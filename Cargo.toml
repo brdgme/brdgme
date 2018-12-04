@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "game/acquire",
   "lib/cmd",
   "lib/color",
   "lib/game",
