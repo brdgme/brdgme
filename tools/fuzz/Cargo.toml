@@ -5,9 +5,9 @@ authors = ["Michael Alexander <beefsack@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-brdgme-cmd = { path = "../cmd" }
-brdgme-game = { path = "../game" }
-brdgme-rand-bot = { path = "../rand-bot" }
+brdgme-cmd = { path = "../../lib/cmd" }
+brdgme-game = { path = "../../lib/game" }
+brdgme-rand-bot = { path = "../../lib/rand-bot" }
 failure = "0.1.1"
 rand = "0.4.2"
 num_cpus = "1.8.0"

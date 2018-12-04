@@ -2,9 +2,9 @@
 members = [
   "lib/cmd",
   "lib/color",
-  "lib/fuzz",
   "lib/game",
   "lib/markup",
   "lib/rand-bot",
-  "lib/repl",
+  "tools/fuzz",
+  "tools/repl",
 ]
