@@ -91,6 +91,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "brdgme-rand-bot"
+version = "0.1.0"
+dependencies = [
+ "brdgme-cmd 0.1.0",
+ "brdgme-game 0.1.0",
+ "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.3.22 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_json 1.0.33 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
