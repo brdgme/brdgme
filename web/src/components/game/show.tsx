@@ -555,7 +555,7 @@ export class Component extends React.PureComponent<IProps, {}> {
   private onCommandInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     this.onCommandChange(
       e.currentTarget.value,
-      e.currentTarget.selectionStart,
+      e.currentTarget.selectionStart || 0,
     );
   }
 
@@ -567,7 +567,7 @@ export class Component extends React.PureComponent<IProps, {}> {
   private onCommandPositionChange(e: React.FormEvent<HTMLInputElement>) {
     this.onCommandChange(
       this.props.command,
-      e.currentTarget.selectionStart,
+      e.currentTarget.selectionStart || 0,
     );
   }
 
