@@ -1,8 +1,8 @@
-use serde_derive::{Serialize, Deserialize};
+use std::str::FromStr;
+
+use serde_derive::{Deserialize, Serialize};
 
 use brdgme_color::Color;
-
-use std::str::FromStr;
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum Align {
@@ -131,8 +131,8 @@ pub enum Node {
 
 impl Node {
     pub fn text<T>(t: T) -> Node
-    where
-        T: Into<String>,
+        where
+            T: Into<String>,
     {
         Node::Text(t.into())
     }
@@ -148,8 +148,8 @@ pub enum TNode {
 
 impl TNode {
     pub fn text<T>(t: T) -> TNode
-    where
-        T: Into<String>,
+        where
+            T: Into<String>,
     {
         TNode::Text(t.into())
     }
@@ -247,8 +247,9 @@ pub type Cell = (Align, Vec<Node>);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use brdgme_color::*;
+
+    use super::*;
 
     #[test]
     fn bg_ranges_works() {

@@ -1,11 +1,18 @@
 use rand::Rng;
 use serde_derive::{Deserialize, Serialize};
 
+use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
+
+use crate::board::{Board, BoardTile, Loc, TileOwner};
+use crate::card::{Card, render_cards, shuffled_deck};
+use crate::casino::Casino;
+use crate::command::Command;
+use crate::render::render_cash;
+use crate::tile::TILES;
 
 pub mod board;
 pub mod card;
@@ -13,13 +20,6 @@ pub mod casino;
 mod command;
 pub mod render;
 pub mod tile;
-
-use crate::board::{Board, BoardTile, Loc, TileOwner};
-use crate::card::{render_cards, shuffled_deck, Card};
-use crate::casino::Casino;
-use crate::command::Command;
-use crate::render::render_cash;
-use crate::tile::TILES;
 
 pub const STARTING_CARDS: usize = 2;
 pub const PLAYER_DICE: usize = 12;
@@ -201,9 +201,9 @@ impl Gamer for Game {
             .into_iter()
             .find(|&p| p == player)
             .is_none()
-        {
-            return None;
-        }
+            {
+                return None;
+            }
         Some(self.command_parser(player).to_spec())
     }
 
@@ -243,12 +243,12 @@ impl Game {
             BoardTile::Built { .. } => {
                 return Err(GameError::InvalidInput {
                     message: "that location has already been built".to_string(),
-                })
+                });
             }
             _ => {
                 return Err(GameError::InvalidInput {
                     message: "you don't own that location".to_string(),
-                })
+                });
             }
         }
         if self.players[p].cash < TILES[loc].build_cost {

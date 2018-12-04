@@ -1,5 +1,6 @@
-use crate::ast::TNode;
 use brdgme_color::Color;
+
+use crate::ast::TNode;
 
 fn fg(color: &Color, content: &str) -> String {
     return format!(r#"<span style="color:{};">{}</span>"#, color, content);

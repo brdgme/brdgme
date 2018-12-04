@@ -1,24 +1,24 @@
-pub mod board;
-mod command;
-pub mod corp;
-mod render;
-mod stats;
+use std::collections::HashMap;
 
-use rand::{thread_rng, Rng};
-use serde_derive::{Serialize, Deserialize};
+use rand::{Rng, thread_rng};
+use serde_derive::{Deserialize, Serialize};
 
+use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
-
-use std::collections::HashMap;
 
 use crate::board::{Board, Loc, Tile};
 use crate::command::Command;
 use crate::corp::Corp;
 use crate::stats::Stats;
+
+pub mod board;
+mod command;
+pub mod corp;
+mod render;
+mod stats;
 
 pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 6;

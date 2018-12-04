@@ -1,13 +1,13 @@
+use std::fmt::Debug;
+use std::marker::PhantomData;
+
 use failure::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json;
 
-use std::fmt::Debug;
-use std::marker::PhantomData;
-
-use brdgme_game::errors::GameError;
 use brdgme_game::{CommandResponse, Gamer, Renderer};
+use brdgme_game::errors::GameError;
 use brdgme_markup;
 
 use crate::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
@@ -123,10 +123,10 @@ fn handle_play<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
 ) -> Response {
     match game.command(player, command, names) {
         Ok(CommandResponse {
-            logs,
-            can_undo,
-            remaining_input,
-        }) => GameResponse::from_gamer(game)
+               logs,
+               can_undo,
+               remaining_input,
+           }) => GameResponse::from_gamer(game)
             .map(|gr| {
                 let (public_render, player_renders) = renders(game);
                 Response::Play {

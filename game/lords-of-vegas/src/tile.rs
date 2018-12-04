@@ -1,6 +1,6 @@
-use lazy_static::lazy_static;
-
 use std::collections::HashMap;
+
+use lazy_static::lazy_static;
 
 use crate::board::{Block, Loc};
 use crate::casino::Casino;

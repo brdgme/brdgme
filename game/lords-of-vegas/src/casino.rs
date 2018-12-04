@@ -1,9 +1,9 @@
+use std::fmt;
+
 use serde_derive::{Deserialize, Serialize};
 
 use brdgme_color::*;
 use brdgme_markup::Node as N;
-
-use std::fmt;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Casino {

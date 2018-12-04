@@ -1,22 +1,22 @@
-pub mod card;
-mod command;
-mod render;
+use std::collections::{HashMap, HashSet};
+use std::default::Default;
 
-use serde_derive::{Serialize, Deserialize};
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
+use serde_derive::{Deserialize, Serialize};
 
+use brdgme_game::{CommandResponse, Gamer, Log, Stat, Status};
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
-use brdgme_game::{CommandResponse, Gamer, Log, Stat, Status};
 use brdgme_markup::Node as N;
 
-use std::collections::{HashMap, HashSet};
-use std::default::Default;
-
-use crate::card::{expeditions, Card, Expedition, Value};
+use crate::card::{Card, Expedition, expeditions, Value};
 use crate::command::Command;
+
+pub mod card;
+mod command;
+mod render;
 
 const INVESTMENTS: usize = 3;
 pub const ROUNDS: usize = 3;
@@ -245,24 +245,24 @@ impl Game {
         if let Some(index) = self.discards
             .iter()
             .rposition(|&c| c.expedition == expedition)
-        {
-            let c = *self.discards
-                .get(index)
-                .ok_or_else(|| GameError::internal("could not find discard card"))?;
-            self.hands
-                .get_mut(player)
-                .ok_or_else(|| GameError::internal("could not find player hand"))?
-                .push(c);
-            self.discards.remove(index);
-            self.next_phase();
-            self.stats[player].takes += 1;
-            self.stats[player].turns += 1;
-            Ok(vec![Log::public(vec![
-                N::Player(player),
-                N::text(" took "),
-                render::card(&c),
-            ])])
-        } else {
+            {
+                let c = *self.discards
+                    .get(index)
+                    .ok_or_else(|| GameError::internal("could not find discard card"))?;
+                self.hands
+                    .get_mut(player)
+                    .ok_or_else(|| GameError::internal("could not find player hand"))?
+                    .push(c);
+                self.discards.remove(index);
+                self.next_phase();
+                self.stats[player].takes += 1;
+                self.stats[player].turns += 1;
+                Ok(vec![Log::public(vec![
+                    N::Player(player),
+                    N::text(" took "),
+                    render::card(&c),
+                ])])
+            } else {
             Err(GameError::invalid_input(
                 "there are no discarded cards for that expedition",
             ))
@@ -362,9 +362,9 @@ impl Game {
                 ))
             })?
             .is_empty()
-        {
-            self.stats[player].expeditions += 1;
-        }
+            {
+                self.stats[player].expeditions += 1;
+            }
         self.remove_player_card(player, c)?;
         self.expeditions
             .get_mut(player)
@@ -563,37 +563,37 @@ impl Gamer for Game {
         };
         match cp.parse(input, players) {
             Ok(ParseOutput {
-                value: Command::Play(c),
-                remaining,
-                ..
-            }) => self.play(player, c).map(|l| CommandResponse {
+                   value: Command::Play(c),
+                   remaining,
+                   ..
+               }) => self.play(player, c).map(|l| CommandResponse {
                 logs: l,
                 can_undo: true,
                 remaining_input: remaining.to_string(),
             }),
             Ok(ParseOutput {
-                value: Command::Discard(c),
-                remaining,
-                ..
-            }) => self.discard(player, c).map(|l| CommandResponse {
+                   value: Command::Discard(c),
+                   remaining,
+                   ..
+               }) => self.discard(player, c).map(|l| CommandResponse {
                 logs: l,
                 can_undo: true,
                 remaining_input: remaining.to_string(),
             }),
             Ok(ParseOutput {
-                value: Command::Take(e),
-                remaining,
-                ..
-            }) => self.take(player, e).map(|l| CommandResponse {
+                   value: Command::Take(e),
+                   remaining,
+                   ..
+               }) => self.take(player, e).map(|l| CommandResponse {
                 logs: l,
                 can_undo: true,
                 remaining_input: remaining.to_string(),
             }),
             Ok(ParseOutput {
-                value: Command::Draw,
-                remaining,
-                ..
-            }) => self.draw(player).map(|l| CommandResponse {
+                   value: Command::Draw,
+                   remaining,
+                   ..
+               }) => self.draw(player).map(|l| CommandResponse {
                 logs: l,
                 can_undo: false,
                 remaining_input: remaining.to_string(),
@@ -677,18 +677,19 @@ pub fn score(players: usize, cards: &[Card]) -> isize {
         }
         acc + (exp_sum.get(&e).unwrap_or(&0) - exp_cost) * (exp_inv.get(&e).unwrap_or(&0) + 1)
             + if cards.unwrap() >= &exp_bonus_size {
-                exp_cost
-            } else {
-                0
-            }
+            exp_cost
+        } else {
+            0
+        }
     })
 }
 
 #[cfg(test)]
 mod test {
-    use super::card::{Expedition, Value};
-    use super::*;
     use brdgme_game::Gamer;
+
+    use super::*;
+    use super::card::{Expedition, Value};
 
     fn discard_and_draw(game: &mut Game, player: usize) {
         let c = game.hands[player][0];
@@ -786,7 +787,7 @@ mod test {
                 &vec![
                     (Expedition::Red, Value::N(3)).into(),
                     (Expedition::Green, Value::N(3)).into(),
-                ]
+                ],
             )
         );
         assert_eq!(
@@ -797,7 +798,7 @@ mod test {
                     (Expedition::Red, Value::N(3)).into(),
                     (Expedition::Green, Value::N(3)).into(),
                     (Expedition::Green, Value::N(4)).into(),
-                ]
+                ],
             )
         );
         assert_eq!(
@@ -809,7 +810,7 @@ mod test {
                     (Expedition::Red, Value::N(3)).into(),
                     (Expedition::Green, Value::N(4)).into(),
                     (Expedition::Green, Value::N(6)).into(),
-                ]
+                ],
             )
         );
         assert_eq!(
@@ -825,7 +826,7 @@ mod test {
                     (Expedition::Green, Value::N(7)).into(),
                     (Expedition::Green, Value::N(8)).into(),
                     (Expedition::Green, Value::N(9)).into(),
-                ]
+                ],
             )
         );
     }

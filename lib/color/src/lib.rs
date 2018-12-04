@@ -1,12 +1,13 @@
-mod error;
-
 use std::fmt;
 use std::str::FromStr;
-use regex::Regex;
-use serde_derive::{Serialize, Deserialize};
+
 use lazy_static::lazy_static;
+use regex::Regex;
+use serde_derive::{Deserialize, Serialize};
 
 pub use crate::error::ColorError;
+
+mod error;
 
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Color {

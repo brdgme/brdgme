@@ -1,3 +1,8 @@
+pub use crate::ast::{Align, Node, Row, row_pad, row_pad_cell, TNode};
+pub use crate::error::MarkupError;
+use crate::parser::parse;
+pub use crate::transform::{from_lines, Player, to_lines, transform};
+
 pub mod ast;
 mod error;
 mod transform;
@@ -5,11 +10,6 @@ mod ansi;
 mod html;
 mod plain;
 mod parser;
-
-pub use crate::transform::{from_lines, to_lines, transform, Player};
-pub use crate::ast::{row_pad, row_pad_cell, Align, Node, Row, TNode};
-use crate::parser::parse;
-pub use crate::error::MarkupError;
 
 pub fn html(input: &[TNode]) -> String {
     html::render(input)
@@ -101,9 +101,11 @@ pub fn to_string(input: &[Node]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use brdgme_color::*;
+
     use crate::ast::{Align as A, Node as N};
+
+    use super::*;
 
     #[test]
     fn ansi_works() {
@@ -166,7 +168,7 @@ mod tests {
                         ],
                     ),
                 ])
-            ],)
+            ], )
         );
     }
 }

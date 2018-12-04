@@ -1,14 +1,14 @@
+use std::fmt;
+
 use rand::{self, Rng};
 use serde_derive::{Deserialize, Serialize};
 
 use brdgme_markup::Node as N;
 
-use std::fmt;
-
 use crate::board::Loc;
 use crate::casino::Casino;
-use crate::tile::{Payout, TILES};
 use crate::STARTING_CARDS;
+use crate::tile::{Payout, TILES};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Card {

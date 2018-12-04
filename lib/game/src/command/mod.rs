@@ -1,7 +1,7 @@
+use serde_derive::{Deserialize, Serialize};
+
 pub mod parser;
 pub mod doc;
-
-use serde_derive::{Serialize, Deserialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Spec {

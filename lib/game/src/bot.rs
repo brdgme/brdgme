@@ -1,13 +1,14 @@
-use rand::{self, Rng};
-use chrono;
-use serde_derive::{Serialize, Deserialize};
-use ::log::{log, trace};
-
 use std::io::Write;
 
-use crate::game::Gamer;
+use chrono;
+use rand::{self, Rng};
+use serde_derive::{Deserialize, Serialize};
+
+use ::log::{log, trace};
+
 use crate::command::Spec as CommandSpec;
 use crate::errors::GameError;
+use crate::game::Gamer;
 
 const BOT_COMMAND_QUALITY_DEFAULT: u8 = 128;
 
@@ -27,8 +28,8 @@ impl Default for BotCommand {
 }
 
 impl<I> From<I> for BotCommand
-where
-    I: Into<String>,
+    where
+        I: Into<String>,
 {
     fn from(s: I) -> Self {
         BotCommand {
@@ -89,8 +90,8 @@ impl<G: Gamer, B: Botter<G>> Fuzzer<G, B> {
     }
 
     pub fn fuzz<O>(&mut self, out: &mut O)
-    where
-        O: Write,
+        where
+            O: Write,
     {
         let mut last_status = chrono::Utc::now().timestamp();
         loop {

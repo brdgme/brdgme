@@ -1,6 +1,6 @@
-use failure::Fail;
-
 use std::fmt;
+
+use failure::Fail;
 
 use crate::command::parser::comma_list_or;
 

@@ -1,6 +1,6 @@
-use serde_json;
-
 use std::io::{Read, Write};
+
+use serde_json;
 
 use crate::api::{Request, Response};
 use crate::requester::Requester;

@@ -1,5 +1,6 @@
-use crate::ast::TNode;
 use brdgme_color::Style;
+
+use crate::ast::TNode;
 
 pub fn render(input: &[TNode]) -> String {
     let default_style = Style::default();

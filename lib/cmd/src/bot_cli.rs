@@ -1,14 +1,14 @@
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serde_derive::{Serialize, Deserialize};
-use serde_json;
-
-use brdgme_game::Gamer;
-use brdgme_game::bot::Botter;
-use brdgme_game::command::Spec as CommandSpec;
-
 use std::fmt::Debug;
 use std::io::{Read, Write};
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use serde_derive::{Deserialize, Serialize};
+use serde_json;
+
+use brdgme_game::bot::Botter;
+use brdgme_game::command::Spec as CommandSpec;
+use brdgme_game::Gamer;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Request {
@@ -22,11 +22,11 @@ pub struct Request {
 pub type Response = Vec<String>;
 
 pub fn cli<G, B, I, O>(bot: &mut B, input: I, output: &mut O)
-where
-    G: Gamer + Debug + Clone + Serialize + DeserializeOwned,
-    B: Botter<G>,
-    I: Read,
-    O: Write,
+    where
+        G: Gamer + Debug + Clone + Serialize + DeserializeOwned,
+        B: Botter<G>,
+        I: Read,
+        O: Write,
 {
     let request = serde_json::from_reader::<_, Request>(input).unwrap();
     let player_state: G::PlayerState = serde_json::from_str(&request.player_state).unwrap();
@@ -39,6 +39,6 @@ where
             &request.players,
             &request.command_spec,
             request.game_id,
-        ),).unwrap()
+        ), ).unwrap()
     ).unwrap();
 }

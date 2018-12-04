@@ -1,17 +1,17 @@
-use combine::{many, Parser, many1};
+use std::str::FromStr;
+
+use combine::{many, many1, Parser};
 use combine::char::{digit, letter, string};
 use combine::combinator::{choice, none_of, parser, r#try};
 use combine::primitives::{ParseResult, Stream};
-
-use std::str::FromStr;
 
 use brdgme_color::*;
 
 use crate::ast::{Align, Cell, Col, ColTrans, ColType, Node, Row};
 
 pub fn parse<I>(input: I) -> ParseResult<Vec<Node>, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     many(choice([
         bold,
@@ -28,8 +28,8 @@ where
 }
 
 fn bold<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (r#try(string("{{b}}")), parser(parse), string("{{/b}}"))
         .map(|(_, children, _)| Node::Bold(children))
@@ -37,8 +37,8 @@ where
 }
 
 fn parse_u8<I>(input: I) -> ParseResult<u8, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     many1(digit())
         .and_then(|s: String| s.parse::<u8>())
@@ -46,8 +46,8 @@ where
 }
 
 fn parse_usize<I>(input: I) -> ParseResult<usize, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     many1(digit())
         .and_then(|s: String| s.parse::<usize>())
@@ -55,8 +55,8 @@ where
 }
 
 fn fg<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{fg ")),
@@ -69,8 +69,8 @@ where
 }
 
 fn bg<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{bg ")),
@@ -83,24 +83,24 @@ where
 }
 
 fn col_args<I>(input: I) -> ParseResult<Col, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         choice([col_type_player, col_type_rgb]),
         many(parser(col_trans)),
     ).map(|(ct, trans)| {
-            Col {
-                color: ct,
-                transform: trans,
-            }
-        })
+        Col {
+            color: ct,
+            transform: trans,
+        }
+    })
         .parse_stream(input)
 }
 
 fn col_type_player<I>(input: I) -> ParseResult<ColType, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (r#try(string("player(")), parser(parse_usize), string(")"))
         .map(|(_, p, _)| ColType::Player(p))
@@ -108,8 +108,8 @@ where
 }
 
 fn col_type_rgb<I>(input: I) -> ParseResult<ColType, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("rgb(")),
@@ -120,14 +120,14 @@ where
         parser(parse_u8),
         string(")"),
     ).map(|(_, r, _, g, _, b, _)| {
-            ColType::RGB(Color { r: r, g: g, b: b })
-        })
+        ColType::RGB(Color { r: r, g: g, b: b })
+    })
         .parse_stream(input)
 }
 
 fn col_trans<I>(input: I) -> ParseResult<ColTrans, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (r#try(string(" | ")), choice([string("mono"), string("inv")]))
         .map(|(_, t)| match t {
@@ -141,8 +141,8 @@ where
 /// Backwards compatibility with Go brdgme. Magenta is handled manually as it doesn't exist in this
 /// version of brdgme.
 fn c<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{c ")),
@@ -151,22 +151,22 @@ where
         parser(parse),
         string("{{/c}}"),
     ).map(|(_, col, _, children, _)| {
-            Node::Fg(
-                match col.as_ref() {
-                    "magenta" => Some(&PURPLE),
-                    _ => named(&col),
-                }.unwrap_or(&BLACK)
-                    .to_owned()
-                    .into(),
-                children,
-            )
-        })
+        Node::Fg(
+            match col.as_ref() {
+                "magenta" => Some(&PURPLE),
+                _ => named(&col),
+            }.unwrap_or(&BLACK)
+                .to_owned()
+                .into(),
+            children,
+        )
+    })
         .parse_stream(input)
 }
 
 fn player<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (r#try(string("{{player ")), parser(parse_usize), string("}}"))
         .map(|(_, p, _)| Node::Player(p))
@@ -174,8 +174,8 @@ where
 }
 
 fn canvas<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{canvas}}")),
@@ -186,8 +186,8 @@ where
 }
 
 fn layer<I>(input: I) -> ParseResult<(usize, usize, Vec<Node>), I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{layer ")),
@@ -202,8 +202,8 @@ where
 }
 
 fn table<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{table}}")),
@@ -214,8 +214,8 @@ where
 }
 
 fn row<I>(input: I) -> ParseResult<Row, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{row}}")),
@@ -226,8 +226,8 @@ where
 }
 
 fn cell<I>(input: I) -> ParseResult<Cell, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{cell ")),
@@ -240,8 +240,8 @@ where
 }
 
 fn align<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{align ")),
@@ -252,14 +252,14 @@ where
         parser(parse),
         string("{{/align}}"),
     ).map(|(_, al, _, width, _, children, _)| {
-            Node::Align(al, width, children)
-        })
+        Node::Align(al, width, children)
+    })
         .parse_stream(input)
 }
 
 fn indent<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     (
         r#try(string("{{indent ")),
@@ -272,8 +272,8 @@ where
 }
 
 fn align_arg<I>(input: I) -> ParseResult<Align, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     choice([string("left"), string("center"), string("right")])
         .map(|s| Align::from_str(s).unwrap())
@@ -281,8 +281,8 @@ where
 }
 
 fn text<I>(input: I) -> ParseResult<Node, I>
-where
-    I: Stream<Item = char>,
+    where
+        I: Stream<Item=char>,
 {
     many1(none_of("{".chars()))
         .map(Node::Text)
@@ -291,11 +291,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::to_string;
     use combine::parser;
 
     use crate::ast::{Align as A, Col, ColTrans, ColType, Node as N};
+
+    use super::*;
+    use super::super::to_string;
 
     #[test]
     fn parse_works() {

@@ -1,18 +1,17 @@
-use serde::de::{Error as DeError, Unexpected, Visitor};
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::iter::FromIterator;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{Error as DeError, Unexpected, Visitor};
 use serde_derive::{Deserialize, Serialize};
 
 use brdgme_game::Log;
 use brdgme_markup::Node as N;
 
-use std::collections::{HashMap, HashSet};
-use std::fmt;
-use std::iter::FromIterator;
-
 use crate::casino::Casino;
-use crate::tile::TILES;
-
 use crate::roll;
+use crate::tile::TILES;
 
 const BLOCK_WIDTH: usize = 3;
 
@@ -131,8 +130,8 @@ impl fmt::Display for Loc {
 
 impl Serialize for Loc {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         serializer.serialize_str(&format!("{}", self))
     }
@@ -148,8 +147,8 @@ impl<'de> Visitor<'de> for LocVisitor {
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Loc, E>
-    where
-        E: DeError,
+        where
+            E: DeError,
     {
         Loc::parse_str(value).map_err(|e| DeError::invalid_value(Unexpected::Other(&e), &self))
     }
@@ -157,8 +156,8 @@ impl<'de> Visitor<'de> for LocVisitor {
 
 impl<'de> Deserialize<'de> for Loc {
     fn deserialize<D>(deserializer: D) -> Result<Loc, D::Error>
-    where
-        D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
     {
         deserializer.deserialize_str(LocVisitor)
     }
@@ -436,7 +435,7 @@ mod tests {
                 tiles: vec![CasinoTile {
                     loc: (Block::A, 1).into(),
                     owner: Some(TileOwner { die: 3, player: 0 }),
-                },],
+                }, ],
             }),
             b.casino_at(&(Block::A, 1).into())
         );
@@ -444,7 +443,7 @@ mod tests {
             vec![CasinoTile {
                 loc: (Block::A, 1).into(),
                 owner: Some(TileOwner { die: 3, player: 0 }),
-            },],
+            }, ],
             b.casino_at(&(Block::A, 1).into()).unwrap().boss_tiles()
         );
 
@@ -464,7 +463,7 @@ mod tests {
                 tiles: vec![CasinoTile {
                     loc: (Block::A, 1).into(),
                     owner: Some(TileOwner { die: 3, player: 0 }),
-                },],
+                }, ],
             }),
             b.casino_at(&(Block::A, 1).into())
         );
@@ -503,7 +502,7 @@ mod tests {
             vec![CasinoTile {
                 loc: (Block::A, 5).into(),
                 owner: Some(TileOwner { die: 5, player: 0 }),
-            },],
+            }, ],
             b.casino_at(&(Block::A, 1).into()).unwrap().boss_tiles()
         );
     }

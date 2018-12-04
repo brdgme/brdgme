@@ -1,14 +1,15 @@
-use unicase::UniCase;
-
-use std::marker::PhantomData;
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::marker::PhantomData;
+
+use unicase::UniCase;
+
+use crate::command::Spec as CommandSpec;
+use crate::errors::GameError;
+
+pub use self::chain::*;
 
 pub mod chain;
-
-use crate::errors::GameError;
-use crate::command::Spec as CommandSpec;
-pub use self::chain::*;
 
 const MANY_DELIM: &str = ",";
 
@@ -31,8 +32,8 @@ pub struct Token {
 
 impl Token {
     pub fn new<T>(token: T) -> Self
-    where
-        T: Into<String>,
+        where
+            T: Into<String>,
     {
         Self {
             token: token.into(),
@@ -180,9 +181,9 @@ impl Parser<i32> for Int {
 }
 
 pub struct Map<T, O, F, TP>
-where
-    F: Fn(T) -> O,
-    TP: Parser<T>,
+    where
+        F: Fn(T) -> O,
+        TP: Parser<T>,
 {
     pub parser: TP,
     pub map: F,
@@ -191,9 +192,9 @@ where
 }
 
 impl<T, O, F, TP> Map<T, O, F, TP>
-where
-    F: Fn(T) -> O,
-    TP: Parser<T>,
+    where
+        F: Fn(T) -> O,
+        TP: Parser<T>,
 {
     pub fn new(parser: TP, map: F) -> Self {
         Self {
@@ -206,9 +207,9 @@ where
 }
 
 impl<T, O, F, TP> Parser<O> for Map<T, O, F, TP>
-where
-    F: Fn(T) -> O,
-    TP: Parser<T>,
+    where
+        F: Fn(T) -> O,
+        TP: Parser<T>,
 {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, O>, GameError> {
         let child_parse = self.parser.parse(input, names)?;
@@ -229,16 +230,16 @@ where
 }
 
 pub struct Opt<T, TP>
-where
-    TP: Parser<T>,
+    where
+        TP: Parser<T>,
 {
     pub parser: TP,
     t_type: PhantomData<T>,
 }
 
 impl<T, TP> Opt<T, TP>
-where
-    TP: Parser<T>,
+    where
+        TP: Parser<T>,
 {
     pub fn new(parser: TP) -> Self {
         Self {
@@ -249,8 +250,8 @@ where
 }
 
 impl<T, TP> Parser<Option<T>> for Opt<T, TP>
-where
-    TP: Parser<T>,
+    where
+        TP: Parser<T>,
 {
     fn parse<'a>(
         &self,
@@ -285,8 +286,8 @@ where
 }
 
 pub struct Many<T, TP>
-where
-    TP: Parser<T>,
+    where
+        TP: Parser<T>,
 {
     pub parser: TP,
     pub min: Option<usize>,
@@ -296,8 +297,8 @@ where
 }
 
 impl<T, TP> Many<T, TP>
-where
-    TP: Parser<T>,
+    where
+        TP: Parser<T>,
 {
     pub fn any(parser: TP) -> Self {
         Self {
@@ -331,8 +332,8 @@ where
 }
 
 impl<T, TP> Parser<Vec<T>> for Many<T, TP>
-where
-    TP: Parser<T>,
+    where
+        TP: Parser<T>,
 {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, Vec<T>>, GameError> {
         let mut parsed: Vec<T> = vec![];
@@ -363,8 +364,8 @@ where
             }
             match self.parser.parse(&input[inner_offset..], names) {
                 Ok(Output {
-                    value, consumed, ..
-                }) => {
+                       value, consumed, ..
+                   }) => {
                     parsed.push(value);
                     offset = inner_offset + consumed.len();
                     if let Some(max) = self.max {
@@ -542,16 +543,16 @@ pub fn comma_list_and<T: Display>(items: &[T]) -> String {
 }
 
 pub struct Enum<T>
-where
-    T: ToString + Clone,
+    where
+        T: ToString + Clone,
 {
     pub values: Vec<T>,
     pub exact: bool,
 }
 
 impl<T> Enum<T>
-where
-    T: ToString + Clone,
+    where
+        T: ToString + Clone,
 {
     pub fn exact(values: Vec<T>) -> Self {
         Self {
@@ -586,8 +587,8 @@ fn shared_prefix(s1: &str, s2: &str) -> usize {
 }
 
 impl<T> Parser<T> for Enum<T>
-where
-    T: ToString + Clone,
+    where
+        T: ToString + Clone,
 {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, T>, GameError> {
         let input_lower = input.to_lowercase();
@@ -814,8 +815,8 @@ mod tests {
                 remaining: " with bacon and cheese",
             },
             parser
-                .parse("10 with bacon and cheese", &[],)
-                .expect("expected '10 with bacon and cheese' to parse",)
+                .parse("10 with bacon and cheese", &[])
+                .expect("expected '10 with bacon and cheese' to parse")
         );
         assert_eq!(
             Output {
@@ -824,8 +825,8 @@ mod tests {
                 remaining: " with bacon and cheese",
             },
             parser
-                .parse("-10 with bacon and cheese", &[],)
-                .expect("expected '-10 with bacon and cheese' to parse",)
+                .parse("-10 with bacon and cheese", &[])
+                .expect("expected '-10 with bacon and cheese' to parse")
         );
         parser
             .parse("-", &[])
@@ -856,8 +857,8 @@ mod tests {
                 remaining: "bacon",
             },
             parser
-                .parse("00123bacon", &[],)
-                .expect("expected '00123bacon' to parse",)
+                .parse("00123bacon", &[])
+                .expect("expected '00123bacon' to parse")
         )
     }
 
@@ -874,8 +875,8 @@ mod tests {
                 remaining: "bacon",
             },
             parser
-                .parse("00123bacon", &[],)
-                .expect("expected '00123bacon' to parse",)
+                .parse("00123bacon", &[])
+                .expect("expected '00123bacon' to parse")
         );
         assert_eq!(
             Output {
@@ -884,8 +885,8 @@ mod tests {
                 remaining: "bacon",
             },
             parser
-                .parse("bacon", &[],)
-                .expect("expected 'bacon' to parse",)
+                .parse("bacon", &[])
+                .expect("expected 'bacon' to parse")
         );
     }
 
@@ -899,8 +900,8 @@ mod tests {
                 remaining: "bacon",
             },
             parser
-                .parse("BlAhbacon", &[],)
-                .expect("expected 'BlAhbacon' to parse",)
+                .parse("BlAhbacon", &[])
+                .expect("expected 'BlAhbacon' to parse")
         );
         parser
             .parse("ClAhbacon", &[])
@@ -920,8 +921,8 @@ mod tests {
                 remaining: "",
             },
             parser
-                .parse("3, 4, 5", &[],)
-                .expect("expected '3, 4, 5' to parse",)
+                .parse("3, 4, 5", &[])
+                .expect("expected '3, 4, 5' to parse")
         );
         parser.min = Some(5);
         parser
@@ -935,8 +936,8 @@ mod tests {
                 remaining: ", 8, 9, 10",
             },
             parser
-                .parse("3, 4, 5, 6, 7, 8, 9, 10", &[],)
-                .expect("expected '3, 4, 5, 6, 7, 8, 9, 10' to parse",)
+                .parse("3, 4, 5, 6, 7, 8, 9, 10", &[])
+                .expect("expected '3, 4, 5, 6, 7, 8, 9, 10' to parse")
         );
         parser.min = None;
         parser.delim = ";".to_string();
@@ -947,8 +948,8 @@ mod tests {
                 remaining: "",
             },
             parser
-                .parse("3; 4; 5", &[],)
-                .expect("expected '3; 4; 5' to parse",)
+                .parse("3; 4; 5", &[])
+                .expect("expected '3; 4; 5' to parse")
         );
     }
 
@@ -974,8 +975,8 @@ mod tests {
                 remaining: "",
             },
             parser
-                .parse("fart, fart, fart", &[],)
-                .expect("expected 'fart, fart, fart' to parse",)
+                .parse("fart, fart, fart", &[])
+                .expect("expected 'fart, fart, fart' to parse")
         );
     }
 
@@ -1011,8 +1012,8 @@ mod tests {
                 remaining: "",
             },
             parser
-                .parse("farty", &[],)
-                .expect("expected 'farty' to parse",)
+                .parse("farty", &[])
+                .expect("expected 'farty' to parse")
         );
         assert_eq!(
             Output {
@@ -1021,8 +1022,8 @@ mod tests {
                 remaining: "log",
             },
             parser
-                .parse("DoGlog", &[],)
-                .expect("expected 'DoGlog' to parse",)
+                .parse("DoGlog", &[])
+                .expect("expected 'DoGlog' to parse")
         );
     }
 
@@ -1039,8 +1040,8 @@ mod tests {
                 remaining: "bacon",
             },
             parser
-                .parse(" BlAhbacon", &[],)
-                .expect("expected ' BlAhbacon' to parse",)
+                .parse(" BlAhbacon", &[])
+                .expect("expected ' BlAhbacon' to parse")
         );
     }
 }

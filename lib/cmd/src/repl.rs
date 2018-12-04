@@ -1,25 +1,24 @@
-use serde_json;
-
-use brdgme_color;
-use term_size;
-
 use std::borrow::Cow;
 use std::fs::File;
-use std::io::prelude::*;
 use std::io::{stdin, stdout};
+use std::io::prelude::*;
 use std::iter::repeat;
 
+use serde_json;
+use term_size;
+
+use brdgme_color;
 use brdgme_color::{player_color, Style};
 use brdgme_game::command::doc;
 use brdgme_game::Status;
-use brdgme_markup::{self, ansi, from_lines, to_lines, transform, Node, Player, TNode};
+use brdgme_markup::{self, ansi, from_lines, Node, Player, TNode, to_lines, transform};
 
 use crate::api::{CliLog, GameResponse, Request, Response};
 use crate::requester::Requester;
 
 pub fn repl<T>(client: &mut T)
-where
-    T: Requester,
+    where
+        T: Requester,
 {
     print!("{}", Style::default().ansi());
     let mut player_names: Vec<String> = vec![];
@@ -46,16 +45,16 @@ where
             players: players.len(),
         })
         .unwrap()
-    {
-        Response::New {
-            game,
-            logs,
-            public_render,
-            player_renders,
-        } => (game, logs, public_render, player_renders),
-        Response::UserError { message } | Response::SystemError { message } => panic!(message),
-        _ => panic!("wrong reponse"),
-    };
+        {
+            Response::New {
+                game,
+                logs,
+                public_render,
+                player_renders,
+            } => (game, logs, public_render, player_renders),
+            Response::UserError { message } | Response::SystemError { message } => panic!(message),
+            _ => panic!("wrong reponse"),
+        };
     output_nl();
     output_logs(logs, &players);
     let mut undo_stack: Vec<GameResponse> = vec![game.clone()];
@@ -136,37 +135,37 @@ where
                             game: game.state.clone(),
                         })
                         .unwrap()
-                    {
-                        Response::Play {
-                            game: new_game,
-                            logs,
-                            remaining_input,
-                            public_render: new_public_render,
-                            player_renders: new_player_renders,
-                            ..
-                        } => {
-                            if remaining_input.trim() != "" {
+                        {
+                            Response::Play {
+                                game: new_game,
+                                logs,
+                                remaining_input,
+                                public_render: new_public_render,
+                                player_renders: new_player_renders,
+                                ..
+                            } => {
+                                if remaining_input.trim() != "" {
+                                    output_nl();
+                                    output_error(format!("Unexpected: '{}'", remaining_input));
+                                    continue;
+                                }
+                                undo_stack.push(game);
+                                game = new_game;
+                                public_render = new_public_render;
+                                player_renders = new_player_renders;
                                 output_nl();
-                                output_error(format!("Unexpected: '{}'", remaining_input));
-                                continue;
+                                output_logs(logs, &players);
                             }
-                            undo_stack.push(game);
-                            game = new_game;
-                            public_render = new_public_render;
-                            player_renders = new_player_renders;
-                            output_nl();
-                            output_logs(logs, &players);
-                        }
-                        Response::SystemError { message } => {
-                            output_nl();
-                            panic!(message);
-                        }
-                        Response::UserError { message } => {
-                            output_nl();
-                            output_error(message);
-                        }
-                        _ => panic!("unexpected response"),
-                    },
+                            Response::SystemError { message } => {
+                                output_nl();
+                                panic!(message);
+                            }
+                            Response::UserError { message } => {
+                                output_nl();
+                                output_error(message);
+                            }
+                            _ => panic!("unexpected response"),
+                        },
                 }
             }
         }
@@ -223,8 +222,8 @@ fn output_nl() {
 }
 
 fn prompt<'a, T>(s: T) -> String
-where
-    T: Into<Cow<'a, str>>,
+    where
+        T: Into<Cow<'a, str>>,
 {
     print!("{}: \x1b[K", s.into());
     stdout().flush().unwrap();

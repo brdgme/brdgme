@@ -1,7 +1,7 @@
-use serde_derive::{Serialize, Deserialize};
-
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
+
+use serde_derive::{Deserialize, Serialize};
 
 use brdgme_color;
 
@@ -118,8 +118,9 @@ pub fn last_expedition(cards: &[Card], expedition: Expedition) -> Option<Card> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::cmp::Ordering;
+
+    use super::*;
 
     #[test]
     fn value_cmp_works() {

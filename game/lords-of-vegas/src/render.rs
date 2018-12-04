@@ -1,21 +1,21 @@
+use std::iter;
+
+use brdgme_color::*;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N};
 use brdgme_markup::ast::{Col, Row};
-use brdgme_color::*;
 
-use std::iter;
-
-use crate::PubState;
-use crate::PlayerState;
-use crate::board::{Block, Board, BoardTile, Loc, TileOwner, BLOCKS};
-use crate::tile::TILES;
-use crate::casino::CASINOS;
+use crate::board::{Block, BLOCKS, Board, BoardTile, Loc, TileOwner};
 use crate::card::casino_card_count;
+use crate::casino::CASINOS;
 use crate::CASINO_CARDS;
 use crate::CASINO_TILES;
 use crate::PLAYER_DICE;
 use crate::PLAYER_OWNER_TOKENS;
+use crate::PlayerState;
 use crate::POINT_STOPS;
+use crate::PubState;
+use crate::tile::TILES;
 
 const TILE_WIDTH: usize = 9;
 const TILE_HEIGHT: usize = 4;

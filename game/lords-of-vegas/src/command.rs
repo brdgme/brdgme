@@ -1,8 +1,8 @@
 use brdgme_game::command::parser::*;
 
-use crate::Game;
-use crate::casino::{Casino, CASINOS};
 use crate::board::Loc;
+use crate::casino::{Casino, CASINOS};
+use crate::Game;
 use crate::tile::TILES;
 
 pub enum Command {

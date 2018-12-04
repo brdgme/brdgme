@@ -1,5 +1,5 @@
-use brdgme_markup::Node;
 use brdgme_color::GREY;
+use brdgme_markup::Node;
 
 use crate::command::Spec;
 

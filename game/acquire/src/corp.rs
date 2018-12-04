@@ -1,10 +1,10 @@
-use serde_derive::{Serialize, Deserialize};
+use std::fmt;
+use std::slice::Iter;
+
+use serde_derive::{Deserialize, Serialize};
 
 use brdgme_color::*;
 use brdgme_markup::Node as N;
-
-use std::slice::Iter;
-use std::fmt;
 
 pub const SAFE_SIZE: usize = 11;
 pub const GAME_END_SIZE: usize = 41;

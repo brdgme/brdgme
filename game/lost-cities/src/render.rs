@@ -1,14 +1,13 @@
 use std::cmp;
-
-use crate::{next_player, PlayerState, PubState, MAX_PLAYERS, ROUNDS, START_ROUND};
-use crate::card::{by_expedition, expeditions, Card};
+use std::iter::repeat;
 
 use brdgme_color::GREY;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row};
 use brdgme_markup::ast::Cell;
 
-use std::iter::repeat;
+use crate::{MAX_PLAYERS, next_player, PlayerState, PubState, ROUNDS, START_ROUND};
+use crate::card::{by_expedition, Card, expeditions};
 
 const EXP_SPACER: &'static str = "  ";
 const TABLEAU_HEADER_SPACER: &'static str = "   ";

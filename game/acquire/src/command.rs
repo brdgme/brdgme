@@ -1,3 +1,5 @@
+use std::usize;
+
 use brdgme_game::command::parser::*;
 use brdgme_game::Gamer;
 
@@ -5,8 +7,6 @@ use crate::board::Loc;
 use crate::corp::{Corp, CORPS};
 use crate::Game;
 use crate::Phase;
-
-use std::usize;
 
 pub enum Command {
     Play(Loc),
@@ -56,9 +56,9 @@ impl Game {
                         .shares
                         .get(&corp)
                         .expect("could not get player shares") >= &2
-                    {
-                        parsers.push(Box::new(self.trade_parser(player, corp)));
-                    }
+                        {
+                            parsers.push(Box::new(self.trade_parser(player, corp)));
+                        }
                     parsers.push(Box::new(keep_parser()));
                 }
             }

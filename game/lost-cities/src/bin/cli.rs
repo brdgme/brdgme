@@ -1,8 +1,8 @@
+use std::io;
+
 use brdgme_cmd::cli::cli;
 use brdgme_cmd::requester;
 use lost_cities::Game;
-
-use std::io;
 
 fn main() {
     cli(

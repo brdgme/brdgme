@@ -1,8 +1,8 @@
-use serde_derive::{Serialize, Deserialize};
+use std::collections::HashMap;
+
+use serde_derive::{Deserialize, Serialize};
 
 use brdgme_game::Stat;
-
-use std::collections::HashMap;
 
 use crate::Corp;
 

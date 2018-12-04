@@ -1,9 +1,10 @@
-use crate::ast::{Align, BgRange, Col, ColTrans, ColType, Node, Row, TNode};
-use brdgme_color::{player_color, Color};
-
-use std::iter;
 use std::cmp;
+use std::iter;
 use std::ops::Range;
+
+use brdgme_color::{Color, player_color};
+
+use crate::ast::{Align, BgRange, Col, ColTrans, ColType, Node, Row, TNode};
 
 pub struct Player {
     pub name: String,
@@ -367,10 +368,12 @@ fn canvas(els: &[(usize, usize, Vec<Node>)], players: &[Player]) -> Vec<TNode> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use brdgme_color::*;
-    use crate::plain::render;
+
     use crate::ast::{Align as A, Node as N, TNode as TN};
+    use crate::plain::render;
+
+    use super::*;
 
     #[test]
     fn align_works() {
@@ -414,7 +417,7 @@ mod tests {
                     ]),
                 ],
                 &[],
-            ),)
+            ), )
         );
     }
 
@@ -432,7 +435,7 @@ mod tests {
             render(&transform(
                 &vec![N::Table(vec![vec![(A::Left, t.clone())]])],
                 &[],
-            ),)
+            ), )
         );
     }
 
