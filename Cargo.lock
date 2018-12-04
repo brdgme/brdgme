@@ -247,6 +247,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lost-cities"
+version = "0.1.0"
+dependencies = [
+ "brdgme-cmd 0.1.0",
+ "brdgme-color 0.1.0",
+ "brdgme-game 0.1.0",
+ "brdgme-markup 0.1.0",
+ "brdgme-rand-bot 0.1.0",
+ "rand 0.3.22 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_derive 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "memchr"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

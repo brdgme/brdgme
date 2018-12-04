@@ -1,0 +1,15 @@
+[package]
+name = "lost-cities"
+version = "0.1.0"
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+brdgme-game = { path = "../../lib/game" }
+brdgme-color = { path = "../../lib/color" }
+brdgme-markup = { path = "../../lib/markup" }
+brdgme-cmd = { path = "../../lib/cmd" }
+brdgme-rand-bot = { path = "../../lib/rand-bot" }
+rand = "0.3.15"
+serde = "1.0.0"
+serde_derive = "1.0.0"
