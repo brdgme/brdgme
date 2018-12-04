@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "game/acquire",
+  "game/lords-of-vegas",
   "game/lost-cities",
   "lib/cmd",
   "lib/color",
