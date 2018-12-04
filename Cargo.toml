@@ -6,4 +6,5 @@ members = [
   "lib/game",
   "lib/markup",
   "lib/rand-bot",
+  "lib/repl",
 ]
