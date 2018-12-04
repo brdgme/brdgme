@@ -1,18 +1,12 @@
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate lazy_static;
-extern crate regex;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-
 mod error;
 
 use std::fmt;
 use std::str::FromStr;
 use regex::Regex;
-pub use error::ColorError;
+use serde_derive::{Serialize, Deserialize};
+use lazy_static::lazy_static;
+
+pub use crate::error::ColorError;
 
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Color {
@@ -39,15 +33,15 @@ impl Color {
     }
 
     pub fn hex(self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b,)
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b, )
     }
 
     pub fn ansi_fg(self) -> String {
-        format!("\x1b[38;2;{};{};{}m", self.r, self.g, self.b,)
+        format!("\x1b[38;2;{};{};{}m", self.r, self.g, self.b, )
     }
 
     pub fn ansi_bg(self) -> String {
-        format!("\x1b[48;2;{};{};{}m", self.r, self.g, self.b,)
+        format!("\x1b[48;2;{};{};{}m", self.r, self.g, self.b, )
     }
 
     pub fn from_hex(s: &str) -> Result<Self, ColorError> {
