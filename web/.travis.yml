@@ -1,0 +1,25 @@
+language: node_js
+node_js:
+- "7"
+env:
+- API_SERVER=http://brdgme-api-prod.us-west-2.elasticbeanstalk.com WS_SERVER=ws://brdgme-websocket-server-prod.us-west-2.elasticbeanstalk.com
+before_install:
+- pip install --user awscli
+- export PATH=$PATH:$HOME/.local/bin
+script:
+- npm test
+- npm run build-prod
+deploy:
+  provider: s3
+  access_key_id:
+    secure: gMtPz6yd5DbjkWoyRxnrjtoj1kOrM6FTKhDXvk8NCDe6VlM1hMnyVeHKY8l51vXV1jkxwqnI5pnmwUQS9WvKtWMhVDBaAVUXDZ9/AL5dj+zdmIeJAjqBi3DFmrvGqX186GowvkX5psvW+NwclBIAhWeCXHcRxK3MVpDXStUI0s49XAVyl2sB7QpWStRSHHIqJJNTUdxSZlzPyDFZV66EMq6PuPTBUrsHQrWjP94njXWYQanUX6Dt6eTQ5K0D7C1R7cqZH0x7GupW/xg/ClwqHHg54NsgJtC4fS+HQq2PltmxbW50YfSz+ar8IAuBU/phr3gfqeU7JL5N8OViioOMlIaeTBwr8/ukQIYrEmlvLrAupdrlpzUs9lWTYdgCpNJNNcEV7vmjGr7y8zmyc8VLAPNEBTRu+Uc3orBm00iPJDkD61Lql8wP/UxJUFIKsLjvybH39cgWYjf2Nl6SIi+QsDGaXqe4XymaFdd5Zpb3F1IQIqch5Sw92Uga4QqNmzSr31KNED2Yro9uid85Kf705lpFPROwCbSTGTdB0xyoczgmKeX1JAlYVLyGWl8rOLxSAO89/Gu31bY9SIjcEQw692hVEjWZn30z2TI2zzk4kCz904PxKe0HI7g7zNLB0Nfw3QtA8XdlL2n47OuyPAxR2yGA99X5LN1oCWxKszF6QAk=
+  secret_access_key:
+    secure: zqafWlPjPTdjihYdSdAeHTgiPlPXFH+4KamU6MLssLtbSDfFlpr4JoKxwyFuPt4ngg7MNc7LZVnKG4TncWHz5Z5vZIRJAhaDI3aKlbYnSZhKS1jNKVsUyYys9ZM9H4oni0YTBlzN3y6pG7H0yu/wZzUSqgP39Nhf+3XM7rB1GEl+NzPcJ+vD5JLWZP64SfBGbytLvg7XqFcJ55221toZgbkxvjBOehRlMe99FPPJV+blNC/qTSOpY09LG9GMzKbQmbP9/xs6mMCS3fr2R8ArJhUCmnZV0VxXEeaz7G0hmPgTIidIugl0m85hKCFTtV6Y06m6ND7V3PIpScJQlA/LZYKw+lP/l7wiATopBXsxvCAvWF95UoGncp8mwOy8geEMCadXJbBg6LRRra0QanY2yJ3QT1/331zMEHeaodTyzPTYsYzQEnwb9nGA8QgtHmVPKFQAo7lqTlto9vreLnZI0JGiC7T3NpUDwolulSM3fYQ5y7V4HLU2eyV5y3NT2/fkplEByFK/pDxGxgw4NoRc06NfvYOD+YjmJTlj8Tr4l5BoCJyXrk40S0I355wwnLZu04tw8c9pMIrTpPZyBP5bp8mm1e7jwjl2dTQVAkKKarPu9gNOBNHlcXbH9sYUl9AeMtUVwaFxqKXEwe4//EtzFTjePtxk2+j+xu7oFA7eTyg=
+  bucket: www.brdg.me
+  skip_cleanup: true
+  region: us-west-2
+  local_dir: dist
+  acl: public_read
+after_deploy:
+- aws configure set preview.cloudfront true
+- aws cloudfront create-invalidation --distribution-id E1NOCZKTXTLDIV --paths "/*"

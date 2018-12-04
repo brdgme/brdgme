@@ -1,0 +1,261 @@
+@import 'vars.less';
+
+.game-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+}
+
+.game-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid @dark-background;
+  flex-direction: column;
+
+  .game-render {
+    flex: 100;
+    text-align: center;
+    width: 100%;
+    overflow-y: auto;
+    
+    > pre {
+      margin: 1em;
+    }
+  }
+
+  .recent-logs-container {
+    width: 63%;
+    flex: 1;
+
+    .recent-logs-header {
+      text-align: center;
+      font-weight: bold;
+      background-color: @dark-background;
+      border-top-left-radius: 0.63em;
+      border-top-right-radius: 0.63em;
+    }
+
+    .recent-logs {
+      font-size: 0.8em;
+      line-height: 1.4em;
+      max-height: 6em;
+      overflow-y: auto;
+      border-bottom-left-radius: 0.63em;
+      border-bottom-right-radius: 0.63em;
+      border: 1px solid @dark-background;
+      padding: 0.63em;
+    }
+  }
+
+  .suggestions-container {
+    flex: 1;
+    width: 63%;
+
+    .suggestions-content {
+      border-radius: 0.63em;
+      border: 1px solid @dark-background;
+      padding: 0.63em;
+      overflow-y: auto;
+
+      .suggestion-doc-item {
+        margin-left: 1em;
+        text-indent: -1em;
+      }
+
+      .suggestion-doc-desc {
+        font-size: 0.9em;
+        font-style: italic;
+      }
+
+      .suggestion-doc-values {
+        margin-left: 0.6em;
+        margin-bottom: 0.3em;
+      }
+    }
+  }
+
+  .game-command-input {
+    width: 63%;
+
+    form {
+      display: flex;
+
+      input {
+        font-size: 1.6em;
+      }
+
+      input[type=text] {
+        flex: 10;
+
+        &:disabled {
+          background-color: @dark-background;
+        }
+      }
+    }
+
+    .command-error {
+      color: @error;
+      text-align: center;
+    }
+  }
+
+  .game-logs-summary-container {
+    position: relative;
+    width: 63%;
+  }
+
+  .game-logs-summary {
+    background-color: rgba(255, 255, 255, 0.85);
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    border-top: 1px solid @dark-background;
+    border-left: 1px solid @dark-background;
+    border-right: 1px solid @dark-background;
+    border-top-left-radius: 0.63em;
+    border-top-right-radius: 0.63em;
+
+    .header {
+      padding: 0.3em;
+      padding-left: 0.63em;
+      background-color: fade(@dark-background, 60%);
+    }
+
+    .content {
+      max-height: 10em;
+      overflow-y: auto;
+      padding: 0.63em;
+    }
+  }
+}
+
+.game-meta {
+  display: flex;
+  flex-direction: column;
+  background-color: @dark-background;
+  width: 15em;
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  overflow-y: auto;
+
+  .game-meta-main {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .game-meta-logs {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    max-height: 50%;
+
+    .game-meta-logs-content {
+      flex: 1;
+      background-color: white;
+      padding: 0.6em;
+      font-size: 0.8em;
+      margin-bottom: 0.6em;
+      overflow-y: auto;
+
+      .game-log-entry {
+        margin-top: 0.2em;
+      }
+    }
+  }
+
+  .rating-change {
+    font-weight: bold;
+
+    .rating-change-up {
+      color: @brdgme-green;
+    }
+
+    .rating-change-down {
+      color: @brdgme-red;
+    }
+
+    .rating-change-none {
+      color: @brdgme-blue;
+    }
+  }
+}
+
+.game-current-turn {
+  height: 1.3em;
+  width: 63%;
+  text-align: center;
+  background-color: @dark-background;
+  border: 1px solid @dark-background;
+}
+
+.game-logs {
+  flex: 1;
+  padding: 0.5em;
+
+  .log-time {
+    margin-top: 0.3em;
+    margin-bottom: 0.3em;
+    text-align: center;
+    color: @light-text;
+  }
+}
+
+.game-meta-close-underlay {
+  display: none;
+}
+
+@media @query-small {
+  .game-meta {
+    display: none;
+  }
+
+  .game-meta.open {
+    display: block;
+    position: absolute;
+    z-index: 100;
+    top: 0;
+    right: 0;
+    height: 100%;
+    max-width: 85%;
+  }
+
+  .game-meta-close-underlay {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.63);
+  }
+
+  .game-main {
+    .game-render {
+      max-width: 99vw;
+      overflow: auto;
+
+      > pre {
+        font-size: 0.8em;
+      }
+    }
+
+    .suggestions-container {
+      width: 100%;
+    }
+
+    .game-command-input {
+      width: 100%;
+    }
+
+    .recent-logs-container {
+      width: 100%;
+    }
+  }
+
+  .game-current-turn {
+    width: 100%;
+  }
+}
