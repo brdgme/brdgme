@@ -1,0 +1,10 @@
+dependencies:
+- name: redis
+  version: ~5.0.0
+  repository: "@stable"
+- name: postgresql
+  version: ~2.7.6
+  repository: "@stable"
+- name: kubeless
+  version: ~2.0.0
+  repository: "@incubator"
