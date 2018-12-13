@@ -115,7 +115,7 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
                 .choose(&self.player_counts)
                 .expect("no player counts for game type");
             self.game = Some(
-                G::new(self.player_count)
+                G::start(self.player_count)
                     .expect("failed to create new game")
                     .0,
             );

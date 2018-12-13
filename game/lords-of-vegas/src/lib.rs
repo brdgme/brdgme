@@ -77,7 +77,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn new(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
         if players < 2 || players > 6 {
             return Err(GameError::PlayerCount {
                 min: 2,
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn json_works() {
         use serde_json;
-        let game = Game::new(3)
+        let game = Game::start(3)
             .expect("could not create game with 3 players")
             .0;
         serde_json::to_string(&game).expect("could not serialise game to JSON");

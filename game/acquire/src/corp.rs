@@ -1,5 +1,4 @@
 use std::fmt;
-use std::slice::Iter;
 
 use serde_derive::{Deserialize, Serialize};
 
@@ -47,24 +46,24 @@ fn additional_value(size: usize) -> usize {
 }
 
 impl Corp {
-    pub fn iter() -> Iter<'static, Corp> {
-        CORPS.into_iter()
+    pub fn iter() -> impl Iterator<Item=&'static Corp> {
+        CORPS.iter()
     }
 
-    pub fn base_value(&self) -> usize {
-        match *self {
+    pub fn base_value(self) -> usize {
+        match self {
             Corp::Worldwide | Corp::Sackson => 200,
             Corp::Festival | Corp::Imperial | Corp::American => 300,
             Corp::Continental | Corp::Tower => 400,
         }
     }
 
-    pub fn value(&self, size: usize) -> usize {
+    pub fn value(self, size: usize) -> usize {
         self.base_value() + additional_value(size)
     }
 
-    pub fn color(&self) -> Color {
-        match *self {
+    pub fn color(self) -> Color {
+        match self {
             Corp::Worldwide => PURPLE,
             Corp::Sackson => DEEP_ORANGE,
             Corp::Festival => GREEN,
@@ -75,25 +74,25 @@ impl Corp {
         }
     }
 
-    pub fn name(&self) -> String {
+    pub fn name(self) -> String {
         format!("{}", self)
     }
 
-    pub fn abbrev(&self) -> String {
+    pub fn abbrev(self) -> String {
         self.name()[..2].to_uppercase()
     }
 
-    pub fn render(&self) -> N {
+    pub fn render(self) -> N {
         N::Bold(vec![
             N::Fg(self.color().into(), vec![N::text(format!("{}", self))]),
         ])
     }
 
-    pub fn minor_bonus(&self, size: usize) -> usize {
+    pub fn minor_bonus(self, size: usize) -> usize {
         self.value(size) * MINOR_MULT
     }
 
-    pub fn major_bonus(&self, size: usize) -> usize {
+    pub fn major_bonus(self, size: usize) -> usize {
         self.value(size) * MAJOR_MULT
     }
 }

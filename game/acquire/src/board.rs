@@ -46,17 +46,17 @@ impl Board {
         self.0[at_u] = t;
     }
 
-    pub fn corp_size(&self, c: &Corp) -> usize {
+    pub fn corp_size(&self, c: Corp) -> usize {
         self.0
             .iter()
             .filter(|t| match **t {
-                Tile::Corp(tc) if tc == *c => true,
+                Tile::Corp(tc) if tc == c => true,
                 _ => false,
             })
             .count()
     }
 
-    pub fn corp_is_safe(&self, c: &Corp) -> bool {
+    pub fn corp_is_safe(&self, c: Corp) -> bool {
         self.corp_size(c) >= corp::SAFE_SIZE
     }
 
@@ -91,7 +91,7 @@ impl Board {
         let mut from: Vec<Corp> = vec![];
         let mut from_size: usize = 0;
         for corp in self.neighbouring_corps(loc) {
-            let size = self.corp_size(&corp);
+            let size = self.corp_size(corp);
             if size > into_size {
                 from = into;
                 into = vec![];
@@ -117,7 +117,7 @@ impl Board {
         (from, into)
     }
 
-    pub fn extend_corp(&mut self, loc: &Loc, corp: &Corp) {
+    pub fn extend_corp(&mut self, loc: &Loc, corp: Corp) {
         self.set_tile(loc, Tile::Corp(corp.to_owned()));
         for n_loc in &loc.neighbours() {
             if self.get_tile(n_loc) == Tile::Unincorporated {
@@ -126,10 +126,10 @@ impl Board {
         }
     }
 
-    pub fn convert_corp(&mut self, from: &Corp, into: &Corp) {
+    pub fn convert_corp(&mut self, from: Corp, into: Corp) {
         for loc in &Loc::all() {
             match self.get_tile(loc) {
-                Tile::Corp(c) if c == *from => self.set_tile(loc, Tile::Corp(*into)),
+                Tile::Corp(c) if c == from => self.set_tile(loc, Tile::Corp(into)),
                 _ => {}
             }
         }
@@ -164,7 +164,7 @@ impl Board {
     pub fn loc_neighbours_multiple_safe_corps(&self, loc: &Loc) -> bool {
         let mut has_safe_corp = false;
         for corp in self.neighbouring_corps(loc) {
-            if self.corp_is_safe(&corp) {
+            if self.corp_is_safe(corp) {
                 if has_safe_corp {
                     return true;
                 }
@@ -348,8 +348,8 @@ mod tests {
         b.set_tile(2usize, Tile::Corp(Corp::American));
         b.set_tile(3usize, Tile::Corp(Corp::American));
         b.set_tile(4usize, Tile::Corp(Corp::Sackson));
-        assert_eq!(0, b.corp_size(&Corp::Continental));
-        assert_eq!(1, b.corp_size(&Corp::Sackson));
-        assert_eq!(2, b.corp_size(&Corp::American));
+        assert_eq!(0, b.corp_size(Corp::Continental));
+        assert_eq!(1, b.corp_size(Corp::Sackson));
+        assert_eq!(2, b.corp_size(Corp::American));
     }
 }

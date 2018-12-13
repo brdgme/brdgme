@@ -103,7 +103,7 @@ impl PubState {
         let mut has_safe: bool = false;
         let mut unsafe_count: usize = 0;
         for corp in Corp::iter() {
-            let size = self.board.corp_size(corp);
+            let size = self.board.corp_size(*corp);
             if size > largest {
                 largest = size;
             }
@@ -161,7 +161,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn new(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
         let mut g = Game::default();
         if players < MIN_PLAYERS || players > MAX_PLAYERS {
             return Err(GameError::PlayerCount {
@@ -262,10 +262,10 @@ able to win the game."
         let output = parser.parse(input, players)?;
         match output.value {
             Command::Play(loc) => self.handle_play_command(player, &loc),
-            Command::Found(corp) => self.handle_found_command(player, &corp),
+            Command::Found(corp) => self.handle_found_command(player, corp),
             Command::Buy(n, corp) => self.handle_buy_command(player, n, corp),
             Command::Done => self.handle_done_command(player).map(|l| (l, false)),
-            Command::Merge(corp, into) => self.handle_merge_command(player, &corp, &into),
+            Command::Merge(corp, into) => self.handle_merge_command(player, corp, into),
             Command::Sell(n) => self.handle_sell_command(player, n),
             Command::Trade(n) => self.handle_trade_command(player, n),
             Command::Keep => self.handle_keep_command(player),
@@ -423,11 +423,11 @@ impl Game {
         match neighbouring_corps.len() {
             1 => {
                 let n_corp = neighbouring_corps.iter().next().unwrap();
-                self.board.extend_corp(loc, n_corp);
+                self.board.extend_corp(loc, *n_corp);
                 logs.push(Log::public(vec![
                     n_corp.render(),
                     N::text(" increased in size to "),
-                    N::Bold(vec![N::text(format!("{}", self.board.corp_size(n_corp)))]),
+                    N::Bold(vec![N::text(format!("{}", self.board.corp_size(*n_corp)))]),
                 ]));
                 self.buy_phase(player);
             }
@@ -450,7 +450,7 @@ impl Game {
             }
             _ => {
                 let safe_corp_count = neighbouring_corps.iter().fold(0, |acc, corp| {
-                    if self.board.corp_is_safe(corp) {
+                    if self.board.corp_is_safe(*corp) {
                         acc + 1
                     } else {
                         acc
@@ -473,14 +473,14 @@ impl Game {
 
     fn buy_phase(&mut self, player: usize) {
         self.phase = Phase::Buy {
-            player: player,
+            player,
             remaining: 3,
         };
     }
 
     fn found_phase(&mut self, player: usize, loc: Loc) {
         self.phase = Phase::Found {
-            player: player,
+            player,
             at: loc,
         }
     }
@@ -498,12 +498,12 @@ impl Game {
         }
         // We set the phase as the merge function validates this.
         self.phase = Phase::ChooseMerger {
-            player: player,
+            player,
             at: loc,
         };
         if from.len() == 1 && into.len() == 1 && from[0] != into[0] {
             // There's no ambiguity, automatically make the merge.
-            self.handle_merge_command(player, &from[0], &into[0])
+            self.handle_merge_command(player, from[0], into[0])
         } else {
             // Stay in this phase so the player can choose.
             Ok((vec![], true))
@@ -513,7 +513,7 @@ impl Game {
     pub fn handle_found_command(
         &mut self,
         player: usize,
-        corp: &Corp,
+        corp: Corp,
     ) -> Result<(Vec<Log>, bool), GameError> {
         self.assert_not_finished()?;
         self.assert_player_turn(player)?;
@@ -525,17 +525,17 @@ impl Game {
                 });
             }
         };
-        if !self.board.available_corps().contains(corp) {
+        if !self.board.available_corps().contains(&corp) {
             return Err(GameError::InvalidInput {
                 message: format!("{} is already on the board", corp),
             });
         }
-        self.players[player].stats.founds.push(*corp);
+        self.players[player].stats.founds.push(corp);
         self.board.extend_corp(&at, corp);
         {
-            let corp_shares = self.shares.entry(*corp).or_insert(STARTING_SHARES);
+            let corp_shares = self.shares.entry(corp).or_insert(STARTING_SHARES);
             if *corp_shares > 0 {
-                let player_shares = self.players[player].shares.entry(*corp).or_insert(0);
+                let player_shares = self.players[player].shares.entry(corp).or_insert(0);
                 *player_shares += 1;
                 *corp_shares -= 1;
             }
@@ -574,7 +574,7 @@ impl Game {
                         message: format!("can only buy {} more", remaining),
                     });
                 }
-                let corp_size = self.board.corp_size(&corp);
+                let corp_size = self.board.corp_size(corp);
                 if corp_size == 0 {
                     return Err(GameError::InvalidInput {
                         message: format!("{} is not on the board", corp),
@@ -594,7 +594,7 @@ impl Game {
                     });
                 }
                 self.players[player].money -= price;
-                self.take_shares(player, n, &corp)?;
+                self.take_shares(player, n, corp)?;
                 self.players[player].stats.buy_sum += price;
                 self.players[player].stats.buys += n;
 
@@ -636,20 +636,20 @@ impl Game {
         self.finished = true;
         // Pay all bonuses on the board.
         for corp in Corp::iter() {
-            let size = self.board.corp_size(corp);
+            let size = self.board.corp_size(*corp);
             if size > 0 {
                 logs.push(Log::public(vec![N::Bold(vec![
                     N::text("Paying shareholder bonuses for "),
                     corp.render(),
                 ])]));
-                logs.extend(self.pay_bonuses(corp));
+                logs.extend(self.pay_bonuses(*corp));
                 for player in 0..self.players.len() {
                     let p_shares = *self.players[player]
                         .shares
                         .get(corp)
                         .expect("could not get player shares");
                     if p_shares > 0 {
-                        logs.extend(self.sell(player, p_shares, corp)?);
+                        logs.extend(self.sell(player, p_shares, *corp)?);
                     }
                 }
             }
@@ -723,8 +723,8 @@ impl Game {
     pub fn handle_merge_command(
         &mut self,
         player: usize,
-        from: &Corp,
-        into: &Corp,
+        from: Corp,
+        into: Corp,
     ) -> Result<(Vec<Log>, bool), GameError> {
         self.assert_not_finished()?;
         self.assert_player_turn(player)?;
@@ -748,19 +748,19 @@ impl Game {
                 message: "merge was called with an empty from or into candidates".to_string(),
             });
         }
-        if !from_candidates.contains(from) {
+        if !from_candidates.contains(&from) {
             return Err(GameError::InvalidInput {
                 message: format!("{} is not a valid corporation to be merged", from),
             });
         }
-        if !into_candidates.contains(into) {
+        if !into_candidates.contains(&into) {
             return Err(GameError::InvalidInput {
                 message: format!("{} is not a valid corporation to merge into", into),
             });
         }
         if self.board.get_tile(at) == Tile::Unincorporated {
             // We just give the tile to the big corp now to make it visually obvious.
-            self.board.set_tile(at, Tile::Corp(*into));
+            self.board.set_tile(at, Tile::Corp(into));
             // Make sure we also consume any unincorporated tiles if required.
             self.board.extend_corp(&at, into);
         }
@@ -773,12 +773,12 @@ impl Game {
         logs.extend(self.pay_bonuses(from));
         self.phase = Phase::SellOrTrade {
             player,
-            corp: *from,
-            into: *into,
+            corp: from,
+            into,
             at,
             turn_player: player,
         };
-        if self.players[player].shares.get(from).cloned().unwrap_or(0) == 0 {
+        if self.players[player].shares.get(&from).cloned().unwrap_or(0) == 0 {
             // The player has none of the shares anyway, just skip them.
             let (new_logs, new_can_undo) = self.next_player_sell_trade()?;
             logs.extend(new_logs);
@@ -788,7 +788,7 @@ impl Game {
         Ok((logs, can_undo && self.players.len() > 2))
     }
 
-    fn pay_bonuses(&mut self, corp: &Corp) -> Vec<Log> {
+    fn pay_bonuses(&mut self, corp: Corp) -> Vec<Log> {
         let BonusPlayers {
             major,
             minor,
@@ -863,7 +863,7 @@ impl Game {
         Log::public(content)
     }
 
-    fn bonus_players(&self, corp: &Corp) -> BonusPlayers {
+    fn bonus_players(&self, corp: Corp) -> BonusPlayers {
         let mut major: Vec<usize> = vec![];
         let mut major_count: usize = 0;
         let mut dummy_shares: usize = 0;
@@ -875,7 +875,7 @@ impl Game {
         let mut minor: Vec<usize> = vec![];
         let mut minor_count: usize = 0;
         for (player, state) in self.players.iter().enumerate() {
-            let shares = state.shares.get(corp).cloned().unwrap_or(0);
+            let shares = state.shares.get(&corp).cloned().unwrap_or(0);
             if shares == 0 {
                 continue;
             }
@@ -948,7 +948,7 @@ impl Game {
             } => (corp, into, at, turn_player),
             _ => panic!("must be Phase::SellOrTrade"),
         };
-        self.board.convert_corp(&corp, &into);
+        self.board.convert_corp(corp, into);
         self.choose_merger_phase(turn_player, at)
     }
 
@@ -968,7 +968,7 @@ impl Game {
                 });
             }
         };
-        let mut logs = self.sell(player, n, &corp)?;
+        let mut logs = self.sell(player, n, corp)?;
         if *self.players[player]
             .shares
             .get(&corp)
@@ -981,7 +981,7 @@ impl Game {
         Ok((logs, can_undo))
     }
 
-    fn sell(&mut self, player: usize, n: usize, corp: &Corp) -> Result<Vec<Log>, GameError> {
+    fn sell(&mut self, player: usize, n: usize, corp: Corp) -> Result<Vec<Log>, GameError> {
         if n == 0 {
             return Err(GameError::InvalidInput {
                 message: "you must sell an amount greater than 0".to_string(),
@@ -990,7 +990,7 @@ impl Game {
         let money = corp.value(self.board.corp_size(corp)) * n;
         let player_shares = *self.players[player]
             .shares
-            .get(corp)
+            .get(&corp)
             .expect("could not get player shares");
         if n > player_shares {
             return Err(GameError::InvalidInput {
@@ -1060,11 +1060,11 @@ impl Game {
 
         let mut can_undo = true;
         self.players[player].stats.trades += receive;
-        self.players[player].stats.trade_loss_sum += n * corp.value(self.board.corp_size(&corp));
+        self.players[player].stats.trade_loss_sum += n * corp.value(self.board.corp_size(corp));
         self.players[player].stats.trade_gain_sum +=
-            receive * into.value(self.board.corp_size(&into));
-        self.return_shares(player, n, &corp)?;
-        self.take_shares(player, receive, &into)?;
+            receive * into.value(self.board.corp_size(into));
+        self.return_shares(player, n, corp)?;
+        self.take_shares(player, receive, into)?;
         let mut logs = vec![Log::public(vec![
             N::Player(player),
             N::text(" traded "),
@@ -1082,35 +1082,35 @@ impl Game {
         Ok((logs, can_undo))
     }
 
-    fn take_shares(&mut self, player: usize, n: usize, corp: &Corp) -> Result<(), GameError> {
+    fn take_shares(&mut self, player: usize, n: usize, corp: Corp) -> Result<(), GameError> {
         let corp_shares = *self.shares
-            .get(corp)
+            .get(&corp)
             .expect("could not get corp share count");
         if corp_shares < n {
             return Err(GameError::InvalidInput {
                 message: format!("{} only has {} left", corp, corp_shares),
             });
         }
-        let player_shares = self.players[player].shares.entry(*corp).or_insert(0);
+        let player_shares = self.players[player].shares.entry(corp).or_insert(0);
         *player_shares += n;
-        let corp_shares = self.shares.entry(*corp).or_insert(STARTING_SHARES);
+        let corp_shares = self.shares.entry(corp).or_insert(STARTING_SHARES);
         *corp_shares -= n;
         Ok(())
     }
 
-    fn return_shares(&mut self, player: usize, n: usize, corp: &Corp) -> Result<(), GameError> {
+    fn return_shares(&mut self, player: usize, n: usize, corp: Corp) -> Result<(), GameError> {
         let player_shares = *self.players[player]
             .shares
-            .get(corp)
+            .get(&corp)
             .expect("could not get player share count");
         if player_shares < n {
             return Err(GameError::InvalidInput {
                 message: format!("only has {} left", player_shares),
             });
         }
-        let player_shares = self.players[player].shares.entry(*corp).or_insert(0);
+        let player_shares = self.players[player].shares.entry(corp).or_insert(0);
         *player_shares -= n;
-        let corp_shares = self.shares.entry(*corp).or_insert(STARTING_SHARES);
+        let corp_shares = self.shares.entry(corp).or_insert(STARTING_SHARES);
         *corp_shares += n;
         Ok(())
     }
@@ -1239,7 +1239,7 @@ impl<'a> From<&'a str> for Game {
                 }
             }
         }
-        let mut g = Game::new(players.len()).expect("expected new game").0;
+        let mut g = Game::start(players.len()).expect("expected new game").0;
         g.phase = Phase::Play(0);
         g.players = players;
         g.board = s.into();

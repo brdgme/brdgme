@@ -482,7 +482,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn new(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
         if players < MIN_PLAYERS || players > MAX_PLAYERS {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -699,7 +699,7 @@ mod test {
 
     #[test]
     fn start_works() {
-        let game = Game::new(2).unwrap().0;
+        let game = Game::start(2).unwrap().0;
         assert_eq!(game.hands.len(), 2);
         assert_eq!(game.hands[0].len(), 8);
         assert_eq!(game.hands[1].len(), 8);
@@ -708,7 +708,7 @@ mod test {
 
     #[test]
     fn end_round_works() {
-        let mut game = Game::new(2).unwrap().0;
+        let mut game = Game::start(2).unwrap().0;
         for _ in 0..44 {
             let p = game.current_player;
             let c = game.hands[p][0];
@@ -725,7 +725,7 @@ mod test {
 
     #[test]
     fn game_end_works() {
-        let mut game = Game::new(2).unwrap().0;
+        let mut game = Game::start(2).unwrap().0;
         for _ in 0..(44 * ROUNDS) {
             let p = game.current_player;
             let c = game.hands[p][0];
@@ -737,7 +737,7 @@ mod test {
 
     #[test]
     fn play_works() {
-        let mut game = Game::new(2).unwrap().0;
+        let mut game = Game::start(2).unwrap().0;
         game.hands[0] = vec![
             (Expedition::Green, Value::Investment).into(),
             (Expedition::Green, Value::Investment).into(),
@@ -833,7 +833,7 @@ mod test {
 
     #[test]
     fn placings_works() {
-        let mut g = Game::new(2).expect("expected to create game").0;
+        let mut g = Game::start(2).expect("expected to create game").0;
         g.scores = vec![vec![200, 0, 0], vec![100, 50, 40]];
         assert_eq!(vec![1, 2], g.placings());
         g.scores = vec![vec![100, 50, 40], vec![200, 0, 0]];

@@ -90,7 +90,7 @@ impl PubState {
         rows.extend(
             Corp::iter()
                 .map(|c| {
-                    let size = self.board.corp_size(c);
+                    let size = self.board.corp_size(*c);
                     let value = c.value(size);
                     row_pad(
                         &[
@@ -195,7 +195,7 @@ fn empty_color(l: Loc) -> Color {
     }
 }
 
-fn corp_main_text_thin(c: &Corp, size: usize) -> Vec<N> {
+fn corp_main_text_thin(c: Corp, size: usize) -> Vec<N> {
     vec![
         N::Fg(
             c.color().inv().mono().into(),
@@ -210,7 +210,7 @@ fn corp_main_text_thin(c: &Corp, size: usize) -> Vec<N> {
     ]
 }
 
-fn corp_main_text_wide(c: &Corp, size: usize) -> Vec<N> {
+fn corp_main_text_wide(c: Corp, size: usize) -> Vec<N> {
     let mut c_name = c.name();
     c_name.truncate(TILE_WIDTH * 2 - 2);
     vec![
@@ -308,7 +308,7 @@ impl Board {
                             let mut start: Option<usize> = None;
                             board::cols()
                                 .filter_map(|col| {
-                                    let l = Loc { row: row, col: col };
+                                    let l = Loc { row, col };
                                     match self.get_tile(&l) {
                                         Tile::Corp(tc) if tc == *c => {
                                             if start.is_none() {
@@ -339,9 +339,9 @@ impl Board {
                             (x + (w - 1) / 2) * TILE_WIDTH,
                             y * TILE_HEIGHT,
                             if w > 1 {
-                                corp_main_text_wide(c, self.corp_size(c))
+                                corp_main_text_wide(*c, self.corp_size(*c))
                             } else {
-                                corp_main_text_thin(c, self.corp_size(c))
+                                corp_main_text_thin(*c, self.corp_size(*c))
                             },
                         ));
                     }

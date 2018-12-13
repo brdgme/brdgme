@@ -79,7 +79,7 @@ pub fn renders<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
 }
 
 fn handle_new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(players: usize) -> Response {
-    match G::new(players) {
+    match G::start(players) {
         Ok((game, logs)) => GameResponse::from_gamer(&game)
             .map(|gs| {
                 let (public_render, player_renders) = renders(&game);

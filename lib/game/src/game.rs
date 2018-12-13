@@ -51,7 +51,7 @@ pub trait Gamer: Sized {
     type PubState: Serialize + DeserializeOwned + Renderer;
     type PlayerState: Serialize + DeserializeOwned + Renderer;
 
-    fn new(players: usize) -> Result<(Self, Vec<Log>), GameError>;
+    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError>;
     fn pub_state(&self) -> Self::PubState;
     fn player_state(&self, player: usize) -> Self::PlayerState;
     fn command(
