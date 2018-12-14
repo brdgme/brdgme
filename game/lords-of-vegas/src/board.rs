@@ -28,8 +28,8 @@ pub enum Block {
 pub static BLOCKS: &'static [Block] = &[Block::A, Block::B, Block::C, Block::D, Block::E, Block::F];
 
 impl Block {
-    pub fn max_lot(&self) -> Lot {
-        match *self {
+    pub fn max_lot(self) -> Lot {
+        match self {
             Block::A | Block::B | Block::E => 6,
             Block::C => 12,
             Block::D | Block::F => 9,
@@ -221,9 +221,9 @@ impl Board {
         used
     }
 
-    pub fn casino_tile_count(&self, c: &Casino) -> usize {
+    pub fn casino_tile_count(&self, c: Casino) -> usize {
         self.0.iter().fold(0, |acc, (_, bt)| match *bt {
-            BoardTile::Built { casino, .. } if casino == *c => acc + 1,
+            BoardTile::Built { casino, .. } if casino == c => acc + 1,
             _ => acc,
         })
     }

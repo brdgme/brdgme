@@ -60,10 +60,10 @@ pub fn render_cards(cards: &[Card]) -> Vec<N> {
     output
 }
 
-pub fn casino_card_count(cards: &[Card], casino: &Casino) -> usize {
+pub fn casino_card_count(cards: &[Card], casino: Casino) -> usize {
     cards.iter().fold(0, |acc, c| match *c {
         Card::Loc { ref loc } => match TILES[loc].payout {
-            Payout::Casino(c) if c == *casino => acc + 1,
+            Payout::Casino(c) if c == casino => acc + 1,
             _ => acc,
         },
         _ => acc,

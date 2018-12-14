@@ -119,7 +119,7 @@ impl PubState {
                 vec![
                     N::text(format!(
                         "{}",
-                        CASINO_CARDS - casino_card_count(&self.played, casino)
+                        CASINO_CARDS - casino_card_count(&self.played, *casino)
                     )),
                 ],
             ));
@@ -129,7 +129,7 @@ impl PubState {
                 vec![
                     N::text(format!(
                         "{}",
-                        CASINO_TILES - self.board.casino_tile_count(casino)
+                        CASINO_TILES - self.board.casino_tile_count(*casino)
                     )),
                 ],
             ));
@@ -138,13 +138,13 @@ impl PubState {
     }
 }
 
-fn block_offset(block: &Block) -> (usize, usize) {
+fn block_offset(block: Block) -> (usize, usize) {
     (
-        match *block {
+        match block {
             Block::A | Block::C | Block::E => 0,
             Block::B | Block::D | Block::F => TILE_WIDTH * 3 + STRIP_FULL_WIDTH,
         },
-        match *block {
+        match block {
             Block::A | Block::B => 0,
             Block::C | Block::D => TILE_HEIGHT * 2 + ALLEY_FULL_HEIGHT,
             Block::E => TILE_HEIGHT * 6 + ALLEY_FULL_HEIGHT * 2,
@@ -157,7 +157,7 @@ impl Board {
     fn render(&self) -> N {
         let mut layers = vec![];
         for block in BLOCKS {
-            let (x, y) = block_offset(block);
+            let (x, y) = block_offset(*block);
             layers.push((x, y, vec![self.render_block(*block)]));
         }
         N::Canvas(layers)
@@ -165,7 +165,7 @@ impl Board {
 
     fn render_block(&self, block: Block) -> N {
         let mut layers = vec![];
-        for lot in 1..block.max_lot() + 1 {
+        for lot in 1..=block.max_lot() {
             let loc = Loc { block, lot };
             let x = (lot - 1) % 3;
             let y = (lot - 1) / 3;

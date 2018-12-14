@@ -115,6 +115,15 @@ impl From<Color> for Col {
     }
 }
 
+impl From<&Color> for Col {
+    fn from(c: &Color) -> Col {
+        Col {
+            color: ColType::RGB(*c),
+            transform: vec![],
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum Node {
     Fg(Col, Vec<Node>),

@@ -49,8 +49,8 @@ pub static PIONEER_COLOR: &'static Color = &Color {
 };
 
 impl Casino {
-    pub fn color(&self) -> &'static Color {
-        match *self {
+    pub fn color(self) -> &'static Color {
+        match self {
             Casino::Albion => ALBION_COLOR,
             Casino::Sphinx => SPHINX_COLOR,
             Casino::Vega => VEGA_COLOR,
@@ -59,8 +59,8 @@ impl Casino {
         }
     }
 
-    pub fn render(&self) -> N {
-        let c = *self.color();
+    pub fn render(self) -> N {
+        let c = self.color();
         N::Bold(vec![N::Bg(
             c.into(),
             vec![N::Fg(

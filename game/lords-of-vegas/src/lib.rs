@@ -160,7 +160,7 @@ impl Gamer for Game {
     ) -> Result<CommandResponse, GameError> {
         let output = self.command_parser(player).parse(input, players)?;
         let (logs, can_undo) = match output.value {
-            Command::Build { loc, casino } => self.build(player, &loc, &casino)?,
+            Command::Build { loc, casino } => self.build(player, &loc, casino)?,
             Command::Remodel { loc, casino } => unimplemented!(),
             Command::Reorg { loc } => unimplemented!(),
             Command::Sprawl { from, to } => unimplemented!(),
@@ -196,14 +196,10 @@ impl Gamer for Game {
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
-        if self
+        self
             .whose_turn()
             .into_iter()
-            .find(|&p| p == player)
-            .is_none()
-            {
-                return None;
-            }
+            .find(|&p| p == player)?;
         Some(self.command_parser(player).to_spec())
     }
 
@@ -225,7 +221,7 @@ impl Game {
         &mut self,
         p: usize,
         loc: &Loc,
-        casino: &Casino,
+        casino: Casino,
     ) -> Result<(Vec<Log>, bool), GameError> {
         if !self.can_build(p) {
             return Err(GameError::InvalidInput {
@@ -260,7 +256,7 @@ impl Game {
         self.board.set(
             *loc,
             BoardTile::Built {
-                casino: *casino,
+                casino,
                 owner: Some(TileOwner {
                     die: TILES[loc].die,
                     player: p,
