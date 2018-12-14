@@ -9,11 +9,11 @@ use brdgme_markup::ast::Cell;
 use crate::{MAX_PLAYERS, next_player, PlayerState, PubState, ROUNDS, START_ROUND};
 use crate::card::{by_expedition, Card, expeditions};
 
-const EXP_SPACER: &'static str = "  ";
-const TABLEAU_HEADER_SPACER: &'static str = "   ";
-const OPPONENT_SPACER: &'static str = "       ";
-const SCORE_SPACER: &'static str = "  ";
-const EMPTY_CARD_PILE: &'static str = "--";
+const EXP_SPACER: &str = "  ";
+const TABLEAU_HEADER_SPACER: &str = "   ";
+const OPPONENT_SPACER: &str = "       ";
+const SCORE_SPACER: &str = "  ";
+const EMPTY_CARD_PILE: &str = "--";
 
 fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) -> Vec<N> {
     let mut layout: Vec<Row> = vec![];

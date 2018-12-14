@@ -96,7 +96,7 @@ fn initial_deck() -> Vec<Card> {
         for _ in 0..INVESTMENTS {
             deck.push((e, Value::Investment).into());
         }
-        for v in MIN_VALUE..MAX_VALUE + 1 {
+        for v in MIN_VALUE..=MAX_VALUE {
             deck.push((e, Value::N(v)).into());
         }
     }
@@ -160,7 +160,9 @@ impl Game {
             if let Some(p_exp) = self.expeditions.get(p) {
                 round_score = score(self.players, p_exp);
             }
-            self.scores.get_mut(p).map(|s| s.push(round_score));
+            if let Some(s) = self.scores.get_mut(p) {
+                s.push(round_score);
+            }
             logs.push(Log::public(vec![
                 N::Player(p),
                 N::text(" scored "),
@@ -355,12 +357,12 @@ impl Game {
         }
         if self.expeditions
             .get(player)
-            .ok_or_else(|| {
+            .ok_or_else(||
                 GameError::internal(format!(
                     "could not find player expedition for player {}",
                     player
                 ))
-            })?
+            )?
             .is_empty()
             {
                 self.stats[player].expeditions += 1;
@@ -676,7 +678,7 @@ pub fn score(players: usize, cards: &[Card]) -> isize {
             return acc;
         }
         acc + (exp_sum.get(&e).unwrap_or(&0) - exp_cost) * (exp_inv.get(&e).unwrap_or(&0) + 1)
-            + if cards.unwrap() >= &exp_bonus_size {
+            + if *cards.unwrap() >= exp_bonus_size {
             exp_cost
         } else {
             0

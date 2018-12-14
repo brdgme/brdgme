@@ -21,8 +21,8 @@ pub enum Expedition {
 }
 
 impl Expedition {
-    pub fn color(&self) -> brdgme_color::Color {
-        match *self {
+    pub fn color(self) -> brdgme_color::Color {
+        match self {
             Expedition::Red => brdgme_color::RED,
             Expedition::Green => brdgme_color::GREEN,
             Expedition::White => brdgme_color::GREY,
@@ -31,8 +31,8 @@ impl Expedition {
         }
     }
 
-    fn abbrev(&self) -> String {
-        match *self {
+    fn abbrev(self) -> String {
+        match self {
             Expedition::Red => "R".to_string(),
             Expedition::Green => "G".to_string(),
             Expedition::White => "W".to_string(),
