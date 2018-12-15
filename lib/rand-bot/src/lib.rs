@@ -12,9 +12,9 @@ pub struct RandBot;
 
 fn bounded_i32(v: i32, min: i32, max: i32) -> i32 {
     assert!(min <= max);
-    let mut v = v as i64;
-    let min64 = min as i64;
-    let max64 = max as i64;
+    let mut v = i64::from(v);
+    let min64 = i64::from(min);
+    let max64 = i64::from(max);
     let range_size = max64 - min64 + 1;
     if v < min64 {
         v += range_size * ((min64 - v) / range_size + 1);
