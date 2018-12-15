@@ -77,6 +77,7 @@ pub struct PlayerRender {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Response {
     PlayerCounts {
         player_counts: Vec<usize>,

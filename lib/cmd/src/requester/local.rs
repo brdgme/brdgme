@@ -29,7 +29,7 @@ impl Requester for LocalRequester {
         {
             let mut wr = cmd.stdin
                 .as_mut()
-                .ok_or(format_err!("failed to get stdin"))?;
+                .ok_or_else(|| format_err!("failed to get stdin"))?;
             let mut bufwr = BufWriter::new(&mut wr);
 
             bufwr.write_all(serde_json::to_string(req)?.as_bytes())?;
