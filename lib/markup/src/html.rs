@@ -2,11 +2,11 @@ use brdgme_color::Color;
 
 use crate::ast::TNode;
 
-fn fg(color: &Color, content: &str) -> String {
+fn fg(color: Color, content: &str) -> String {
     return format!(r#"<span style="color:{};">{}</span>"#, color, content);
 }
 
-fn bg(color: &Color, content: &str) -> String {
+fn bg(color: Color, content: &str) -> String {
     return format!(
         r#"<span style="background-color:{};">{}</span>"#,
         color,
@@ -34,8 +34,8 @@ fn render_nodes(input: &[TNode]) -> String {
     for n in input {
         match *n {
             TNode::Text(ref t) => buf.push_str(&escape(t)),
-            TNode::Fg(ref color, ref children) => buf.push_str(&fg(color, &render_nodes(children))),
-            TNode::Bg(ref color, ref children) => buf.push_str(&bg(color, &render_nodes(children))),
+            TNode::Fg(color, ref children) => buf.push_str(&fg(color, &render_nodes(children))),
+            TNode::Bg(color, ref children) => buf.push_str(&bg(color, &render_nodes(children))),
             TNode::Bold(ref children) => buf.push_str(&b(&render_nodes(children))),
         }
     }

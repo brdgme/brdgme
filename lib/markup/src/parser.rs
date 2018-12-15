@@ -120,7 +120,7 @@ fn col_type_rgb<I>(input: I) -> ParseResult<ColType, I>
         parser(parse_u8),
         string(")"),
     ).map(|(_, r, _, g, _, b, _)| {
-        ColType::RGB(Color { r: r, g: g, b: b })
+        ColType::RGB(Color { r, g, b })
     })
         .parse_stream(input)
 }
