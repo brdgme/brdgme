@@ -29,7 +29,7 @@ pub fn fuzz<F, R>(new_requester: F)
         exit_txs.push(exit_tx);
         thread::spawn(move || {
             let client = new_requester.lock().unwrap()();
-            let mut fuzzer = Fuzzer::new(Box::new(client)).expect("expected to create fuzzer");
+            let mut fuzzer = Fuzzer::try_new(Box::new(client)).expect("expected to create fuzzer");
             loop {
                 step_tx
                     .send(fuzzer.next().expect("failed to get something from fuzzer"))
@@ -72,7 +72,7 @@ pub fn fuzz<F, R>(new_requester: F)
                 println!(
                     "\nError detected: {}\n\nCommand: {}\n\nGame: {:?}",
                     error,
-                    command.unwrap_or("none".to_string()),
+                    command.unwrap_or_else(|| "none".to_string()),
                     game
                 );
                 break;
@@ -89,7 +89,7 @@ pub fn fuzz_gamer<G>()
     where
         G: Gamer + Debug + Clone + Serialize + DeserializeOwned + 'static,
 {
-    fuzz(|| requester::gamer::new::<G>())
+    fuzz(requester::gamer::new::<G>)
 }
 
 #[derive(Default)]
@@ -118,7 +118,7 @@ struct Fuzzer {
 }
 
 impl Fuzzer {
-    fn new(mut client: Box<requester::Requester>) -> Result<Self, Error> {
+    fn try_new(mut client: Box<requester::Requester>) -> Result<Self, Error> {
         let player_counts = match client.request(&api::Request::PlayerCounts)? {
             api::Response::PlayerCounts { player_counts } => player_counts,
             v => bail!("invalid response to player counts request: {:?}", v),
@@ -133,7 +133,7 @@ impl Fuzzer {
     }
 
     fn new_game(&mut self) -> Result<(), Error> {
-        let players = *self.rng.choose(&self.player_counts).ok_or(format_err!(
+        let players = *self.rng.choose(&self.player_counts).ok_or_else(|| format_err!(
             "could not get player counts from {:?}",
             self.player_counts
         ))?;
@@ -165,7 +165,7 @@ impl Fuzzer {
                      },
                      ref player_renders,
                  }) => {
-                let player = *self.rng.choose(&whose_turn).ok_or(format_err!(
+                let player = *self.rng.choose(&whose_turn).ok_or_else(|| format_err!(
                     "unable to pick active turn player from: {:?}",
                     whose_turn
                 ))?;
@@ -318,7 +318,7 @@ fn exec_command(
             player_renders,
         })),
         api::Response::UserError { message } => Ok(CommandResponse::UserError { message }),
-        v @ _ => bail!(format!("{:?}", v)),
+        v => bail!(format!("{:?}", v)),
     }
 }
 
