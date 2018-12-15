@@ -162,8 +162,8 @@ impl Parser<i32> for Int {
             }
         }
         Ok(Output {
-            value: value,
-            consumed: consumed,
+            value,
+            consumed,
             remaining: &input[consumed_count..],
         })
     }
@@ -198,8 +198,8 @@ impl<T, O, F, TP> Map<T, O, F, TP>
 {
     pub fn new(parser: TP, map: F) -> Self {
         Self {
-            parser: parser,
-            map: map,
+            parser,
+            map,
             t_type: PhantomData,
             o_type: PhantomData,
         }
@@ -243,7 +243,7 @@ impl<T, TP> Opt<T, TP>
 {
     pub fn new(parser: TP) -> Self {
         Self {
-            parser: parser,
+            parser,
             t_type: PhantomData,
         }
     }
@@ -302,7 +302,7 @@ impl<T, TP> Many<T, TP>
 {
     pub fn any(parser: TP) -> Self {
         Self {
-            parser: parser,
+            parser,
             min: None,
             max: None,
             delim: MANY_DELIM.to_string(),
@@ -312,7 +312,7 @@ impl<T, TP> Many<T, TP>
 
     pub fn some(parser: TP) -> Self {
         Self {
-            parser: parser,
+            parser,
             min: Some(1),
             max: None,
             delim: MANY_DELIM.to_string(),
@@ -322,7 +322,7 @@ impl<T, TP> Many<T, TP>
 
     pub fn bounded(parser: TP, min: usize, max: usize) -> Self {
         Self {
-            parser: parser,
+            parser,
             min: Some(min),
             max: Some(max),
             delim: MANY_DELIM.to_string(),
@@ -458,7 +458,7 @@ pub struct OneOf<T, TP: Parser<T> + ?Sized> {
 impl<T, TP: Parser<T> + ?Sized> OneOf<T, TP> {
     pub fn new(parsers: Vec<Box<TP>>) -> Self {
         Self {
-            parsers: parsers,
+            parsers,
             t_type: PhantomData,
         }
     }
@@ -556,14 +556,14 @@ impl<T> Enum<T>
 {
     pub fn exact(values: Vec<T>) -> Self {
         Self {
-            values: values,
+            values,
             exact: true,
         }
     }
 
     pub fn partial(values: Vec<T>) -> Self {
         Self {
-            values: values,
+            values,
             exact: false,
         }
     }
@@ -678,7 +678,7 @@ impl<T, TP: Parser<T>> Doc<T, TP> {
         Self {
             name: name.into(),
             desc: None,
-            parser: parser,
+            parser,
             t_type: PhantomData,
         }
     }
@@ -687,7 +687,7 @@ impl<T, TP: Parser<T>> Doc<T, TP> {
         Self {
             name: name.into(),
             desc: Some(desc.into()),
-            parser: parser,
+            parser,
             t_type: PhantomData,
         }
     }
@@ -762,7 +762,7 @@ pub struct AfterSpace<T, TP: Parser<T>> {
 impl<T, TP: Parser<T>> AfterSpace<T, TP> {
     pub fn new(parser: TP) -> Self {
         Self {
-            parser: parser,
+            parser,
             t_type: PhantomData,
         }
     }

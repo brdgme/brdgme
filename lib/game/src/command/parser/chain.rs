@@ -42,8 +42,8 @@ impl<A, B, PA, PB> Chain2<A, B, PA, PB>
 {
     pub fn new(a: PA, b: PB) -> Self {
         Self {
-            a: a,
-            b: b,
+            a,
+            b,
             a_type: PhantomData,
             b_type: PhantomData,
         }
@@ -90,9 +90,9 @@ impl<A, B, C, PA, PB, PC> Chain3<A, B, C, PA, PB, PC>
 {
     pub fn new(a: PA, b: PB, c: PC) -> Self {
         Self {
-            a: a,
-            b: b,
-            c: c,
+            a,
+            b,
+            c,
             a_type: PhantomData,
             b_type: PhantomData,
             c_type: PhantomData,
@@ -156,10 +156,10 @@ impl<A, B, C, D, PA, PB, PC, PD> Chain4<A, B, C, D, PA, PB, PC, PD>
 {
     pub fn new(a: PA, b: PB, c: PC, d: PD) -> Self {
         Self {
-            a: a,
-            b: b,
-            c: c,
-            d: d,
+            a,
+            b,
+            c,
+            d,
             a_type: PhantomData,
             b_type: PhantomData,
             c_type: PhantomData,

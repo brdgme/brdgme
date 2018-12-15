@@ -70,9 +70,9 @@ impl<G: Gamer, B: Botter<G>> Fuzzer<G, B> {
             player_names: (0..player_counts.iter().max().cloned().unwrap_or(0))
                 .map(|c| format!("{}", c))
                 .collect(),
-            player_counts: player_counts,
+            player_counts,
             player_count: 0,
-            bot: bot,
+            bot,
             rng: rand::thread_rng(),
             game_count: 0,
             command_count: 0,

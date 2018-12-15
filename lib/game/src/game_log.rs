@@ -14,7 +14,7 @@ pub struct Log {
 impl Log {
     pub fn public(content: Vec<Node>) -> Log {
         Log {
-            content: content,
+            content,
             at: Utc::now().naive_utc(),
             public: true,
             to: vec![],
@@ -23,10 +23,10 @@ impl Log {
 
     pub fn private(content: Vec<Node>, to: Vec<usize>) -> Log {
         Log {
-            content: content,
+            content,
             at: Utc::now().naive_utc(),
             public: false,
-            to: to,
+            to,
         }
     }
 }
