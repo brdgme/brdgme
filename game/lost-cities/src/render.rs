@@ -3,11 +3,11 @@ use std::iter::repeat;
 
 use brdgme_color::GREY;
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
 use brdgme_markup::ast::Cell;
+use brdgme_markup::{Align as A, Node as N, Row};
 
-use crate::{MAX_PLAYERS, next_player, PlayerState, PubState, ROUNDS, START_ROUND};
-use crate::card::{by_expedition, Card, expeditions};
+use crate::card::{by_expedition, expeditions, Card};
+use crate::{next_player, PlayerState, PubState, MAX_PLAYERS, ROUNDS, START_ROUND};
 
 const EXP_SPACER: &str = "  ";
 const TABLEAU_HEADER_SPACER: &str = "   ";
@@ -19,17 +19,15 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
     let mut layout: Vec<Row> = vec![];
     if !pub_state.is_finished {
         layout.extend(vec![
-            vec![
-                (
-                    A::Center,
-                    vec![
-                        N::text("Round "),
-                        N::Bold(vec![N::text(format!("{}", pub_state.round))]),
-                        N::text(" of "),
-                        N::Bold(vec![N::text(format!("{}", super::ROUNDS))]),
-                    ],
-                ),
-            ],
+            vec![(
+                A::Center,
+                vec![
+                    N::text("Round "),
+                    N::Bold(vec![N::text(format!("{}", pub_state.round))]),
+                    N::text(" of "),
+                    N::Bold(vec![N::text(format!("{}", super::ROUNDS))]),
+                ],
+            )],
             vec![],
         ]);
     }
@@ -43,12 +41,10 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
     if let Some(h) = hand {
         layout.append(&mut vec![
             vec![],
-            vec![
-                (
-                    A::Center,
-                    vec![N::Fg(GREY.into(), vec![N::text("Your hand")])],
-                ),
-            ],
+            vec![(
+                A::Center,
+                vec![N::Fg(GREY.into(), vec![N::text("Your hand")])],
+            )],
             vec![(A::Center, render_hand(h))],
         ]);
     }
@@ -81,16 +77,14 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
                 (A::Left, vec![]),
                 (
                     A::Center,
-                    vec![
-                        N::text(
-                            pub_state
-                                .scores
-                                .get(p)
-                                .and_then(|s| s.get(r))
-                                .map(|rs| format!("{}", rs))
-                                .unwrap_or_else(|| "".to_string()),
-                        ),
-                    ],
+                    vec![N::text(
+                        pub_state
+                            .scores
+                            .get(p)
+                            .and_then(|s| s.get(r))
+                            .map(|rs| format!("{}", rs))
+                            .unwrap_or_else(|| "".to_string()),
+                    )],
                 ),
             ]);
         }
@@ -105,9 +99,7 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
     }
     layout.append(&mut vec![
         vec![],
-        vec![
-            (A::Center, vec![N::Fg(GREY.into(), vec![N::text("Scores")])]),
-        ],
+        vec![(A::Center, vec![N::Fg(GREY.into(), vec![N::text("Scores")])])],
         vec![(A::Center, vec![N::Table(scores)])],
     ]);
     vec![N::Table(layout)]
@@ -162,27 +154,25 @@ impl PubState {
                     opponent_tableaus.push(opp_tableau);
                 }
                 // Adjust all to the same height bottom aligned and render each as a table cell.
-                layout.push(N::Table(vec![
-                    opponent_tableaus
-                        .into_iter()
-                        .enumerate()
-                        .flat_map(|(i, mut opp_tableau)| {
-                            let mut cells: Vec<Cell> = vec![];
-                            if i > 0 {
-                                cells.push((A::Left, vec![N::text(OPPONENT_SPACER)]))
-                            }
-                            let height = opp_tableau.len();
-                            if height < tallest {
-                                let mut new_tableau: Vec<Row> =
-                                    repeat(vec![]).take(tallest - height).collect();
-                                new_tableau.extend(opp_tableau);
-                                opp_tableau = new_tableau;
-                            }
-                            cells.push((A::Left, vec![N::Table(opp_tableau)]));
-                            cells
-                        })
-                        .collect(),
-                ]))
+                layout.push(N::Table(vec![opponent_tableaus
+                    .into_iter()
+                    .enumerate()
+                    .flat_map(|(i, mut opp_tableau)| {
+                        let mut cells: Vec<Cell> = vec![];
+                        if i > 0 {
+                            cells.push((A::Left, vec![N::text(OPPONENT_SPACER)]))
+                        }
+                        let height = opp_tableau.len();
+                        if height < tallest {
+                            let mut new_tableau: Vec<Row> =
+                                repeat(vec![]).take(tallest - height).collect();
+                            new_tableau.extend(opp_tableau);
+                            opp_tableau = new_tableau;
+                        }
+                        cells.push((A::Left, vec![N::Table(opp_tableau)]));
+                        cells
+                    })
+                    .collect()]))
             }
             _ => unreachable!(),
         }
@@ -195,45 +185,38 @@ impl PubState {
         }
 
         // Discards
-        let mut discards: Row = vec![
-            (A::Right, vec![N::Fg(GREY.into(), vec![N::text("Discard")])]),
-        ];
+        let mut discards: Row =
+            vec![(A::Right, vec![N::Fg(GREY.into(), vec![N::text("Discard")])])];
         for (i, &e) in expeditions().iter().enumerate() {
             // Column spacing
             discards.push((
                 A::Left,
-                vec![
-                    N::text(if i == 0 {
-                        TABLEAU_HEADER_SPACER
-                    } else {
-                        EXP_SPACER
-                    }),
-                ],
+                vec![N::text(if i == 0 {
+                    TABLEAU_HEADER_SPACER
+                } else {
+                    EXP_SPACER
+                })],
             ));
 
             discards.push((
                 A::Center,
-                vec![
-                    if let Some(v) = self.discards.get(&e) {
-                        card(&(e, *v).into())
-                    } else {
-                        N::Fg(e.color().into(), vec![N::text(EMPTY_CARD_PILE)])
-                    },
-                ],
+                vec![if let Some(v) = self.discards.get(&e) {
+                    card(&(e, *v).into())
+                } else {
+                    N::Fg(e.color().into(), vec![N::text(EMPTY_CARD_PILE)])
+                }],
             ));
         }
         discards.push((
             A::Left,
-            vec![
-                N::Fg(
-                    GREY.into(),
-                    vec![
-                        N::text("   "),
-                        N::Bold(vec![N::text(format!("{}", self.deck_remaining))]),
-                        N::text(" left"),
-                    ],
-                ),
-            ],
+            vec![N::Fg(
+                GREY.into(),
+                vec![
+                    N::text("   "),
+                    N::Bold(vec![N::text(format!("{}", self.deck_remaining))]),
+                    N::text(" left"),
+                ],
+            )],
         ));
 
         rows.push(discards);
@@ -269,41 +252,33 @@ fn render_tableau_cards(cards: &[Card], header: &N) -> Vec<Row> {
         largest = cmp::max(largest, by_exp.get(&e).unwrap_or(&vec![]).len());
     }
     for row_i in 0..largest {
-        let mut row: Row = vec![
-            if row_i == 0 {
-                (A::Right, vec![header.to_owned()])
-            } else {
-                (A::Left, vec![])
-            },
-        ];
+        let mut row: Row = vec![if row_i == 0 {
+            (A::Right, vec![header.to_owned()])
+        } else {
+            (A::Left, vec![])
+        }];
         for (i, &e) in expeditions().iter().enumerate() {
             // Column spacing
             row.push((
                 A::Left,
-                vec![
-                    N::text(if i == 0 {
-                        TABLEAU_HEADER_SPACER
-                    } else {
-                        EXP_SPACER
-                    }),
-                ],
+                vec![N::text(if i == 0 {
+                    TABLEAU_HEADER_SPACER
+                } else {
+                    EXP_SPACER
+                })],
             ));
             match by_exp.get(&e).unwrap_or(&vec![]).get(row_i) {
                 Some(c) => row.push((A::Center, vec![card(c)])),
                 None => row.push((
                     A::Left,
-                    vec![
-                        N::Fg(
-                            e.color().into(),
-                            vec![
-                                N::text(if row_i == 0 {
-                                    EMPTY_CARD_PILE
-                                } else {
-                                    EXP_SPACER
-                                }),
-                            ],
-                        ),
-                    ],
+                    vec![N::Fg(
+                        e.color().into(),
+                        vec![N::text(if row_i == 0 {
+                            EMPTY_CARD_PILE
+                        } else {
+                            EXP_SPACER
+                        })],
+                    )],
                 )),
             }
         }
@@ -326,9 +301,10 @@ fn render_hand(cards: &[Card]) -> Vec<N> {
 }
 
 pub fn card(c: &Card) -> N {
-    N::Bold(vec![
-        N::Fg(c.expedition.color().into(), vec![N::text(c.to_string())]),
-    ])
+    N::Bold(vec![N::Fg(
+        c.expedition.color().into(),
+        vec![N::text(c.to_string())],
+    )])
 }
 
 pub fn comma_cards(cards: &[Card]) -> Vec<N> {

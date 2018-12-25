@@ -46,7 +46,7 @@ fn additional_value(size: usize) -> usize {
 }
 
 impl Corp {
-    pub fn iter() -> impl Iterator<Item=&'static Corp> {
+    pub fn iter() -> impl Iterator<Item = &'static Corp> {
         CORPS.iter()
     }
 
@@ -83,9 +83,10 @@ impl Corp {
     }
 
     pub fn render(self) -> N {
-        N::Bold(vec![
-            N::Fg(self.color().into(), vec![N::text(format!("{}", self))]),
-        ])
+        N::Bold(vec![N::Fg(
+            self.color().into(),
+            vec![N::text(format!("{}", self))],
+        )])
     }
 
     pub fn minor_bonus(self, size: usize) -> usize {

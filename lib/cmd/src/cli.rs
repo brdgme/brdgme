@@ -14,6 +14,8 @@ pub fn cli<R: Requester, I: Read, O: Write>(requester: &mut R, input: I, output:
                 message: message.to_string(),
             },
             Ok(r) => requester.request(&r).unwrap(),
-        }).unwrap()
-    ).unwrap();
+        })
+        .unwrap()
+    )
+    .unwrap();
 }

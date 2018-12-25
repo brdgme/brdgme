@@ -2,8 +2,8 @@ use brdgme_game::command::parser::*;
 
 use crate::board::Loc;
 use crate::casino::{Casino, CASINOS};
-use crate::Game;
 use crate::tile::TILES;
+use crate::Game;
 
 pub enum Command {
     Build { loc: Loc, casino: Casino },

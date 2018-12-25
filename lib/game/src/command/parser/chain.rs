@@ -10,9 +10,9 @@ pub fn chain_2<'a, A, B, PA, PB>(
     input: &'a str,
     names: &[String],
 ) -> Result<Output<'a, (A, B)>, GameError>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
 {
     let lhs = a.parse(input, names)?;
     let rhs = b.parse(lhs.remaining, names)?;
@@ -25,9 +25,9 @@ pub fn chain_2<'a, A, B, PA, PB>(
 }
 
 pub struct Chain2<A, B, PA, PB>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
 {
     pub a: PA,
     pub b: PB,
@@ -36,9 +36,9 @@ pub struct Chain2<A, B, PA, PB>
 }
 
 impl<A, B, PA, PB> Chain2<A, B, PA, PB>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
 {
     pub fn new(a: PA, b: PB) -> Self {
         Self {
@@ -51,9 +51,9 @@ impl<A, B, PA, PB> Chain2<A, B, PA, PB>
 }
 
 impl<A, B, PA, PB> Parser<(A, B)> for Chain2<A, B, PA, PB>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
 {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, (A, B)>, GameError> {
         chain_2(&self.a, &self.b, input, names)
@@ -69,10 +69,10 @@ impl<A, B, PA, PB> Parser<(A, B)> for Chain2<A, B, PA, PB>
 }
 
 pub struct Chain3<A, B, C, PA, PB, PC>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
-        PC: Parser<C>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
+    PC: Parser<C>,
 {
     pub a: PA,
     pub b: PB,
@@ -83,10 +83,10 @@ pub struct Chain3<A, B, C, PA, PB, PC>
 }
 
 impl<A, B, C, PA, PB, PC> Chain3<A, B, C, PA, PB, PC>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
-        PC: Parser<C>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
+    PC: Parser<C>,
 {
     pub fn new(a: PA, b: PB, c: PC) -> Self {
         Self {
@@ -101,10 +101,10 @@ impl<A, B, C, PA, PB, PC> Chain3<A, B, C, PA, PB, PC>
 }
 
 impl<A, B, C, PA, PB, PC> Parser<(A, B, C)> for Chain3<A, B, C, PA, PB, PC>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
-        PC: Parser<C>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
+    PC: Parser<C>,
 {
     fn parse<'a>(
         &self,
@@ -131,11 +131,11 @@ impl<A, B, C, PA, PB, PC> Parser<(A, B, C)> for Chain3<A, B, C, PA, PB, PC>
 }
 
 pub struct Chain4<A, B, C, D, PA, PB, PC, PD>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
-        PC: Parser<C>,
-        PD: Parser<D>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
+    PC: Parser<C>,
+    PD: Parser<D>,
 {
     pub a: PA,
     pub b: PB,
@@ -148,11 +148,11 @@ pub struct Chain4<A, B, C, D, PA, PB, PC, PD>
 }
 
 impl<A, B, C, D, PA, PB, PC, PD> Chain4<A, B, C, D, PA, PB, PC, PD>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
-        PC: Parser<C>,
-        PD: Parser<D>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
+    PC: Parser<C>,
+    PD: Parser<D>,
 {
     pub fn new(a: PA, b: PB, c: PC, d: PD) -> Self {
         Self {
@@ -169,11 +169,11 @@ impl<A, B, C, D, PA, PB, PC, PD> Chain4<A, B, C, D, PA, PB, PC, PD>
 }
 
 impl<A, B, C, D, PA, PB, PC, PD> Parser<(A, B, C, D)> for Chain4<A, B, C, D, PA, PB, PC, PD>
-    where
-        PA: Parser<A>,
-        PB: Parser<B>,
-        PC: Parser<C>,
-        PD: Parser<D>,
+where
+    PA: Parser<A>,
+    PB: Parser<B>,
+    PC: Parser<C>,
+    PD: Parser<D>,
 {
     fn parse<'a>(
         &self,

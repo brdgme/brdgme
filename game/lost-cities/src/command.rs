@@ -1,7 +1,7 @@
 use brdgme_game::command::parser::*;
 use brdgme_game::Gamer;
 
-use crate::card::{Card, Expedition, expeditions};
+use crate::card::{expeditions, Card, Expedition};
 use crate::Game;
 use crate::Phase;
 

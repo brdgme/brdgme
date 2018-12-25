@@ -1,13 +1,19 @@
 use serde_derive::{Deserialize, Serialize};
 
-pub mod parser;
 pub mod doc;
+pub mod parser;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Spec {
-    Int { min: Option<i32>, max: Option<i32> },
+    Int {
+        min: Option<i32>,
+        max: Option<i32>,
+    },
     Token(String),
-    Enum { values: Vec<String>, exact: bool },
+    Enum {
+        values: Vec<String>,
+        exact: bool,
+    },
     OneOf(Vec<Spec>),
     Chain(Vec<Spec>),
     Many {

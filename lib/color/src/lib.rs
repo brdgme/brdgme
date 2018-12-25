@@ -34,21 +34,21 @@ impl Color {
     }
 
     pub fn hex(self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b, )
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b,)
     }
 
     pub fn ansi_fg(self) -> String {
-        format!("\x1b[38;2;{};{};{}m", self.r, self.g, self.b, )
+        format!("\x1b[38;2;{};{};{}m", self.r, self.g, self.b,)
     }
 
     pub fn ansi_bg(self) -> String {
-        format!("\x1b[48;2;{};{};{}m", self.r, self.g, self.b, )
+        format!("\x1b[48;2;{};{};{}m", self.r, self.g, self.b,)
     }
 
     pub fn from_hex(s: &str) -> Result<Self, ColorError> {
         lazy_static! {
-            static ref RE: Regex = Regex::new(
-                r"^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$").unwrap();
+            static ref RE: Regex =
+                Regex::new(r"^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$").unwrap();
         }
         if let Some(cap) = RE.captures_iter(&s.to_lowercase()).next() {
             return Ok(Color {

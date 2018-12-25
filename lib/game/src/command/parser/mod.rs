@@ -32,8 +32,8 @@ pub struct Token {
 
 impl Token {
     pub fn new<T>(token: T) -> Self
-        where
-            T: Into<String>,
+    where
+        T: Into<String>,
     {
         Self {
             token: token.into(),
@@ -136,12 +136,10 @@ impl Parser<i32> for Int {
             });
         }
         let consumed = &input[..consumed_count];
-        let value: i32 = consumed.parse().map_err(|_| {
-            GameError::Parse {
-                message: Some(format!("failed to parse '{}'", consumed)),
-                expected: self.expected(names),
-                offset: 0,
-            }
+        let value: i32 = consumed.parse().map_err(|_| GameError::Parse {
+            message: Some(format!("failed to parse '{}'", consumed)),
+            expected: self.expected(names),
+            offset: 0,
         })?;
         if let Some(min) = self.min {
             if value < min {
@@ -181,9 +179,9 @@ impl Parser<i32> for Int {
 }
 
 pub struct Map<T, O, F, TP>
-    where
-        F: Fn(T) -> O,
-        TP: Parser<T>,
+where
+    F: Fn(T) -> O,
+    TP: Parser<T>,
 {
     pub parser: TP,
     pub map: F,
@@ -192,9 +190,9 @@ pub struct Map<T, O, F, TP>
 }
 
 impl<T, O, F, TP> Map<T, O, F, TP>
-    where
-        F: Fn(T) -> O,
-        TP: Parser<T>,
+where
+    F: Fn(T) -> O,
+    TP: Parser<T>,
 {
     pub fn new(parser: TP, map: F) -> Self {
         Self {
@@ -207,9 +205,9 @@ impl<T, O, F, TP> Map<T, O, F, TP>
 }
 
 impl<T, O, F, TP> Parser<O> for Map<T, O, F, TP>
-    where
-        F: Fn(T) -> O,
-        TP: Parser<T>,
+where
+    F: Fn(T) -> O,
+    TP: Parser<T>,
 {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, O>, GameError> {
         let child_parse = self.parser.parse(input, names)?;
@@ -230,16 +228,16 @@ impl<T, O, F, TP> Parser<O> for Map<T, O, F, TP>
 }
 
 pub struct Opt<T, TP>
-    where
-        TP: Parser<T>,
+where
+    TP: Parser<T>,
 {
     pub parser: TP,
     t_type: PhantomData<T>,
 }
 
 impl<T, TP> Opt<T, TP>
-    where
-        TP: Parser<T>,
+where
+    TP: Parser<T>,
 {
     pub fn new(parser: TP) -> Self {
         Self {
@@ -250,8 +248,8 @@ impl<T, TP> Opt<T, TP>
 }
 
 impl<T, TP> Parser<Option<T>> for Opt<T, TP>
-    where
-        TP: Parser<T>,
+where
+    TP: Parser<T>,
 {
     fn parse<'a>(
         &self,
@@ -286,8 +284,8 @@ impl<T, TP> Parser<Option<T>> for Opt<T, TP>
 }
 
 pub struct Many<T, TP>
-    where
-        TP: Parser<T>,
+where
+    TP: Parser<T>,
 {
     pub parser: TP,
     pub min: Option<usize>,
@@ -297,8 +295,8 @@ pub struct Many<T, TP>
 }
 
 impl<T, TP> Many<T, TP>
-    where
-        TP: Parser<T>,
+where
+    TP: Parser<T>,
 {
     pub fn any(parser: TP) -> Self {
         Self {
@@ -332,8 +330,8 @@ impl<T, TP> Many<T, TP>
 }
 
 impl<T, TP> Parser<Vec<T>> for Many<T, TP>
-    where
-        TP: Parser<T>,
+where
+    TP: Parser<T>,
 {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, Vec<T>>, GameError> {
         let mut parsed: Vec<T> = vec![];
@@ -364,8 +362,8 @@ impl<T, TP> Parser<Vec<T>> for Many<T, TP>
             }
             match self.parser.parse(&input[inner_offset..], names) {
                 Ok(Output {
-                       value, consumed, ..
-                   }) => {
+                    value, consumed, ..
+                }) => {
                     parsed.push(value);
                     offset = inner_offset + consumed.len();
                     if let Some(max) = self.max {
@@ -543,16 +541,16 @@ pub fn comma_list_and<T: Display>(items: &[T]) -> String {
 }
 
 pub struct Enum<T>
-    where
-        T: ToString + Clone,
+where
+    T: ToString + Clone,
 {
     pub values: Vec<T>,
     pub exact: bool,
 }
 
 impl<T> Enum<T>
-    where
-        T: ToString + Clone,
+where
+    T: ToString + Clone,
 {
     pub fn exact(values: Vec<T>) -> Self {
         Self {
@@ -587,8 +585,8 @@ fn shared_prefix(s1: &str, s2: &str) -> usize {
 }
 
 impl<T> Parser<T> for Enum<T>
-    where
-        T: ToString + Clone,
+where
+    T: ToString + Clone,
 {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, T>, GameError> {
         let input_lower = input.to_lowercase();
@@ -638,10 +636,12 @@ impl<T> Parser<T> for Enum<T>
             _ => Err(GameError::Parse {
                 message: Some(format!(
                     "matched {}, more input is required to uniquely match one",
-                    comma_list_and(&matched
-                        .iter()
-                        .map(|m| m.to_string())
-                        .collect::<Vec<String>>()),
+                    comma_list_and(
+                        &matched
+                            .iter()
+                            .map(|m| m.to_string())
+                            .collect::<Vec<String>>()
+                    ),
                 )),
                 expected: self.expected(names),
                 offset: 0,
@@ -650,7 +650,8 @@ impl<T> Parser<T> for Enum<T>
     }
 
     fn expected(&self, _names: &[String]) -> Vec<String> {
-        let mut values = self.values
+        let mut values = self
+            .values
             .iter()
             .map(|v| v.to_string())
             .collect::<Vec<String>>();
@@ -730,11 +731,9 @@ impl Player {
         names
             .iter()
             .enumerate()
-            .map(|(p, name)| {
-                PlayerNum {
-                    num: p,
-                    name: name.to_string(),
-                }
+            .map(|(p, name)| PlayerNum {
+                num: p,
+                name: name.to_string(),
             })
             .collect::<Vec<PlayerNum>>()
     }

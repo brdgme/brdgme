@@ -17,7 +17,8 @@ impl Align {
             Align::Left => "left",
             Align::Center => "center",
             Align::Right => "right",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
@@ -140,8 +141,8 @@ pub enum Node {
 
 impl Node {
     pub fn text<T>(t: T) -> Node
-        where
-            T: Into<String>,
+    where
+        T: Into<String>,
     {
         Node::Text(t.into())
     }
@@ -157,8 +158,8 @@ pub enum TNode {
 
 impl TNode {
     pub fn text<T>(t: T) -> TNode
-        where
-            T: Into<String>,
+    where
+        T: Into<String>,
     {
         TNode::Text(t.into())
     }
@@ -207,9 +208,9 @@ impl TNode {
         nodes.iter().fold(0, |sum, n| {
             sum + match *n {
                 TNode::Text(ref text) => text.chars().count(),
-                TNode::Fg(_, ref children) |
-                TNode::Bg(_, ref children) |
-                TNode::Bold(ref children) => TNode::len(children),
+                TNode::Fg(_, ref children)
+                | TNode::Bg(_, ref children)
+                | TNode::Bold(ref children) => TNode::len(children),
             }
         })
     }
@@ -294,16 +295,14 @@ mod tests {
                 TNode::text("blah blah"),
                 TNode::Bg(
                     RED,
-                    vec![
-                        TNode::Fg(
-                            BLUE,
-                            vec![
-                                TNode::text("lolol"),
-                                TNode::Bg(ORANGE, vec![TNode::text("egg")]),
-                                TNode::text("bacon!"),
-                            ],
-                        ),
-                    ],
+                    vec![TNode::Fg(
+                        BLUE,
+                        vec![
+                            TNode::text("lolol"),
+                            TNode::Bg(ORANGE, vec![TNode::text("egg")]),
+                            TNode::text("bacon!"),
+                        ],
+                    ),],
                 ),
                 TNode::text("harharhar"),
             ])

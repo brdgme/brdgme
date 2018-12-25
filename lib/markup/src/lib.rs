@@ -1,15 +1,15 @@
-pub use crate::ast::{Align, Node, Row, row_pad, row_pad_cell, TNode};
+pub use crate::ast::{row_pad, row_pad_cell, Align, Node, Row, TNode};
 pub use crate::error::MarkupError;
 use crate::parser::parse;
-pub use crate::transform::{from_lines, Player, to_lines, transform};
+pub use crate::transform::{from_lines, to_lines, transform, Player};
 
+mod ansi;
 pub mod ast;
 mod error;
-mod transform;
-mod ansi;
 mod html;
-mod plain;
 mod parser;
+mod plain;
+mod transform;
 
 pub fn html(input: &[TNode]) -> String {
     html::render(input)
@@ -50,21 +50,17 @@ pub fn to_string(input: &[Node]) -> String {
             Node::Table(ref rows) => format!(
                 "{{{{table}}}}{}{{{{/table}}}}",
                 rows.iter()
-                    .map(|r| {
-                        format!(
-                            "{{{{row}}}}{}{{{{/row}}}}",
-                            r.iter()
-                                .map(|&(ref align, ref children)| {
-                                    format!(
-                                        "{{{{cell {}}}}}{}{{{{/cell}}}}",
-                                        align.to_string(),
-                                        to_string(children)
-                                    )
-                                })
-                                .collect::<Vec<String>>()
-                                .join("")
-                        )
-                    })
+                    .map(|r| format!(
+                        "{{{{row}}}}{}{{{{/row}}}}",
+                        r.iter()
+                            .map(|&(ref align, ref children)| format!(
+                                "{{{{cell {}}}}}{}{{{{/cell}}}}",
+                                align.to_string(),
+                                to_string(children)
+                            ))
+                            .collect::<Vec<String>>()
+                            .join("")
+                    ))
                     .collect::<Vec<String>>()
                     .join("")
             ),
@@ -83,14 +79,12 @@ pub fn to_string(input: &[Node]) -> String {
                 "{{{{canvas}}}}{}{{{{/canvas}}}}",
                 layers
                     .iter()
-                    .map(|&(x, y, ref children)| {
-                        format!(
-                            "{{{{layer {} {}}}}}{}{{{{/layer}}}}",
-                            x,
-                            y,
-                            to_string(children)
-                        )
-                    })
+                    .map(|&(x, y, ref children)| format!(
+                        "{{{{layer {} {}}}}}{}{{{{/layer}}}}",
+                        x,
+                        y,
+                        to_string(children)
+                    ))
                     .collect::<Vec<String>>()
                     .join("")
             ),
@@ -141,34 +135,17 @@ mod tests {
     fn to_string_works() {
         println!(
             "{}",
-            to_string(&[
-                N::Canvas(vec![
-                    (
-                        5,
-                        10,
-                        vec![
-                            N::Table(vec![
-                                vec![
-                                    (
-                                        A::Center,
-                                        vec![
-                                            N::Fg(
-                                                AMBER.into(),
-                                                vec![
-                                                    N::Bg(
-                                                        BLUE.into(),
-                                                        vec![N::Bold(vec![N::text("moo")])],
-                                                    ),
-                                                ],
-                                            ),
-                                        ],
-                                    ),
-                                ],
-                            ]),
-                        ],
-                    ),
-                ])
-            ], )
+            to_string(&[N::Canvas(vec![(
+                5,
+                10,
+                vec![N::Table(vec![vec![(
+                    A::Center,
+                    vec![N::Fg(
+                        AMBER.into(),
+                        vec![N::Bg(BLUE.into(), vec![N::Bold(vec![N::text("moo")])],),],
+                    ),],
+                ),],]),],
+            ),])],)
         );
     }
 }

@@ -31,25 +31,19 @@ impl Spec {
                 min,
                 max,
                 ref delim,
-            } => {
-                doc_many(spec, min, max, delim, opts)
-                    .map(|d| vec![d])
-                    .unwrap_or_else(|| vec![])
-            }
-            Spec::Opt(ref spec) => {
-                doc_opt(spec, opts).map(|d| vec![d]).unwrap_or_else(
-                    || vec![],
-                )
-            }
+            } => doc_many(spec, min, max, delim, opts)
+                .map(|d| vec![d])
+                .unwrap_or_else(|| vec![]),
+            Spec::Opt(ref spec) => doc_opt(spec, opts)
+                .map(|d| vec![d])
+                .unwrap_or_else(|| vec![]),
             Spec::Doc {
                 ref name,
                 ref desc,
                 ref spec,
-            } => {
-                doc_doc(name, desc, spec).map(|d| vec![d]).unwrap_or_else(
-                    || vec![],
-                )
-            }
+            } => doc_doc(name, desc, spec)
+                .map(|d| vec![d])
+                .unwrap_or_else(|| vec![]),
             Spec::Player => vec![(vec![Node::text("player")], None)],
             Spec::Space => vec![(vec![Node::text(" ")], None)],
         }
@@ -138,8 +132,7 @@ fn doc_many(
         (_, Some(0)) => None,
         (Some(min), Some(max)) if min > max => None,
         // Like optional
-        (Some(0), Some(1)) |
-        (None, Some(1)) => {
+        (Some(0), Some(1)) | (None, Some(1)) => {
             doc.push(Node::text("?"));
             Some((doc, desc))
         }
@@ -177,8 +170,10 @@ fn doc_opt(spec: &Spec, opts: &Opts) -> Option<(Vec<Node>, Option<String>)> {
 }
 
 fn doc_doc(name: &str, desc: &Option<String>, spec: &Spec) -> Option<(Vec<Node>, Option<String>)> {
-    join_docs(&spec.doc_opts(&Opts { name: Some(name.to_owned()) }))
-        .map(|(doc, child_desc)| (doc, desc.to_owned().or(child_desc)))
+    join_docs(&spec.doc_opts(&Opts {
+        name: Some(name.to_owned()),
+    }))
+    .map(|(doc, child_desc)| (doc, desc.to_owned().or(child_desc)))
 }
 
 pub fn render(docs: &[(Vec<Node>, Option<String>)]) -> Vec<Node> {

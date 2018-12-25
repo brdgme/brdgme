@@ -2,20 +2,20 @@ use std::iter;
 
 use brdgme_color::*;
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N};
 use brdgme_markup::ast::{Col, Row};
+use brdgme_markup::{Align as A, Node as N};
 
-use crate::board::{Block, BLOCKS, Board, BoardTile, Loc, TileOwner};
+use crate::board::{Block, Board, BoardTile, Loc, TileOwner, BLOCKS};
 use crate::card::casino_card_count;
 use crate::casino::CASINOS;
+use crate::tile::TILES;
+use crate::PlayerState;
+use crate::PubState;
 use crate::CASINO_CARDS;
 use crate::CASINO_TILES;
 use crate::PLAYER_DICE;
 use crate::PLAYER_OWNER_TOKENS;
-use crate::PlayerState;
 use crate::POINT_STOPS;
-use crate::PubState;
-use crate::tile::TILES;
 
 const TILE_WIDTH: usize = 9;
 const TILE_HEIGHT: usize = 4;
@@ -47,19 +47,15 @@ impl Renderer for PlayerState {
 impl PubState {
     pub fn render_with_perspective(&self, perspective: Option<usize>) -> N {
         N::Table(vec![
-            vec![
-                (
-                    A::Center,
-                    vec![N::Table(vec![vec![(A::Left, vec![self.board.render()])]])],
-                ),
-            ],
+            vec![(
+                A::Center,
+                vec![N::Table(vec![vec![(A::Left, vec![self.board.render()])]])],
+            )],
             vec![],
-            vec![
-                (
-                    A::Center,
-                    vec![self.render_player_table(perspective.unwrap_or(0))],
-                ),
-            ],
+            vec![(
+                A::Center,
+                vec![self.render_player_table(perspective.unwrap_or(0))],
+            )],
             vec![],
             vec![(A::Center, vec![self.render_casino_table()])],
         ])
@@ -116,22 +112,18 @@ impl PubState {
             remaining_cards.push((A::Left, vec![]));
             remaining_cards.push((
                 A::Center,
-                vec![
-                    N::text(format!(
-                        "{}",
-                        CASINO_CARDS - casino_card_count(&self.played, *casino)
-                    )),
-                ],
+                vec![N::text(format!(
+                    "{}",
+                    CASINO_CARDS - casino_card_count(&self.played, *casino)
+                ))],
             ));
             remaining_tiles.push((A::Left, vec![]));
             remaining_tiles.push((
                 A::Center,
-                vec![
-                    N::text(format!(
-                        "{}",
-                        CASINO_TILES - self.board.casino_tile_count(*casino)
-                    )),
-                ],
+                vec![N::text(format!(
+                    "{}",
+                    CASINO_TILES - self.board.casino_tile_count(*casino)
+                ))],
             ));
         }
         N::Table(vec![casino_names, remaining_cards, remaining_tiles])
@@ -195,26 +187,20 @@ impl BoardTile {
             BoardTile::Built {
                 owner: Some(TileOwner { die, .. }),
                 ..
-            } => vec![
-                N::Bg(
-                    player_color,
-                    vec![
-                        N::Fg(
-                            player_color_fg,
-                            vec![N::Bold(vec![N::text(format!(" {} ", die))])],
-                        ),
-                    ],
-                ),
-            ],
+            } => vec![N::Bg(
+                player_color,
+                vec![N::Fg(
+                    player_color_fg,
+                    vec![N::Bold(vec![N::text(format!(" {} ", die))])],
+                )],
+            )],
             _ => vec![
                 N::Bg(
                     player_color,
-                    vec![
-                        N::Fg(
-                            player_color_fg,
-                            vec![N::text(format!("${:2}", TILES[loc].build_cost))],
-                        ),
-                    ],
+                    vec![N::Fg(
+                        player_color_fg,
+                        vec![N::text(format!("${:2}", TILES[loc].build_cost))],
+                    )],
                 ),
                 N::text(format!("\n({})", TILES[loc].die)),
             ],
@@ -233,49 +219,42 @@ impl BoardTile {
             (
                 0,
                 0,
-                vec![
-                    N::Bg(
-                        border_bg.into(),
-                        vec![N::text(rect(TILE_WIDTH, TILE_HEIGHT))],
-                    ),
-                ],
+                vec![N::Bg(
+                    border_bg.into(),
+                    vec![N::text(rect(TILE_WIDTH, TILE_HEIGHT))],
+                )],
             ),
             // Inlay background
             (
                 INLAY_LEFT,
                 INLAY_TOP,
-                vec![
-                    N::Bg(
-                        inlay_bg.into(),
-                        vec![N::text(rect(INLAY_WIDTH, INLAY_HEIGHT))],
-                    ),
-                ],
+                vec![N::Bg(
+                    inlay_bg.into(),
+                    vec![N::text(rect(INLAY_WIDTH, INLAY_HEIGHT))],
+                )],
             ),
             // Middle text
             (
                 INLAY_LEFT,
                 INLAY_TOP,
-                vec![
-                    N::Align(
-                        A::Center,
-                        INLAY_WIDTH,
-                        vec![N::Fg(inlay_fg.into(), middle_text)],
-                    ),
-                ],
+                vec![N::Align(
+                    A::Center,
+                    INLAY_WIDTH,
+                    vec![N::Fg(inlay_fg.into(), middle_text)],
+                )],
             ),
             // Bot text
             (
                 0,
                 TILE_HEIGHT - 1,
-                vec![
-                    N::Align(
-                        A::Center,
-                        TILE_WIDTH,
-                        vec![
-                            N::Fg(border_fg.into(), vec![N::Bold(vec![N::text(bot_text)])]),
-                        ],
-                    ),
-                ],
+                vec![N::Align(
+                    A::Center,
+                    TILE_WIDTH,
+                    vec![N::Fg(
+                        border_fg.into(),
+                        vec![N::Bold(vec![N::text(bot_text)])],
+                    )],
+                )],
             ),
         ])
     }
@@ -292,7 +271,8 @@ fn rect(w: usize, h: usize) -> String {
 }
 
 pub fn render_cash(amount: usize) -> N {
-    N::Bold(vec![
-        N::Fg(GREEN.into(), vec![N::text(format!("${}", amount))]),
-    ])
+    N::Bold(vec![N::Fg(
+        GREEN.into(),
+        vec![N::text(format!("${}", amount))],
+    )])
 }

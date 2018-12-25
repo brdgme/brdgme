@@ -28,8 +28,8 @@ impl Default for BotCommand {
 }
 
 impl<I> From<I> for BotCommand
-    where
-        I: Into<String>,
+where
+    I: Into<String>,
 {
     fn from(s: I) -> Self {
         BotCommand {
@@ -83,15 +83,13 @@ impl<G: Gamer, B: Botter<G>> Fuzzer<G, B> {
     pub fn status(&self) -> String {
         format!(
             "Games: {}\tCommands: {}\tInvalid inputs: {}",
-            self.game_count,
-            self.command_count,
-            self.invalid_input_count
+            self.game_count, self.command_count, self.invalid_input_count
         )
     }
 
     pub fn fuzz<O>(&mut self, out: &mut O)
-        where
-            O: Write,
+    where
+        O: Write,
     {
         let mut last_status = chrono::Utc::now().timestamp();
         loop {
@@ -111,7 +109,8 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.game.as_ref().map(|g| g.is_finished()).unwrap_or(true) {
             self.game_count += 1;
-            self.player_count = *self.rng
+            self.player_count = *self
+                .rng
                 .choose(&self.player_counts)
                 .expect("no player counts for game type");
             self.game = Some(
@@ -120,7 +119,8 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
                     .0,
             );
         } else if let Some(ref mut game) = self.game {
-            let player = *self.rng
+            let player = *self
+                .rng
                 .choose(&game.whose_turn())
                 .expect("is nobody's turn");
             let player_state = game.player_state(player);
@@ -132,7 +132,8 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
                 &command_spec,
                 Some(format!("{}", self.game_count)),
             );
-            let input = self.rng
+            let input = self
+                .rng
                 .choose(&bot_commands)
                 .expect("bot returned no commands")
                 .to_owned();
@@ -150,9 +151,7 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
                 }
                 _ => panic!(
                     "error running command '{}' for player {}, {:?}",
-                    cmd,
-                    player,
-                    cmd_res
+                    cmd, player, cmd_res
                 ),
             }
         }

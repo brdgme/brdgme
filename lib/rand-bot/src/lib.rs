@@ -87,9 +87,9 @@ fn commands(command_spec: &command::Spec, players: &[String]) -> Vec<BotCommand>
 // the CLI here. This allows the bot to be used / with arbitrary games as long
 // as the command spec is generated.
 pub fn cli<I, O>(input: I, output: &mut O)
-    where
-        I: Read,
-        O: Write,
+where
+    I: Read,
+    O: Write,
 {
     let request = serde_json::from_reader::<_, bot_cli::Request>(input).unwrap();
     writeln!(
@@ -97,7 +97,7 @@ pub fn cli<I, O>(input: I, output: &mut O)
         "{}",
         serde_json::to_string(&commands(&request.command_spec, &request.players)).unwrap()
     )
-        .unwrap();
+    .unwrap();
 }
 
 impl<T: Gamer> Botter<T> for RandBot {
@@ -114,9 +114,9 @@ impl<T: Gamer> Botter<T> for RandBot {
 }
 
 pub fn fuzz<G, O>(out: &mut O)
-    where
-        G: Gamer,
-        O: Write,
+where
+    G: Gamer,
+    O: Write,
 {
     Fuzzer::<G, _>::new(RandBot {}).fuzz(out);
 }

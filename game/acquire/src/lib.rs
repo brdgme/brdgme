@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 use serde_derive::{Deserialize, Serialize};
 
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
 use crate::board::{Board, Loc, Tile};
@@ -121,7 +121,8 @@ impl PubState {
             largest,
             has_safe,
             unsafe_count,
-        }.into()
+        }
+        .into()
     }
 }
 
@@ -254,11 +255,11 @@ able to win the game."
         input: &str,
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
-        let parser = self.command_parser(player).ok_or_else::<GameError, _>(|| {
-            GameError::InvalidInput {
-                message: "not your turn".to_string(),
-            }
-        })?;
+        let parser =
+            self.command_parser(player)
+                .ok_or_else::<GameError, _>(|| GameError::InvalidInput {
+                    message: "not your turn".to_string(),
+                })?;
         let output = parser.parse(input, players)?;
         match output.value {
             Command::Play(loc) => self.handle_play_command(player, &loc),
@@ -270,7 +271,8 @@ able to win the game."
             Command::Trade(n) => self.handle_trade_command(player, n),
             Command::Keep => self.handle_keep_command(player),
             Command::End => self.handle_end_command(player).map(|l| (l, false)),
-        }.map(|(logs, can_undo)| CommandResponse {
+        }
+        .map(|(logs, can_undo)| CommandResponse {
             logs,
             can_undo,
             remaining_input: output.remaining.to_string(),
@@ -432,7 +434,8 @@ impl Game {
                 self.buy_phase(player);
             }
             0 => {
-                let has_unincorporated_neighbour = loc.neighbours()
+                let has_unincorporated_neighbour = loc
+                    .neighbours()
                     .iter()
                     .any(|n_loc| self.board.get_tile(n_loc) == Tile::Unincorporated);
                 if has_unincorporated_neighbour {
@@ -479,10 +482,7 @@ impl Game {
     }
 
     fn found_phase(&mut self, player: usize, loc: Loc) {
-        self.phase = Phase::Found {
-            player,
-            at: loc,
-        }
+        self.phase = Phase::Found { player, at: loc }
     }
 
     fn choose_merger_phase(
@@ -497,10 +497,7 @@ impl Game {
             return Ok((vec![], true));
         }
         // We set the phase as the merge function validates this.
-        self.phase = Phase::ChooseMerger {
-            player,
-            at: loc,
-        };
+        self.phase = Phase::ChooseMerger { player, at: loc };
         if from.len() == 1 && into.len() == 1 && from[0] != into[0] {
             // There's no ambiguity, automatically make the merge.
             self.handle_merge_command(player, from[0], into[0])
@@ -664,13 +661,13 @@ impl Game {
             .iter()
             .find(|loc| self.board.assert_loc_playable(loc).is_ok())
             .is_none()
-            {
-                let (mut logs, has_ended) = self.redraw_hand(player)?;
-                if !has_ended {
-                    logs.extend(self.start_turn(player)?);
-                }
-                return Ok(logs);
+        {
+            let (mut logs, has_ended) = self.redraw_hand(player)?;
+            if !has_ended {
+                logs.extend(self.start_turn(player)?);
             }
+            return Ok(logs);
+        }
         self.phase = Phase::Play(player);
         Ok(vec![])
     }
@@ -972,12 +969,13 @@ impl Game {
         if *self.players[player]
             .shares
             .get(&corp)
-            .expect("could not get player shares") == 0
-            {
-                let (new_logs, new_can_undo) = self.next_player_sell_trade()?;
-                logs.extend(new_logs);
-                can_undo = new_can_undo;
-            }
+            .expect("could not get player shares")
+            == 0
+        {
+            let (new_logs, new_can_undo) = self.next_player_sell_trade()?;
+            logs.extend(new_logs);
+            can_undo = new_can_undo;
+        }
         Ok((logs, can_undo))
     }
 
@@ -1048,7 +1046,8 @@ impl Game {
             });
         }
         let receive = n / 2;
-        let into_shares = self.shares
+        let into_shares = self
+            .shares
             .get(&into)
             .cloned()
             .expect("could not get into shares");
@@ -1083,7 +1082,8 @@ impl Game {
     }
 
     fn take_shares(&mut self, player: usize, n: usize, corp: Corp) -> Result<(), GameError> {
-        let corp_shares = *self.shares
+        let corp_shares = *self
+            .shares
             .get(&corp)
             .expect("could not get corp share count");
         if corp_shares < n {
@@ -1265,7 +1265,7 @@ mod tests {
         let mut g: Game = "...
                            .0.
                            ..."
-            .into();
+        .into();
         g.command(0, "play b2", &players)
             .expect("expected playing tile to work");
         assert_eq!(
@@ -1273,7 +1273,7 @@ mod tests {
             "...
              .#.
              ..."
-                .into()
+            .into()
         );
     }
 
@@ -1283,7 +1283,7 @@ mod tests {
         let mut g: Game = "...
                            #0.
                            ..."
-            .into();
+        .into();
         g.command(0, "play b2", &players)
             .expect("expected playing tile to work");
         g.command(0, "found fe", &players)
@@ -1293,7 +1293,7 @@ mod tests {
             "...
              FF.
              ..."
-                .into()
+            .into()
         );
     }
 
@@ -1303,7 +1303,7 @@ mod tests {
         let mut g: Game = "FF0
                            ..A
                            ..A"
-            .into();
+        .into();
         g.players[0].shares.insert(Corp::American, 9);
         g.players[1].shares.insert(Corp::American, 8);
         g.command(0, "play a3", &players)
@@ -1328,7 +1328,7 @@ mod tests {
             "FFF
              ..F
              ..F"
-                .into()
+            .into()
         );
     }
 }

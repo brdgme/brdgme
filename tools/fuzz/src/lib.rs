@@ -1,10 +1,10 @@
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use failure::{bail, Error, format_err};
+use failure::{bail, format_err, Error};
 use rand::{Rng, ThreadRng};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -14,9 +14,9 @@ use brdgme_cmd::requester;
 use brdgme_game::{command, Gamer};
 
 pub fn fuzz<F, R>(new_requester: F)
-    where
-        F: Fn() -> R + Send + 'static,
-        R: requester::Requester + 'static,
+where
+    F: Fn() -> R + Send + 'static,
+    R: requester::Requester + 'static,
 {
     let mut exit_txs: Vec<Sender<()>> = vec![];
     let new_requester = Arc::new(Mutex::new(new_requester));
@@ -52,10 +52,10 @@ pub fn fuzz<F, R>(new_requester: F)
             .duration_since(last_output_at)
             .expect("failed to get duration")
             > output_interval
-            {
-                eprintln!("{}", tally.render());
-                last_output_at = now;
-            }
+        {
+            eprintln!("{}", tally.render());
+            last_output_at = now;
+        }
         match step_rx.recv().expect("failed to get step") {
             FuzzStep::Created => tally.started += 1,
             FuzzStep::Finished => tally.finished += 1,
@@ -86,8 +86,8 @@ pub fn fuzz<F, R>(new_requester: F)
 }
 
 pub fn fuzz_gamer<G>()
-    where
-        G: Gamer + Debug + Clone + Serialize + DeserializeOwned + 'static,
+where
+    G: Gamer + Debug + Clone + Serialize + DeserializeOwned + 'static,
 {
     fuzz(requester::gamer::new::<G>)
 }
@@ -133,10 +133,9 @@ impl Fuzzer {
     }
 
     fn new_game(&mut self) -> Result<(), Error> {
-        let players = *self.rng.choose(&self.player_counts).ok_or_else(|| format_err!(
-            "could not get player counts from {:?}",
-            self.player_counts
-        ))?;
+        let players = *self.rng.choose(&self.player_counts).ok_or_else(|| {
+            format_err!("could not get player counts from {:?}", self.player_counts)
+        })?;
         self.names = names(players);
         match self.client.request(&api::Request::New { players })? {
             api::Response::New {
@@ -157,18 +156,17 @@ impl Fuzzer {
     fn command(&mut self) -> Result<CommandResponse, Error> {
         let (player, command_spec, state) = match self.game {
             Some(FuzzGame {
-                     game:
-                     api::GameResponse {
-                         ref state,
-                         status: brdgme_game::Status::Active { ref whose_turn, .. },
-                         ..
-                     },
-                     ref player_renders,
-                 }) => {
-                let player = *self.rng.choose(&whose_turn).ok_or_else(|| format_err!(
-                    "unable to pick active turn player from: {:?}",
-                    whose_turn
-                ))?;
+                game:
+                    api::GameResponse {
+                        ref state,
+                        status: brdgme_game::Status::Active { ref whose_turn, .. },
+                        ..
+                    },
+                ref player_renders,
+            }) => {
+                let player = *self.rng.choose(&whose_turn).ok_or_else(|| {
+                    format_err!("unable to pick active turn player from: {:?}", whose_turn)
+                })?;
                 if player_renders.len() <= player {
                     bail!(
                         "there is no player_render for player {} in {:?}",
@@ -183,13 +181,13 @@ impl Fuzzer {
                 (player, player_render.clone().command_spec.unwrap(), state)
             }
             Some(FuzzGame {
-                     game:
-                     api::GameResponse {
-                         status: brdgme_game::Status::Finished { .. },
-                         ..
-                     },
-                     ..
-                 }) => bail!("the game is already finished"),
+                game:
+                    api::GameResponse {
+                        status: brdgme_game::Status::Finished { .. },
+                        ..
+                    },
+                ..
+            }) => bail!("the game is already finished"),
             None => bail!("there isn't a game"),
         };
         exec_rand_command(
@@ -225,13 +223,13 @@ impl Iterator for Fuzzer {
         match self.game {
             Some(_) => match self.command() {
                 Ok(CommandResponse::Ok(FuzzGame {
-                                           game:
-                                           api::GameResponse {
-                                               status: brdgme_game::Status::Finished { .. },
-                                               ..
-                                           },
-                                           ..
-                                       })) => {
+                    game:
+                        api::GameResponse {
+                            status: brdgme_game::Status::Finished { .. },
+                            ..
+                        },
+                    ..
+                })) => {
                     self.game = None;
                     Some(FuzzStep::Finished)
                 }

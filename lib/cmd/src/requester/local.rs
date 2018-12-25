@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::io::{BufWriter, Write};
 use std::process::{Command, Stdio};
 
-use failure::{Error, format_err};
+use failure::{format_err, Error};
 use serde_json;
 
 use crate::api::{Request, Response};
@@ -27,7 +27,8 @@ impl Requester for LocalRequester {
             .spawn()?;
 
         {
-            let mut wr = cmd.stdin
+            let mut wr = cmd
+                .stdin
                 .as_mut()
                 .ok_or_else(|| format_err!("failed to get stdin"))?;
             let mut bufwr = BufWriter::new(&mut wr);

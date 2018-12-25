@@ -22,11 +22,11 @@ pub struct Request {
 pub type Response = Vec<String>;
 
 pub fn cli<G, B, I, O>(bot: &mut B, input: I, output: &mut O)
-    where
-        G: Gamer + Debug + Clone + Serialize + DeserializeOwned,
-        B: Botter<G>,
-        I: Read,
-        O: Write,
+where
+    G: Gamer + Debug + Clone + Serialize + DeserializeOwned,
+    B: Botter<G>,
+    I: Read,
+    O: Write,
 {
     let request = serde_json::from_reader::<_, Request>(input).unwrap();
     let player_state: G::PlayerState = serde_json::from_str(&request.player_state).unwrap();
@@ -39,6 +39,8 @@ pub fn cli<G, B, I, O>(bot: &mut B, input: I, output: &mut O)
             &request.players,
             &request.command_spec,
             request.game_id,
-        ), ).unwrap()
-    ).unwrap();
+        ),)
+        .unwrap()
+    )
+    .unwrap();
 }

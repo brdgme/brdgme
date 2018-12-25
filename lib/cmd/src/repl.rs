@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fs::File;
-use std::io::{stdin, stdout};
 use std::io::prelude::*;
+use std::io::{stdin, stdout};
 use std::iter::repeat;
 
 use serde_json;
@@ -11,14 +11,14 @@ use brdgme_color;
 use brdgme_color::{player_color, Style};
 use brdgme_game::command::doc;
 use brdgme_game::Status;
-use brdgme_markup::{self, ansi, from_lines, Node, Player, TNode, to_lines, transform};
+use brdgme_markup::{self, ansi, from_lines, to_lines, transform, Node, Player, TNode};
 
 use crate::api::{CliLog, GameResponse, Request, Response};
 use crate::requester::Requester;
 
 pub fn repl<T>(client: &mut T)
-    where
-        T: Requester,
+where
+    T: Requester,
 {
     print!("{}", Style::default().ansi());
     let mut player_names: Vec<String> = vec![];
@@ -45,16 +45,16 @@ pub fn repl<T>(client: &mut T)
             players: players.len(),
         })
         .unwrap()
-        {
-            Response::New {
-                game,
-                logs,
-                public_render,
-                player_renders,
-            } => (game, logs, public_render, player_renders),
-            Response::UserError { message } | Response::SystemError { message } => panic!(message),
-            _ => panic!("wrong reponse"),
-        };
+    {
+        Response::New {
+            game,
+            logs,
+            public_render,
+            player_renders,
+        } => (game, logs, public_render, player_renders),
+        Response::UserError { message } | Response::SystemError { message } => panic!(message),
+        _ => panic!("wrong reponse"),
+    };
     output_nl();
     output_logs(logs, &players);
     let mut undo_stack: Vec<GameResponse> = vec![game.clone()];
@@ -107,7 +107,8 @@ pub fn repl<T>(client: &mut T)
                             "{}",
                             serde_json::ser::to_string_pretty(&game)
                                 .expect("could not get game JSON")
-                        ).expect("could not write to file");
+                        )
+                        .expect("could not write to file");
                     }
                     ":load" => {
                         let file = File::open("game.json").expect("could not open file");
@@ -135,37 +136,37 @@ pub fn repl<T>(client: &mut T)
                             game: game.state.clone(),
                         })
                         .unwrap()
-                        {
-                            Response::Play {
-                                game: new_game,
-                                logs,
-                                remaining_input,
-                                public_render: new_public_render,
-                                player_renders: new_player_renders,
-                                ..
-                            } => {
-                                if remaining_input.trim() != "" {
-                                    output_nl();
-                                    output_error(format!("Unexpected: '{}'", remaining_input));
-                                    continue;
-                                }
-                                undo_stack.push(game);
-                                game = new_game;
-                                public_render = new_public_render;
-                                player_renders = new_player_renders;
+                    {
+                        Response::Play {
+                            game: new_game,
+                            logs,
+                            remaining_input,
+                            public_render: new_public_render,
+                            player_renders: new_player_renders,
+                            ..
+                        } => {
+                            if remaining_input.trim() != "" {
                                 output_nl();
-                                output_logs(logs, &players);
+                                output_error(format!("Unexpected: '{}'", remaining_input));
+                                continue;
                             }
-                            Response::SystemError { message } => {
-                                output_nl();
-                                panic!(message);
-                            }
-                            Response::UserError { message } => {
-                                output_nl();
-                                output_error(message);
-                            }
-                            _ => panic!("unexpected response"),
-                        },
+                            undo_stack.push(game);
+                            game = new_game;
+                            public_render = new_public_render;
+                            player_renders = new_player_renders;
+                            output_nl();
+                            output_logs(logs, &players);
+                        }
+                        Response::SystemError { message } => {
+                            output_nl();
+                            panic!(message);
+                        }
+                        Response::UserError { message } => {
+                            output_nl();
+                            output_error(message);
+                        }
+                        _ => panic!("unexpected response"),
+                    },
                 }
             }
         }
@@ -186,20 +187,22 @@ fn output_nodes(nodes: &[Node], players: &[Player]) {
     let (term_w, _) = term_size::dimensions().unwrap_or_default();
     print!(
         "{}",
-        ansi(&from_lines(&to_lines(&transform(nodes, players))
-            .iter()
-            .map(|l| {
-                let l_len = TNode::len(l);
-                let mut l = l.to_owned();
-                if l_len < term_w {
-                    l.push(TNode::Bg(
-                        *Style::default().bg,
-                        vec![TNode::Text(repeat(" ").take(term_w - l_len).collect())],
-                    ));
-                }
-                l
-            })
-            .collect::<Vec<Vec<TNode>>>()))
+        ansi(&from_lines(
+            &to_lines(&transform(nodes, players))
+                .iter()
+                .map(|l| {
+                    let l_len = TNode::len(l);
+                    let mut l = l.to_owned();
+                    if l_len < term_w {
+                        l.push(TNode::Bg(
+                            *Style::default().bg,
+                            vec![TNode::Text(repeat(" ").take(term_w - l_len).collect())],
+                        ));
+                    }
+                    l
+                })
+                .collect::<Vec<Vec<TNode>>>()
+        ))
     );
 }
 
@@ -222,8 +225,8 @@ fn output_nl() {
 }
 
 fn prompt<'a, T>(s: T) -> String
-    where
-        T: Into<Cow<'a, str>>,
+where
+    T: Into<Cow<'a, str>>,
 {
     print!("{}: \x1b[K", s.into());
     stdout().flush().unwrap();

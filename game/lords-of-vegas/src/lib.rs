@@ -1,14 +1,14 @@
 use rand::Rng;
 use serde_derive::{Deserialize, Serialize};
 
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
 use crate::board::{Board, BoardTile, Loc, TileOwner};
-use crate::card::{Card, render_cards, shuffled_deck};
+use crate::card::{render_cards, shuffled_deck, Card};
 use crate::casino::Casino;
 use crate::command::Command;
 use crate::render::render_cash;
@@ -196,10 +196,7 @@ impl Gamer for Game {
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
-        self
-            .whose_turn()
-            .into_iter()
-            .find(|&p| p == player)?;
+        self.whose_turn().into_iter().find(|&p| p == player)?;
         Some(self.command_parser(player).to_spec())
     }
 
