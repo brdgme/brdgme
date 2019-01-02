@@ -360,17 +360,13 @@ impl Game {
                 }
             }
         }
-        if self
-            .expeditions
-            .get(player)
-            .ok_or_else(|| {
-                GameError::internal(format!(
-                    "could not find player expedition for player {}",
-                    player
-                ))
-            })?
-            .is_empty()
-        {
+        let player_expedition = self.expeditions.get(player).ok_or_else(|| {
+            GameError::internal(format!(
+                "could not find player expedition for player {}",
+                player
+            ))
+        })?;
+        if player_expedition.is_empty() {
             self.stats[player].expeditions += 1;
         }
         self.remove_player_card(player, c)?;
