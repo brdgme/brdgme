@@ -1,0 +1,36 @@
+package(default_visibility = ["//visibility:public"])
+
+load("@io_bazel_rules_rust//rust:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "brdgme_cmd",
+    srcs = [
+        "src/requester/gamer.rs",
+        "src/requester/local.rs",
+        "src/requester/mod.rs",
+        "src/api.rs",
+        "src/bot_cli.rs",
+        "src/cli.rs",
+        "src/repl.rs",
+        "src/lib.rs",
+    ],
+    rustc_flags = ["--edition", "2018"],
+    deps = [
+        "//lib/color:brdgme_color",
+        "//lib/game:brdgme_game",
+        "//lib/markup:brdgme_markup",
+        "//third_party/cargo:chrono",
+        "//third_party/cargo:failure",
+        "//third_party/cargo:serde",
+        "//third_party/cargo:serde_derive",
+        "//third_party/cargo:serde_json",
+        "//third_party/cargo:term_size",
+    ],
+)
+
+rust_test(
+    name = "test",
+    timeout = "short",
+    rustc_flags = ["--edition", "2018"],
+    deps = [":brdgme_cmd"],
+)

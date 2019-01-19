@@ -1,6 +1,3 @@
-extern crate brdgme_cmd;
-extern crate brdgme_fuzz;
-
 use std::env;
 
 use brdgme_cmd::requester;
