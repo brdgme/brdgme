@@ -1,0 +1,7 @@
+language: generic
+
+services:
+  - docker
+
+script:
+- docker run --rm -v "$PWD":/usr/src/app insready/bazel /bin/bash -c "bazel build ... && bazel test ..."
