@@ -13,7 +13,7 @@ rust_library(
         ["src/**/*.rs"],
         exclude = ["src/bin.rs", "src/bin/**/*.rs"],
     ),
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [
         "//lib/color:brdgme_color",
         "//lib/game:brdgme_game",
@@ -27,13 +27,13 @@ rust_library(
 rust_test(
     name = "test",
     timeout = "short",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [":lost_cities"],
 )
 
 rust_binary(
     name = "cli",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     srcs = ["src/bin/cli.rs"],
     deps = [
         ":lost_cities",
@@ -43,7 +43,7 @@ rust_binary(
 
 rust_binary(
     name = "fuzz",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     srcs = ["src/bin/fuzz.rs"],
     deps = [
         ":lost_cities",
@@ -53,7 +53,7 @@ rust_binary(
 
 rust_binary(
     name = "repl",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     srcs = ["src/bin/repl.rs"],
     deps = [
         ":lost_cities",

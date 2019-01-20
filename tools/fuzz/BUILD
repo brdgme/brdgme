@@ -13,7 +13,7 @@ rust_library(
         ["src/**/*.rs"],
         exclude = ["src/bin.rs", "src/bin/**/*.rs"],
     ),
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [
         "//lib/cmd:brdgme_cmd",
         "//lib/game:brdgme_game",
@@ -28,13 +28,13 @@ rust_library(
 rust_test(
     name = "test",
     timeout = "short",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [":brdgme_fuzz"],
 )
 
 rust_binary(
     name = "brdgme_fuzz_bin",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     srcs = ["src/main.rs"],
     deps = [
         ":brdgme_fuzz",

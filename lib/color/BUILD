@@ -8,7 +8,7 @@ rust_library(
         ["src/**/*.rs"],
         exclude = ["src/bin.rs", "src/bin/**/*.rs"],
     ),
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [
         "//third_party/cargo:failure",
         "//third_party/cargo:lazy_static",
@@ -21,6 +21,6 @@ rust_library(
 rust_test(
     name = "test",
     timeout = "short",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [":brdgme_color"],
 )

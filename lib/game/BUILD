@@ -8,7 +8,7 @@ rust_library(
         ["src/**/*.rs"],
         exclude = ["src/bin.rs", "src/bin/**/*.rs"],
     ),
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [
         "//lib/color:brdgme_color",
         "//lib/markup:brdgme_markup",
@@ -26,6 +26,6 @@ rust_library(
 rust_test(
     name = "test",
     timeout = "short",
-    rustc_flags = ["--edition", "2018"],
+    edition = "2018",
     deps = [":brdgme_game"],
 )
