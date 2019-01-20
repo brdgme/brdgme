@@ -1,12 +1,17 @@
+dist: xenial
+
 language: generic
 
 cache:
   directories:
     - /home/travis/.cache/bazel/
-    - /root/.cache/bazel/
 
-services:
-  - docker
+before_install:
+  - sudo apt-get install pkg-config zip g++ zlib1g-dev unzip python
+  - wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
+  - chmod +x bazel-0.21.0-installer-linux-x86_64.sh
+  - sudo ./bazel-0.21.0-installer-linux-x86_64.sh
 
 script:
-- docker run --rm -v "$PWD":/usr/src/app insready/bazel /bin/bash -c "bazel build ... && bazel test ..."
+- bazel build ... 
+- bazel test ...
