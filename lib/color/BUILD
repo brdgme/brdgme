@@ -4,10 +4,10 @@ load("@io_bazel_rules_rust//rust:rust.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "brdgme_color",
-    srcs = [
-        "src/error.rs",
-        "src/lib.rs",
-    ],
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+    ),
     rustc_flags = ["--edition", "2018"],
     deps = [
         "//third_party/cargo:failure",

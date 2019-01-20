@@ -9,15 +9,10 @@ load(
 
 rust_library(
     name = "lords_of_vegas",
-    srcs = [
-        "src/board.rs",
-        "src/card.rs",
-        "src/casino.rs",
-        "src/command.rs",
-        "src/lib.rs",
-        "src/render.rs",
-        "src/tile.rs",
-    ],
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+    ),
     rustc_flags = ["--edition", "2018"],
     deps = [
         "//lib/color:brdgme_color",

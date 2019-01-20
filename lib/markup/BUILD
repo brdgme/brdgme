@@ -4,16 +4,10 @@ load("@io_bazel_rules_rust//rust:rust.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "brdgme_markup",
-    srcs = [
-        "src/ansi.rs",
-        "src/ast.rs",
-        "src/error.rs",
-        "src/html.rs",
-        "src/lib.rs",
-        "src/parser.rs",
-        "src/plain.rs",
-        "src/transform.rs",
-    ],
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+    ),
     rustc_flags = ["--edition", "2018"],
     deps = [
         "//lib/color:brdgme_color",

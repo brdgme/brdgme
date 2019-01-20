@@ -9,7 +9,10 @@ load(
 
 rust_library(
     name = "brdgme_rand_bot",
-    srcs = ["src/lib.rs"],
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+    ),
     rustc_flags = ["--edition", "2018"],
     deps = [
         "//lib/cmd:brdgme_cmd",

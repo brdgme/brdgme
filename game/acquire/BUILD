@@ -9,14 +9,10 @@ load(
 
 rust_library(
     name = "acquire",
-    srcs = [
-        "src/board.rs",
-        "src/command.rs",
-        "src/corp.rs",
-        "src/lib.rs",
-        "src/render.rs",
-        "src/stats.rs",
-    ],
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+    ),
     rustc_flags = ["--edition", "2018"],
     deps = [
         "//lib/color:brdgme_color",

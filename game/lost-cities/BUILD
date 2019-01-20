@@ -9,12 +9,10 @@ load(
 
 rust_library(
     name = "lost_cities",
-    srcs = [
-        "src/card.rs",
-        "src/command.rs",
-        "src/lib.rs",
-        "src/render.rs",
-    ],
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+    ),
     rustc_flags = ["--edition", "2018"],
     deps = [
         "//lib/color:brdgme_color",

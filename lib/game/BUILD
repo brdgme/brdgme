@@ -4,17 +4,10 @@ load("@io_bazel_rules_rust//rust:rust.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "brdgme_game",
-    srcs = [
-        "src/command/parser/chain.rs",
-        "src/command/parser/mod.rs",
-        "src/command/doc.rs",
-        "src/command/mod.rs",
-        "src/bot.rs",
-        "src/errors.rs",
-        "src/game_log.rs",
-        "src/game.rs",
-        "src/lib.rs",
-    ],
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+    ),
     rustc_flags = ["--edition", "2018"],
     deps = [
         "//lib/color:brdgme_color",
