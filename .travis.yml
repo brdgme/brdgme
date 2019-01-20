@@ -2,18 +2,11 @@ dist: xenial
 
 language: generic
 
-cache:
-  directories:
-    - /home/travis/.cache/bazel/
-
 before_install:
   - sudo apt-get install pkg-config zip g++ zlib1g-dev unzip python
   - wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
   - chmod +x bazel-0.21.0-installer-linux-x86_64.sh
   - sudo ./bazel-0.21.0-installer-linux-x86_64.sh
-
-before_script:
-  - sudo chown -R travis /home/travis/.cache/bazel
 
 script:
   - bazel build ... 
