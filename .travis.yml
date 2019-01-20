@@ -1,5 +1,10 @@
 language: generic
 
+cache:
+  directories:
+    - /home/travis/.cache/bazel/
+    - /root/.cache/bazel/
+
 services:
   - docker
 
