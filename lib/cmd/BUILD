@@ -6,7 +6,10 @@ rust_library(
     name = "brdgme_cmd",
     srcs = glob(
         ["src/**/*.rs"],
-        exclude = ["src/bin.rs", "src/bin/**/*.rs"],
+        exclude = [
+            "src/bin.rs",
+            "src/bin/**/*.rs",
+        ],
     ),
     edition = "2018",
     deps = [

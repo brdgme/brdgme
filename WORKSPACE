@@ -1,5 +1,7 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+# Rust
+
 http_archive(
     name = "io_bazel_rules_rust",
     sha256 = "7fb8dd83d0bf9f3567b4fd84610d760edcdebba02c2202a455825daa5c6cd5fb",
@@ -25,3 +27,27 @@ bazel_version(name = "bazel_version")
 
 load("//third_party/cargo:crates.bzl", "raze_fetch_remote_crates")
 raze_fetch_remote_crates()
+
+# Go
+
+http_archive(
+    name = "io_bazel_rules_go",
+    urls = ["https://github.com/bazelbuild/rules_go/releases/download/0.16.5/rules_go-0.16.5.tar.gz"],
+    sha256 = "7be7dc01f1e0afdba6c8eb2b43d2fa01c743be1b9273ab1eaf6c233df078d705",
+)
+load("@io_bazel_rules_go//go:def.bzl", "go_rules_dependencies", "go_register_toolchains")
+go_rules_dependencies()
+go_register_toolchains()
+
+http_archive(
+    name = "bazel_gazelle",
+    urls = ["https://github.com/bazelbuild/bazel-gazelle/releases/download/0.16.0/bazel-gazelle-0.16.0.tar.gz"],
+    sha256 = "7949fc6cc17b5b191103e97481cf8889217263acf52e00b560683413af204fcb",
+)
+load("@bazel_gazelle//:deps.bzl", "go_repository")
+
+go_repository(
+    name = "com_github_stretchr_testify_assert",
+    importpath = "github.com/stretchr/testify/assert",
+    commit = "363ebb24d041ccea8068222281c2e963e997b9dc",
+)
