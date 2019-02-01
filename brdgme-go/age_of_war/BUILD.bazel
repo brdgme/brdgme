@@ -27,5 +27,5 @@ go_test(
         "game_test.go",
     ],
     embed = [":go_default_library"],
-    deps = ["//stretchr/testify/assert:go_default_library"],
+    deps = ["//brdgme-go/assert:go_default_library"],
 )

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/brdgme-go/assert"
 )
 
 func TestIntSort(t *testing.T) {

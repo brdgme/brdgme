@@ -3,7 +3,7 @@ package brdgme
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/brdgme-go/assert"
 )
 
 func TestInt(t *testing.T) {

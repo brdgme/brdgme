@@ -45,9 +45,3 @@ http_archive(
     sha256 = "7949fc6cc17b5b191103e97481cf8889217263acf52e00b560683413af204fcb",
 )
 load("@bazel_gazelle//:deps.bzl", "go_repository")
-
-go_repository(
-    name = "com_github_stretchr_testify_assert",
-    importpath = "github.com/stretchr/testify/assert",
-    commit = "363ebb24d041ccea8068222281c2e963e997b9dc",
-)
