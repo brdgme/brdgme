@@ -3,7 +3,7 @@ package age_of_war
 import (
 	"testing"
 
-	"github.com/brdgme-go/assert"
+	"brdgme-go/assert"
 )
 
 func TestGame_New(t *testing.T) {

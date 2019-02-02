@@ -3,7 +3,7 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
 go_library(
     name = "go_default_library",
     srcs = ["main.go"],
-    importpath = "github.com/brdgme-go/age_of_war/cmd",
+    importpath = "brdgme-go/age_of_war/cmd",
     visibility = ["//visibility:private"],
     deps = [
         "//brdgme-go/age_of_war:go_default_library",

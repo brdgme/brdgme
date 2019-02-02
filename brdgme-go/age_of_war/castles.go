@@ -3,8 +3,8 @@ package age_of_war
 import (
 	"sort"
 
-	"github.com/brdgme-go/brdgme"
-	"github.com/brdgme-go/render"
+	"brdgme-go/brdgme"
+	"brdgme-go/render"
 )
 
 const (

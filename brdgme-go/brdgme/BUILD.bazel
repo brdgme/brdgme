@@ -11,7 +11,7 @@ go_library(
         "reader.go",
         "strings.go",
     ],
-    importpath = "github.com/brdgme-go/brdgme",
+    importpath = "brdgme-go/brdgme",
     visibility = ["//visibility:public"],
 )
 

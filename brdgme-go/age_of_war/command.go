@@ -1,7 +1,7 @@
 package age_of_war
 
 import (
-	"github.com/brdgme-go/brdgme"
+	"brdgme-go/brdgme"
 )
 
 type attackCommand struct {

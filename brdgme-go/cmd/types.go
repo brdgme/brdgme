@@ -1,6 +1,6 @@
 package cmd
 
-import "github.com/brdgme-go/brdgme"
+import "brdgme-go/brdgme"
 
 type request struct {
 	PlayerCounts *requestPlayerCounts `json:",omitempty"`

@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/brdgme-go/age_of_war"
-	"github.com/brdgme-go/cmd"
+	"brdgme-go/age_of_war"
+	"brdgme-go/cmd"
 )
 
 func main() {

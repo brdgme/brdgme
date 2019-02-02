@@ -6,7 +6,7 @@ go_library(
         "cli.go",
         "types.go",
     ],
-    importpath = "github.com/brdgme-go/cmd",
+    importpath = "brdgme-go/cmd",
     visibility = ["//visibility:public"],
     deps = ["//brdgme-go/brdgme:go_default_library"],
 )
