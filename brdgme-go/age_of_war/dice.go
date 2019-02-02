@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"brdgme-go/brdgme"
-	"brdgme-go/render"
+	"github.com/brdgme-go/brdgme"
+	"github.com/brdgme-go/render"
 )
 
 const (

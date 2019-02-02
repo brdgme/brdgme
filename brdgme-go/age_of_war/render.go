@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"brdgme-go/render"
+	"github.com/brdgme-go/render"
 )
 
 func (g *Game) PlayerRender(player int) string {

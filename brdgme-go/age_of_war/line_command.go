@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"brdgme-go/brdgme"
-	"brdgme-go/render"
+	"github.com/brdgme-go/brdgme"
+	"github.com/brdgme-go/render"
 )
 
 func (g *Game) LineCommand(

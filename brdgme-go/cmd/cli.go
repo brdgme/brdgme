@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"brdgme-go/brdgme"
+	"github.com/brdgme-go/brdgme"
 )
 
 const PlayerCountsRequest = "\"PlayerCounts\""

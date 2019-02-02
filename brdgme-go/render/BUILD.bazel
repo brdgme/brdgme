@@ -9,7 +9,7 @@ go_library(
         "render.go",
         "table.go",
     ],
-    importpath = "brdgme-go/render",
+    importpath = "github.com/brdgme-go/render",
     visibility = ["//visibility:public"],
 )
 

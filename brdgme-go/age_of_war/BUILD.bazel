@@ -12,7 +12,7 @@ go_library(
         "render.go",
         "roll_command.go",
     ],
-    importpath = "brdgme-go/age_of_war",
+    importpath = "github.com/brdgme-go/age_of_war",
     visibility = ["//visibility:public"],
     deps = [
         "//brdgme-go/brdgme:go_default_library",

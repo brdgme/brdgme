@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"brdgme-go/assert"
+	"github.com/brdgme-go/assert"
 )
 
 func TestIntSort(t *testing.T) {
