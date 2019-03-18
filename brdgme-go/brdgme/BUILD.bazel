@@ -17,6 +17,7 @@ go_library(
 
 go_test(
     name = "go_default_test",
+    timeout = "short",
     srcs = [
         "command_test.go",
         "int_test.go",
