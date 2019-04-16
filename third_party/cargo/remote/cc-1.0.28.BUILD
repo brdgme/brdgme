@@ -49,7 +49,7 @@ rust_binary(
     edition = "2015",
     srcs = glob(["**/*.rs"]),
     deps = [
-        # Binaries get an implicit dependency on their lib
+        # Binaries get an implicit dependency on their crate's lib
         ":cc",
     ],
     rustc_flags = [

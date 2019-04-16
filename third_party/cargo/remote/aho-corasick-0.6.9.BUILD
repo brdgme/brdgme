@@ -32,7 +32,7 @@ rust_binary(
     edition = "2015",
     srcs = glob(["**/*.rs"]),
     deps = [
-        # Binaries get an implicit dependency on their lib
+        # Binaries get an implicit dependency on their crate's lib
         ":aho_corasick",
         "@raze__memchr__2_1_2//:memchr",
     ],
