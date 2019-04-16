@@ -29,5 +29,5 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    crate = ":brdgme_cmd",
+    deps = [":brdgme_cmd"],
 )

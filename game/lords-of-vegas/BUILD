@@ -34,7 +34,7 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    crate = ":lords_of_vegas",
+    deps = [":lords_of_vegas"],
 )
 
 rust_binary(

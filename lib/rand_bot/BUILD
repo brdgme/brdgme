@@ -30,7 +30,7 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    crate = ":brdgme_rand_bot",
+    deps = [":brdgme_rand_bot"],
 )
 
 rust_binary(
