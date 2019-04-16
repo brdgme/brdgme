@@ -25,5 +25,5 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    deps = [":brdgme_markup"],
+    crate = ":brdgme_markup",
 )

@@ -32,7 +32,7 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    deps = [":acquire"],
+    crate = ":acquire",
 )
 
 rust_binary(

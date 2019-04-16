@@ -25,5 +25,5 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    deps = [":brdgme_color"],
+    crate = ":brdgme_color",
 )

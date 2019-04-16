@@ -32,7 +32,7 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    deps = [":brdgme_fuzz"],
+    crate = ":brdgme_fuzz",
 )
 
 rust_binary(

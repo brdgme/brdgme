@@ -31,7 +31,7 @@ rust_test(
     name = "test",
     timeout = "short",
     edition = "2018",
-    deps = [":lost_cities"],
+    crate = ":lost_cities",
 )
 
 rust_binary(
