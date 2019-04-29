@@ -11,7 +11,7 @@ func Player(player int) string {
 }
 
 func Indent(amount int, content string) string {
-	return fmt.Sprintf("{{align %d}}%s{{/align}}")
+	return fmt.Sprintf("{{align %d}}%s{{/align}}", amount, content)
 }
 
 func Layout(content []string) string {
