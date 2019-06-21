@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rand::{thread_rng, Rng};
+use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 
 use brdgme_game::command::Spec as CommandSpec;
@@ -174,7 +174,7 @@ impl Gamer for Game {
 
         // Shuffle up the draw tiles.
         let mut tiles = Loc::all();
-        thread_rng().shuffle(tiles.as_mut_slice());
+        tiles.as_mut_slice().shuffle(&mut thread_rng());
         g.draw_tiles = tiles;
 
         // Place initial tiles onto the board.

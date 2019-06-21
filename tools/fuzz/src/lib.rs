@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use failure::{bail, format_err, Error};
-use rand::{Rng, ThreadRng};
+use rand::prelude::*;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -128,12 +128,12 @@ impl Fuzzer {
             player_counts,
             names: vec![],
             game: None,
-            rng: rand::thread_rng(),
+            rng: thread_rng(),
         })
     }
 
     fn new_game(&mut self) -> Result<(), Error> {
-        let players = *self.rng.choose(&self.player_counts).ok_or_else(|| {
+        let players = *self.player_counts.choose(&mut self.rng).ok_or_else(|| {
             format_err!("could not get player counts from {:?}", self.player_counts)
         })?;
         self.names = names(players);
@@ -164,7 +164,7 @@ impl Fuzzer {
                     },
                 ref player_renders,
             }) => {
-                let player = *self.rng.choose(&whose_turn).ok_or_else(|| {
+                let player = *whose_turn.choose(&mut self.rng).ok_or_else(|| {
                     format_err!("unable to pick active turn player from: {:?}", whose_turn)
                 })?;
                 if player_renders.len() <= player {

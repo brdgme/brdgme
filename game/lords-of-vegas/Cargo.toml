@@ -1,0 +1,18 @@
+[package]
+name = "lords-of-vegas"
+version = "0.1.0"
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+brdgme_cmd = { path = "../../lib/cmd" }
+brdgme_fuzz = { path = "../../tools/fuzz" }
+brdgme_color = { path = "../../lib/color" }
+brdgme_game = { path = "../../lib/game" }
+brdgme_markup = { path = "../../lib/markup" }
+failure = "0.1.5"
+lazy_static = "1.3.0"
+rand = "0.6.5"
+serde = "1.0.92"
+serde_derive = "1.0.92"
+serde_json = "1.0.39"

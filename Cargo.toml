@@ -1,0 +1,14 @@
+[workspace]
+
+members = [
+    "game/acquire",
+    "game/lords-of-vegas",
+    "game/lost-cities",
+    "lib/cmd",
+    "lib/color",
+    "lib/game",
+    "lib/markup",
+    "lib/rand_bot",
+    "tools/fuzz",
+    "tools/repl",
+]

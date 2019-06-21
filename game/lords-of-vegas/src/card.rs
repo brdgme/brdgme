@@ -1,6 +1,6 @@
 use std::fmt;
 
-use rand::{self, Rng};
+use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 
 use brdgme_markup::Node as N;
@@ -23,7 +23,7 @@ pub fn shuffled_deck(players: usize) -> Vec<Card> {
         .cloned()
         .map(|t| Card::Loc { loc: t })
         .collect();
-    rng.shuffle(&mut cards);
+    cards.as_mut_slice().shuffle(&mut rng);
     // Insert the game end card in the last quarter of the deck, taking into account the cards which
     // will be drawn by the players as adding the end card happens after players draw.
     let player_draw_count = players * STARTING_CARDS;

@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 
 use brdgme_game::command::Spec as CommandSpec;

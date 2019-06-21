@@ -1,10 +1,10 @@
 use std::io::Write;
 
 use chrono;
-use rand::{self, Rng};
+use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 
-use ::log::{log, trace};
+use ::log::trace;
 
 use crate::command::Spec as CommandSpec;
 use crate::errors::GameError;
@@ -56,7 +56,7 @@ pub struct Fuzzer<G: Gamer, B: Botter<G>> {
     player_names: Vec<String>,
     player_count: usize,
     bot: B,
-    rng: rand::ThreadRng,
+    rng: ThreadRng,
     game_count: usize,
     command_count: usize,
     invalid_input_count: usize,
@@ -73,7 +73,7 @@ impl<G: Gamer, B: Botter<G>> Fuzzer<G, B> {
             player_counts,
             player_count: 0,
             bot,
-            rng: rand::thread_rng(),
+            rng: thread_rng(),
             game_count: 0,
             command_count: 0,
             invalid_input_count: 0,
@@ -109,19 +109,14 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.game.as_ref().map(|g| g.is_finished()).unwrap_or(true) {
             self.game_count += 1;
-            self.player_count = *self
-                .rng
-                .choose(&self.player_counts)
-                .expect("no player counts for game type");
+            self.player_count = *self.player_counts.choose(&mut self.rng).expect("no player counts for game type");
             self.game = Some(
                 G::start(self.player_count)
                     .expect("failed to create new game")
                     .0,
             );
         } else if let Some(ref mut game) = self.game {
-            let player = *self
-                .rng
-                .choose(&game.whose_turn())
+            let player = *game.whose_turn().choose(&mut self.rng)
                 .expect("is nobody's turn");
             let player_state = game.player_state(player);
             let command_spec = game.command_spec(player).expect("expected a command spec");
@@ -132,9 +127,7 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
                 &command_spec,
                 Some(format!("{}", self.game_count)),
             );
-            let input = self
-                .rng
-                .choose(&bot_commands)
+            let input = bot_commands.choose(&mut self.rng)
                 .expect("bot returned no commands")
                 .to_owned();
             if input.commands.is_empty() {

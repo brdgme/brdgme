@@ -1,0 +1,17 @@
+[package]
+name = "brdgme_game"
+version = "0.1.0"
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+brdgme_color = { path = "../color" }
+brdgme_markup = { path = "../markup" }
+chrono = { version = "0.4.6", features = ["serde"] }
+combine = "2.3.1"
+failure = "0.1.5"
+log = "0.4.6"
+rand = "0.6.5"
+serde = "1.0.92"
+serde_derive = "1.0.92"
+unicase = "2.4.0"

@@ -1,7 +1,7 @@
 use std::i32;
 use std::io::{Read, Write};
 
-use rand::{Rng, ThreadRng};
+use rand::prelude::*;
 
 use brdgme_cmd::bot_cli;
 use brdgme_game::bot::{BotCommand, Botter, Fuzzer};
@@ -33,12 +33,12 @@ pub fn spec_to_command(
             bounded_i32(rng.gen(), min.unwrap_or(i32::MIN), max.unwrap_or(i32::MAX))
         )],
         command::Spec::Token(ref token) => vec![token.to_owned()],
-        command::Spec::Enum { ref values, .. } => rng
-            .choose(values)
+        command::Spec::Enum { ref values, .. } => values
+            .choose(rng)
             .map(|v| vec![v.to_owned()])
             .unwrap_or_else(|| vec![]),
         command::Spec::OneOf(ref options) => {
-            spec_to_command(rng.choose(options).unwrap(), players, rng)
+            spec_to_command(options.choose(rng).unwrap(), players, rng)
         }
         command::Spec::Chain(ref chain) => chain
             .iter()
@@ -70,13 +70,13 @@ pub fn spec_to_command(
             parts
         }
         command::Spec::Doc { ref spec, .. } => spec_to_command(spec, players, rng),
-        command::Spec::Player => vec![rng.choose(players).unwrap().to_owned()],
+        command::Spec::Player => vec![players.choose(rng).unwrap().to_owned()],
         command::Spec::Space => vec![" ".to_string()],
     }
 }
 
 fn commands(command_spec: &command::Spec, players: &[String]) -> Vec<BotCommand> {
-    let mut rng = rand::thread_rng();
+    let mut rng = thread_rng();
     vec![spec_to_command(command_spec, players, &mut rng)
         .join(" ")
         .into()]

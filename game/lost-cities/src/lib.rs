@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::default::Default;
 
-use rand::{thread_rng, Rng};
+use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 
 use brdgme_game::command::parser::Output as ParseOutput;
@@ -127,7 +127,7 @@ impl Game {
         ))])];
         // Grab a new deck and shuffle it.
         let mut deck = initial_deck();
-        thread_rng().shuffle(deck.as_mut_slice());
+        deck.as_mut_slice().shuffle(&mut thread_rng());
         self.deck = deck;
         // Clear out discards, hands and expeditions.
         self.discards = vec![];
