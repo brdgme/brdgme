@@ -109,14 +109,19 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.game.as_ref().map(|g| g.is_finished()).unwrap_or(true) {
             self.game_count += 1;
-            self.player_count = *self.player_counts.choose(&mut self.rng).expect("no player counts for game type");
+            self.player_count = *self
+                .player_counts
+                .choose(&mut self.rng)
+                .expect("no player counts for game type");
             self.game = Some(
                 G::start(self.player_count)
                     .expect("failed to create new game")
                     .0,
             );
         } else if let Some(ref mut game) = self.game {
-            let player = *game.whose_turn().choose(&mut self.rng)
+            let player = *game
+                .whose_turn()
+                .choose(&mut self.rng)
                 .expect("is nobody's turn");
             let player_state = game.player_state(player);
             let command_spec = game.command_spec(player).expect("expected a command spec");
@@ -127,7 +132,8 @@ impl<G: Gamer, B: Botter<G>> Iterator for Fuzzer<G, B> {
                 &command_spec,
                 Some(format!("{}", self.game_count)),
             );
-            let input = bot_commands.choose(&mut self.rng)
+            let input = bot_commands
+                .choose(&mut self.rng)
                 .expect("bot returned no commands")
                 .to_owned();
             if input.commands.is_empty() {

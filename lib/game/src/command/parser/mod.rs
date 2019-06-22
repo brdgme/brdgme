@@ -44,7 +44,9 @@ impl Token {
 impl Parser<String> for Token {
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, String>, GameError> {
         let t_len = self.token.len();
-        if input.len() < self.token.len() || UniCase::new(&input[..t_len]) != UniCase::new(&self.token) {
+        if input.len() < self.token.len()
+            || UniCase::new(&input[..t_len]) != UniCase::new(&self.token)
+        {
             return Err(GameError::Parse {
                 message: None,
                 expected: self.expected(names),
