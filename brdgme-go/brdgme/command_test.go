@@ -24,7 +24,7 @@ func TestInt(t *testing.T) {
 		Remaining: " dacon",
 	}, output)
 
-	output, err = parser.Parse("bleh moo", []string{})
+	_, err = parser.Parse("bleh moo", []string{})
 	assert.Equal(t, ParseError{
 		Expected: []string{"number"},
 	}, *err)
@@ -47,7 +47,7 @@ func TestInt(t *testing.T) {
 		Remaining: " blah",
 	}, output)
 
-	output, err = parser.Parse("2 blah", []string{})
+	_, err = parser.Parse("2 blah", []string{})
 	assert.Equal(t, ParseError{
 		Message:  "2 is too low",
 		Expected: []string{"number 3 or higher"},
@@ -72,7 +72,7 @@ func TestInt(t *testing.T) {
 		Remaining: " blah",
 	}, output)
 
-	output, err = parser.Parse("6 blah", []string{})
+	_, err = parser.Parse("6 blah", []string{})
 	assert.Equal(t, ParseError{
 		Message:  "6 is too high",
 		Expected: []string{"number between 3 and 5"},
@@ -90,12 +90,12 @@ func TestToken(t *testing.T) {
 		Remaining: " blah",
 	}, output)
 
-	output, err = parser.Parse("Pley blah", []string{})
+	_, err = parser.Parse("Pley blah", []string{})
 	assert.Equal(t, ParseError{
 		Expected: []string{"play"},
 	}, *err)
 
-	output, err = parser.Parse("pl", []string{})
+	_, err = parser.Parse("pl", []string{})
 	assert.Equal(t, ParseError{
 		Expected: []string{"play"},
 	}, *err)
@@ -120,14 +120,14 @@ func TestEnum(t *testing.T) {
 		Remaining: " blah",
 	}, output)
 
-	output, err = parser.Parse("on blah", []string{})
+	_, err = parser.Parse("on blah", []string{})
 	assert.Equal(t, ParseError{
 		Message:  "matched one and onetwo, more input is required to uniquely match one",
 		Expected: []string{"one", "onetwo", "three"},
 	}, *err)
 
 	parser.Exact = true
-	output, err = parser.Parse("thr blah", []string{})
+	_, err = parser.Parse("thr blah", []string{})
 	assert.Equal(t, ParseError{
 		Expected: []string{"one", "onetwo", "three"},
 	}, *err)
@@ -148,7 +148,7 @@ func TestOneOf(t *testing.T) {
 		Remaining: " blah",
 	}, output)
 
-	output, err = parser.Parse("cheeze blah", []string{})
+	_, err = parser.Parse("cheeze blah", []string{})
 	assert.Equal(t, ParseError{
 		Expected: []string{"egg", "number", "cheese"},
 	}, *err)
@@ -169,7 +169,7 @@ func TestChain(t *testing.T) {
 		Remaining: " blah",
 	}, output)
 
-	output, err = parser.Parse("cheeze blah", []string{})
+	_, err = parser.Parse("cheeze blah", []string{})
 	assert.Equal(t, ParseError{
 		Expected: []string{"egg"},
 	}, *err)
@@ -223,7 +223,7 @@ func TestDoc(t *testing.T) {
 		Remaining: " blah",
 	}, output)
 
-	output, err = parser.Parse("egg 5 blah", []string{})
+	_, err = parser.Parse("egg 5 blah", []string{})
 	assert.Equal(t, ParseError{
 		Expected: []string{"number"},
 	}, *err)
@@ -252,7 +252,7 @@ func TestSpace(t *testing.T) {
 		Remaining: "egg",
 	}, output)
 
-	output, err = parser.Parse("egg", []string{})
+	_, err = parser.Parse("egg", []string{})
 	assert.Equal(t, ParseError{
 		Message:  "expected whitespace",
 		Expected: []string{"whitespace"},
@@ -270,7 +270,7 @@ func TestAfterSpace(t *testing.T) {
 		Remaining: "blah",
 	}, output)
 
-	output, err = parser.Parse("egg", []string{})
+	_, err = parser.Parse("egg", []string{})
 	assert.Equal(t, ParseError{
 		Message:  "expected whitespace",
 		Expected: []string{"whitespace"},

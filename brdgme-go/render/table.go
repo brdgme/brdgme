@@ -6,11 +6,13 @@ import (
 	"strings"
 )
 
+// Cell is a cell in a table
 type Cell struct {
 	Align   Al
 	Content string
 }
 
+// Cel creates a cell
 func Cel(content string, align ...Al) Cell {
 	al := Left
 	if len(align) > 0 {
@@ -22,10 +24,12 @@ func Cel(content string, align ...Al) Cell {
 	}
 }
 
+// ToString renders the cell
 func (c Cell) ToString() string {
 	return fmt.Sprintf("{{cell %s}}%s{{/cell}}", alignStrs[c.Align], c.Content)
 }
 
+// Table renders a table
 func Table(rows [][]Cell, rowSpacing, colSpacing int) string {
 	output := bytes.NewBufferString("{{table}}")
 	for i, r := range rows {

@@ -696,7 +696,7 @@ func (m Map) ToSpec() Spec {
 }
 
 func (m Map) Expected(names []string) []string {
-	return m.Expected(names)
+	return m.Parser.Expected(names)
 }
 
 func (m Map) Parse(input string, names []string) (Output, *ParseError) {

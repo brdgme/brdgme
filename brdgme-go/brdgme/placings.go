@@ -80,7 +80,7 @@ func GenPlacings(metrics [][]int) []int {
 	}
 
 	placings := make([]int, len(metrics))
-	for p := range metrics {
+	for p := range metrics { // nolint
 		placings[p] = placingMap[p]
 	}
 

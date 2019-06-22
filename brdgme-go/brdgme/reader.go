@@ -38,7 +38,7 @@ func (p *Reader) ReadWhile(fn func(rune) bool) (string, error) {
 		if fn(r) {
 			out.WriteRune(r)
 		} else {
-			p.UnreadRune()
+			_ = p.UnreadRune()
 			break
 		}
 	}

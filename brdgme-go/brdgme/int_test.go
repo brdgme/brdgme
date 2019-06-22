@@ -38,9 +38,9 @@ func TestIntShuffle(t *testing.T) {
 }
 
 func TestIntFind(t *testing.T) {
-	k, ok := IntFind(4, []int{1, 2, 5, 6})
+	_, ok := IntFind(4, []int{1, 2, 5, 6})
 	assert.False(t, ok)
-	k, ok = IntFind(3, []int{1, 2, 3, 3, 5})
+	k, ok := IntFind(3, []int{1, 2, 3, 3, 5})
 	assert.True(t, ok)
 	assert.Equal(t, 2, k)
 }

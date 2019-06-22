@@ -570,7 +570,7 @@ func True(t TestingT, value bool, msgAndArgs ...interface{}) bool {
 		h.Helper()
 	}
 
-	if value != true {
+	if !value {
 		return Fail(t, "Should be true", msgAndArgs...)
 	}
 
@@ -586,7 +586,7 @@ func False(t TestingT, value bool, msgAndArgs ...interface{}) bool {
 		h.Helper()
 	}
 
-	if value != false {
+	if value {
 		return Fail(t, "Should be false", msgAndArgs...)
 	}
 
@@ -1331,17 +1331,6 @@ func JSONEq(t TestingT, expected string, actual string, msgAndArgs ...interface{
 	}
 
 	return Equal(t, expectedJSONAsInterface, actualJSONAsInterface, msgAndArgs...)
-}
-
-func typeAndKind(v interface{}) (reflect.Type, reflect.Kind) {
-	t := reflect.TypeOf(v)
-	k := t.Kind()
-
-	if k == reflect.Ptr {
-		t = t.Elem()
-		k = t.Kind()
-	}
-	return t, k
 }
 
 // validateEqualArgs checks whether provided arguments can be safely used in the

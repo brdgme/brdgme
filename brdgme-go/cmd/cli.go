@@ -26,7 +26,7 @@ func Cli(game brdgme.Gamer, in io.Reader, out io.Writer) {
 	} else {
 		decoder := json.NewDecoder(bufIn)
 		if err := decoder.Decode(&request); err != nil {
-			encoder.Encode(response{
+			_ = encoder.Encode(response{
 				SystemError: &responseSystemError{
 					Message: fmt.Sprintf("Unable to decode request: %v", err),
 				}})
@@ -47,7 +47,7 @@ func Cli(game brdgme.Gamer, in io.Reader, out io.Writer) {
 	case request.PlayerRender != nil:
 		handlePlayerRender(game, *request.PlayerRender, encoder)
 	default:
-		encoder.Encode(response{
+		_ = encoder.Encode(response{
 			SystemError: &responseSystemError{
 				Message: "Could not parse command from request",
 			},
@@ -113,7 +113,7 @@ func toResponseLogs(logs []brdgme.Log) []log {
 }
 
 func handlePlayerCounts(game brdgme.Gamer, request requestPlayerCounts, out *json.Encoder) {
-	out.Encode(response{
+	_ = out.Encode(response{
 		PlayerCounts: &responsePlayerCounts{
 			PlayerCounts: game.PlayerCounts(),
 		},
@@ -125,7 +125,7 @@ func handleNew(game brdgme.Gamer, request requestNew, out *json.Encoder) {
 	if err == nil {
 		gameResponse, err := toGameResponse(game)
 		if err != nil {
-			out.Encode(response{
+			_ = out.Encode(response{
 				SystemError: &responseSystemError{
 					Message: fmt.Sprintf("Unable to create game response struct, %s", err),
 				},
@@ -134,14 +134,14 @@ func handleNew(game brdgme.Gamer, request requestNew, out *json.Encoder) {
 		}
 		pubRender, playerRenders, err := renders(game)
 		if err != nil {
-			out.Encode(response{
+			_ = out.Encode(response{
 				SystemError: &responseSystemError{
 					Message: fmt.Sprintf("Unable to get renders, %s", err),
 				},
 			})
 			return
 		}
-		out.Encode(response{
+		_ = out.Encode(response{
 			New: &responseNew{
 				Game:          gameResponse,
 				Logs:          toResponseLogs(logs),
@@ -151,7 +151,7 @@ func handleNew(game brdgme.Gamer, request requestNew, out *json.Encoder) {
 		})
 	} else {
 		// Most likely due to incorrect player counts.
-		out.Encode(response{
+		_ = out.Encode(response{
 			UserError: &responseUserError{
 				Message: fmt.Sprintf("Unable to start game, %s", err),
 			},
@@ -161,7 +161,7 @@ func handleNew(game brdgme.Gamer, request requestNew, out *json.Encoder) {
 
 func handleStatus(game brdgme.Gamer, request requestStatus, out *json.Encoder) {
 	if err := unmarshalGame(request.Game, game); err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("Could not unmarshal game: %s", err),
 			},
@@ -170,7 +170,7 @@ func handleStatus(game brdgme.Gamer, request requestStatus, out *json.Encoder) {
 	}
 	gameResp, err := toGameResponse(game)
 	if err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("Could not get game response: %s", err),
 			},
@@ -179,14 +179,14 @@ func handleStatus(game brdgme.Gamer, request requestStatus, out *json.Encoder) {
 	}
 	pubRender, playerRenders, err := renders(game)
 	if err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("Unable to get renders, %s", err),
 			},
 		})
 		return
 	}
-	out.Encode(response{
+	_ = out.Encode(response{
 		Status: &responseStatus{
 			Game:          gameResp,
 			PublicRender:  pubRender,
@@ -197,7 +197,7 @@ func handleStatus(game brdgme.Gamer, request requestStatus, out *json.Encoder) {
 
 func handlePlay(game brdgme.Gamer, request requestPlay, out *json.Encoder) {
 	if err := unmarshalGame(request.Game, game); err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("Could not unmarshal game: %s", err),
 			},
@@ -216,7 +216,7 @@ func handlePlay(game brdgme.Gamer, request requestPlay, out *json.Encoder) {
 				// Something has already worked, so we'll stay quiet
 				gameResponse, err := toGameResponse(game)
 				if err != nil {
-					out.Encode(response{
+					_ = out.Encode(response{
 						SystemError: &responseSystemError{
 							Message: fmt.Sprintf("Unable to create game response struct, %s", err),
 						},
@@ -225,14 +225,14 @@ func handlePlay(game brdgme.Gamer, request requestPlay, out *json.Encoder) {
 				}
 				pubRender, playerRenders, err := renders(game)
 				if err != nil {
-					out.Encode(response{
+					_ = out.Encode(response{
 						SystemError: &responseSystemError{
 							Message: fmt.Sprintf("Unable to get renders, %s", err),
 						},
 					})
 					return
 				}
-				out.Encode(response{
+				_ = out.Encode(response{
 					Play: &responsePlay{
 						Game:           gameResponse,
 						Logs:           toResponseLogs(logs),
@@ -244,14 +244,14 @@ func handlePlay(game brdgme.Gamer, request requestPlay, out *json.Encoder) {
 				})
 			} else if err != nil {
 				// We got an error so lets return it
-				out.Encode(response{
+				_ = out.Encode(response{
 					UserError: &responseUserError{
 						Message: fmt.Sprintf("Command failed, %s", err),
 					},
 				})
 			} else {
 				// No commands were parsed for some reason
-				out.Encode(response{
+				_ = out.Encode(response{
 					UserError: &responseUserError{
 						Message: "No command was executed",
 					},
@@ -276,7 +276,7 @@ func toPubRender(game brdgme.Gamer) (pubRender, error) {
 
 func handlePubRender(game brdgme.Gamer, request requestPubRender, out *json.Encoder) {
 	if err := unmarshalGame(request.Game, game); err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("could not unmarshal game: %s", err),
 			},
@@ -285,14 +285,14 @@ func handlePubRender(game brdgme.Gamer, request requestPubRender, out *json.Enco
 	}
 	pr, err := toPubRender(game)
 	if err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("could not generate pub render: %s", err),
 			},
 		})
 		return
 	}
-	out.Encode(response{
+	_ = out.Encode(response{
 		PubRender: &responsePubRender{
 			Render: pr,
 		},
@@ -313,7 +313,7 @@ func toPlayerRender(game brdgme.Gamer, player int) (playerRender, error) {
 
 func handlePlayerRender(game brdgme.Gamer, request requestPlayerRender, out *json.Encoder) {
 	if err := unmarshalGame(request.Game, game); err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("Could not unmarshal game: %s", err),
 			},
@@ -322,14 +322,14 @@ func handlePlayerRender(game brdgme.Gamer, request requestPlayerRender, out *jso
 	}
 	pr, err := toPlayerRender(game, request.Player)
 	if err != nil {
-		out.Encode(response{
+		_ = out.Encode(response{
 			SystemError: &responseSystemError{
 				Message: fmt.Sprintf("could not generate player render: %s", err),
 			},
 		})
 		return
 	}
-	out.Encode(response{
+	_ = out.Encode(response{
 		PlayerRender: &responsePlayerRender{
 			Render: pr,
 		},
