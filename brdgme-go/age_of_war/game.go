@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/brdgme/brdgme-go/brdgme"
-	"github.com/brdgme/brdgme-go/render"
+	"github.com/brdgme/brdgme/brdgme-go/brdgme"
+	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
 var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))

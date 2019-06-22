@@ -3,7 +3,7 @@ package brdgme
 import (
 	"testing"
 
-	"github.com/brdgme/brdgme-go/assert"
+	"github.com/brdgme/brdgme/brdgme-go/assert"
 )
 
 func TestCmpMetrics(t *testing.T) {
