@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/brdgme-go/brdgme"
-	"github.com/brdgme-go/render"
+	"github.com/brdgme/brdgme-go/brdgme"
+	"github.com/brdgme/brdgme-go/render"
 )
 
 func (g *Game) AttackCommand(

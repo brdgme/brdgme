@@ -3,7 +3,7 @@ package age_of_war
 import (
 	"errors"
 
-	"github.com/brdgme-go/brdgme"
+	"github.com/brdgme/brdgme-go/brdgme"
 )
 
 func (g *Game) RollCommand(
