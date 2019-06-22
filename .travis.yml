@@ -7,7 +7,7 @@ matrix:
         - cd brdgme-go
         - go build ./...
         - go test ./...
-        - golangci-ling run
+        - golangci-lint run
     - language: rust
       before_script:
         - rustup component add clippy
