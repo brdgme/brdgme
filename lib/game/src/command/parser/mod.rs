@@ -956,7 +956,7 @@ mod tests {
 
     #[test]
     fn test_one_of_works() {
-        let parsers: Vec<Box<Parser<String>>> = vec![
+        let parsers: Vec<Box<dyn Parser<String>>> = vec![
             Box::new(Token::new("blah")),
             Box::new(Map::new(Many::any(Token::new("fart")), |v| v.join(" "))),
         ];

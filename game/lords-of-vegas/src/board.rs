@@ -25,7 +25,7 @@ pub enum Block {
     F,
 }
 
-pub static BLOCKS: &'static [Block] = &[Block::A, Block::B, Block::C, Block::D, Block::E, Block::F];
+pub static BLOCKS: &[Block] = &[Block::A, Block::B, Block::C, Block::D, Block::E, Block::F];
 
 impl Block {
     pub fn max_lot(self) -> Lot {

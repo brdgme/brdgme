@@ -14,7 +14,7 @@ pub enum Casino {
     Pioneer,
 }
 
-pub static CASINOS: &'static [Casino] = &[
+pub static CASINOS: &[Casino] = &[
     Casino::Albion,
     Casino::Sphinx,
     Casino::Vega,
@@ -22,27 +22,27 @@ pub static CASINOS: &'static [Casino] = &[
     Casino::Pioneer,
 ];
 
-pub static ALBION_COLOR: &'static Color = &Color {
+pub static ALBION_COLOR: &Color = &Color {
     r: 128,
     g: 64,
     b: 124,
 };
-pub static SPHINX_COLOR: &'static Color = &Color {
+pub static SPHINX_COLOR: &Color = &Color {
     r: 128,
     g: 116,
     b: 64,
 };
-pub static VEGA_COLOR: &'static Color = &Color {
+pub static VEGA_COLOR: &Color = &Color {
     r: 64,
     g: 128,
     b: 92,
 };
-pub static TIVOLI_COLOR: &'static Color = &Color {
+pub static TIVOLI_COLOR: &Color = &Color {
     r: 128,
     g: 124,
     b: 121,
 };
-pub static PIONEER_COLOR: &'static Color = &Color {
+pub static PIONEER_COLOR: &Color = &Color {
     r: 128,
     g: 70,
     b: 64,

@@ -31,7 +31,7 @@ pub const CASINO_DEFAULT_HEIGHT: usize = 1;
 pub const DIE_MIN: usize = 1;
 pub const DIE_MAX: usize = 6;
 
-pub static POINT_STOPS: &'static [usize] = &[
+pub static POINT_STOPS: &[usize] = &[
     0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 18, 20, 23, 26, 29, 32, 36, 40, 44, 49, 54, 60, 66,
     73, 81, 90,
 ];

@@ -21,11 +21,11 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Option<Box<Parser<Command>>> {
+    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<Command>>> {
         if self.is_finished() {
             return None;
         }
-        let mut parsers: Vec<Box<Parser<Command>>> = vec![];
+        let mut parsers: Vec<Box<dyn Parser<Command>>> = vec![];
         if self.phase.whose_turn() == player {
             match self.phase {
                 Phase::Play(_) => {

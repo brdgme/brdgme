@@ -110,7 +110,7 @@ impl FuzzTally {
 }
 
 struct Fuzzer {
-    client: Box<requester::Requester>,
+    client: Box<dyn requester::Requester>,
     player_counts: Vec<usize>,
     names: Vec<String>,
     game: Option<FuzzGame>,
@@ -118,7 +118,7 @@ struct Fuzzer {
 }
 
 impl Fuzzer {
-    fn try_new(mut client: Box<requester::Requester>) -> Result<Self, Error> {
+    fn try_new(mut client: Box<dyn requester::Requester>) -> Result<Self, Error> {
         let player_counts = match client.request(&api::Request::PlayerCounts)? {
             api::Response::PlayerCounts { player_counts } => player_counts,
             v => bail!("invalid response to player counts request: {:?}", v),

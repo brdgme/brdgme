@@ -16,8 +16,8 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Box<Parser<Command>> {
-        let mut parsers: Vec<Box<Parser<Command>>> = vec![];
+    pub fn command_parser(&self, player: usize) -> Box<dyn Parser<Command>> {
+        let mut parsers: Vec<Box<dyn Parser<Command>>> = vec![];
         if self.can_build(player) {
             parsers.push(Box::new(self.build_parser(player)));
         }

@@ -69,8 +69,7 @@ impl Renderer for PlayerState {
     }
 }
 
-static CORP_TABLE_HEADER: &'static [&'static str] =
-    &["Corporation", "Size", "Value", "Shares", "Minor", "Major"];
+static CORP_TABLE_HEADER: &[&str] = &["Corporation", "Size", "Value", "Shares", "Minor", "Major"];
 
 const ROW_PAD: &str = "   ";
 
