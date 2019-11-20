@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 
 use serde_derive::{Deserialize, Serialize};
@@ -11,14 +12,17 @@ pub enum Align {
     Right,
 }
 
-impl Align {
-    pub fn to_string(&self) -> String {
-        match *self {
-            Align::Left => "left",
-            Align::Center => "center",
-            Align::Right => "right",
-        }
-        .to_string()
+impl fmt::Display for Align {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match *self {
+                Align::Left => "left",
+                Align::Center => "center",
+                Align::Right => "right",
+            }
+        )
     }
 }
 

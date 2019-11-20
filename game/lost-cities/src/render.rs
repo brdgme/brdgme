@@ -7,7 +7,7 @@ use brdgme_markup::ast::Cell;
 use brdgme_markup::{Align as A, Node as N, Row};
 
 use crate::card::{by_expedition, expeditions, Card};
-use crate::{next_player, PlayerState, PubState, MAX_PLAYERS, ROUNDS, START_ROUND};
+use crate::{next_player, PlayerState, PubState, END_ROUND, MAX_PLAYERS, ROUNDS, START_ROUND};
 
 const EXP_SPACER: &str = "  ";
 const TABLEAU_HEADER_SPACER: &str = "   ";
@@ -55,7 +55,7 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
     };
     let mut scores: Vec<Row> = vec![];
     let mut header: Row = vec![(A::Left, vec![])];
-    for r in START_ROUND..(START_ROUND + ROUNDS) {
+    for r in START_ROUND..=END_ROUND {
         header.extend(vec![
             (A::Left, vec![N::text(SCORE_SPACER)]),
             (

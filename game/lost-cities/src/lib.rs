@@ -21,6 +21,7 @@ mod render;
 const INVESTMENTS: usize = 3;
 pub const ROUNDS: usize = 3;
 pub const START_ROUND: usize = 1;
+pub const END_ROUND: usize = START_ROUND + ROUNDS - 1;
 const MIN_PLAYERS: usize = 2;
 const MAX_PLAYERS: usize = 3;
 const MIN_VALUE: usize = 2;
