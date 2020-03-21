@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::marker::PhantomData;
@@ -476,11 +477,13 @@ impl<T, TP: Parser<T> + ?Sized> Parser<T> for OneOf<T, TP> {
                     if let GameError::Parse { offset, .. } = e {
                         e_consumed = offset;
                     }
-                    if e_consumed > error_consumed {
-                        errors = vec![e];
-                        error_consumed = e_consumed;
-                    } else if e_consumed == error_consumed {
-                        errors.push(e);
+                    match e_consumed.cmp(&error_consumed) {
+                        Ordering::Greater => {
+                            errors = vec![e];
+                            error_consumed = e_consumed;
+                        }
+                        Ordering::Equal => errors.push(e),
+                        _ => {}
                     }
                 }
             }
