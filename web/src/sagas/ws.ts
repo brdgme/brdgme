@@ -42,7 +42,7 @@ export function* sagas(): IterableIterator<Effect> {
 }
 
 export function* updateToken(action: Session.IUpdateToken): IterableIterator<Effect> {
-  yield put(WS.subscribeUser(action.payload));
+  yield put(WS.subscribeUser(action.payload.token));
 }
 
 export function* clearToken(action: Session.IClearToken): IterableIterator<Effect> {
@@ -50,6 +50,10 @@ export function* clearToken(action: Session.IClearToken): IterableIterator<Effec
 }
 
 export function* wsSaga(): IterableIterator<Effect> {
+  const wsServer = yield select((state: AppState) => state.session.wsServer);
+  if (wsServer === undefined) {
+    return;
+  }
   const actions = yield actionChannel([
     WS.SUBSCRIBE_GAME,
     WS.UNSUBSCRIBE_GAME,
@@ -59,7 +63,7 @@ export function* wsSaga(): IterableIterator<Effect> {
   while (true) {
     try {
       // yield put(WS.connecting());
-      const socket: WebSocket = yield call(connect, process.env.WS_SERVER);
+      const socket: WebSocket = yield call(connect, wsServer);
       const socketClose = call(socketClosePromise, socket);
       // yield put(WS.connected());
       const s = yield fork(socketSagas, socket);

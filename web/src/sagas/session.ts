@@ -10,6 +10,8 @@ import * as Login from "../reducers/pages/login";
 import * as Session from "../reducers/session";
 
 export const LS_AUTH_TOKEN_OFFSET = "token";
+export const LS_API_SERVER_OFFSET = "apiServer";
+export const LS_WS_SERVER_OFFSET = "wsServer";
 
 export function* sagas(): IterableIterator<Effect> {
   yield takeEvery(Login.SUBMIT_CODE_SUCCESS, loginSuccess);
@@ -20,7 +22,7 @@ export function* sagas(): IterableIterator<Effect> {
 }
 
 function* loginSuccess(action: Login.ISubmitCodeSuccess): IterableIterator<Effect> {
-  yield put(Session.updateToken(action.payload));
+  yield put(Session.updateToken(action.payload.token, action.payload.apiServer, action.payload.wsServer));
   yield put(Session.updatePath("/"));
 }
 
@@ -30,8 +32,10 @@ function* updatePath(action: Session.IUpdatePath): IterableIterator<Effect> {
 }
 
 function* updateToken(action: Session.IUpdateToken): IterableIterator<Effect> {
-  localStorage.setItem(LS_AUTH_TOKEN_OFFSET, action.payload);
-  const init: http.IInitResponse = yield call(http.fetchInit, action.payload);
+  localStorage.setItem(LS_AUTH_TOKEN_OFFSET, action.payload.token);
+  localStorage.setItem(LS_API_SERVER_OFFSET, action.payload.apiServer);
+  localStorage.setItem(LS_WS_SERVER_OFFSET, action.payload.wsServer);
+  const init: http.IInitResponse = yield call(http.fetchInit, action.payload.apiServer, action.payload.token);
   yield put(Session.updateUser(Records.User.fromJS(init.user)));
   yield put(Session.updateGameVersionTypes(
     Immutable.List(

@@ -10,6 +10,6 @@ export default function* sagas(): IterableIterator<Effect[]> {
     fork(gameSagas),
     fork(loginSagas),
     fork(sessionSagas),
-    fork(wsSagas),
+    //fork(wsSagas),
   ];
 }

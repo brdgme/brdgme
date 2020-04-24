@@ -5,6 +5,8 @@ import * as Login from "./pages/login";
 
 export class State extends Immutable.Record({
   token: undefined as string | undefined,
+  apiServer: "",
+  wsServer: "",
   path: "",
   user: undefined as Records.User | undefined,
   gameVersionTypes: undefined as Immutable.List<Records.GameVersionType> | undefined,
@@ -18,11 +20,15 @@ export const UPDATE_GAME_VERSION_TYPES = "brdgme/session/UPDATE_GAME_VERSION_TYP
 
 export interface IUpdateToken {
   type: typeof UPDATE_TOKEN;
-  payload: string;
+  payload: {
+    token: string;
+    apiServer: string;
+    wsServer: string;
+  };
 }
-export const updateToken = (token: string): IUpdateToken => ({
+export const updateToken = (token: string, apiServer: string, wsServer: string): IUpdateToken => ({
   type: UPDATE_TOKEN,
-  payload: token,
+  payload: { token, apiServer, wsServer },
 });
 
 export interface IClearToken { type: typeof CLEAR_TOKEN; }
@@ -66,8 +72,14 @@ type Action
 
 export function reducer(state = new State(), action: Action): State {
   switch (action.type) {
-    case UPDATE_TOKEN: return state.set("token", action.payload);
-    case CLEAR_TOKEN: return state.remove("token");
+    case UPDATE_TOKEN: return state
+      .set("token", action.payload.token)
+      .set("apiServer", action.payload.apiServer)
+      .set("wsServer", action.payload.wsServer);
+    case CLEAR_TOKEN: return state
+      .remove("token")
+      .remove("apiServer")
+      .remove("wsServer");
     case UPDATE_PATH: return state.set("path", action.payload);
     case UPDATE_USER: return state.set("user", action.payload);
     case UPDATE_GAME_VERSION_TYPES:

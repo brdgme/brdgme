@@ -3,44 +3,44 @@ import * as superagent from "superagent";
 
 import * as Model from "./model";
 
-export async function submitLoginEmail(email: string): Promise<{}> {
+export async function submitLoginEmail(email: string, apiServer: string): Promise<{}> {
   return superagent
-    .post(`${process.env.API_SERVER}/auth`)
+    .post(`${apiServer}/auth`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send({ email });
 }
 
-export async function submitLoginCode(email: string, code: string): Promise<string> {
+export async function submitLoginCode(email: string, code: string, apiServer: string): Promise<string> {
   return superagent
-    .post(`${process.env.API_SERVER}/auth/confirm`)
+    .post(`${apiServer}/auth/confirm`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send({ email, code })
     .then((res) => res.body as string);
 }
 
-export async function fetchActiveGames(token: string): Promise<Model.IGameExtended[]> {
+export async function fetchActiveGames(apiServer: string, token: string): Promise<Model.IGameExtended[]> {
   return superagent
-    .get(`${process.env.API_SERVER}/game/my_active`)
+    .get(`${apiServer}/game/my_active`)
     .auth(token, "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .then((res) => res.body.games as Model.IGameExtended[]);
 }
 
-export async function fetchGame(id: string, token?: string): Promise<Model.IGameExtended> {
+export async function fetchGame(id: string, apiServer: string, token?: string): Promise<Model.IGameExtended> {
   return superagent
-    .get(`${process.env.API_SERVER}/game/${id}`)
+    .get(`${apiServer}/game/${id}`)
     .auth(token || "", "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .then((res) => res.body as Model.IGameExtended);
 }
 
-export async function submitGameCommand(id: string, command: string, token: string): Promise<Model.IGameExtended> {
+export async function submitGameCommand(id: string, command: string, apiServer: string, token: string): Promise<Model.IGameExtended> {
   return superagent
-    .post(`${process.env.API_SERVER}/game/${id}/command`)
+    .post(`${apiServer}/game/${id}/command`)
     .auth(token, "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -48,9 +48,9 @@ export async function submitGameCommand(id: string, command: string, token: stri
     .then((res) => res.body as Model.IGameExtended);
 }
 
-export async function submitMarkGameRead(id: string, token: string): Promise<Model.IGamePlayer> {
+export async function submitMarkGameRead(id: string, apiServer: string, token: string): Promise<Model.IGamePlayer> {
   return superagent
-    .post(`${process.env.API_SERVER}/game/${id}/mark_read`)
+    .post(`${apiServer}/game/${id}/mark_read`)
     .auth(token, "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -58,9 +58,9 @@ export async function submitMarkGameRead(id: string, token: string): Promise<Mod
     .then((res) => res.body as Model.IGamePlayer);
 }
 
-export async function submitGameConcede(id: string, token: string): Promise<Model.IGameExtended> {
+export async function submitGameConcede(id: string, apiServer: string, token: string): Promise<Model.IGameExtended> {
   return superagent
-    .post(`${process.env.API_SERVER}/game/${id}/concede`)
+    .post(`${apiServer}/game/${id}/concede`)
     .auth(token, "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -68,9 +68,9 @@ export async function submitGameConcede(id: string, token: string): Promise<Mode
     .then((res) => res.body as Model.IGameExtended);
 }
 
-export async function submitUndo(id: string, token: string): Promise<Model.IGameExtended> {
+export async function submitUndo(id: string, apiServer: string, token: string): Promise<Model.IGameExtended> {
   return superagent
-    .post(`${process.env.API_SERVER}/game/${id}/undo`)
+    .post(`${apiServer}/game/${id}/undo`)
     .auth(token, "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -78,9 +78,9 @@ export async function submitUndo(id: string, token: string): Promise<Model.IGame
     .then((res) => res.body as Model.IGameExtended);
 }
 
-export async function submitRestart(id: string, token: string): Promise<Model.IGameExtended> {
+export async function submitRestart(id: string, apiServer: string, token: string): Promise<Model.IGameExtended> {
   return superagent
-    .post(`${process.env.API_SERVER}/game/${id}/restart`)
+    .post(`${apiServer}/game/${id}/restart`)
     .auth(token, "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -94,9 +94,9 @@ export interface IInitResponse {
   user?: Model.IUser;
 }
 
-export async function fetchInit(token?: string): Promise<IInitResponse> {
+export async function fetchInit(apiServer: string, token?: string): Promise<IInitResponse> {
   let req = superagent
-    .get(`${process.env.API_SERVER}/init`)
+    .get(`${apiServer}/init`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json");
   if (token !== undefined) {
@@ -109,10 +109,11 @@ export async function submitNewGame(
   gameVersionId: string,
   userIds: Immutable.List<string>,
   emails: Immutable.List<string>,
+  apiServer: string,
   token: string,
 ): Promise<Model.IGameExtended> {
   return superagent
-    .post(`${process.env.API_SERVER}/game`)
+    .post(`${apiServer}/game`)
     .auth(token, "")
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")

@@ -10,10 +10,14 @@ export enum Mode {
 export class State extends Immutable.Record({
   code: "",
   email: "",
+  apiServer: "http://localhost:8081",
+  wsServer: "ws://localhost:8082",
   mode: Mode.EnteringEmail,
 }) {
   public code: string;
   public email: string;
+  public apiServer: string;
+  public wsServer: string;
   public mode: Mode;
 }
 
@@ -56,11 +60,14 @@ export const updateMode = (mode: Mode): IUpdateMode => ({
 
 export interface ISubmitEmail {
   type: typeof SUBMIT_EMAIL;
-  payload: string;
+  payload: {
+    email: string;
+    apiServer: string;
+  };
 }
-export const submitEmail = (email: string): ISubmitEmail => ({
+export const submitEmail = (email: string, apiServer: string): ISubmitEmail => ({
   type: SUBMIT_EMAIL,
-  payload: email,
+  payload: { email, apiServer },
 });
 
 export interface ISubmitEmailSuccess {
@@ -82,20 +89,26 @@ export interface ISubmitCode {
   payload: {
     email: string;
     code: string;
+    apiServer: string;
+    wsServer: string;
   };
 }
-export const submitCode = (email: string, code: string): ISubmitCode => ({
+export const submitCode = (email: string, code: string, apiServer: string, wsServer: string): ISubmitCode => ({
   type: SUBMIT_CODE,
-  payload: { email, code },
+  payload: { email, code, apiServer, wsServer },
 });
 
 export interface ISubmitCodeSuccess {
   type: typeof SUBMIT_CODE_SUCCESS;
-  payload: string;
+  payload: {
+    token: string;
+    apiServer: string;
+    wsServer: string;
+  };
 }
-export const submitCodeSuccess = (token: string): ISubmitCodeSuccess => ({
+export const submitCodeSuccess = (token: string, apiServer: string, wsServer: string): ISubmitCodeSuccess => ({
   type: SUBMIT_CODE_SUCCESS,
-  payload: token,
+  payload: { token, apiServer, wsServer },
 });
 
 export interface ISubmitCodeFail {

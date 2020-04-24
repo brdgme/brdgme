@@ -9,14 +9,16 @@ import { Spinner } from "./spinner";
 export interface IPropValues {
   email: string;
   code: string;
+  apiServer: string;
+  wsServer: string;
   mode: LoginReducer.Mode;
 }
 export interface IPropHandlers {
   onChangeEmail: (email: string) => void;
   onChangeCode: (code: string) => void;
   onChangeMode: (mode: LoginReducer.Mode) => void;
-  onSubmitEmail: (email: string) => void;
-  onSubmitCode: (email: string, code: string) => void;
+  onSubmitEmail: (email: string, apiServer: string) => void;
+  onSubmitCode: (email: string, code: string, apiServer: string, wsServer: string) => void;
 }
 export interface IProps extends IPropValues, IPropHandlers { }
 
@@ -92,12 +94,12 @@ export class Component extends React.PureComponent<IProps, {}> {
 
   private handleSubmitEmail(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    this.props.onSubmitEmail(this.props.email);
+    this.props.onSubmitEmail(this.props.email, this.props.apiServer);
   }
 
   private handleSubmitCode(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    this.props.onSubmitCode(this.props.email, this.props.code);
+    this.props.onSubmitCode(this.props.email, this.props.code, this.props.apiServer, this.props.wsServer);
   }
 
   private handleClickHaveCode(e: React.MouseEvent<HTMLAnchorElement>) {
@@ -127,6 +129,8 @@ function mapStateToProps(state: AppState): IPropValues {
     code: state.pages.login.code,
     email: state.pages.login.email,
     mode: state.pages.login.mode,
+    apiServer: state.pages.login.apiServer,
+    wsServer: state.pages.login.wsServer,
   };
 }
 
@@ -135,8 +139,8 @@ function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): IPropHandlers {
     onChangeCode: (code) => dispatch(LoginReducer.updateCode(code)),
     onChangeEmail: (email) => dispatch(LoginReducer.updateEmail(email)),
     onChangeMode: (mode) => dispatch(LoginReducer.updateMode(mode)),
-    onSubmitCode: (email, code) => dispatch(LoginReducer.submitCode(email, code)),
-    onSubmitEmail: (email) => dispatch(LoginReducer.submitEmail(email)),
+    onSubmitCode: (email, code) => dispatch(LoginReducer.submitCode(email, code, "http://localhost:8081", "ws://localhost:8082")),
+    onSubmitEmail: (email, apiServer) => dispatch(LoginReducer.submitEmail(email, apiServer)),
   };
 }
 

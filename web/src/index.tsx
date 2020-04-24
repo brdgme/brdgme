@@ -6,7 +6,7 @@ import createSagaMiddleware from "redux-saga";
 
 import * as Session from "./reducers/session";
 import sagas from "./sagas";
-import { LS_AUTH_TOKEN_OFFSET } from "./sagas/session";
+import { LS_AUTH_TOKEN_OFFSET, LS_API_SERVER_OFFSET, LS_WS_SERVER_OFFSET } from "./sagas/session";
 
 import "./style.less"; // tslint:disable-line
 
@@ -31,8 +31,10 @@ const store = Redux.createStore(
 sagaMiddleware.run(sagas);
 store.dispatch(Session.updatePath(location.hash.substr(1)));
 const token = localStorage.getItem(LS_AUTH_TOKEN_OFFSET);
-if (token !== null) {
-  store.dispatch(Session.updateToken(token));
+const apiServer = localStorage.getItem(LS_API_SERVER_OFFSET);
+const wsServer = localStorage.getItem(LS_WS_SERVER_OFFSET);
+if (token !== null && apiServer !== null && wsServer !== null) {
+  store.dispatch(Session.updateToken(token, apiServer, wsServer));
 }
 
 ReactDOM.render(
