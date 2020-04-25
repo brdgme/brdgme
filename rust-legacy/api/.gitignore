@@ -1,0 +1,5 @@
+target
+*.bk
+/deploy/brdgme-api
+/deploy/deploy.zip
+/openssl

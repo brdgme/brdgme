@@ -1,0 +1,32 @@
+[package]
+name = "brdgme-api"
+version = "0.1.0"
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+
+[dependencies]
+brdgme-cmd = { git = "https://github.com/brdgme/cmd.git" }
+brdgme-game = { git = "https://github.com/brdgme/game.git" }
+brdgme-color = { git = "https://github.com/brdgme/color.git" }
+brdgme-markup = { git = "https://github.com/brdgme/markup.git" }
+lazy_static = "0.2.6"
+failure = "0.1.1"
+r2d2 = "0.7.2"
+rand = "0.3.15"
+chrono = "0.4.0"
+lettre = "0.6.2"
+log = "0.3.7"
+env_logger = "0.4.2"
+uuid = { version = "0.5.0", features = ["serde", "v4"] }
+serde = "1.0.0"
+serde_derive = "1.0.0"
+serde_json = "1.0.0"
+rocket = "0.3.0"
+rocket_codegen = "0.3.0"
+rocket_contrib = { version = "0.3.0", features = ["json"] }
+email = "0.0.17"
+hyper = "0.10.7"
+hyper-rustls = "0.6.1"
+diesel = { version = "0.99.0", features = ["postgres", "uuid", "chrono", "large-tables"] }
+r2d2-diesel = "0.12.0"
+unicase = "1.4.0"
+redis = "0.8.0"

@@ -2,4 +2,4 @@
 set -e
 cd "$(dirname "$0")"
 go vet ./...
-cargo clippy -- -D warnings
+cd rust && cargo clippy -- -D warnings

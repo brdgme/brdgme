@@ -1,0 +1,13 @@
+DROP TABLE friends;
+DROP TABLE game_type_users;
+DROP TABLE game_log_targets;
+DROP TABLE game_logs;
+DROP TABLE game_players;
+DROP TABLE games;
+DROP TABLE game_versions;
+DROP TABLE game_types;
+DROP TABLE user_auth_tokens;
+DROP TABLE user_emails;
+DROP TABLE users;
+DROP TYPE color;
+DROP EXTENSION "uuid-ossp";

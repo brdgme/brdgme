@@ -1,0 +1,5 @@
+ALTER TABLE games
+DROP COLUMN IF EXISTS chat_id;
+DROP TABLE IF EXISTS chat_messages;
+DROP TABLE IF EXISTS chat_users;
+DROP TABLE IF EXISTS chats;

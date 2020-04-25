@@ -1,0 +1,16 @@
+sudo: required
+language: rust
+rust: nightly
+services:
+- postgresql
+env:
+- DATABASE_URL=postgres://postgres@localhost/brdgme_test
+script:
+- cargo install diesel_cli
+- diesel database setup
+- ./cargo.sh build --verbose --all
+- ./cargo.sh test --verbose
+- ./cargo.sh test --verbose -- --ignored
+- ./cargo.sh clean
+- rustup target install x86_64-unknown-linux-musl
+- ./cargo.sh build --release --target x86_64-unknown-linux-musl
