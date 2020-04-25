@@ -4,12 +4,12 @@ set -e
 SRC_DIR="$(readlink -e "$(dirname $0)")"
 cd "$SRC_DIR"
 
-if [ ! -d "openssl" ]
+if [ ! -d "openssl/openssl-1.1.0l" ]
 then
 	mkdir -p openssl
 	cd openssl
 	wget https://www.openssl.org/source/old/1.1.0/openssl-1.1.0l.tar.gz
-	tar zxvf openssl-1.1.0l.tar.gz
+	tar zxf openssl-1.1.0l.tar.gz
 	cd openssl-1.1.0l
 	./config
 	make
