@@ -3,7 +3,6 @@ use std::io::{BufWriter, Write};
 use std::process::{Command, Stdio};
 
 use failure::{format_err, Error};
-use serde_json;
 
 use crate::api::{Request, Response};
 use crate::requester::Requester;

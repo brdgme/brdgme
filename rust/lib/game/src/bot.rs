@@ -1,6 +1,5 @@
 use std::io::Write;
 
-use chrono;
 use rand::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 

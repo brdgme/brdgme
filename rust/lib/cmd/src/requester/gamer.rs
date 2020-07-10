@@ -4,11 +4,9 @@ use std::marker::PhantomData;
 use failure::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json;
 
 use brdgme_game::errors::GameError;
 use brdgme_game::{CommandResponse, Gamer, Renderer};
-use brdgme_markup;
 
 use crate::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
 use crate::requester::Requester;

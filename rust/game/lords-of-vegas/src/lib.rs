@@ -310,7 +310,6 @@ mod tests {
 
     #[test]
     fn json_works() {
-        use serde_json;
         let game = Game::start(3)
             .expect("could not create game with 3 players")
             .0;

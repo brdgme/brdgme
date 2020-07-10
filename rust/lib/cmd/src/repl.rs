@@ -4,10 +4,6 @@ use std::io::prelude::*;
 use std::io::{stdin, stdout};
 use std::iter::repeat;
 
-use serde_json;
-use term_size;
-
-use brdgme_color;
 use brdgme_color::{player_color, Style};
 use brdgme_game::command::doc;
 use brdgme_game::Status;

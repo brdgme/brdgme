@@ -2,12 +2,10 @@ use chrono::NaiveDateTime;
 use failure::{format_err, Error};
 use serde::Serialize;
 use serde_derive::{Deserialize, Serialize};
-use serde_json;
 
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::{Gamer, Log, Status};
-use brdgme_markup;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Request {

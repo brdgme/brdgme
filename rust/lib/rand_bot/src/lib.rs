@@ -36,7 +36,7 @@ pub fn spec_to_command(
         command::Spec::Enum { ref values, .. } => values
             .choose(rng)
             .map(|v| vec![v.to_owned()])
-            .unwrap_or_else(|| vec![]),
+            .unwrap_or_else(Vec::new),
         command::Spec::OneOf(ref options) => {
             spec_to_command(options.choose(rng).unwrap(), players, rng)
         }

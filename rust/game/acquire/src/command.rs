@@ -87,7 +87,7 @@ impl Game {
                         self.players
                             .get(player)
                             .map(|p| p.tiles.clone())
-                            .unwrap_or_else(|| vec![]),
+                            .unwrap_or_else(Vec::new),
                     ),
                 )),
             ),
