@@ -1,7 +1,7 @@
-use failure::Fail;
+use thiserror::Error;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum ColorError {
-    #[fail(display = "parse error: {}", message)]
+    #[error("parse error, {message}")]
     Parse { message: String },
 }

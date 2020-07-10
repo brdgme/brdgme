@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use failure::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -9,6 +8,7 @@ use brdgme_game::errors::GameError;
 use brdgme_game::{CommandResponse, Gamer, Renderer};
 
 use crate::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
+use crate::requester::error::RequestError;
 use crate::requester::Requester;
 
 pub struct GameRequester<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> {
@@ -20,12 +20,12 @@ pub fn new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> GameReq
 }
 
 impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for GameRequester<G> {
-    fn request(&mut self, req: &Request) -> Result<Response, Error> {
+    fn request(&mut self, req: &Request) -> Result<Response, RequestError> {
         match *req {
             Request::New { players } => Ok(handle_new::<G>(players)),
             Request::PlayerCounts => Ok(handle_player_counts::<G>()),
             Request::Status { ref game } => {
-                let game = serde_json::from_str(&game).unwrap();
+                let game = serde_json::from_str(&game)?;
                 Ok(handle_status::<G>(&game))
             }
             Request::Play {
@@ -34,15 +34,15 @@ impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for Game
                 ref names,
                 ref game,
             } => {
-                let mut game = serde_json::from_str(&game).unwrap();
+                let mut game = serde_json::from_str(&game)?;
                 Ok(handle_play::<G>(player, &command, &names, &mut game))
             }
             Request::PubRender { ref game } => {
-                let game = serde_json::from_str(&game).unwrap();
+                let game = serde_json::from_str(&game)?;
                 Ok(handle_pub_render::<G>(&game))
             }
             Request::PlayerRender { player, ref game } => {
-                let game = serde_json::from_str(&game).unwrap();
+                let game = serde_json::from_str(&game)?;
                 Ok(handle_player_render::<G>(player, &game))
             }
         }
