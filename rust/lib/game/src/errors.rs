@@ -1,14 +1,16 @@
 use thiserror::Error;
 
+use crate::command::parser::comma_list_or;
+
 #[derive(Debug, Error)]
 pub enum GameError {
-    #[error("invalid player count, expected {min}-{max}, got {given}")]
+    #[error("invalid player count, expected {}, got {given}", player_range_output(.min, .max))]
     PlayerCount {
         min: usize,
         max: usize,
         given: usize,
     },
-    #[error("{message}")]
+    #[error("invalid input, {message}")]
     InvalidInput { message: String },
     #[error("not your turn")]
     NotYourTurn,
@@ -16,7 +18,7 @@ pub enum GameError {
     Finished,
     #[error("internal error: {message}")]
     Internal { message: String },
-    #[error("{message:?}expected {expected:?}")]
+    #[error("{}expected {}", parse_error_message(.message), comma_list_or(.expected))]
     Parse {
         message: Option<String>,
         expected: Vec<String>,
@@ -35,5 +37,20 @@ impl GameError {
         GameError::Internal {
             message: message.into(),
         }
+    }
+}
+
+fn parse_error_message(message: &Option<String>) -> String {
+    message
+        .as_ref()
+        .map(|m| format!("{}, ", m))
+        .unwrap_or_else(|| "".to_string())
+}
+
+fn player_range_output(min: &usize, max: &usize) -> String {
+    if min == max {
+        format!("{}", min)
+    } else {
+        format!("{} to {}", min, max)
     }
 }
