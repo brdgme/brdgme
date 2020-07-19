@@ -121,7 +121,7 @@ function connect(addr: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(addr);
     socket.addEventListener("open", (event) => resolve(socket));
-    socket.addEventListener("error", (event) => reject(event));
+    socket.addEventListener("error", reject);
   });
 }
 

@@ -113,7 +113,7 @@ export const submit = (
   game_version_id: string,
   emails: Immutable.List<string>,
   user_ids: Immutable.List<string>,
-) => ({
+): ISubmit => ({
   type: SUBMIT,
   payload: { game_version_id, emails, user_ids },
 });
@@ -151,7 +151,7 @@ export type Action
   | ISubmitFail
   ;
 
-export function reducer(state = new State(), action: Action): State {
+export function reducer(state = State, action: Action): State {
   switch (action.type) {
     case UPDATE_MODE: return state.set("mode", action.payload);
     case UPDATE_GAME_VERSION_ID: return state.set(

@@ -1,10 +1,6 @@
 const webpack = require('webpack');
-const ExtractTextPlugin = require("extract-text-webpack-plugin");
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
-
-const extractLess = new ExtractTextPlugin({
-  filename: '[name].css'
-});
 
 module.exports = {
   entry: "./src/index.tsx",
@@ -30,7 +26,9 @@ module.exports = {
         process.env.WS_SERVER || 'ws://localhost:8081'
       ),
     }),
-    extractLess,
+    new MiniCssExtractPlugin({
+      filename: '[name].css'
+    }),
     new HtmlWebpackPlugin({
       title: 'brdg.me',
       hash: true,
@@ -47,15 +45,11 @@ module.exports = {
       // Less
       {
         test: /\.less$/,
-        use: extractLess.extract({
-          use: [{
-            loader: "css-loader"
-          }, {
-            loader: "less-loader"
-          }],
-          // use style-loader in development
-          fallback: "style-loader"
-        })
+        use: [
+          MiniCssExtractPlugin.loader,
+          "css-loader",
+          "less-loader",
+        ]
       }
     ]
   },

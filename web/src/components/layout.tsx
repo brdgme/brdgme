@@ -26,10 +26,16 @@ interface IPropHandlers {
   onCloseMenu: () => void;
 }
 
-interface IProps extends IPropValues, IPropHandlers { }
+const connector = ReactRedux.connect(mapState, mapDispatch);
+type PropsFromRedux = ReactRedux.ConnectedProps<typeof connector>;
 
-export class Component extends React.PureComponent<IProps, {}> {
-  public constructor(props: IProps, context?: any) {
+type Props = PropsFromRedux & {
+  children: React.ReactNode;
+  onSubMenuButtonClick?: () => void;
+};
+
+export class Component extends React.PureComponent<Props> {
+  public constructor(props: Props, context?: any) {
     super(props, context);
 
     this.handleToggleMenu = this.handleToggleMenu.bind(this);
@@ -221,20 +227,15 @@ export class Component extends React.PureComponent<IProps, {}> {
   }
 }
 
-interface IOwnProps {
-  onSubMenuButtonClick?: () => void;
-}
-
-function mapStateToProps(state: AppState, ownProps: IOwnProps): IPropValues {
+function mapState(state: AppState): IPropValues {
   return {
     user: state.session.user,
     activeGames: state.game.games.size > 0 && state.game.games.toList() || undefined,
     menuOpen: state.layout.menuOpen,
-    onSubMenuButtonClick: ownProps.onSubMenuButtonClick,
   };
 }
 
-function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): IPropHandlers {
+function mapDispatch(dispatch: Redux.Dispatch<Layout.Action | Session.Action>): IPropHandlers {
   return {
     onLogout: () => dispatch(Session.clearToken()),
     onRedirect: (path) => dispatch(Session.updatePath(path)),
@@ -243,7 +244,4 @@ function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): IPropHandlers {
   };
 }
 
-export const Container: React.ComponentClass<IOwnProps> = ReactRedux.connect(
-  mapStateToProps,
-  mapDispatchToProps,
-)(Component);
+export const Container = connector(Component);

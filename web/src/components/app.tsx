@@ -36,11 +36,11 @@ function mapStateToProps(state: AppState): IPropValues {
   };
 }
 
-function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): {} {
+function mapDispatchToProps(dispatch: Redux.Dispatch<Redux.Action<any>>): {} {
   return {};
 }
 
-export const Container: React.ComponentClass<{}> = ReactRedux.connect(
+export const Container = ReactRedux.connect(
   mapStateToProps,
   mapDispatchToProps,
 )(Component);

@@ -159,7 +159,7 @@ function mapDispatchToProps(dispatch: Redux.Dispatch<GameNew.Action>, ownProps: 
   };
 }
 
-export const Container: React.ComponentClass<{}> = ReactRedux.connect(
+export const Container = ReactRedux.connect(
   mapStateToProps,
   mapDispatchToProps,
 )(Component);

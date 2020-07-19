@@ -51,14 +51,14 @@ export interface ICommandBlur {
 }
 export const commandBlur = (): ICommandBlur => ({ type: COMMAND_BLUR });
 
-type Action
+export type Action
   = IUpdateCommand
   | IToggleSubMenu
   | ICommandFocus
   | ICommandBlur
   | Game.Action;
 
-export function reducer(state = new State(), action: Action): State {
+export function reducer(state = State, action: Action): State {
   switch (action.type) {
     case UPDATE_COMMAND: return state
       .set("command", action.payload.command)

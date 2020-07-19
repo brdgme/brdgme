@@ -25,15 +25,21 @@ export class State extends Immutable.Record({
   ws: new WS.State(),
 }) { }
 
-const childrenReducer = combineReducers<State>({
+const childrenReducer = combineReducers({
   game: Game.reducer,
   layout: Layout.reducer,
   pages: Pages.reducer,
   session: Session.reducer,
   ws: WS.reducer,
-});
+}, new State());
 
-export type Action = IClearPageState;
+export type Action
+  = IClearPageState
+  | Game.Action
+  | Layout.Action
+  | Session.Action
+  | WS.Action
+  ;
 
 export function reducer(state: State = new State(), action: Action): State {
   state = childrenReducer(state, action);

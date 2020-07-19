@@ -22,7 +22,7 @@ function mapStateToProps(state: AppState): {} {
   return {};
 }
 
-function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): {} {
+function mapDispatchToProps(dispatch: Redux.Dispatch<Redux.Action<any>>): {} {
   return {};
 }
 

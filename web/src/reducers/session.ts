@@ -56,7 +56,7 @@ export const updateGameVersionTypes =
     payload: gameVersionTypes,
   });
 
-type Action
+export type Action
   = IUpdateToken
   | IClearToken
   | IUpdatePath
@@ -64,7 +64,7 @@ type Action
   | IUpdateGameVersionTypes
   ;
 
-export function reducer(state = new State(), action: Action): State {
+export function reducer(state = State, action: Action): State {
   switch (action.type) {
     case UPDATE_TOKEN: return state.set("token", action.payload);
     case CLEAR_TOKEN: return state.remove("token");

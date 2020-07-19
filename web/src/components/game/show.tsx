@@ -72,7 +72,8 @@ export class Component extends React.PureComponent<IProps, {}> {
   public render(): JSX.Element {
     return (
       <Layout
-        onSubMenuButtonClick={this.handleSubMenuButtonClick}
+        // TODO uncomment and fix
+        // onSubMenuButtonClick={this.handleSubMenuButtonClick}
       >
         <div className="game-container">
           <div className="game-main">
@@ -620,7 +621,7 @@ function mapStateToProps(state: AppState, ownProps: IOwnProps): IPropValues {
   };
 }
 
-function mapDispatchToProps(dispatch: Redux.Dispatch<{}>, ownProps: IOwnProps): IPropHandlers {
+function mapDispatchToProps(dispatch: Redux.Dispatch<GameShow.Action | Session.Action | WS.Action>, ownProps: IOwnProps): IPropHandlers {
   return {
     onCommand: (gameId, command) => dispatch(Game.submitCommand(gameId, command)),
     onCommandFocus: () => dispatch(GameShow.commandFocus()),
@@ -639,7 +640,7 @@ function mapDispatchToProps(dispatch: Redux.Dispatch<{}>, ownProps: IOwnProps): 
   };
 }
 
-export const Container: React.ComponentClass<IOwnProps> = ReactRedux.connect(
+export const Container = ReactRedux.connect(
   mapStateToProps,
   mapDispatchToProps,
 )(Component);

@@ -130,7 +130,7 @@ function mapStateToProps(state: AppState): IPropValues {
   };
 }
 
-function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): IPropHandlers {
+function mapDispatchToProps(dispatch: Redux.Dispatch<LoginReducer.Action>): IPropHandlers {
   return {
     onChangeCode: (code) => dispatch(LoginReducer.updateCode(code)),
     onChangeEmail: (email) => dispatch(LoginReducer.updateEmail(email)),
@@ -140,7 +140,7 @@ function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): IPropHandlers {
   };
 }
 
-export const Container: React.ComponentClass<{}> = ReactRedux.connect(
+export const Container = ReactRedux.connect(
   mapStateToProps,
   mapDispatchToProps,
 )(Component);

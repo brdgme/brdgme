@@ -26,7 +26,7 @@ export type Action
   | ICloseMenu
   ;
 
-export function reducer(state = new State(), action: Action): State {
+export function reducer(state = State, action: Action): State {
   switch (action.type) {
     case TOGGLE_MENU: return state.update("menuOpen", (menuOpen) => !menuOpen);
     case CLOSE_MENU: return state.set("menuOpen", false);

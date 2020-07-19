@@ -117,7 +117,7 @@ export type Action
   | ISubmitCodeFail
   ;
 
-export function reducer(state = new State(), action: Action): State {
+export function reducer(state = State, action: Action): State {
   switch (action.type) {
     case UPDATE_EMAIL: return state.set("email", action.payload);
     case UPDATE_CODE: return state.set("code", action.payload);
