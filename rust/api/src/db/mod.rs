@@ -1,8 +1,9 @@
-use failure::{Error, ResultExt};
+use anyhow::{Context, Result};
+use lazy_static::lazy_static;
 
-pub mod query;
-pub mod models;
 pub mod color;
+pub mod models;
+pub mod query;
 pub mod schema;
 
 //use r2d2;
@@ -12,15 +13,15 @@ use std::env;
 
 lazy_static! {
     pub static ref CONN: Connections = Connections {
-        w: Connection{},
-        r: Connection{},
+        w: Connection {},
+        r: Connection {},
     };
 }
 
 pub struct Connection {}
 
 impl Connection {
-    pub fn get(&self) -> Result<Box<PgConnection>, Error> {
+    pub fn get(&self) -> Result<Box<PgConnection>> {
         use diesel::Connection;
         Ok(Box::new(
             PgConnection::establish(&env::var("DATABASE_URL").context("DATABASE_URL not set")?)

@@ -7,6 +7,6 @@ edition = "2018"
 [dependencies]
 brdgme_cmd = { path = "../cmd" }
 brdgme_game = { path = "../game" }
-chrono = { version = "0.4.6", features = ["serde"] }
-rand = "0.6.5"
-serde_json = "1.0.39"
+chrono = { version = "0.4.13", features = ["serde"] }
+rand = "0.7.3"
+serde_json = "1.0.57"

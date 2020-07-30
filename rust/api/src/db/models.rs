@@ -1,10 +1,8 @@
-use uuid::Uuid;
 use chrono::NaiveDateTime;
 use failure::{Error, ResultExt};
+use uuid::Uuid;
 
-use brdgme_markup as markup;
-
-use db::schema::*;
+use crate::db::schema::*;
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
 pub struct User {
@@ -351,12 +349,12 @@ pub struct RenderedGameLog {
 }
 
 impl GameLog {
-    fn render(&self, players: &[markup::Player]) -> Result<String, Error> {
-        let (parsed, _) = markup::from_string(&self.body).context("error parsing log body")?;
-        Ok(markup::html(&markup::transform(&parsed, players)))
+    fn render(&self, players: &[brdgme_markup::Player]) -> Result<String, Error> {
+        let (parsed, _) = brdgme_markup::from_string(&self.body).context("error parsing log body")?;
+        Ok(brdgme_markup::html(&brdgme_markup::transform(&parsed, players)))
     }
 
-    pub fn into_rendered(self, players: &[markup::Player]) -> Result<RenderedGameLog, Error> {
+    pub fn into_rendered(self, players: &[brdgme_markup::Player]) -> Result<RenderedGameLog, Error> {
         let html = self.render(players)?;
         Ok(RenderedGameLog {
             game_log: self,
@@ -496,10 +494,10 @@ pub struct NewChatUser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use diesel::{self, Connection};
+    use crate::db::color::Color;
+    use crate::db::{schema, CONN};
     use diesel::prelude::*;
-    use db::color::Color;
-    use db::{schema, CONN};
+    use diesel::{self, Connection};
 
     #[test]
     #[ignore]

@@ -6,18 +6,18 @@ use rand::{self, Rng};
 use chrono::{Duration, Utc};
 use failure::{Error, ResultExt};
 
-use brdgme_cmd::cli::CliLog;
+use crate::brdgme_cmd::api::CliLog;
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::usize::MAX as USIZE_MAX;
 use std::cmp::Ordering;
 
-use db::models::*;
-use db::color::{self, Color};
+use crate::db::models::*;
+use crate::db::color::{self, Color};
 
 #[cfg(test)]
-use db::CONN;
+use crate::db::CONN;
 
 pub mod chat;
 pub mod game;
@@ -29,7 +29,7 @@ lazy_static! {
 }
 
 pub fn create_user_by_name(name: &str, conn: &PgConnection) -> Result<User, Error> {
-    use db::schema::users;
+    use crate::db::schema::users;
     Ok(diesel::insert_into(users::table)
         .values(&NewUser {
             name: name,
@@ -42,7 +42,7 @@ pub fn create_user_by_name(name: &str, conn: &PgConnection) -> Result<User, Erro
 }
 
 pub fn find_user(find_id: &Uuid, conn: &PgConnection) -> Result<Option<User>, Error> {
-    use db::schema::users;
+    use crate::db::schema::users;
 
     Ok(users::table
         .find(find_id)
@@ -55,7 +55,7 @@ pub fn find_user_by_email(
     by_email: &str,
     conn: &PgConnection,
 ) -> Result<Option<(UserEmail, User)>, Error> {
-    use db::schema::{user_emails, users};
+    use crate::db::schema::{user_emails, users};
 
     Ok(user_emails::table
         .filter(user_emails::email.eq(by_email))
@@ -92,7 +92,7 @@ pub fn create_user_by_email(email: &str, conn: &PgConnection) -> Result<(UserEma
 }
 
 pub fn create_user_email(ue: &NewUserEmail, conn: &PgConnection) -> Result<UserEmail, Error> {
-    use db::schema::user_emails;
+    use crate::db::schema::user_emails;
     Ok(diesel::insert_into(user_emails::table)
         .values(ue)
         .get_result(conn)
@@ -112,7 +112,7 @@ pub fn generate_user_login_confirmation(
     user_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<String, Error> {
-    use db::schema::users;
+    use crate::db::schema::users;
 
     let code = rand_code();
     diesel::update(users::table.find(user_id))
@@ -160,7 +160,7 @@ pub fn user_login_confirm(
 }
 
 pub fn create_auth_token(for_user_id: &Uuid, conn: &PgConnection) -> Result<UserAuthToken, Error> {
-    use db::schema::user_auth_tokens;
+    use crate::db::schema::user_auth_tokens;
 
     Ok(diesel::insert_into(user_auth_tokens::table)
         .values(&NewUserAuthToken {
@@ -171,7 +171,7 @@ pub fn create_auth_token(for_user_id: &Uuid, conn: &PgConnection) -> Result<User
 }
 
 pub fn authenticate(search_token: &Uuid, conn: &PgConnection) -> Result<Option<User>, Error> {
-    use db::schema::{user_auth_tokens, users};
+    use crate::db::schema::{user_auth_tokens, users};
 
     let uat: UserAuthToken = match user_auth_tokens::table
         .find(search_token)
@@ -193,7 +193,7 @@ pub fn find_valid_user_auth_tokens_for_users(
     user_ids: &[Uuid],
     conn: &PgConnection,
 ) -> Result<Vec<UserAuthToken>, Error> {
-    use db::schema::user_auth_tokens;
+    use crate::db::schema::user_auth_tokens;
 
     Ok(user_auth_tokens::table
         .filter(user_auth_tokens::user_id.eq_any(user_ids))
@@ -203,7 +203,7 @@ pub fn find_valid_user_auth_tokens_for_users(
 }
 
 pub fn find_game(id: &Uuid, conn: &PgConnection) -> Result<Game, Error> {
-    use db::schema::games;
+    use crate::db::schema::games;
 
     Ok(games::table
         .find(id)
@@ -212,7 +212,7 @@ pub fn find_game(id: &Uuid, conn: &PgConnection) -> Result<Game, Error> {
 }
 
 pub fn find_game_version(id: &Uuid, conn: &PgConnection) -> Result<Option<GameVersion>, Error> {
-    use db::schema::game_versions;
+    use crate::db::schema::game_versions;
 
     Ok(game_versions::table
         .find(id)
@@ -225,7 +225,7 @@ pub fn find_game_with_version(
     id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Option<(Game, GameVersion)>, Error> {
-    use db::schema::{game_versions, games};
+    use crate::db::schema::{game_versions, games};
 
     Ok(games::table
         .find(id)
@@ -283,7 +283,7 @@ pub fn find_active_games_for_user(
     id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Vec<GameExtended>, Error> {
-    use db::schema::{game_players, game_types, game_versions, games};
+    use crate::db::schema::{game_players, game_types, game_versions, games};
 
     Ok(games::table
         .inner_join(game_players::table)
@@ -317,7 +317,7 @@ pub fn find_active_games_for_user(
 }
 
 pub fn find_game_extended(id: &Uuid, conn: &PgConnection) -> Result<GameExtended, Error> {
-    use db::schema::{game_types, game_versions, games};
+    use crate::db::schema::{game_types, game_versions, games};
 
     let (game, game_version) = games::table
         .find(id)
@@ -469,7 +469,7 @@ pub fn find_game_type_user_by_game_type_and_user(
     user_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Option<GameTypeUser>, Error> {
-    use db::schema::game_type_users;
+    use crate::db::schema::game_type_users;
     Ok(game_type_users::table
         .filter(game_type_users::game_type_id.eq(game_type_id))
         .filter(game_type_users::user_id.eq(user_id))
@@ -482,7 +482,7 @@ pub fn create_game_type_user(
     gtu: &NewGameTypeUser,
     conn: &PgConnection,
 ) -> Result<GameTypeUser, Error> {
-    use db::schema::game_type_users;
+    use crate::db::schema::game_type_users;
     Ok(diesel::insert_into(game_type_users::table)
         .values(gtu)
         .get_result(conn)
@@ -495,7 +495,7 @@ pub fn player_can_undo_set_undo_game_state(
     game_state: &str,
     conn: &PgConnection,
 ) -> Result<(), Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
     conn.transaction(|| {
         diesel::update(
             game_players::table
@@ -519,7 +519,7 @@ pub fn player_cannot_undo_set_undo_game_state(
     game_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Vec<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
     Ok(
         diesel::update(game_players::table.filter(game_players::game_id.eq(game_id)))
             .set(game_players::undo_game_state.eq(None::<String>))
@@ -596,7 +596,7 @@ pub fn update_game_is_finished(
     is_finished: bool,
     conn: &PgConnection,
 ) -> Result<Option<Game>, Error> {
-    use db::schema::games;
+    use crate::db::schema::games;
     Ok(diesel::update(games::table.find(game_id))
         .set(games::is_finished.eq(is_finished))
         .get_result(conn)
@@ -606,7 +606,7 @@ pub fn update_game_is_finished(
 
 pub fn find_player_count_by_game(game_id: &Uuid, conn: &PgConnection) -> Result<i64, Error> {
     use diesel::dsl::count;
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(game_players::table
         .select(count(game_players::id))
@@ -624,7 +624,7 @@ pub fn update_game(
     update: &NewGame,
     conn: &PgConnection,
 ) -> Result<Option<Game>, Error> {
-    use db::schema::games;
+    use crate::db::schema::games;
     Ok(diesel::update(games::table.find(update_id))
         .set((
             games::game_version_id.eq(update.game_version_id),
@@ -641,7 +641,7 @@ pub fn mark_game_read(
     user_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Option<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
     Ok(diesel::update(
         game_players::table
             .filter(game_players::game_id.eq(id))
@@ -657,7 +657,7 @@ pub fn update_game_whose_turn(
     positions: &[usize],
     conn: &PgConnection,
 ) -> Result<Vec<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(
         diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
@@ -687,7 +687,7 @@ pub fn update_game_points_for_position(
     points: f32,
     conn: &PgConnection,
 ) -> Result<Option<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(diesel::update(
         game_players::table
@@ -704,7 +704,7 @@ pub fn update_game_eliminated(
     positions: &[usize],
     conn: &PgConnection,
 ) -> Result<Vec<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(
         diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
@@ -824,7 +824,7 @@ fn update_game_type_user_rating(
     rating: i32,
     conn: &PgConnection,
 ) -> Result<Option<GameTypeUser>, Error> {
-    use db::schema::game_type_users;
+    use crate::db::schema::game_type_users;
 
     Ok(diesel::update(game_type_users::table.find(id))
         .set(game_type_users::rating.eq(rating))
@@ -856,7 +856,7 @@ pub fn update_game_player_result(
     rating_change: Option<i32>,
     conn: &PgConnection,
 ) -> Result<Option<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(diesel::update(
         game_players::table
@@ -876,7 +876,7 @@ pub fn update_game_is_read(
     game_player_ids: &[Uuid],
     conn: &PgConnection,
 ) -> Result<Vec<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(
         diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
@@ -928,7 +928,7 @@ pub fn find_game_players_by_game(
     game_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Vec<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(game_players::table
         .filter(game_players::game_id.eq(game_id))
@@ -942,7 +942,7 @@ pub fn find_game_player_by_user_and_game(
     game_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Option<GamePlayer>, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(game_players::table
         .filter(game_players::user_id.eq(user_id))
@@ -957,7 +957,7 @@ pub fn find_game_player_type_users_by_game(
     game_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Vec<GamePlayerTypeUser>, Error> {
-    use db::schema::{game_players, game_versions, games, users};
+    use crate::db::schema::{game_players, game_versions, games, users};
 
     let (game_version, _) = game_versions::table
         .inner_join(games::table)
@@ -987,7 +987,7 @@ pub fn find_game_players_with_user_by_game(
     game_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Vec<(GamePlayer, User)>, Error> {
-    use db::schema::{game_players, users};
+    use crate::db::schema::{game_players, users};
 
     Ok(game_players::table
         .filter(game_players::game_id.eq(game_id))
@@ -1007,7 +1007,7 @@ pub fn create_game_log(
     to: &[Uuid],
     conn: &PgConnection,
 ) -> Result<CreatedGameLog, Error> {
-    use db::schema::game_logs;
+    use crate::db::schema::game_logs;
     conn.transaction(|| {
         let created_log: GameLog = diesel::insert_into(game_logs::table)
             .values(log)
@@ -1044,7 +1044,7 @@ pub fn create_game_log_target(
     new_target: &NewGameLogTarget,
     conn: &PgConnection,
 ) -> Result<GameLogTarget, Error> {
-    use db::schema::game_log_targets;
+    use crate::db::schema::game_log_targets;
 
     Ok(diesel::insert_into(game_log_targets::table)
         .values(new_target)
@@ -1077,7 +1077,7 @@ pub fn find_user_with_primary_email(
     find_user_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Option<(UserEmail, User)>, Error> {
-    use db::schema::{user_emails, users};
+    use crate::db::schema::{user_emails, users};
 
     Ok(user_emails::table
         .filter(user_emails::user_id.eq(find_user_id))
@@ -1092,7 +1092,7 @@ pub fn find_user_with_primary_email_by_email(
     search_email: &str,
     conn: &PgConnection,
 ) -> Result<Option<(UserEmail, User)>, Error> {
-    use db::schema::{user_emails, users};
+    use crate::db::schema::{user_emails, users};
 
     Ok(match user_emails::table
         .filter(user_emails::email.eq(search_email))
@@ -1109,7 +1109,7 @@ pub fn find_user_with_primary_email_by_email(
 }
 
 pub fn create_game(new_game: &NewGame, conn: &PgConnection) -> Result<Game, Error> {
-    use db::schema::games;
+    use crate::db::schema::games;
 
     Ok(diesel::insert_into(games::table)
         .values(new_game)
@@ -1121,7 +1121,7 @@ pub fn create_game_version(
     new_game_version: &NewGameVersion,
     conn: &PgConnection,
 ) -> Result<GameVersion, Error> {
-    use db::schema::game_versions;
+    use crate::db::schema::game_versions;
 
     Ok(diesel::insert_into(game_versions::table)
         .values(new_game_version)
@@ -1133,7 +1133,7 @@ pub fn create_game_type(
     new_game_type: &NewGameType,
     conn: &PgConnection,
 ) -> Result<GameType, Error> {
-    use db::schema::game_types;
+    use crate::db::schema::game_types;
 
     Ok(diesel::insert_into(game_types::table)
         .values(new_game_type)
@@ -1158,7 +1158,7 @@ pub fn create_game_player(
     player: &NewGamePlayer,
     conn: &PgConnection,
 ) -> Result<GamePlayer, Error> {
-    use db::schema::game_players;
+    use crate::db::schema::game_players;
 
     Ok(diesel::insert_into(game_players::table)
         .values(player)
@@ -1167,7 +1167,7 @@ pub fn create_game_player(
 }
 
 pub fn public_game_versions(conn: &PgConnection) -> Result<Vec<GameVersionType>, Error> {
-    use db::schema::{game_types, game_versions};
+    use crate::db::schema::{game_types, game_versions};
 
     Ok(game_versions::table
         .filter(game_versions::is_public.eq(true))
@@ -1189,7 +1189,7 @@ pub fn find_public_game_logs_for_game(
     game_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Vec<GameLog>, Error> {
-    use db::schema::game_logs;
+    use crate::db::schema::game_logs;
 
     Ok(game_logs::table
         .filter(game_logs::game_id.eq(game_id))
@@ -1203,7 +1203,7 @@ pub fn find_game_logs_for_player(
     game_player_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Vec<GameLog>, Error> {
-    use db::schema::{game_log_targets, game_logs, game_players};
+    use crate::db::schema::{game_log_targets, game_logs, game_players};
 
     let game_player: GamePlayer = game_players::table.find(game_player_id).get_result(conn)?;
     Ok(game_logs::table
@@ -1291,7 +1291,7 @@ fn create_test_game(players: usize, conn: &PgConnection) -> GameExtended {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use db::color::Color;
+    use crate::db::color::Color;
 
     #[test]
     fn rand_code_works() {

@@ -1,7 +1,7 @@
 use std::fmt;
 
 use rand::prelude::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_markup::Node as N;
 

@@ -1,4 +1,3 @@
-use rand::{self, Rng};
 use failure::Error;
 
 use std::collections::{HashMap, HashSet};

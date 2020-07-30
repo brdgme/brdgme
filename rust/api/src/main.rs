@@ -1,53 +1,20 @@
 #![recursion_limit = "1024"]
 #![allow(dead_code)]
 #![allow(unused_variables)]
-#![feature(plugin)]
-#![plugin(rocket_codegen)]
-#![feature(custom_derive)]
 
-extern crate chrono;
-#[macro_use]
-extern crate diesel;
-extern crate email;
-extern crate env_logger;
-#[macro_use]
-extern crate failure;
-extern crate hyper;
-extern crate hyper_rustls;
-#[macro_use]
-extern crate lazy_static;
-extern crate lettre;
-#[macro_use]
-extern crate log;
-extern crate r2d2;
-extern crate r2d2_diesel;
-extern crate rand;
-extern crate redis;
-extern crate rocket;
-extern crate rocket_contrib;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate unicase;
-extern crate uuid;
-
-extern crate brdgme_cmd;
-extern crate brdgme_color;
-extern crate brdgme_game;
-extern crate brdgme_markup;
+use rocket::routes;
 
 mod config;
 mod controller;
 mod db;
-mod mail;
-mod game_client;
 mod errors;
-mod websocket;
+mod game_client;
+mod mail;
 mod render;
+mod websocket;
 
-use std::thread;
 use std::sync::Mutex;
+use std::thread;
 
 fn main() {
     let (pub_queue, pub_queue_tx) = websocket::PubQueue::new();

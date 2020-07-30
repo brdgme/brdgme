@@ -3,7 +3,7 @@ use std::fmt;
 use std::iter::{self, FromIterator};
 use std::ops::Range;
 
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_game::errors::GameError;
 use brdgme_markup::Node as N;

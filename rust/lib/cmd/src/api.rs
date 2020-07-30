@@ -1,6 +1,5 @@
 use chrono::NaiveDateTime;
-use serde::Serialize;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use brdgme_game::command::Spec as CommandSpec;

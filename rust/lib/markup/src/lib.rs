@@ -1,6 +1,8 @@
+use combine::Parser;
+
 pub use crate::ast::{row_pad, row_pad_cell, Align, Node, Row, TNode};
 pub use crate::error::MarkupError;
-use crate::parser::parse;
+use crate::parser::markup;
 pub use crate::transform::{from_lines, to_lines, transform, Player};
 
 mod ansi;
@@ -24,9 +26,7 @@ pub fn plain(input: &[TNode]) -> String {
 }
 
 pub fn from_string(input: &str) -> Result<(Vec<Node>, &str), MarkupError> {
-    parse(input)
-        .map(|(nodes, remaining)| (nodes, remaining.into_inner()))
-        .map_err(|_| MarkupError::Parse)
+    markup().parse(input).map_err(|_| MarkupError::Parse)
 }
 
 pub fn to_string(input: &[Node]) -> String {

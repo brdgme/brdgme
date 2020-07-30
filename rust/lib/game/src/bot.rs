@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use rand::prelude::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use ::log::trace;
 

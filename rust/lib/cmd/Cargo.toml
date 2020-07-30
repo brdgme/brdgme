@@ -8,9 +8,8 @@ edition = "2018"
 brdgme_color = { path = "../color" }
 brdgme_game = { path = "../game" }
 brdgme_markup = { path = "../markup" }
-chrono = { version = "0.4.6", features = ["serde"] }
+chrono = { version = "0.4.13", features = ["serde"] }
 thiserror = "1.0.20"
-serde = "1.0.92"
-serde_derive = "1.0.92"
-serde_json = "1.0.39"
-term_size = "0.3.1"
+serde = { version = "1.0.114", features = ["derive"] }
+serde_json = "1.0.57"
+term_size = "0.3.2"

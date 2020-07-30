@@ -1,17 +1,17 @@
 use diesel;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
-use uuid::Uuid;
 use failure::{Error, ResultExt};
+use uuid::Uuid;
 
-use db::models::*;
+use crate::db::models::*;
 
 pub fn update_chat_id(
     game_id: &Uuid,
     chat_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Option<Game>, Error> {
-    use db::schema::games;
+    use crate::db::schema::games;
 
     Ok(diesel::update(games::table.find(game_id))
         .set(games::chat_id.eq(chat_id))
@@ -25,7 +25,7 @@ pub fn update_restarted_game_id(
     restarted_game_id: &Uuid,
     conn: &PgConnection,
 ) -> Result<Option<Game>, Error> {
-    use db::schema::games;
+    use crate::db::schema::games;
 
     Ok(diesel::update(games::table.find(game_id))
         .set(games::restarted_game_id.eq(restarted_game_id))

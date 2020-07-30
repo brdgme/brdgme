@@ -1,8 +1,9 @@
-use mail::handle_inbound_email;
-use rocket::Data;
 use failure::Error;
+use rocket::{post, Data};
 
 use std::io::Read;
+
+use crate::mail::handle_inbound_email;
 
 #[post("/", data = "<data>")]
 pub fn index(data: Data) -> Result<(), Error> {

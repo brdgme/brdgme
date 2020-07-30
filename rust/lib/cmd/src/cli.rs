@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use crate::api::{Request, Response};
+pub use crate::api::{Request, Response};
 use crate::requester::Requester;
 
 pub fn cli<R: Requester, I: Read, O: Write>(requester: &mut R, input: I, output: &mut O) {

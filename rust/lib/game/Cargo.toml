@@ -7,11 +7,10 @@ edition = "2018"
 [dependencies]
 brdgme_color = { path = "../color" }
 brdgme_markup = { path = "../markup" }
-chrono = { version = "0.4.6", features = ["serde"] }
-combine = "2.3.1"
+chrono = { version = "0.4.13", features = ["serde"] }
+combine = "4.2.1"
 thiserror = "1.0.20"
-log = "0.4.6"
-rand = "0.6.5"
-serde = "1.0.92"
-serde_derive = "1.0.92"
-unicase = "2.4.0"
+log = "0.4.11"
+rand = "0.7.3"
+serde = { version = "1.0.114", features = ["derive"] }
+unicase = "2.6.0"

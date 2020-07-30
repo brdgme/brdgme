@@ -1,11 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_derive::{Deserialize, Serialize};
-
 use brdgme_markup::Node;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::command;
 use crate::errors::GameError;

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_color::*;
 use brdgme_markup::Node as N;
