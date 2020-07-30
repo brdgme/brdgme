@@ -383,15 +383,15 @@ mod tests {
     #[test]
     fn align_works() {
         assert_eq!(
-            transform(&vec![N::Align(A::Left, 10, vec![N::text("abc")])], &[]),
+            transform(&[N::Align(A::Left, 10, vec![N::text("abc")])], &[]),
             vec![TN::text("abc"), TN::text("       ")]
         );
         assert_eq!(
-            transform(&vec![N::Align(A::Center, 10, vec![N::text("abc")])], &[]),
+            transform(&[N::Align(A::Center, 10, vec![N::text("abc")])], &[]),
             vec![TN::text("   "), TN::text("abc"), TN::text("    ")]
         );
         assert_eq!(
-            transform(&vec![N::Align(A::Right, 10, vec![N::text("abc")])], &[]),
+            transform(&[N::Align(A::Right, 10, vec![N::text("abc")])], &[]),
             vec![TN::text("       "), TN::text("abc")]
         );
     }
@@ -401,7 +401,7 @@ mod tests {
         assert_eq!(
             "           blah     \nheadersome long text".to_string(),
             render(&transform(
-                &vec![N::Table(vec![
+                &[N::Table(vec![
                     vec![
                         (A::Left, vec![]),
                         (A::Center, vec![N::Fg(GREY.into(), vec![N::text("blah")])]),
@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(
             render(&transform(&t, &[])),
             render(&transform(
-                &vec![N::Table(vec![vec![(A::Left, t.clone())]])],
+                &[N::Table(vec![vec![(A::Left, t.clone())]])],
                 &[],
             ),)
         );
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn to_lines_works() {
         assert_eq!(
-            to_lines(&vec![TN::text("one\ntwo")]),
+            to_lines(&[TN::text("one\ntwo")]),
             vec![vec![TN::text("one")], vec![TN::text("two")]]
         );
     }
@@ -450,14 +450,14 @@ mod tests {
     fn slice_works() {
         assert_eq!(
             slice(
-                &vec![TN::Fg(RED, vec![TN::Bold(vec![TN::text("blah")])])],
+                &[TN::Fg(RED, vec![TN::Bold(vec![TN::text("blah")])])],
                 &(1..3),
             ),
             vec![TN::Fg(RED, vec![TN::Bold(vec![TN::text("la")])])]
         );
         assert_eq!(
             slice(
-                &vec![TN::Bold(vec![
+                &[TN::Bold(vec![
                     TN::Fg(RED, vec![TN::text("one"), TN::text("two")]),
                     TN::Bg(BLUE, vec![TN::text("three"), TN::text("four")]),
                     TN::Bg(GREY, vec![TN::text("five"), TN::text("six")]),

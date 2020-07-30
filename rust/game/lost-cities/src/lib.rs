@@ -783,13 +783,13 @@ mod test {
 
     #[test]
     fn score_works() {
-        assert_eq!(0, score(2, &vec![]));
-        assert_eq!(-17, score(2, &vec![(Expedition::Red, Value::N(3)).into()]));
+        assert_eq!(0, score(2, &[]));
+        assert_eq!(-17, score(2, &[(Expedition::Red, Value::N(3)).into()]));
         assert_eq!(
             -34,
             score(
                 2,
-                &vec![
+                &[
                     (Expedition::Red, Value::N(3)).into(),
                     (Expedition::Green, Value::N(3)).into(),
                 ],
@@ -799,7 +799,7 @@ mod test {
             -30,
             score(
                 2,
-                &vec![
+                &[
                     (Expedition::Red, Value::N(3)).into(),
                     (Expedition::Green, Value::N(3)).into(),
                     (Expedition::Green, Value::N(4)).into(),
@@ -810,7 +810,7 @@ mod test {
             -37,
             score(
                 2,
-                &vec![
+                &[
                     (Expedition::Green, Value::Investment).into(),
                     (Expedition::Red, Value::N(3)).into(),
                     (Expedition::Green, Value::N(4)).into(),
@@ -822,7 +822,7 @@ mod test {
             44,
             score(
                 2,
-                &vec![
+                &[
                     (Expedition::Green, Value::N(2)).into(),
                     (Expedition::Green, Value::N(3)).into(),
                     (Expedition::Green, Value::N(4)).into(),

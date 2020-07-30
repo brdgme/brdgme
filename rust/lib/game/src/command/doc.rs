@@ -33,17 +33,17 @@ impl Spec {
                 ref delim,
             } => doc_many(spec, min, max, delim, opts)
                 .map(|d| vec![d])
-                .unwrap_or_else(|| vec![]),
+                .unwrap_or_else(Vec::new),
             Spec::Opt(ref spec) => doc_opt(spec, opts)
                 .map(|d| vec![d])
-                .unwrap_or_else(|| vec![]),
+                .unwrap_or_else(Vec::new),
             Spec::Doc {
                 ref name,
                 ref desc,
                 ref spec,
             } => doc_doc(name, desc, spec)
                 .map(|d| vec![d])
-                .unwrap_or_else(|| vec![]),
+                .unwrap_or_else(Vec::new),
             Spec::Player => vec![(vec![Node::text("player")], None)],
             Spec::Space => vec![(vec![Node::text(" ")], None)],
         }

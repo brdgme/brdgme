@@ -1,24 +1,24 @@
-use std::fmt;
-
-use failure::Fail;
+use thiserror::Error;
 
 use crate::command::parser::comma_list_or;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum GameError {
+    #[error("invalid player count, expected {}, got {given}", player_range_output(.min, .max))]
     PlayerCount {
         min: usize,
         max: usize,
         given: usize,
     },
-    InvalidInput {
-        message: String,
-    },
+    #[error("invalid input, {message}")]
+    InvalidInput { message: String },
+    #[error("not your turn")]
     NotYourTurn,
+    #[error("game is already finished")]
     Finished,
-    Internal {
-        message: String,
-    },
+    #[error("internal error: {message}")]
+    Internal { message: String },
+    #[error("{}expected {}", parse_error_message(.message), comma_list_or(.expected))]
     Parse {
         message: Option<String>,
         expected: Vec<String>,
@@ -40,37 +40,14 @@ impl GameError {
     }
 }
 
-impl fmt::Display for GameError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            GameError::PlayerCount { given, min, max } => write!(
-                f,
-                "not for {} players, expected {}",
-                given,
-                player_range_output(min, max)
-            ),
-            GameError::InvalidInput { ref message } => write!(f, "{}", message),
-            GameError::NotYourTurn => write!(f, "not your turn"),
-            GameError::Finished => write!(f, "game is already finished"),
-            GameError::Internal { ref message } => write!(f, "internal error: {}", message),
-            GameError::Parse {
-                ref message,
-                ref expected,
-                ..
-            } => write!(
-                f,
-                "{}expected {}",
-                message
-                    .as_ref()
-                    .map(|m| format!("{}, ", m))
-                    .unwrap_or_else(|| "".to_string()),
-                comma_list_or(expected)
-            ),
-        }
-    }
+fn parse_error_message(message: &Option<String>) -> String {
+    message
+        .as_ref()
+        .map(|m| format!("{}, ", m))
+        .unwrap_or_else(|| "".to_string())
 }
 
-fn player_range_output(min: usize, max: usize) -> String {
+fn player_range_output(min: &usize, max: &usize) -> String {
     if min == max {
         format!("{}", min)
     } else {

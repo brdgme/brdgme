@@ -9,4 +9,4 @@ brdgme_color = { path = "../color" }
 combine = "2.3.1"
 serde = "1.0.92"
 serde_derive = "1.0.92"
-failure = "0.1.5"
+thiserror = "1.0.20"

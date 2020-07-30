@@ -1,26 +1,27 @@
-use failure::{bail, Error};
-
 use crate::api::{Request, Response};
 
+pub mod error;
 pub mod gamer;
 pub mod local;
 
+use crate::requester::error::{ParseArgsError, RequestError};
+
 pub trait Requester {
-    fn request(&mut self, req: &Request) -> Result<Response, Error>;
+    fn request(&mut self, req: &Request) -> Result<Response, RequestError>;
 }
 
-pub fn parse_args(args: &[String]) -> Result<impl Requester, Error> {
+pub fn parse_args(args: &[String]) -> Result<impl Requester, ParseArgsError> {
     let args_len = args.len();
     if args_len < 2 {
-        bail!("expected a type argument of 'local'");
+        return Err(ParseArgsError::TypeMissing);
     }
     Ok(match args[1].as_ref() {
         "local" => {
             if args_len < 3 {
-                bail!("expected a path argument");
+                return Err(ParseArgsError::PathMissing);
             }
             local::LocalRequester::new(&args[2])
         }
-        _ => panic!("expected one of 'local'"),
+        _ => return Err(ParseArgsError::TypeMissing),
     })
 }

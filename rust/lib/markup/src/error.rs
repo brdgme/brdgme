@@ -1,7 +1,7 @@
-use failure::Fail;
+use thiserror::Error;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum MarkupError {
-    #[fail(display = "failed to parse input")]
+    #[error("failed to parse input")]
     Parse,
 }

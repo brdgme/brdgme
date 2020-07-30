@@ -295,7 +295,7 @@ mod tests {
                     color: None,
                 },
             ],
-            TNode::bg_ranges(&vec![
+            TNode::bg_ranges(&[
                 TNode::text("blah blah"),
                 TNode::Bg(
                     RED,

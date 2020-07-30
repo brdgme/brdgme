@@ -18,3 +18,17 @@ matrix:
         - cd ../rust-legacy/api
         - ./cargo.sh build
         - ./cargo.sh test
+    - language: node_js
+      node_js:
+        - 14
+      install:
+        - cd web
+        - npm install
+        - cd ../websocket
+        - npm install
+      script:
+        - cd web
+        - node_modules/.bin/webpack
+        - npm test
+        - cd ../websocket
+        - npm run build

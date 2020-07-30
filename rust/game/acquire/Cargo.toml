@@ -10,7 +10,7 @@ brdgme_fuzz = { path = "../../tools/fuzz" }
 brdgme_color = { path = "../../lib/color" }
 brdgme_game = { path = "../../lib/game" }
 brdgme_markup = { path = "../../lib/markup" }
-failure = "0.1.5"
+thiserror = "1.0.20"
 rand = "0.6.5"
 serde = "1.0.92"
 serde_derive = "1.0.92"

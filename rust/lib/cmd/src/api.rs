@@ -1,13 +1,11 @@
 use chrono::NaiveDateTime;
-use failure::{format_err, Error};
 use serde::Serialize;
 use serde_derive::{Deserialize, Serialize};
-use serde_json;
+use thiserror::Error;
 
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::{Gamer, Log, Status};
-use brdgme_markup;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Request {
@@ -115,11 +113,19 @@ pub enum Response {
     },
 }
 
+#[derive(Error, Debug)]
+pub enum GameResponseError {
+    #[error("failed to encode game state")]
+    Encode {
+        #[from]
+        source: serde_json::Error,
+    },
+}
+
 impl GameResponse {
-    pub fn from_gamer<T: Gamer + Serialize>(gamer: &T) -> Result<GameResponse, Error> {
+    pub fn from_gamer<T: Gamer + Serialize>(gamer: &T) -> Result<GameResponse, GameResponseError> {
         Ok(GameResponse {
-            state: serde_json::to_string(gamer)
-                .map_err(|e| format_err!("unable to encode game state: {}", e))?,
+            state: serde_json::to_string(gamer)?,
             points: gamer.points(),
             status: gamer.status(),
         })
