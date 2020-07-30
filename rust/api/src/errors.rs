@@ -8,6 +8,7 @@ use rocket::http::{ContentType, Status};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 
+use log::error;
 use std::io::Cursor;
 
 #[derive(thiserror::Error, Debug)]

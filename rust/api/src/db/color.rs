@@ -1,9 +1,8 @@
-use failure::Error;
+use anyhow::{anyhow, Context, Error, Result};
+use rand::seq::SliceRandom;
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-
-use brdgme_color;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Color {
@@ -27,7 +26,7 @@ pub static COLORS: &'static [Color] = &[
 ];
 
 impl Color {
-    pub fn from_strings(from: &[String]) -> Result<Vec<Color>, Error> {
+    pub fn from_strings(from: &[String]) -> Result<Vec<Color>> {
         let mut cols = vec![];
         for s in from {
             cols.push(Color::from_str(s)?)
@@ -60,7 +59,8 @@ impl ToString for Color {
             Color::Purple => "Purple",
             Color::Brown => "Brown",
             Color::BlueGrey => "BlueGrey",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
@@ -76,7 +76,7 @@ impl FromStr for Color {
             "Purple" => Color::Purple,
             "Brown" => Color::Brown,
             "BlueGrey" => Color::BlueGrey,
-            _ => bail!("Invalid color"),
+            _ => return Err(anyhow!("Invalid color")),
         })
     }
 }
@@ -107,7 +107,7 @@ pub fn choose(available: &HashSet<&Color>, prefs: &[Vec<Color>]) -> Vec<Color> {
         .enumerate()
         .map(|(l, pref)| (l, pref.clone()))
         .collect::<Vec<LocPref>>();
-    rng.shuffle(&mut rem_prefs);
+    rem_prefs.shuffle(&mut rng);
     'outer: loop {
         'inner: for &(pos, ref pref) in &rem_prefs.clone() {
             if assigned.contains_key(&pos) || pref.is_empty() {

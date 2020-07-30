@@ -2,6 +2,10 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+// We need this for schema.rs to work properly
+#[macro_use]
+extern crate diesel;
+
 use rocket::routes;
 
 mod config;

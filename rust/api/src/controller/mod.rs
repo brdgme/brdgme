@@ -1,4 +1,4 @@
-use failure::{Error, ResultExt};
+use anyhow::{anyhow, Context, Error, Result};
 use hyper::Method;
 use rocket::http::hyper::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -9,6 +9,7 @@ use rocket::request::{FromParam, Request};
 use rocket::response::{self, Responder};
 use rocket::{get, options};
 use rocket_contrib::json::Json;
+use serde::Serialize;
 use uuid::Uuid;
 
 use std::path::PathBuf;
@@ -31,7 +32,7 @@ impl UuidParam {
 impl<'a> FromParam<'a> for UuidParam {
     type Error = Error;
 
-    fn from_param(param: &'a RawStr) -> Result<Self, Error> {
+    fn from_param(param: &'a RawStr) -> Result<Self> {
         Ok(UuidParam(
             Uuid::from_str(param).context("failed to parse UUID")?,
         ))
@@ -76,7 +77,7 @@ pub struct InitResponse {
 }
 
 #[get("/init")]
-pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, Error> {
+pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>> {
     let conn = &*CONN.r.get().context("unable to get connection")?;
 
     Ok(CORS(Json(InitResponse {

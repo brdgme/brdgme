@@ -1,5 +1,7 @@
+use anyhow::{anyhow, Context, Error, Result};
 use chrono::NaiveDateTime;
-use failure::{Error, ResultExt};
+use diesel::{Associations, Identifiable, Insertable, Queryable};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::db::schema::*;
@@ -350,11 +352,17 @@ pub struct RenderedGameLog {
 
 impl GameLog {
     fn render(&self, players: &[brdgme_markup::Player]) -> Result<String, Error> {
-        let (parsed, _) = brdgme_markup::from_string(&self.body).context("error parsing log body")?;
-        Ok(brdgme_markup::html(&brdgme_markup::transform(&parsed, players)))
+        let (parsed, _) =
+            brdgme_markup::from_string(&self.body).context("error parsing log body")?;
+        Ok(brdgme_markup::html(&brdgme_markup::transform(
+            &parsed, players,
+        )))
     }
 
-    pub fn into_rendered(self, players: &[brdgme_markup::Player]) -> Result<RenderedGameLog, Error> {
+    pub fn into_rendered(
+        self,
+        players: &[brdgme_markup::Player],
+    ) -> Result<RenderedGameLog, Error> {
         let html = self.render(players)?;
         Ok(RenderedGameLog {
             game_log: self,
