@@ -1,5 +1,5 @@
 use rand::prelude::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;

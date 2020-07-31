@@ -15,9 +15,6 @@ matrix:
         - cargo build
         - cargo test
         - cargo clippy -- -D warnings
-        - cd ../rust-legacy/api
-        - ./cargo.sh build
-        - ./cargo.sh test
     - language: node_js
       node_js:
         - 14

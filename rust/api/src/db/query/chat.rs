@@ -1,14 +1,14 @@
-use diesel;
+use anyhow::{Context, Result};
+use chrono::{NaiveDateTime, Utc};
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
+use serde::Serialize;
 use uuid::Uuid;
-use chrono::{NaiveDateTime, Utc};
-use failure::{Error, ResultExt};
 
-use db::models::*;
+use crate::db::models::*;
 
-pub fn create(conn: &PgConnection) -> Result<Chat, Error> {
-    use db::schema::chats;
+pub fn create(conn: &PgConnection) -> Result<Chat> {
+    use crate::db::schema::chats;
 
     Ok(diesel::insert_into(chats::table)
         .values(&NewChat { id: None })
@@ -16,28 +16,24 @@ pub fn create(conn: &PgConnection) -> Result<Chat, Error> {
         .context("error creating chat")?)
 }
 
-pub fn add_users(
-    chat_id: Uuid,
-    user_ids: &[Uuid],
-    conn: &PgConnection,
-) -> Result<Vec<ChatUser>, Error> {
-    use db::schema::chat_users;
+pub fn add_users(chat_id: Uuid, user_ids: &[Uuid], conn: &PgConnection) -> Result<Vec<ChatUser>> {
+    use crate::db::schema::chat_users;
 
     if user_ids.is_empty() {
         return Ok(vec![]);
     }
 
     Ok(diesel::insert_into(chat_users::table)
-        .values(&user_ids
-            .iter()
-            .map(|&user_id| {
-                NewChatUser {
+        .values(
+            &user_ids
+                .iter()
+                .map(|&user_id| NewChatUser {
                     chat_id,
                     user_id,
                     last_read_at: None,
-                }
-            })
-            .collect::<Vec<NewChatUser>>())
+                })
+                .collect::<Vec<NewChatUser>>(),
+        )
         .get_results(conn)
         .context("error adding users to chat")?)
 }
@@ -46,8 +42,8 @@ pub fn create_message(
     chat_user_id: Uuid,
     message: &str,
     conn: &PgConnection,
-) -> Result<ChatMessage, Error> {
-    use db::schema::chat_messages;
+) -> Result<ChatMessage> {
+    use crate::db::schema::chat_messages;
 
     Ok(diesel::insert_into(chat_messages::table)
         .values(&NewChatMessage {
@@ -58,8 +54,8 @@ pub fn create_message(
         .context("error creating chat message")?)
 }
 
-pub fn find(id: &Uuid, conn: &PgConnection) -> Result<Chat, Error> {
-    use db::schema::chats;
+pub fn find(id: &Uuid, conn: &PgConnection) -> Result<Chat> {
+    use crate::db::schema::chats;
 
     Ok(chats::table
         .find(id)
@@ -67,8 +63,8 @@ pub fn find(id: &Uuid, conn: &PgConnection) -> Result<Chat, Error> {
         .context("error finding chat")?)
 }
 
-pub fn find_users_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<ChatUser>, Error> {
-    use db::schema::chat_users;
+pub fn find_users_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<ChatUser>> {
+    use crate::db::schema::chat_users;
 
     Ok(chat_users::table
         .filter(chat_users::chat_id.eq(chat_id))
@@ -76,11 +72,8 @@ pub fn find_users_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<Cha
         .context("error finding chat users for chat")?)
 }
 
-pub fn find_messages_by_chat(
-    chat_id: &Uuid,
-    conn: &PgConnection,
-) -> Result<Vec<ChatMessage>, Error> {
-    use db::schema::{chat_messages, chat_users};
+pub fn find_messages_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<ChatMessage>> {
+    use crate::db::schema::{chat_messages, chat_users};
 
     Ok(chat_messages::table
         .inner_join(chat_users::table)
@@ -94,8 +87,8 @@ pub fn update_user_last_read_at(
     chat_user_id: &Uuid,
     at: NaiveDateTime,
     conn: &PgConnection,
-) -> Result<Option<ChatUser>, Error> {
-    use db::schema::chat_users;
+) -> Result<Option<ChatUser>> {
+    use crate::db::schema::chat_users;
 
     Ok(diesel::update(chat_users::table.find(chat_user_id))
         .set(chat_users::last_read_at.eq(at))
@@ -107,7 +100,7 @@ pub fn update_user_last_read_at(
 pub fn update_user_last_read_at_now(
     chat_user_id: &Uuid,
     conn: &PgConnection,
-) -> Result<Option<ChatUser>, Error> {
+) -> Result<Option<ChatUser>> {
     update_user_last_read_at(chat_user_id, Utc::now().naive_utc(), conn)
 }
 
@@ -135,7 +128,7 @@ pub struct PublicChatExtended {
     pub chat_messages: Vec<PublicChatMessage>,
 }
 
-pub fn find_extended(id: &Uuid, conn: &PgConnection) -> Result<ChatExtended, Error> {
+pub fn find_extended(id: &Uuid, conn: &PgConnection) -> Result<ChatExtended> {
     Ok(ChatExtended {
         chat: find(id, conn)?,
         chat_users: find_users_by_chat(id, conn)?,
@@ -145,8 +138,8 @@ pub fn find_extended(id: &Uuid, conn: &PgConnection) -> Result<ChatExtended, Err
 
 #[cfg(test)]
 mod tests {
-    use db::query::*;
     use super::*;
+    use crate::db::query::*;
 
     #[test]
     #[ignore]

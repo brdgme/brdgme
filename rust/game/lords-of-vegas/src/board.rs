@@ -4,7 +4,6 @@ use std::iter::FromIterator;
 
 use serde::de::{Error as DeError, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_derive::{Deserialize, Serialize};
 
 use brdgme_game::Log;
 use brdgme_markup::Node as N;

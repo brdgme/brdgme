@@ -3,7 +3,7 @@ use std::fmt;
 use std::iter::{self, FromIterator};
 use std::ops::Range;
 
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_game::errors::GameError;
 use brdgme_markup::Node as N;
@@ -49,10 +49,7 @@ impl Board {
     pub fn corp_size(&self, c: Corp) -> usize {
         self.0
             .iter()
-            .filter(|t| match **t {
-                Tile::Corp(tc) if tc == c => true,
-                _ => false,
-            })
+            .filter(|t| matches!(**t, Tile::Corp(tc) if tc == c))
             .count()
     }
 

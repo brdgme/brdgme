@@ -1,11 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_derive::{Deserialize, Serialize};
-
 use brdgme_markup::Node;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::command;
 use crate::errors::GameError;
@@ -66,10 +64,7 @@ pub trait Gamer: Sized {
     fn player_counts() -> Vec<usize>;
 
     fn is_finished(&self) -> bool {
-        match self.status() {
-            Status::Finished { .. } => true,
-            _ => false,
-        }
+        matches!(self.status(), Status::Finished { .. })
     }
 
     fn whose_turn(&self) -> Vec<usize> {

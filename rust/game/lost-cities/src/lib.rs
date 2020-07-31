@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::default::Default;
 
 use rand::prelude::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::command::Spec as CommandSpec;

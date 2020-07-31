@@ -8,7 +8,7 @@ edition = "2018"
 brdgme_cmd = { path = "../../lib/cmd" }
 brdgme_game = { path = "../../lib/game" }
 brdgme_rand_bot = { path = "../../lib/rand_bot" }
-failure = "0.1.5"
-num_cpus = "1.10.1"
-rand = "0.6.5"
-serde = "1.0.92"
+anyhow = "1.0.32"
+num_cpus = "1.13.0"
+rand = "0.7.3"
+serde = "1.0.114"

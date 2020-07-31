@@ -2,8 +2,7 @@ use std::fmt::Debug;
 use std::io::{Read, Write};
 
 use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_game::bot::Botter;
 use brdgme_game::command::Spec as CommandSpec;

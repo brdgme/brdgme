@@ -1,24 +1,26 @@
+use anyhow::{Context, Result};
+use lazy_static::lazy_static;
+use log::warn;
 use redis::{self, Client};
-use serde_json;
+use serde::Serialize;
 use uuid::Uuid;
-use failure::{Error, ResultExt};
 
-use brdgme_cmd::cli;
+use brdgme_cmd::api as brdgme_cmd_api;
 use brdgme_markup as markup;
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-use config::CONFIG;
-use db::models::*;
-use db::query::{CreatedGameLog, PublicGameExtended};
-use render;
-use controller::game::ShowResponse;
+use crate::config::CONFIG;
+use crate::controller::game::ShowResponse;
+use crate::db::models::*;
+use crate::db::query::{CreatedGameLog, PublicGameExtended};
+use crate::render;
 
 lazy_static! {
     pub static ref CLIENT: Client = connect().unwrap();
 }
 
-pub fn connect() -> Result<Client, Error> {
+pub fn connect() -> Result<Client> {
     Ok(Client::open(CONFIG.redis_url.as_ref()).context("unable to open client")?)
 }
 
@@ -46,8 +48,8 @@ impl PubQueue {
         (PubQueue { rx }, tx)
     }
 
-    pub fn run(&self) -> Result<(), Error> {
-        let conn = CLIENT
+    pub fn run(&self) -> Result<()> {
+        let mut conn = CLIENT
             .get_connection()
             .context("unable to get Redis connection from client")?;
         loop {
@@ -60,7 +62,7 @@ impl PubQueue {
                                 .arg(message.channel)
                                 .arg(payload)
                                 .ignore();
-                            if let Err(e) = pipe.query::<()>(&conn) {
+                            if let Err(e) = pipe.query::<()>(&mut conn) {
                                 warn!("error publishing message: {}", e);
                             }
                         }
@@ -77,7 +79,7 @@ fn created_logs_for_player(
     player_id: Option<Uuid>,
     logs: &[CreatedGameLog],
     players: &[markup::Player],
-) -> Result<Vec<RenderedGameLog>, Error> {
+) -> Result<Vec<RenderedGameLog>> {
     logs.iter()
         .filter(|gl| {
             gl.game_log.is_public
@@ -102,7 +104,7 @@ pub fn enqueue_game_restarted(
     restarted_game_id: &Uuid,
     user_auth_tokens: &[UserAuthToken],
     pub_queue_tx: &Sender<Message>,
-) -> Result<(), Error> {
+) -> Result<()> {
     let message = MessageKind::GameRestarted {
         game_id: game_id.to_owned(),
         restarted_game_id: restarted_game_id.to_owned(),
@@ -127,11 +129,11 @@ pub fn enqueue_game_restarted(
 pub fn enqueue_game_update<'a>(
     game: &'a PublicGameExtended,
     game_logs: &[CreatedGameLog],
-    public_render: &cli::PubRender,
-    player_renders: &[cli::PlayerRender],
+    public_render: &brdgme_cmd_api::PubRender,
+    player_renders: &[brdgme_cmd_api::PlayerRender],
     user_auth_tokens: &[UserAuthToken],
     pub_queue_tx: &Sender<Message>,
-) -> Result<(), Error> {
+) -> Result<()> {
     let markup_players = render::public_game_players_to_markup_players(&game.game_players)?;
     pub_queue_tx
         .send(Message {

@@ -1,6 +1,5 @@
 use chrono::NaiveDateTime;
-use serde::Serialize;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use brdgme_game::command::Spec as CommandSpec;
@@ -75,7 +74,6 @@ pub struct PlayerRender {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub enum Response {
     PlayerCounts {
         player_counts: Vec<usize>,

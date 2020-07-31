@@ -1,9 +1,10 @@
-use failure::{Error, ResultExt};
+use anyhow::{Context, Result};
+use lazy_static::lazy_static;
 
 use std::env;
 
 lazy_static! {
-  pub static ref CONFIG: Config = from_env().unwrap();
+    pub static ref CONFIG: Config = from_env().unwrap();
 }
 
 pub enum Mail {
@@ -16,7 +17,7 @@ pub enum Mail {
 }
 
 impl Mail {
-    fn smtp_from_env() -> Result<Self, Error> {
+    fn smtp_from_env() -> Result<Self> {
         Ok(Mail::Smtp {
             addr: env::var("SMTP_ADDR").context("SMTP_ADDR must be set")?,
             user: env::var("SMTP_USER").context("SMTP_USER must be set")?,
@@ -37,7 +38,7 @@ pub struct Config {
     pub mail_from: String,
 }
 
-fn from_env() -> Result<Config, Error> {
+fn from_env() -> Result<Config> {
     Ok(Config {
         database_url: env::var("DATABASE_URL").context("DATABASE_URL must be set")?,
         database_url_r: env::var("DATABASE_URL_R").ok(),

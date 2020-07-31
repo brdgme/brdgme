@@ -1,17 +1,17 @@
+use anyhow::{Context, Result};
 use email::MimeMessage;
-use lettre::email::SendableEmail;
-use lettre::transport::EmailTransport;
-use lettre::transport::file::FileEmailTransport;
-use lettre::transport::smtp::{SmtpTransportBuilder, SUBMISSION_PORT};
-use failure::{Error, ResultExt};
+use lettre::file::FileTransport;
+use lettre::smtp::authentication::Credentials;
+use lettre::smtp::SmtpClient;
+use lettre::{SendableEmail, Transport};
 
 use std::env::temp_dir;
 
-use config::{Mail, CONFIG};
+use crate::config::{Mail, CONFIG};
 
-pub fn send<T: SendableEmail>(email: T) -> Result<(), Error> {
+pub fn send(email: SendableEmail) -> Result<()> {
     match CONFIG.mail {
-        Mail::File => Ok(FileEmailTransport::new(temp_dir())
+        Mail::File => Ok(FileTransport::new(temp_dir())
             .send(email)
             .map(|_| ())
             .context("unable to send email")?),
@@ -19,11 +19,9 @@ pub fn send<T: SendableEmail>(email: T) -> Result<(), Error> {
             ref addr,
             ref user,
             ref pass,
-        } => Ok(SmtpTransportBuilder::new((addr.as_ref(), SUBMISSION_PORT))
-            .context("could not initialise SMTP transport")?
-            .encrypt()
-            .credentials(user, pass)
-            .build()
+        } => Ok(SmtpClient::new_simple(addr.as_ref())?
+            .credentials(Credentials::new(user.to_string(), pass.to_string()))
+            .transport()
             .send(email)
             .map(|_| ())
             .context("unable to send email")?),

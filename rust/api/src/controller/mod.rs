@@ -1,22 +1,21 @@
+use anyhow::Context;
+use rocket::http::RawStr;
 use rocket::request::{FromParam, Request};
 use rocket::response::{self, Responder};
-use rocket::http::RawStr;
-use rocket::http::hyper::header::{AccessControlAllowCredentials, AccessControlAllowHeaders,
-                                  AccessControlAllowMethods, AccessControlAllowOrigin};
-use rocket_contrib::Json;
-use hyper::method::Method;
+use rocket::{get, options};
+use rocket_contrib::json::Json;
+use serde::Serialize;
 use uuid::Uuid;
-use unicase::UniCase;
-use failure::{Error, ResultExt};
 
-use std::str::FromStr;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 pub mod auth;
 pub mod game;
 pub mod mail;
 
-use db::{models, query, CONN};
+use crate::db::{models, query, CONN};
+use crate::errors::ControllerError;
 
 pub struct UuidParam(Uuid);
 
@@ -27,11 +26,12 @@ impl UuidParam {
 }
 
 impl<'a> FromParam<'a> for UuidParam {
-    type Error = Error;
+    type Error = ControllerError;
 
-    fn from_param(param: &'a RawStr) -> Result<Self, Error> {
-        Ok(UuidParam(Uuid::from_str(param)
-            .context("failed to parse UUID")?))
+    fn from_param(param: &'a RawStr) -> Result<Self, ControllerError> {
+        Ok(UuidParam(
+            Uuid::from_str(param).context("failed to parse UUID")?,
+        ))
     }
 }
 
@@ -40,19 +40,16 @@ pub struct CORS<R>(R);
 impl<'r, R: Responder<'r>> Responder<'r> for CORS<R> {
     fn respond_to(self, request: &Request) -> response::Result<'r> {
         let mut response = self.0.respond_to(request)?;
-        response.set_header(AccessControlAllowOrigin::Any);
-        response.set_header(AccessControlAllowMethods(vec![
-            Method::Get,
-            Method::Post,
-            Method::Put,
-            Method::Delete,
-            Method::Options,
-        ]));
-        response.set_header(AccessControlAllowHeaders(vec![
-            UniCase("Authorization".to_string()),
-            UniCase("Content-Type".to_string()),
-        ]));
-        response.set_header(AccessControlAllowCredentials);
+        response.set_raw_header("Access-Control-Allow-Origin", "*");
+        response.set_raw_header(
+            "Access-Control-Allow-Methods",
+            "GET, POST, PUT, DELETE, OPTIONS",
+        );
+        response.set_raw_header(
+            "Access-Control-Allow-Headers",
+            "Authorization, Content-Type",
+        );
+        response.set_raw_header("Access-Control-Allow-Credentials", "true");
         Ok(response)
     }
 }
@@ -70,7 +67,7 @@ pub struct InitResponse {
 }
 
 #[get("/init")]
-pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, Error> {
+pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, ControllerError> {
     let conn = &*CONN.r.get().context("unable to get connection")?;
 
     Ok(CORS(Json(InitResponse {
@@ -79,7 +76,8 @@ pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, Erro
             .into_iter()
             .map(|gvt| gvt.into_public())
             .collect(),
-        games: user.as_ref()
+        games: user
+            .as_ref()
             .map(|u| {
                 query::find_active_games_for_user(&u.id, conn)
                     .unwrap()
@@ -91,7 +89,7 @@ pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, Erro
                     })
                     .collect()
             })
-            .unwrap_or_else(|| vec![]),
+            .unwrap_or_else(Vec::new),
         user: user.map(|u| u.into_public()),
     })))
 }

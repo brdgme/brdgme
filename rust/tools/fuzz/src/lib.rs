@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use failure::{bail, format_err, Error};
+use anyhow::{anyhow, Result};
 use rand::prelude::*;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -118,10 +118,15 @@ struct Fuzzer {
 }
 
 impl Fuzzer {
-    fn try_new(mut client: Box<dyn requester::Requester>) -> Result<Self, Error> {
+    fn try_new(mut client: Box<dyn requester::Requester>) -> Result<Self> {
         let player_counts = match client.request(&api::Request::PlayerCounts)? {
             api::Response::PlayerCounts { player_counts } => player_counts,
-            v => bail!("invalid response to player counts request: {:?}", v),
+            v => {
+                return Err(anyhow!(
+                    "invalid response to player counts request: {:?}",
+                    v
+                ))
+            }
         };
         Ok(Fuzzer {
             client,
@@ -132,10 +137,11 @@ impl Fuzzer {
         })
     }
 
-    fn new_game(&mut self) -> Result<(), Error> {
-        let players = *self.player_counts.choose(&mut self.rng).ok_or_else(|| {
-            format_err!("could not get player counts from {:?}", self.player_counts)
-        })?;
+    fn new_game(&mut self) -> Result<()> {
+        let players = *self
+            .player_counts
+            .choose(&mut self.rng)
+            .ok_or_else(|| anyhow!("could not get player counts from {:?}", self.player_counts))?;
         self.names = names(players);
         match self.client.request(&api::Request::New { players })? {
             api::Response::New {
@@ -149,11 +155,11 @@ impl Fuzzer {
                 });
                 Ok(())
             }
-            v => bail!("invalid response for new game: {:?}", v),
+            v => Err(anyhow!("invalid response for new game: {:?}", v)),
         }
     }
 
-    fn command(&mut self) -> Result<CommandResponse, Error> {
+    fn command(&mut self) -> Result<CommandResponse> {
         let (player, command_spec, state) = match self.game {
             Some(FuzzGame {
                 game:
@@ -165,18 +171,18 @@ impl Fuzzer {
                 ref player_renders,
             }) => {
                 let player = *whose_turn.choose(&mut self.rng).ok_or_else(|| {
-                    format_err!("unable to pick active turn player from: {:?}", whose_turn)
+                    anyhow!("unable to pick active turn player from: {:?}", whose_turn)
                 })?;
                 if player_renders.len() <= player {
-                    bail!(
+                    return Err(anyhow!(
                         "there is no player_render for player {} in {:?}",
                         player,
                         player_renders
-                    );
+                    ));
                 }
                 let player_render = &player_renders[player];
                 if player_render.command_spec.is_none() {
-                    bail!("player {}'s command_spec is None", player);
+                    return Err(anyhow!("player {}'s command_spec is None", player));
                 }
                 (player, player_render.clone().command_spec.unwrap(), state)
             }
@@ -187,8 +193,8 @@ impl Fuzzer {
                         ..
                     },
                 ..
-            }) => bail!("the game is already finished"),
-            None => bail!("there isn't a game"),
+            }) => return Err(anyhow!("the game is already finished")),
+            None => return Err(anyhow!("there isn't a game")),
         };
         exec_rand_command(
             &mut (*self.client),
@@ -278,7 +284,7 @@ fn exec_rand_command(
     names: Vec<String>,
     command_spec: &command::Spec,
     rng: &mut ThreadRng,
-) -> Result<CommandResponse, Error> {
+) -> Result<CommandResponse> {
     exec_command(
         client,
         rand_command(command_spec, &names, rng),
@@ -294,7 +300,7 @@ fn exec_command(
     game: String,
     player: usize,
     names: Vec<String>,
-) -> Result<CommandResponse, Error> {
+) -> Result<CommandResponse> {
     match client.request(&api::Request::Play {
         command,
         game,
@@ -316,7 +322,7 @@ fn exec_command(
             player_renders,
         })),
         api::Response::UserError { message } => Ok(CommandResponse::UserError { message }),
-        v => bail!(format!("{:?}", v)),
+        v => Err(anyhow!(format!("{:?}", v))),
     }
 }
 

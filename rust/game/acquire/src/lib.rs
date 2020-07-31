@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rand::prelude::*;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
@@ -196,14 +196,12 @@ impl Gamer for Game {
         let mut logs: Vec<Log> = vec![];
         if players == 2 {
             // 2 players gets a dummy shareholder, output details.
-            logs.push(Log::public(vec![N::Bold(vec![
-                N::text(
-                    "\
+            logs.push(Log::public(vec![N::Bold(vec![N::text(
+                "\
 2 player special rule: a dummy player is added for shareholder bonuses. A dice (D6) is rolled to \
 determine the dummy player's shares. The money for the dummy player is not tracked and it is not \
-able to win the game."
-                ),
-            ])]))
+able to win the game.",
+            )])]))
         }
         logs.push(Log::public(vec![
             N::Player(start_player),
@@ -327,10 +325,7 @@ struct BonusPlayers {
 
 impl Game {
     pub fn can_play(&self, player: usize) -> bool {
-        match self.phase {
-            Phase::Play(p) if p == player => true,
-            _ => false,
-        }
+        matches!(self.phase, Phase::Play(p) if p == player)
     }
 
     fn draw_replacement_tiles(&mut self, player: usize) -> Result<(Vec<Log>, bool), GameError> {
@@ -544,10 +539,7 @@ impl Game {
                 N::text(" founded "),
                 corp.render(),
             ])],
-            match self.phase {
-                Phase::Buy { .. } => true,
-                _ => false,
-            },
+            matches!(self.phase, Phase::Buy { .. }),
         ))
     }
 

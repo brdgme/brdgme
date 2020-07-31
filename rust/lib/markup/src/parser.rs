@@ -1,128 +1,142 @@
 use std::str::FromStr;
 
-use combine::char::{digit, letter, string};
-use combine::combinator::{choice, none_of, parser, r#try};
-use combine::primitives::{ParseResult, Stream};
+use combine::parser::char::{digit, letter, string};
+use combine::{attempt, choice, none_of, parser, ParseError, Stream};
 use combine::{many, many1, Parser};
 
 use brdgme_color::*;
 
 use crate::ast::{Align, Cell, Col, ColTrans, ColType, Node, Row};
 
-pub fn parse<I>(input: I) -> ParseResult<Vec<Node>, I>
+fn markup_<Input>() -> impl Parser<Input, Output = Vec<Node>>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    many(choice([
-        bold, fg, bg, c, player, canvas, table, text, align, indent,
-    ]))
-    .parse_stream(input)
+    many(choice((
+        attempt(bold()),
+        attempt(fg()),
+        attempt(bg()),
+        attempt(c()),
+        attempt(player()),
+        attempt(canvas()),
+        attempt(table()),
+        attempt(text()),
+        attempt(align()),
+        attempt(indent()),
+    )))
 }
 
-fn bold<I>(input: I) -> ParseResult<Node, I>
+parser! {
+    pub fn markup[Input]()(Input) -> Vec<Node>
+    where [Input: Stream<Token = char>]
+    {
+        markup_()
+    }
+}
+
+fn bold<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    (r#try(string("{{b}}")), parser(parse), string("{{/b}}"))
+    (attempt(string("{{b}}")), markup(), string("{{/b}}"))
         .map(|(_, children, _)| Node::Bold(children))
-        .parse_stream(input)
 }
 
-fn parse_u8<I>(input: I) -> ParseResult<u8, I>
+fn parse_u8<Input>() -> impl Parser<Input, Output = u8>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    many1(digit())
-        .and_then(|s: String| s.parse::<u8>())
-        .parse_stream(input)
+    many1(digit()).map(|s: String| s.parse::<u8>().unwrap())
 }
 
-fn parse_usize<I>(input: I) -> ParseResult<usize, I>
+fn parse_usize<Input>() -> impl Parser<Input, Output = usize>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    many1(digit())
-        .and_then(|s: String| s.parse::<usize>())
-        .parse_stream(input)
+    many1(digit()).map(|s: String| s.parse::<usize>().unwrap())
 }
 
-fn fg<I>(input: I) -> ParseResult<Node, I>
+fn fg<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{fg ")),
-        parser(col_args),
+        attempt(string("{{fg ")),
+        col_args(),
         string("}}"),
-        parser(parse),
+        markup(),
         string("{{/fg}}"),
     )
         .map(|(_, c, _, children, _)| Node::Fg(c, children))
-        .parse_stream(input)
 }
 
-fn bg<I>(input: I) -> ParseResult<Node, I>
+fn bg<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{bg ")),
-        parser(col_args),
+        attempt(string("{{bg ")),
+        col_args(),
         string("}}"),
-        parser(parse),
+        markup(),
         string("{{/bg}}"),
     )
         .map(|(_, c, _, children, _)| Node::Bg(c, children))
-        .parse_stream(input)
 }
 
-fn col_args<I>(input: I) -> ParseResult<Col, I>
+fn col_args<Input>() -> impl Parser<Input, Output = Col>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        choice([col_type_player, col_type_rgb]),
-        many(parser(col_trans)),
+        choice((col_type_player(), col_type_rgb())),
+        many(col_trans()),
     )
         .map(|(ct, trans)| Col {
             color: ct,
             transform: trans,
         })
-        .parse_stream(input)
 }
 
-fn col_type_player<I>(input: I) -> ParseResult<ColType, I>
+fn col_type_player<Input>() -> impl Parser<Input, Output = ColType>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    (r#try(string("player(")), parser(parse_usize), string(")"))
-        .map(|(_, p, _)| ColType::Player(p))
-        .parse_stream(input)
+    (attempt(string("player(")), parse_usize(), string(")")).map(|(_, p, _)| ColType::Player(p))
 }
 
-fn col_type_rgb<I>(input: I) -> ParseResult<ColType, I>
+fn col_type_rgb<Input>() -> impl Parser<Input, Output = ColType>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("rgb(")),
-        parser(parse_u8),
+        attempt(string("rgb(")),
+        parse_u8(),
         string(","),
-        parser(parse_u8),
+        parse_u8(),
         string(","),
-        parser(parse_u8),
+        parse_u8(),
         string(")"),
     )
         .map(|(_, r, _, g, _, b, _)| ColType::RGB(Color { r, g, b }))
-        .parse_stream(input)
 }
 
-fn col_trans<I>(input: I) -> ParseResult<ColTrans, I>
+fn col_trans<Input>() -> impl Parser<Input, Output = ColTrans>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string(" | ")),
+        attempt(string(" | ")),
         choice([string("mono"), string("inv")]),
     )
         .map(|(_, t)| match t {
@@ -130,20 +144,20 @@ where
             "inv" => ColTrans::Inv,
             _ => panic!("invalid transform"),
         })
-        .parse_stream(input)
 }
 
 /// Backwards compatibility with Go brdgme. Magenta is handled manually as it doesn't exist in this
 /// version of brdgme.
-fn c<I>(input: I) -> ParseResult<Node, I>
+fn c<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{c ")),
-        many1::<String, _>(letter()),
+        attempt(string("{{c ")),
+        many1::<String, _, _>(letter()),
         string("}}"),
-        parser(parse),
+        markup(),
         string("{{/c}}"),
     )
         .map(|(_, col, _, children, _)| {
@@ -158,154 +172,139 @@ where
                 children,
             )
         })
-        .parse_stream(input)
 }
 
-fn player<I>(input: I) -> ParseResult<Node, I>
+fn player<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    (
-        r#try(string("{{player ")),
-        parser(parse_usize),
-        string("}}"),
-    )
-        .map(|(_, p, _)| Node::Player(p))
-        .parse_stream(input)
+    (attempt(string("{{player ")), parse_usize(), string("}}")).map(|(_, p, _)| Node::Player(p))
 }
 
-fn canvas<I>(input: I) -> ParseResult<Node, I>
+fn canvas<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{canvas}}")),
-        many(parser(layer)),
+        attempt(string("{{canvas}}")),
+        many(layer()),
         string("{{/canvas}}"),
     )
         .map(|(_, layers, _)| Node::Canvas(layers))
-        .parse_stream(input)
 }
 
-fn layer<I>(input: I) -> ParseResult<(usize, usize, Vec<Node>), I>
+fn layer<Input>() -> impl Parser<Input, Output = (usize, usize, Vec<Node>)>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{layer ")),
-        parser(parse_usize),
+        attempt(string("{{layer ")),
+        parse_usize(),
         string(" "),
-        parser(parse_usize),
+        parse_usize(),
         string("}}"),
-        parser(parse),
+        markup(),
         string("{{/layer}}"),
     )
         .map(|(_, x, _, y, _, children, _)| (x, y, children))
-        .parse_stream(input)
 }
 
-fn table<I>(input: I) -> ParseResult<Node, I>
+fn table<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{table}}")),
-        many(parser(row)),
+        attempt(string("{{table}}")),
+        many(row()),
         string("{{/table}}"),
     )
         .map(|(_, rows, _)| Node::Table(rows))
-        .parse_stream(input)
 }
 
-fn row<I>(input: I) -> ParseResult<Row, I>
+fn row<Input>() -> impl Parser<Input, Output = Row>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    (
-        r#try(string("{{row}}")),
-        many(parser(cell)),
-        string("{{/row}}"),
-    )
-        .map(|(_, cells, _)| cells)
-        .parse_stream(input)
+    (attempt(string("{{row}}")), many(cell()), string("{{/row}}")).map(|(_, cells, _)| cells)
 }
 
-fn cell<I>(input: I) -> ParseResult<Cell, I>
+fn cell<Input>() -> impl Parser<Input, Output = Cell>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{cell ")),
-        parser(align_arg),
+        attempt(string("{{cell ")),
+        align_arg(),
         string("}}"),
-        parser(parse),
+        markup(),
         string("{{/cell}}"),
     )
         .map(|(_, al, _, children, _)| (al, children))
-        .parse_stream(input)
 }
 
-fn align<I>(input: I) -> ParseResult<Node, I>
+fn align<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{align ")),
-        parser(align_arg),
+        (string("{{align ")),
+        align_arg(),
         string(" "),
-        parser(parse_usize),
+        parse_usize(),
         string("}}"),
-        parser(parse),
+        markup(),
         string("{{/align}}"),
     )
         .map(|(_, al, _, width, _, children, _)| Node::Align(al, width, children))
-        .parse_stream(input)
 }
 
-fn indent<I>(input: I) -> ParseResult<Node, I>
+fn indent<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        r#try(string("{{indent ")),
-        parser(parse_usize),
+        attempt(string("{{indent ")),
+        parse_usize(),
         string("}}"),
-        parser(parse),
+        markup(),
         string("{{/indent}}"),
     )
         .map(|(_, width, _, children, _)| Node::Indent(width, children))
-        .parse_stream(input)
 }
 
-fn align_arg<I>(input: I) -> ParseResult<Align, I>
+fn align_arg<Input>() -> impl Parser<Input, Output = Align>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    choice([string("left"), string("center"), string("right")])
-        .map(|s| Align::from_str(s).unwrap())
-        .parse_stream(input)
+    choice([string("left"), string("center"), string("right")]).map(|s| Align::from_str(s).unwrap())
 }
 
-fn text<I>(input: I) -> ParseResult<Node, I>
+fn text<Input>() -> impl Parser<Input, Output = Node>
 where
-    I: Stream<Item = char>,
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    many1(none_of("{".chars()))
-        .map(Node::Text)
-        .parse_stream(input)
+    many1(none_of("{".chars())).map(Node::Text)
 }
 
 #[cfg(test)]
 mod tests {
-    use combine::parser;
-
     use crate::ast::{Align as A, Col, ColTrans, ColType, Node as N};
 
     use super::super::to_string;
     use super::*;
 
     #[test]
-    fn parse_works() {
+    fn markup_works() {
         let expected: Vec<Node> = vec![N::Canvas(vec![(
             5,
             10,
@@ -332,7 +331,7 @@ mod tests {
         )])];
         assert_eq!(
             Ok((expected.clone(), "")),
-            parser(parse).parse(to_string(&expected).as_ref())
+            markup().parse(to_string(&expected).as_ref())
         );
     }
 }
