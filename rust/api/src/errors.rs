@@ -1,9 +1,4 @@
 use diesel;
-use hyper::Method;
-use rocket::http::hyper::header::{
-    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-    ACCESS_CONTROL_ALLOW_ORIGIN, AUTHORIZATION, CONTENT_TYPE,
-};
 use rocket::http::{ContentType, Status};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
@@ -16,7 +11,7 @@ pub enum ControllerError {
     #[error("Bad request: {message}")]
     BadRequest { message: String },
     #[error("Internal error: {inner}")]
-    Internal { inner: Box<dyn std::error::Error> },
+    Internal { inner: anyhow::Error },
 }
 
 impl ControllerError {
@@ -27,40 +22,40 @@ impl ControllerError {
     }
 }
 
+impl From<anyhow::Error> for ControllerError {
+    fn from(error: anyhow::Error) -> Self {
+        ControllerError::Internal { inner: error }
+    }
+}
+
 impl From<diesel::result::Error> for ControllerError {
     fn from(error: diesel::result::Error) -> Self {
         ControllerError::Internal {
-            inner: Box::new(error),
+            inner: error.into(),
         }
     }
 }
 
-impl<'r, 'o: 'r> Responder<'r, 'o> for ControllerError {
-    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
+impl<'r> Responder<'r> for ControllerError {
+    fn respond_to(self, request: &Request) -> response::Result<'r> {
         match self {
             ControllerError::BadRequest { ref message } => Ok(Response::build()
                 .status(Status::BadRequest)
                 .header(ContentType::Plain)
-                .raw_header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .raw_header("Access-Control-Allow-Origin", "*")
                 .raw_header(
-                    ACCESS_CONTROL_ALLOW_METHODS,
-                    vec![
-                        Method::Get,
-                        Method::Post,
-                        Method::Put,
-                        Method::Delete,
-                        Method::Options,
-                    ],
+                    "Access-Control-Allow-Methods",
+                    "GET, POST, PUT, DELETE, OPTIONS",
                 )
                 .raw_header(
-                    ACCESS_CONTROL_ALLOW_HEADERS,
-                    vec![AUTHORIZATION, CONTENT_TYPE],
+                    "Access-Control-Allow-Headers",
+                    "Authorization, Content-Type",
                 )
-                .raw_header(ACCESS_CONTROL_ALLOW_CREDENTIALS, true)
+                .raw_header("Access-Control-Allow-Credentials", "true")
                 .sized_body(Cursor::new(message.to_owned()))
                 .finalize()),
             ControllerError::Internal { inner } => {
-                error!("{}, {}", inner.cause(), inner.backtrace());
+                error!("{}", inner);
                 Err(Status::InternalServerError)
             }
         }

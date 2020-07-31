@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use lazy_static::lazy_static;
 use log::warn;
 use redis::{self, Client};
@@ -50,7 +50,7 @@ impl PubQueue {
     }
 
     pub fn run(&self) -> Result<()> {
-        let conn = CLIENT
+        let mut conn = CLIENT
             .get_connection()
             .context("unable to get Redis connection from client")?;
         loop {

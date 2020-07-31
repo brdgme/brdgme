@@ -1,9 +1,4 @@
-use anyhow::{anyhow, Context, Error, Result};
-use hyper::Method;
-use rocket::http::hyper::header::{
-    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-    ACCESS_CONTROL_ALLOW_ORIGIN, AUTHORIZATION, CONTENT_TYPE,
-};
+use anyhow::Context;
 use rocket::http::RawStr;
 use rocket::request::{FromParam, Request};
 use rocket::response::{self, Responder};
@@ -20,6 +15,7 @@ pub mod game;
 pub mod mail;
 
 use crate::db::{models, query, CONN};
+use crate::errors::ControllerError;
 
 pub struct UuidParam(Uuid);
 
@@ -30,9 +26,9 @@ impl UuidParam {
 }
 
 impl<'a> FromParam<'a> for UuidParam {
-    type Error = Error;
+    type Error = ControllerError;
 
-    fn from_param(param: &'a RawStr) -> Result<Self> {
+    fn from_param(param: &'a RawStr) -> Result<Self, ControllerError> {
         Ok(UuidParam(
             Uuid::from_str(param).context("failed to parse UUID")?,
         ))
@@ -41,25 +37,19 @@ impl<'a> FromParam<'a> for UuidParam {
 
 pub struct CORS<R>(R);
 
-impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CORS<R> {
-    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
+impl<'r, R: Responder<'r>> Responder<'r> for CORS<R> {
+    fn respond_to(self, request: &Request) -> response::Result<'r> {
         let mut response = self.0.respond_to(request)?;
-        response.set_raw_header(ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        response.set_raw_header("Access-Control-Allow-Origin", "*");
         response.set_raw_header(
-            ACCESS_CONTROL_ALLOW_METHODS,
-            vec![
-                Method::Get,
-                Method::Post,
-                Method::Put,
-                Method::Delete,
-                Method::Options,
-            ],
+            "Access-Control-Allow-Methods",
+            "GET, POST, PUT, DELETE, OPTIONS",
         );
         response.set_raw_header(
-            ACCESS_CONTROL_ALLOW_HEADERS,
-            vec![AUTHORIZATION, CONTENT_TYPE],
+            "Access-Control-Allow-Headers",
+            "Authorization, Content-Type",
         );
-        response.set_raw_header(ACCESS_CONTROL_ALLOW_CREDENTIALS, true);
+        response.set_raw_header("Access-Control-Allow-Credentials", "true");
         Ok(response)
     }
 }
@@ -77,7 +67,7 @@ pub struct InitResponse {
 }
 
 #[get("/init")]
-pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>> {
+pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, ControllerError> {
     let conn = &*CONN.r.get().context("unable to get connection")?;
 
     Ok(CORS(Json(InitResponse {

@@ -20,13 +20,12 @@ env_logger = "0.7.1"
 uuid = { version = "0.6.5", features = ["serde", "v4"] }
 serde = { version = "1.0.114", features = ["derive"] }
 serde_json = "1.0.57"
-rocket = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "e531770989ebf9c83b9d815520a3a269337c7a88" }
-rocket_codegen = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "e531770989ebf9c83b9d815520a3a269337c7a88" }
-rocket_contrib = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "e531770989ebf9c83b9d815520a3a269337c7a88", features = ["json"] }
+rocket = "0.4.5"
+rocket_codegen = "0.4.5"
+rocket_contrib = "0.4.5"
 email = "0.0.21"
-hyper = "0.13.7"
-hyper-tls = "0.4.3"
-hyper-rustls = "0.21.0"
+hyper = "0.10.16"
+hyper-rustls = "0.6.1"
 diesel = { version = "1.4.5", features = ["postgres", "uuid", "chrono", "32-column-tables"] }
 r2d2-diesel = "1.0.0"
 unicase = "2.6.0"

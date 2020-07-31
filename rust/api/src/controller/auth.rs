@@ -67,28 +67,44 @@ pub fn confirm(data: Json<ConfirmRequest>) -> Result<CORS<Json<String>>> {
 impl<'a, 'r> FromRequest<'a, 'r> for User {
     type Error = Error;
 
-    fn from_request(request: &'a Request<'r>) -> Outcome<User, Self::Error, ()> {
+    fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Error> {
         let auth_header = match request.headers().get_one("Authorization") {
             Some(a) => a,
-            None => return Outcome::Failure(anyhow!("missing Authorization header")),
+            None => {
+                return Outcome::Failure((
+                    Status::Unauthorized,
+                    anyhow!("missing Authorization header"),
+                ))
+            }
         };
         if !auth_header.starts_with("Bearer ") {
-            return Outcome::Failure(anyhow!("expected Bearer Authorization header"));
+            return Outcome::Failure((
+                Status::Unauthorized,
+                anyhow!("expected Bearer Authorization header"),
+            ));
         }
         let token = match Uuid::parse_str(&auth_header[6..]) {
             Ok(uuid) => uuid,
             Err(_) => {
-                return Outcome::Failure(anyhow!("Authorization password not in valid format"))
+                return Outcome::Failure((
+                    Status::Unauthorized,
+                    anyhow!("Authorization password not in valid format"),
+                ))
             }
         };
         let conn = &*match CONN.r.get() {
             Ok(c) => c,
-            Err(_) => return Outcome::Failure(anyhow!("error getting connection")),
+            Err(_) => {
+                return Outcome::Failure((
+                    Status::InternalServerError,
+                    anyhow!("error getting connection"),
+                ))
+            }
         };
 
         match query::authenticate(&token, conn) {
             Ok(Some(user)) => Outcome::Success(user),
-            _ => Outcome::Failure(anyhow!("invalid credentials")),
+            _ => Outcome::Failure((Status::Unauthorized, anyhow!("invalid credentials"))),
         }
     }
 }

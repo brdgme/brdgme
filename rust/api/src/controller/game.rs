@@ -64,7 +64,7 @@ pub fn create(
                     public_render,
                     player_renders,
                 } => (game, logs, public_render, player_renders),
-                _ => return Err(anyhow!("expected cli::Response::New")),
+                _ => Err(anyhow!("expected cli::Response::New"))?,
             };
             let status = game_status_values(&game_info.status);
             let created_game = query::create_game_with_users(
@@ -266,7 +266,7 @@ pub fn command(
         let player: &models::GamePlayer = &players
             .iter()
             .find(|&&(ref p, _)| p.user_id == user.id)
-            .ok_or_else::<Error, _>(|| format_err!("you are not a player in this game"))?
+            .ok_or_else::<Error, _>(|| anyhow!("you are not a player in this game"))?
             .0;
         let position = player.position;
 
@@ -303,7 +303,7 @@ pub fn command(
                 cli::Response::UserError { message } => {
                     return Err(ControllerError::bad_request(message))
                 }
-                _ => Err(format_err!("invalid response type"))?,
+                _ => Err(anyhow!("invalid response type"))?,
             };
         if !remaining_command.trim().is_empty() {
             return Err(ControllerError::bad_request(format!(
@@ -352,7 +352,7 @@ pub fn command(
             &pub_queue_tx
                 .inner()
                 .lock()
-                .map_err::<Error, _>(|e| format_err!("unable to get lock on pub_queue_tx: {}", e))?
+                .map_err::<Error, _>(|e| anyhow!("unable to get lock on pub_queue_tx: {}", e))?
                 .clone(),
         )?;
         let gp = game_extended
@@ -414,7 +414,7 @@ pub fn undo(
                 public_render,
                 player_renders,
             } => (game, public_render, player_renders),
-            _ => Err(format_err!("invalid response type"))?,
+            _ => Err(anyhow!("invalid response type"))?,
         };
         let status = game_status_values(&game_response.status);
         let updated = query::update_game_command_success(
@@ -465,7 +465,7 @@ pub fn undo(
             &pub_queue_tx
                 .inner()
                 .lock()
-                .map_err::<Error, _>(|e| format_err!("unable to get lock on pub_queue_tx: {}", e))?
+                .map_err::<Error, _>(|e| anyhow!("unable to get lock on pub_queue_tx: {}", e))?
                 .clone(),
         )?;
         let gp = game_extended
@@ -547,7 +547,7 @@ pub fn concede(
                 player_renders,
                 ..
             } => (public_render, player_renders),
-            _ => return Err(format_err!("invalid response type").into()),
+            _ => return Err(anyhow!("invalid response type").into()),
         };
         let created_log = query::create_game_log(
             &models::NewGameLog {
@@ -579,7 +579,7 @@ pub fn concede(
             &pub_queue_tx
                 .inner()
                 .lock()
-                .map_err::<Error, _>(|e| format_err!("unable to get lock on pub_queue_tx: {}", e))?
+                .map_err::<Error, _>(|e| anyhow!("unable to get lock on pub_queue_tx: {}", e))?
                 .clone(),
         )?;
         let gp = game_extended
@@ -616,9 +616,9 @@ pub fn restart(
                 .game_players
                 .iter()
                 .find(|gptu| gptu.user.id == user.id)
-                .ok_or_else(|| format_err!("you are not a player in this game"))?;
+                .ok_or_else(|| anyhow!("you are not a player in this game"))?;
             if game_extended.game.restarted_game_id.is_some() {
-                bail!("game has already been restarted");
+                return Err(anyhow!("game has already been restarted"));
             }
             let opponent_ids: Vec<Uuid> = game_extended
                 .game_players
@@ -646,7 +646,7 @@ pub fn restart(
                     public_render,
                     player_renders,
                 } => (game, logs, public_render, player_renders),
-                _ => bail!("expected cli::Response::New"),
+                _ => return Err(anyhow!("expected cli::Response::New")),
             };
             let status = game_status_values(&game_info.status);
             let created_game = query::create_game_with_users(
@@ -692,7 +692,7 @@ pub fn restart(
     let tx = pub_queue_tx
         .inner()
         .lock()
-        .map_err::<Error, _>(|e| format_err!("unable to get lock on pub_queue_tx: {}", e))?
+        .map_err::<Error, _>(|e| anyhow!("unable to get lock on pub_queue_tx: {}", e))?
         .clone();
     let tokens = query::find_valid_user_auth_tokens_for_users(&user_ids, conn)?;
     websocket::enqueue_game_update(

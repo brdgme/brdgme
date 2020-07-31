@@ -1,6 +1,7 @@
 #![recursion_limit = "1024"]
 #![allow(dead_code)]
 #![allow(unused_variables)]
+#![feature(decl_macro)]
 
 // We need this for schema.rs to work properly
 #[macro_use]

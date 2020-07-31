@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{Context, Error, Result};
 use chrono::NaiveDateTime;
 use diesel::{Associations, Identifiable, Insertable, Queryable};
 use serde::{Deserialize, Serialize};
