@@ -14,16 +14,16 @@ where
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     many(choice((
-        bold(),
-        fg(),
-        bg(),
-        c(),
-        player(),
-        canvas(),
-        table(),
-        text(),
-        align(),
-        indent(),
+        attempt(bold()),
+        attempt(fg()),
+        attempt(bg()),
+        attempt(c()),
+        attempt(player()),
+        attempt(canvas()),
+        attempt(table()),
+        attempt(text()),
+        attempt(align()),
+        attempt(indent()),
     )))
 }
 
@@ -304,7 +304,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_works() {
+    fn markup_works() {
         let expected: Vec<Node> = vec![N::Canvas(vec![(
             5,
             10,
