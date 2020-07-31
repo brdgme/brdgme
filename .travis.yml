@@ -8,13 +8,10 @@ matrix:
         - go test ./...
         - go vet ./...
     - language: rust
-      before_script:
-        - rustup component add clippy
       script:
         - cd rust
         - cargo build
         - cargo test
-        - cargo clippy -- -D warnings
     - language: node_js
       node_js:
         - 14
