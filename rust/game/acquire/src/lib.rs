@@ -325,10 +325,7 @@ struct BonusPlayers {
 
 impl Game {
     pub fn can_play(&self, player: usize) -> bool {
-        match self.phase {
-            Phase::Play(p) if p == player => true,
-            _ => false,
-        }
+        matches!(self.phase, Phase::Play(p) if p == player)
     }
 
     fn draw_replacement_tiles(&mut self, player: usize) -> Result<(Vec<Log>, bool), GameError> {
@@ -542,10 +539,7 @@ impl Game {
                 N::text(" founded "),
                 corp.render(),
             ])],
-            match self.phase {
-                Phase::Buy { .. } => true,
-                _ => false,
-            },
+            matches!(self.phase, Phase::Buy { .. }),
         ))
     }
 

@@ -3,7 +3,6 @@ use lazy_static::lazy_static;
 use log::warn;
 use redis::{self, Client};
 use serde::Serialize;
-use serde_json;
 use uuid::Uuid;
 
 use brdgme_cmd::api as brdgme_cmd_api;

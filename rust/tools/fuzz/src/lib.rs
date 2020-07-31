@@ -155,7 +155,7 @@ impl Fuzzer {
                 });
                 Ok(())
             }
-            v => return Err(anyhow!("invalid response for new game: {:?}", v)),
+            v => Err(anyhow!("invalid response for new game: {:?}", v)),
         }
     }
 
@@ -322,7 +322,7 @@ fn exec_command(
             player_renders,
         })),
         api::Response::UserError { message } => Ok(CommandResponse::UserError { message }),
-        v => return Err(anyhow!(format!("{:?}", v))),
+        v => Err(anyhow!(format!("{:?}", v))),
     }
 }
 

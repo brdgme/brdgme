@@ -44,8 +44,8 @@ pub fn create(
 
     let (created_game, created_logs, public_render, player_renders, user_ids) = conn
         .transaction::<_, Error, _>(move || {
-            let opponent_ids = data.opponent_ids.unwrap_or_else(|| vec![]);
-            let opponent_emails = data.opponent_emails.unwrap_or_else(|| vec![]);
+            let opponent_ids = data.opponent_ids.unwrap_or_else(Vec::new);
+            let opponent_emails = data.opponent_emails.unwrap_or_else(Vec::new);
             let player_count: usize = 1 + opponent_ids.len() + opponent_emails.len();
             let game_version = query::find_game_version(&data.game_version_id, conn)
                 .context("error finding game version")?
@@ -64,7 +64,7 @@ pub fn create(
                     public_render,
                     player_renders,
                 } => (game, logs, public_render, player_renders),
-                _ => Err(anyhow!("expected cli::Response::New"))?,
+                _ => return Err(anyhow!("expected cli::Response::New")),
             };
             let status = game_status_values(&game_info.status);
             let created_game = query::create_game_with_users(
@@ -88,7 +88,7 @@ pub fn create(
             .context("unable to create game")?;
             let created_logs = query::create_game_logs_from_cli(&created_game.game.id, logs, conn)
                 .context("unable to create game logs")?;
-            let mut user_ids = opponent_ids.clone();
+            let mut user_ids = opponent_ids;
             user_ids.push(user_id);
             Ok((
                 created_game,
@@ -282,7 +282,7 @@ pub fn command(
                     player: position as usize,
                     game: game.game_state.clone(),
                     command: data.command.to_owned(),
-                    names: names,
+                    names,
                 },
             )? {
                 cli::Response::Play {
@@ -303,7 +303,7 @@ pub fn command(
                 cli::Response::UserError { message } => {
                     return Err(ControllerError::bad_request(message))
                 }
-                _ => Err(anyhow!("invalid response type"))?,
+                _ => return Err(anyhow!("invalid response type").into()),
             };
         if !remaining_command.trim().is_empty() {
             return Err(ControllerError::bad_request(format!(
@@ -405,16 +405,14 @@ pub fn undo(
 
         let (game_response, public_render, player_renders) = match game_client::request(
             &game_version.uri,
-            &cli::Request::Status {
-                game: undo_state.clone(),
-            },
+            &cli::Request::Status { game: undo_state },
         )? {
             cli::Response::Status {
                 game,
                 public_render,
                 player_renders,
             } => (game, public_render, player_renders),
-            _ => Err(anyhow!("invalid response type"))?,
+            _ => return Err(anyhow!("invalid response type").into()),
         };
         let status = game_status_values(&game_response.status);
         let updated = query::update_game_command_success(
@@ -539,7 +537,7 @@ pub fn concede(
         let (public_render, player_renders) = match game_client::request(
             &game_version.uri,
             &cli::Request::Status {
-                game: game.game_state.clone(),
+                game: game.game_state,
             },
         )? {
             cli::Response::Status {
@@ -675,7 +673,7 @@ pub fn restart(
                 &created_game.game.id,
                 conn,
             )?;
-            let mut user_ids = opponent_ids.clone();
+            let mut user_ids = opponent_ids;
             user_ids.push(user_id);
             Ok((
                 created_game,

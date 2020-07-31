@@ -1,4 +1,3 @@
-use diesel;
 use rocket::http::{ContentType, Status};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
@@ -10,28 +9,16 @@ use std::io::Cursor;
 pub enum ControllerError {
     #[error("Bad request: {message}")]
     BadRequest { message: String },
-    #[error("Internal error: {inner}")]
-    Internal { inner: anyhow::Error },
+    #[error("Database error")]
+    Database(#[from] diesel::result::Error),
+    #[error("Internal error")]
+    Internal(#[from] anyhow::Error),
 }
 
 impl ControllerError {
     pub fn bad_request<T: Into<String>>(message: T) -> Self {
         ControllerError::BadRequest {
             message: message.into(),
-        }
-    }
-}
-
-impl From<anyhow::Error> for ControllerError {
-    fn from(error: anyhow::Error) -> Self {
-        ControllerError::Internal { inner: error }
-    }
-}
-
-impl From<diesel::result::Error> for ControllerError {
-    fn from(error: diesel::result::Error) -> Self {
-        ControllerError::Internal {
-            inner: error.into(),
         }
     }
 }
@@ -54,8 +41,12 @@ impl<'r> Responder<'r> for ControllerError {
                 .raw_header("Access-Control-Allow-Credentials", "true")
                 .sized_body(Cursor::new(message.to_owned()))
                 .finalize()),
-            ControllerError::Internal { inner } => {
-                error!("{}", inner);
+            ControllerError::Internal(inner) => {
+                error!("Internal error: {}", inner);
+                Err(Status::InternalServerError)
+            }
+            ControllerError::Database(inner) => {
+                error!("Database error: {}", inner);
                 Err(Status::InternalServerError)
             }
         }

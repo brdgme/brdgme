@@ -15,7 +15,7 @@ pub enum Color {
     BlueGrey,
 }
 
-pub static COLORS: &'static [Color] = &[
+pub static COLORS: &[Color] = &[
     Color::Green,
     Color::Red,
     Color::Blue,

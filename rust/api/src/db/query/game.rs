@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use diesel;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use uuid::Uuid;

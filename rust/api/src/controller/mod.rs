@@ -89,7 +89,7 @@ pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, Cont
                     })
                     .collect()
             })
-            .unwrap_or_else(|| vec![]),
+            .unwrap_or_else(Vec::new),
         user: user.map(|u| u.into_public()),
     })))
 }

@@ -64,10 +64,7 @@ pub trait Gamer: Sized {
     fn player_counts() -> Vec<usize>;
 
     fn is_finished(&self) -> bool {
-        match self.status() {
-            Status::Finished { .. } => true,
-            _ => false,
-        }
+        matches!(self.status(), Status::Finished { .. })
     }
 
     fn whose_turn(&self) -> Vec<usize> {

@@ -1,6 +1,8 @@
 #![recursion_limit = "1024"]
 #![allow(dead_code)]
 #![allow(unused_variables)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::too_many_arguments)]
 #![feature(decl_macro)]
 
 // We need this for schema.rs to work properly

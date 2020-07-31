@@ -2,7 +2,6 @@ use anyhow::{anyhow, Context, Result};
 use hyper::net::HttpsConnector;
 use hyper::{self, Client as HttpClient};
 use hyper_rustls::TlsClient;
-use serde_json;
 
 use brdgme_game::command::Spec as CommandSpec;
 

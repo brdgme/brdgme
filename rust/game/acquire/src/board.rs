@@ -49,10 +49,7 @@ impl Board {
     pub fn corp_size(&self, c: Corp) -> usize {
         self.0
             .iter()
-            .filter(|t| match **t {
-                Tile::Corp(tc) if tc == c => true,
-                _ => false,
-            })
+            .filter(|t| matches!(**t, Tile::Corp(tc) if tc == c))
             .count()
     }
 

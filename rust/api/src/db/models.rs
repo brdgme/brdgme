@@ -366,7 +366,7 @@ impl GameLog {
         let html = self.render(players)?;
         Ok(RenderedGameLog {
             game_log: self,
-            html: html,
+            html,
         })
     }
 }

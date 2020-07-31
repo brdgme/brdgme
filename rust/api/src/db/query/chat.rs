@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use chrono::{NaiveDateTime, Utc};
-use diesel;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use serde::Serialize;

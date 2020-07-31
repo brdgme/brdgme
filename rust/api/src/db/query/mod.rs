@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Error, Result};
 use chrono::{Duration, Utc};
-use diesel;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use lazy_static::lazy_static;
@@ -35,7 +34,7 @@ pub fn create_user_by_name(name: &str, conn: &PgConnection) -> Result<User> {
     use crate::db::schema::users;
     Ok(diesel::insert_into(users::table)
         .values(&NewUser {
-            name: name,
+            name,
             pref_colors: &[],
             login_confirmation: None,
             login_confirmation_at: None,
@@ -82,7 +81,7 @@ pub fn create_user_by_email(email: &str, conn: &PgConnection) -> Result<(UserEma
         let ue = create_user_email(
             &NewUserEmail {
                 user_id: u.id,
-                email: email,
+                email,
                 is_primary: true,
             },
             conn,
@@ -303,8 +302,8 @@ pub fn find_active_games_for_user(id: &Uuid, conn: &PgConnection) -> Result<Vec<
             let players = find_game_player_type_users_by_game(&game.id, conn)?;
             Ok(GameExtended {
                 game: game.clone(),
-                game_type: game_type,
-                game_version: game_version,
+                game_type,
+                game_version,
                 game_players: players,
                 chat: game.chat_id.map(|chat_id| {
                     chat::find_extended(&chat_id, conn).expect("error finding chat for game")
@@ -327,8 +326,8 @@ pub fn find_game_extended(id: &Uuid, conn: &PgConnection) -> Result<GameExtended
     let players = find_game_player_type_users_by_game(&game.id, conn)?;
     Ok(GameExtended {
         game: game.clone(),
-        game_type: game_type,
-        game_version: game_version,
+        game_type,
+        game_version,
         game_players: players,
         chat: game.chat_id.map(|chat_id| {
             chat::find_extended(&chat_id, conn).expect("error finding chat for game")
@@ -437,8 +436,8 @@ pub fn create_game_with_users(opts: &CreateGameOpts, conn: &PgConnection) -> Res
         }
         Ok(CreatedGame {
             game: game_record,
-            opponents: opponents,
-            players: players,
+            opponents,
+            players,
         })
     })
 }
