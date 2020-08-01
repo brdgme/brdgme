@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
-go test ./...
-cd rust && cargo test
+DOCKER_BUILDKIT=1 docker build --target=rust-test .
+DOCKER_BUILDKIT=1 docker build --target=go-test .
+DOCKER_BUILDKIT=1 docker build --target=web-test .

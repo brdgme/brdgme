@@ -1,29 +1,5 @@
-dist: bionic
-matrix:
-  include:
-    - language: go
-      before_script:
-        - curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.17.1
-      script:
-        - go build ./...
-        - go test ./...
-        - go vet ./...
-    - language: rust
-      script:
-        - cd rust
-        - cargo build
-        - cargo test
-    - language: node_js
-      node_js:
-        - 12
-      install:
-        - cd web
-        - npm install
-        - cd ../websocket
-        - npm install
-      script:
-        - cd web
-        - node_modules/.bin/webpack
-        - npm test
-        - cd ../websocket
-        - npm run build
+services:
+  - docker
+script:
+  - ./build.sh
+  - ./test.sh
