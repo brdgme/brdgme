@@ -24,5 +24,14 @@ CMD ["./lost_cities_cli"]
 FROM golang:1.14.6 AS go-builder
 WORKDIR /src
 COPY brdgme-go brdgme-go
-Copy go.mod .
+COPY go.mod .
 RUN go build ./...
+
+FROM go-builder AS age_of_war-builder
+RUN go build -o age_of_war brdgme-go/age_of_war/cmd/*.go
+RUN pwd
+
+FROM alpine:3.12.0 AS age_of_war
+WORKDIR /root
+COPY --from=age_of_war-builder /src/age_of_war .
+CMD ["./age_of_war"]
