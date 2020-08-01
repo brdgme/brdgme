@@ -6,7 +6,7 @@ import * as Http from 'http';
 /**
  * Configuration environment variables and defaults.
  */
-const PORT = parseInt(process.env.PORT || '8081');
+const PORT = parseInt(process.env.PORT || '80');
 const REDIS_URL = process.env.REDIS_URL;
 const LOG_LEVEL = process.env.LOG_LEVEL as Log.LogLevelDesc;
 if (LOG_LEVEL !== undefined) {

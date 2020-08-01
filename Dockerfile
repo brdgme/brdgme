@@ -6,7 +6,7 @@ WORKDIR /src
 COPY rust .
 RUN RUSTFLAGS=-g cargo build --release
 
-FROM alpine:3.12.0 AS brdgme_api
+FROM alpine:3.12.0 AS api
 WORKDIR /root
 COPY --from=rust-builder /src/target/release/brdgme_api .
 CMD ["./brdgme_api"]
@@ -35,3 +35,20 @@ FROM alpine:3.12.0 AS age_of_war
 WORKDIR /root
 COPY --from=age_of_war-builder /src/age_of_war .
 CMD ["./age_of_war"]
+
+FROM node:14.7.0 AS web-builder
+WORKDIR /src
+COPY web .
+RUN npm install
+RUN node_modules/.bin/webpack -p
+
+FROM nginx:1.19.1 AS web
+COPY --from=web-builder /src/dist /usr/share/nginx/html
+
+FROM node:14.7.0 AS websocket
+EXPOSE 80
+WORKDIR /src
+COPY websocket .
+RUN npm install
+RUN node_modules/.bin/tsc
+CMD ["node", "dist/index.js"]

@@ -26,7 +26,7 @@
     "@types/loglevel": "^1.5.3",
     "@types/redis": "^0.12.36",
     "@types/ws": "0.0.40",
-    "bufferutil": "^3.0.5",
+    "bufferutil": "^4.0.1",
     "loglevel": "^1.6.1",
     "redis": "^2.8.0",
     "typescript": "^2.9.2",
