@@ -1,0 +1,28 @@
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: brdgme-ingress
+spec:
+  rules:
+  - host: ws.brdg.me
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: websocket
+          servicePort: 80
+  - host: api.brdg.me
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: api
+          servicePort: 8000
+  - host: brdg.me
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: web
+          servicePort: 80

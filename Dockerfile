@@ -11,17 +11,17 @@ RUN cargo test
 FROM rust-src AS rust-builder
 RUN RUSTFLAGS=-g cargo build --release
 
-FROM alpine:3.12.0 AS api
+FROM rust:1.45.1 AS api
 WORKDIR /root
 COPY --from=rust-builder /src/target/release/brdgme_api .
 CMD ["./brdgme_api"]
 
-FROM alpine:3.12.0 AS acquire
+FROM rust:1.45.1 AS acquire
 WORKDIR /root
 COPY --from=rust-builder /src/target/release/acquire_cli .
 CMD ["./acquire_cli"]
 
-FROM alpine:3.12.0 AS lost_cities
+FROM rust:1.45.1 AS lost_cities
 WORKDIR /root
 COPY --from=rust-builder /src/target/release/lost_cities_cli .
 CMD ["./lost_cities_cli"]

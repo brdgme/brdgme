@@ -7,7 +7,7 @@ import * as Http from 'http';
  * Configuration environment variables and defaults.
  */
 const PORT = parseInt(process.env.PORT || '80');
-const REDIS_URL = process.env.REDIS_URL;
+const REDIS_URL = process.env.REDIS_URL || 'redis://redis';
 const LOG_LEVEL = process.env.LOG_LEVEL as Log.LogLevelDesc;
 if (LOG_LEVEL !== undefined) {
   Log.setLevel(LOG_LEVEL);
@@ -17,12 +17,7 @@ if (LOG_LEVEL !== undefined) {
  * Connect to Redis, do this first as if we can't connect there's no point
  * continuing.
  */
-let redis: Redis.RedisClient;
-if (REDIS_URL) {
-  redis = Redis.createClient(REDIS_URL);
-} else {
-  redis = Redis.createClient();
-}
+let redis = Redis.createClient(REDIS_URL);
 
 /**
  * `hasPrefix` checks whether the prefix `p` is present in the string `str`.

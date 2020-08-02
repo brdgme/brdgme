@@ -40,9 +40,9 @@ pub struct Config {
 
 fn from_env() -> Result<Config> {
     Ok(Config {
-        database_url: env::var("DATABASE_URL").context("DATABASE_URL must be set")?,
+        database_url: env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://postgres/brdgme".to_string()),
         database_url_r: env::var("DATABASE_URL_R").ok(),
-        redis_url: env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_string()),
+        redis_url: env::var("REDIS_URL").unwrap_or_else(|_| "redis://redis".to_string()),
         mail: Mail::from_env(),
         mail_from: env::var("MAIL_FROM").unwrap_or_else(|_| "play@brdg.me".to_string()),
     })
