@@ -1,0 +1,23 @@
+apiVersion: skaffold/v2beta5
+kind: Config
+metadata:
+  name: brdgme
+build:
+  local:
+    useBuildkit: true
+  artifacts:
+  - image: brdgme/api
+    docker:
+      target: api
+  - image: brdgme/web
+    docker:
+      target: web
+  - image: brdgme/websocket
+    docker:
+      target: websocket
+deploy:
+  kubectl:
+    manifests:
+    - k8s/api.yaml
+    - k8s/web.yaml
+    - k8s/websocket.yaml
