@@ -1,0 +1,33 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: age-of-war-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: age-of-war-1
+  template:
+    metadata:
+      labels:
+        app: age-of-war-1
+    spec:
+      containers:
+        - name: age-of-war
+          image: brdgme/age-of-war
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: age-of-war-1
+  labels:
+    app: age-of-war-1
+spec:
+  type: NodePort
+  ports:
+   - port: 80
+  selector:
+   app: age-of-war-1

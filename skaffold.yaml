@@ -5,6 +5,7 @@ metadata:
 build:
   local:
     useBuildkit: true
+    concurrency: 0
   artifacts:
   - image: brdgme/api
     docker:
@@ -15,9 +16,21 @@ build:
   - image: brdgme/websocket
     docker:
       target: websocket
+  - image: brdgme/acquire
+    docker:
+      target: acquire
+  - image: brdgme/lost-cities
+    docker:
+      target: lost-cities
+  - image: brdgme/age-of-war
+    docker:
+      target: age-of-war
 deploy:
   kubectl:
     manifests:
     - k8s/api.yaml
     - k8s/web.yaml
     - k8s/websocket.yaml
+    - k8s/game/acquire-1.yaml
+    - k8s/game/lost-cities-2.yaml
+    - k8s/game/age-of-war-1.yaml

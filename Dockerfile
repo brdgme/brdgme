@@ -16,15 +16,16 @@ WORKDIR /root
 COPY --from=rust-builder /src/target/release/brdgme_api .
 CMD ["./brdgme_api"]
 
-FROM rust:1.45.1 AS acquire
+FROM rust:1.45.1 AS script-httpd
 WORKDIR /root
-COPY --from=rust-builder /src/target/release/acquire_cli .
-CMD ["./acquire_cli"]
+COPY --from=rust-builder /src/target/release/script_httpd .
+CMD ["./script_httpd", "./script"]
 
-FROM rust:1.45.1 AS lost_cities
-WORKDIR /root
-COPY --from=rust-builder /src/target/release/lost_cities_cli .
-CMD ["./lost_cities_cli"]
+FROM script-httpd AS acquire
+COPY --from=rust-builder /src/target/release/acquire_cli script
+
+FROM script-httpd AS lost-cities
+COPY --from=rust-builder /src/target/release/lost_cities_cli script
 
 FROM golang:1.14.6 AS go-builder
 WORKDIR /src
@@ -35,14 +36,12 @@ RUN go build ./...
 FROM go-builder AS go-test
 RUN go test ./...
 
-FROM go-builder AS age_of_war-builder
+FROM go-builder AS age-of-war-builder
 RUN go build -o age_of_war brdgme-go/age_of_war/cmd/*.go
 RUN pwd
 
-FROM alpine:3.12.0 AS age_of_war
-WORKDIR /root
-COPY --from=age_of_war-builder /src/age_of_war .
-CMD ["./age_of_war"]
+FROM script-httpd AS age-of-war
+COPY --from=age-of-war-builder /src/age_of_war script
 
 FROM node:14.7.0 AS web-src
 WORKDIR /src
