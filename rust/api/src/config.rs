@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use lazy_static::lazy_static;
 
 use std::env;
@@ -8,7 +8,7 @@ lazy_static! {
 }
 
 pub enum Mail {
-    File,
+    Log,
     Smtp {
         addr: String,
         user: String,
@@ -26,13 +26,56 @@ impl Mail {
     }
 
     pub fn from_env() -> Self {
-        Self::smtp_from_env().unwrap_or(Mail::File)
+        Self::smtp_from_env().unwrap_or(Mail::Log)
+    }
+}
+
+#[derive(Debug)]
+pub struct PostgresConfig {
+    pub host: String,
+    pub port: Option<String>,
+    pub user: String,
+    pub password: String,
+    pub database: String,
+}
+
+impl PostgresConfig {
+    pub fn from_env(suffix: &str) -> Result<Option<Self>> {
+        Ok(Some(Self {
+            host: env::var(&format!("POSTGRES_HOST{}", suffix))
+                .unwrap_or_else(|_| "postgres".to_string()),
+            database: env::var(&format!("POSTGRES_DB{}", suffix))
+                .unwrap_or_else(|_| "brdgme".to_string()),
+            port: env::var(&format!("POSTGRES_TCP_PORT{}", suffix)).ok(),
+            user: match env::var(&format!("POSTGRES_USER{}", suffix)) {
+                Ok(u) => u,
+                Err(env::VarError::NotPresent) => return Ok(None),
+                Err(e) => return Err(e.into()),
+            },
+            password: match env::var(&format!("POSTGRES_PASSWORD{}", suffix)) {
+                Ok(p) => p,
+                Err(env::VarError::NotPresent) => return Ok(None),
+                Err(e) => return Err(e.into()),
+            },
+        }))
+    }
+
+    pub fn url(&self) -> String {
+        let port = self
+            .port
+            .as_ref()
+            .map(|p| format!(":{}", p))
+            .unwrap_or_else(|| "".to_string());
+        format!(
+            "postgres://{}:{}@{}{}/{}",
+            self.user, self.password, self.host, port, self.database
+        )
     }
 }
 
 pub struct Config {
-    pub database_url: String,
-    pub database_url_r: Option<String>,
+    pub postgres: PostgresConfig,
+    pub postgres_r: Option<PostgresConfig>,
     pub redis_url: String,
     pub mail: Mail,
     pub mail_from: String,
@@ -40,8 +83,9 @@ pub struct Config {
 
 fn from_env() -> Result<Config> {
     Ok(Config {
-        database_url: env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://postgres/brdgme".to_string()),
-        database_url_r: env::var("DATABASE_URL_R").ok(),
+        postgres: PostgresConfig::from_env("")?
+            .ok_or_else(|| anyhow!("expected a Postgres config"))?,
+        postgres_r: PostgresConfig::from_env("_R")?,
         redis_url: env::var("REDIS_URL").unwrap_or_else(|_| "redis://redis".to_string()),
         mail: Mail::from_env(),
         mail_from: env::var("MAIL_FROM").unwrap_or_else(|_| "play@brdg.me".to_string()),

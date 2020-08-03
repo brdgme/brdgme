@@ -1,20 +1,18 @@
 use anyhow::{Context, Result};
 use email::MimeMessage;
-use lettre::file::FileTransport;
 use lettre::smtp::authentication::Credentials;
 use lettre::smtp::SmtpClient;
 use lettre::{SendableEmail, Transport};
-
-use std::env::temp_dir;
+use log::error;
 
 use crate::config::{Mail, CONFIG};
 
 pub fn send(email: SendableEmail) -> Result<()> {
     match CONFIG.mail {
-        Mail::File => Ok(FileTransport::new(temp_dir())
-            .send(email)
-            .map(|_| ())
-            .context("unable to send email")?),
+        Mail::Log => {
+            error!("{}", email.message_to_string()?);
+            Ok(())
+        }
         Mail::Smtp {
             ref addr,
             ref user,

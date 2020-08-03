@@ -18,6 +18,9 @@ spec:
           image: brdgme/api
           ports:
             - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: postgres-config
 ---
 apiVersion: v1
 kind: Service

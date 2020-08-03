@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
 
 pub mod color;
@@ -9,7 +9,8 @@ pub mod schema;
 //use r2d2;
 //use r2d2_diesel::ConnectionManager;
 use diesel::pg::PgConnection;
-use std::env;
+
+use crate::config;
 
 lazy_static! {
     pub static ref CONN: Connections = Connections {
@@ -23,10 +24,11 @@ pub struct Connection {}
 impl Connection {
     pub fn get(&self) -> Result<Box<PgConnection>> {
         use diesel::Connection;
-        Ok(Box::new(
-            PgConnection::establish(&env::var("DATABASE_URL").context("DATABASE_URL not set")?)
-                .context("Unable to connect to database")?,
-        ))
+        Ok(Box::new(PgConnection::establish(
+            &config::PostgresConfig::from_env("")?
+                .ok_or_else(|| anyhow!("could not get database config"))?
+                .url(),
+        )?))
     }
 }
 
