@@ -23,7 +23,7 @@ export async function submitLoginCode(email: string, code: string): Promise<stri
 export async function fetchActiveGames(token: string): Promise<Model.IGameExtended[]> {
   return superagent
     .get(`/api/game/my_active`)
-    .auth(token, "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .then((res) => res.body.games as Model.IGameExtended[]);
@@ -32,7 +32,7 @@ export async function fetchActiveGames(token: string): Promise<Model.IGameExtend
 export async function fetchGame(id: string, token?: string): Promise<Model.IGameExtended> {
   return superagent
     .get(`/api/game/${id}`)
-    .auth(token || "", "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .then((res) => res.body as Model.IGameExtended);
@@ -41,7 +41,7 @@ export async function fetchGame(id: string, token?: string): Promise<Model.IGame
 export async function submitGameCommand(id: string, command: string, token: string): Promise<Model.IGameExtended> {
   return superagent
     .post(`/api/game/${id}/command`)
-    .auth(token, "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send({ command })
@@ -51,7 +51,7 @@ export async function submitGameCommand(id: string, command: string, token: stri
 export async function submitMarkGameRead(id: string, token: string): Promise<Model.IGamePlayer> {
   return superagent
     .post(`/api/game/${id}/mark_read`)
-    .auth(token, "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send()
@@ -61,7 +61,7 @@ export async function submitMarkGameRead(id: string, token: string): Promise<Mod
 export async function submitGameConcede(id: string, token: string): Promise<Model.IGameExtended> {
   return superagent
     .post(`/api/game/${id}/concede`)
-    .auth(token, "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send()
@@ -71,7 +71,7 @@ export async function submitGameConcede(id: string, token: string): Promise<Mode
 export async function submitUndo(id: string, token: string): Promise<Model.IGameExtended> {
   return superagent
     .post(`/api/game/${id}/undo`)
-    .auth(token, "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send()
@@ -81,7 +81,7 @@ export async function submitUndo(id: string, token: string): Promise<Model.IGame
 export async function submitRestart(id: string, token: string): Promise<Model.IGameExtended> {
   return superagent
     .post(`/api/game/${id}/restart`)
-    .auth(token, "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send()
@@ -100,7 +100,7 @@ export async function fetchInit(token?: string): Promise<IInitResponse> {
     .set("Content-Type", "application/json")
     .set("Accept", "application/json");
   if (token !== undefined) {
-    req = req.auth(token, "");
+    req.set("Authorization", `Bearer ${token}`)
   }
   return req.then((res) => res.body as IInitResponse);
 }
@@ -113,7 +113,7 @@ export async function submitNewGame(
 ): Promise<Model.IGameExtended> {
   return superagent
     .post(`/api/game`)
-    .auth(token, "")
+    .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send({

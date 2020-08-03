@@ -83,7 +83,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for User {
                 anyhow!("expected Bearer Authorization header"),
             ));
         }
-        let token = match Uuid::parse_str(&auth_header[6..]) {
+        let token = match Uuid::parse_str(&auth_header[7..]) {
             Ok(uuid) => uuid,
             Err(_) => {
                 return Outcome::Failure((
