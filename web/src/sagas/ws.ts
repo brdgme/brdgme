@@ -59,7 +59,7 @@ export function* wsSaga(): IterableIterator<Effect> {
   while (true) {
     try {
       // yield put(WS.connecting());
-      const socket: WebSocket = yield call(connect, `ws://${window.location.host}:${window.location.port}/ws`);
+      const socket: WebSocket = yield call(connect, `ws://${window.location.host}/ws`);
       const socketClose = call(socketClosePromise, socket);
       // yield put(WS.connected());
       const s = yield fork(socketSagas, socket);
