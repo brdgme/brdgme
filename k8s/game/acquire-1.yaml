@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: acquire
-          image: brdgme/acquire
+          image: brdgme/acquire:v1.0.0
           ports:
             - containerPort: 80
 ---
