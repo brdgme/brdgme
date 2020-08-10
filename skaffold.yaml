@@ -15,15 +15,15 @@ build:
   - image: brdgme/websocket
     docker:
       target: websocket
-  - image: brdgme/acquire
+  - image: brdgme/acquire-1
     docker:
-      target: acquire
-  - image: brdgme/lost-cities
+      target: acquire-1
+  - image: brdgme/lost-cities-2
     docker:
-      target: lost-cities
-  - image: brdgme/age-of-war
+      target: lost-cities-2
+  - image: brdgme/age-of-war-1
     docker:
-      target: age-of-war
+      target: age-of-war-1
 deploy:
   kubectl:
     manifests:

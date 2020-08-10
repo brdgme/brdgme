@@ -29,10 +29,10 @@ WORKDIR /root
 COPY --from=rust-builder /src/out/script_httpd .
 CMD ["./script_httpd", "./script"]
 
-FROM script-httpd AS acquire
+FROM script-httpd AS acquire-1
 COPY --from=rust-builder /src/out/acquire_cli script
 
-FROM script-httpd AS lost-cities
+FROM script-httpd AS lost-cities-2
 COPY --from=rust-builder /src/out/lost_cities_cli script
 
 FROM golang:1.14.6 AS go-builder
@@ -48,7 +48,7 @@ FROM go-builder AS age-of-war-builder
 RUN go build -o age_of_war brdgme-go/age_of_war/cmd/*.go
 RUN pwd
 
-FROM script-httpd AS age-of-war
+FROM script-httpd AS age-of-war-1
 COPY --from=age-of-war-builder /src/age_of_war script
 
 FROM node:14.7.0 AS web-src
