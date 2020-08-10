@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+export DOCKER_BUILDKIT=1
 cd "$(dirname "$0")"
 docker build --target=api .
 docker build --target=web .
