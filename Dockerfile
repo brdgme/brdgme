@@ -53,8 +53,9 @@ COPY --from=age-of-war-builder /src/age_of_war script
 
 FROM node:14.7.0 AS web-src
 WORKDIR /src
-COPY web .
+COPY web/package.json web/package-lock.json .
 RUN npm install
+COPY web .
 
 FROM web-src AS web-builder
 RUN node_modules/.bin/webpack -p
@@ -68,7 +69,8 @@ COPY --from=web-builder /src/dist /usr/share/nginx/html
 FROM node:14.7.0 AS websocket
 EXPOSE 80
 WORKDIR /src
-COPY websocket .
+COPY websocket/package.json websocket/package-lock.json .
 RUN npm install
+COPY websocket .
 RUN node_modules/.bin/tsc
 CMD ["node", "dist/index.js"]
