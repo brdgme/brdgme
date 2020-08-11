@@ -27,6 +27,9 @@ build:
   - image: brdgme/liars-dice-1
     docker:
       target: liars-dice-1
+  - image: brdgme/for-sale-1
+    docker:
+      target: for-sale-1
 deploy:
   kubectl:
     manifests:
@@ -37,3 +40,4 @@ deploy:
     - k8s/game/lost-cities-2.yaml
     - k8s/game/age-of-war-1.yaml
     - k8s/game/liars-dice-1.yaml
+    - k8s/game/for-sale-1.yaml

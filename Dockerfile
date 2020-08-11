@@ -56,6 +56,12 @@ RUN go build -o liars_dice brdgme-go/liars_dice/cmd/*.go
 FROM script-httpd AS liars-dice-1
 COPY --from=liars-dice-builder /src/liars_dice script
 
+FROM go-builder AS for-sale-builder
+RUN go build -o for_sale brdgme-go/for_sale/cmd/*.go
+
+FROM script-httpd AS for-sale-1
+COPY --from=for-sale-builder /src/for_sale script
+
 FROM node:14.7.0 AS web-src
 WORKDIR /src
 COPY web/package.json web/package-lock.json .
