@@ -46,10 +46,15 @@ RUN go test ./...
 
 FROM go-builder AS age-of-war-builder
 RUN go build -o age_of_war brdgme-go/age_of_war/cmd/*.go
-RUN pwd
 
 FROM script-httpd AS age-of-war-1
 COPY --from=age-of-war-builder /src/age_of_war script
+
+FROM go-builder AS liars-dice-builder
+RUN go build -o liars_dice brdgme-go/liars_dice/cmd/*.go
+
+FROM script-httpd AS liars-dice-1
+COPY --from=liars-dice-builder /src/liars_dice script
 
 FROM node:14.7.0 AS web-src
 WORKDIR /src
