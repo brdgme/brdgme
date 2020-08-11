@@ -18,6 +18,9 @@ build:
   - image: brdgme/acquire-1
     docker:
       target: acquire-1
+  - image: brdgme/lost-cities-1
+    docker:
+      target: lost-cities-1
   - image: brdgme/lost-cities-2
     docker:
       target: lost-cities-2
@@ -37,6 +40,7 @@ deploy:
     - k8s/web.yaml
     - k8s/websocket.yaml
     - k8s/game/acquire-1.yaml
+    - k8s/game/lost-cities-1.yaml
     - k8s/game/lost-cities-2.yaml
     - k8s/game/age-of-war-1.yaml
     - k8s/game/liars-dice-1.yaml

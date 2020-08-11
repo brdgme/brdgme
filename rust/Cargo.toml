@@ -5,6 +5,7 @@ members = [
     "game/acquire",
     "game/lords-of-vegas",
     "game/lost-cities",
+    "game/lost-cities-1",
     "lib/cmd",
     "lib/color",
     "lib/game",

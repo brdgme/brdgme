@@ -1207,6 +1207,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lost-cities-1"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.7.3",
+ "serde",
+]
+
+[[package]]
 name = "matches"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

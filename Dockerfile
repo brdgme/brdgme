@@ -35,6 +35,9 @@ COPY --from=rust-builder /src/out/acquire_cli script
 FROM script-httpd AS lost-cities-2
 COPY --from=rust-builder /src/out/lost_cities_cli script
 
+FROM script-httpd AS lost-cities-1
+COPY --from=rust-builder /src/out/lost_cities_1_cli script
+
 FROM golang:1.14.6 AS go-builder
 WORKDIR /src
 COPY brdgme-go brdgme-go
