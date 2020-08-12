@@ -9,6 +9,7 @@ lazy_static! {
 
 pub enum Mail {
     Log,
+    Relay,
     Smtp {
         addr: String,
         user: String,
@@ -26,7 +27,7 @@ impl Mail {
     }
 
     pub fn from_env() -> Self {
-        Self::smtp_from_env().unwrap_or(Mail::Log)
+        Self::smtp_from_env().unwrap_or(Mail::Relay)
     }
 }
 
