@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use email::MimeMessage;
 use lettre::smtp::authentication::Credentials;
 use lettre::smtp::SmtpClient;
-use lettre::{SendableEmail, Transport};
+use lettre::{ClientSecurity, SendableEmail, Transport};
 use log::error;
 
 use crate::config::{Mail, CONFIG};
@@ -13,6 +13,11 @@ pub fn send(email: SendableEmail) -> Result<()> {
             error!("{}", email.message_to_string()?);
             Ok(())
         }
+        Mail::Relay {} => Ok(SmtpClient::new("smtp:25", ClientSecurity::None)?
+            .transport()
+            .send(email)
+            .map(|_| ())
+            .context("unable to send email")?),
         Mail::Smtp {
             ref addr,
             ref user,
