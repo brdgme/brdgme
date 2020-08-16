@@ -38,15 +38,15 @@ func GoodsReversed() []Good {
 	l := len(Goods)
 	rev := make([]Good, l)
 	for i, _ := range Goods {
-		rev[i] = l - i - 1
+		rev[i] = Good(l - i - 1)
 	}
 	return rev
 }
 
 func GoodMaximum(good Good) int {
-	return 8 - good
+	return int(8 - good)
 }
 
 func GoodValue(good Good, n int) int {
-	return (n * (n + 1) / 2) * (good + 1)
+	return (n * (n + 1) / 2) * int(good+1)
 }

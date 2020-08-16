@@ -12,6 +12,8 @@ const (
 	BJ
 )
 
+var TestPlayers = []string{"Mick", "Steve", "BJ"}
+
 func TestGame_KeepSkulls_allDisasterSkip(t *testing.T) {
 	g := &Game{}
 	g.New(3)

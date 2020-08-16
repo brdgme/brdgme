@@ -100,7 +100,7 @@ func (b *PlayerBoard) GainGoods(n int) {
 	good := GoodWood
 	for i := 0; i < n; i++ {
 		b.GainGood(good)
-		good = (good + 1) % len(Goods)
+		good = (good + 1) % Good(len(Goods))
 	}
 }
 

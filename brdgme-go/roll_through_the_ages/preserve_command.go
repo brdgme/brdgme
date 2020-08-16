@@ -4,31 +4,30 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Miniand/brdg.me/command"
-	"github.com/Miniand/brdg.me/game/log"
+	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-type PreserveCommand struct{}
+// type PreserveCommand struct{}
 
-func (c PreserveCommand) Name() string { return "preserve" }
+// func (c PreserveCommand) Name() string { return "preserve" }
 
-func (c PreserveCommand) Call(
-	player string,
-	context interface{},
-	input *command.Reader,
-) (string, error) {
-	g := context.(*Game)
-	pNum, err := g.PlayerNum(player)
-	if err != nil {
-		return "", err
-	}
+// func (c PreserveCommand) Call(
+// 	player string,
+// 	context interface{},
+// 	input *command.Reader,
+// ) (string, error) {
+// 	g := context.(*Game)
+// 	pNum, err := g.PlayerNum(player)
+// 	if err != nil {
+// 		return "", err
+// 	}
 
-	return "", g.Preserve(pNum)
-}
+// 	return "", g.Preserve(pNum)
+// }
 
-func (c PreserveCommand) Usage(player string, context interface{}) string {
-	return "{{b}}preserve{{/b}} to use 1 pottery to double your food"
-}
+// func (c PreserveCommand) Usage(player string, context interface{}) string {
+// 	return "{{b}}preserve{{/b}} to use 1 pottery to double your food"
+// }
 
 func (g *Game) CanPreserve(player int) bool {
 	b := g.Boards[player]
@@ -37,19 +36,19 @@ func (g *Game) CanPreserve(player int) bool {
 		b.Food > 0
 }
 
-func (g *Game) Preserve(player int) error {
+func (g *Game) Preserve(player int) ([]brdgme.Log, error) {
 	if !g.CanPreserve(player) {
-		return errors.New("you can't preserve at the moment")
+		return nil, errors.New("you can't preserve at the moment")
 	}
 
 	g.Boards[player].Food *= 2
 	g.Boards[player].Goods[GoodPottery] -= 1
 
-	g.Log.Add(log.NewPublicMessage(fmt.Sprintf(
+	logs := []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
 		`%s used {{b}}preservation{{/b}} to double their food to {{b}}%d{{/b}} for {{b}}1 pottery{{/b}}`,
 		g.RenderName(player),
 		g.Boards[player].Food,
-	)))
-	g.NextPhase()
-	return nil
+	))}
+	logs = append(logs, g.NextPhase()...)
+	return logs, nil
 }

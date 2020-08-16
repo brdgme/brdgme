@@ -262,6 +262,7 @@ func (g *Game) PhaseResolve() []brdgme.Log {
 	if g.Boards[cp].Food > 15 {
 		logs = append(logs, brdgme.NewPublicLog(fmt.Sprintf(
 			`{{player %d}} had their food reduced from {{b}}%d{{/b}} to the maximum of {{b}}15{{/b}}`,
+			cp,
 			g.Boards[cp].Food,
 		)))
 		g.Boards[cp].Food = 15
@@ -298,7 +299,7 @@ func (g *Game) PhaseResolve() []brdgme.Log {
 	case 2:
 		if g.Boards[cp].Developments[DevelopmentIrrigation] {
 			logs = append(logs, brdgme.NewPublicLog(fmt.Sprintf(
-				`{{player %s}} avoids a drought with their irrigation development`,
+				`{{player %d}} avoids a drought with their irrigation development`,
 				cp,
 			)))
 		} else {
@@ -317,7 +318,7 @@ func (g *Game) PhaseResolve() []brdgme.Log {
 			if g.Boards[p].Developments[DevelopmentMedicine] {
 				buf.WriteString(fmt.Sprintf(
 					"\n  {{player %d}} avoids pestilence with their medicine development",
-					g.RenderName(p),
+					p,
 				))
 			} else {
 				g.Boards[p].Disasters += 3
@@ -513,4 +514,29 @@ func ContainsInt(needle int, haystack []int) bool {
 		}
 	}
 	return false
+}
+
+func ContainsGood(needle Good, haystack []Good) bool {
+	for _, i := range haystack {
+		if needle == i {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Game) PlayerState(player int) interface{} {
+	panic("not implemented")
+}
+
+func (g *Game) PubState() interface{} {
+	panic("not implemented")
+}
+
+func (g *Game) Points() []float32 {
+	panic("not implemented")
+}
+
+func (g *Game) Status() brdgme.Status {
+	panic("not implemented")
 }

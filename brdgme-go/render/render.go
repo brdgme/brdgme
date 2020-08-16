@@ -7,6 +7,13 @@ func Bold(content string) string {
 	return fmt.Sprintf("{{b}}%s{{/b}}", content)
 }
 
+func BoldIf(content string, when bool) string {
+	if when {
+		return Bold(content)
+	}
+	return content
+}
+
 // Player renders a player by index
 func Player(player int) string {
 	return fmt.Sprintf("{{player %d}}", player)
@@ -27,4 +34,13 @@ func Layout(content []string) string {
 		}}
 	}
 	return Table(rows, 0, 0)
+}
+
+// Markup applies a foreground color and optional emboldening to content
+func Markup(content string, fg Color, bold bool) string {
+	inner := Fg(fg, content)
+	if bold {
+		return Bold(inner)
+	}
+	return inner
 }

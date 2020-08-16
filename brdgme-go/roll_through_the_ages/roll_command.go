@@ -3,46 +3,44 @@ package roll_through_the_ages
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
-	"github.com/Miniand/brdg.me/command"
-	"github.com/Miniand/brdg.me/game/log"
-	"github.com/Miniand/brdg.me/render"
+	"github.com/brdgme/brdgme/brdgme-go/brdgme"
+	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
-type RollCommand struct{}
+// type RollCommand struct{}
 
-func (c RollCommand) Name() string { return "roll" }
+// func (c RollCommand) Name() string { return "roll" }
 
-func (c RollCommand) Call(
-	player string,
-	context interface{},
-	input *command.Reader,
-) (string, error) {
-	g := context.(*Game)
-	pNum, err := g.PlayerNum(player)
-	if err != nil {
-		return "", err
-	}
-	args, err := input.ReadLineArgs()
-	if err != nil || len(args) == 0 {
-		return "", errors.New("you must specify at least one dice to roll")
-	}
-	dice := make([]int, len(args))
-	for i, s := range args {
-		d, err := strconv.Atoi(s)
-		if err != nil {
-			return "", fmt.Errorf("%s is not a number", s)
-		}
-		dice[i] = d
-	}
-	return "", g.Roll(pNum, dice)
-}
+// func (c RollCommand) Call(
+// 	player string,
+// 	context interface{},
+// 	input *command.Reader,
+// ) (string, error) {
+// 	g := context.(*Game)
+// 	pNum, err := g.PlayerNum(player)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	args, err := input.ReadLineArgs()
+// 	if err != nil || len(args) == 0 {
+// 		return "", errors.New("you must specify at least one dice to roll")
+// 	}
+// 	dice := make([]int, len(args))
+// 	for i, s := range args {
+// 		d, err := strconv.Atoi(s)
+// 		if err != nil {
+// 			return "", fmt.Errorf("%s is not a number", s)
+// 		}
+// 		dice[i] = d
+// 	}
+// 	return "", g.Roll(pNum, dice)
+// }
 
-func (c RollCommand) Usage(player string, context interface{}) string {
-	return "{{b}}roll # # #{{/b}} to reroll dice, eg. {{b}}roll 1 3 4{{/b}}"
-}
+// func (c RollCommand) Usage(player string, context interface{}) string {
+// 	return "{{b}}roll # # #{{/b}} to reroll dice, eg. {{b}}roll 1 3 4{{/b}}"
+// }
 
 func (g *Game) CanRoll(player int) bool {
 	if g.CurrentPlayer != player {
@@ -98,7 +96,7 @@ func (g *Game) NewRoll(n int) {
 }
 
 func (g *Game) KeepSkulls() {
-	if len(g.Players) == 1 {
+	if g.PlayerCount() == 1 {
 		// You can reroll skulls in single player
 		return
 	}
@@ -119,7 +117,7 @@ func (g *Game) KeepSkulls() {
 	}
 }
 
-func (g *Game) LogRoll(newDice, oldDice []int) {
+func (g *Game) LogRoll(newDice, oldDice []int) []brdgme.Log {
 	diceStrings := []string{}
 	for _, d := range newDice {
 		diceStrings = append(diceStrings, render.Bold(RenderDice(d)))
@@ -127,9 +125,9 @@ func (g *Game) LogRoll(newDice, oldDice []int) {
 	for _, d := range oldDice {
 		diceStrings = append(diceStrings, RenderDice(d))
 	}
-	g.Log.Add(log.NewPublicMessage(fmt.Sprintf(
+	return []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
 		`%s rolled  %s`,
 		g.RenderName(g.CurrentPlayer),
 		strings.Join(diceStrings, "  "),
-	)))
+	))}
 }

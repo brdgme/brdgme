@@ -7,21 +7,36 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-func (g *Game) TradeCommand(
-	player int,
-	args TradeCommand,
-	remaining string,
-) (brdgme.CommandResponse, error) {
-	logs, err := g.TradeCommand(player, amount)
-	if err != nil {
-		return brdgme.CommandResponse{}, err
-	}
-	return brdgme.CommandResponse{
-		Logs:      logs,
-		CanUndo:   true,
-		Remaining: remaining,
-	}
-}
+// type TradeCommand struct{}
+
+// func (c TradeCommand) Name() string { return "trade" }
+
+// func (c TradeCommand) Call(
+// 	player string,
+// 	context interface{},
+// 	input *command.Reader,
+// ) (string, error) {
+// 	g := context.(*Game)
+// 	pNum, err := g.PlayerNum(player)
+// 	if err != nil {
+// 		return "", err
+// 	}
+
+// 	args, err := input.ReadLineArgs()
+// 	if err != nil || len(args) == 0 {
+// 		return "", errors.New("you must specify how much stone to trade")
+// 	}
+// 	amount, err := strconv.Atoi(args[0])
+// 	if err != nil || amount < 1 {
+// 		return "", errors.New("the amount must be a positive number")
+// 	}
+
+// 	return "", g.TradeStone(pNum, amount)
+// }
+
+// func (c TradeCommand) Usage(player string, context interface{}) string {
+// 	return "{{b}}trade #{{_b}} to trade stone for 3 workers each, eg. {{b}}trade 3{{_b}}"
+// }
 
 func (g *Game) CanTrade(player int) bool {
 	return g.CurrentPlayer == player && g.Phase == PhaseBuild &&
@@ -40,13 +55,11 @@ func (g *Game) TradeStone(player, amount int) ([]brdgme.Log, error) {
 	workers := amount * 3
 	g.RemainingWorkers += workers
 	g.Boards[player].Goods[GoodStone] -= amount
-	return []brdgme.Log{
-		brdgme.NewPublicLog(fmt.Sprintf(
-			`{{player %d}} traded {{b}}%d{{/b}} %s for {{b}}%d workers{{/b}}`,
-			player,
-			amount,
-			RenderGoodName(GoodStone),
-			workers,
-		)),
-	}, nil
+	return []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
+		`%s traded {{b}}%d{{_b}} %s for {{b}}%d workers{{_b}}`,
+		g.RenderName(player),
+		amount,
+		RenderGoodName(GoodStone),
+		workers,
+	))}, nil
 }

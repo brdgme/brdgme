@@ -4,42 +4,40 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"strconv"
 
-	"github.com/Miniand/brdg.me/command"
-	"github.com/Miniand/brdg.me/game/log"
+	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-type InvadeCommand struct{}
+// type InvadeCommand struct{}
 
-func (c InvadeCommand) Name() string { return "invade" }
+// func (c InvadeCommand) Name() string { return "invade" }
 
-func (c InvadeCommand) Call(
-	player string,
-	context interface{},
-	input *command.Reader,
-) (string, error) {
-	g := context.(*Game)
-	pNum, err := g.PlayerNum(player)
-	if err != nil {
-		return "", err
-	}
+// func (c InvadeCommand) Call(
+// 	player string,
+// 	context interface{},
+// 	input *command.Reader,
+// ) (string, error) {
+// 	g := context.(*Game)
+// 	pNum, err := g.PlayerNum(player)
+// 	if err != nil {
+// 		return "", err
+// 	}
 
-	args, err := input.ReadLineArgs()
-	if err != nil || len(args) < 1 {
-		return "", errors.New("you must specify how many spearheads to use")
-	}
-	amount, err := strconv.Atoi(args[0])
-	if err != nil || amount < 1 {
-		return "", errors.New("the amount must be a positive number")
-	}
+// 	args, err := input.ReadLineArgs()
+// 	if err != nil || len(args) < 1 {
+// 		return "", errors.New("you must specify how many spearheads to use")
+// 	}
+// 	amount, err := strconv.Atoi(args[0])
+// 	if err != nil || amount < 1 {
+// 		return "", errors.New("the amount must be a positive number")
+// 	}
 
-	return "", g.Invade(pNum, amount)
-}
+// 	return "", g.Invade(pNum, amount)
+// }
 
-func (c InvadeCommand) Usage(player string, context interface{}) string {
-	return "{{b}}invade #{{/b}} to use spearheads to inflict extra damage on other players, eg. {{b}}invade 2{{/b}}"
-}
+// func (c InvadeCommand) Usage(player string, context interface{}) string {
+// 	return "{{b}}invade #{{/b}} to use spearheads to inflict extra damage on other players, eg. {{b}}invade 2{{/b}}"
+// }
 
 func (g *Game) CanInvade(player int) bool {
 	return g.CurrentPlayer == player && g.Phase == PhaseInvade &&
@@ -47,16 +45,16 @@ func (g *Game) CanInvade(player int) bool {
 		g.Boards[player].Goods[GoodSpearhead] > 0
 }
 
-func (g *Game) Invade(player, amount int) error {
+func (g *Game) Invade(player, amount int) ([]brdgme.Log, error) {
 	if !g.CanInvade(player) {
-		return errors.New("you can't invade at the moment")
+		return nil, errors.New("you can't invade at the moment")
 	}
 	if amount <= 0 {
-		return errors.New("you must specify a positive amount of spearheads")
+		return nil, errors.New("you must specify a positive amount of spearheads")
 	}
 	sh := g.Boards[player].Goods[GoodSpearhead]
 	if amount > sh {
-		return fmt.Errorf("you only have %d spearheads", sh)
+		return nil, fmt.Errorf("you only have %d spearheads", sh)
 	}
 
 	g.Boards[player].Goods[GoodSpearhead] -= amount
@@ -65,7 +63,8 @@ func (g *Game) Invade(player, amount int) error {
 		g.RenderName(player),
 		amount,
 	))
-	for p, _ := range g.Players {
+	playerCount := g.PlayerCount()
+	for p := 0; p < playerCount; p++ {
 		if p == player {
 			continue
 		}
@@ -83,8 +82,8 @@ func (g *Game) Invade(player, amount int) error {
 			))
 		}
 	}
-	g.Log.Add(log.NewPublicMessage(buf.String()))
 
-	g.NextPhase()
-	return nil
+	logs := []brdgme.Log{brdgme.NewPublicLog(buf.String())}
+	logs = append(logs, g.NextPhase()...)
+	return logs, nil
 }

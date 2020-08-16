@@ -3,39 +3,36 @@ package roll_through_the_ages
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/Miniand/brdg.me/render"
+	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
 func (g *Game) RenderName(player int) string {
 	return fmt.Sprintf("{{player %d}}", player)
 }
 
-func (g *Game) PlayerRender(player int) (string, error) {
-	pNum, err := g.PlayerNum(player)
-	if err != nil {
-		return "", err
-	}
+func (g *Game) PlayerRender(player int) string {
 	buf := bytes.NewBuffer([]byte{})
 	// Dice
-	diceRow := []interface{}{}
-	numberRow := []interface{}{}
+	diceRow := []render.Cell{}
+	numberRow := []render.Cell{}
 	for i, d := range g.RolledDice {
 		diceString := DiceStrings[d]
-		diceRow = append(diceRow, render.Bold(RenderDice(d)))
-		numberRow = append(numberRow, fmt.Sprintf(
+		diceRow = append(diceRow, render.Cel(render.Bold(RenderDice(d))))
+		numberRow = append(numberRow, render.Cel(fmt.Sprintf(
 			`%s{{c "gray"}}%d{{/c}}`,
 			strings.Repeat(" ", utf8.RuneCountInString(diceString)/2),
 			i+1,
-		))
+		)))
 	}
 	for _, d := range g.KeptDice {
-		diceRow = append(diceRow, RenderDice(d))
+		diceRow = append(diceRow, render.Cell{Align: render.Left, Content: RenderDice(d)})
 	}
 	buf.WriteString("{{b}}Dice{{/b}} {{c \"gray\"}}(F: food, W: worker, G: good, C: coin, X: skull){{/c}}\n")
-	t := render.Table([][]interface{}{diceRow, numberRow}, 0, 2)
+	t := render.Table([][]render.Cell{diceRow, numberRow}, 0, 2)
 	buf.WriteString(t)
 	buf.WriteString("\n\n")
 	// Remaining turns
@@ -45,21 +42,21 @@ func (g *Game) PlayerRender(player int) (string, error) {
 	// Turn resources
 	switch g.Phase {
 	case PhaseBuild, PhaseBuy:
-		cells := [][]interface{}{
-			{render.Bold("Turn supplies")},
-			{render.Bold("Workers:"), g.RemainingWorkers},
-			{render.Bold("Coins:"), fmt.Sprintf(
+		cells := [][]render.Cell{
+			{render.Cel(render.Bold("Turn supplies"))},
+			{render.Cel(render.Bold("Workers:")), render.Cel(strconv.Itoa(g.RemainingWorkers))},
+			{render.Cel(render.Bold("Coins:")), render.Cel(fmt.Sprintf(
 				"%d (%d including goods)",
 				g.RemainingCoins,
-				g.RemainingCoins+g.Boards[pNum].GoodsValue(),
-			)},
+				g.RemainingCoins+g.Boards[player].GoodsValue(),
+			))},
 		}
 		buf.WriteString(render.Table(cells, 0, 2))
 		buf.WriteString("\n\n")
 	case PhaseTrade:
-		cells := [][]interface{}{
-			{render.Bold("Turn supplies")},
-			{render.Bold("Ships:"), g.RemainingShips},
+		cells := [][]render.Cell{
+			{render.Cel(render.Bold("Turn supplies"))},
+			{render.Cel(render.Bold("Ships:")), render.Cel(strconv.Itoa(g.RemainingShips))},
 		}
 		buf.WriteString(render.Table(cells, 0, 2))
 		buf.WriteString("\n\n")
@@ -77,26 +74,26 @@ func (g *Game) PlayerRender(player int) (string, error) {
 		))
 		last = n
 	}
-	cells := [][]interface{}{{"{{b}}Player{{/b}}", cityHeaderBuf.String()}}
-	for p, _ := range g.Players {
+	cells := [][]render.Cell{{render.Cel("{{b}}Player{{/b}}"), render.Cel(cityHeaderBuf.String())}}
+	for p := 0; p < g.PlayerCount(); p++ {
 		remaining := MaxCityProgress - g.Boards[p].CityProgress
-		row := []interface{}{
-			g.RenderName(p),
-			fmt.Sprintf(
+		row := []render.Cell{
+			render.Cel(g.RenderName(p)),
+			render.Cel(fmt.Sprintf(
 				"%s%s",
 				strings.Repeat(fmt.Sprintf(
 					`%s `,
-					RenderX(p, p == pNum),
+					RenderX(p, p == player),
 				), g.Boards[p].CityProgress+1),
 				strings.Repeat(
 					`{{c "gray"}}.{{/c}} `,
 					remaining,
 				),
-			),
+			)),
 		}
 		if remaining > 0 {
-			row = append(row, render.Markup(
-				fmt.Sprintf("(%d left)", remaining), render.Gray, p == pNum))
+			row = append(row, render.Cel(render.Markup(
+				fmt.Sprintf("(%d left)", remaining), render.Grey, p == player)))
 		}
 		cells = append(cells, row)
 	}
@@ -104,30 +101,30 @@ func (g *Game) PlayerRender(player int) (string, error) {
 	buf.WriteString(t)
 	buf.WriteString("\n\n")
 	// Developments
-	header := []interface{}{render.Bold("Development")}
-	for p, _ := range g.Players {
-		header = append(header, g.RenderName(p))
+	header := []render.Cell{render.Cel(render.Bold("Development"))}
+	for p := 0; p < g.PlayerCount(); p++ {
+		header = append(header, render.Cel(g.RenderName(p)))
 	}
-	header = append(header, []interface{}{
-		render.Bold("Cost"),
-		render.Bold("Pts"),
-		render.Bold("Effect"),
+	header = append(header, []render.Cell{
+		render.Cel(render.Bold("Cost")),
+		render.Cel(render.Bold("Pts")),
+		render.Cel(render.Bold("Effect")),
 	}...)
-	cells = [][]interface{}{header}
+	cells = [][]render.Cell{header}
 	for _, d := range Developments {
 		dv := DevelopmentValues[d]
-		row := []interface{}{strings.Title(dv.Name)}
-		for p, _ := range g.Players {
+		row := []render.Cell{render.Cel(strings.Title(dv.Name))}
+		for p := 0; p < g.PlayerCount(); p++ {
 			cell := `{{c "gray"}}.{{/c}}`
 			if g.Boards[p].Developments[d] {
-				cell = RenderX(p, pNum == p)
+				cell = RenderX(p, player == p)
 			}
-			row = append(row, render.Centred(cell))
+			row = append(row, render.Cel(cell, render.Center))
 		}
-		row = append(row, []interface{}{
-			fmt.Sprintf(" %d", dv.Cost),
-			fmt.Sprintf(" %d", dv.Points),
-			fmt.Sprintf(`{{c "gray"}}%s{{/c}}`, dv.Effect),
+		row = append(row, []render.Cell{
+			render.Cel(fmt.Sprintf(" %d", dv.Cost)),
+			render.Cel(fmt.Sprintf(" %d", dv.Points)),
+			render.Cel(fmt.Sprintf(`{{c "gray"}}%s{{/c}}`, dv.Effect)),
 		}...)
 		cells = append(cells, row)
 	}
@@ -135,20 +132,20 @@ func (g *Game) PlayerRender(player int) (string, error) {
 	buf.WriteString(t)
 	buf.WriteString("\n\n")
 	// Monuments
-	header = []interface{}{render.Bold("Monument")}
-	for p, _ := range g.Players {
-		header = append(header, g.RenderName(p))
+	header = []render.Cell{render.Cel(render.Bold("Monument"))}
+	for p := 0; p < g.PlayerCount(); p++ {
+		header = append(header, render.Cel(g.RenderName(p)))
 	}
-	header = append(header, []interface{}{
-		render.Bold("Size"),
-		render.Bold("Pts"),
-		render.Bold("Effect"),
+	header = append(header, []render.Cell{
+		render.Cel(render.Bold("Size")),
+		render.Cel(render.Bold("Pts")),
+		render.Cel(render.Bold("Effect")),
 	}...)
-	cells = [][]interface{}{header}
+	cells = [][]render.Cell{header}
 	for _, m := range Monuments {
 		mv := MonumentValues[m]
-		row := []interface{}{strings.Title(mv.Name)}
-		for p, _ := range g.Players {
+		row := []render.Cell{render.Cel(strings.Title(mv.Name))}
+		for p := 0; p < g.PlayerCount(); p++ {
 			var cell string
 			switch {
 			case g.Boards[p].Monuments[m] == 0:
@@ -156,18 +153,14 @@ func (g *Game) PlayerRender(player int) (string, error) {
 			case g.Boards[p].Monuments[m] == mv.Size:
 				cell = RenderX(p, g.Boards[p].MonumentBuiltFirst[m])
 			default:
-				cell = fmt.Sprintf(
-					`{{c "%s"}}%d{{/c}}`,
-					render.PlayerColour(p),
-					g.Boards[p].Monuments[m],
-				)
+				cell = render.Fgp(p, strconv.Itoa(g.Boards[p].Monuments[m]))
 			}
-			row = append(row, render.Centred(cell))
+			row = append(row, render.Cel(cell, render.Center))
 		}
-		row = append(row, []interface{}{
-			fmt.Sprintf(" %d", mv.Size),
-			fmt.Sprintf("{{b}}%d{{/b}}/%d", mv.Points, mv.SubsequentPoints),
-			fmt.Sprintf(`{{c "gray"}}%s{{/c}}`, mv.Effect),
+		row = append(row, []render.Cell{
+			render.Cel(fmt.Sprintf(" %d", mv.Size)),
+			render.Cel(fmt.Sprintf("{{b}}%d{{/b}}/%d", mv.Points, mv.SubsequentPoints)),
+			render.Cel(fmt.Sprintf(`{{c "gray"}}%s{{/c}}`, mv.Effect)),
 		}...)
 		cells = append(cells, row)
 	}
@@ -175,82 +168,80 @@ func (g *Game) PlayerRender(player int) (string, error) {
 	buf.WriteString(t)
 	buf.WriteString("\n\n")
 	// Resources
-	header = []interface{}{render.Bold("Resource")}
-	for p, _ := range g.Players {
-		header = append(header, g.RenderName(p))
+	header = []render.Cell{render.Cel(render.Bold("Resource"))}
+	for p := 0; p < g.PlayerCount(); p++ {
+		header = append(header, render.Cel(g.RenderName(p)))
 	}
-	cells = [][]interface{}{header}
+	cells = [][]render.Cell{header}
 	for _, good := range GoodsReversed() {
-		row := []interface{}{RenderGoodName(good)}
-		for p, _ := range g.Players {
+		row := []render.Cell{render.Cel(RenderGoodName(good))}
+		for p := 0; p < g.PlayerCount(); p++ {
 			num := g.Boards[p].Goods[good]
-			cell := render.Colour(".", "gray")
+			cell := render.Fg(render.Grey, ".")
 			if num > 0 {
-				cell = render.Markup(
-					fmt.Sprintf("%d (%d)", num, GoodValue(good, num)),
-					render.PlayerColour(p),
-					p == pNum,
+				cell = render.BoldIf(
+					render.Fgp(p, fmt.Sprintf("%d (%d)", num, GoodValue(good, num))),
+					p == player,
 				)
 			}
-			row = append(row, render.Centred(cell))
+			row = append(row, render.Cel(cell, render.Center))
 		}
 		cells = append(cells, row)
 	}
-	row := []interface{}{render.Bold("total")}
-	for p, _ := range g.Players {
-		cell := render.Markup(
-			fmt.Sprintf("%d (%d)", g.Boards[p].GoodsNum(), g.Boards[p].GoodsValue()),
-			render.PlayerColour(p),
-			p == pNum,
+	row := []render.Cell{render.Cel(render.Bold("total"))}
+	for p := 0; p < g.PlayerCount(); p++ {
+		cell := render.BoldIf(
+			render.Fgp(p, fmt.Sprintf("%d (%d)", g.Boards[p].GoodsNum(), g.Boards[p].GoodsValue())),
+			p == player,
 		)
-		row = append(row, render.Centred(cell))
+		row = append(row, render.Cel(cell, render.Center))
 	}
-	cells = append(cells, row, []interface{}{})
+	cells = append(cells, row, []render.Cell{})
 
-	row = []interface{}{FoodName}
-	for p, _ := range g.Players {
-		cell := render.Markup(
-			g.Boards[p].Food,
-			render.PlayerColour(p),
-			p == pNum,
+	row = []render.Cell{render.Cel(FoodName)}
+	for p := 0; p < g.PlayerCount(); p++ {
+		cell := render.BoldIf(
+			render.Fgp(p, strconv.Itoa(g.Boards[p].Food)),
+			p == player,
 		)
-		row = append(row, render.Centred(cell))
+		row = append(row, render.Cel(cell, render.Center))
 	}
 	cells = append(cells, row)
-	row = []interface{}{ShipName}
-	for p, _ := range g.Players {
-		cell := render.Markup(
-			g.Boards[p].Ships,
-			render.PlayerColour(p),
-			p == pNum,
+	row = []render.Cell{render.Cel(ShipName)}
+	for p := 0; p < g.PlayerCount(); p++ {
+		cell := render.BoldIf(
+			render.Fgp(p, strconv.Itoa(g.Boards[p].Ships)),
+			p == player,
 		)
-		row = append(row, render.Centred(cell))
+		row = append(row, render.Cel(cell, render.Center))
 	}
 	cells = append(cells, row)
-	row = []interface{}{DisasterName}
-	for p, _ := range g.Players {
-		cell := render.Markup(
-			g.Boards[p].Disasters,
-			render.PlayerColour(p),
-			p == pNum,
+	row = []render.Cell{render.Cel(DisasterName)}
+	for p := 0; p < g.PlayerCount(); p++ {
+		cell := render.BoldIf(
+			render.Fgp(p, strconv.Itoa(g.Boards[p].Disasters)),
+			p == player,
 		)
-		row = append(row, render.Centred(cell))
+		row = append(row, render.Cel(cell, render.Center))
 	}
 	cells = append(cells, row)
-	row = []interface{}{render.Bold("score")}
-	for p, _ := range g.Players {
-		cell := render.Markup(
-			g.Boards[p].Score(),
-			render.PlayerColour(p),
-			p == pNum,
+	row = []render.Cell{render.Cel(render.Bold("score"))}
+	for p := 0; p < g.PlayerCount(); p++ {
+		cell := render.BoldIf(
+			render.Fgp(p, strconv.Itoa(g.Boards[p].Score())),
+			p == player,
 		)
-		row = append(row, render.Centred(cell))
+		row = append(row, render.Cel(cell, render.Center))
 	}
 	cells = append(cells, row)
 
 	t = render.Table(cells, 0, 2)
 	buf.WriteString(t)
-	return buf.String(), nil
+	return buf.String()
+}
+
+func (g *Game) PubRender() string {
+	panic("unimplemented")
 }
 
 func RenderX(player int, strong bool) string {
@@ -258,7 +249,7 @@ func RenderX(player int, strong bool) string {
 	if strong {
 		x = "X"
 	}
-	return render.Markup(x, render.PlayerColour(player), strong)
+	return render.BoldIf(render.Fgp(player, x), strong)
 }
 
 func RenderDice(dice int) string {
