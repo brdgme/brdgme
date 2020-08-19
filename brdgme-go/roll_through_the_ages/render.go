@@ -241,7 +241,9 @@ func (g *Game) PlayerRender(player int) string {
 }
 
 func (g *Game) PubRender() string {
-	panic("unimplemented")
+	// No hidden information, so the public render is just the render for the
+	// active player
+	return g.PlayerRender(g.CurrentPlayer)
 }
 
 func RenderX(player int, strong bool) string {

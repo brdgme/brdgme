@@ -521,17 +521,34 @@ func ContainsGood(needle Good, haystack []Good) bool {
 }
 
 func (g *Game) PlayerState(player int) interface{} {
-	panic("not implemented")
+	return nil
 }
 
 func (g *Game) PubState() interface{} {
-	panic("not implemented")
+	return nil
 }
 
 func (g *Game) Points() []float32 {
-	panic("not implemented")
+	points := make([]float32, len(g.Boards))
+	for i, b := range g.Boards {
+		points[i] = float32(b.Score())
+	}
+	return points
 }
 
 func (g *Game) Status() brdgme.Status {
-	panic("not implemented")
+	if g.IsFinished() {
+		scores := make([][]int, len(g.Boards))
+		for i, b := range g.Boards {
+			scores[i] = []int{b.Score()}
+		}
+		return brdgme.StatusFinished{
+			Placings: brdgme.GenPlacings(scores),
+			Stats:    []interface{}{},
+		}.ToStatus()
+	}
+	return brdgme.StatusActive{
+		WhoseTurn:  g.WhoseTurn(),
+		Eliminated: []int{},
+	}.ToStatus()
 }
