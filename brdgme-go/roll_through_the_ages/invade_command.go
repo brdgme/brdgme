@@ -8,37 +8,6 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-// type InvadeCommand struct{}
-
-// func (c InvadeCommand) Name() string { return "invade" }
-
-// func (c InvadeCommand) Call(
-// 	player string,
-// 	context interface{},
-// 	input *command.Reader,
-// ) (string, error) {
-// 	g := context.(*Game)
-// 	pNum, err := g.PlayerNum(player)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	args, err := input.ReadLineArgs()
-// 	if err != nil || len(args) < 1 {
-// 		return "", errors.New("you must specify how many spearheads to use")
-// 	}
-// 	amount, err := strconv.Atoi(args[0])
-// 	if err != nil || amount < 1 {
-// 		return "", errors.New("the amount must be a positive number")
-// 	}
-
-// 	return "", g.Invade(pNum, amount)
-// }
-
-// func (c InvadeCommand) Usage(player string, context interface{}) string {
-// 	return "{{b}}invade #{{/b}} to use spearheads to inflict extra damage on other players, eg. {{b}}invade 2{{/b}}"
-// }
-
 func (g *Game) CanInvade(player int) bool {
 	return g.CurrentPlayer == player && g.Phase == PhaseInvade &&
 		g.Boards[player].Developments[DevelopmentSmithing] &&
