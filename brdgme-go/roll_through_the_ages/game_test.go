@@ -24,6 +24,7 @@ func (g *Game) NewBlank(players int) ([]brdgme.Log, error) {
 	}
 	g.CurrentPlayer = Mick
 	g.Phase = PhaseRoll
+	g.RemainingRolls = 2
 	return nil, nil
 }
 

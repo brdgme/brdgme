@@ -67,6 +67,8 @@ func (g *Game) Command(
 		return g.DiscardCommand(player, value.Amount, value.Good, parseOutput.Remaining)
 	case InvadeCommand:
 		return g.InvadeCommand(player, value.Amount, parseOutput.Remaining)
+	case RollCommand:
+		return g.RollCommand(player, value.Dice, parseOutput.Remaining)
 	}
 	return brdgme.CommandResponse{}, errors.New("inexhaustive command handler")
 }

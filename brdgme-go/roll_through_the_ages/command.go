@@ -51,6 +51,10 @@ type InvadeCommand struct {
 	Amount int
 }
 
+type RollCommand struct {
+	Dice []int
+}
+
 func (g *Game) CommandParser(player int) brdgme.Parser {
 	parsers := []brdgme.Parser{}
 	if g.CanBuild(player) {
@@ -73,6 +77,9 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 	}
 	if g.CanInvade(player) {
 		parsers = append(parsers, g.InvadeParser(player))
+	}
+	if g.CanRoll(player) {
+		parsers = append(parsers, g.RollParser(player))
 	}
 	return brdgme.OneOf(parsers)
 }
@@ -430,6 +437,39 @@ func (g *Game) InvadeParser(player int) brdgme.Parser {
 			return InvadeCommand{
 				Amount: value.([]interface{})[1].(int),
 			}
+		},
+	}
+}
+
+func (g *Game) RollParser(player int) brdgme.Parser {
+	minI := 1
+	maxI := len(g.RolledDice)
+	minU := uint(minI)
+	maxU := uint(maxI)
+	return brdgme.Map{
+		Parser: brdgme.Chain{
+			brdgme.Doc{
+				Name:   "roll",
+				Desc:   "roll dice",
+				Parser: brdgme.Token("roll"),
+			},
+			brdgme.AfterSpace(
+				brdgme.Many{
+					Min: &minU,
+					Max: &maxU,
+					Parser: brdgme.Int{
+						Min: &minI,
+						Max: &maxI,
+					},
+				},
+			),
+		},
+		Func: func(value interface{}) interface{} {
+			dice := []int{}
+			for _, v := range value.([]interface{})[1].([]interface{}) {
+				dice = append(dice, v.(int))
+			}
+			return RollCommand{Dice: dice}
 		},
 	}
 }

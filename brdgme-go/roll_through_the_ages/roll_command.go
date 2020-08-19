@@ -9,39 +9,6 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
-// type RollCommand struct{}
-
-// func (c RollCommand) Name() string { return "roll" }
-
-// func (c RollCommand) Call(
-// 	player string,
-// 	context interface{},
-// 	input *command.Reader,
-// ) (string, error) {
-// 	g := context.(*Game)
-// 	pNum, err := g.PlayerNum(player)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	args, err := input.ReadLineArgs()
-// 	if err != nil || len(args) == 0 {
-// 		return "", errors.New("you must specify at least one dice to roll")
-// 	}
-// 	dice := make([]int, len(args))
-// 	for i, s := range args {
-// 		d, err := strconv.Atoi(s)
-// 		if err != nil {
-// 			return "", fmt.Errorf("%s is not a number", s)
-// 		}
-// 		dice[i] = d
-// 	}
-// 	return "", g.Roll(pNum, dice)
-// }
-
-// func (c RollCommand) Usage(player string, context interface{}) string {
-// 	return "{{b}}roll # # #{{/b}} to reroll dice, eg. {{b}}roll 1 3 4{{/b}}"
-// }
-
 func (g *Game) CanRoll(player int) bool {
 	if g.CurrentPlayer != player {
 		return false
@@ -50,20 +17,20 @@ func (g *Game) CanRoll(player int) bool {
 		g.Phase == PhaseExtraRoll
 }
 
-func (g *Game) Roll(player int, diceNum []int) error {
+func (g *Game) Roll(player int, diceNum []int) ([]brdgme.Log, error) {
 	if !g.CanRoll(player) {
-		return errors.New("you can't roll at the moment")
+		return nil, errors.New("you can't roll at the moment")
 	}
 	if len(diceNum) == 0 {
-		return errors.New("you must specify which dice to roll")
+		return nil, errors.New("you must specify which dice to roll")
 	}
 	if g.Phase == PhaseExtraRoll && len(diceNum) > 1 {
-		return errors.New("you may only roll one dice on the extra roll")
+		return nil, errors.New("you may only roll one dice on the extra roll")
 	}
 	l := len(g.RolledDice)
 	for _, n := range diceNum {
 		if n < 0 || n > l {
-			return fmt.Errorf("dice number must be between 1 and %d", l)
+			return nil, fmt.Errorf("dice number must be between 1 and %d", l)
 		}
 	}
 	kept := []Die{}
@@ -74,18 +41,18 @@ func (g *Game) Roll(player int, diceNum []int) error {
 	}
 	rolled := RollN(len(g.RolledDice) - len(kept))
 	g.RolledDice = append(rolled, kept...)
-	g.LogRoll(rolled, append(kept, g.KeptDice...))
-	g.KeepSkulls()
+	logs := g.LogRoll(rolled, append(kept, g.KeptDice...))
+	logs = append(logs, g.KeepSkulls()...)
 	switch g.Phase {
 	case PhaseRoll:
 		g.RemainingRolls -= 1
 		if g.RemainingRolls == 0 {
-			g.NextPhase()
+			logs = append(logs, g.NextPhase()...)
 		}
 	case PhaseExtraRoll:
-		g.NextPhase()
+		logs = append(logs, g.NextPhase()...)
 	}
-	return nil
+	return logs, nil
 }
 
 func (g *Game) NewRoll(n int) {
@@ -95,10 +62,10 @@ func (g *Game) NewRoll(n int) {
 	g.KeepSkulls()
 }
 
-func (g *Game) KeepSkulls() {
+func (g *Game) KeepSkulls() []brdgme.Log {
 	if g.PlayerCount() == 1 {
 		// You can reroll skulls in single player
-		return
+		return nil
 	}
 	i := 0
 	for i < len(g.RolledDice) {
@@ -111,10 +78,12 @@ func (g *Game) KeepSkulls() {
 			continue
 		}
 	}
+	logs := []brdgme.Log{}
 	if len(g.RolledDice) == 0 && !(g.Phase == PhaseExtraRoll &&
 		g.Boards[g.CurrentPlayer].Developments[DevelopmentLeadership]) {
-		g.NextPhase()
+		logs = g.NextPhase()
 	}
+	return logs
 }
 
 func (g *Game) LogRoll(newDice, oldDice []Die) []brdgme.Log {
@@ -130,4 +99,20 @@ func (g *Game) LogRoll(newDice, oldDice []Die) []brdgme.Log {
 		g.RenderName(g.CurrentPlayer),
 		strings.Join(diceStrings, "  "),
 	))}
+}
+
+func (g *Game) RollCommand(
+	player int,
+	dice []int,
+	remaining string,
+) (brdgme.CommandResponse, error) {
+	logs, err := g.Roll(player, dice)
+	if err != nil {
+		return brdgme.CommandResponse{}, err
+	}
+	return brdgme.CommandResponse{
+		Logs:      logs,
+		CanUndo:   false,
+		Remaining: remaining,
+	}, nil
 }
