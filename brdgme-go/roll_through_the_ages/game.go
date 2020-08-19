@@ -29,8 +29,8 @@ type Game struct {
 	CurrentPlayer    int
 	Phase            int
 	Boards           []*PlayerBoard
-	RolledDice       []int
-	KeptDice         []int
+	RolledDice       []Die
+	KeptDice         []Die
 	RemainingRolls   int
 	RemainingCoins   int
 	RemainingWorkers int
@@ -44,9 +44,27 @@ var _ brdgme.Gamer = &Game{}
 func (g *Game) Command(
 	player int,
 	input string,
-	players []string,
+	playerNames []string,
 ) (brdgme.CommandResponse, error) {
-	panic("not implemented")
+	parseOutput, err := g.CommandParser(player).Parse(input, playerNames)
+	if err != nil {
+		return brdgme.CommandResponse{}, err
+	}
+	switch value := parseOutput.Value.(type) {
+	case NextCommand:
+		return g.NextCommand(player, parseOutput.Remaining)
+	case TradeCommand:
+		return g.TradeCommand(player, value.Amount, parseOutput.Remaining)
+	case BuildCommand:
+		return g.BuildCommand(player, value, parseOutput.Remaining)
+	case TakeCommand:
+		return g.TakeCommand(player, value.Actions, parseOutput.Remaining)
+	case BuyCommand:
+		return g.BuyCommand(player, value, parseOutput.Remaining)
+	case DiscardCommand:
+		return g.DiscardCommand(player, value.Amount, value.Good, parseOutput.Remaining)
+	}
+	return brdgme.CommandResponse{}, errors.New("inexhaustive command handler")
 }
 
 func (g *Game) CommandSpec(player int) *brdgme.Spec {
@@ -149,7 +167,7 @@ func (g *Game) Winners() []int {
 	// There's a tie, goods value is tie breaker
 	goodsWinners := []int{}
 	goodsScore := 0
-	for p, _ := range winners {
+	for p := range winners {
 		score := g.Boards[p].GoodsValue()
 		if score > goodsScore {
 			goodsWinners = []int{}
@@ -215,7 +233,7 @@ func (g *Game) RollExtraPhase() []brdgme.Log {
 	g.Phase = PhaseExtraRoll
 	// Can reroll anything
 	g.RolledDice = append(g.RolledDice, g.KeptDice...)
-	g.KeptDice = []int{}
+	g.KeptDice = []Die{}
 	if !g.Boards[g.CurrentPlayer].Developments[DevelopmentLeadership] {
 		return g.NextPhase()
 	}
@@ -225,7 +243,7 @@ func (g *Game) RollExtraPhase() []brdgme.Log {
 func (g *Game) CollectPhase() []brdgme.Log {
 	g.Phase = PhaseCollect
 	g.KeptDice = append(g.RolledDice, g.KeptDice...)
-	g.RolledDice = []int{}
+	g.RolledDice = []Die{}
 	// Collect goods and food
 	cp := g.CurrentPlayer
 	hasFoodOrWorkersDice := false

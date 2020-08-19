@@ -252,7 +252,7 @@ func RenderX(player int, strong bool) string {
 	return render.BoldIf(render.Fgp(player, x), strong)
 }
 
-func RenderDice(dice int) string {
+func RenderDice(dice Die) string {
 	diceString := DiceStrings[dice]
 	for v, col := range DiceValueColours {
 		diceString = strings.Replace(diceString, v, fmt.Sprintf(

@@ -7,12 +7,14 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
+type TakeAction int
+
 const (
-	TakeFood = iota
+	TakeFood TakeAction = iota
 	TakeWorkers
 )
 
-var TakeMap = map[int]string{
+var TakeMap = map[TakeAction]string{
 	TakeFood:    "food",
 	TakeWorkers: "workers",
 }
@@ -59,7 +61,7 @@ func (g *Game) CanTake(player int) bool {
 	return g.CurrentPlayer == player && g.Phase == PhaseCollect
 }
 
-func (g *Game) Take(player int, actions []int) ([]brdgme.Log, error) {
+func (g *Game) Take(player int, actions []TakeAction) ([]brdgme.Log, error) {
 	if !g.CanTake(player) {
 		return nil, errors.New("you can't take at the moment")
 	}
@@ -89,4 +91,20 @@ func (g *Game) Take(player int, actions []int) ([]brdgme.Log, error) {
 	}
 
 	return g.NextPhase(), nil
+}
+
+func (g *Game) TakeCommand(
+	player int,
+	actions []TakeAction,
+	remaining string,
+) (brdgme.CommandResponse, error) {
+	logs, err := g.Take(player, actions)
+	if err != nil {
+		return brdgme.CommandResponse{}, err
+	}
+	return brdgme.CommandResponse{
+		Logs:      logs,
+		CanUndo:   true,
+		Remaining: remaining,
+	}, nil
 }

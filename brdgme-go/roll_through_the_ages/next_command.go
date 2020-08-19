@@ -45,3 +45,15 @@ func (g *Game) Next(player int) ([]brdgme.Log, error) {
 	}
 	return g.NextPhase(), nil
 }
+
+func (g *Game) NextCommand(
+	player int,
+	remaining string,
+) (brdgme.CommandResponse, error) {
+	logs, err := g.Next(player)
+	return brdgme.CommandResponse{
+		Logs:      logs,
+		CanUndo:   false,
+		Remaining: remaining,
+	}, err
+}

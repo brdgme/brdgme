@@ -2,6 +2,7 @@ package roll_through_the_ages
 
 const (
 	BaseCitySize = 3
+	GoodsLimit   = 6
 )
 
 var CityLevels = []int{3, 7, 12, 18}
@@ -134,4 +135,15 @@ func (b *PlayerBoard) GoodsValue() int {
 
 func (b *PlayerBoard) HasBuilt(monument MonumentID) bool {
 	return b.Monuments[monument] >= MonumentValues[monument].Size
+}
+
+func (b *PlayerBoard) GoodsOverLimit() int {
+	if b.Developments[DevelopmentCaravans] == true {
+		return 0
+	}
+	overLimit := b.GoodsNum() - GoodsLimit
+	if overLimit < 0 {
+		return 0
+	}
+	return overLimit
 }

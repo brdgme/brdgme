@@ -66,7 +66,7 @@ func (g *Game) Roll(player int, diceNum []int) error {
 			return fmt.Errorf("dice number must be between 1 and %d", l)
 		}
 	}
-	kept := []int{}
+	kept := []Die{}
 	for i, d := range g.RolledDice {
 		if !ContainsInt(i+1, diceNum) {
 			kept = append(kept, d)
@@ -90,8 +90,8 @@ func (g *Game) Roll(player int, diceNum []int) error {
 
 func (g *Game) NewRoll(n int) {
 	g.RolledDice = RollN(n)
-	g.LogRoll(g.RolledDice, []int{})
-	g.KeptDice = []int{}
+	g.LogRoll(g.RolledDice, []Die{})
+	g.KeptDice = []Die{}
 	g.KeepSkulls()
 }
 
@@ -117,7 +117,7 @@ func (g *Game) KeepSkulls() {
 	}
 }
 
-func (g *Game) LogRoll(newDice, oldDice []int) []brdgme.Log {
+func (g *Game) LogRoll(newDice, oldDice []Die) []brdgme.Log {
 	diceStrings := []string{}
 	for _, d := range newDice {
 		diceStrings = append(diceStrings, render.Bold(RenderDice(d)))

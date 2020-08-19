@@ -13,8 +13,8 @@ func (g *Game) BuyCommand(
 	args BuyCommand,
 	remaining string,
 ) (brdgme.CommandResponse, error) {
-	goods := args.Goods
-	if args.AllGoods {
+	goods := args.Goods.Goods
+	if args.Goods.AllGoods {
 		for good, num := range g.Boards[player].Goods {
 			if num > 0 {
 				goods = append(goods, good)

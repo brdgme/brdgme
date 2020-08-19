@@ -37,7 +37,7 @@ var GoodColours = map[Good]string{
 func GoodsReversed() []Good {
 	l := len(Goods)
 	rev := make([]Good, l)
-	for i, _ := range Goods {
+	for i := range Goods {
 		rev[i] = Good(l - i - 1)
 	}
 	return rev

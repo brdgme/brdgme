@@ -18,7 +18,7 @@ func (g *Game) BuildCommand(
 	case BuildTypeShip:
 		return g.BuildShipCommand(player, args.Amount, remaining)
 	case BuildTypeMonument:
-		return g.BuildMonumentCommand(player, args.Target.Monument, args.Amount, remaining)
+		return g.BuildMonumentCommand(player, args.Amount, args.Target.Monument, remaining)
 	}
 	panic("unreachable")
 }

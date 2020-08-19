@@ -65,6 +65,12 @@ RUN go build -o for_sale brdgme-go/for_sale/cmd/*.go
 FROM script-httpd AS for-sale-1
 COPY --from=for-sale-builder /src/for_sale script
 
+FROM go-builder AS roll-through-the-ages-builder
+RUN go build -o roll_through_the_ages brdgme-go/roll_through_the_ages/cmd/*.go
+
+FROM script-httpd AS roll-through-the-ages-1
+COPY --from=roll-through-the-ages-builder /src/roll_through_the_ages script
+
 FROM node:14.7.0 AS web-src
 WORKDIR /src
 COPY web/package.json web/package-lock.json .

@@ -8,15 +8,12 @@ import (
 
 func TestTradeCommand(t *testing.T) {
 	g := &Game{}
-	g.New(3)
-	g.CurrentPlayer = Mick
-	g.Phase = PhaseRoll
-	g.RolledDice = []int{
+	g.NewBlank(3)
+	g.RolledDice = []Die{
 		DiceFood,
 		DiceFood,
 		DiceFood,
 	}
-	g.KeptDice = []int{}
 	g.Boards[Mick].Developments[DevelopmentEngineering] = true
 	g.Boards[Mick].Goods[GoodStone] = 3
 	_, err := g.Command(Mick, "next", TestPlayers)

@@ -1,7 +1,9 @@
 package roll_through_the_ages
 
+type Die int
+
 const (
-	DiceFood = iota
+	DiceFood Die = iota
 	DiceGood
 	DiceSkull
 	DiceWorkers
@@ -9,7 +11,7 @@ const (
 	DiceCoins
 )
 
-var DiceFaces = []int{
+var DiceFaces = []Die{
 	DiceFood,
 	DiceGood,
 	DiceSkull,
@@ -18,7 +20,7 @@ var DiceFaces = []int{
 	DiceCoins,
 }
 
-var DiceStrings = map[int]string{
+var DiceStrings = map[Die]string{
 	DiceFood:          "FFF",
 	DiceGood:          "G",
 	DiceSkull:         "GXG",
@@ -35,12 +37,12 @@ var DiceValueColours = map[string]string{
 	"C": "yellow",
 }
 
-func Roll() int {
-	return r.Int() % len(DiceFaces)
+func Roll() Die {
+	return Die(r.Int() % len(DiceFaces))
 }
 
-func RollN(n int) []int {
-	dice := make([]int, n)
+func RollN(n int) []Die {
+	dice := make([]Die, n)
 	for i := 0; i < n; i++ {
 		dice[i] = Roll()
 	}
