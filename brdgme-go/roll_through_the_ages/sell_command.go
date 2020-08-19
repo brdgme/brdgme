@@ -62,3 +62,16 @@ func (g *Game) SellFood(player, amount int) ([]brdgme.Log, error) {
 		coins,
 	))}, nil
 }
+
+func (g *Game) SellCommand(
+	player,
+	amount int,
+	remaining string,
+) (brdgme.CommandResponse, error) {
+	logs, err := g.SellFood(player, amount)
+	return brdgme.CommandResponse{
+		Logs:      logs,
+		CanUndo:   false,
+		Remaining: remaining,
+	}, err
+}

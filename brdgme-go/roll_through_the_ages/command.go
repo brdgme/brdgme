@@ -55,6 +55,10 @@ type RollCommand struct {
 	Dice []int
 }
 
+type SellCommand struct {
+	Amount int
+}
+
 func (g *Game) CommandParser(player int) brdgme.Parser {
 	parsers := []brdgme.Parser{}
 	if g.CanBuild(player) {
@@ -80,6 +84,9 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 	}
 	if g.CanRoll(player) {
 		parsers = append(parsers, g.RollParser(player))
+	}
+	if g.CanSell(player) {
+		parsers = append(parsers, g.SellParser(player))
 	}
 	return brdgme.OneOf(parsers)
 }
@@ -470,6 +477,35 @@ func (g *Game) RollParser(player int) brdgme.Parser {
 				dice = append(dice, v.(int))
 			}
 			return RollCommand{Dice: dice}
+		},
+	}
+}
+
+func (g *Game) SellParser(player int) brdgme.Parser {
+	min := 1
+	max := g.Boards[player].Food
+	return brdgme.Map{
+		Parser: brdgme.Chain{
+			brdgme.Doc{
+				Name:   "sell",
+				Desc:   "sell food for 6 coins each",
+				Parser: brdgme.Token("sell"),
+			},
+			brdgme.AfterSpace(
+				brdgme.Doc{
+					Name: "amount",
+					Desc: "amount of food to sell",
+					Parser: brdgme.Int{
+						Min: &min,
+						Max: &max,
+					},
+				},
+			),
+		},
+		Func: func(value interface{}) interface{} {
+			return SellCommand{
+				Amount: value.([]interface{})[1].(int),
+			}
 		},
 	}
 }
