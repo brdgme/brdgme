@@ -7,47 +7,6 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-// type SwapCommand struct{}
-
-// func (c SwapCommand) Name() string { return "swap" }
-
-// func (c SwapCommand) Call(
-// 	player string,
-// 	context interface{},
-// 	input *command.Reader,
-// ) (string, error) {
-// 	g := context.(*Game)
-// 	pNum, err := g.PlayerNum(player)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	args, err := input.ReadLineArgs()
-// 	if err != nil || len(args) < 3 {
-// 		return "", errors.New("you must specify an amount, a good to remove and a good to receive")
-// 	}
-// 	amount, err := strconv.Atoi(args[0])
-// 	if err != nil || amount < 1 {
-// 		return "", errors.New("the amount must be a positive number")
-// 	}
-
-// 	fromGood, err := helper.MatchStringInStringMap(args[1], GoodStrings)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	toGood, err := helper.MatchStringInStringMap(args[2], GoodStrings)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	return "", g.Swap(pNum, fromGood, toGood, amount)
-// }
-
-// func (c SwapCommand) Usage(player string, context interface{}) string {
-// 	return "{{b}}swap # (from) (to){{/b}} to swap goods from one type to another, eg. {{b}}swap 2 wood spear{{/b}}"
-// }
-
 func (g *Game) CanSwap(player int) bool {
 	return g.CurrentPlayer == player && g.Phase == PhaseTrade &&
 		g.Boards[player].Developments[DevelopmentShipping] &&
@@ -98,4 +57,20 @@ func (g *Game) Swap(player int, fromGood, toGood Good, amount int) ([]brdgme.Log
 		logs = append(logs, g.NextPhase()...)
 	}
 	return logs, nil
+}
+
+func (g *Game) SwapCommand(
+	player, amount int,
+	from, to Good,
+	remaining string,
+) (brdgme.CommandResponse, error) {
+	logs, err := g.Swap(player, from, to, amount)
+	if err != nil {
+		return brdgme.CommandResponse{}, err
+	}
+	return brdgme.CommandResponse{
+		Logs:      logs,
+		CanUndo:   false,
+		Remaining: remaining,
+	}, nil
 }

@@ -61,6 +61,11 @@ type SellCommand struct {
 
 type PreserveCommand struct{}
 
+type SwapCommand struct {
+	Amount   int
+	From, To Good
+}
+
 func (g *Game) CommandParser(player int) brdgme.Parser {
 	parsers := []brdgme.Parser{}
 	if g.CanBuild(player) {
@@ -76,7 +81,7 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 		parsers = append(parsers, NextParser())
 	}
 	if g.CanTake(player) {
-		parsers = append(parsers, g.TakeParser(player))
+		parsers = append(parsers, g.TakeParser())
 	}
 	if g.CanDiscard(player) {
 		parsers = append(parsers, g.DiscardParser(player))
@@ -85,13 +90,16 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 		parsers = append(parsers, g.InvadeParser(player))
 	}
 	if g.CanRoll(player) {
-		parsers = append(parsers, g.RollParser(player))
+		parsers = append(parsers, g.RollParser())
 	}
 	if g.CanSell(player) {
 		parsers = append(parsers, g.SellParser(player))
 	}
 	if g.CanPreserve(player) {
 		parsers = append(parsers, PreserveParser())
+	}
+	if g.CanSwap(player) {
+		parsers = append(parsers, SwapParser())
 	}
 	return brdgme.OneOf(parsers)
 }
@@ -255,7 +263,7 @@ func (g *Game) BuyParser(player int) brdgme.Parser {
 				g.BuyDevelopmentParser(player),
 			),
 			brdgme.Opt{
-				Parser: brdgme.AfterSpace(g.BuyGoodParser(player)),
+				Parser: brdgme.AfterSpace(BuyGoodParser()),
 			},
 		},
 		Func: func(value interface{}) interface{} {
@@ -294,7 +302,7 @@ func (g *Game) BuyDevelopmentParser(player int) brdgme.Parser {
 	}
 }
 
-func (g *Game) BuyGoodParser(player int) brdgme.Parser {
+func BuyGoodParser() brdgme.Parser {
 	var min uint = 1
 	return brdgme.OneOf{
 		brdgme.Map{
@@ -312,8 +320,8 @@ func (g *Game) BuyGoodParser(player int) brdgme.Parser {
 			},
 			Func: func(value interface{}) interface{} {
 				goods := []Good{}
-				for _, g := range value.([]interface{}) {
-					goods = append(goods, g.(Good))
+				for _, good := range value.([]interface{}) {
+					goods = append(goods, good.(Good))
 				}
 				return BuyCommandGoods{
 					Goods: goods,
@@ -349,7 +357,7 @@ func NextParser() brdgme.Parser {
 	}
 }
 
-func (g *Game) TakeParser(player int) brdgme.Parser {
+func (g *Game) TakeParser() brdgme.Parser {
 	var min uint = 1
 	var max uint = 0
 	for _, v := range g.KeptDice {
@@ -453,7 +461,7 @@ func (g *Game) InvadeParser(player int) brdgme.Parser {
 	}
 }
 
-func (g *Game) RollParser(player int) brdgme.Parser {
+func (g *Game) RollParser() brdgme.Parser {
 	minI := 1
 	maxI := len(g.RolledDice)
 	minU := uint(minI)
@@ -524,6 +532,49 @@ func PreserveParser() brdgme.Parser {
 		},
 		Func: func(value interface{}) interface{} {
 			return PreserveCommand{}
+		},
+	}
+}
+
+func SwapParser() brdgme.Parser {
+	min := 1
+	return brdgme.Map{
+		Parser: brdgme.Chain{
+			brdgme.Doc{
+				Name:   "swap",
+				Desc:   "swap one type of goods for a different type using shipping",
+				Parser: brdgme.Token("swap"),
+			},
+			brdgme.AfterSpace(
+				brdgme.Doc{
+					Name: "amount",
+					Desc: "amount of goods to swap",
+					Parser: brdgme.Int{
+						Min: &min,
+					},
+				},
+			),
+			brdgme.AfterSpace(
+				brdgme.Doc{
+					Name:   "from",
+					Desc:   "type of good to swap away",
+					Parser: GoodParser(),
+				},
+			),
+			brdgme.AfterSpace(
+				brdgme.Doc{
+					Name:   "to",
+					Desc:   "type of good to gain",
+					Parser: GoodParser(),
+				},
+			),
+		},
+		Func: func(value interface{}) interface{} {
+			return SwapCommand{
+				Amount: value.([]interface{})[1].(int),
+				From:   value.([]interface{})[2].(Good),
+				To:     value.([]interface{})[3].(Good),
+			}
 		},
 	}
 }

@@ -24,7 +24,7 @@ func (g *Game) SellFood(player, amount int) ([]brdgme.Log, error) {
 	g.RemainingCoins += coins
 	g.Boards[player].Food -= amount
 	return []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
-		`%s traded {{b}}%d{{/b}} %s for {{b}}%d coins{{/b}}`,
+		`%s sold {{b}}%d{{/b}} %s for {{b}}%d coins{{/b}}`,
 		g.RenderName(player),
 		amount,
 		FoodName,

@@ -73,6 +73,8 @@ func (g *Game) Command(
 		return g.SellCommand(player, value.Amount, parseOutput.Remaining)
 	case PreserveCommand:
 		return g.PreserveCommand(player, parseOutput.Remaining)
+	case SwapCommand:
+		return g.SwapCommand(player, value.Amount, value.From, value.To, parseOutput.Remaining)
 	}
 	return brdgme.CommandResponse{}, errors.New("inexhaustive command handler")
 }
@@ -89,50 +91,6 @@ func (g *Game) CommandSpec(player int) *brdgme.Spec {
 func (g *Game) PlayerCounts() []int {
 	return []int{2, 3, 4}
 }
-
-/*
-func (g *Game) Commands(player string) []command.Command {
-	commands := []command.Command{}
-	pNum, err := g.PlayerNum(player)
-	if err != nil {
-		return commands
-	}
-	if g.CanPreserve(pNum) {
-		commands = append(commands, PreserveCommand{})
-	}
-	if g.CanRoll(pNum) {
-		commands = append(commands, RollCommand{})
-	}
-	if g.CanTake(pNum) {
-		commands = append(commands, TakeCommand{})
-	}
-	if g.CanInvade(pNum) {
-		commands = append(commands, InvadeCommand{})
-	}
-	if g.CanTrade(pNum) {
-		commands = append(commands, TradeCommand{})
-	}
-	if g.CanBuild(pNum) {
-		commands = append(commands, BuildCommand{})
-	}
-	if g.CanSell(pNum) {
-		commands = append(commands, SellCommand{})
-	}
-	if g.CanSwap(pNum) {
-		commands = append(commands, SwapCommand{})
-	}
-	if g.CanBuy(pNum) {
-		commands = append(commands, BuyCommand{})
-	}
-	if g.CanDiscard(pNum) {
-		commands = append(commands, DiscardCommand{})
-	}
-	if g.CanNext(pNum) {
-		commands = append(commands, NextCommand{})
-	}
-	return commands
-}
-*/
 
 func (g *Game) New(players int) ([]brdgme.Log, error) {
 	if players < 2 || players > 4 {
