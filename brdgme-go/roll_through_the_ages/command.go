@@ -59,6 +59,8 @@ type SellCommand struct {
 	Amount int
 }
 
+type PreserveCommand struct{}
+
 func (g *Game) CommandParser(player int) brdgme.Parser {
 	parsers := []brdgme.Parser{}
 	if g.CanBuild(player) {
@@ -71,7 +73,7 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 		parsers = append(parsers, g.TradeParser(player))
 	}
 	if g.CanNext(player) {
-		parsers = append(parsers, g.NextParser())
+		parsers = append(parsers, NextParser())
 	}
 	if g.CanTake(player) {
 		parsers = append(parsers, g.TakeParser(player))
@@ -87,6 +89,9 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 	}
 	if g.CanSell(player) {
 		parsers = append(parsers, g.SellParser(player))
+	}
+	if g.CanPreserve(player) {
+		parsers = append(parsers, PreserveParser())
 	}
 	return brdgme.OneOf(parsers)
 }
@@ -331,7 +336,7 @@ func GoodParser() brdgme.Parser {
 	}
 }
 
-func (g *Game) NextParser() brdgme.Parser {
+func NextParser() brdgme.Parser {
 	return brdgme.Map{
 		Parser: brdgme.Doc{
 			Name:   "next",
@@ -506,6 +511,19 @@ func (g *Game) SellParser(player int) brdgme.Parser {
 			return SellCommand{
 				Amount: value.([]interface{})[1].(int),
 			}
+		},
+	}
+}
+
+func PreserveParser() brdgme.Parser {
+	return brdgme.Map{
+		Parser: brdgme.Doc{
+			Name:   "preserve",
+			Desc:   "use 1 pottery to double your food",
+			Parser: brdgme.Token("preserve"),
+		},
+		Func: func(value interface{}) interface{} {
+			return PreserveCommand{}
 		},
 	}
 }

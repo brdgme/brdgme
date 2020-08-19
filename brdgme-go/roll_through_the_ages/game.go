@@ -71,6 +71,8 @@ func (g *Game) Command(
 		return g.RollCommand(player, value.Dice, parseOutput.Remaining)
 	case SellCommand:
 		return g.SellCommand(player, value.Amount, parseOutput.Remaining)
+	case PreserveCommand:
+		return g.PreserveCommand(player, parseOutput.Remaining)
 	}
 	return brdgme.CommandResponse{}, errors.New("inexhaustive command handler")
 }

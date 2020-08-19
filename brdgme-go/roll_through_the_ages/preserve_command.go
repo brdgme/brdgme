@@ -7,28 +7,6 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-// type PreserveCommand struct{}
-
-// func (c PreserveCommand) Name() string { return "preserve" }
-
-// func (c PreserveCommand) Call(
-// 	player string,
-// 	context interface{},
-// 	input *command.Reader,
-// ) (string, error) {
-// 	g := context.(*Game)
-// 	pNum, err := g.PlayerNum(player)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	return "", g.Preserve(pNum)
-// }
-
-// func (c PreserveCommand) Usage(player string, context interface{}) string {
-// 	return "{{b}}preserve{{/b}} to use 1 pottery to double your food"
-// }
-
 func (g *Game) CanPreserve(player int) bool {
 	b := g.Boards[player]
 	return g.CurrentPlayer == player && g.Phase == PhasePreserve &&
@@ -51,4 +29,16 @@ func (g *Game) Preserve(player int) ([]brdgme.Log, error) {
 	))}
 	logs = append(logs, g.NextPhase()...)
 	return logs, nil
+}
+
+func (g *Game) PreserveCommand(
+	player int,
+	remaining string,
+) (brdgme.CommandResponse, error) {
+	logs, err := g.Preserve(player)
+	return brdgme.CommandResponse{
+		Logs:      logs,
+		CanUndo:   false,
+		Remaining: remaining,
+	}, err
 }

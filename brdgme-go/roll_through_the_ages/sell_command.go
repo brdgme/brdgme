@@ -7,37 +7,6 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-// type SellCommand struct{}
-
-// func (c SellCommand) Name() string { return "sell" }
-
-// func (c SellCommand) Call(
-// 	player string,
-// 	context interface{},
-// 	input *command.Reader,
-// ) (string, error) {
-// 	g := context.(*Game)
-// 	pNum, err := g.PlayerNum(player)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	args, err := input.ReadLineArgs()
-// 	if err != nil || len(args) == 0 {
-// 		return "", errors.New("you must specify how much food to sell")
-// 	}
-// 	amount, err := strconv.Atoi(args[0])
-// 	if err != nil || amount < 1 {
-// 		return "", errors.New("the amount must be a positive number")
-// 	}
-
-// 	return "", g.SellFood(pNum, amount)
-// }
-
-// func (c SellCommand) Usage(player string, context interface{}) string {
-// 	return "{{b}}sell #{{/b}} to sell food for 6 coins each, eg. {{b}}sell 3{{/b}}"
-// }
-
 func (g *Game) CanSell(player int) bool {
 	return g.CurrentPlayer == player && g.Phase == PhaseBuy &&
 		g.Boards[player].Developments[DevelopmentGranaries]
