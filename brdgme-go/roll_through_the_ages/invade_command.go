@@ -74,7 +74,7 @@ func (g *Game) Invade(player, amount int) ([]brdgme.Log, error) {
 				g.RenderName(p),
 			))
 		} else {
-			g.Boards[p].Disasters += amount
+			g.Boards[p].Disasters += amount * 2
 			buf.WriteString(fmt.Sprintf(
 				"\n  %s takes {{b}}%d disaster points{{/b}}",
 				g.RenderName(p),
@@ -86,4 +86,20 @@ func (g *Game) Invade(player, amount int) ([]brdgme.Log, error) {
 	logs := []brdgme.Log{brdgme.NewPublicLog(buf.String())}
 	logs = append(logs, g.NextPhase()...)
 	return logs, nil
+}
+
+func (g *Game) InvadeCommand(
+	player int,
+	amount int,
+	remaining string,
+) (brdgme.CommandResponse, error) {
+	logs, err := g.Invade(player, amount)
+	if err != nil {
+		return brdgme.CommandResponse{}, err
+	}
+	return brdgme.CommandResponse{
+		Logs:      logs,
+		CanUndo:   false,
+		Remaining: remaining,
+	}, nil
 }

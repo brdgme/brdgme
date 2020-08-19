@@ -28,7 +28,7 @@ import (
 // }
 
 func (g *Game) CanNext(player int) bool {
-	return player == g.CurrentPlayer && ContainsInt(g.Phase, []int{
+	return player == g.CurrentPlayer && Contains(g.Phase, []interface{}{
 		PhasePreserve,
 		PhaseRoll,
 		PhaseExtraRoll,

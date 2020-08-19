@@ -10,8 +10,10 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
+type Phase int
+
 const (
-	PhasePreserve = iota
+	PhasePreserve Phase = iota
 	PhaseRoll
 	PhaseExtraRoll
 	PhaseCollect
@@ -27,7 +29,7 @@ var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type Game struct {
 	CurrentPlayer    int
-	Phase            int
+	Phase            Phase
 	Boards           []*PlayerBoard
 	RolledDice       []Die
 	KeptDice         []Die
@@ -63,6 +65,8 @@ func (g *Game) Command(
 		return g.BuyCommand(player, value, parseOutput.Remaining)
 	case DiscardCommand:
 		return g.DiscardCommand(player, value.Amount, value.Good, parseOutput.Remaining)
+	case InvadeCommand:
+		return g.InvadeCommand(player, value.Amount, parseOutput.Remaining)
 	}
 	return brdgme.CommandResponse{}, errors.New("inexhaustive command handler")
 }
@@ -526,6 +530,15 @@ func (g *Game) AvailableDevelopments(player int) []DevelopmentID {
 }
 
 func ContainsInt(needle int, haystack []int) bool {
+	for _, i := range haystack {
+		if needle == i {
+			return true
+		}
+	}
+	return false
+}
+
+func Contains(needle interface{}, haystack []interface{}) bool {
 	for _, i := range haystack {
 		if needle == i {
 			return true

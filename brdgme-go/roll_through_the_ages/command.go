@@ -47,6 +47,10 @@ type DiscardCommand struct {
 	Good   Good
 }
 
+type InvadeCommand struct {
+	Amount int
+}
+
 func (g *Game) CommandParser(player int) brdgme.Parser {
 	parsers := []brdgme.Parser{}
 	if g.CanBuild(player) {
@@ -66,6 +70,9 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 	}
 	if g.CanDiscard(player) {
 		parsers = append(parsers, g.DiscardParser(player))
+	}
+	if g.CanInvade(player) {
+		parsers = append(parsers, g.InvadeParser(player))
 	}
 	return brdgme.OneOf(parsers)
 }
@@ -393,6 +400,35 @@ func (g *Game) DiscardParser(player int) brdgme.Parser {
 			return DiscardCommand{
 				Amount: value.([]interface{})[1].(int),
 				Good:   value.([]interface{})[2].(Good),
+			}
+		},
+	}
+}
+
+func (g *Game) InvadeParser(player int) brdgme.Parser {
+	min := 1
+	max := g.Boards[player].Goods[GoodSpearhead]
+	return brdgme.Map{
+		Parser: brdgme.Chain{
+			brdgme.Doc{
+				Name:   "invade",
+				Desc:   "invade other players by spending spearheads for -2 points each",
+				Parser: brdgme.Token("invade"),
+			},
+			brdgme.AfterSpace(
+				brdgme.Doc{
+					Name: "amount",
+					Desc: "amount of spearheads to spend",
+					Parser: brdgme.Int{
+						Min: &min,
+						Max: &max,
+					},
+				},
+			),
+		},
+		Func: func(value interface{}) interface{} {
+			return InvadeCommand{
+				Amount: value.([]interface{})[1].(int),
 			}
 		},
 	}
