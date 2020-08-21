@@ -25,7 +25,7 @@ func (g *Game) TradeStone(player, amount int) ([]brdgme.Log, error) {
 	g.RemainingWorkers += workers
 	g.Boards[player].Goods[GoodStone] -= amount
 	return []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
-		`%s traded {{b}}%d{{_b}} %s for {{b}}%d workers{{_b}}`,
+		`%s traded {{b}}%d{{/b}} %s for {{b}}%d workers{{/b}}`,
 		g.RenderName(player),
 		amount,
 		RenderGoodName(GoodStone),

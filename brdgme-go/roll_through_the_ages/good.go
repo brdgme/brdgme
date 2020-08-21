@@ -1,5 +1,7 @@
 package roll_through_the_ages
 
+import "github.com/brdgme/brdgme/brdgme-go/render"
+
 type Good int
 
 const (
@@ -26,12 +28,12 @@ var GoodStrings = map[Good]string{
 	GoodSpearhead: "spearhead",
 }
 
-var GoodColours = map[Good]string{
-	GoodWood:      "magenta",
-	GoodStone:     "gray",
-	GoodPottery:   "red",
-	GoodCloth:     "blue",
-	GoodSpearhead: "yellow",
+var GoodColours = map[Good]render.Color{
+	GoodWood:      render.Purple,
+	GoodStone:     render.Grey,
+	GoodPottery:   render.Red,
+	GoodCloth:     render.Blue,
+	GoodSpearhead: render.Yellow,
 }
 
 func GoodsReversed() []Good {

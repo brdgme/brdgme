@@ -1,5 +1,9 @@
 package roll_through_the_ages
 
+import (
+	"github.com/brdgme/brdgme/brdgme-go/render"
+)
+
 type Die int
 
 const (
@@ -29,12 +33,12 @@ var DiceStrings = map[Die]string{
 	DiceCoins:         "C",
 }
 
-var DiceValueColours = map[string]string{
-	"F": "green",
-	"G": "magenta",
-	"X": "red",
-	"W": "cyan",
-	"C": "yellow",
+var DiceValueColours = map[string]render.Color{
+	"F": render.Green,
+	"G": render.Purple,
+	"X": render.Red,
+	"W": render.Cyan,
+	"C": render.Yellow,
 }
 
 func Roll() Die {

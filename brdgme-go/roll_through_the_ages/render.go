@@ -23,15 +23,17 @@ func (g *Game) PlayerRender(player int) string {
 		diceString := DiceStrings[d]
 		diceRow = append(diceRow, render.Cel(render.Bold(RenderDice(d))))
 		numberRow = append(numberRow, render.Cel(fmt.Sprintf(
-			`%s{{c "gray"}}%d{{/c}}`,
+			`%s%v`,
 			strings.Repeat(" ", utf8.RuneCountInString(diceString)/2),
-			i+1,
+			render.Fg(render.Grey, strconv.Itoa(i+1)),
 		)))
 	}
 	for _, d := range g.KeptDice {
 		diceRow = append(diceRow, render.Cell{Align: render.Left, Content: RenderDice(d)})
 	}
-	buf.WriteString("{{b}}Dice{{/b}} {{c \"gray\"}}(F: food, W: worker, G: good, C: coin, X: skull){{/c}}\n")
+	buf.WriteString("{{b}}Dice{{/b}} ")
+	buf.WriteString(render.Fg(render.Grey, "(F: food, W: worker, G: good, C: coin, X: skull)"))
+	buf.WriteString("\n")
 	t := render.Table([][]render.Cell{diceRow, numberRow}, 0, 2)
 	buf.WriteString(t)
 	buf.WriteString("\n\n")
@@ -62,7 +64,9 @@ func (g *Game) PlayerRender(player int) string {
 		buf.WriteString("\n\n")
 	}
 	// Cities
-	buf.WriteString("{{b}}Cities{{/b}} {{c \"gray\"}}(number of dice and food used per turn){{/c}}\n")
+	buf.WriteString("{{b}}Cities{{/b}} ")
+	buf.WriteString(render.Fg(render.Grey, "(number of dice and food used per turn)"))
+	buf.WriteString("\n")
 	cityHeaderBuf := bytes.NewBufferString(fmt.Sprintf(
 		"{{b}}%d{{/b}}", BaseCitySize))
 	last := 0
@@ -86,7 +90,7 @@ func (g *Game) PlayerRender(player int) string {
 					RenderX(p, p == player),
 				), g.Boards[p].CityProgress+1),
 				strings.Repeat(
-					`{{c "gray"}}.{{/c}} `,
+					render.Fg(render.Grey, ".")+" ",
 					remaining,
 				),
 			)),
@@ -115,7 +119,7 @@ func (g *Game) PlayerRender(player int) string {
 		dv := DevelopmentValues[d]
 		row := []render.Cell{render.Cel(strings.Title(dv.Name))}
 		for p := 0; p < g.PlayerCount(); p++ {
-			cell := `{{c "gray"}}.{{/c}}`
+			cell := render.Fg(render.Grey, ".")
 			if g.Boards[p].Developments[d] {
 				cell = RenderX(p, player == p)
 			}
@@ -124,7 +128,7 @@ func (g *Game) PlayerRender(player int) string {
 		row = append(row, []render.Cell{
 			render.Cel(fmt.Sprintf(" %d", dv.Cost)),
 			render.Cel(fmt.Sprintf(" %d", dv.Points)),
-			render.Cel(fmt.Sprintf(`{{c "gray"}}%s{{/c}}`, dv.Effect)),
+			render.Cel(render.Fg(render.Grey, dv.Effect)),
 		}...)
 		cells = append(cells, row)
 	}
@@ -149,7 +153,7 @@ func (g *Game) PlayerRender(player int) string {
 			var cell string
 			switch {
 			case g.Boards[p].Monuments[m] == 0:
-				cell = `{{c "gray"}}.{{/c}}`
+				cell = render.Fg(render.Grey, ".")
 			case g.Boards[p].Monuments[m] == mv.Size:
 				cell = RenderX(p, g.Boards[p].MonumentBuiltFirst[m])
 			default:
@@ -160,7 +164,7 @@ func (g *Game) PlayerRender(player int) string {
 		row = append(row, []render.Cell{
 			render.Cel(fmt.Sprintf(" %d", mv.Size)),
 			render.Cel(fmt.Sprintf("{{b}}%d{{/b}}/%d", mv.Points, mv.SubsequentPoints)),
-			render.Cel(fmt.Sprintf(`{{c "gray"}}%s{{/c}}`, mv.Effect)),
+			render.Cel(render.Fg(render.Grey, mv.Effect)),
 		}...)
 		cells = append(cells, row)
 	}
@@ -257,23 +261,15 @@ func RenderX(player int, strong bool) string {
 func RenderDice(dice Die) string {
 	diceString := DiceStrings[dice]
 	for v, col := range DiceValueColours {
-		diceString = strings.Replace(diceString, v, fmt.Sprintf(
-			`{{c "%s"}}%s{{/c}}`,
-			col,
-			v,
-		), -1)
+		diceString = strings.Replace(diceString, v, render.Fg(col, v), -1)
 	}
 	return diceString
 }
 
 func RenderGoodName(good Good) string {
-	return fmt.Sprintf(
-		`{{b}}{{c "%s"}}%s{{/c}}{{/b}}`,
-		GoodColours[good],
-		GoodStrings[good],
-	)
+	return render.Bold(render.Fg(GoodColours[good], GoodStrings[good]))
 }
 
-var FoodName = `{{b}}{{c "green"}}food{{/c}}{{/b}}`
-var ShipName = `{{b}}{{c "blue"}}ship{{/c}}{{/b}}`
-var DisasterName = `{{b}}{{c "red"}}disaster{{/c}}{{/b}}`
+var FoodName = render.Bold(render.Fg(render.Green, "food"))
+var ShipName = render.Bold(render.Fg(render.Blue, "ship"))
+var DisasterName = render.Bold(render.Fg(render.Red, "disaster"))
