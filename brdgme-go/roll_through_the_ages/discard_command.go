@@ -8,7 +8,9 @@ import (
 )
 
 func (g *Game) CanDiscard(player int) bool {
-	return g.CurrentPlayer == player && g.Phase == PhaseDiscard
+	return g.CurrentPlayer == player &&
+		g.Phase == PhaseDiscard &&
+		g.Boards[g.CurrentPlayer].GoodsOverLimit() > 0
 }
 
 func (g *Game) Discard(player, amount int, good Good) ([]brdgme.Log, error) {
@@ -53,7 +55,7 @@ func (g *Game) DiscardCommand(
 	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   false,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, nil
 }

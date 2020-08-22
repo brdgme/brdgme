@@ -105,6 +105,13 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 }
 
 func (g *Game) BuildParser(player int) brdgme.Parser {
+	opts := []brdgme.Parser{}
+	if g.CanBuildBuilding(player) {
+		opts = append(opts, g.BuildTargetWorkerParser(player))
+	}
+	if g.CanBuildShip(player) {
+		opts = append(opts, g.BuildTargetShipParser(player))
+	}
 	return brdgme.Map{
 		Parser: brdgme.Chain{
 			brdgme.Doc{
@@ -113,10 +120,7 @@ func (g *Game) BuildParser(player int) brdgme.Parser {
 				Parser: brdgme.Token("build"),
 			},
 			brdgme.AfterSpace(
-				brdgme.OneOf([]brdgme.Parser{
-					g.BuildTargetWorkerParser(player),
-					g.BuildTargetShipParser(player),
-				}),
+				brdgme.OneOf(opts),
 			),
 		},
 		Func: func(value interface{}) interface{} {
@@ -464,6 +468,9 @@ func (g *Game) InvadeParser(player int) brdgme.Parser {
 func (g *Game) RollParser() brdgme.Parser {
 	minI := 1
 	maxI := len(g.RolledDice)
+	if g.Phase == PhaseExtraRoll {
+		maxI = 1
+	}
 	minU := uint(minI)
 	maxU := uint(maxI)
 	return brdgme.Map{

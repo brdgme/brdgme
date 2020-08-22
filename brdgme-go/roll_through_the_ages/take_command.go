@@ -66,7 +66,7 @@ func (g *Game) TakeCommand(
 	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   true,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, nil
 }

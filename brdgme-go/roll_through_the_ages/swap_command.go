@@ -70,7 +70,7 @@ func (g *Game) SwapCommand(
 	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   false,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, nil
 }

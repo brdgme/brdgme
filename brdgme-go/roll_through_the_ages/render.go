@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/brdgme/brdgme/brdgme-go/render"
 )
@@ -24,7 +23,7 @@ func (g *Game) PlayerRender(player int) string {
 		diceRow = append(diceRow, render.Cel(render.Bold(RenderDice(d))))
 		numberRow = append(numberRow, render.Cel(fmt.Sprintf(
 			`%s%v`,
-			strings.Repeat(" ", utf8.RuneCountInString(diceString)/2),
+			strings.Repeat(" ", len(diceString)/2),
 			render.Fg(render.Grey, strconv.Itoa(i+1)),
 		)))
 	}

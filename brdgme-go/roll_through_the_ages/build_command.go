@@ -28,7 +28,11 @@ func (c BuildCommand) Usage(player string, context interface{}) string {
 }
 
 func (g *Game) CanBuild(player int) bool {
-	return g.CanBuildBuilding(player) || g.CanBuildShip(player) || g.CanTrade(player)
+	return g.CanBuildBuilding(player) || g.CanBuildShip(player)
+}
+
+func (g *Game) CanBuildOrTrade(player int) bool {
+	return g.CanBuild(player) || g.CanTrade(player)
 }
 
 func (g *Game) CanBuildBuilding(player int) bool {
@@ -74,7 +78,7 @@ func (g *Game) BuildCity(player, amount int) ([]brdgme.Log, error) {
 			newCities,
 		)))
 	}
-	if !g.CanBuild(player) {
+	if !g.CanBuildOrTrade(player) {
 		logs = append(logs, g.NextPhase()...)
 	}
 	return logs, nil
@@ -87,7 +91,7 @@ func (g *Game) BuildCityCommand(player, amount int, remaining string) (brdgme.Co
 	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   true,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, nil
 }
@@ -120,7 +124,7 @@ func (g *Game) BuildShip(player, amount int) ([]brdgme.Log, error) {
 			amount,
 		)),
 	}
-	if !g.CanBuild(player) {
+	if !g.CanBuildOrTrade(player) {
 		logs = append(logs, g.NextPhase()...)
 	}
 	return logs, nil
@@ -133,7 +137,7 @@ func (g *Game) BuildShipCommand(player, amount int, remaining string) (brdgme.Co
 	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   true,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, nil
 }
@@ -181,9 +185,9 @@ func (g *Game) BuildMonument(player, amount int, monument MonumentID) ([]brdgme.
 			player,
 			mv.Name,
 		)))
-		g.CheckGameEndTriggered(player)
+		logs = append(logs, g.CheckGameEndTriggered(player)...)
 	}
-	if !g.CanBuild(player) {
+	if !g.CanBuildOrTrade(player) {
 		logs = append(logs, g.NextPhase()...)
 	}
 	return logs, nil
@@ -196,7 +200,7 @@ func (g *Game) BuildMonumentCommand(player, amount int, monument MonumentID, rem
 	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   true,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, nil
 }

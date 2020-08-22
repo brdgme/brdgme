@@ -100,8 +100,7 @@ func (g *Game) New(players int) ([]brdgme.Log, error) {
 	for i := 0; i < players; i++ {
 		g.Boards[i] = NewPlayerBoard()
 	}
-	g.StartTurn()
-	return nil, nil
+	return g.StartTurn(), nil
 }
 
 func (g *Game) PlayerCount() int {
@@ -152,10 +151,10 @@ func (g *Game) WhoseTurn() []int {
 	return []int{g.CurrentPlayer}
 }
 
-func (g *Game) StartTurn() {
+func (g *Game) StartTurn() []brdgme.Log {
 	g.RemainingCoins = 0
 	g.RemainingWorkers = 0
-	g.PreservePhase()
+	return g.PreservePhase()
 }
 
 func (g *Game) NextPhase() []brdgme.Log {
@@ -192,9 +191,9 @@ func (g *Game) PreservePhase() []brdgme.Log {
 
 func (g *Game) RollPhase() []brdgme.Log {
 	g.Phase = PhaseRoll
-	g.NewRoll(g.Boards[g.CurrentPlayer].Cities())
+	logs := g.NewRoll(g.Boards[g.CurrentPlayer].Cities())
 	g.RemainingRolls = 2
-	return []brdgme.Log{}
+	return logs
 }
 
 func (g *Game) RollExtraPhase() []brdgme.Log {
@@ -339,7 +338,7 @@ func (g *Game) PhaseResolve() []brdgme.Log {
 				}
 			}
 			logs = append(logs, brdgme.NewPublicLog(buf.String()))
-			g.InvadePhase()
+			logs = append(logs, g.InvadePhase()...)
 			return logs
 		} else if g.Boards[cp].HasBuilt(MonumentGreatWall) {
 			logs = append(logs, brdgme.NewPublicLog(fmt.Sprintf(
@@ -391,7 +390,7 @@ func (g *Game) InvadePhase() []brdgme.Log {
 
 func (g *Game) BuildPhase() []brdgme.Log {
 	g.Phase = PhaseBuild
-	if !g.CanBuild(g.CurrentPlayer) {
+	if !g.CanBuildOrTrade(g.CurrentPlayer) {
 		return g.NextPhase()
 	}
 	return []brdgme.Log{}
@@ -435,7 +434,7 @@ func (g *Game) NextTurn() []brdgme.Log {
 		g.Finished = true
 	}
 	if !g.IsFinished() {
-		g.StartTurn()
+		return g.StartTurn()
 	}
 	return []brdgme.Log{}
 }

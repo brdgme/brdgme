@@ -9,7 +9,8 @@ import (
 
 func (g *Game) CanSell(player int) bool {
 	return g.CurrentPlayer == player && g.Phase == PhaseBuy &&
-		g.Boards[player].Developments[DevelopmentGranaries]
+		g.Boards[player].Developments[DevelopmentGranaries] &&
+		g.Boards[player].Food > 0
 }
 
 func (g *Game) SellFood(player, amount int) ([]brdgme.Log, error) {
@@ -38,9 +39,12 @@ func (g *Game) SellCommand(
 	remaining string,
 ) (brdgme.CommandResponse, error) {
 	logs, err := g.SellFood(player, amount)
+	if err != nil {
+		return brdgme.CommandResponse{}, err
+	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   false,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, err
 }

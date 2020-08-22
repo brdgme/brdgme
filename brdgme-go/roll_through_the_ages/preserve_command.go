@@ -36,9 +36,12 @@ func (g *Game) PreserveCommand(
 	remaining string,
 ) (brdgme.CommandResponse, error) {
 	logs, err := g.Preserve(player)
+	if err != nil {
+		return brdgme.CommandResponse{}, err
+	}
 	return brdgme.CommandResponse{
 		Logs:      logs,
-		CanUndo:   false,
+		CanUndo:   g.CurrentPlayer == player,
 		Remaining: remaining,
 	}, err
 }

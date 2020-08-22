@@ -13,7 +13,8 @@ func (g *Game) CanRoll(player int) bool {
 	if g.CurrentPlayer != player {
 		return false
 	}
-	return g.Phase == PhaseRoll && g.RemainingRolls > 0 ||
+	return g.Phase == PhaseRoll &&
+		(g.RemainingRolls > 0 && len(g.RolledDice) > 0) ||
 		g.Phase == PhaseExtraRoll
 }
 
@@ -55,11 +56,12 @@ func (g *Game) Roll(player int, diceNum []int) ([]brdgme.Log, error) {
 	return logs, nil
 }
 
-func (g *Game) NewRoll(n int) {
+func (g *Game) NewRoll(n int) []brdgme.Log {
 	g.RolledDice = RollN(n)
-	g.LogRoll(g.RolledDice, []Die{})
+	logs := g.LogRoll(g.RolledDice, []Die{})
 	g.KeptDice = []Die{}
-	g.KeepSkulls()
+	logs = append(logs, g.KeepSkulls()...)
+	return logs
 }
 
 func (g *Game) KeepSkulls() []brdgme.Log {
