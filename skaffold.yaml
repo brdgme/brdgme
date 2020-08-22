@@ -33,6 +33,9 @@ build:
   - image: brdgme/for-sale-1
     docker:
       target: for-sale-1
+  - image: brdgme/roll-through-the-ages-1
+    docker:
+      target: roll-through-the-ages-1
 deploy:
   kubectl:
     manifests:
@@ -45,3 +48,4 @@ deploy:
     - k8s/game/age-of-war-1.yaml
     - k8s/game/liars-dice-1.yaml
     - k8s/game/for-sale-1.yaml
+    - k8s/game/roll-through-the-ages-1.yaml

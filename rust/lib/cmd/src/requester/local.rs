@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::io::{BufWriter, Write};
+use std::io::{stderr, BufWriter, Write};
 use std::process::{Command, Stdio};
 
 use crate::api::{Request, Response};
@@ -33,6 +33,10 @@ impl Requester for LocalRequester {
         }
 
         let output = cmd.wait_with_output()?;
+
+        if !output.stderr.is_empty() {
+            stderr().write_all(&output.stderr)?;
+        }
 
         Ok(serde_json::from_slice(&output.stdout)?)
     }
