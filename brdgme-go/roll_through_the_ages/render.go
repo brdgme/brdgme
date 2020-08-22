@@ -49,7 +49,7 @@ func (g *Game) PlayerRender(player int) string {
 			{render.Cel(render.Bold("Coins:")), render.Cel(fmt.Sprintf(
 				"%d (%d including goods)",
 				g.RemainingCoins,
-				g.RemainingCoins+g.Boards[player].GoodsValue(),
+				g.RemainingCoins+g.Boards[g.CurrentPlayer].GoodsValue(),
 			))},
 		}
 		buf.WriteString(render.Table(cells, 0, 2))
