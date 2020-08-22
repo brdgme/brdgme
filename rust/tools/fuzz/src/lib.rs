@@ -327,5 +327,5 @@ fn exec_command(
 }
 
 fn rand_command(command_spec: &command::Spec, players: &[String], rng: &mut ThreadRng) -> String {
-    brdgme_rand_bot::spec_to_command(command_spec, players, rng).join("")
+    brdgme_rand_bot::spec_to_command(command_spec, command_spec, players, rng).join("")
 }
