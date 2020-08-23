@@ -2,24 +2,24 @@ export interface ICommandSpec {
   Int?: { min?: number, max?: number };
   Token?: string;
   Enum?: { values: string[], exact: boolean };
-  OneOf?: ICommandSpec[];
-  Chain?: ICommandSpec[];
-  Many?: { min?: number, max?: number, delim: string, spec: ICommandSpec };
-  Opt?: ICommandSpec;
-  Doc?: { name: string, desc?: string, spec: ICommandSpec };
+  OneOf?: CommandSpec[];
+  Chain?: CommandSpec[];
+  Many?: { min?: number, max?: number, delim?: CommandSpec, spec: CommandSpec };
+  Opt?: CommandSpec;
+  Doc?: { name: string, desc?: string, spec: CommandSpec };
 }
 
-const COMMAND_SPEC_PLAYER = "Player";
-const COMMAND_SPEC_SPACE = "Space";
+export const COMMAND_SPEC_PLAYER = "Player";
+export const COMMAND_SPEC_SPACE = "Space";
 
-type CommandSpec = ICommandSpec | typeof COMMAND_SPEC_PLAYER | typeof COMMAND_SPEC_SPACE;
+export type CommandSpec = ICommandSpec | typeof COMMAND_SPEC_PLAYER | typeof COMMAND_SPEC_SPACE;
 
 export interface IParseResult {
   kind: typeof MATCH_FULL | typeof MATCH_PARTIAL | typeof MATCH_ERROR;
   offset: number;
   length?: number;
   next?: IParseResult[];
-  value?: string;
+  value?: any;
   name?: string;
   desc?: string;
   message?: string;
@@ -84,6 +84,8 @@ export function parseIntSpec(input: string, offset: number, min?: number, max?: 
   return {
     kind: intResult.kind,
     offset,
+    length: intResult.length,
+    value: intResult.value,
     next: [intResult].concat(enumResult.next || []),
   };
 }
@@ -188,6 +190,7 @@ export function parseSpace(input: string, offset: number): IParseResult {
       kind: MATCH_FULL,
       offset,
       length: matches[0].length,
+      value: input.slice(offset, offset+matches[0].length),
     };
   }
   return {
@@ -414,6 +417,59 @@ export function parseChain(
   );
 }
 
+export function parseMany(
+  input: string,
+  offset: number,
+  spec: CommandSpec,
+  delim?: CommandSpec,
+  min?: number,
+  max?: number,
+): IParseResult {
+  let result: IParseResult | undefined;
+  const value: any = [];
+  while (true) {
+    if (result !== undefined && delim) {
+      const delimResult = parse(input, offset, delim);
+      const delimFlatResult = flattenResult(delimResult);
+      if (delimFlatResult.combined.kind !== MATCH_FULL) {
+        result = pushResult(delimResult, result);
+        result.value = value;
+        return result;
+      }
+      offset = delimResult.offset + (delimResult.length || 0);
+    }
+
+    const itemResult = parse(input, offset, spec);
+    offset = itemResult.offset + (itemResult.length || 0);
+    const itemFlatResult = flattenResult(itemResult);
+    if (itemFlatResult.combined.kind === MATCH_FULL) {
+      value.push(itemFlatResult.combined.value);
+      if (result !== undefined) {
+        result.length = itemFlatResult.combined.offset +
+          (itemFlatResult.combined.length || 0);
+      } else {
+        result = itemResult;
+      }
+    }
+    if (itemFlatResult.combined.kind !== MATCH_FULL ||
+      max !== undefined && value.length == max) {
+      if (result === undefined) {
+        return {
+          kind: MATCH_ERROR,
+          offset,
+          message: "did not match any",
+        };
+      }
+      result = pushResult(itemResult, result);
+      if (min !== undefined && value.length < min) {
+        result.kind = MATCH_PARTIAL;
+      }
+      result.value = value;
+      return result;
+    }
+  }
+}
+
 export function parse(input: string, offset: number, spec: CommandSpec): IParseResult {
   if (spec === COMMAND_SPEC_PLAYER) {
     return {
@@ -434,11 +490,7 @@ export function parse(input: string, offset: number, spec: CommandSpec): IParseR
   } else if (spec.Chain !== undefined) {
     return parseChain(input, offset, spec.Chain);
   } else if (spec.Many !== undefined) {
-    return {
-      kind: MATCH_ERROR,
-      offset,
-      message: "Many not implemented",
-    };
+    return parseMany(input, offset, spec.Many.spec, spec.Many.delim, spec.Many.min, spec.Many.max);
   } else if (spec.Opt !== undefined) {
     return {
       kind: MATCH_ERROR,
