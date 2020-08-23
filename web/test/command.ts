@@ -128,17 +128,17 @@ describe("Command.parseEnum", () => {
 
 describe("Command.parseMany", () => {
   it("should parse a single item", () => {
-    const result = Command.parseMany(
+    const result = Command.flattenResult(Command.parseMany(
       "fart   ",
       0,
       {
         Token: "fart",
       },
-    );
+    )).combined;
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 4);
-    assert.deepEqual(result.value, ["fart"]);
+    assert.equal(result.value, "fart");
   });
   it("should parse multiple items without delim", () => {
     const result = Command.parseMany(
@@ -151,7 +151,7 @@ describe("Command.parseMany", () => {
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 8);
-    assert.deepEqual(result.value, ["fart", "fart"]);
+    assert.equal(result.value, "fartfart");
   });
   it("should parse multiple items with delim", () => {
     const result = Command.parseMany(
@@ -165,7 +165,7 @@ describe("Command.parseMany", () => {
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 11);
-    assert.deepEqual(result.value, ["fart", "fart"]);
+    assert.equal(result.value, "fart   fart");
   });
   it("should parse partial item", () => {
     const result = Command.parseMany(
@@ -181,7 +181,7 @@ describe("Command.parseMany", () => {
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 4);
-    assert.deepEqual(result.value, ["fart"]);
+    assert.equal(result.value, "fart");
     assert.isNotNull(result.next);
     assert.lengthOf(result.next!, 1);
     assert.equal(result.next![0].kind, Command.MATCH_PARTIAL);
@@ -203,7 +203,7 @@ describe("Command.parseMany", () => {
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 4);
-    assert.deepEqual(result.value, ["fart"]);
+    assert.equal(result.value, "fart");
     assert.isNotNull(result.next);
     assert.lengthOf(result.next!, 1);
     assert.equal(result.next![0].kind, Command.MATCH_PARTIAL);
@@ -232,7 +232,7 @@ describe("Command.parseMany", () => {
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 12);
-    assert.deepEqual(result.value, ["fart", "cheese"]);
+    assert.equal(result.value, "fart  cheese");
     assert.isNotNull(result.next);
     assert.lengthOf(result.next!, 1);
     assert.isNotNull(result.next![0].next);
@@ -258,7 +258,7 @@ describe("Command.parseMany", () => {
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 8);
-    assert.deepEqual(result.value, ["fart", "fart"]);
+    assert.equal(result.value, "fartfart");
   });
   it("should be partial if min not met", () => {
     const result = Command.parseMany(
@@ -273,6 +273,50 @@ describe("Command.parseMany", () => {
     assert.equal(result.kind, Command.MATCH_PARTIAL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 12);
-    assert.deepEqual(result.value, ["fart", "fart", "fart"]);
+    assert.equal(result.value, "fartfartfart");
+  });
+  it("should be partial when enum and no input yet", () => {
+    const result = Command.parseMany(
+      "",
+      0,
+      {
+        Enum: {
+          values: [
+            "fart",
+            "cheese",
+            "bacon",
+          ],
+          exact: false,
+        },
+      },
+      Command.COMMAND_SPEC_SPACE,
+    );
+    assert.equal(result.kind, Command.MATCH_FULL);
+    assert.equal(result.offset, 0);
+    assert.equal(result.value, "");
+    assert.isNotNull(result.next);
+    assert.lengthOf(result.next!, 3);
+    assert.equal(result.next![0].kind, Command.MATCH_PARTIAL);
+    assert.equal(result.next![0].offset, 0);
+    assert.equal(result.next![1].kind, Command.MATCH_PARTIAL);
+    assert.equal(result.next![1].offset, 0);
+    assert.equal(result.next![2].kind, Command.MATCH_PARTIAL);
+    assert.equal(result.next![2].offset, 0);
+  });
+  it("should recreate the value from the input", () => {
+    const result = Command.flattenResult(Command.parseMany(
+      "1 2 ",
+      0,
+      {
+        Int: {
+          min: 1,
+          max: 2,
+        }
+      },
+      Command.COMMAND_SPEC_SPACE,
+    )).combined;
+    assert.equal(result.kind, Command.MATCH_PARTIAL);
+    assert.equal(result.offset, 0);
+    assert.equal(result.value, "1 2");
   });
 });

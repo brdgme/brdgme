@@ -19,7 +19,7 @@ export interface IParseResult {
   offset: number;
   length?: number;
   next?: IParseResult[];
-  value?: any;
+  value?: string;
   name?: string;
   desc?: string;
   message?: string;
@@ -426,48 +426,72 @@ export function parseMany(
   max?: number,
 ): IParseResult {
   let result: IParseResult | undefined;
-  const value: any = [];
+  let matches = 0;
+  let offsetIter = offset;
+
   while (true) {
-    if (result !== undefined && delim) {
-      const delimResult = parse(input, offset, delim);
+    if (result && delim) {
+      const delimResult = parse(input, offsetIter, delim);
+      result = pushResult(delimResult, result);
       const delimFlatResult = flattenResult(delimResult);
       if (delimFlatResult.combined.kind !== MATCH_FULL) {
-        result = pushResult(delimResult, result);
-        result.value = value;
         return result;
       }
-      offset = delimResult.offset + (delimResult.length || 0);
+      offsetIter = delimResult.offset + (delimResult.length || 0);
     }
 
-    const itemResult = parse(input, offset, spec);
-    offset = itemResult.offset + (itemResult.length || 0);
+    const itemResult = parse(input, offsetIter, spec);
     const itemFlatResult = flattenResult(itemResult);
     if (itemFlatResult.combined.kind === MATCH_FULL) {
-      value.push(itemFlatResult.combined.value);
-      if (result !== undefined) {
-        result.length = itemFlatResult.combined.offset +
-          (itemFlatResult.combined.length || 0);
-      } else {
-        result = itemResult;
+      matches++;
+    }
+
+    if (!result) {
+      // If we don't have a top level result yet, we just use this one.
+      result = itemResult;
+    } else {
+      // Otherwise we only append if relevant.
+      if (itemFlatResult.combined.kind === MATCH_ERROR &&
+        min !== undefined && matches < min) {
+        // We didn't parse another and haven't met the minimum yet, so this is an
+        // error.
+        result = pushResult(itemResult, result);
+        result.kind = MATCH_ERROR;
+        return result;
+      }
+
+      if (itemFlatResult.combined.kind !== MATCH_ERROR) {
+        result = pushResult(itemResult, result);
       }
     }
+
     if (itemFlatResult.combined.kind !== MATCH_FULL ||
-      max !== undefined && value.length == max) {
-      if (result === undefined) {
-        return {
-          kind: MATCH_ERROR,
-          offset,
-          message: "did not match any",
-        };
-      }
-      result = pushResult(itemResult, result);
-      if (min !== undefined && value.length < min) {
+      max !== undefined && matches == max) {
+      if (min !== undefined && matches < min) {
         result.kind = MATCH_PARTIAL;
       }
-      result.value = value;
       return result;
     }
+
+    offsetIter = itemResult.offset + (itemResult.length || 0);
   }
+}
+
+export function parseOpt(
+  input: string,
+  offset: number,
+  spec: CommandSpec,
+): IParseResult {
+  const subResult = parse(input, offset, spec);
+  if (subResult.kind == MATCH_ERROR) {
+    return {
+      kind: MATCH_FULL,
+      offset,
+      length: 0,
+      value: '',
+    };
+  }
+  return subResult;
 }
 
 export function parse(input: string, offset: number, spec: CommandSpec): IParseResult {
@@ -492,11 +516,7 @@ export function parse(input: string, offset: number, spec: CommandSpec): IParseR
   } else if (spec.Many !== undefined) {
     return parseMany(input, offset, spec.Many.spec, spec.Many.delim, spec.Many.min, spec.Many.max);
   } else if (spec.Opt !== undefined) {
-    return {
-      kind: MATCH_ERROR,
-      offset,
-      message: "Opt not implemented",
-    };
+    return parseOpt(input, offset, spec.Opt);
   } else if (spec.Doc !== undefined) {
     return parseDoc(input, offset, spec.Doc.name, spec.Doc.spec, spec.Doc.desc);
   }

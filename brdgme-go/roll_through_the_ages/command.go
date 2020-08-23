@@ -483,14 +483,18 @@ func (g *Game) RollParser() brdgme.Parser {
 				Parser: brdgme.Token("roll"),
 			},
 			brdgme.AfterSpace(
-				brdgme.Many{
-					Min: &minU,
-					Max: &maxU,
-					Parser: brdgme.Int{
-						Min: &minI,
-						Max: &maxI,
+				brdgme.Doc{
+					Name: "dice",
+					Desc: "list of dice numbers to roll, separated by spaces",
+					Parser: brdgme.Many{
+						Min: &minU,
+						Max: &maxU,
+						Parser: brdgme.Int{
+							Min: &minI,
+							Max: &maxI,
+						},
+						Delim: brdgme.Space{},
 					},
-					Delim: brdgme.Space{},
 				},
 			),
 		},
