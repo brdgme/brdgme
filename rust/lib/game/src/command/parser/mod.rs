@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt::Display;
-use std::marker::PhantomData;
 
 use unicase::UniCase;
 
@@ -12,8 +11,6 @@ pub use self::chain::*;
 
 pub mod chain;
 
-const MANY_DELIM: &str = ",";
-
 #[derive(Debug, PartialEq)]
 pub struct Output<'a, T> {
     pub value: T,
@@ -21,8 +18,11 @@ pub struct Output<'a, T> {
     pub remaining: &'a str,
 }
 
-pub trait Parser<T> {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, T>, GameError>;
+pub trait Parser {
+    type T;
+
+    fn parse<'a>(&self, input: &'a str, names: &[String])
+        -> Result<Output<'a, Self::T>, GameError>;
     fn expected(&self, names: &[String]) -> Vec<String>;
     fn to_spec(&self) -> CommandSpec;
 }
@@ -42,7 +42,9 @@ impl Token {
     }
 }
 
-impl Parser<String> for Token {
+impl Parser for Token {
+    type T = String;
+
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, String>, GameError> {
         let t_len = self.token.len();
         if input.len() < self.token.len()
@@ -114,7 +116,9 @@ impl Int {
     }
 }
 
-impl Parser<i32> for Int {
+impl Parser for Int {
+    type T = i32;
+
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, i32>, GameError> {
         let mut found_digit = false;
         let consumed_count = input
@@ -184,34 +188,29 @@ impl Parser<i32> for Int {
 pub struct Map<T, O, F, TP>
 where
     F: Fn(T) -> O,
-    TP: Parser<T>,
+    TP: Parser<T = T>,
 {
     pub parser: TP,
     pub map: F,
-    t_type: PhantomData<T>,
-    o_type: PhantomData<O>,
 }
 
 impl<T, O, F, TP> Map<T, O, F, TP>
 where
     F: Fn(T) -> O,
-    TP: Parser<T>,
+    TP: Parser<T = T>,
 {
     pub fn new(parser: TP, map: F) -> Self {
-        Self {
-            parser,
-            map,
-            t_type: PhantomData,
-            o_type: PhantomData,
-        }
+        Self { parser, map }
     }
 }
 
-impl<T, O, F, TP> Parser<O> for Map<T, O, F, TP>
+impl<T, O, F, TP> Parser for Map<T, O, F, TP>
 where
     F: Fn(T) -> O,
-    TP: Parser<T>,
+    TP: Parser<T = T>,
 {
+    type T = O;
+
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, O>, GameError> {
         let child_parse = self.parser.parse(input, names)?;
         Ok(Output {
@@ -230,35 +229,33 @@ where
     }
 }
 
-pub struct Opt<T, TP>
+pub struct Opt<TP>
 where
-    TP: Parser<T>,
+    TP: Parser,
 {
     pub parser: TP,
-    t_type: PhantomData<T>,
 }
 
-impl<T, TP> Opt<T, TP>
+impl<TP> Opt<TP>
 where
-    TP: Parser<T>,
+    TP: Parser,
 {
     pub fn new(parser: TP) -> Self {
-        Self {
-            parser,
-            t_type: PhantomData,
-        }
+        Self { parser }
     }
 }
 
-impl<T, TP> Parser<Option<T>> for Opt<T, TP>
+impl<T, TP> Parser for Opt<TP>
 where
-    TP: Parser<T>,
+    TP: Parser<T = T>,
 {
+    type T = Option<T>;
+
     fn parse<'a>(
         &self,
         input: &'a str,
         names: &[String],
-    ) -> Result<Output<'a, Option<T>>, GameError> {
+    ) -> Result<Output<'a, Self::T>, GameError> {
         Ok(match self.parser.parse(input, names) {
             Ok(output) => Output {
                 value: Some(output.value),
@@ -286,58 +283,62 @@ where
     }
 }
 
-pub struct Many<T, TP>
+pub struct Many<TP, DP>
 where
-    TP: Parser<T>,
+    TP: Parser,
+    DP: Parser,
 {
     pub parser: TP,
     pub min: Option<usize>,
     pub max: Option<usize>,
-    pub delim: String,
-    t_type: PhantomData<T>,
+    pub delim: Option<DP>,
 }
 
-impl<T, TP> Many<T, TP>
+impl<TP> Many<TP, Space>
 where
-    TP: Parser<T>,
+    TP: Parser,
 {
-    pub fn any(parser: TP) -> Self {
+    pub fn any_spaced(parser: TP) -> Self {
         Self {
             parser,
             min: None,
             max: None,
-            delim: MANY_DELIM.to_string(),
-            t_type: PhantomData,
+            delim: Some(Space {}),
         }
     }
 
-    pub fn some(parser: TP) -> Self {
+    pub fn some_spaced(parser: TP) -> Self {
         Self {
             parser,
             min: Some(1),
             max: None,
-            delim: MANY_DELIM.to_string(),
-            t_type: PhantomData,
+            delim: Some(Space {}),
         }
     }
 
-    pub fn bounded(parser: TP, min: usize, max: usize) -> Self {
+    pub fn bounded_spaced(parser: TP, min: usize, max: usize) -> Self {
         Self {
             parser,
             min: Some(min),
             max: Some(max),
-            delim: MANY_DELIM.to_string(),
-            t_type: PhantomData,
+            delim: Some(Space {}),
         }
     }
 }
 
-impl<T, TP> Parser<Vec<T>> for Many<T, TP>
+impl<TP, DP> Parser for Many<TP, DP>
 where
-    TP: Parser<T>,
+    TP: Parser,
+    DP: Parser,
 {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, Vec<T>>, GameError> {
-        let mut parsed: Vec<T> = vec![];
+    type T = Vec<TP::T>;
+
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
+        let mut parsed: Self::T = vec![];
         if let Some(max) = self.max {
             if max == 0 || max < self.min.unwrap_or(0) {
                 return Ok(Output {
@@ -349,17 +350,15 @@ where
         }
         let mut first = true;
         let mut offset = 0;
-        let delim = Chain2::new(
-            Opt::new(Space {}),
-            Chain2::new(Token::new(self.delim.to_owned()), Opt::new(Space {})),
-        );
         'outer: loop {
             let mut inner_offset = offset;
             if !first {
-                match delim.parse(&input[offset..], names) {
-                    Ok(Output { consumed, .. }) => inner_offset += consumed.len(),
-                    Err(_) => break 'outer,
-                };
+                if let Some(d) = self.delim.as_ref() {
+                    match d.parse(&input[offset..], names) {
+                        Ok(Output { consumed, .. }) => inner_offset += consumed.len(),
+                        Err(_) => break 'outer,
+                    };
+                }
             } else {
                 first = false;
             }
@@ -418,14 +417,16 @@ where
             spec: Box::new(self.parser.to_spec()),
             min: self.min,
             max: self.max,
-            delim: self.delim.to_owned(),
+            delim: self.delim.as_ref().map(|d| Box::new(d.to_spec())),
         }
     }
 }
 
 struct Space {}
 
-impl Parser<String> for Space {
+impl Parser for Space {
+    type T = String;
+
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, String>, GameError> {
         let consumed = input.chars().take_while(|c| c.is_whitespace()).count();
         if consumed == 0 {
@@ -451,22 +452,24 @@ impl Parser<String> for Space {
     }
 }
 
-pub struct OneOf<T, TP: Parser<T> + ?Sized> {
+pub struct OneOf<TP: Parser + ?Sized> {
     pub parsers: Vec<Box<TP>>,
-    t_type: PhantomData<T>,
 }
 
-impl<T, TP: Parser<T> + ?Sized> OneOf<T, TP> {
+impl<TP: Parser + ?Sized> OneOf<TP> {
     pub fn new(parsers: Vec<Box<TP>>) -> Self {
-        Self {
-            parsers,
-            t_type: PhantomData,
-        }
+        Self { parsers }
     }
 }
 
-impl<T, TP: Parser<T> + ?Sized> Parser<T> for OneOf<T, TP> {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, T>, GameError> {
+impl<TP: Parser + ?Sized> Parser for OneOf<TP> {
+    type T = TP::T;
+
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
         let mut errors: Vec<GameError> = vec![];
         let mut error_consumed: usize = 0;
         for p in &self.parsers {
@@ -589,11 +592,16 @@ fn shared_prefix(s1: &str, s2: &str) -> usize {
     }
 }
 
-impl<T> Parser<T> for Enum<T>
+impl<T> Parser for Enum<T>
 where
     T: ToString + Clone,
 {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, T>, GameError> {
+    type T = T;
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
         let input_lower = input.to_lowercase();
         let mut matched: Vec<&T> = vec![];
         let mut match_len: usize = 0;
@@ -672,20 +680,18 @@ where
     }
 }
 
-pub struct Doc<T, TP: Parser<T>> {
+pub struct Doc<TP: Parser> {
     pub name: String,
     pub desc: Option<String>,
     pub parser: TP,
-    t_type: PhantomData<T>,
 }
 
-impl<T, TP: Parser<T>> Doc<T, TP> {
+impl<TP: Parser> Doc<TP> {
     pub fn name<I: Into<String>>(name: I, parser: TP) -> Self {
         Self {
             name: name.into(),
             desc: None,
             parser,
-            t_type: PhantomData,
         }
     }
 
@@ -694,13 +700,18 @@ impl<T, TP: Parser<T>> Doc<T, TP> {
             name: name.into(),
             desc: Some(desc.into()),
             parser,
-            t_type: PhantomData,
         }
     }
 }
 
-impl<T, TP: Parser<T>> Parser<T> for Doc<T, TP> {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, T>, GameError> {
+impl<TP: Parser> Parser for Doc<TP> {
+    type T = TP::T;
+
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
         self.parser.parse(input, names)
     }
 
@@ -744,8 +755,14 @@ impl Player {
     }
 }
 
-impl Parser<usize> for Player {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, usize>, GameError> {
+impl Parser for Player {
+    type T = usize;
+
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
         Map::new(Enum::partial(self.player_nums(names)), |pn| pn.num).parse(input, names)
     }
 
@@ -758,22 +775,24 @@ impl Parser<usize> for Player {
     }
 }
 
-pub struct AfterSpace<T, TP: Parser<T>> {
+pub struct AfterSpace<TP: Parser> {
     pub parser: TP,
-    t_type: PhantomData<T>,
 }
 
-impl<T, TP: Parser<T>> AfterSpace<T, TP> {
+impl<TP: Parser> AfterSpace<TP> {
     pub fn new(parser: TP) -> Self {
-        Self {
-            parser,
-            t_type: PhantomData,
-        }
+        Self { parser }
     }
 }
 
-impl<T, TP: Parser<T>> Parser<T> for AfterSpace<T, TP> {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, T>, GameError> {
+impl<TP: Parser> Parser for AfterSpace<TP> {
+    type T = TP::T;
+
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
         let pair = chain_2(&Space {}, &self.parser, input, names)?;
         Ok(Output {
             value: pair.value.1,
@@ -914,10 +933,15 @@ mod tests {
 
     #[test]
     fn many_parser_works() {
-        let mut parser = Many::any(Int {
+        let mut parser = Many {
+            parser: Int {
+                min: None,
+                max: None,
+            },
             min: None,
             max: None,
-        });
+            delim: Some(Token::new(", ")),
+        };
         assert_eq!(
             Output {
                 value: vec![3, 4, 5],
@@ -944,24 +968,26 @@ mod tests {
                 .expect("expected '3, 4, 5, 6, 7, 8, 9, 10' to parse")
         );
         parser.min = None;
-        parser.delim = ";".to_string();
+        parser.delim = Some(Token::new(";"));
         assert_eq!(
             Output {
                 value: vec![3, 4, 5],
-                consumed: "3; 4; 5",
+                consumed: "3;4;5",
                 remaining: "",
             },
             parser
-                .parse("3; 4; 5", &[])
+                .parse("3;4;5", &[])
                 .expect("expected '3; 4; 5' to parse")
         );
     }
 
     #[test]
     fn test_one_of_works() {
-        let parsers: Vec<Box<dyn Parser<String>>> = vec![
+        let parsers: Vec<Box<dyn Parser<T = String>>> = vec![
             Box::new(Token::new("blah")),
-            Box::new(Map::new(Many::any(Token::new("fart")), |v| v.join(" "))),
+            Box::new(Map::new(Many::any_spaced(Token::new("fart")), |v| {
+                v.join(" ")
+            })),
         ];
         let parser = OneOf::new(parsers);
         assert_eq!(
@@ -975,12 +1001,12 @@ mod tests {
         assert_eq!(
             Output {
                 value: "fart fart fart".to_string(),
-                consumed: "fart, fart, fart",
+                consumed: "fart fart fart",
                 remaining: "",
             },
             parser
-                .parse("fart, fart, fart", &[])
-                .expect("expected 'fart, fart, fart' to parse")
+                .parse("fart fart fart", &[])
+                .expect("expected 'fart fart fart' to parse")
         );
     }
 

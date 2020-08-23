@@ -21,11 +21,11 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<Command>>> {
+    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<T = Command>>> {
         if self.is_finished() {
             return None;
         }
-        let mut parsers: Vec<Box<dyn Parser<Command>>> = vec![];
+        let mut parsers: Vec<Box<dyn Parser<T = Command>>> = vec![];
         if self.phase.whose_turn() == player {
             match self.phase {
                 Phase::Play(_) => {
@@ -77,7 +77,7 @@ impl Game {
         }
     }
 
-    fn play_parser(&self, player: usize) -> impl Parser<Command> {
+    fn play_parser(&self, player: usize) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc("play", "play a tile to the board", Token::new("play")),
@@ -95,7 +95,7 @@ impl Game {
         )
     }
 
-    fn found_parser(&self, corps: Vec<Corp>) -> impl Parser<Command> {
+    fn found_parser(&self, corps: Vec<Corp>) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc("found", "found a new corporation", Token::new("found")),
@@ -109,7 +109,7 @@ impl Game {
         )
     }
 
-    fn buy_parser(&self, _player: usize, remaining: usize) -> impl Parser<Command> {
+    fn buy_parser(&self, _player: usize, remaining: usize) -> impl Parser<T = Command> {
         Map::new(
             Chain3::new(
                 Doc::name_desc("buy", "buy shares", Token::new("buy")),
@@ -128,7 +128,7 @@ impl Game {
         )
     }
 
-    fn sell_parser(&self, player: usize, corp: Corp) -> impl Parser<Command> {
+    fn sell_parser(&self, player: usize, corp: Corp) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc("sell", "sell shares", Token::new("sell")),
@@ -142,7 +142,7 @@ impl Game {
         )
     }
 
-    fn trade_parser(&self, player: usize, corp: Corp) -> impl Parser<Command> {
+    fn trade_parser(&self, player: usize, corp: Corp) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc("trade", "trade shares, two-for-one", Token::new("trade")),
@@ -156,7 +156,7 @@ impl Game {
         )
     }
 
-    fn player_shares_parser(&self, player: usize, corp: Corp) -> impl Parser<i32> {
+    fn player_shares_parser(&self, player: usize, corp: Corp) -> impl Parser<T = i32> {
         Int::bounded(
             1,
             self.players
@@ -166,7 +166,7 @@ impl Game {
         )
     }
 
-    fn merge_parser(&self, corps: &[Corp]) -> impl Parser<Command> {
+    fn merge_parser(&self, corps: &[Corp]) -> impl Parser<T = Command> {
         Map::new(
             Chain4::new(
                 Doc::name_desc(
@@ -191,7 +191,7 @@ impl Game {
     }
 }
 
-fn end_parser() -> impl Parser<Command> {
+fn end_parser() -> impl Parser<T = Command> {
     Doc::name_desc(
         "end",
         "trigger the end of the game at the end of your turn",
@@ -199,7 +199,7 @@ fn end_parser() -> impl Parser<Command> {
     )
 }
 
-fn done_parser() -> impl Parser<Command> {
+fn done_parser() -> impl Parser<T = Command> {
     Doc::name_desc(
         "done",
         "finish buying shares and end your turn",
@@ -207,7 +207,7 @@ fn done_parser() -> impl Parser<Command> {
     )
 }
 
-fn keep_parser() -> impl Parser<Command> {
+fn keep_parser() -> impl Parser<T = Command> {
     Doc::name_desc(
         "keep",
         "finish selling and trading shares",

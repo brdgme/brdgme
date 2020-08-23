@@ -321,6 +321,7 @@ func BuyGoodParser() brdgme.Parser {
 			Parser: brdgme.Many{
 				Min:    &min,
 				Parser: GoodParser(),
+				Delim:  brdgme.Space{},
 			},
 			Func: func(value interface{}) interface{} {
 				goods := []Good{}
@@ -386,6 +387,7 @@ func (g *Game) TakeParser() brdgme.Parser {
 							{Name: TakeMap[TakeWorkers], Value: TakeWorkers},
 						},
 					},
+					Delim: brdgme.Space{},
 				},
 			),
 		},
@@ -488,6 +490,7 @@ func (g *Game) RollParser() brdgme.Parser {
 						Min: &minI,
 						Max: &maxI,
 					},
+					Delim: brdgme.Space{},
 				},
 			),
 		},

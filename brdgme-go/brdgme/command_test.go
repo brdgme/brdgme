@@ -178,6 +178,7 @@ func TestChain(t *testing.T) {
 func TestMany(t *testing.T) {
 	parser := Many{
 		Parser: Int{},
+		Delim:  Space{},
 	}
 
 	output, err := parser.Parse("1 2 3 4 5 blah", []string{})

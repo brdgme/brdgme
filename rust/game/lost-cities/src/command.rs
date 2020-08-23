@@ -14,11 +14,11 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<Command>>> {
+    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<T = Command>>> {
         if self.is_finished() {
             return None;
         }
-        let mut parsers: Vec<Box<dyn Parser<Command>>> = vec![];
+        let mut parsers: Vec<Box<dyn Parser<T = Command>>> = vec![];
         if self.current_player == player {
             match self.phase {
                 Phase::PlayOrDiscard => {
@@ -38,7 +38,7 @@ impl Game {
         }
     }
 
-    pub fn play_parser(&self, player: usize) -> impl Parser<Command> {
+    pub fn play_parser(&self, player: usize) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc("play", "play a card to an expedition", Token::new("play")),
@@ -48,7 +48,7 @@ impl Game {
         )
     }
 
-    pub fn discard_parser(&self, player: usize) -> impl Parser<Command> {
+    pub fn discard_parser(&self, player: usize) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc(
@@ -62,7 +62,7 @@ impl Game {
         )
     }
 
-    pub fn player_card_parser(&self, player: usize, desc: &str) -> impl Parser<Card> {
+    pub fn player_card_parser(&self, player: usize, desc: &str) -> impl Parser<T = Card> {
         let mut player_hand = self.hands.get(player).cloned().unwrap_or_else(Vec::new);
         player_hand.sort();
         player_hand.dedup();
@@ -70,7 +70,7 @@ impl Game {
     }
 }
 
-pub fn draw_parser() -> impl Parser<Command> {
+pub fn draw_parser() -> impl Parser<T = Command> {
     Doc::name_desc(
         "draw",
         "draw a card from the draw pile",
@@ -78,7 +78,7 @@ pub fn draw_parser() -> impl Parser<Command> {
     )
 }
 
-pub fn take_parser() -> impl Parser<Command> {
+pub fn take_parser() -> impl Parser<T = Command> {
     Map::new(
         Chain2::new(
             Doc::name_desc(
@@ -92,7 +92,7 @@ pub fn take_parser() -> impl Parser<Command> {
     )
 }
 
-pub fn expedition_parser() -> impl Parser<Expedition> {
+pub fn expedition_parser() -> impl Parser<T = Expedition> {
     Doc::name_desc(
         "expedition",
         "the expedition to take from",

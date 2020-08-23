@@ -435,25 +435,30 @@ type Many struct {
 	Parser Parser
 	Min    *uint
 	Max    *uint
-	Delim  string
+	Delim  Parser
 }
 
 var _ Parser = Many{}
 
 type ManySpec struct {
-	Spec  Spec   `json:"spec"`
-	Min   *uint  `json:"min,omitempty"`
-	Max   *uint  `json:"max,omitempty"`
-	Delim string `json:"delim"`
+	Spec  Spec  `json:"spec"`
+	Min   *uint `json:"min,omitempty"`
+	Max   *uint `json:"max,omitempty"`
+	Delim *Spec `json:"delim,omitempty"`
 }
 
 func (m Many) ToSpec() Spec {
+	var delimSpec *Spec
+	if m.Delim != nil {
+		dSpec := m.Delim.ToSpec()
+		delimSpec = &dSpec
+	}
 	return Spec{
 		Many: &ManySpec{
 			Spec:  m.Parser.ToSpec(),
 			Min:   m.Min,
 			Max:   m.Max,
-			Delim: m.Delim,
+			Delim: delimSpec,
 		},
 	}
 }
@@ -491,17 +496,12 @@ func (m Many) Parse(input string, names []string) (Output, *ParseError) {
 
 	first := true
 	offset := 0
-	delim := Chain{
-		Opt{Space{}},
-		Token(m.Delim),
-		Opt{Space{}},
-	}
 
 	for {
 		innerOffset := offset
 
-		if !first {
-			delimOutput, delimErr := delim.Parse(input[offset:], names)
+		if !first && m.Delim != nil {
+			delimOutput, delimErr := m.Delim.Parse(input[offset:], names)
 			if delimErr != nil {
 				break
 			}

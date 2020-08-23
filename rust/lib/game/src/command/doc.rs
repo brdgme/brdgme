@@ -124,7 +124,7 @@ fn doc_many(
     spec: &Spec,
     min: Option<usize>,
     max: Option<usize>,
-    _delim: &str,
+    _delim: &Option<Box<Spec>>,
     opts: &Opts,
 ) -> Option<(Vec<Node>, Option<String>)> {
     join_docs(&spec.doc_opts(opts)).and_then(|(mut doc, desc)| match (min, max) {

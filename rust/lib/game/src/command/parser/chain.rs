@@ -1,18 +1,16 @@
-use std::marker::PhantomData;
-
 use crate::command::parser::{Output, Parser};
 use crate::command::Spec as CommandSpec;
 use crate::errors::*;
 
-pub fn chain_2<'a, A, B, PA, PB>(
+pub fn chain_2<'a, PA, PB>(
     a: &PA,
     b: &PB,
     input: &'a str,
     names: &[String],
-) -> Result<Output<'a, (A, B)>, GameError>
+) -> Result<Output<'a, (PA::T, PB::T)>, GameError>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
+    PA: Parser,
+    PB: Parser,
 {
     let lhs = a.parse(input, names)?;
     let rhs = b.parse(lhs.remaining, names)?;
@@ -24,38 +22,37 @@ where
     })
 }
 
-pub struct Chain2<A, B, PA, PB>
+pub struct Chain2<PA, PB>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
+    PA: Parser,
+    PB: Parser,
 {
     pub a: PA,
     pub b: PB,
-    a_type: PhantomData<A>,
-    b_type: PhantomData<B>,
 }
 
-impl<A, B, PA, PB> Chain2<A, B, PA, PB>
+impl<PA, PB> Chain2<PA, PB>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
+    PA: Parser,
+    PB: Parser,
 {
     pub fn new(a: PA, b: PB) -> Self {
-        Self {
-            a,
-            b,
-            a_type: PhantomData,
-            b_type: PhantomData,
-        }
+        Self { a, b }
     }
 }
 
-impl<A, B, PA, PB> Parser<(A, B)> for Chain2<A, B, PA, PB>
+impl<PA, PB> Parser for Chain2<PA, PB>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
+    PA: Parser,
+    PB: Parser,
 {
-    fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, (A, B)>, GameError> {
+    type T = (PA::T, PB::T);
+
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
         chain_2(&self.a, &self.b, input, names)
     }
 
@@ -68,49 +65,41 @@ where
     }
 }
 
-pub struct Chain3<A, B, C, PA, PB, PC>
+pub struct Chain3<PA, PB, PC>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
-    PC: Parser<C>,
+    PA: Parser,
+    PB: Parser,
+    PC: Parser,
 {
     pub a: PA,
     pub b: PB,
     pub c: PC,
-    a_type: PhantomData<A>,
-    b_type: PhantomData<B>,
-    c_type: PhantomData<C>,
 }
 
-impl<A, B, C, PA, PB, PC> Chain3<A, B, C, PA, PB, PC>
+impl<PA, PB, PC> Chain3<PA, PB, PC>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
-    PC: Parser<C>,
+    PA: Parser,
+    PB: Parser,
+    PC: Parser,
 {
     pub fn new(a: PA, b: PB, c: PC) -> Self {
-        Self {
-            a,
-            b,
-            c,
-            a_type: PhantomData,
-            b_type: PhantomData,
-            c_type: PhantomData,
-        }
+        Self { a, b, c }
     }
 }
 
-impl<A, B, C, PA, PB, PC> Parser<(A, B, C)> for Chain3<A, B, C, PA, PB, PC>
+impl<PA, PB, PC> Parser for Chain3<PA, PB, PC>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
-    PC: Parser<C>,
+    PA: Parser,
+    PB: Parser,
+    PC: Parser,
 {
+    type T = (PA::T, PB::T, PC::T);
+
     fn parse<'a>(
         &self,
         input: &'a str,
         names: &[String],
-    ) -> Result<Output<'a, (A, B, C)>, GameError> {
+    ) -> Result<Output<'a, Self::T>, GameError> {
         let head = self.a.parse(input, names)?;
         let tail = chain_2(&self.b, &self.c, head.remaining, names)?;
         let consumed = head.consumed.len() + tail.consumed.len();
@@ -130,56 +119,45 @@ where
     }
 }
 
-pub struct Chain4<A, B, C, D, PA, PB, PC, PD>
+pub struct Chain4<PA, PB, PC, PD>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
-    PC: Parser<C>,
-    PD: Parser<D>,
+    PA: Parser,
+    PB: Parser,
+    PC: Parser,
+    PD: Parser,
 {
     pub a: PA,
     pub b: PB,
     pub c: PC,
     pub d: PD,
-    a_type: PhantomData<A>,
-    b_type: PhantomData<B>,
-    c_type: PhantomData<C>,
-    d_type: PhantomData<D>,
 }
 
-impl<A, B, C, D, PA, PB, PC, PD> Chain4<A, B, C, D, PA, PB, PC, PD>
+impl<PA, PB, PC, PD> Chain4<PA, PB, PC, PD>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
-    PC: Parser<C>,
-    PD: Parser<D>,
+    PA: Parser,
+    PB: Parser,
+    PC: Parser,
+    PD: Parser,
 {
     pub fn new(a: PA, b: PB, c: PC, d: PD) -> Self {
-        Self {
-            a,
-            b,
-            c,
-            d,
-            a_type: PhantomData,
-            b_type: PhantomData,
-            c_type: PhantomData,
-            d_type: PhantomData,
-        }
+        Self { a, b, c, d }
     }
 }
 
-impl<A, B, C, D, PA, PB, PC, PD> Parser<(A, B, C, D)> for Chain4<A, B, C, D, PA, PB, PC, PD>
+impl<PA, PB, PC, PD> Parser for Chain4<PA, PB, PC, PD>
 where
-    PA: Parser<A>,
-    PB: Parser<B>,
-    PC: Parser<C>,
-    PD: Parser<D>,
+    PA: Parser,
+    PB: Parser,
+    PC: Parser,
+    PD: Parser,
 {
+    type T = (PA::T, PB::T, PC::T, PD::T);
+
     fn parse<'a>(
         &self,
         input: &'a str,
         names: &[String],
-    ) -> Result<Output<'a, (A, B, C, D)>, GameError> {
+    ) -> Result<Output<'a, Self::T>, GameError> {
         let head = chain_2(&self.a, &self.b, input, names)?;
         let tail = chain_2(&self.c, &self.d, head.remaining, names)?;
         let consumed = head.consumed.len() + tail.consumed.len();

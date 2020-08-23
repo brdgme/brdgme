@@ -69,7 +69,9 @@ pub fn spec_to_command(
             let mut parts: Vec<String> = vec![];
             for i in 0..n {
                 if i != 0 {
-                    parts.push(delim.to_owned());
+                    if let Some(d) = delim {
+                        parts.extend(spec_to_command(d, ctx, players, rng));
+                    }
                 }
                 parts.extend(spec_to_command(spec, ctx, players, rng));
             }

@@ -16,8 +16,8 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Box<dyn Parser<Command>> {
-        let mut parsers: Vec<Box<dyn Parser<Command>>> = vec![];
+    pub fn command_parser(&self, player: usize) -> Box<dyn Parser<T = Command>> {
+        let mut parsers: Vec<Box<dyn Parser<T = Command>>> = vec![];
         if self.can_build(player) {
             parsers.push(Box::new(self.build_parser(player)));
         }
@@ -27,7 +27,7 @@ impl Game {
         Box::new(OneOf::new(parsers))
     }
 
-    pub fn build_parser(&self, player: usize) -> impl Parser<Command> {
+    pub fn build_parser(&self, player: usize) -> impl Parser<T = Command> {
         Map::new(
             Chain3::new(
                 Doc::name_desc("build", "build a casino at a location", Token::new("build")),
@@ -46,7 +46,7 @@ impl Game {
         )
     }
 
-    pub fn sprawl_parser(&self) -> impl Parser<Command> {
+    pub fn sprawl_parser(&self) -> impl Parser<T = Command> {
         Map::new(
             Chain3::new(
                 Doc::name_desc(
@@ -69,7 +69,7 @@ impl Game {
         )
     }
 
-    pub fn remodel_action(&self) -> impl Parser<Command> {
+    pub fn remodel_action(&self) -> impl Parser<T = Command> {
         Map::new(
             Chain3::new(
                 Doc::name_desc(
@@ -92,7 +92,7 @@ impl Game {
         )
     }
 
-    pub fn reorg_parser(&self) -> impl Parser<Command> {
+    pub fn reorg_parser(&self) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc(
@@ -110,7 +110,7 @@ impl Game {
         )
     }
 
-    pub fn gamble_parser(&self) -> impl Parser<Command> {
+    pub fn gamble_parser(&self) -> impl Parser<T = Command> {
         Map::new(
             Chain3::new(
                 Doc::name_desc(
@@ -133,7 +133,7 @@ impl Game {
         )
     }
 
-    pub fn raise_parser(&self) -> impl Parser<Command> {
+    pub fn raise_parser(&self) -> impl Parser<T = Command> {
         Map::new(
             Chain2::new(
                 Doc::name_desc(
@@ -152,19 +152,19 @@ impl Game {
     }
 }
 
-fn loc_parser(mut locs: Vec<Loc>) -> impl Parser<Loc> {
+fn loc_parser(mut locs: Vec<Loc>) -> impl Parser<T = Loc> {
     locs.sort();
     Enum::exact(locs)
 }
 
-fn casino_parser() -> impl Parser<Casino> {
+fn casino_parser() -> impl Parser<T = Casino> {
     Enum::partial(CASINOS.to_owned())
 }
 
-fn money_parser() -> impl Parser<usize> {
+fn money_parser() -> impl Parser<T = usize> {
     Map::new(Int::positive(), |i| i as usize)
 }
 
-fn done_parser() -> impl Parser<Command> {
+fn done_parser() -> impl Parser<T = Command> {
     Map::new(Token::new("done"), |_| Command::Done)
 }

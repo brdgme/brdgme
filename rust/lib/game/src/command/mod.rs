@@ -20,7 +20,7 @@ pub enum Spec {
         spec: Box<Spec>,
         min: Option<usize>,
         max: Option<usize>,
-        delim: String,
+        delim: Option<Box<Spec>>,
     },
     Opt(Box<Spec>),
     Doc {
