@@ -57,6 +57,8 @@ func TestBuildShipCommand(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = g.Command(Mick, "take w f", TestPlayers)
 	assert.NoError(t, err)
+	_, err = g.Command(Mick, "build 3 ship", TestPlayers)
+	assert.Error(t, err)
 	_, err = g.Command(Mick, "build 2 ship", TestPlayers)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, g.Boards[Mick].Ships)

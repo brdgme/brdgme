@@ -106,7 +106,7 @@ func (g *Game) BuildShip(player, amount int) ([]brdgme.Log, error) {
 	if w := g.Boards[player].Goods[GoodWood]; amount > w {
 		return nil, fmt.Errorf("you only have %d wood left", w)
 	}
-	if c := g.Boards[player].Goods[GoodWood]; amount > c {
+	if c := g.Boards[player].Goods[GoodCloth]; amount > c {
 		return nil, fmt.Errorf("you only have %d cloth left", c)
 	}
 	if g.Boards[player].Ships+amount > 5 {
