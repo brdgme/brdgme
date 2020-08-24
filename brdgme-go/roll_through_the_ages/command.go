@@ -470,11 +470,11 @@ func (g *Game) InvadeParser(player int) brdgme.Parser {
 func (g *Game) RollParser() brdgme.Parser {
 	minI := 1
 	maxI := len(g.RolledDice)
-	if g.Phase == PhaseExtraRoll {
-		maxI = 1
-	}
 	minU := uint(minI)
 	maxU := uint(maxI)
+	if g.Phase == PhaseExtraRoll {
+		maxU = 1
+	}
 	return brdgme.Map{
 		Parser: brdgme.Chain{
 			brdgme.Doc{
