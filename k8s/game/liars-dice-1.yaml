@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: liars-dice
-          image: brdgme/liars-dice-1:v1.9.0
+          image: brdgme/liars-dice-1:v1.10.0
           ports:
             - containerPort: 80
 ---
