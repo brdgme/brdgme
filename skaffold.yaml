@@ -9,33 +9,43 @@ build:
   artifacts:
   - image: brdgme/api
     docker:
+      dockerfile: rust/Dockerfile
       target: api
   - image: brdgme/web
     docker:
+      dockerfile: web/Dockerfile
       target: web
   - image: brdgme/websocket
     docker:
+      dockerfile: websocket/Dockerfile
       target: websocket
   - image: brdgme/acquire-1
     docker:
+      dockerfile: rust/Dockerfile
       target: acquire-1
   - image: brdgme/lost-cities-1
     docker:
+      dockerfile: rust/Dockerfile
       target: lost-cities-1
   - image: brdgme/lost-cities-2
     docker:
+      dockerfile: rust/Dockerfile
       target: lost-cities-2
   - image: brdgme/age-of-war-1
     docker:
+      dockerfile: brdgme-go/Dockerfile
       target: age-of-war-1
   - image: brdgme/liars-dice-1
     docker:
+      dockerfile: brdgme-go/Dockerfile
       target: liars-dice-1
   - image: brdgme/for-sale-1
     docker:
+      dockerfile: brdgme-go/Dockerfile
       target: for-sale-1
   - image: brdgme/roll-through-the-ages-1
     docker:
+      dockerfile: brdgme-go/Dockerfile
       target: roll-through-the-ages-1
 deploy:
   kubectl:

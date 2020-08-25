@@ -13,5 +13,4 @@ members = [
     "lib/rand_bot",
     "tools/fuzz",
     "tools/repl",
-    "tools/script_httpd",
 ]
