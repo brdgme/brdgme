@@ -24,11 +24,11 @@ WORKDIR /root
 COPY --from=rust-builder /src/out/brdgme_api .
 CMD ["./brdgme_api"]
 
-FROM beefsack/script-httpd:latest AS acquire-1
+FROM beefsack/script-httpd:v1.1.2 AS acquire-1
 COPY --from=rust-builder /src/out/acquire_cli /script
 
-FROM beefsack/script-httpd:latest AS lost-cities-2
+FROM beefsack/script-httpd:v1.1.2 AS lost-cities-2
 COPY --from=rust-builder /src/out/lost_cities_cli /script
 
-FROM beefsack/script-httpd:latest AS lost-cities-1
+FROM beefsack/script-httpd:v1.1.2 AS lost-cities-1
 COPY --from=rust-builder /src/out/lost_cities_1_cli /script
