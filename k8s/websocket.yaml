@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: websocket
-          image: brdgme/websocket:v1.12.0
+          image: brdgme/websocket:v1.13.0
           ports:
             - containerPort: 80
 ---
