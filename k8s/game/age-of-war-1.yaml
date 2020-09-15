@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: age-of-war
-          image: brdgme/age-of-war-1:v1.13.0
+          image: brdgme/age-of-war-1:v1.14.0
           ports:
             - containerPort: 80
 ---
