@@ -98,9 +98,15 @@ func (b *PlayerBoard) WorkerModifier() int {
 }
 
 func (b *PlayerBoard) GainGoods(n int) {
+	quarryingUsed := false
 	good := GoodWood
 	for i := 0; i < n; i++ {
 		b.GainGood(good)
+		// Extra stone if player has quarry
+		if good == GoodStone && b.Developments[DevelopmentQuarrying] && !quarryingUsed {
+			b.Goods[good] += 1
+			quarryingUsed = true
+		}
 		good = (good + 1) % Good(len(Goods))
 	}
 }
@@ -108,11 +114,6 @@ func (b *PlayerBoard) GainGoods(n int) {
 func (b *PlayerBoard) GainGood(good Good) {
 	max := GoodMaximum(good)
 	if b.Goods[good] < max {
-		b.Goods[good] += 1
-	}
-	// Extra stone if player has quarry
-	if good == GoodStone && b.Developments[DevelopmentQuarrying] &&
-		b.Goods[good] < max {
 		b.Goods[good] += 1
 	}
 }
