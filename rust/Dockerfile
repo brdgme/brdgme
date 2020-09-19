@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:experimental
 
-FROM rust:1.45.1 AS rust-nightly-2020-07-27
-RUN rustup install nightly-2020-07-27
+FROM rust:1.45.1 AS rust-nightly-2020-09-19
+RUN rustup install nightly-2020-09-19
 
-FROM rust-nightly-2020-07-27 AS rust-src
+FROM rust-nightly-2020-09-19 AS rust-src
 WORKDIR /src
 COPY rust .
 
