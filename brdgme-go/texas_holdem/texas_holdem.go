@@ -21,6 +21,8 @@ const (
 	HANDS_PER_BLINDS_INCREASE = 5
 )
 
+var _ brdgme.Gamer = &Game{}
+
 type Game struct {
 	Players                  int
 	CurrentPlayer            int
@@ -53,7 +55,7 @@ func RenderCashFixedWidth(amount int) string {
 	return output
 }
 
-func (g *Game) Start(players int) ([]brdgme.Log, error) {
+func (g *Game) New(players int) ([]brdgme.Log, error) {
 	if players < 2 || players > 9 {
 		return nil, errors.New("Texas hold 'em is limited to 2 - 9 players")
 	}
@@ -552,7 +554,11 @@ func (g *Game) RenderPlayerName(playerNum int) string {
 	return render.Player(playerNum)
 }
 
-func (g *Game) RenderForPlayer(player int) (string, error) {
+func (g *Game) PubRender() string {
+	return g.PlayerRender(-1)
+}
+
+func (g *Game) PlayerRender(player int) string {
 	buf := bytes.NewBufferString("")
 	// Table
 	buf.WriteString(render.Bold("Community cards:  "))
@@ -561,13 +567,15 @@ func (g *Game) RenderForPlayer(player int) (string, error) {
 	buf.WriteString(render.Bold("Current pot:      "))
 	buf.WriteString(RenderCash(g.Pot()))
 	buf.WriteString("\n\n")
-	// Player specific
-	buf.WriteString(render.Bold("Your cards:  "))
-	buf.WriteString(strings.Join(RenderCards(g.PlayerHands[player]), " "))
-	buf.WriteString("\n")
-	buf.WriteString(render.Bold("Your cash:   "))
-	buf.WriteString(RenderCash(g.PlayerMoney[player]))
-	buf.WriteString("\n\n")
+	if player >= 0 {
+		// Player specific
+		buf.WriteString(render.Bold("Your cards:  "))
+		buf.WriteString(strings.Join(RenderCards(g.PlayerHands[player]), " "))
+		buf.WriteString("\n")
+		buf.WriteString(render.Bold("Your cash:   "))
+		buf.WriteString(RenderCash(g.PlayerMoney[player]))
+		buf.WriteString("\n\n")
+	}
 	// All players table
 	playersTable := [][]render.Cell{
 		[]render.Cell{
@@ -599,7 +607,7 @@ func (g *Game) RenderForPlayer(player int) (string, error) {
 	}
 	table := render.Table(playersTable, 0, 2)
 	buf.WriteString(table)
-	return buf.String(), nil
+	return buf.String()
 }
 
 func RenderCards(deck libcard.Deck) (output []string) {
@@ -638,6 +646,42 @@ func (g *Game) EliminatedPlayerList() (eliminatedPlayers []int) {
 		}
 	}
 	return
+}
+
+func (g *Game) Command(
+	player int,
+	input string,
+	players []string,
+) (brdgme.CommandResponse, error) {
+	panic("unimplemented")
+}
+
+func (g *Game) CommandSpec(player int) *brdgme.Spec {
+	panic("unimplemented")
+}
+
+func (g *Game) PlayerCount() int {
+	return g.Players
+}
+
+func (g *Game) PlayerCounts() []int {
+	return []int{2, 3, 4, 5, 6, 7, 8, 9}
+}
+
+func (g *Game) PlayerState(player int) interface{} {
+	panic("unimplemented")
+}
+
+func (g *Game) PubState() interface{} {
+	panic("unimplemented")
+}
+
+func (g *Game) Points() []float32 {
+	panic("unimplemented")
+}
+
+func (g *Game) Status() brdgme.Status {
+	panic("unimplemented")
 }
 
 func min(numbers ...int) int {
