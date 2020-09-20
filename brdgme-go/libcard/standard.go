@@ -2,6 +2,8 @@ package libcard
 
 import (
 	"fmt"
+
+	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
 const (
@@ -69,22 +71,22 @@ func Standard52DeckWithJokers() (d Deck) {
 func (c Card) RenderStandard52() string {
 	var (
 		symbol string
-		colour string
+		colour render.Color
 		rank   string
 	)
 	switch c.Suit {
 	case STANDARD_52_SUIT_CLUBS:
 		symbol = "♣"
-		colour = "black"
+		colour = render.Black
 	case STANDARD_52_SUIT_DIAMONDS:
 		symbol = "♦"
-		colour = "red"
+		colour = render.Red
 	case STANDARD_52_SUIT_HEARTS:
 		symbol = "♥"
-		colour = "red"
+		colour = render.Red
 	case STANDARD_52_SUIT_SPADES:
 		symbol = "♠"
-		colour = "black"
+		colour = render.Black
 	}
 	switch c.Rank {
 	case STANDARD_52_RANK_ACE:
@@ -100,7 +102,7 @@ func (c Card) RenderStandard52() string {
 	default:
 		rank = fmt.Sprintf("%d", c.Rank)
 	}
-	return fmt.Sprintf(`{{c "%s"}}%s%s{{_c}}`, colour, symbol, rank)
+	return render.Fg(colour, fmt.Sprintf("%s%s", symbol, rank))
 }
 
 func (c Card) RenderStandard52FixedWidth() string {
@@ -112,7 +114,7 @@ func (c Card) RenderStandard52FixedWidth() string {
 }
 
 func RenderStandard52Hidden() string {
-	return `{{c "gray"}}##{{_c}}`
+	return render.Fg(render.Grey, "##")
 }
 
 func RenderStandard52HiddenFixedWidth() string {
