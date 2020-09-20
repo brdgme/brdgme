@@ -649,19 +649,44 @@ func (g *Game) PlayerCounts() []int {
 }
 
 func (g *Game) PlayerState(player int) interface{} {
-	panic("unimplemented")
+	return nil
 }
 
 func (g *Game) PubState() interface{} {
-	panic("unimplemented")
+	return nil
+}
+
+func (g *Game) PlayerTotalMoney(player int) int {
+	return g.Bets[player] + g.PlayerMoney[player]
 }
 
 func (g *Game) Points() []float32 {
-	panic("unimplemented")
+	points := make([]float32, g.Players)
+	for p := 0; p < g.Players; p++ {
+		points[p] = float32(g.PlayerTotalMoney(p))
+	}
+	return points
 }
 
 func (g *Game) Status() brdgme.Status {
-	panic("unimplemented")
+	if g.IsFinished() {
+		return brdgme.StatusFinished{
+			Placings: g.Placings(),
+		}.ToStatus()
+	}
+	return brdgme.StatusActive{
+		WhoseTurn: g.WhoseTurn(),
+	}.ToStatus()
+}
+
+func (g *Game) Placings() []int {
+	metrics := make([][]int, g.Players)
+	for p := 0; p < g.Players; p++ {
+		metrics[p] = []int{
+			g.PlayerTotalMoney(p),
+		}
+	}
+	return brdgme.GenPlacings(metrics)
 }
 
 func min(numbers ...int) int {
