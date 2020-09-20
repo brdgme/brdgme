@@ -117,9 +117,9 @@ func (g *Game) NewHand() []brdgme.Log {
 	// Shuffle and deal two cards to each player
 	g.CommunityCards = libcard.Deck{}
 	g.Deck = libcard.Standard52DeckAceHigh().Shuffle()
-	for i, _ := range activePlayers {
-		g.PlayerHands[i], g.Deck = g.Deck.PopN(2)
-		g.PlayerHands[i] = g.PlayerHands[i].Sort()
+	for _, p := range activePlayers {
+		g.PlayerHands[p], g.Deck = g.Deck.PopN(2)
+		g.PlayerHands[p] = g.PlayerHands[p].Sort()
 	}
 	if len(g.BettingPlayers()) > 0 {
 		// Make the current player the one next to the big blind
@@ -250,11 +250,11 @@ func (g *Game) Fold(playerNum int) ([]brdgme.Log, error) {
 	g.FoldedPlayers[playerNum] = true
 	if len(g.ActivePlayers()) == 1 {
 		// Everyone folded
-		for activePlayerNum, _ := range g.ActivePlayers() {
+		for _, p := range g.ActivePlayers() {
 			logs = append(logs, brdgme.NewPublicLog(fmt.Sprintf(
-				"%s took %s", g.RenderPlayerName(activePlayerNum),
+				"%s took %s", g.RenderPlayerName(p),
 				RenderCash(g.Pot()))))
-			g.PlayerMoney[activePlayerNum] += g.Pot()
+			g.PlayerMoney[p] += g.Pot()
 			logs = append(logs, g.NewHand()...)
 			return logs, nil
 		}
@@ -517,9 +517,9 @@ func (g *Game) Pot() int {
 func (g *Game) SmallestBet() int {
 	bet := 0
 	firstRun := true
-	for playerNum, _ := range g.ActivePlayers() {
-		if g.Bets[playerNum] != 0 && (firstRun || g.Bets[playerNum] < bet) {
-			bet = g.Bets[playerNum]
+	for _, p := range g.ActivePlayers() {
+		if g.Bets[p] != 0 && (firstRun || g.Bets[p] < bet) {
+			bet = g.Bets[p]
 			firstRun = false
 		}
 	}
