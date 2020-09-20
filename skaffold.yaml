@@ -47,6 +47,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: roll-through-the-ages-1
+  - image: brdgme/texas-holdem-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: texas-holdem-1
 deploy:
   kubectl:
     manifests:
@@ -60,3 +64,4 @@ deploy:
     - k8s/game/liars-dice-1.yaml
     - k8s/game/for-sale-1.yaml
     - k8s/game/roll-through-the-ages-1.yaml
+    - k8s/game/texas-holdem-1.yaml

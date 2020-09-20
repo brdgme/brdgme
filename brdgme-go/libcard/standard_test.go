@@ -2,6 +2,8 @@ package libcard
 
 import (
 	"testing"
+
+	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
 func TestRenderStandard52(t *testing.T) {
@@ -9,12 +11,12 @@ func TestRenderStandard52(t *testing.T) {
 		Suit: STANDARD_52_SUIT_CLUBS,
 		Rank: STANDARD_52_RANK_ACE,
 	}
-	expected := `{{c "black"}}♣A{{_c}}`
+	expected := render.Fg(render.Black, "♣A")
 	output := c.RenderStandard52()
 	if output != expected {
 		t.Error("Expected", expected, "but got", output)
 	}
-	expected = `{{c "black"}}♣A{{_c}} `
+	expected = render.Fg(render.Black, "♣A") + " "
 	output = c.RenderStandard52FixedWidth()
 	if output != expected {
 		t.Error("Expected", expected, "but got", output)
@@ -23,13 +25,8 @@ func TestRenderStandard52(t *testing.T) {
 		Suit: STANDARD_52_SUIT_DIAMONDS,
 		Rank: STANDARD_52_RANK_10,
 	}
-	expected = `{{c "red"}}♦10{{_c}}`
+	expected = render.Fg(render.Red, "♦10")
 	output = c.RenderStandard52()
-	if output != expected {
-		t.Error("Expected", expected, "but got", output)
-	}
-	expected = `{{c "red"}}♦10{{_c}}`
-	output = c.RenderStandard52FixedWidth()
 	if output != expected {
 		t.Error("Expected", expected, "but got", output)
 	}
@@ -37,12 +34,7 @@ func TestRenderStandard52(t *testing.T) {
 		Suit: STANDARD_52_SUIT_HEARTS,
 		Rank: STANDARD_52_RANK_KING,
 	}
-	expected = `{{c "red"}}♥K{{_c}}`
-	output = c.RenderStandard52()
-	if output != expected {
-		t.Error("Expected", expected, "but got", output)
-	}
-	expected = `{{c "red"}}♥K{{_c}} `
+	expected = render.Fg(render.Red, "♥K") + " "
 	output = c.RenderStandard52FixedWidth()
 	if output != expected {
 		t.Error("Expected", expected, "but got", output)
@@ -51,22 +43,12 @@ func TestRenderStandard52(t *testing.T) {
 		Suit: STANDARD_52_SUIT_SPADES,
 		Rank: STANDARD_52_RANK_QUEEN,
 	}
-	expected = `{{c "black"}}♠Q{{_c}}`
-	output = c.RenderStandard52()
-	if output != expected {
-		t.Error("Expected", expected, "but got", output)
-	}
-	expected = `{{c "black"}}♠Q{{_c}} `
-	output = c.RenderStandard52FixedWidth()
-	if output != expected {
-		t.Error("Expected", expected, "but got", output)
-	}
-	expected = `{{c "gray"}}##{{_c}}`
+	expected = render.Fg(render.Grey, "##")
 	output = RenderStandard52Hidden()
 	if output != expected {
 		t.Error("Expected", expected, "but got", output)
 	}
-	expected = `{{c "gray"}}##{{_c}} `
+	expected = render.Fg(render.Grey, "##") + " "
 	output = RenderStandard52HiddenFixedWidth()
 	if output != expected {
 		t.Error("Expected", expected, "but got", output)

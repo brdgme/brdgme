@@ -30,3 +30,9 @@ RUN go build -o roll_through_the_ages brdgme-go/roll_through_the_ages/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS roll-through-the-ages-1
 COPY --from=roll-through-the-ages-builder /src/roll_through_the_ages /script
+
+FROM go-builder AS texas-holdem-builder
+RUN go build -o texas_holdem brdgme-go/texas_holdem/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS texas-holdem-1
+COPY --from=texas-holdem-builder /src/texas_holdem /script
