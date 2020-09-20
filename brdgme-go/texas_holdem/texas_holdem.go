@@ -2,7 +2,6 @@ package texas_holdem
 
 import (
 	"bytes"
-	"encoding/gob"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -41,7 +40,7 @@ type Game struct {
 }
 
 func RenderCash(amount int) string {
-	return fmt.Sprintf(`{{b}}{{c "green"}}$%d{{_c}}{{_b}}`, amount)
+	return render.Markup(fmt.Sprintf("$%d", amount), render.Green, true)
 }
 
 func RenderCashFixedWidth(amount int) string {
@@ -128,7 +127,7 @@ func (g *Game) NewHand() []brdgme.Log {
 		g.FirstBettingPlayer = g.CurrentPlayer
 	} else {
 		// Nobody has money!  Just go to next phase.
-		g.NextPhase()
+		logs = append(logs, g.NextPhase()...)
 	}
 	return logs
 }
@@ -223,32 +222,6 @@ func (g *Game) Bet(playerNum int, amount int) error {
 	return nil
 }
 
-/*
-func (g *Game) Commands(player string) []command.Command {
-	commands := []command.Command{}
-	pNum, err := g.PlayerNum(player)
-	if err != nil {
-		return commands
-	}
-	if g.CanCheck(pNum) {
-		commands = append(commands, CheckCommand{})
-	}
-	if g.CanCall(pNum) {
-		commands = append(commands, CallCommand{})
-	}
-	if g.CanRaise(pNum) {
-		commands = append(commands, RaiseCommand{})
-	}
-	if g.CanFold(pNum) {
-		commands = append(commands, FoldCommand{})
-	}
-	if g.CanAllin(pNum) {
-		commands = append(commands, AllinCommand{})
-	}
-	return commands
-}
-*/
-
 func (g *Game) Check(playerNum int) ([]brdgme.Log, error) {
 	if g.IsFinished() || g.CurrentPlayer != playerNum {
 		return nil, errors.New("Not your turn")
@@ -258,8 +231,14 @@ func (g *Game) Check(playerNum int) ([]brdgme.Log, error) {
 	}
 	logs := []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf("%s checked",
 		g.RenderPlayerName(playerNum)))}
-	g.NextPlayer()
+	logs = append(logs, g.NextPlayer()...)
 	return logs, nil
+}
+
+func (g *Game) CanCheck(player int) bool {
+	currentBet := g.CurrentBet()
+	return g.CurrentPlayer == player && g.Bets[player] == currentBet &&
+		!g.IsFinished()
 }
 
 func (g *Game) Fold(playerNum int) ([]brdgme.Log, error) {
@@ -280,9 +259,15 @@ func (g *Game) Fold(playerNum int) ([]brdgme.Log, error) {
 			return logs, nil
 		}
 	} else {
-		g.NextPlayer()
+		logs = append(logs, g.NextPlayer()...)
 	}
 	return logs, nil
+}
+
+func (g *Game) CanFold(player int) bool {
+	currentBet := g.CurrentBet()
+	return g.CurrentPlayer == player && g.Bets[player] < currentBet &&
+		!g.IsFinished()
 }
 
 func (g *Game) Call(playerNum int) ([]brdgme.Log, error) {
@@ -303,15 +288,26 @@ func (g *Game) Call(playerNum int) ([]brdgme.Log, error) {
 	}
 	logs := []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf("%s called",
 		g.RenderPlayerName(playerNum)))}
-	g.NextPlayer()
+	logs = append(logs, g.NextPlayer()...)
 	return logs, nil
+}
+
+func (g *Game) CanCall(player int) bool {
+	currentBet := g.CurrentBet()
+	return g.CurrentPlayer == player && g.Bets[player] < currentBet &&
+		g.PlayerMoney[player] > currentBet-g.Bets[player] &&
+		!g.IsFinished()
+}
+
+func (g *Game) MinRaise() int {
+	return max(g.MinimumBet, g.LargestRaise)
 }
 
 func (g *Game) Raise(playerNum int, amount int) ([]brdgme.Log, error) {
 	if g.IsFinished() || g.CurrentPlayer != playerNum {
 		return nil, errors.New("Not your turn")
 	}
-	minRaise := max(g.MinimumBet, g.LargestRaise)
+	minRaise := g.MinRaise()
 	difference := g.CurrentBet() - g.Bets[playerNum]
 	if amount < minRaise {
 		return nil, errors.New(fmt.Sprintf(
@@ -323,8 +319,16 @@ func (g *Game) Raise(playerNum int, amount int) ([]brdgme.Log, error) {
 	}
 	logs := []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf("%s raised by %s",
 		g.RenderPlayerName(playerNum), RenderCash(amount)))}
-	g.NextPlayer()
+	logs = append(logs, g.NextPlayer()...)
 	return logs, nil
+}
+
+func (g *Game) CanRaise(player int) bool {
+	currentBet := g.CurrentBet()
+	minRaise := g.LargestRaise
+	return g.CurrentPlayer == player &&
+		g.PlayerMoney[player] > currentBet-g.Bets[player]+minRaise &&
+		!g.IsFinished()
 }
 
 func (g *Game) AllIn(playerNum int) ([]brdgme.Log, error) {
@@ -338,11 +342,17 @@ func (g *Game) AllIn(playerNum int) ([]brdgme.Log, error) {
 	}
 	logs := []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf("%s went all in with %s",
 		g.RenderPlayerName(playerNum), RenderCash(amount)))}
-	g.NextPlayer()
+	logs = append(logs, g.NextPlayer()...)
 	return logs, nil
 }
 
-func (g *Game) NextPlayer() {
+func (g *Game) CanAllIn(player int) bool {
+	return g.CurrentPlayer == player && g.PlayerMoney[player] > 0 &&
+		!g.IsFinished()
+}
+
+func (g *Game) NextPlayer() []brdgme.Log {
+	logs := []brdgme.Log{}
 	requiringCallPlayers := g.RequiringCallPlayers()
 	bettingPlayers := g.BettingPlayers()
 	if len(bettingPlayers) > 0 {
@@ -362,36 +372,39 @@ func (g *Game) NextPlayer() {
 			}
 		}
 		if len(requiringCallPlayers) == 0 && g.EveryoneHasBetOnce {
-			g.NextPhase()
+			logs = append(logs, g.NextPhase()...)
 		} else {
 			g.CurrentPlayer = nextPlayer
 		}
 	} else {
-		g.NextPhase()
+		logs = append(logs, g.NextPhase()...)
 	}
+	return logs
 }
 
-func (g *Game) NextPhase() {
+func (g *Game) NextPhase() []brdgme.Log {
+	logs := []brdgme.Log{}
 	bettingPlayersCount := len(g.BettingPlayers())
 	switch len(g.CommunityCards) {
 	case 0:
-		g.Flop()
+		logs = append(logs, g.Flop()...)
 		if bettingPlayersCount < 2 {
-			g.NextPhase()
+			logs = append(logs, g.NextPhase()...)
 		}
 	case 3:
-		g.Turn()
+		logs = append(logs, g.Turn()...)
 		if bettingPlayersCount < 2 {
-			g.NextPhase()
+			logs = append(logs, g.NextPhase()...)
 		}
 	case 4:
-		g.River()
+		logs = append(logs, g.River()...)
 		if bettingPlayersCount < 2 {
-			g.NextPhase()
+			logs = append(logs, g.NextPhase()...)
 		}
 	case 5:
-		g.Showdown()
+		logs = append(logs, g.Showdown()...)
 	}
+	return logs
 }
 
 func (g *Game) Flop() []brdgme.Log {
@@ -529,27 +542,6 @@ func (g *Game) NewBettingRound() {
 	g.EveryoneHasBetOnce = false
 }
 
-func (g *Game) Name() string {
-	return "Texas hold 'em"
-}
-
-func (g *Game) Identifier() string {
-	return "texas_holdem"
-}
-
-func (g *Game) Encode() ([]byte, error) {
-	buf := bytes.NewBuffer([]byte{})
-	encoder := gob.NewEncoder(buf)
-	err := encoder.Encode(g)
-	return buf.Bytes(), err
-}
-
-func (g *Game) Decode(data []byte) error {
-	buf := bytes.NewBuffer(data)
-	decoder := gob.NewDecoder(buf)
-	return decoder.Decode(g)
-}
-
 func (g *Game) RenderPlayerName(playerNum int) string {
 	return render.Player(playerNum)
 }
@@ -646,18 +638,6 @@ func (g *Game) EliminatedPlayerList() (eliminatedPlayers []int) {
 		}
 	}
 	return
-}
-
-func (g *Game) Command(
-	player int,
-	input string,
-	players []string,
-) (brdgme.CommandResponse, error) {
-	panic("unimplemented")
-}
-
-func (g *Game) CommandSpec(player int) *brdgme.Spec {
-	panic("unimplemented")
 }
 
 func (g *Game) PlayerCount() int {

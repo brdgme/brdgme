@@ -78,26 +78,19 @@ func TestDealerRaiseWhenLastPlayer(t *testing.T) {
 	if len(g.CommunityCards) != 0 {
 		t.Fatal("Flopped too early")
 	}
-	_, err = g.Command(STEVE, "call", []string{})
+	_, err = g.Command(STEVE, "check", []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(g.CommunityCards) != 0 {
 		t.Fatal("Flopped too early")
 	}
-	_, err = g.Command(BJ, "check", []string{})
+	_, err = g.Command(BJ, "call", []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(g.CommunityCards) != 3 {
 		t.Fatal("Flop didn't happen")
-	}
-	_, err = g.Command(MICK, "check", []string{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(g.CommunityCards) != 3 {
-		t.Fatal("Turn happened too early")
 	}
 	_, err = g.Command(STEVE, "check", []string{})
 	if err != nil {
@@ -106,14 +99,14 @@ func TestDealerRaiseWhenLastPlayer(t *testing.T) {
 	if len(g.CommunityCards) != 3 {
 		t.Fatal("Turn happened too early")
 	}
-	_, err = g.Command(BJ, "raise 10", []string{})
+	_, err = g.Command(BJ, "check", []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(g.CommunityCards) != 3 {
 		t.Fatal("Turn happened too early")
 	}
-	_, err = g.Command(MICK, "call", []string{})
+	_, err = g.Command(MICK, "raise 10", []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +114,13 @@ func TestDealerRaiseWhenLastPlayer(t *testing.T) {
 		t.Fatal("Turn happened too early")
 	}
 	_, err = g.Command(STEVE, "call", []string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.CommunityCards) != 3 {
+		t.Fatal("Turn happened too early")
+	}
+	_, err = g.Command(BJ, "call", []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
