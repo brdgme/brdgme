@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: for-sale
-          image: brdgme/for-sale-1:v1.15.0
+          image: brdgme/for-sale-1:v1.16.0
           ports:
             - containerPort: 80
 ---
