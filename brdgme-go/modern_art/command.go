@@ -151,8 +151,17 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 
 func CardParser(card libcard.Card) brdgme.Parser {
 	return brdgme.Doc{
-		Desc:   fmt.Sprintf("%s - %s", suitNames[card.Suit], rankNames[card.Rank]),
-		Parser: brdgme.Token(fmt.Sprintf("%s%s", suitCodes[card.Suit], rankCodes[card.Rank])),
+		Desc: fmt.Sprintf("%s - %s", suitNames[card.Suit], rankNames[card.Rank]),
+		Parser: brdgme.Map{
+			Parser: brdgme.Token(fmt.Sprintf(
+				"%s%s",
+				suitCodes[card.Suit],
+				rankCodes[card.Rank],
+			)),
+			Func: func(value interface{}) interface{} {
+				return card
+			},
+		},
 	}
 }
 

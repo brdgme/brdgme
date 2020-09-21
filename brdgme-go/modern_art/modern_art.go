@@ -25,7 +25,7 @@ const (
 	SUIT_LITE_METAL = iota
 	SUIT_YOKO
 	SUIT_CHRISTINE_P
-	SUIT_KARL_GLITTER
+	SUIT_KARL_GITTER
 	SUIT_KRYPTO
 )
 const (
@@ -61,32 +61,32 @@ var suits = []int{
 	SUIT_LITE_METAL,
 	SUIT_YOKO,
 	SUIT_CHRISTINE_P,
-	SUIT_KARL_GLITTER,
+	SUIT_KARL_GITTER,
 	SUIT_KRYPTO,
 }
 
 var suitNames = map[int]string{
-	SUIT_LITE_METAL:   "Lite Metal",
-	SUIT_YOKO:         "Yoko",
-	SUIT_CHRISTINE_P:  "Christine P",
-	SUIT_KARL_GLITTER: "Karl Glitter",
-	SUIT_KRYPTO:       "Krypto",
+	SUIT_LITE_METAL:  "Lite Metal",
+	SUIT_YOKO:        "Yoko",
+	SUIT_CHRISTINE_P: "Christine P",
+	SUIT_KARL_GITTER: "Karl Gitter",
+	SUIT_KRYPTO:      "Krypto",
 }
 
 var suitCodes = map[int]string{
-	SUIT_LITE_METAL:   "lm",
-	SUIT_YOKO:         "yo",
-	SUIT_CHRISTINE_P:  "cp",
-	SUIT_KARL_GLITTER: "kg",
-	SUIT_KRYPTO:       "kr",
+	SUIT_LITE_METAL:  "lm",
+	SUIT_YOKO:        "yo",
+	SUIT_CHRISTINE_P: "cp",
+	SUIT_KARL_GITTER: "kg",
+	SUIT_KRYPTO:      "kr",
 }
 
 var suitColours = map[int]render.Color{
-	SUIT_LITE_METAL:   render.Yellow,
-	SUIT_YOKO:         render.Green,
-	SUIT_CHRISTINE_P:  render.Red,
-	SUIT_KARL_GLITTER: render.Blue,
-	SUIT_KRYPTO:       render.Brown,
+	SUIT_LITE_METAL:  render.Yellow,
+	SUIT_YOKO:        render.Green,
+	SUIT_CHRISTINE_P: render.Red,
+	SUIT_KARL_GITTER: render.Blue,
+	SUIT_KRYPTO:      render.Brown,
 }
 
 var ranks = []int{
@@ -135,7 +135,7 @@ var cardDistribution = map[int]map[int]int{
 		RANK_DOUBLE:      2,
 		RANK_ONCE_AROUND: 3,
 	},
-	SUIT_KARL_GLITTER: {
+	SUIT_KARL_GITTER: {
 		RANK_OPEN:        3,
 		RANK_FIXED_PRICE: 3,
 		RANK_SEALED:      3,
