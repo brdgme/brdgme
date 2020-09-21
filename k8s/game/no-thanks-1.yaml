@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: no-thanks
-          image: brdgme/no-thanks-1:v1.20.0
+          image: brdgme/no-thanks-1:v1.21.0
           ports:
             - containerPort: 80
 ---
