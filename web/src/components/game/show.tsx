@@ -174,7 +174,14 @@ export class Component extends React.PureComponent<IProps, {}> {
       return [];
     }
     const commandSpec = this.props.game.command_spec.toJS();
-    const fullCommand = Command.parse(this.props.command, 0, commandSpec);
+    const names = 
+      this.props.game.game_players.map((gptu) => gptu.user.name).toArray();
+    const fullCommand = Command.parse(
+      this.props.command,
+      0,
+      commandSpec,
+      names,
+    );
     const suggestions = Command.suggestions(fullCommand, this.props.commandPos);
     let allSuggestions: Command.Suggestion[] = [];
     let start = Command.startOfMatch(fullCommand, this.props.commandPos);
@@ -188,7 +195,7 @@ export class Component extends React.PureComponent<IProps, {}> {
     }
     if (start !== undefined) {
       const upToStart = Command.parse(
-        this.props.command.substr(0, start), 0, commandSpec);
+        this.props.command.substr(0, start), 0, commandSpec, names);
       allSuggestions = Command.suggestions(upToStart, start);
     }
     return suggestions;

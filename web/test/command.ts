@@ -134,6 +134,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
+      [],
     )).combined;
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
@@ -147,6 +148,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
+      []
     );
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
@@ -160,6 +162,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
+      [],
       Command.COMMAND_SPEC_SPACE,
     );
     assert.equal(result.kind, Command.MATCH_FULL);
@@ -174,6 +177,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
+      [],
       {
         Token: "cheese",
       },
@@ -196,6 +200,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
+      [],
       {
         Token: "cheese",
       },
@@ -227,6 +232,7 @@ describe("Command.parseMany", () => {
           exact: false,
         },
       },
+      [],
       Command.COMMAND_SPEC_SPACE,
     );
     assert.equal(result.kind, Command.MATCH_FULL);
@@ -251,6 +257,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
+      [],
       undefined,
       undefined,
       2,
@@ -267,6 +274,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
+      [],
       undefined,
       4,
     );
@@ -289,6 +297,7 @@ describe("Command.parseMany", () => {
           exact: false,
         },
       },
+      [],
       Command.COMMAND_SPEC_SPACE,
     );
     assert.equal(result.kind, Command.MATCH_FULL);
@@ -313,6 +322,7 @@ describe("Command.parseMany", () => {
           max: 2,
         }
       },
+      [],
       Command.COMMAND_SPEC_SPACE,
     )).combined;
     assert.equal(result.kind, Command.MATCH_PARTIAL);
