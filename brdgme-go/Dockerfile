@@ -42,3 +42,9 @@ RUN go build -o modern_art brdgme-go/modern_art/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS modern-art-1
 COPY --from=modern-art-builder /src/modern_art /script
+
+FROM go-builder AS no-thanks-builder
+RUN go build -o no_thanks brdgme-go/no_thanks/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS no-thanks-1
+COPY --from=no-thanks-builder /src/no_thanks /script

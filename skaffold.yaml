@@ -55,6 +55,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: modern-art-1
+  - image: brdgme/no-thanks-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: no-thanks-1
 deploy:
   kubectl:
     manifests:
@@ -70,3 +74,4 @@ deploy:
     - k8s/game/roll-through-the-ages-1.yaml
     - k8s/game/texas-holdem-1.yaml
     - k8s/game/modern-art-1.yaml
+    - k8s/game/no-thanks-1.yaml
