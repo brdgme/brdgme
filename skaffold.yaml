@@ -51,6 +51,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: texas-holdem-1
+  - image: brdgme/modern-art-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: modern-art-1
 deploy:
   kubectl:
     manifests:
@@ -65,3 +69,4 @@ deploy:
     - k8s/game/for-sale-1.yaml
     - k8s/game/roll-through-the-ages-1.yaml
     - k8s/game/texas-holdem-1.yaml
+    - k8s/game/modern-art-1.yaml

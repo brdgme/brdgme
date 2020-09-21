@@ -36,3 +36,9 @@ RUN go build -o texas_holdem brdgme-go/texas_holdem/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS texas-holdem-1
 COPY --from=texas-holdem-builder /src/texas_holdem /script
+
+FROM go-builder AS modern-art-builder
+RUN go build -o modern_art brdgme-go/modern_art/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS modern-art-1
+COPY --from=modern-art-builder /src/modern_art /script
