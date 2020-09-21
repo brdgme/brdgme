@@ -14,8 +14,11 @@ import (
 const (
 	INITIAL_MONEY = 100
 )
+
+type State int
+
 const (
-	STATE_PLAY_CARD = iota
+	STATE_PLAY_CARD State = iota
 	STATE_AUCTION
 )
 const (
@@ -155,7 +158,7 @@ type Game struct {
 	PlayerMoney         map[int]int
 	PlayerHands         map[int]libcard.Deck
 	PlayerPurchases     map[int]libcard.Deck
-	State               int
+	State               State
 	Round               int
 	Deck                libcard.Deck
 	CurrentPlayer       int
@@ -163,18 +166,6 @@ type Game struct {
 	Finished            bool
 	CurrentlyAuctioning libcard.Deck
 	Bids                map[int]int
-}
-
-func (g *Game) Command(
-	player int,
-	input string,
-	players []string,
-) (brdgme.CommandResponse, error) {
-	panic("unimplemented")
-}
-
-func (g *Game) CommandSpec(player int) *brdgme.Spec {
-	panic("unimplemented")
 }
 
 func (g *Game) PlayerCount() int {
@@ -194,7 +185,24 @@ func (g *Game) PubState() interface{} {
 }
 
 func (g *Game) Status() brdgme.Status {
-	panic("unimplemented")
+	if g.IsFinished() {
+		return brdgme.StatusFinished{
+			Placings: g.Placings(),
+		}.ToStatus()
+	}
+	return brdgme.StatusActive{
+		WhoseTurn: g.WhoseTurn(),
+	}.ToStatus()
+}
+
+func (g *Game) Placings() []int {
+	metrics := [][]int{}
+	for p := 0; p < g.Players; p++ {
+		metrics = append(metrics, []int{
+			g.PlayerMoney[p],
+		})
+	}
+	return brdgme.GenPlacings(metrics)
 }
 
 func (g *Game) Points() []float32 {
@@ -556,7 +564,7 @@ func (g *Game) CanBid(player int) bool {
 
 func (g *Game) CanAdd(player int) bool {
 	return g.IsAuction() && g.AuctionType() == RANK_DOUBLE &&
-		g.IsPlayersTurn(player)
+		g.IsPlayersTurn(player) && len(g.PlayerHands[player]) > 0
 }
 
 func (g *Game) CanBuy(player int) bool {
@@ -685,6 +693,7 @@ func RenderCardNames(d libcard.Deck) string {
 }
 
 func (g *Game) SettleAuction(winner, price int) []brdgme.Log {
+	logs := []brdgme.Log{}
 	g.PlayerMoney[winner] -= price
 	g.PlayerPurchases[winner] = g.PlayerPurchases[winner].
 		PushMany(g.CurrentlyAuctioning).Sort()
@@ -693,15 +702,25 @@ func (g *Game) SettleAuction(winner, price int) []brdgme.Log {
 		g.PlayerMoney[g.CurrentPlayer] += price
 		paidTo = render.Player(g.CurrentPlayer)
 	}
-	g.State = STATE_PLAY_CARD
-	g.NextPlayer()
-	return []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
+	logs = append(logs, brdgme.NewPublicLog(fmt.Sprintf(
 		"%s bought %s, paying %s to %s",
 		render.Player(winner),
 		RenderCardNames(g.CurrentlyAuctioning),
 		RenderMoney(price),
 		paidTo,
-	))}
+	)))
+
+	g.State = STATE_PLAY_CARD
+	g.NextPlayer()
+	for len(g.PlayerHands[g.CurrentPlayer]) == 0 {
+		logs = append(logs, brdgme.NewPublicLog(fmt.Sprintf(
+			"Skipping %s as they have no cards",
+			render.Player(g.CurrentPlayer),
+		)))
+		g.NextPlayer()
+	}
+
+	return logs
 }
 
 func (g *Game) Pass(player int) ([]brdgme.Log, error) {
