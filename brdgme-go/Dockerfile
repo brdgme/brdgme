@@ -48,3 +48,9 @@ RUN go build -o no_thanks brdgme-go/no_thanks/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS no-thanks-1
 COPY --from=no-thanks-builder /src/no_thanks /script
+
+FROM go-builder AS sushizock-builder
+RUN go build -o sushizock brdgme-go/sushizock/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS sushizock-1
+COPY --from=sushizock-builder /src/sushizock /script
