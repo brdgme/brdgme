@@ -218,31 +218,6 @@ func (g *Game) Points() []float32 {
 	return points
 }
 
-/*
-func (g *Game) Commands(player string) []command.Command {
-	commands := []command.Command{}
-	if g.CanPlay(player) {
-		commands = append(commands, PlayCommand{})
-	}
-	if g.CanSetPrice(player) {
-		commands = append(commands, PriceCommand{})
-	}
-	if g.CanAdd(player) {
-		commands = append(commands, AddCommand{})
-	}
-	if g.CanBid(player) {
-		commands = append(commands, BidCommand{})
-	}
-	if g.CanBuy(player) {
-		commands = append(commands, BuyCommand{})
-	}
-	if g.CanPass(player) {
-		commands = append(commands, PassCommand{})
-	}
-	return commands
-}
-*/
-
 func (g *Game) PlayerRender(pNum int) string {
 	output := bytes.Buffer{}
 	// Auction specific
