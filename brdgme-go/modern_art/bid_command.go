@@ -1,12 +1,6 @@
 package modern_art
 
-import (
-	"errors"
-	"strconv"
-
-	"github.com/Miniand/brdg.me/command"
-)
-
+/*
 type BidCommand struct{}
 
 func (bc BidCommand) Name() string { return "bid" }
@@ -35,3 +29,4 @@ func (bc BidCommand) Call(
 func (bc BidCommand) Usage(player string, context interface{}) string {
 	return "{{b}}bid #{{_b}} to bid an amount in the auction, eg. {{b}}bid 10{{_b}}"
 }
+*/

@@ -1,6 +1,7 @@
 package modern_art
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Miniand/brdg.me/command"
@@ -41,12 +42,13 @@ func mockGame(t *testing.T) *Game {
 
 func cloneGame(g *Game) *Game {
 	newG := &Game{}
-	data, err := g.Encode()
+	raw, err := json.Marshal(g)
 	if err != nil {
-		panic(err.Error())
+		panic(err)
 	}
-	if err := newG.Decode(data); err != nil {
-		panic(err.Error())
+	err = json.Unmarshal(raw, newG)
+	if err != nil {
+		panic(err)
 	}
 	return newG
 }

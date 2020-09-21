@@ -1,11 +1,6 @@
 package modern_art
 
-import (
-	"errors"
-
-	"github.com/Miniand/brdg.me/command"
-)
-
+/*
 type AddCommand struct{}
 
 func (ac AddCommand) Name() string { return "add" }
@@ -34,3 +29,4 @@ func (ac AddCommand) Call(
 func (ac AddCommand) Usage(player string, context interface{}) string {
 	return "{{b}}add ####{{_b}} to add a card to the auction, eg. {{b}}play lmop{{_b}}"
 }
+*/

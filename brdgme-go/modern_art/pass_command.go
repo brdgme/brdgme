@@ -1,7 +1,6 @@
 package modern_art
 
-import "github.com/Miniand/brdg.me/command"
-
+/*
 type PassCommand struct{}
 
 func (pc PassCommand) Name() string { return "pass" }
@@ -22,3 +21,4 @@ func (pc PassCommand) Call(
 func (pc PassCommand) Usage(player string, context interface{}) string {
 	return "{{b}}pass{{_b}} to pass"
 }
+*/

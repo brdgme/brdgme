@@ -1,11 +1,6 @@
 package modern_art
 
-import (
-	"errors"
-
-	"github.com/Miniand/brdg.me/command"
-)
-
+/*
 type PlayCommand struct{}
 
 func (pc PlayCommand) Name() string { return "play" }
@@ -34,3 +29,4 @@ func (pc PlayCommand) Call(
 func (pc PlayCommand) Usage(player string, context interface{}) string {
 	return "{{b}}play ####{{_b}} to play a card using the card code, eg. {{b}}play lmop{{_b}}"
 }
+*/
