@@ -60,3 +60,9 @@ RUN go build -o sushi_go brdgme-go/sushi_go/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS sushi-go-1
 COPY --from=sushi-go-builder /src/sushi_go /script
+
+FROM go-builder AS zombie-dice-builder
+RUN go build -o zombie_dice brdgme-go/zombie_dice/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS zombie-dice-1
+COPY --from=zombie-dice-builder /src/zombie_dice /script
