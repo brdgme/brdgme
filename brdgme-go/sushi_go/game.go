@@ -438,7 +438,7 @@ func (g *Game) PuddingCards(player int) int {
 
 func (g *Game) Placings() []int {
 	metrics := [][]int{}
-	for p := 0; p < g.AllPlayers; p++ {
+	for p := 0; p < g.Players; p++ {
 		// Number of points, ties broken by number of pudding cards
 		metrics[p] = []int{g.PlayerPoints[p], g.PuddingCards(p)}
 	}
