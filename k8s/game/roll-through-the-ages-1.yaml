@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: roll-through-the-ages
-          image: brdgme/roll-through-the-ages-1:v1.23.0
+          image: brdgme/roll-through-the-ages-1:v1.24.0
           ports:
             - containerPort: 80
 ---
