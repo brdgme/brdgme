@@ -235,3 +235,15 @@ func Plural(n int, s string) string {
 	}
 	return s + "s"
 }
+
+func CommaList(strs []string) string {
+	l := len(strs)
+	switch l {
+	case 0:
+		return ""
+	case 1:
+		return strs[0]
+	default:
+		return strings.Join(strs[:l-1], ", ") + " and " + strs[l-1]
+	}
+}

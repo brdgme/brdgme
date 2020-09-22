@@ -63,6 +63,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: sushizock-1
+  - image: brdgme/sushi-go-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: sushi-go-1
 deploy:
   kubectl:
     manifests:
@@ -80,3 +84,4 @@ deploy:
     - k8s/game/modern-art-1.yaml
     - k8s/game/no-thanks-1.yaml
     - k8s/game/sushizock-1.yaml
+    - k8s/game/sushi-go-1.yaml

@@ -54,3 +54,9 @@ RUN go build -o sushizock brdgme-go/sushizock/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS sushizock-1
 COPY --from=sushizock-builder /src/sushizock /script
+
+FROM go-builder AS sushi-go-builder
+RUN go build -o sushi_go brdgme-go/sushi_go/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS sushi-go-1
+COPY --from=sushi-go-builder /src/sushi_go /script
