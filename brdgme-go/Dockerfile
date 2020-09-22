@@ -66,3 +66,9 @@ RUN go build -o zombie_dice brdgme-go/zombie_dice/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS zombie-dice-1
 COPY --from=zombie-dice-builder /src/zombie_dice /script
+
+FROM go-builder AS love-letter-builder
+RUN go build -o love_letter brdgme-go/love_letter/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS love-letter-1
+COPY --from=love-letter-builder /src/love_letter /script
