@@ -65,7 +65,7 @@ func (g *Game) Points() []float32 {
 }
 
 func (g *Game) Placings() []int {
-	metrics := [][]int{}
+	metrics := make([][]int, g.Players)
 	for p := 0; p < g.Players; p++ {
 		metrics[p] = []int{g.Scores[p]}
 	}
