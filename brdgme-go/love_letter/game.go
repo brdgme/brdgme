@@ -303,23 +303,3 @@ func (g *Game) AssertTarget(player int, incSelf bool, target int) error {
 func (g *Game) CanPlay(player int) bool {
 	return g.CurrentPlayer == player
 }
-
-/*
-func (g *Game) Play(player, card int, args ...string) error {
-	if !g.CanPlay(player) {
-		return errors.New("unable to play right now")
-	}
-	if _, ok := brdgme.IntFind(card, g.Hands[player]); !ok {
-		return errors.New("you don't have that card")
-	}
-	curRound := g.Round
-	if err := Cards[card].Play(g, player, args...); err != nil {
-		return err
-	}
-	if g.Round == curRound {
-		// Only go to the next player if the round didn't just end.
-		g.NextPlayer()
-	}
-	return nil
-}
-*/
