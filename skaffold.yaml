@@ -75,6 +75,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: love-letter-1
+  - image: brdgme/category-5-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: category-5-1
 deploy:
   kubectl:
     manifests:
@@ -95,3 +99,4 @@ deploy:
     - k8s/game/sushi-go-1.yaml
     - k8s/game/zombie-dice-1.yaml
     - k8s/game/love-letter-1.yaml
+    - k8s/game/category-5-1.yaml

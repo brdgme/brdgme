@@ -72,3 +72,9 @@ RUN go build -o love_letter brdgme-go/love_letter/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS love-letter-1
 COPY --from=love-letter-builder /src/love_letter /script
+
+FROM go-builder AS category-5-builder
+RUN go build -o category_5 brdgme-go/category_5/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS category-5-1
+COPY --from=category-5-builder /src/category_5 /script
