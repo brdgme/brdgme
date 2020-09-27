@@ -3,8 +3,7 @@ package category_5
 import (
 	"testing"
 
-	"github.com/Miniand/brdg.me/game/helper"
-	"github.com/stretchr/testify/assert"
+	"github.com/brdgme/brdgme/brdgme-go/assert"
 )
 
 const (
@@ -35,14 +34,14 @@ func TestAutoPlayLastCard(t *testing.T) {
 		{4},
 	}
 	g.Hands = map[int][]Card{
-		helper.Mick:  {5, 6},
-		helper.Steve: {7, 8},
+		Mick:  {5, 6},
+		Steve: {7, 8},
 	}
 	_, err = g.Command(Mick, "play 5", []string{})
 	assert.NoError(t, err)
 	_, err = g.Command(Steve, "play 7", []string{})
 	assert.NoError(t, err)
-	assert.Len(t, g.Hands[helper.Mick], 10)
+	assert.Len(t, g.Hands[Mick], 10)
 }
 
 func TestSortCards(t *testing.T) {
