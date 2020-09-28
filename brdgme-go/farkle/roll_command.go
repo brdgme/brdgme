@@ -1,0 +1,54 @@
+package farkle
+
+import (
+	"errors"
+
+	"github.com/brdgme/brdgme/brdgme-go/brdgme"
+)
+
+/*
+type RollCommand struct{}
+
+func (rc RollCommand) Name() string { return "roll" }
+
+func (rc RollCommand) Call(
+	player string,
+	context interface{},
+	input *command.Reader,
+) (string, error) {
+	g := context.(*Game)
+	pNum, ok := g.PlayerNum(player)
+	if !ok {
+		return "", errors.New("can't find player")
+	}
+	if !g.CanRoll(pNum) {
+		return "", errors.New("can't play at the moment")
+	}
+	if len(g.RemainingDice) > 0 {
+		g.Roll(len(g.RemainingDice))
+	} else {
+		g.Roll(6)
+	}
+	g.TakenThisRoll = false
+	return "", nil
+}
+
+func (rc RollCommand) Usage(player string, context interface{}) string {
+	return "{{b}}roll{{_b}} to roll remaining dice"
+}
+*/
+
+func (g *Game) PlayerRoll(pNum int) ([]brdgme.Log, error) {
+	if !g.CanRoll(pNum) {
+		return nil, errors.New("can't play at the moment")
+	}
+	g.TakenThisRoll = false
+	if len(g.RemainingDice) > 0 {
+		return g.Roll(len(g.RemainingDice)), nil
+	}
+	return g.Roll(6), nil
+}
+
+func (g *Game) CanRoll(player int) bool {
+	return player == g.Player && g.TakenThisRoll && !g.IsFinished()
+}

@@ -84,3 +84,9 @@ RUN go build -o cathedral brdgme-go/cathedral/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS cathedral-1
 COPY --from=cathedral-builder /src/cathedral /script
+
+FROM go-builder AS farkle-builder
+RUN go build -o farkle brdgme-go/farkle/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS farkle-1
+COPY --from=farkle-builder /src/farkle /script

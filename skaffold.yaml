@@ -83,6 +83,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: cathedral-1
+  - image: brdgme/farkle-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: farkle-1
 deploy:
   kubectl:
     manifests:
@@ -105,3 +109,4 @@ deploy:
     - k8s/game/love-letter-1.yaml
     - k8s/game/category-5-1.yaml
     - k8s/game/cathedral-1.yaml
+    - k8s/game/farkle-1.yaml
