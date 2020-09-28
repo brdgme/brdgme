@@ -85,19 +85,25 @@ func (g *Game) PlayParser(player int) brdgme.Parser {
 					Parser: g.LocParser(player),
 				},
 			),
-			brdgme.AfterSpace(
-				brdgme.Doc{
-					Name:   "dir",
-					Desc:   "the direction to play the piece",
-					Parser: DirParser(),
-				},
-			),
+			brdgme.Opt{
+				Parser: brdgme.AfterSpace(
+					brdgme.Doc{
+						Name:   "dir",
+						Desc:   "the direction to play the piece, or down if not specified",
+						Parser: DirParser(),
+					},
+				),
+			},
 		},
 		Func: func(value interface{}) interface{} {
+			dir := DirDown
+			if d, ok := value.([]interface{})[3].(Dir); ok {
+				dir = d
+			}
 			return PlayCommand{
 				Piece: value.([]interface{})[1].(int),
 				Loc:   value.([]interface{})[2].(Loc),
-				Dir:   value.([]interface{})[3].(Dir),
+				Dir:   dir,
 			}
 		},
 	}
