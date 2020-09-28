@@ -174,7 +174,7 @@ export class Component extends React.PureComponent<IProps, {}> {
       return [];
     }
     const commandSpec = this.props.game.command_spec.toJS();
-    const names = 
+    const names =
       this.props.game.game_players.map((gptu) => gptu.user.name).toArray();
     const fullCommand = Command.parse(
       this.props.command,

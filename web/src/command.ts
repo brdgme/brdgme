@@ -81,12 +81,16 @@ export function parseIntSpec(input: string, offset: number, min?: number, max?: 
       };
     }
   }
+  let next;
+  if (intResult.kind !== MATCH_FULL) {
+    next = enumResult.next;
+  }
   return {
     kind: intResult.kind,
     offset,
     length: intResult.length,
     value: intResult.value,
-    next: [intResult].concat(enumResult.next || []),
+    next,
   };
 }
 

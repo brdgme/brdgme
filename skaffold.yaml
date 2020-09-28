@@ -79,6 +79,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: category-5-1
+  - image: brdgme/cathedral-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: cathedral-1
 deploy:
   kubectl:
     manifests:
@@ -100,3 +104,4 @@ deploy:
     - k8s/game/zombie-dice-1.yaml
     - k8s/game/love-letter-1.yaml
     - k8s/game/category-5-1.yaml
+    - k8s/game/cathedral-1.yaml
