@@ -140,6 +140,25 @@ func TestStealRed(t *testing.T) {
 	}, g.PlayerRedTiles[Steve])
 }
 
+func TestStealRedNNotAllowed(t *testing.T) {
+	g := &Game{}
+	_, err := g.New(3)
+	assert.NoError(t, err)
+
+	g.PlayerRedTiles[Steve] = Tiles{
+		Tile{Type: TileTypeRed, Value: -3},
+		Tile{Type: TileTypeRed, Value: -1},
+		Tile{Type: TileTypeRed, Value: -2},
+	}
+
+	// We should be stealing from the end of the slice
+	_, err = g.Command(Mick, "roll 5", names)
+	assert.NoError(t, err)
+	g.KeptDice = []int{DieRedChopsticks, DieRedChopsticks, DieRedChopsticks, DieSushi, DieBones}
+	_, err = g.Command(Mick, "steal ste r 2", names)
+	assert.Error(t, err)
+}
+
 func TestStealBlueN(t *testing.T) {
 	g := &Game{}
 	_, err := g.New(3)

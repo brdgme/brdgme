@@ -418,7 +418,7 @@ func (g *Game) StealRedN(player, targetPlayer, n int) ([]brdgme.Log, error) {
 	if n == 1 {
 		return g.StealRed(player, targetPlayer)
 	}
-	if !g.CanStealRed(player) {
+	if !g.CanStealRedN(player) {
 		return nil, errors.New("can't steal a hidden red tile at the moment")
 	}
 	if player == targetPlayer {
@@ -445,7 +445,7 @@ func (g *Game) StealBlueN(player, targetPlayer, n int) ([]brdgme.Log, error) {
 	if n == 1 {
 		return g.StealBlue(player, targetPlayer)
 	}
-	if !g.CanStealBlue(player) {
+	if !g.CanStealBlueN(player) {
 		return nil, errors.New("can't steal a hidden blue tile at the moment")
 	}
 	if player == targetPlayer {
