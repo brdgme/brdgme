@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: lost-cities
-          image: brdgme/lost-cities-2:v1.31.0
+          image: brdgme/lost-cities-2:v1.32.0
           ports:
             - containerPort: 80
 ---
