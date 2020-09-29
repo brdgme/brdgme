@@ -1,6 +1,7 @@
 package cathedral
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
@@ -143,25 +144,48 @@ func (g *Game) Play(player, piece int, loc Loc, dir Dir) ([]brdgme.Log, error) {
 	if p.Player != PlayerCathedral && g.PlayedPieces[1][0] {
 		logs = append(logs, g.CheckCaptures(loc)...)
 	}
-	// Check if there are any open tiles left, otherwise it becomes
-	// simultaneous play.
-	if !g.NoOpenTiles {
+	// If neither player can play anything, it's the end of the game.
+	playablePiece := false
+	for p := 0; p < g.Players; p++ {
+		playablePiece = g.CanPlaySomething(p, LocFilterPlayable)
+		if playablePiece {
+			break
+		}
+	}
+	if !playablePiece {
+		// The game is finished
+		g.Finished = true
+		buf := bytes.NewBufferString(render.Bold(
+			"The game is finished, remaining piece size is as follows:",
+		))
+		for p := 0; p < g.Players; p++ {
+			buf.WriteString(fmt.Sprintf(
+				"\n%s - %s",
+				render.Player(p),
+				render.Bold(strconv.Itoa(g.RemainingPieceSize(p))),
+			))
+		}
+		logs = append(logs, brdgme.NewPublicLog(buf.String()))
+	} else if !g.NoOpenTiles {
+		// The game isn't finidhed yet. Check if all open tiles are now used,
+		// and if so we switch to simultaneous mode
 		openTileExists := false
 		for p := 0; p < g.Players; p++ {
 			if g.CanPlaySomething(p, LocFilterOpen) {
 				openTileExists = true
+				break
 			}
 		}
 		if !openTileExists {
+			// We don't have any open tiles left, so it becomes simultaneous.
 			g.NoOpenTiles = true
 			logs = append(logs, brdgme.NewPublicLog(
 				"No open tiles remain, players will play the rest of their pieces simultaneously.",
 			))
+		} else if player != 1 || piece != 0 {
+			// Go to next player if it wasn't the cathedral just played.
+			g.NextPlayer()
 		}
-	}
-	if player != 1 || piece != 0 {
-		// Go to next player if it wasn't the cathedral just played.
-		logs = append(logs, g.NextPlayer()...)
 	}
 	return logs, nil
 }

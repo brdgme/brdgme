@@ -1,13 +1,9 @@
 package cathedral
 
 import (
-	"bytes"
 	"errors"
-	"fmt"
-	"strconv"
 
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
-	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
 type Dir int
@@ -175,26 +171,12 @@ func OpenSides(src Tiler, loc Loc) (open map[Dir]bool) {
 	return
 }
 
-func (g *Game) NextPlayer() []brdgme.Log {
+func (g *Game) NextPlayer() {
 	opponent := Opponent(g.CurrentPlayer)
+	// We switch to the opponent if they have any playable pieces.
 	if g.CanPlaySomething(opponent, LocFilterPlayable) {
-		// The opponent can play something, so they have a turn.
 		g.CurrentPlayer = opponent
-		return nil
 	}
-	// The game is finished
-	g.Finished = true
-	buf := bytes.NewBufferString(render.Bold(
-		"The game is finished, remaining piece size is as follows:",
-	))
-	for p := 0; p < g.Players; p++ {
-		buf.WriteString(fmt.Sprintf(
-			"\n%s - %s",
-			render.Player(p),
-			render.Bold(strconv.Itoa(g.RemainingPieceSize(p))),
-		))
-	}
-	return []brdgme.Log{brdgme.NewPublicLog(buf.String())}
 }
 
 func (g *Game) RemainingPieceSize(player int) int {
