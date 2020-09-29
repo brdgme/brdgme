@@ -1,4 +1,4 @@
-package farkle
+package greed
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ func TestGame(t *testing.T) {
 	g := &Game{}
 	_, err := g.New(2)
 	assert.NoError(t, err)
-	g.RemainingDice = []int{1, 2, 3, 4, 5, 6}
-	_, err = g.Command(g.Player, "score 1", []string{})
+	g.RemainingDice = []Die{DieDollar, DieDollar, DieDollar, DieE1, DieE2, DieD}
+	_, err = g.Command(g.Player, "score $ $ $", []string{})
 	assert.NoError(t, err)
 }

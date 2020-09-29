@@ -1,4 +1,4 @@
-package farkle
+package greed
 
 import (
 	"errors"
@@ -95,8 +95,6 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 
 func (g *Game) ScoreParser() brdgme.Parser {
 	minNum := uint(1)
-	min := 1
-	max := 6
 	return brdgme.Map{
 		Parser: brdgme.Chain{
 			brdgme.Doc{
@@ -109,21 +107,18 @@ func (g *Game) ScoreParser() brdgme.Parser {
 					Name: "dice",
 					Desc: "the dice to score",
 					Parser: brdgme.Many{
-						Min: &minNum,
-						Parser: brdgme.Int{
-							Min: &min,
-							Max: &max,
-						},
-						Delim: brdgme.Space{},
+						Min:    &minNum,
+						Parser: DieParser(),
+						Delim:  brdgme.Space{},
 					},
 				},
 			),
 		},
 		Func: func(value interface{}) interface{} {
 			rawDice := value.([]interface{})[1].([]interface{})
-			dice := make([]int, len(rawDice))
+			dice := make([]Die, len(rawDice))
 			for i, d := range rawDice {
-				dice[i] = d.(int)
+				dice[i] = d.(Die)
 			}
 			return ScoreCommand{
 				Dice: dice,
@@ -152,4 +147,17 @@ var DoneParser = brdgme.Doc{
 			return DoneCommand{}
 		},
 	},
+}
+
+func DieParser() brdgme.Parser {
+	values := make([]brdgme.EnumValue, len(DieFaces))
+	for i, die := range DieFaces {
+		values[i] = brdgme.EnumValue{
+			Value: die,
+			Name:  DieNames[die],
+		}
+	}
+	return brdgme.Enum{
+		Values: values,
+	}
 }

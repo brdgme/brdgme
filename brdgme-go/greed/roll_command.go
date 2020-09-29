@@ -1,4 +1,4 @@
-package farkle
+package greed
 
 import (
 	"errors"

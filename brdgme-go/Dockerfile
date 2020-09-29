@@ -90,3 +90,9 @@ RUN go build -o farkle brdgme-go/farkle/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS farkle-1
 COPY --from=farkle-builder /src/farkle /script
+
+FROM go-builder AS greed-builder
+RUN go build -o greed brdgme-go/greed/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS greed-1
+COPY --from=greed-builder /src/greed /script

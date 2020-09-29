@@ -87,6 +87,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: farkle-1
+  - image: brdgme/greed-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: greed-1
 deploy:
   kubectl:
     manifests:
@@ -110,3 +114,4 @@ deploy:
     - k8s/game/category-5-1.yaml
     - k8s/game/cathedral-1.yaml
     - k8s/game/farkle-1.yaml
+    - k8s/game/greed-1.yaml
