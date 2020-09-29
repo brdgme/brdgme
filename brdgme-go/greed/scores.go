@@ -31,12 +31,12 @@ func Scores() []Score {
 	}
 }
 
-func (s Score) ValueString() string {
-	return RenderDice(s.Dice)
+func (s Score) ValueString(delim string) string {
+	return RenderDice(s.Dice, delim)
 }
 
 func (s Score) Description() string {
-	return fmt.Sprintf("%s (%d points)", s.ValueString(), s.Value)
+	return fmt.Sprintf("%s (%d points)", s.ValueString(""), s.Value)
 }
 
 func ScoreStrings() (scoreStrings []string) {
@@ -56,7 +56,7 @@ func AvailableScores(dice []Die) (available map[string]Score) {
 	for _, s := range Scores() {
 		isIn, _ := die.DiceInDice(s.Dice, dice)
 		if isIn {
-			available[s.ValueString()] = s
+			available[s.ValueString("")] = s
 		}
 	}
 	return

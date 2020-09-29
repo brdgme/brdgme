@@ -41,8 +41,8 @@ var DieNames = map[Die]string{
 	DieDollar: "$",
 	DieG:      "G",
 	DieR:      "R",
-	DieE1:     "E1",
-	DieE2:     "E2",
+	DieE1:     "E",
+	DieE2:     "e",
 	DieD:      "D",
 }
 
@@ -108,7 +108,7 @@ func (g *Game) PubRender() string {
 	cells := [][]render.Cell{
 		{
 			render.Cel(render.Bold("Remaining dice")),
-			render.Cel(RenderDice(g.RemainingDice)),
+			render.Cel(RenderDice(g.RemainingDice, " ")),
 		},
 		{
 			render.Cel(render.Bold("Score this turn")),
@@ -204,7 +204,7 @@ func (g *Game) Roll(n int) []brdgme.Log {
 	logs := []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
 		"%s rolled %s",
 		render.Player(g.Player),
-		RenderDice(g.RemainingDice),
+		RenderDice(g.RemainingDice, " "),
 	))}
 	if len(AvailableScores(g.RemainingDice)) == 0 {
 		// No dice!
@@ -222,10 +222,10 @@ func RenderDie(value Die) string {
 	return render.Markup(DieNames[value], DiceColours[value], true)
 }
 
-func RenderDice(values []Die) string {
+func RenderDice(values []Die, delim string) string {
 	strs := make([]string, len(values))
 	for i, v := range values {
 		strs[i] = RenderDie(v)
 	}
-	return strings.Join(strs, " ")
+	return strings.Join(strs, delim)
 }

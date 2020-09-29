@@ -35,7 +35,7 @@ func (g *Game) Score(player int, dice []int) ([]brdgme.Log, error) {
 	return []brdgme.Log{brdgme.NewPublicLog(fmt.Sprintf(
 		"%s scored %s for %s points",
 		render.Player(g.Player),
-		RenderDice(dice),
+		RenderDice(dice, ""),
 		render.Bold(strconv.Itoa(score)),
 	))}, nil
 }

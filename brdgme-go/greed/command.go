@@ -2,8 +2,11 @@ package greed
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
+	"github.com/brdgme/brdgme/brdgme-go/die"
 )
 
 type ScoreCommand struct {
@@ -93,8 +96,36 @@ func (g *Game) CommandParser(player int) brdgme.Parser {
 	return parsers
 }
 
+func ScoreDiceParser(score Score) brdgme.Parser {
+	diceStrs := make([]string, len(score.Dice))
+	for i, d := range score.Dice {
+		diceStrs[i] = DieNames[d]
+	}
+	name := strings.Join(diceStrs, "")
+	return brdgme.Doc{
+		Name: name,
+		Desc: fmt.Sprintf("%d points", score.Value),
+		Parser: brdgme.Map{
+			Parser: brdgme.Token(name),
+			Func: func(value interface{}) interface{} {
+				return score.Dice
+			},
+		},
+	}
+}
+
 func (g *Game) ScoreParser() brdgme.Parser {
-	minNum := uint(1)
+	available := []brdgme.Parser{}
+	for _, s := range Scores() {
+		if ok, _ := die.DiceInDice(s.Dice, g.RemainingDice); ok {
+			available = append(available, ScoreDiceParser(s))
+		}
+	}
+	// We reverse it to prioritise the longer matches, as OneOf matches the
+	// first
+	for i, j := 0, len(available)-1; i < j; i, j = i+1, j-1 {
+		available[i], available[j] = available[j], available[i]
+	}
 	return brdgme.Map{
 		Parser: brdgme.Chain{
 			brdgme.Doc{
@@ -104,24 +135,15 @@ func (g *Game) ScoreParser() brdgme.Parser {
 			},
 			brdgme.AfterSpace(
 				brdgme.Doc{
-					Name: "dice",
-					Desc: "the dice to score",
-					Parser: brdgme.Many{
-						Min:    &minNum,
-						Parser: DieParser(),
-						Delim:  brdgme.Space{},
-					},
+					Name:   "dice",
+					Desc:   "the dice to score",
+					Parser: brdgme.OneOf(available),
 				},
 			),
 		},
 		Func: func(value interface{}) interface{} {
-			rawDice := value.([]interface{})[1].([]interface{})
-			dice := make([]Die, len(rawDice))
-			for i, d := range rawDice {
-				dice[i] = d.(Die)
-			}
 			return ScoreCommand{
-				Dice: dice,
+				Dice: value.([]interface{})[1].([]Die),
 			}
 		},
 	}
