@@ -121,11 +121,6 @@ func (g *Game) ScoreParser() brdgme.Parser {
 			available = append(available, ScoreDiceParser(s))
 		}
 	}
-	// We reverse it to prioritise the longer matches, as OneOf matches the
-	// first
-	for i, j := 0, len(available)-1; i < j; i, j = i+1, j-1 {
-		available[i], available[j] = available[j], available[i]
-	}
 	return brdgme.Map{
 		Parser: brdgme.Chain{
 			brdgme.Doc{
