@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: brdgme/api:v1.35.0
+          image: brdgme/api:v1.36.0
           ports:
             - containerPort: 8000
           envFrom:

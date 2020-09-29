@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: zombie-dice
-          image: brdgme/zombie-dice-1:v1.35.0
+          image: brdgme/zombie-dice-1:v1.36.0
           ports:
             - containerPort: 80
 ---
