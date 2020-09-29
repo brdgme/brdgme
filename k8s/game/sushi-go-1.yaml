@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: sushi-go
-          image: brdgme/sushi-go-1:v1.34.0
+          image: brdgme/sushi-go-1:v1.35.0
           ports:
             - containerPort: 80
 ---

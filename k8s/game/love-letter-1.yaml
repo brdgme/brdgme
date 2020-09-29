@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: love-letter
-          image: brdgme/love-letter-1:v1.34.0
+          image: brdgme/love-letter-1:v1.35.0
           ports:
             - containerPort: 80
 ---
