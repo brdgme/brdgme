@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: category-5
-          image: brdgme/category-5-1:v1.33.0
+          image: brdgme/category-5-1:v1.34.0
           ports:
             - containerPort: 80
 ---
