@@ -91,6 +91,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: greed-1
+  - image: brdgme/splendor-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: splendor-1
 deploy:
   kubectl:
     manifests:
@@ -115,3 +119,4 @@ deploy:
     - k8s/game/cathedral-1.yaml
     - k8s/game/farkle-1.yaml
     - k8s/game/greed-1.yaml
+    - k8s/game/splendor-1.yaml

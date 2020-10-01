@@ -96,3 +96,9 @@ RUN go build -o greed brdgme-go/greed/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS greed-1
 COPY --from=greed-builder /src/greed /script
+
+FROM go-builder AS splendor-builder
+RUN go build -o splendor brdgme-go/splendor/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS splendor-1
+COPY --from=splendor-builder /src/splendor /script
