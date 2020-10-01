@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: texas-holdem
-          image: brdgme/texas-holdem-1:v1.36.0
+          image: brdgme/texas-holdem-1:v1.37.0
           ports:
             - containerPort: 80
 ---

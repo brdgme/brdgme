@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: brdgme/web:v1.36.0
+          image: brdgme/web:v1.37.0
           ports:
             - containerPort: 80
 ---
