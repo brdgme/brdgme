@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
-	"github.com/brdgme/brdgme/brdgme-go/die"
+	"github.com/brdgme/brdgme/brdgme-go/libdie"
 	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
@@ -191,7 +191,7 @@ func (g *Game) Roll(n int) []brdgme.Log {
 }
 
 func RenderDie(value int) string {
-	return render.Markup(die.Render(value), DiceColours[value], true)
+	return render.Markup(libdie.Render(value), DiceColours[value], true)
 }
 
 func RenderDice(values []int) string {

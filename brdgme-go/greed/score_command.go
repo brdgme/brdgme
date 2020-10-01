@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
-	"github.com/brdgme/brdgme/brdgme-go/die"
+	"github.com/brdgme/brdgme/brdgme-go/libdie"
 	"github.com/brdgme/brdgme/brdgme-go/render"
 )
 
@@ -14,7 +14,7 @@ func (g *Game) Score(player int, dice []int) ([]brdgme.Log, error) {
 	// Check that it's a valid value string and get the points
 	score := 0
 	for _, s := range Scores() {
-		if die.DiceEquals(dice, s.Dice) {
+		if libdie.DiceEquals(dice, s.Dice) {
 			score = s.Value
 			break
 		}
@@ -25,7 +25,7 @@ func (g *Game) Score(player int, dice []int) ([]brdgme.Log, error) {
 		)
 	}
 	// Check that we've actually got the dice
-	isIn, remaining := die.DiceInDice(dice, g.RemainingDice)
+	isIn, remaining := libdie.DiceInDice(dice, g.RemainingDice)
 	if !isIn {
 		return nil, errors.New("You don't have those dice")
 	}

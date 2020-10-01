@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
-	"github.com/brdgme/brdgme/brdgme-go/die"
+	"github.com/brdgme/brdgme/brdgme-go/libdie"
 )
 
 type ScoreCommand struct {
@@ -117,7 +117,7 @@ func ScoreDiceParser(score Score) brdgme.Parser {
 func (g *Game) ScoreParser() brdgme.Parser {
 	available := []brdgme.Parser{}
 	for _, s := range Scores() {
-		if ok, _ := die.DiceInDice(s.Dice, g.RemainingDice); ok {
+		if ok, _ := libdie.DiceInDice(s.Dice, g.RemainingDice); ok {
 			available = append(available, ScoreDiceParser(s))
 		}
 	}

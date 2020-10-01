@@ -3,7 +3,7 @@ package farkle
 import (
 	"fmt"
 
-	"github.com/brdgme/brdgme/brdgme-go/die"
+	"github.com/brdgme/brdgme/brdgme-go/libdie"
 )
 
 type Score struct {
@@ -25,7 +25,7 @@ func Scores() []Score {
 }
 
 func (s Score) ValueString() string {
-	valueString, err := die.DiceToValueString(s.Dice)
+	valueString, err := libdie.DiceToValueString(s.Dice)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -38,7 +38,7 @@ func (s Score) Description() string {
 
 func ScoreStrings() (scoreStrings []string) {
 	for _, s := range Scores() {
-		valueString, err := die.DiceToValueString(s.Dice)
+		valueString, err := libdie.DiceToValueString(s.Dice)
 		if err != nil {
 			panic(err.Error())
 		}
@@ -51,7 +51,7 @@ func ScoreStrings() (scoreStrings []string) {
 func AvailableScores(dice []int) (available map[string]Score) {
 	available = map[string]Score{}
 	for _, s := range Scores() {
-		isIn, _ := die.DiceInDice(s.Dice, dice)
+		isIn, _ := libdie.DiceInDice(s.Dice, dice)
 		if isIn {
 			available[s.ValueString()] = s
 		}
