@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: cathedral
-          image: brdgme/cathedral-1:v1.37.0
+          image: brdgme/cathedral-1:v1.38.0
           ports:
             - containerPort: 80
 ---
