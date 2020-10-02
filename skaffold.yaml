@@ -95,6 +95,10 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: splendor-1
+  - image: brdgme/battleship-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: battleship-1
 deploy:
   kubectl:
     manifests:
@@ -120,3 +124,4 @@ deploy:
     - k8s/game/farkle-1.yaml
     - k8s/game/greed-1.yaml
     - k8s/game/splendor-1.yaml
+    - k8s/game/battleship-1.yaml

@@ -102,3 +102,9 @@ RUN go build -o splendor brdgme-go/splendor/cmd/*.go
 
 FROM beefsack/webify:v1.3.0 AS splendor-1
 COPY --from=splendor-builder /src/splendor /script
+
+FROM go-builder AS battleship-builder
+RUN go build -o battleship brdgme-go/battleship/cmd/*.go
+
+FROM beefsack/webify:v1.3.0 AS battleship-1
+COPY --from=battleship-builder /src/battleship /script
