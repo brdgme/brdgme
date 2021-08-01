@@ -1,10 +1,9 @@
 use anyhow::{anyhow, Context, Error, Result};
 use lettre_email::EmailBuilder;
 use rocket::http::Status;
-use rocket::outcome::Outcome;
 use rocket::post;
-use rocket::request::{self, FromRequest, Request};
-use rocket_contrib::json::Json;
+use rocket::request::{FromRequest, Outcome, Request};
+use rocket::serde::json::Json;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -64,11 +63,12 @@ pub fn confirm(data: Json<ConfirmRequest>) -> Result<CORS<Json<String>>> {
     }
 }
 
-impl<'a, 'r> FromRequest<'a, 'r> for User {
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for User {
     type Error = Error;
 
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Error> {
-        let auth_header = match request.headers().get_one("Authorization") {
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Error> {
+        let auth_header = match req.headers().get_one("Authorization") {
             Some(a) => a,
             None => {
                 return Outcome::Failure((

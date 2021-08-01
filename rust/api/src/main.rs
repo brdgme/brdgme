@@ -3,7 +3,6 @@
 #![allow(unused_variables)]
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::too_many_arguments)]
-#![feature(decl_macro)]
 
 // We need this for schema.rs to work properly
 #[macro_use]
@@ -27,7 +26,7 @@ fn main() {
     let (pub_queue, pub_queue_tx) = websocket::PubQueue::new();
     thread::spawn(move || pub_queue.run());
 
-    rocket::ignite()
+    rocket::build()
         .manage(Mutex::new(pub_queue_tx))
         .mount(
             "/game",

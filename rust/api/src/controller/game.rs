@@ -2,10 +2,10 @@ use anyhow::{anyhow, Context, Error};
 use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::Connection;
+use rocket::serde::json::Json;
+use rocket::serde::uuid::Uuid;
 use rocket::{get, post, State};
-use rocket_contrib::json::Json;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use brdgme_cmd::cli;
 use brdgme_game::command::Spec as CommandSpec;
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
-use crate::controller::{UuidParam, CORS};
+use crate::controller::CORS;
 use crate::db::CONN;
 use crate::db::{models, query};
 use crate::errors::ControllerError;
@@ -174,7 +174,7 @@ pub struct ShowResponse {
 
 #[get("/<id>")]
 pub fn show(
-    id: UuidParam,
+    id: Uuid,
     user: Option<models::User>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
@@ -243,7 +243,7 @@ pub struct CommandRequest {
 
 #[post("/<id>/command", data = "<data>")]
 pub fn command(
-    id: UuidParam,
+    id: Uuid,
     user: models::User,
     pub_queue_tx: State<Mutex<Sender<websocket::Message>>>,
     data: Json<CommandRequest>,
@@ -373,7 +373,7 @@ pub fn command(
 
 #[post("/<id>/undo")]
 pub fn undo(
-    id: UuidParam,
+    id: Uuid,
     user: models::User,
     pub_queue_tx: State<Mutex<Sender<websocket::Message>>>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
@@ -484,7 +484,7 @@ pub fn undo(
 
 #[post("/<id>/mark_read")]
 pub fn mark_read(
-    id: UuidParam,
+    id: Uuid,
     user: models::User,
 ) -> Result<CORS<Json<Option<models::PublicGamePlayer>>>, ControllerError> {
     let id = id.into_uuid();
@@ -501,7 +501,7 @@ pub fn mark_read(
 
 #[post("/<id>/concede")]
 pub fn concede(
-    id: UuidParam,
+    id: Uuid,
     user: models::User,
     pub_queue_tx: State<Mutex<Sender<websocket::Message>>>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
@@ -598,7 +598,7 @@ pub fn concede(
 
 #[post("/<id>/restart")]
 pub fn restart(
-    id: UuidParam,
+    id: Uuid,
     user: models::User,
     pub_queue_tx: State<Mutex<Sender<websocket::Message>>>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {

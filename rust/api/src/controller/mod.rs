@@ -3,7 +3,7 @@ use rocket::http::RawStr;
 use rocket::request::{FromParam, Request};
 use rocket::response::{self, Responder};
 use rocket::{get, options};
-use rocket_contrib::json::Json;
+use rocket::serde::json::Json;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -17,28 +17,11 @@ pub mod mail;
 use crate::db::{models, query, CONN};
 use crate::errors::ControllerError;
 
-pub struct UuidParam(Uuid);
-
-impl UuidParam {
-    pub fn into_uuid(self) -> Uuid {
-        self.0
-    }
-}
-
-impl<'a> FromParam<'a> for UuidParam {
-    type Error = ControllerError;
-
-    fn from_param(param: &'a RawStr) -> Result<Self, ControllerError> {
-        Ok(UuidParam(
-            Uuid::from_str(param).context("failed to parse UUID")?,
-        ))
-    }
-}
 
 pub struct CORS<R>(R);
 
-impl<'r, R: Responder<'r>> Responder<'r> for CORS<R> {
-    fn respond_to(self, request: &Request) -> response::Result<'r> {
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CORS<R> {
+    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
         let mut response = self.0.respond_to(request)?;
         response.set_raw_header("Access-Control-Allow-Origin", "*");
         response.set_raw_header(

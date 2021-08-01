@@ -1,25 +1,22 @@
 # syntax=docker/dockerfile:experimental
 
-FROM rust:1.45.1 AS rust-nightly-2020-09-19
-RUN rustup install nightly-2020-09-19
-
-FROM rust-nightly-2020-09-19 AS rust-src
+FROM rust:1.53.0 AS rust-src
 WORKDIR /src
 COPY rust .
 
+FROM rust:1.53.0 AS rust-deps
+WORKDIR /src
+COPY rust .
+RUN find . -type f -not \( -name Cargo.lock -or -name Cargo.toml -or -name lib.rs -or -name main.rs \) -delete
+RUN cargo build --release
+
 FROM rust-src AS rust-test
-RUN \
-  --mount=type=cache,target=/usr/local/cargo/registry \
-  --mount=type=cache,target=/src/target \
-  cargo test
+RUN cargo test
 
 FROM rust-src AS rust-builder
-RUN \
-  --mount=type=cache,target=/usr/local/cargo/registry \
-  --mount=type=cache,target=/src/target \
-  RUSTFLAGS=-g cargo build --release --out-dir=out -Z unstable-options
+RUN RUSTFLAGS=-g cargo build --release --out-dir=out -Z unstable-options
 
-FROM rust:1.45.1 AS api
+FROM rust-builder AS api
 WORKDIR /root
 COPY --from=rust-builder /src/out/brdgme_api .
 CMD ["./brdgme_api"]
