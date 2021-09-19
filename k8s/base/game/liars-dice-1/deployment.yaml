@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: liars-dice-1
+spec:
+  selector:
+    matchLabels:
+      app: liars-dice-1
+  template:
+    metadata:
+      labels:
+        app: liars-dice-1
+    spec:
+      containers:
+      - name: liars-dice-1
+        image: brdgme/liars-dice-1
+        ports:
+        - containerPort: 80

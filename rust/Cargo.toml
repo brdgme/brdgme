@@ -2,10 +2,10 @@
 
 members = [
     "api",
-    "game/acquire",
-    "game/lords-of-vegas",
-    "game/lost-cities",
+    "game/acquire-1",
+    "game/lords-of-vegas-1",
     "game/lost-cities-1",
+    "game/lost-cities-2",
     "lib/cmd",
     "lib/color",
     "lib/game",

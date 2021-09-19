@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: texas-holdem-1
+spec:
+  selector:
+    matchLabels:
+      app: texas-holdem-1
+  template:
+    metadata:
+      labels:
+        app: texas-holdem-1
+    spec:
+      containers:
+      - name: texas-holdem-1
+        image: brdgme/texas-holdem-1
+        ports:
+        - containerPort: 80

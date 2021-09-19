@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lost-cities-1
+spec:
+  selector:
+    matchLabels:
+      app: lost-cities-1
+  template:
+    metadata:
+      labels:
+        app: lost-cities-1
+    spec:
+      containers:
+      - name: lost-cities-1
+        image: brdgme/lost-cities-1
+        ports:
+        - containerPort: 80

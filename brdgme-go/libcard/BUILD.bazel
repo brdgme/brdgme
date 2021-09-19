@@ -1,0 +1,19 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+test_files = ["test.go", "*_test.go"]
+
+go_library(
+    name = "libcard",
+    srcs = glob(["*.go"], test_files),
+    deps = [
+        "//brdgme-go/render",
+    ],
+    importpath = "github.com/brdgme/brdgme/brdgme-go/libcard",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "test",
+    srcs = glob(test_files),
+    embed = [":libcard"],
+)

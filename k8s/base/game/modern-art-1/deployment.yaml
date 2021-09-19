@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modern-art-1
+spec:
+  selector:
+    matchLabels:
+      app: modern-art-1
+  template:
+    metadata:
+      labels:
+        app: modern-art-1
+    spec:
+      containers:
+      - name: modern-art-1
+        image: brdgme/modern-art-1
+        ports:
+        - containerPort: 80

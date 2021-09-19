@@ -1,0 +1,23 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+test_files = ["test.go", "*_test.go"]
+
+go_library(
+    name = "age_of_war_1",
+    srcs = glob(["*.go"], test_files),
+    deps = [
+        "//brdgme-go/brdgme",
+        "//brdgme-go/render",
+    ],
+    importpath = "github.com/brdgme/brdgme/brdgme-go/age_of_war_1",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "test",
+    srcs = glob(test_files),
+    deps = [
+        "//brdgme-go/assert",
+    ],
+    embed = [":age_of_war_1"],
+)

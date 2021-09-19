@@ -1,0 +1,16 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+test_files = ["test.go", "*_test.go"]
+
+go_library(
+    name = "libdie",
+    srcs = glob(["*.go"], test_files),
+    importpath = "github.com/brdgme/brdgme/brdgme-go/libdie",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "test",
+    srcs = glob(test_files),
+    embed = [":libdie"],
+)

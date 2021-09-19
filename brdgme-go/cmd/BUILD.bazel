@@ -1,0 +1,11 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "cmd",
+    srcs = glob(["**/*.go"]),
+    deps = [
+        "//brdgme-go/brdgme",
+    ],
+    importpath = "github.com/brdgme/brdgme/brdgme-go/cmd",
+    visibility = ["//visibility:public"],
+)

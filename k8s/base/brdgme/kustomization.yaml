@@ -1,0 +1,8 @@
+bases:
+- ../api
+- ../game
+- ../postgres
+- ../redis
+- ../smtp
+- ../web
+- ../websocket

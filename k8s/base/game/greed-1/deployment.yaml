@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: greed-1
+spec:
+  selector:
+    matchLabels:
+      app: greed-1
+  template:
+    metadata:
+      labels:
+        app: greed-1
+    spec:
+      containers:
+      - name: greed-1
+        image: brdgme/greed-1
+        ports:
+        - containerPort: 80

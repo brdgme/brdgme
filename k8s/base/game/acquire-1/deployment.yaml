@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acquire-1
+spec:
+  selector:
+    matchLabels:
+      app: acquire-1
+  template:
+    metadata:
+      labels:
+        app: acquire-1
+    spec:
+      containers:
+      - name: acquire-1
+        image: brdgme/acquire-1
+        ports:
+        - containerPort: 80

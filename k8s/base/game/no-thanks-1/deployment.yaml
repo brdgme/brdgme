@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: no-thanks-1
+spec:
+  selector:
+    matchLabels:
+      app: no-thanks-1
+  template:
+    metadata:
+      labels:
+        app: no-thanks-1
+    spec:
+      containers:
+      - name: no-thanks-1
+        image: brdgme/no-thanks-1
+        ports:
+        - containerPort: 80

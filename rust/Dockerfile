@@ -25,10 +25,10 @@ COPY --from=rust-builder /src/out/brdgme_api .
 CMD ["./brdgme_api"]
 
 FROM beefsack/webify:v1.3.0 AS acquire-1
-COPY --from=rust-builder /src/out/acquire_cli /script
-
-FROM beefsack/webify:v1.3.0 AS lost-cities-2
-COPY --from=rust-builder /src/out/lost_cities_cli /script
+COPY --from=rust-builder /src/out/acquire_1_cli /script
 
 FROM beefsack/webify:v1.3.0 AS lost-cities-1
 COPY --from=rust-builder /src/out/lost_cities_1_cli /script
+
+FROM beefsack/webify:v1.3.0 AS lost-cities-2
+COPY --from=rust-builder /src/out/lost_cities_2_cli /script

@@ -1,0 +1,22 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+test_files = ["test.go", "*_test.go"]
+
+go_library(
+    name = "libpoker",
+    srcs = glob(["*.go"], test_files),
+    deps = [
+        "//brdgme-go/libcard",
+    ],
+    importpath = "github.com/brdgme/brdgme/brdgme-go/libpoker",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "test",
+    srcs = glob(test_files),
+    deps = [
+        "//brdgme-go/brdgme",
+    ],
+    embed = [":libpoker"],
+)

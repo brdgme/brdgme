@@ -1,6 +1,6 @@
 FROM node:14.7.0 AS web-src
 WORKDIR /src
-COPY web/package.json web/package-lock.json .
+COPY web/package.json web/package-lock.json ./
 RUN npm install
 COPY web .
 

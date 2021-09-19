@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zombie-dice-1
+spec:
+  selector:
+    matchLabels:
+      app: zombie-dice-1
+  template:
+    metadata:
+      labels:
+        app: zombie-dice-1
+    spec:
+      containers:
+      - name: zombie-dice-1
+        image: brdgme/zombie-dice-1
+        ports:
+        - containerPort: 80

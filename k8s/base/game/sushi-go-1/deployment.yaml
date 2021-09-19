@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sushi-go-1
+spec:
+  selector:
+    matchLabels:
+      app: sushi-go-1
+  template:
+    metadata:
+      labels:
+        app: sushi-go-1
+    spec:
+      containers:
+      - name: sushi-go-1
+        image: brdgme/sushi-go-1
+        ports:
+        - containerPort: 80

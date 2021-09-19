@@ -1,12 +1,12 @@
-apiVersion: skaffold/v2beta5
+apiVersion: skaffold/v2beta8
 kind: Config
 metadata:
   name: brdgme
 build:
   local:
     useBuildkit: true
-    concurrency: 0
   artifacts:
+  # Base services
   - image: brdgme/api
     docker:
       dockerfile: rust/Dockerfile
@@ -19,62 +19,19 @@ build:
     docker:
       dockerfile: websocket/Dockerfile
       target: websocket
+  # Games
   - image: brdgme/acquire-1
     docker:
       dockerfile: rust/Dockerfile
       target: acquire-1
-  - image: brdgme/lost-cities-1
-    docker:
-      dockerfile: rust/Dockerfile
-      target: lost-cities-1
-  - image: brdgme/lost-cities-2
-    docker:
-      dockerfile: rust/Dockerfile
-      target: lost-cities-2
   - image: brdgme/age-of-war-1
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: age-of-war-1
-  - image: brdgme/liars-dice-1
+  - image: brdgme/battleship-1
     docker:
       dockerfile: brdgme-go/Dockerfile
-      target: liars-dice-1
-  - image: brdgme/for-sale-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: for-sale-1
-  - image: brdgme/roll-through-the-ages-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: roll-through-the-ages-1
-  - image: brdgme/texas-holdem-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: texas-holdem-1
-  - image: brdgme/modern-art-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: modern-art-1
-  - image: brdgme/no-thanks-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: no-thanks-1
-  - image: brdgme/sushizock-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: sushizock-1
-  - image: brdgme/sushi-go-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: sushi-go-1
-  - image: brdgme/zombie-dice-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: zombie-dice-1
-  - image: brdgme/love-letter-1
-    docker:
-      dockerfile: brdgme-go/Dockerfile
-      target: love-letter-1
+      target: battleship-1
   - image: brdgme/category-5-1
     docker:
       dockerfile: brdgme-go/Dockerfile
@@ -87,41 +44,62 @@ build:
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: farkle-1
+  - image: brdgme/for-sale-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: for-sale-1
   - image: brdgme/greed-1
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: greed-1
+  - image: brdgme/liars-dice-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: liars-dice-1
+  - image: brdgme/lost-cities-1
+    docker:
+      dockerfile: rust/Dockerfile
+      target: lost-cities-1
+  - image: brdgme/lost-cities-2
+    docker:
+      dockerfile: rust/Dockerfile
+      target: lost-cities-2
+  - image: brdgme/love-letter-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: love-letter-1
+  - image: brdgme/modern-art-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: modern-art-1
+  - image: brdgme/no-thanks-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: no-thanks-1
+  - image: brdgme/roll-through-the-ages-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: roll-through-the-ages-1
   - image: brdgme/splendor-1
     docker:
       dockerfile: brdgme-go/Dockerfile
       target: splendor-1
-  - image: brdgme/battleship-1
+  - image: brdgme/sushi-go-1
     docker:
       dockerfile: brdgme-go/Dockerfile
-      target: battleship-1
+      target: sushi-go-1
+  - image: brdgme/sushizock-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: sushizock-1
+  - image: brdgme/texas-holdem-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: texas-holdem-1
+  - image: brdgme/zombie-dice-1
+    docker:
+      dockerfile: brdgme-go/Dockerfile
+      target: zombie-dice-1
 deploy:
-  kubectl:
-    manifests:
-    - k8s/api.yaml
-    - k8s/web.yaml
-    - k8s/websocket.yaml
-    - k8s/game/acquire-1.yaml
-    - k8s/game/lost-cities-1.yaml
-    - k8s/game/lost-cities-2.yaml
-    - k8s/game/age-of-war-1.yaml
-    - k8s/game/liars-dice-1.yaml
-    - k8s/game/for-sale-1.yaml
-    - k8s/game/roll-through-the-ages-1.yaml
-    - k8s/game/texas-holdem-1.yaml
-    - k8s/game/modern-art-1.yaml
-    - k8s/game/no-thanks-1.yaml
-    - k8s/game/sushizock-1.yaml
-    - k8s/game/sushi-go-1.yaml
-    - k8s/game/zombie-dice-1.yaml
-    - k8s/game/love-letter-1.yaml
-    - k8s/game/category-5-1.yaml
-    - k8s/game/cathedral-1.yaml
-    - k8s/game/farkle-1.yaml
-    - k8s/game/greed-1.yaml
-    - k8s/game/splendor-1.yaml
-    - k8s/game/battleship-1.yaml
+  kustomize:
+    paths: ["k8s/dev"]

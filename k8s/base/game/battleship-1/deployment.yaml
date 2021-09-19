@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: battleship-1
+spec:
+  selector:
+    matchLabels:
+      app: battleship-1
+  template:
+    metadata:
+      labels:
+        app: battleship-1
+    spec:
+      containers:
+      - name: battleship-1
+        image: brdgme/battleship-1
+        ports:
+        - containerPort: 80

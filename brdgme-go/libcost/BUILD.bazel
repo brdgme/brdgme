@@ -1,0 +1,19 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+test_files = ["test.go", "*_test.go"]
+
+go_library(
+    name = "libcost",
+    srcs = glob(["*.go"], test_files),
+    importpath = "github.com/brdgme/brdgme/brdgme-go/libcost",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "test",
+    srcs = glob(test_files),
+    deps = [
+        "//brdgme-go/assert",
+    ],
+    embed = [":libcost"],
+)
