@@ -103,3 +103,8 @@ build:
 deploy:
   kustomize:
     paths: ["k8s/dev"]
+profiles:
+- name: prod
+  deploy:
+    kustomize:
+      paths: ["k8s/prod"]
