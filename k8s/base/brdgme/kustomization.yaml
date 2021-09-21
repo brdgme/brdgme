@@ -1,6 +1,7 @@
 bases:
 - ../api
 - ../game
+- ../ingress
 - ../postgres
 - ../redis
 - ../smtp
