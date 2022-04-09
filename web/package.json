@@ -45,7 +45,7 @@
     "less": "^3.9.0",
     "less-loader": "^4.1.0",
     "mocha": "^4.1.0",
-    "moment": "^2.22.2",
+    "moment": "^2.29.2",
     "morgan": "^1.9.1",
     "source-map-loader": "^0.2.4",
     "source-map-support": "^0.5.19",
