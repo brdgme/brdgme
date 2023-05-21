@@ -170,6 +170,8 @@ let server = Http.createServer((req, res) => {
 server.listen(PORT);
 const wss = new WebSocket.Server({ server });
 wss.on('connection', handleConnection);
+const interval = setInterval(() => wss.clients.forEach((ws) => ws.ping()), 30000);
+wss.on('close', () => clearInterval(interval));
 
 /**
  * Handles an inbound connection, listening for messages to control Redis
