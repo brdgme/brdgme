@@ -44,7 +44,7 @@
     "html-webpack-plugin": "^2.28.0",
     "less": "^3.9.0",
     "less-loader": "^4.1.0",
-    "mocha": "^4.1.0",
+    "mocha": "^10.2.0",
     "moment": "^2.22.2",
     "morgan": "^1.9.1",
     "source-map-loader": "^0.2.4",
