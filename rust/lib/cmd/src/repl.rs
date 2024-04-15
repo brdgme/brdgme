@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{stdin, stdout};
-use std::iter::repeat;
 
 use brdgme_color::{player_color, Style};
 use brdgme_game::command::doc;
@@ -23,7 +22,7 @@ where
             "Enter player {} (or blank to finish)",
             player_names.len() + 1
         ));
-        if player == "" {
+        if player.is_empty() {
             break;
         }
         player_names.push(player);
@@ -48,7 +47,9 @@ where
             public_render,
             player_renders,
         } => (game, logs, public_render, player_renders),
-        Response::UserError { message } | Response::SystemError { message } => panic!(message),
+        Response::UserError { message } | Response::SystemError { message } => {
+            panic!("{}", message)
+        }
         _ => panic!("wrong reponse"),
     };
     output_nl();
@@ -59,7 +60,7 @@ where
             Status::Finished { placings, .. } => {
                 output_nl();
                 match placings.as_slice() {
-                    placings if placings.is_empty() => {
+                    [] => {
                         println!("The game is over, there are no winners")
                     }
                     placings => println!(
@@ -155,7 +156,7 @@ where
                         }
                         Response::SystemError { message } => {
                             output_nl();
-                            panic!(message);
+                            panic!("{}", message);
                         }
                         Response::UserError { message } => {
                             output_nl();
@@ -192,7 +193,7 @@ fn output_nodes(nodes: &[Node], players: &[Player]) {
                     if l_len < term_w {
                         l.push(TNode::Bg(
                             *Style::default().bg,
-                            vec![TNode::Text(repeat(" ").take(term_w - l_len).collect())],
+                            vec![TNode::Text(" ".repeat(term_w - l_len))],
                         ));
                     }
                     l

@@ -53,9 +53,9 @@ pub fn to_string(input: &[Node]) -> String {
                     .map(|r| format!(
                         "{{{{row}}}}{}{{{{/row}}}}",
                         r.iter()
-                            .map(|&(ref align, ref children)| format!(
+                            .map(|(align, children)| format!(
                                 "{{{{cell {}}}}}{}{{{{/cell}}}}",
-                                align.to_string(),
+                                align,
                                 to_string(children)
                             ))
                             .collect::<Vec<String>>()
@@ -66,7 +66,7 @@ pub fn to_string(input: &[Node]) -> String {
             ),
             Node::Align(ref al, width, ref children) => format!(
                 "{{{{align {} {}}}}}{}{{{{/align}}}}",
-                al.to_string(),
+                al,
                 width,
                 to_string(children)
             ),

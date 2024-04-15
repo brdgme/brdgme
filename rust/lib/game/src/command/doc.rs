@@ -4,15 +4,12 @@ use brdgme_markup::Node;
 use crate::command::Spec;
 
 #[derive(Clone)]
+#[derive(Default)]
 pub struct Opts {
     pub name: Option<String>,
 }
 
-impl Default for Opts {
-    fn default() -> Self {
-        Self { name: None }
-    }
-}
+
 
 impl Spec {
     pub fn doc(&self) -> Vec<(Vec<Node>, Option<String>)> {
@@ -33,17 +30,17 @@ impl Spec {
                 ref delim,
             } => doc_many(spec, min, max, delim, opts)
                 .map(|d| vec![d])
-                .unwrap_or_else(Vec::new),
+                .unwrap_or_default(),
             Spec::Opt(ref spec) => doc_opt(spec, opts)
                 .map(|d| vec![d])
-                .unwrap_or_else(Vec::new),
+                .unwrap_or_default(),
             Spec::Doc {
                 ref name,
                 ref desc,
                 ref spec,
             } => doc_doc(name, desc, spec)
                 .map(|d| vec![d])
-                .unwrap_or_else(Vec::new),
+                .unwrap_or_default(),
             Spec::Player => vec![(vec![Node::text("player")], None)],
             Spec::Space => vec![(vec![Node::text(" ")], None)],
         }
@@ -79,7 +76,7 @@ fn join_docs(docs: &[(Vec<Node>, Option<String>)]) -> Option<(Vec<Node>, Option<
         _ => {
             let mut desc: Option<String> = None;
             let mut nodes: Vec<Node> = vec![Node::text("[")];
-            for (i, &(ref doc, ref desc_opt)) in docs.iter().enumerate() {
+            for (i, (doc, desc_opt)) in docs.iter().enumerate() {
                 if i == 0 {
                     desc = desc_opt.to_owned();
                 } else {
@@ -178,7 +175,7 @@ fn doc_doc(name: &str, desc: &Option<String>, spec: &Spec) -> Option<(Vec<Node>,
 
 pub fn render(docs: &[(Vec<Node>, Option<String>)]) -> Vec<Node> {
     let mut output: Vec<Node> = vec![];
-    for (i, &(ref doc, ref desc)) in docs.iter().enumerate() {
+    for (i, (doc, desc)) in docs.iter().enumerate() {
         if i > 0 {
             output.push(Node::text("\n"));
         }

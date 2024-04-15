@@ -212,6 +212,7 @@ enum FuzzStep {
     Created,
     CommandOk,
     UserError {
+        #[allow(dead_code)]
         message: String,
     },
     Finished,

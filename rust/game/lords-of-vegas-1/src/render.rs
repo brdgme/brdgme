@@ -1,4 +1,4 @@
-use std::iter;
+
 
 use brdgme_color::*;
 use brdgme_game::Renderer;
@@ -261,7 +261,7 @@ impl BoardTile {
 }
 
 fn rect(w: usize, h: usize) -> String {
-    let line: String = iter::repeat(" ").take(w).collect();
+    let line: String = " ".repeat(w);
     let mut r = line.clone();
     for _ in 0..h - 1 {
         r.push('\n');

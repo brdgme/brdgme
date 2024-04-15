@@ -77,7 +77,7 @@ fn table(rows: &[Row], players: &[Player]) -> Vec<TNode> {
     for r in rows {
         let mut row: Vec<Vec<Vec<TNode>>> = vec![];
         let mut row_height: usize = 1;
-        for (i, &(_, ref children)) in r.iter().enumerate() {
+        for (i, (_, children)) in r.iter().enumerate() {
             let cell_lines = to_lines(&transform(children, players));
             row_height = cmp::max(row_height, cell_lines.len());
             let width = cell_lines
@@ -101,7 +101,7 @@ fn table(rows: &[Row], players: &[Player]) -> Vec<TNode> {
                 output.push(TNode::text("\n"));
             }
             for (ci, w) in widths.iter().enumerate() {
-                if let Some(&(ref al, _)) = r.get(ci) {
+                if let Some((al, _)) = r.get(ci) {
                     output.extend(if transformed[ri][ci].len() > line_i {
                         align(al, *w, &transformed[ri][ci][line_i])
                     } else {
@@ -128,23 +128,23 @@ fn align(a: &Align, width: usize, children: &[TNode]) -> Vec<TNode> {
             Align::Left => {
                 aligned.extend(l);
                 if diff > 0 {
-                    aligned.push(TNode::Text(iter::repeat(" ").take(diff).collect()));
+                    aligned.push(TNode::Text(" ".repeat(diff)));
                 }
             }
             Align::Center => {
                 let before = diff / 2;
                 let after = (diff + 1) / 2;
                 if before > 0 {
-                    aligned.push(TNode::Text(iter::repeat(" ").take(before).collect()));
+                    aligned.push(TNode::Text(" ".repeat(before)));
                 }
                 aligned.extend(l);
                 if after > 0 {
-                    aligned.push(TNode::Text(iter::repeat(" ").take(after).collect()));
+                    aligned.push(TNode::Text(" ".repeat(after)));
                 }
             }
             Align::Right => {
                 if diff > 0 {
-                    aligned.push(TNode::Text(iter::repeat(" ").take(diff).collect()));
+                    aligned.push(TNode::Text(" ".repeat(diff)));
                 }
                 aligned.extend(l);
             }
@@ -158,7 +158,7 @@ fn indent(n: usize, children: &[TNode]) -> Vec<TNode> {
         &to_lines(children)
             .iter()
             .map(|l| {
-                let mut new_l = vec![TNode::Text(iter::repeat(" ").take(n).collect())];
+                let mut new_l = vec![TNode::Text(" ".repeat(n))];
                 new_l.extend(l.clone());
                 new_l
             })
@@ -352,7 +352,7 @@ fn canvas(els: &[(usize, usize, Vec<Node>)], players: &[Player]) -> Vec<TNode> {
             .iter()
             .map(|l| {
                 let mut sorted_l = l.clone();
-                sorted_l.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+                sorted_l.sort_by(|(a, _), (b, _)| a.cmp(b));
                 let mut last_x = 0;
                 sorted_l
                     .iter()

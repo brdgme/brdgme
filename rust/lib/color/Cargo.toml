@@ -2,7 +2,7 @@
 name = "brdgme_color"
 version = "0.1.0"
 authors = ["Michael Alexander <beefsack@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 lazy_static = "1.4.0"

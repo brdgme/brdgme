@@ -78,7 +78,7 @@ impl Gamer for Game {
     type PlayerState = PlayerState;
 
     fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
-        if players < 2 || players > 6 {
+        if !(2..=6).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: 2,
                 max: 6,

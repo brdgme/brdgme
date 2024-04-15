@@ -2,7 +2,7 @@
 name = "lost-cities-1"
 version = "0.1.0"
 authors = ["Michael Alexander <beefsack@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 brdgme_cmd = { path = "../../lib/cmd" }

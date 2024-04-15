@@ -2,12 +2,14 @@ use crate::command::parser::{Output, Parser};
 use crate::command::Spec as CommandSpec;
 use crate::errors::*;
 
+type Chain2Output<PA, PB> = (<PA as Parser>::T, <PB as Parser>::T);
+
 pub fn chain_2<'a, PA, PB>(
     a: &PA,
     b: &PB,
     input: &'a str,
     names: &[String],
-) -> Result<Output<'a, (PA::T, PB::T)>, GameError>
+) -> Result<Output<'a, Chain2Output<PA, PB>>, GameError>
 where
     PA: Parser,
     PB: Parser,

@@ -34,16 +34,14 @@ const EXP_BONUS_SIZE_2P: isize = 8;
 const EXP_BONUS_SIZE_3P: isize = 7;
 
 #[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Phase {
+    #[default]
     PlayOrDiscard,
     DrawOrTake,
 }
 
-impl Default for Phase {
-    fn default() -> Phase {
-        Phase::PlayOrDiscard
-    }
-}
+
 
 #[derive(Default, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
@@ -490,7 +488,7 @@ impl Gamer for Game {
     type PlayerState = PlayerState;
 
     fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
-        if players < MIN_PLAYERS || players > MAX_PLAYERS {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
                 max: MAX_PLAYERS,
@@ -679,7 +677,7 @@ pub fn score(players: usize, cards: &[Card]) -> isize {
     }
     expeditions().iter().fold(0, |acc, &e| {
         let cards = exp_cards.get(&e);
-        if cards == None {
+        if cards.is_none() {
             return acc;
         }
         acc + (exp_sum.get(&e).unwrap_or(&0) - exp_cost) * (exp_inv.get(&e).unwrap_or(&0) + 1)
@@ -739,7 +737,7 @@ mod test {
             game.discard(p, c).unwrap();
             game.draw(p).unwrap();
         }
-        assert_eq!(game.is_finished(), true);
+        assert!(game.is_finished());
     }
 
     #[test]

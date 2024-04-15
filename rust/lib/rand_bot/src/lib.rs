@@ -44,7 +44,7 @@ pub fn spec_to_command(
             .map(|v| vec![v.to_owned()])
             .unwrap_or_else(Vec::new),
         command::Spec::OneOf(ref options) => {
-            spec_to_command(options.choose(rng).unwrap(), &spec, players, rng)
+            spec_to_command(options.choose(rng).unwrap(), spec, players, rng)
         }
         command::Spec::Chain(ref chain) => chain
             .iter()

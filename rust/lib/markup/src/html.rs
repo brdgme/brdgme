@@ -3,25 +3,25 @@ use brdgme_color::Color;
 use crate::ast::TNode;
 
 fn fg(color: Color, content: &str) -> String {
-    return format!(r#"<span style="color:{};">{}</span>"#, color, content);
+    format!(r#"<span style="color:{};">{}</span>"#, color, content)
 }
 
 fn bg(color: Color, content: &str) -> String {
-    return format!(
+    format!(
         r#"<span style="background-color:{};">{}</span>"#,
         color, content
-    );
+    )
 }
 
 fn b(content: &str) -> String {
-    return format!("<b>{}</b>", content);
+    format!("<b>{}</b>", content)
 }
 
 fn escape(input: &str) -> String {
     input
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub fn render(input: &[TNode]) -> String {

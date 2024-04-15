@@ -168,7 +168,7 @@ fn tile_background(c: Color) -> N {
     N::Bg(
         c.into(),
         vec![N::text(
-            repeat(repeat(" ").take(TILE_WIDTH).collect::<String>())
+            repeat(" ".repeat(TILE_WIDTH))
                 .take(TILE_HEIGHT)
                 .collect::<Vec<String>>()
                 .join("\n"),
@@ -215,7 +215,7 @@ impl Board {
         for l in Loc::all() {
             let render_x = l.col * TILE_WIDTH;
             let render_y = l.row * TILE_HEIGHT;
-            match self.get_tile(&l) {
+            match self.get_tile(l) {
                 Tile::Empty => {
                     layers.push((render_x, render_y, vec![tile_background(empty_color(l))]));
                     layers.push((
@@ -276,7 +276,7 @@ impl Board {
                             board::cols()
                                 .filter_map(|col| {
                                     let l = Loc { row, col };
-                                    match self.get_tile(&l) {
+                                    match self.get_tile(l) {
                                         Tile::Corp(tc) if tc == *c => {
                                             if start.is_none() {
                                                 start = Some(col);

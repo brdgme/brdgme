@@ -25,7 +25,7 @@ impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for Game
             Request::New { players } => Ok(handle_new::<G>(players)),
             Request::PlayerCounts => Ok(handle_player_counts::<G>()),
             Request::Status { ref game } => {
-                let game = serde_json::from_str(&game)?;
+                let game = serde_json::from_str(game)?;
                 Ok(handle_status::<G>(&game))
             }
             Request::Play {
@@ -34,15 +34,15 @@ impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for Game
                 ref names,
                 ref game,
             } => {
-                let mut game = serde_json::from_str(&game)?;
-                Ok(handle_play::<G>(player, &command, &names, &mut game))
+                let mut game = serde_json::from_str(game)?;
+                Ok(handle_play::<G>(player, command, names, &mut game))
             }
             Request::PubRender { ref game } => {
-                let game = serde_json::from_str(&game)?;
+                let game = serde_json::from_str(game)?;
                 Ok(handle_pub_render::<G>(&game))
             }
             Request::PlayerRender { player, ref game } => {
-                let game = serde_json::from_str(&game)?;
+                let game = serde_json::from_str(game)?;
                 Ok(handle_player_render::<G>(player, &game))
             }
         }

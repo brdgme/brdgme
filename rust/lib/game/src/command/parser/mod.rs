@@ -127,7 +127,7 @@ impl Parser for Int {
             .take_while(|&(i, c)| {
                 if i == 0 && c == '-' {
                     true
-                } else if c.is_digit(10) {
+                } else if c.is_ascii_digit() {
                     found_digit = true;
                     true
                 } else {

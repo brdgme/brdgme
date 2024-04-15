@@ -15,18 +15,16 @@ pub const HEIGHT: usize = 9;
 pub const SIZE: usize = WIDTH * HEIGHT;
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Tile {
+    #[default]
     Empty,
     Discarded,
     Unincorporated,
     Corp(Corp),
 }
 
-impl Default for Tile {
-    fn default() -> Self {
-        Tile::Empty
-    }
-}
+
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Board(pub Vec<Tile>);
@@ -313,10 +311,10 @@ mod tests {
 
     #[test]
     fn loc_into_usize_works() {
-        assert_eq!(0 as usize, Loc::default().into());
-        assert_eq!(8 as usize, Loc { row: 0, col: 8 }.into());
-        assert_eq!(27 as usize, Loc { row: 2, col: 3 }.into());
-        assert_eq!(23 as usize, Loc { row: 1, col: 11 }.into());
+        assert_eq!(0_usize, Loc::default().into());
+        assert_eq!(8_usize, Loc { row: 0, col: 8 }.into());
+        assert_eq!(27_usize, Loc { row: 2, col: 3 }.into());
+        assert_eq!(23_usize, Loc { row: 1, col: 11 }.into());
     }
 
     #[test]

@@ -44,7 +44,7 @@ fn parse_error_message(message: &Option<String>) -> String {
     message
         .as_ref()
         .map(|m| format!("{}, ", m))
-        .unwrap_or_else(|| "".to_string())
+        .unwrap_or_default()
 }
 
 fn player_range_output(min: &usize, max: &usize) -> String {

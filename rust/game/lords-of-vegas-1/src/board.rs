@@ -169,7 +169,9 @@ pub struct TileOwner {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum BoardTile {
+    #[default]
     Unowned,
     Owned {
         player: usize,
@@ -181,13 +183,10 @@ pub enum BoardTile {
     },
 }
 
-impl Default for BoardTile {
-    fn default() -> Self {
-        BoardTile::Unowned
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default)]
 pub struct Board(HashMap<Loc, BoardTile>);
 
 #[derive(Default, Copy, Clone)]
@@ -380,11 +379,7 @@ impl BoardCasino {
     }
 }
 
-impl Default for Board {
-    fn default() -> Self {
-        Board(HashMap::new())
-    }
-}
+
 
 #[cfg(test)]
 mod tests {

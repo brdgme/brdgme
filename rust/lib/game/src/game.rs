@@ -138,7 +138,7 @@ fn cmp_fallback(a: &[i32], b: &[i32]) -> Ordering {
 pub fn gen_placings(metrics: &[Vec<i32>]) -> Vec<usize> {
     let mut grouped: HashMap<&Vec<i32>, Vec<usize>> = HashMap::new();
     for (player, m) in metrics.iter().enumerate() {
-        let entry = grouped.entry(m).or_insert_with(Vec::new);
+        let entry = grouped.entry(m).or_default();
         entry.push(player);
     }
 

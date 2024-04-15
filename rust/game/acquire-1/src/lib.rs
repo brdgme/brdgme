@@ -164,7 +164,7 @@ impl Gamer for Game {
 
     fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
         let mut g = Game::default();
-        if players < MIN_PLAYERS || players > MAX_PLAYERS {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
                 max: MAX_PLAYERS,
@@ -179,14 +179,15 @@ impl Gamer for Game {
 
         // Place initial tiles onto the board.
         for l in g.draw_tiles.drain(0..players) {
-            g.board.set_tile(&l, Tile::Unincorporated);
+            g.board.set_tile(l, Tile::Unincorporated);
         }
 
         // Setup for each player.
         for _ in 0..players {
-            let mut player = Player::default();
-            player.tiles = g.draw_tiles.drain(0..TILE_HAND_SIZE).collect();
-            g.players.push(player);
+            g.players.push(Player {
+                tiles: g.draw_tiles.drain(0..TILE_HAND_SIZE).collect(),
+                ..Default::default()
+            });
         }
 
         // Set the start player.
@@ -303,9 +304,9 @@ pub struct CanEndFalse {
     unsafe_count: usize,
 }
 
-impl Into<CanEnd> for CanEndFalse {
-    fn into(self) -> CanEnd {
-        CanEnd::False(self)
+impl From<CanEndFalse> for CanEnd {
+    fn from(val: CanEndFalse) -> Self {
+        CanEnd::False(val)
     }
 }
 
@@ -648,11 +649,10 @@ impl Game {
 
     fn start_turn(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
         // If all tiles are unplayable, we get new tiles.
-        if self.players[player]
+        if !self.players[player]
             .tiles
             .iter()
-            .find(|loc| self.board.assert_loc_playable(loc).is_ok())
-            .is_none()
+            .any(|loc| self.board.assert_loc_playable(loc).is_ok())
         {
             let (mut logs, has_ended) = self.redraw_hand(player)?;
             if !has_ended {
@@ -1187,25 +1187,25 @@ fn corp_hash_map(initial: usize) -> HashMap<Corp, usize> {
     hm
 }
 
-impl Into<PubState> for Game {
-    fn into(self) -> PubState {
+impl From<Game> for PubState {
+    fn from(val: Game) -> Self {
         PubState {
-            phase: self.phase,
-            players: self.players.iter().map(|v| v.to_owned().into()).collect(),
-            board: self.board,
-            shares: self.shares,
-            remaining_tiles: self.draw_tiles.len(),
-            last_turn: self.last_turn,
-            finished: self.finished,
+            phase: val.phase,
+            players: val.players.iter().map(|v| v.to_owned().into()).collect(),
+            board: val.board,
+            shares: val.shares,
+            remaining_tiles: val.draw_tiles.len(),
+            last_turn: val.last_turn,
+            finished: val.finished,
         }
     }
 }
 
-impl Into<PubPlayer> for Player {
-    fn into(self) -> PubPlayer {
+impl From<Player> for PubPlayer {
+    fn from(val: Player) -> Self {
         PubPlayer {
-            money: self.money,
-            shares: self.shares,
+            money: val.money,
+            shares: val.shares,
         }
     }
 }
@@ -1222,7 +1222,7 @@ impl<'a> From<&'a str> for Game {
         let mut players: Vec<Player> = vec![Player::default(), Player::default()];
         for (row, line) in s.trim().lines().enumerate() {
             for (col, ch) in line.trim().chars().enumerate() {
-                if ch >= '0' && ch <= '9' {
+                if ch.is_ascii_digit() {
                     let p = ((ch as u8) - b'0') as usize;
                     while players.len() <= p {
                         players.push(Player::default());
