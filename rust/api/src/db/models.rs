@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::db::schema::*;
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Serialize, Deserialize)]
 pub struct User {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -39,7 +39,7 @@ pub struct PublicUser {
 }
 
 #[derive(Insertable)]
-#[table_name = "users"]
+#[diesel(table_name = users)]
 pub struct NewUser<'a> {
     pub name: &'a str,
     pub pref_colors: &'a [&'a str],
@@ -48,7 +48,7 @@ pub struct NewUser<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations)]
-#[belongs_to(User)]
+#[diesel(belongs_to(User))]
 pub struct UserEmail {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -59,7 +59,7 @@ pub struct UserEmail {
 }
 
 #[derive(Insertable)]
-#[table_name = "user_emails"]
+#[diesel(table_name = user_emails)]
 pub struct NewUserEmail<'a> {
     pub user_id: Uuid,
     pub email: &'a str,
@@ -67,7 +67,7 @@ pub struct NewUserEmail<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations)]
-#[belongs_to(User)]
+#[diesel(belongs_to(User))]
 pub struct UserAuthToken {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -76,12 +76,12 @@ pub struct UserAuthToken {
 }
 
 #[derive(Insertable)]
-#[table_name = "user_auth_tokens"]
+#[diesel(table_name = user_auth_tokens)]
 pub struct NewUserAuthToken {
     pub user_id: Uuid,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Serialize, Deserialize)]
 pub struct GameType {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -94,15 +94,17 @@ pub struct GameType {
 pub type PublicGameType = GameType;
 
 #[derive(Insertable)]
-#[table_name = "game_types"]
+#[diesel(table_name = game_types)]
 pub struct NewGameType<'a> {
     pub name: &'a str,
     pub player_counts: Vec<i32>,
     pub weight: f32,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
-#[belongs_to(GameType)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
+#[diesel(belongs_to(GameType))]
 pub struct GameVersion {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -140,7 +142,7 @@ pub struct PublicGameVersion {
 }
 
 #[derive(Insertable)]
-#[table_name = "game_versions"]
+#[diesel(table_name = game_versions)]
 pub struct NewGameVersion<'a> {
     pub game_type_id: Uuid,
     pub name: &'a str,
@@ -171,7 +173,7 @@ pub struct PublicGameVersionType {
 }
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations)]
-#[belongs_to(GameVersion)]
+#[diesel(belongs_to(GameVersion))]
 pub struct Game {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -212,16 +214,18 @@ impl Game {
 }
 
 #[derive(Insertable)]
-#[table_name = "games"]
+#[diesel(table_name = games)]
 pub struct NewGame<'a> {
     pub game_version_id: Uuid,
     pub is_finished: bool,
     pub game_state: &'a str,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
-#[belongs_to(Game)]
-#[belongs_to(User)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
+#[diesel(belongs_to(Game))]
+#[diesel(belongs_to(User))]
 pub struct GamePlayer {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -288,7 +292,7 @@ pub struct PublicGamePlayer {
 }
 
 #[derive(Insertable)]
-#[table_name = "game_players"]
+#[diesel(table_name = game_players)]
 pub struct NewGamePlayer<'a> {
     pub game_id: Uuid,
     pub user_id: Uuid,
@@ -330,8 +334,10 @@ pub struct PublicGamePlayerTypeUser {
     pub game_type_user: PublicGameTypeUser,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
-#[belongs_to(Game)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
+#[diesel(belongs_to(Game))]
 pub struct GameLog {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -372,7 +378,7 @@ impl GameLog {
 }
 
 #[derive(Insertable)]
-#[table_name = "game_logs"]
+#[diesel(table_name = game_logs)]
 pub struct NewGameLog<'a> {
     pub game_id: Uuid,
     pub body: &'a str,
@@ -381,8 +387,8 @@ pub struct NewGameLog<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations)]
-#[belongs_to(GameLog)]
-#[belongs_to(GamePlayer)]
+#[diesel(belongs_to(GameLog))]
+#[diesel(belongs_to(GamePlayer))]
 pub struct GameLogTarget {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -392,15 +398,17 @@ pub struct GameLogTarget {
 }
 
 #[derive(Insertable)]
-#[table_name = "game_log_targets"]
+#[diesel(table_name = game_log_targets)]
 pub struct NewGameLogTarget {
     pub game_log_id: Uuid,
     pub game_player_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Queryable, Identifiable, Associations)]
-#[belongs_to(GameType)]
-#[belongs_to(User)]
+#[derive(
+    Serialize, Deserialize, Debug, PartialEq, Clone, Queryable, Identifiable, Associations,
+)]
+#[diesel(belongs_to(GameType))]
+#[diesel(belongs_to(User))]
 pub struct GameTypeUser {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -415,7 +423,7 @@ pub struct GameTypeUser {
 pub type PublicGameTypeUser = GameTypeUser;
 
 #[derive(Insertable)]
-#[table_name = "game_type_users"]
+#[diesel(table_name = game_type_users)]
 pub struct NewGameTypeUser {
     pub game_type_id: Uuid,
     pub user_id: Uuid,
@@ -425,7 +433,7 @@ pub struct NewGameTypeUser {
 }
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations)]
-#[belongs_to(User, foreign_key = "target_user_id")]
+#[diesel(belongs_to(User, foreign_key = target_user_id))]
 pub struct Friend {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -436,14 +444,14 @@ pub struct Friend {
 }
 
 #[derive(Insertable)]
-#[table_name = "friends"]
+#[diesel(table_name = friends)]
 pub struct NewFriend {
     pub source_user_id: Uuid,
     pub target_user_id: Uuid,
     pub has_accepted: Option<bool>,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize)]
+#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Serialize)]
 pub struct Chat {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -453,13 +461,13 @@ pub struct Chat {
 pub type PublicChat = Chat;
 
 #[derive(Insertable)]
-#[table_name = "chats"]
+#[diesel(table_name = chats)]
 pub struct NewChat {
     pub id: Option<Uuid>, // Can't use an empty struct
 }
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize)]
-#[belongs_to(ChatUser)]
+#[diesel(belongs_to(ChatUser))]
 pub struct ChatMessage {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -471,15 +479,15 @@ pub struct ChatMessage {
 pub type PublicChatMessage = ChatMessage;
 
 #[derive(Insertable)]
-#[table_name = "chat_messages"]
+#[diesel(table_name = chat_messages)]
 pub struct NewChatMessage<'a> {
     pub chat_user_id: Uuid,
     pub message: &'a str,
 }
 
 #[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize)]
-#[belongs_to(Chat)]
-#[belongs_to(User)]
+#[diesel(belongs_to(Chat))]
+#[diesel(belongs_to(User))]
 pub struct ChatUser {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -492,7 +500,7 @@ pub struct ChatUser {
 pub type PublicChatUser = ChatUser;
 
 #[derive(Insertable)]
-#[table_name = "chat_users"]
+#[diesel(table_name = chat_users)]
 pub struct NewChatUser {
     pub chat_id: Uuid,
     pub user_id: Uuid,
