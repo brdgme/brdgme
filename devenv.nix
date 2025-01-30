@@ -1,4 +1,4 @@
-{ pkgs, lib, config, inputs, options, ... }:
+{ pkgs, lib, config, inputs, ... }:
 
 {
   languages.go.enable = true;
@@ -6,11 +6,5 @@
     enable = true;
     npm.enable = true;
   };
-  languages.rust = {
-    enable = true;
-    channel = "nightly";
-    targets = [
-      "wasm32-unknown-unknown"
-    ];
-  };
+  languages.rust.enable = true;
 }
