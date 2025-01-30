@@ -17,7 +17,7 @@ pub enum Card {
 }
 
 pub fn shuffled_deck(players: usize) -> Vec<Card> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut cards: Vec<Card> = TILES
         .keys()
         .cloned()
@@ -29,7 +29,7 @@ pub fn shuffled_deck(players: usize) -> Vec<Card> {
     let player_draw_count = players * STARTING_CARDS;
     let cards_len = cards.len();
     let quart_pile = (cards_len - player_draw_count) / 4;
-    let quart_pos = rng.gen::<usize>() % quart_pile;
+    let quart_pos = rng.random_range(0..quart_pile);
     cards.insert(cards_len - quart_pos, Card::GameEnd);
     cards
 }

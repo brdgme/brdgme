@@ -14,8 +14,7 @@ pub const WIDTH: usize = 12;
 pub const HEIGHT: usize = 9;
 pub const SIZE: usize = WIDTH * HEIGHT;
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum Tile {
     #[default]
     Empty,
@@ -23,8 +22,6 @@ pub enum Tile {
     Unincorporated,
     Corp(Corp),
 }
-
-
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Board(pub Vec<Tile>);

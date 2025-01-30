@@ -133,7 +133,7 @@ impl Fuzzer {
             player_counts,
             names: vec![],
             game: None,
-            rng: thread_rng(),
+            rng: rand::rng(),
         })
     }
 

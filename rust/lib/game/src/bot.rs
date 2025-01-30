@@ -72,7 +72,7 @@ impl<G: Gamer, B: Botter<G>> Fuzzer<G, B> {
             player_counts,
             player_count: 0,
             bot,
-            rng: thread_rng(),
+            rng: rand::rng(),
             game_count: 0,
             command_count: 0,
             invalid_input_count: 0,

@@ -1,4 +1,3 @@
-use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use brdgme_game::command::Spec as CommandSpec;
@@ -70,7 +69,7 @@ pub struct Game {
 }
 
 pub fn roll() -> usize {
-    rand::thread_rng().gen::<usize>() % (DIE_MAX - DIE_MIN) + DIE_MIN
+    rand::random_range(DIE_MIN..=DIE_MAX)
 }
 
 impl Gamer for Game {
@@ -89,7 +88,7 @@ impl Gamer for Game {
         let mut board = Board::default();
         let mut deck = shuffled_deck(players);
         let mut played: Vec<Card> = vec![];
-        let current_player = rand::thread_rng().gen::<usize>() % players;
+        let current_player = rand::random_range(0..players);
         let players: Vec<Player> = (0..players)
             .map(|p| {
                 let cards: Vec<Card> = deck.drain(..STARTING_CARDS).collect();

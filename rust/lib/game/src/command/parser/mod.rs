@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::fmt::Display;
+use std::fmt;
 
 use unicase::UniCase;
 
@@ -531,7 +531,7 @@ impl<TP: Parser + ?Sized> Parser for OneOf<TP> {
     }
 }
 
-pub fn comma_list<T: Display>(items: &[T], last: &str) -> String {
+pub fn comma_list<T: fmt::Display>(items: &[T], last: &str) -> String {
     match items.len() {
         0 => "".to_string(),
         1 => format!("{}", items[0]),
@@ -540,11 +540,11 @@ pub fn comma_list<T: Display>(items: &[T], last: &str) -> String {
     }
 }
 
-pub fn comma_list_or<T: Display>(items: &[T]) -> String {
+pub fn comma_list_or<T: fmt::Display>(items: &[T]) -> String {
     comma_list(items, "or")
 }
 
-pub fn comma_list_and<T: Display>(items: &[T]) -> String {
+pub fn comma_list_and<T: fmt::Display>(items: &[T]) -> String {
     comma_list(items, "and")
 }
 
@@ -734,9 +734,9 @@ struct PlayerNum {
     name: String,
 }
 
-impl ToString for PlayerNum {
-    fn to_string(&self) -> String {
-        self.name.to_owned()
+impl fmt::Display for PlayerNum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
     }
 }
 

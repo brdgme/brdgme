@@ -1,5 +1,3 @@
-use std::usize;
-
 use brdgme_game::command::parser::*;
 use brdgme_game::Gamer;
 

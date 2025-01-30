@@ -8,4 +8,4 @@ edition = "2021"
 brdgme_color = { path = "../color" }
 combine = "4.2.1"
 serde = { version = "1.0.114", features = ["derive"] }
-thiserror = "1.0.20"
+thiserror = "2.0.11"

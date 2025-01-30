@@ -26,15 +26,12 @@ const MIN_VALUE: usize = 2;
 const MAX_VALUE: usize = 10;
 const HAND_SIZE: usize = 8;
 
-#[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize, Default)]
 pub enum Phase {
     #[default]
     PlayOrDiscard,
     DrawOrTake,
 }
-
-
 
 #[derive(Default, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
@@ -101,7 +98,7 @@ impl Game {
         ))])];
         // Grab a new deck and shuffle it.
         let mut deck = initial_deck();
-        deck.shuffle(&mut thread_rng());
+        deck.shuffle(&mut rand::rng());
         self.deck = deck;
         // Clear out discards, hands and expeditions.
         self.discards = vec![];

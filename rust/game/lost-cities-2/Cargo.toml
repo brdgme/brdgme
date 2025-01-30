@@ -10,5 +10,5 @@ brdgme_fuzz = { path = "../../tools/fuzz" }
 brdgme_color = { path = "../../lib/color" }
 brdgme_game = { path = "../../lib/game" }
 brdgme_markup = { path = "../../lib/markup" }
-rand = "0.7.3"
+rand = "0.9.0"
 serde = { version = "1.0.114", features = ["derive"] }

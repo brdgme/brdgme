@@ -99,7 +99,7 @@ pub fn choose(available: &HashSet<&Color>, prefs: &[Vec<Color>]) -> Vec<Color> {
     } else {
         vec![]
     };
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut remaining = available.clone();
     let mut assigned: HashMap<usize, Color> = HashMap::new();
     let mut rem_prefs = sub_prefs

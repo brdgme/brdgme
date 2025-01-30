@@ -1,4 +1,3 @@
-use std::i32;
 use std::io::{Read, Write};
 
 use rand::prelude::*;
@@ -35,7 +34,11 @@ pub fn spec_to_command(
             }
             vec![format!(
                 "{}",
-                bounded_i32(rng.gen(), min.unwrap_or(i32::MIN), max.unwrap_or(i32::MAX))
+                bounded_i32(
+                    rng.random(),
+                    min.unwrap_or(i32::MIN),
+                    max.unwrap_or(i32::MAX)
+                )
             )]
         }
         command::Spec::Token(ref token) => vec![token.to_owned()],
@@ -51,7 +54,7 @@ pub fn spec_to_command(
             .flat_map(|c| spec_to_command(c, ctx, players, rng))
             .collect(),
         command::Spec::Opt(ref spec) => {
-            if rng.gen() {
+            if rng.random() {
                 spec_to_command(spec, ctx, players, rng)
             } else {
                 vec![]
@@ -65,7 +68,7 @@ pub fn spec_to_command(
         } => {
             let min = min.unwrap_or(0) as i32;
             let max = max.unwrap_or(3) as i32;
-            let n = bounded_i32(rng.gen(), min, max);
+            let n = bounded_i32(rng.random(), min, max);
             let mut parts: Vec<String> = vec![];
             for i in 0..n {
                 if i != 0 {
@@ -84,7 +87,7 @@ pub fn spec_to_command(
 }
 
 fn commands(command_spec: &command::Spec, players: &[String]) -> Vec<BotCommand> {
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     vec![
         spec_to_command(command_spec, command_spec, players, &mut rng)
             .join(" ")

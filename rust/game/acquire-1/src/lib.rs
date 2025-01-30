@@ -174,7 +174,7 @@ impl Gamer for Game {
 
         // Shuffle up the draw tiles.
         let mut tiles = Loc::all();
-        tiles.as_mut_slice().shuffle(&mut thread_rng());
+        tiles.as_mut_slice().shuffle(&mut rand::rng());
         g.draw_tiles = tiles;
 
         // Place initial tiles onto the board.
@@ -191,7 +191,7 @@ impl Gamer for Game {
         }
 
         // Set the start player.
-        let start_player = (thread_rng().next_u32() as usize) % players;
+        let start_player = (rand::rng().next_u32() as usize) % players;
         g.phase = Phase::Play(start_player);
 
         let mut logs: Vec<Log> = vec![];
@@ -857,7 +857,7 @@ impl Game {
         let mut major_count: usize = 0;
         let mut dummy_shares: usize = 0;
         if self.players.len() == 2 {
-            dummy_shares = (thread_rng().gen::<usize>() % 5) + 1;
+            dummy_shares = rand::random_range(1..=5);
             major.push(DUMMY_PLAYER_OFFSET);
             major_count = dummy_shares;
         }

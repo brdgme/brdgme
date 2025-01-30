@@ -10,5 +10,5 @@ brdgme_game = { path = "../../lib/game" }
 brdgme_rand_bot = { path = "../../lib/rand_bot" }
 anyhow = "1.0.32"
 num_cpus = "1.13.0"
-rand = "0.7.3"
+rand = "0.9.0"
 serde = "1.0.114"

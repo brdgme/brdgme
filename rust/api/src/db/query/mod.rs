@@ -99,11 +99,11 @@ pub fn create_user_email(ue: &NewUserEmail, conn: &PgConnection) -> Result<UserE
 }
 
 fn rand_code() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     format!(
         "{}{:05}",
-        (rng.gen::<usize>() % 9) + 1,
-        rng.gen::<usize>() % 100000
+        rng.random_range(1..=9),
+        rng.random_range(0..100000)
     )
 }
 
@@ -365,7 +365,7 @@ pub fn create_game_with_users(opts: &CreateGameOpts, conn: &PgConnection) -> Res
         users.push(creator);
 
         // Randomise the users so player order is random.
-        let mut rnd = rand::thread_rng();
+        let mut rnd = rand::rng();
         users.shuffle(&mut rnd);
 
         // Assign colors to each player using preferences.

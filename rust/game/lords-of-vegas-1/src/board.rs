@@ -168,8 +168,7 @@ pub struct TileOwner {
     pub die: usize,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Default)]
 pub enum BoardTile {
     #[default]
     Unowned,
@@ -183,10 +182,7 @@ pub enum BoardTile {
     },
 }
 
-
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Board(HashMap<Loc, BoardTile>);
 
 #[derive(Default, Copy, Clone)]
@@ -378,8 +374,6 @@ impl BoardCasino {
         bosses
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

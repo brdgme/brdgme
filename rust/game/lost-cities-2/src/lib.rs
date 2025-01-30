@@ -33,15 +33,12 @@ const EXP_COST_3P: isize = 15;
 const EXP_BONUS_SIZE_2P: isize = 8;
 const EXP_BONUS_SIZE_3P: isize = 7;
 
-#[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize, Default)]
 pub enum Phase {
     #[default]
     PlayOrDiscard,
     DrawOrTake,
 }
-
-
 
 #[derive(Default, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
@@ -105,7 +102,7 @@ fn initial_deck() -> Vec<Card> {
 impl Game {
     fn leaders(&self) -> HashSet<usize> {
         let mut lead: HashSet<usize> = HashSet::new();
-        let mut highest: isize = std::isize::MIN;
+        let mut highest: isize = isize::MIN;
         for p in 0..self.players {
             let score = self.player_score(p);
             if score > highest {
@@ -126,7 +123,7 @@ impl Game {
         ))])];
         // Grab a new deck and shuffle it.
         let mut deck = initial_deck();
-        deck.as_mut_slice().shuffle(&mut thread_rng());
+        deck.as_mut_slice().shuffle(&mut rand::rng());
         self.deck = deck;
         // Clear out discards, hands and expeditions.
         self.discards = vec![];
