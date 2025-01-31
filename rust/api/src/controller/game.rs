@@ -42,8 +42,8 @@ pub async fn create(
     let data = data.into_inner();
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
-    let opponent_ids = data.opponent_ids.clone().unwrap_or_else(Vec::new);
-    let opponent_emails = data.opponent_emails.clone().unwrap_or_else(Vec::new);
+    let opponent_ids = data.opponent_ids.clone().unwrap_or_default();
+    let opponent_emails = data.opponent_emails.clone().unwrap_or_default();
     let player_count: usize = 1 + opponent_ids.len() + opponent_emails.len();
     let game_version = query::find_game_version(&data.game_version_id, conn)
         .context("error finding game version")?
@@ -268,14 +268,14 @@ pub async fn command(
             .context("error finding game players")?;
     let player: &models::GamePlayer = &players
         .iter()
-        .find(|&&(ref p, _)| p.user_id == user.id)
+        .find(|&(p, _)| p.user_id == user.id)
         .ok_or_else::<Error, _>(|| anyhow!("you are not a player in this game"))?
         .0;
     let position = player.position;
 
     let names = players
         .iter()
-        .map(|&(_, ref user)| user.name.clone())
+        .map(|(_, user)| user.name.clone())
         .collect::<Vec<String>>();
 
     let (game_response, logs, can_undo, remaining_command, public_render, player_renders) =

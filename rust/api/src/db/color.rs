@@ -35,9 +35,9 @@ impl Color {
     }
 }
 
-impl Into<brdgme_color::Color> for Color {
-    fn into(self) -> brdgme_color::Color {
-        match self {
+impl From<Color> for brdgme_color::Color {
+    fn from(val: Color) -> Self {
+        match val {
             Color::Green => brdgme_color::GREEN,
             Color::Red => brdgme_color::RED,
             Color::Blue => brdgme_color::BLUE,

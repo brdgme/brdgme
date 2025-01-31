@@ -32,7 +32,7 @@ lazy_static! {
 
 pub fn create_user_by_name(name: &str, conn: &mut PgConnection) -> Result<User> {
     use crate::db::schema::users;
-    Ok(diesel::insert_into(users::table)
+    diesel::insert_into(users::table)
         .values(&NewUser {
             name,
             pref_colors: &[],
@@ -40,17 +40,17 @@ pub fn create_user_by_name(name: &str, conn: &mut PgConnection) -> Result<User> 
             login_confirmation_at: None,
         })
         .get_result(conn)
-        .context("error creating user")?)
+        .context("error creating user")
 }
 
 pub fn find_user(find_id: &Uuid, conn: &mut PgConnection) -> Result<Option<User>> {
     use crate::db::schema::users;
 
-    Ok(users::table
+    users::table
         .find(find_id)
         .first(conn)
         .optional()
-        .context("error finding user")?)
+        .context("error finding user")
 }
 
 pub fn find_user_by_email(
@@ -59,13 +59,13 @@ pub fn find_user_by_email(
 ) -> Result<Option<(UserEmail, User)>> {
     use crate::db::schema::{user_emails, users};
 
-    Ok(user_emails::table
+    user_emails::table
         .filter(user_emails::email.eq(by_email))
         .limit(1)
         .inner_join(users::table)
         .first::<(UserEmail, User)>(conn)
         .optional()
-        .context("error finding user")?)
+        .context("error finding user")
 }
 
 pub fn find_or_create_user_by_email(
@@ -95,10 +95,10 @@ pub fn create_user_by_email(email: &str, conn: &mut PgConnection) -> Result<(Use
 
 pub fn create_user_email(ue: &NewUserEmail, conn: &mut PgConnection) -> Result<UserEmail> {
     use crate::db::schema::user_emails;
-    Ok(diesel::insert_into(user_emails::table)
+    diesel::insert_into(user_emails::table)
         .values(ue)
         .get_result(conn)
-        .context("error creating user email")?)
+        .context("error creating user email")
 }
 
 fn rand_code() -> String {
@@ -161,12 +161,12 @@ pub fn user_login_confirm(
 pub fn create_auth_token(for_user_id: &Uuid, conn: &mut PgConnection) -> Result<UserAuthToken> {
     use crate::db::schema::user_auth_tokens;
 
-    Ok(diesel::insert_into(user_auth_tokens::table)
+    diesel::insert_into(user_auth_tokens::table)
         .values(&NewUserAuthToken {
             user_id: *for_user_id,
         })
         .get_result::<UserAuthToken>(conn)
-        .context("error creating auth token")?)
+        .context("error creating auth token")
 }
 
 pub fn authenticate(search_token: &Uuid, conn: &mut PgConnection) -> Result<Option<User>> {
@@ -196,30 +196,30 @@ pub fn find_valid_user_auth_tokens_for_users(
 ) -> Result<Vec<UserAuthToken>> {
     use crate::db::schema::user_auth_tokens;
 
-    Ok(user_auth_tokens::table
+    user_auth_tokens::table
         .filter(user_auth_tokens::user_id.eq_any(user_ids))
         .filter(user_auth_tokens::created_at.gt(Utc::now().naive_utc() - *TOKEN_EXPIRY))
         .get_results(conn)
-        .context("error finding user auth tokens for user")?)
+        .context("error finding user auth tokens for user")
 }
 
 pub fn find_game(id: &Uuid, conn: &mut PgConnection) -> Result<Game> {
     use crate::db::schema::games;
 
-    Ok(games::table
+    games::table
         .find(id)
         .first(conn)
-        .context("error finding game")?)
+        .context("error finding game")
 }
 
 pub fn find_game_version(id: &Uuid, conn: &mut PgConnection) -> Result<Option<GameVersion>> {
     use crate::db::schema::game_versions;
 
-    Ok(game_versions::table
+    game_versions::table
         .find(id)
         .first(conn)
         .optional()
-        .context("error finding game version")?)
+        .context("error finding game version")
 }
 
 pub fn find_game_with_version(
@@ -228,12 +228,12 @@ pub fn find_game_with_version(
 ) -> Result<Option<(Game, GameVersion)>> {
     use crate::db::schema::{game_versions, games};
 
-    Ok(games::table
+    games::table
         .find(id)
         .inner_join(game_versions::table)
         .first(conn)
         .optional()
-        .context("error finding game")?)
+        .context("error finding game")
 }
 
 #[derive(Clone)]
@@ -285,7 +285,7 @@ pub struct PublicGameExtended {
 pub fn find_active_games_for_user(id: &Uuid, conn: &mut PgConnection) -> Result<Vec<GameExtended>> {
     use crate::db::schema::{game_players, game_types, game_versions, games};
 
-    Ok(games::table
+    games::table
         .inner_join(game_players::table)
         .filter(game_players::user_id.eq(id))
         .filter(
@@ -295,7 +295,7 @@ pub fn find_active_games_for_user(id: &Uuid, conn: &mut PgConnection) -> Result<
         )
         .get_results::<(Game, GamePlayer)>(conn)?
         .iter()
-        .map(|&(ref game, _)| {
+        .map(|(game, _)| {
             let game_version: GameVersion = game_versions::table
                 .find(game.game_version_id)
                 .get_result(conn)?;
@@ -313,7 +313,7 @@ pub fn find_active_games_for_user(id: &Uuid, conn: &mut PgConnection) -> Result<
                 }),
             })
         })
-        .collect::<Result<Vec<GameExtended>>>()?)
+        .collect::<Result<Vec<GameExtended>>>()
 }
 
 pub fn find_game_extended(id: &Uuid, conn: &mut PgConnection) -> Result<GameExtended> {
@@ -367,7 +367,7 @@ pub fn create_game_with_users(
             .ok_or_else::<Error, _>(|| anyhow!("could not find creator"))?;
         let opponents = create_game_users(opts.opponent_ids, opts.opponent_emails, conn)
             .context("could not create game users")?;
-        let mut users: Vec<User> = opponents.iter().map(|&(_, ref u)| u.clone()).collect();
+        let mut users: Vec<User> = opponents.iter().map(|(_, u)| u.clone()).collect();
         users.push(creator);
 
         // Randomise the users so player order is random.
@@ -474,12 +474,12 @@ pub fn find_game_type_user_by_game_type_and_user(
     conn: &mut PgConnection,
 ) -> Result<Option<GameTypeUser>> {
     use crate::db::schema::game_type_users;
-    Ok(game_type_users::table
+    game_type_users::table
         .filter(game_type_users::game_type_id.eq(game_type_id))
         .filter(game_type_users::user_id.eq(user_id))
         .get_result(conn)
         .optional()
-        .context("error finding game type user")?)
+        .context("error finding game type user")
 }
 
 pub fn create_game_type_user(
@@ -487,10 +487,10 @@ pub fn create_game_type_user(
     conn: &mut PgConnection,
 ) -> Result<GameTypeUser> {
     use crate::db::schema::game_type_users;
-    Ok(diesel::insert_into(game_type_users::table)
+    diesel::insert_into(game_type_users::table)
         .values(gtu)
         .get_result(conn)
-        .context("error inserting new game type user")?)
+        .context("error inserting new game type user")
 }
 
 pub fn player_can_undo_set_undo_game_state(
@@ -526,12 +526,10 @@ pub fn player_cannot_undo_set_undo_game_state(
     conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
-    Ok(
-        diesel::update(game_players::table.filter(game_players::game_id.eq(game_id)))
+    diesel::update(game_players::table.filter(game_players::game_id.eq(game_id)))
             .set(game_players::undo_game_state.eq(None::<String>))
             .get_results(conn)
-            .context("error updating game players undo_game_state to None")?,
-    )
+            .context("error updating game players undo_game_state to None")
 }
 
 pub struct UpdatedGame {
@@ -602,22 +600,22 @@ pub fn update_game_is_finished(
     conn: &mut PgConnection,
 ) -> Result<Option<Game>> {
     use crate::db::schema::games;
-    Ok(diesel::update(games::table.find(game_id))
+    diesel::update(games::table.find(game_id))
         .set(games::is_finished.eq(is_finished))
         .get_result(conn)
         .optional()
-        .context("error updating game is_finished")?)
+        .context("error updating game is_finished")
 }
 
 pub fn find_player_count_by_game(game_id: &Uuid, conn: &mut PgConnection) -> Result<i64> {
     use crate::db::schema::game_players;
     use diesel::dsl::count;
 
-    Ok(game_players::table
+    game_players::table
         .select(count(game_players::id))
         .filter(game_players::game_id.eq(game_id))
         .get_result(conn)
-        .context("error getting player count")?)
+        .context("error getting player count")
 }
 
 fn to_i32_vec(from: &[usize]) -> Vec<i32> {
@@ -630,7 +628,7 @@ pub fn update_game(
     conn: &mut PgConnection,
 ) -> Result<Option<Game>> {
     use crate::db::schema::games;
-    Ok(diesel::update(games::table.find(update_id))
+    diesel::update(games::table.find(update_id))
         .set((
             games::game_version_id.eq(update.game_version_id),
             games::is_finished.eq(update.is_finished),
@@ -638,7 +636,7 @@ pub fn update_game(
         ))
         .get_result(conn)
         .optional()
-        .context("error updating game")?)
+        .context("error updating game")
 }
 
 pub fn mark_game_read(
@@ -647,7 +645,7 @@ pub fn mark_game_read(
     conn: &mut PgConnection,
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
-    Ok(diesel::update(
+    diesel::update(
         game_players::table
             .filter(game_players::game_id.eq(id))
             .filter(game_players::user_id.eq(user_id)),
@@ -655,7 +653,7 @@ pub fn mark_game_read(
     .set((game_players::is_read.eq(true),))
     .get_result(conn)
     .optional()
-    .context("error marking game as read")?)
+    .context("error marking game as read")
 }
 
 pub fn update_game_whose_turn(
@@ -665,12 +663,10 @@ pub fn update_game_whose_turn(
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
-    Ok(
-        diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
+    diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
             .set(game_players::is_turn.eq(game_players::position.eq_any(to_i32_vec(positions))))
             .get_results(conn)
-            .context("error updating game players")?,
-    )
+            .context("error updating game players")
 }
 
 pub fn update_game_points(
@@ -695,7 +691,7 @@ pub fn update_game_points_for_position(
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
 
-    Ok(diesel::update(
+    diesel::update(
         game_players::table
             .filter(game_players::game_id.eq(id))
             .filter(game_players::position.eq(position)),
@@ -703,7 +699,7 @@ pub fn update_game_points_for_position(
     .set(game_players::points.eq(points))
     .get_result(conn)
     .optional()
-    .context("error updating game player points")?)
+    .context("error updating game player points")
 }
 
 pub fn update_game_eliminated(
@@ -713,15 +709,13 @@ pub fn update_game_eliminated(
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
-    Ok(
-        diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
+    diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
             .set(
                 game_players::is_eliminated
                     .eq(game_players::position.eq_any(to_i32_vec(positions))),
             )
             .get_results(conn)
-            .context("error updating game players")?,
-    )
+            .context("error updating game players")
 }
 
 pub fn update_game_placings(
@@ -743,10 +737,8 @@ pub fn update_game_placings(
         // We only update ratings if placings are provided and there haven't been any rating changes
         // yet.
         let update_ratings: bool = !placings.is_empty()
-            && game_players
-                .iter()
-                .find(|gp| gp.rating_change.is_some())
-                .is_none();
+            && !game_players
+                .iter().any(|gp| gp.rating_change.is_some());
         if update_ratings {
             // We grab existing game type users up front.
             let game_player_type_users: Vec<(&GamePlayer, GameTypeUser)> = game_players
@@ -835,11 +827,11 @@ fn update_game_type_user_rating(
 ) -> Result<Option<GameTypeUser>> {
     use crate::db::schema::game_type_users;
 
-    Ok(diesel::update(game_type_users::table.find(id))
+    diesel::update(game_type_users::table.find(id))
         .set(game_type_users::rating.eq(rating))
         .get_result(conn)
         .optional()
-        .context("unable to update game type user rating")?)
+        .context("unable to update game type user rating")
 }
 
 const ELO_K: f32 = 32.0;
@@ -867,7 +859,7 @@ pub fn update_game_player_result(
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
 
-    Ok(diesel::update(
+    diesel::update(
         game_players::table
             .filter(game_players::game_id.eq(game_id))
             .filter(game_players::position.eq(position as i32)),
@@ -878,7 +870,7 @@ pub fn update_game_player_result(
     ))
     .get_result(conn)
     .optional()
-    .context("error updating place for game player")?)
+    .context("error updating place for game player")
 }
 
 pub fn update_game_is_read(
@@ -888,12 +880,10 @@ pub fn update_game_is_read(
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
-    Ok(
-        diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
+    diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
             .set(game_players::is_read.eq(game_players::id.eq_any(game_player_ids)))
             .get_results(conn)
-            .context("error updating game players")?,
-    )
+            .context("error updating game players")
 }
 
 pub fn create_game_logs_from_cli(
@@ -938,11 +928,11 @@ pub fn find_game_players_by_game(
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
-    Ok(game_players::table
+    game_players::table
         .filter(game_players::game_id.eq(game_id))
         .order(game_players::position)
         .get_results(conn)
-        .context("error finding players")?)
+        .context("error finding players")
 }
 
 pub fn find_game_player_by_user_and_game(
@@ -952,13 +942,13 @@ pub fn find_game_player_by_user_and_game(
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
 
-    Ok(game_players::table
+    game_players::table
         .filter(game_players::user_id.eq(user_id))
         .filter(game_players::game_id.eq(game_id))
         .order(game_players::position)
         .get_result(conn)
         .optional()
-        .context("error finding player")?)
+        .context("error finding player")
 }
 
 pub fn find_game_player_type_users_by_game(
@@ -997,12 +987,12 @@ pub fn find_game_players_with_user_by_game(
 ) -> Result<Vec<(GamePlayer, User)>> {
     use crate::db::schema::{game_players, users};
 
-    Ok(game_players::table
+    game_players::table
         .filter(game_players::game_id.eq(game_id))
         .order(game_players::position)
         .inner_join(users::table)
         .get_results(conn)
-        .context("error finding game players")?)
+        .context("error finding game players")
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -1054,10 +1044,10 @@ pub fn create_game_log_target(
 ) -> Result<GameLogTarget> {
     use crate::db::schema::game_log_targets;
 
-    Ok(diesel::insert_into(game_log_targets::table)
+    diesel::insert_into(game_log_targets::table)
         .values(new_target)
         .get_result(conn)
-        .context("error inserting game log target")?)
+        .context("error inserting game log target")
 }
 
 pub fn create_game_users(
@@ -1089,13 +1079,13 @@ pub fn find_user_with_primary_email(
 ) -> Result<Option<(UserEmail, User)>> {
     use crate::db::schema::{user_emails, users};
 
-    Ok(user_emails::table
+    user_emails::table
         .filter(user_emails::user_id.eq(find_user_id))
         .filter(user_emails::is_primary.eq(true))
         .inner_join(users::table)
         .first(conn)
         .optional()
-        .context("error finding user")?)
+        .context("error finding user")
 }
 
 pub fn find_user_with_primary_email_by_email(
@@ -1125,10 +1115,10 @@ pub fn find_user_with_primary_email_by_email(
 pub fn create_game(new_game: &NewGame, conn: &mut PgConnection) -> Result<Game> {
     use crate::db::schema::games;
 
-    Ok(diesel::insert_into(games::table)
+    diesel::insert_into(games::table)
         .values(new_game)
         .get_result(conn)
-        .context("error inserting game")?)
+        .context("error inserting game")
 }
 
 pub fn create_game_version(
@@ -1137,19 +1127,19 @@ pub fn create_game_version(
 ) -> Result<GameVersion> {
     use crate::db::schema::game_versions;
 
-    Ok(diesel::insert_into(game_versions::table)
+    diesel::insert_into(game_versions::table)
         .values(new_game_version)
         .get_result(conn)
-        .context("error inserting game version")?)
+        .context("error inserting game version")
 }
 
 pub fn create_game_type(new_game_type: &NewGameType, conn: &mut PgConnection) -> Result<GameType> {
     use crate::db::schema::game_types;
 
-    Ok(diesel::insert_into(game_types::table)
+    diesel::insert_into(game_types::table)
         .values(new_game_type)
         .get_result(conn)
-        .context("error inserting game type")?)
+        .context("error inserting game type")
 }
 
 pub fn create_game_players(
@@ -1168,10 +1158,10 @@ pub fn create_game_players(
 pub fn create_game_player(player: &NewGamePlayer, conn: &mut PgConnection) -> Result<GamePlayer> {
     use crate::db::schema::game_players;
 
-    Ok(diesel::insert_into(game_players::table)
+    diesel::insert_into(game_players::table)
         .values(player)
         .get_result(conn)
-        .context("error inserting game player")?)
+        .context("error inserting game player")
 }
 
 pub fn public_game_versions(conn: &mut PgConnection) -> Result<Vec<GameVersionType>> {
@@ -1197,12 +1187,12 @@ pub fn find_public_game_logs_for_game(
 ) -> Result<Vec<GameLog>> {
     use crate::db::schema::game_logs;
 
-    Ok(game_logs::table
+    game_logs::table
         .filter(game_logs::game_id.eq(game_id))
         .filter(game_logs::is_public.eq(true))
         .order(game_logs::logged_at)
         .get_results(conn)
-        .context("error finding game logs")?)
+        .context("error finding game logs")
 }
 
 pub fn find_game_logs_for_player(
@@ -1224,7 +1214,7 @@ pub fn find_game_logs_for_player(
         .get_results::<(GameLog, Option<GameLogTarget>)>(conn)
         .context("error finding game logs")?
         .iter()
-        .map(|&(ref gl, _)| gl.clone())
+        .map(|(gl, _)| gl.clone())
         .collect())
 }
 

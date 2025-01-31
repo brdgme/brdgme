@@ -43,17 +43,17 @@ pub struct PostgresConfig {
 impl PostgresConfig {
     pub fn from_env(suffix: &str) -> Result<Option<Self>> {
         Ok(Some(Self {
-            host: env::var(&format!("POSTGRES_HOST{}", suffix))
+            host: env::var(format!("POSTGRES_HOST{}", suffix))
                 .unwrap_or_else(|_| "postgres".to_string()),
-            database: env::var(&format!("POSTGRES_DB{}", suffix))
+            database: env::var(format!("POSTGRES_DB{}", suffix))
                 .unwrap_or_else(|_| "brdgme".to_string()),
-            port: env::var(&format!("POSTGRES_TCP_PORT{}", suffix)).ok(),
-            user: match env::var(&format!("POSTGRES_USER{}", suffix)) {
+            port: env::var(format!("POSTGRES_TCP_PORT{}", suffix)).ok(),
+            user: match env::var(format!("POSTGRES_USER{}", suffix)) {
                 Ok(u) => u,
                 Err(env::VarError::NotPresent) => return Ok(None),
                 Err(e) => return Err(e.into()),
             },
-            password: match env::var(&format!("POSTGRES_PASSWORD{}", suffix)) {
+            password: match env::var(format!("POSTGRES_PASSWORD{}", suffix)) {
                 Ok(p) => p,
                 Err(env::VarError::NotPresent) => return Ok(None),
                 Err(e) => return Err(e.into()),
@@ -66,7 +66,7 @@ impl PostgresConfig {
             .port
             .as_ref()
             .map(|p| format!(":{}", p))
-            .unwrap_or_else(|| "".to_string());
+            .unwrap_or_default();
         format!(
             "postgres://{}:{}@{}{}/{}",
             self.user, self.password, self.host, port, self.database

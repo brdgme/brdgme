@@ -21,7 +21,7 @@ lazy_static! {
 }
 
 pub fn connect() -> Result<Client> {
-    Ok(Client::open(CONFIG.redis_url.as_ref()).context("unable to open client")?)
+    Client::open(CONFIG.redis_url.as_ref()).context("unable to open client")
 }
 
 pub struct Message {
@@ -87,7 +87,7 @@ fn created_logs_for_player(
                     .and_then(|p_id| gl.targets.iter().find(|t| t.game_player_id == p_id))
                     .is_some()
         })
-        .map(|gl| Ok(gl.game_log.to_owned().into_rendered(players)?))
+        .map(|gl| gl.game_log.to_owned().into_rendered(players))
         .collect()
 }
 
@@ -126,8 +126,8 @@ pub fn enqueue_game_restarted(
     Ok(())
 }
 
-pub fn enqueue_game_update<'a>(
-    game: &'a PublicGameExtended,
+pub fn enqueue_game_update(
+    game: &PublicGameExtended,
     game_logs: &[CreatedGameLog],
     public_render: &brdgme_cmd_api::PubRender,
     player_renders: &[brdgme_cmd_api::PlayerRender],
