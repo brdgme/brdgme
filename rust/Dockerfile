@@ -1,34 +1,29 @@
-# syntax=docker/dockerfile:experimental
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+WORKDIR /app
 
-FROM rust:1.45.1 AS rust-nightly-2020-09-19
-RUN rustup install nightly-2020-09-19
-
-FROM rust-nightly-2020-09-19 AS rust-src
-WORKDIR /src
+FROM chef AS planner
 COPY rust .
+RUN cargo chef prepare --recipe-path recipe.json
 
-FROM rust-src AS rust-test
-RUN \
-  --mount=type=cache,target=/usr/local/cargo/registry \
-  --mount=type=cache,target=/src/target \
-  cargo test
+FROM chef AS builder 
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
+# Build application
+COPY rust .
+RUN cargo build --release
 
-FROM rust-src AS rust-builder
-RUN \
-  --mount=type=cache,target=/usr/local/cargo/registry \
-  --mount=type=cache,target=/src/target \
-  RUSTFLAGS=-g cargo build --release --out-dir=out -Z unstable-options
-
-FROM rust:1.45.1 AS api
+FROM debian:bookworm-slim AS api
+RUN apt-get -y update && apt-get install -y --no-install-recommends libpq5
 WORKDIR /root
-COPY --from=rust-builder /src/out/brdgme_api .
+COPY --from=builder /app/target/release/brdgme_api .
 CMD ["./brdgme_api"]
 
 FROM beefsack/webify:v1.3.0 AS acquire-1
-COPY --from=rust-builder /src/out/acquire_1_cli /script
+COPY --from=builder /app/target/release/acquire_1_cli /script
 
 FROM beefsack/webify:v1.3.0 AS lost-cities-1
-COPY --from=rust-builder /src/out/lost_cities_1_cli /script
+COPY --from=builder /app/target/release/lost_cities_1_cli /script
 
 FROM beefsack/webify:v1.3.0 AS lost-cities-2
-COPY --from=rust-builder /src/out/lost_cities_2_cli /script
+COPY --from=builder /app/target/release/lost_cities_2_cli /script

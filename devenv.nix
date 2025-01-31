@@ -6,8 +6,13 @@
     enable = true;
     npm.enable = true;
   };
+  languages.typescript.enable = true;
   languages.rust.enable = true;
   packages = with pkgs; [
+    k9s
+    kubectl
+    minikube
     postgresql
+    skaffold
   ];
 }

@@ -1,4 +1,4 @@
-FROM node:14.7.0 AS websocket
+FROM node:23 AS websocket
 EXPOSE 80
 WORKDIR /src
 COPY websocket/package.json websocket/package-lock.json ./

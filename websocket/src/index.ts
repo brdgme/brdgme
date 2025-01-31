@@ -17,7 +17,9 @@ if (LOG_LEVEL !== undefined) {
  * Connect to Redis, do this first as if we can't connect there's no point
  * continuing.
  */
-let redis = Redis.createClient(REDIS_URL);
+let redis = Redis.createClient({
+  url: REDIS_URL,
+});
 
 /**
  * `hasPrefix` checks whether the prefix `p` is present in the string `str`.
@@ -51,7 +53,7 @@ class Subscriptions {
   subscribe(ws: WebSocket, channel: string) {
     if (this.channels[channel] === undefined) {
       this.channels[channel] = [];
-      if (!redis.subscribe(channel)) {
+      if (!redis.subscribe(channel, this.handleMessage)) {
         throw (`failed to subscribe: ${channel}`);
       }
     }
@@ -133,10 +135,10 @@ class Subscriptions {
   /**
    * `handleMessage` is a `Redis` 'message' handler, proxying messages to
    * subscriptions.
-   * @param {string} channel 
    * @param {string} message 
+   * @param {string} channel 
    */
-  handleMessage(channel: string, message: string) {
+  handleMessage(message: string, channel: string) {
     if (this.channels[channel] === undefined) {
       Log.debug(`Got message for channel ${channel}, but no subscribers`);
       return;
@@ -153,7 +155,6 @@ class Subscriptions {
  * Create our global subscription object and register it with Redis.
  */
 let subscriptions = new Subscriptions();
-redis.on('message', subscriptions.handleMessage);
 
 /**
  * Listen for WebSocket connections. We use a custom connection to reply 200 by
@@ -178,7 +179,7 @@ wss.on('close', () => clearInterval(interval));
  * subscriptions.
  */
 function handleConnection(ws: WebSocket) {
-  ws.on('message', (message) => handleMessage(ws, message));
+  ws.on('message', (message) => handleMessage(ws, message.toString()));
   ws.on('close', () => handleClose(ws));
 }
 

@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "nodeNext",
     "outDir": "dist",
     "strictNullChecks": true
   },

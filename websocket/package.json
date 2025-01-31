@@ -23,13 +23,13 @@
   },
   "homepage": "https://github.com/brdgme/websocket-server#readme",
   "dependencies": {
-    "@types/loglevel": "^1.5.3",
-    "@types/redis": "^0.12.36",
-    "@types/ws": "0.0.40",
-    "bufferutil": "^4.0.1",
-    "loglevel": "^1.6.1",
-    "redis": "^2.8.0",
-    "typescript": "^2.9.2",
-    "ws": "^6.1.2"
+    "@types/loglevel": "^1.5.4",
+    "@types/redis": "^4.0.10",
+    "@types/ws": "^8.5.14",
+    "bufferutil": "^4.0.9",
+    "loglevel": "^1.9.2",
+    "redis": "^4.7.0",
+    "typescript": "^5.7.3",
+    "ws": "^8.18.0"
   }
 }
