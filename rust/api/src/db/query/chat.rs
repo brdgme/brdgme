@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::db::models::*;
 
-pub fn create(conn: &PgConnection) -> Result<Chat> {
+pub fn create(conn: &mut PgConnection) -> Result<Chat> {
     use crate::db::schema::chats;
 
     Ok(diesel::insert_into(chats::table)
@@ -16,7 +16,7 @@ pub fn create(conn: &PgConnection) -> Result<Chat> {
         .context("error creating chat")?)
 }
 
-pub fn add_users(chat_id: Uuid, user_ids: &[Uuid], conn: &PgConnection) -> Result<Vec<ChatUser>> {
+pub fn add_users(chat_id: Uuid, user_ids: &[Uuid], conn: &mut PgConnection) -> Result<Vec<ChatUser>> {
     use crate::db::schema::chat_users;
 
     if user_ids.is_empty() {
@@ -41,7 +41,7 @@ pub fn add_users(chat_id: Uuid, user_ids: &[Uuid], conn: &PgConnection) -> Resul
 pub fn create_message(
     chat_user_id: Uuid,
     message: &str,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<ChatMessage> {
     use crate::db::schema::chat_messages;
 
@@ -54,7 +54,7 @@ pub fn create_message(
         .context("error creating chat message")?)
 }
 
-pub fn find(id: &Uuid, conn: &PgConnection) -> Result<Chat> {
+pub fn find(id: &Uuid, conn: &mut PgConnection) -> Result<Chat> {
     use crate::db::schema::chats;
 
     Ok(chats::table
@@ -63,7 +63,7 @@ pub fn find(id: &Uuid, conn: &PgConnection) -> Result<Chat> {
         .context("error finding chat")?)
 }
 
-pub fn find_users_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<ChatUser>> {
+pub fn find_users_by_chat(chat_id: &Uuid, conn: &mut PgConnection) -> Result<Vec<ChatUser>> {
     use crate::db::schema::chat_users;
 
     Ok(chat_users::table
@@ -72,7 +72,7 @@ pub fn find_users_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<Cha
         .context("error finding chat users for chat")?)
 }
 
-pub fn find_messages_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<ChatMessage>> {
+pub fn find_messages_by_chat(chat_id: &Uuid, conn: &mut PgConnection) -> Result<Vec<ChatMessage>> {
     use crate::db::schema::{chat_messages, chat_users};
 
     Ok(chat_messages::table
@@ -86,7 +86,7 @@ pub fn find_messages_by_chat(chat_id: &Uuid, conn: &PgConnection) -> Result<Vec<
 pub fn update_user_last_read_at(
     chat_user_id: &Uuid,
     at: NaiveDateTime,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<ChatUser>> {
     use crate::db::schema::chat_users;
 
@@ -99,7 +99,7 @@ pub fn update_user_last_read_at(
 
 pub fn update_user_last_read_at_now(
     chat_user_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<ChatUser>> {
     update_user_last_read_at(chat_user_id, Utc::now().naive_utc(), conn)
 }
@@ -128,7 +128,7 @@ pub struct PublicChatExtended {
     pub chat_messages: Vec<PublicChatMessage>,
 }
 
-pub fn find_extended(id: &Uuid, conn: &PgConnection) -> Result<ChatExtended> {
+pub fn find_extended(id: &Uuid, conn: &mut PgConnection) -> Result<ChatExtended> {
     Ok(ChatExtended {
         chat: find(id, conn)?,
         chat_users: find_users_by_chat(id, conn)?,

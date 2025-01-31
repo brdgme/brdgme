@@ -30,7 +30,7 @@ lazy_static! {
     static ref FINISHED_GAME_RELEVANCE: Duration = Duration::days(3);
 }
 
-pub fn create_user_by_name(name: &str, conn: &PgConnection) -> Result<User> {
+pub fn create_user_by_name(name: &str, conn: &mut PgConnection) -> Result<User> {
     use crate::db::schema::users;
     Ok(diesel::insert_into(users::table)
         .values(&NewUser {
@@ -43,7 +43,7 @@ pub fn create_user_by_name(name: &str, conn: &PgConnection) -> Result<User> {
         .context("error creating user")?)
 }
 
-pub fn find_user(find_id: &Uuid, conn: &PgConnection) -> Result<Option<User>> {
+pub fn find_user(find_id: &Uuid, conn: &mut PgConnection) -> Result<Option<User>> {
     use crate::db::schema::users;
 
     Ok(users::table
@@ -55,7 +55,7 @@ pub fn find_user(find_id: &Uuid, conn: &PgConnection) -> Result<Option<User>> {
 
 pub fn find_user_by_email(
     by_email: &str,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<(UserEmail, User)>> {
     use crate::db::schema::{user_emails, users};
 
@@ -68,15 +68,18 @@ pub fn find_user_by_email(
         .context("error finding user")?)
 }
 
-pub fn find_or_create_user_by_email(email: &str, conn: &PgConnection) -> Result<(UserEmail, User)> {
+pub fn find_or_create_user_by_email(
+    email: &str,
+    conn: &mut PgConnection,
+) -> Result<(UserEmail, User)> {
     if let Some(v) = find_user_by_email(email, conn)? {
         return Ok(v);
     }
     create_user_by_email(email, conn)
 }
 
-pub fn create_user_by_email(email: &str, conn: &PgConnection) -> Result<(UserEmail, User)> {
-    conn.transaction(|| {
+pub fn create_user_by_email(email: &str, conn: &mut PgConnection) -> Result<(UserEmail, User)> {
+    conn.transaction(|conn| {
         let u = create_user_by_name(email, conn)?;
         let ue = create_user_email(
             &NewUserEmail {
@@ -90,7 +93,7 @@ pub fn create_user_by_email(email: &str, conn: &PgConnection) -> Result<(UserEma
     })
 }
 
-pub fn create_user_email(ue: &NewUserEmail, conn: &PgConnection) -> Result<UserEmail> {
+pub fn create_user_email(ue: &NewUserEmail, conn: &mut PgConnection) -> Result<UserEmail> {
     use crate::db::schema::user_emails;
     Ok(diesel::insert_into(user_emails::table)
         .values(ue)
@@ -107,7 +110,7 @@ fn rand_code() -> String {
     )
 }
 
-pub fn generate_user_login_confirmation(user_id: &Uuid, conn: &PgConnection) -> Result<String> {
+pub fn generate_user_login_confirmation(user_id: &Uuid, conn: &mut PgConnection) -> Result<String> {
     use crate::db::schema::users;
 
     let code = rand_code();
@@ -120,8 +123,8 @@ pub fn generate_user_login_confirmation(user_id: &Uuid, conn: &PgConnection) -> 
     Ok(code)
 }
 
-pub fn user_login_request(email: &str, conn: &PgConnection) -> Result<String> {
-    conn.transaction(|| {
+pub fn user_login_request(email: &str, conn: &mut PgConnection) -> Result<String> {
+    conn.transaction(|conn| {
         let (_, user) = find_or_create_user_by_email(email, conn)?;
 
         let confirmation = match (user.login_confirmation, user.login_confirmation_at) {
@@ -137,7 +140,7 @@ pub fn user_login_request(email: &str, conn: &PgConnection) -> Result<String> {
 pub fn user_login_confirm(
     email: &str,
     confirmation: &str,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<UserAuthToken>> {
     let user = match find_user_by_email(email, conn)? {
         Some((_, u)) => u,
@@ -155,7 +158,7 @@ pub fn user_login_confirm(
     )
 }
 
-pub fn create_auth_token(for_user_id: &Uuid, conn: &PgConnection) -> Result<UserAuthToken> {
+pub fn create_auth_token(for_user_id: &Uuid, conn: &mut PgConnection) -> Result<UserAuthToken> {
     use crate::db::schema::user_auth_tokens;
 
     Ok(diesel::insert_into(user_auth_tokens::table)
@@ -166,7 +169,7 @@ pub fn create_auth_token(for_user_id: &Uuid, conn: &PgConnection) -> Result<User
         .context("error creating auth token")?)
 }
 
-pub fn authenticate(search_token: &Uuid, conn: &PgConnection) -> Result<Option<User>> {
+pub fn authenticate(search_token: &Uuid, conn: &mut PgConnection) -> Result<Option<User>> {
     use crate::db::schema::{user_auth_tokens, users};
 
     let uat: UserAuthToken = match user_auth_tokens::table
@@ -189,7 +192,7 @@ pub fn authenticate(search_token: &Uuid, conn: &PgConnection) -> Result<Option<U
 
 pub fn find_valid_user_auth_tokens_for_users(
     user_ids: &[Uuid],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<UserAuthToken>> {
     use crate::db::schema::user_auth_tokens;
 
@@ -200,7 +203,7 @@ pub fn find_valid_user_auth_tokens_for_users(
         .context("error finding user auth tokens for user")?)
 }
 
-pub fn find_game(id: &Uuid, conn: &PgConnection) -> Result<Game> {
+pub fn find_game(id: &Uuid, conn: &mut PgConnection) -> Result<Game> {
     use crate::db::schema::games;
 
     Ok(games::table
@@ -209,7 +212,7 @@ pub fn find_game(id: &Uuid, conn: &PgConnection) -> Result<Game> {
         .context("error finding game")?)
 }
 
-pub fn find_game_version(id: &Uuid, conn: &PgConnection) -> Result<Option<GameVersion>> {
+pub fn find_game_version(id: &Uuid, conn: &mut PgConnection) -> Result<Option<GameVersion>> {
     use crate::db::schema::game_versions;
 
     Ok(game_versions::table
@@ -221,7 +224,7 @@ pub fn find_game_version(id: &Uuid, conn: &PgConnection) -> Result<Option<GameVe
 
 pub fn find_game_with_version(
     id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<(Game, GameVersion)>> {
     use crate::db::schema::{game_versions, games};
 
@@ -279,7 +282,7 @@ pub struct PublicGameExtended {
     pub chat: Option<chat::PublicChatExtended>,
 }
 
-pub fn find_active_games_for_user(id: &Uuid, conn: &PgConnection) -> Result<Vec<GameExtended>> {
+pub fn find_active_games_for_user(id: &Uuid, conn: &mut PgConnection) -> Result<Vec<GameExtended>> {
     use crate::db::schema::{game_players, game_types, game_versions, games};
 
     Ok(games::table
@@ -313,7 +316,7 @@ pub fn find_active_games_for_user(id: &Uuid, conn: &PgConnection) -> Result<Vec<
         .collect::<Result<Vec<GameExtended>>>()?)
 }
 
-pub fn find_game_extended(id: &Uuid, conn: &PgConnection) -> Result<GameExtended> {
+pub fn find_game_extended(id: &Uuid, conn: &mut PgConnection) -> Result<GameExtended> {
     use crate::db::schema::{game_types, game_versions, games};
 
     let (game, game_version) = games::table
@@ -351,10 +354,13 @@ pub struct CreateGameOpts<'a> {
     pub opponent_emails: &'a [String],
     pub chat_id: Option<Uuid>,
 }
-pub fn create_game_with_users(opts: &CreateGameOpts, conn: &PgConnection) -> Result<CreatedGame> {
+pub fn create_game_with_users(
+    opts: &CreateGameOpts,
+    conn: &mut PgConnection,
+) -> Result<CreatedGame> {
     // We get the timestamp for now before logs are created to make sure players can read them.
     let now = Utc::now().naive_utc();
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         // Find or create users.
         let creator = find_user(opts.creator_id, conn)
             .context("could not find creator")?
@@ -445,7 +451,7 @@ pub fn create_game_with_users(opts: &CreateGameOpts, conn: &PgConnection) -> Res
 pub fn find_or_create_game_type_user(
     game_type_id: &Uuid,
     user_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<GameTypeUser> {
     if let Some(gtu) = find_game_type_user_by_game_type_and_user(game_type_id, user_id, conn)? {
         return Ok(gtu);
@@ -465,7 +471,7 @@ pub fn find_or_create_game_type_user(
 pub fn find_game_type_user_by_game_type_and_user(
     game_type_id: &Uuid,
     user_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<GameTypeUser>> {
     use crate::db::schema::game_type_users;
     Ok(game_type_users::table
@@ -476,7 +482,10 @@ pub fn find_game_type_user_by_game_type_and_user(
         .context("error finding game type user")?)
 }
 
-pub fn create_game_type_user(gtu: &NewGameTypeUser, conn: &PgConnection) -> Result<GameTypeUser> {
+pub fn create_game_type_user(
+    gtu: &NewGameTypeUser,
+    conn: &mut PgConnection,
+) -> Result<GameTypeUser> {
     use crate::db::schema::game_type_users;
     Ok(diesel::insert_into(game_type_users::table)
         .values(gtu)
@@ -488,10 +497,10 @@ pub fn player_can_undo_set_undo_game_state(
     game_id: &Uuid,
     game_player_id: &Uuid,
     game_state: &str,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<()> {
     use crate::db::schema::game_players;
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         diesel::update(
             game_players::table
                 .find(game_player_id)
@@ -514,7 +523,7 @@ pub fn player_can_undo_set_undo_game_state(
 
 pub fn player_cannot_undo_set_undo_game_state(
     game_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
     Ok(
@@ -542,9 +551,9 @@ pub fn update_game_command_success(
     eliminated: &[usize],
     placings: &[usize],
     points: &[f32],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<UpdatedGame> {
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         if let Some(game_state) = undo_game_state {
             player_can_undo_set_undo_game_state(game_id, game_player_id, game_state, conn)?;
         } else {
@@ -566,9 +575,9 @@ pub fn update_game_command_success(
 pub fn concede_game(
     game_id: &Uuid,
     game_player_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<UpdatedGame> {
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let game_players = find_game_players_by_game(game_id, conn)
             .context("unable to find game players for concede")?;
         let placings: Vec<usize> = game_players
@@ -590,7 +599,7 @@ pub fn concede_game(
 pub fn update_game_is_finished(
     game_id: &Uuid,
     is_finished: bool,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<Game>> {
     use crate::db::schema::games;
     Ok(diesel::update(games::table.find(game_id))
@@ -600,7 +609,7 @@ pub fn update_game_is_finished(
         .context("error updating game is_finished")?)
 }
 
-pub fn find_player_count_by_game(game_id: &Uuid, conn: &PgConnection) -> Result<i64> {
+pub fn find_player_count_by_game(game_id: &Uuid, conn: &mut PgConnection) -> Result<i64> {
     use crate::db::schema::game_players;
     use diesel::dsl::count;
 
@@ -618,7 +627,7 @@ fn to_i32_vec(from: &[usize]) -> Vec<i32> {
 pub fn update_game(
     update_id: &Uuid,
     update: &NewGame,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<Game>> {
     use crate::db::schema::games;
     Ok(diesel::update(games::table.find(update_id))
@@ -635,7 +644,7 @@ pub fn update_game(
 pub fn mark_game_read(
     id: &Uuid,
     user_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
     Ok(diesel::update(
@@ -652,7 +661,7 @@ pub fn mark_game_read(
 pub fn update_game_whose_turn(
     id: &Uuid,
     positions: &[usize],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
@@ -667,7 +676,7 @@ pub fn update_game_whose_turn(
 pub fn update_game_points(
     id: &Uuid,
     points: &[f32],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayer>> {
     Ok(points
         .iter()
@@ -682,7 +691,7 @@ pub fn update_game_points_for_position(
     id: &Uuid,
     position: i32,
     points: f32,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
 
@@ -700,7 +709,7 @@ pub fn update_game_points_for_position(
 pub fn update_game_eliminated(
     id: &Uuid,
     positions: &[usize],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
@@ -718,11 +727,11 @@ pub fn update_game_eliminated(
 pub fn update_game_placings(
     game_id: &Uuid,
     placings: &[usize],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<(Vec<GamePlayer>, Vec<GameTypeUser>)> {
     let placings: Vec<usize> = placings.to_owned();
 
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let game = find_game(game_id, conn)?;
         let game_version = find_game_version(&game.game_version_id, conn)?
             .ok_or_else::<Error, _>(|| anyhow!("could not find game version for game"))?;
@@ -822,7 +831,7 @@ pub fn update_game_placings(
 fn update_game_type_user_rating(
     id: &Uuid,
     rating: i32,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<GameTypeUser>> {
     use crate::db::schema::game_type_users;
 
@@ -854,7 +863,7 @@ pub fn update_game_player_result(
     position: usize,
     place: usize,
     rating_change: Option<i32>,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
 
@@ -875,7 +884,7 @@ pub fn update_game_player_result(
 pub fn update_game_is_read(
     id: &Uuid,
     game_player_ids: &[Uuid],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
@@ -890,9 +899,9 @@ pub fn update_game_is_read(
 pub fn create_game_logs_from_cli(
     game_id: &Uuid,
     logs: Vec<CliLog>,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<CreatedGameLog>> {
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let mut player_id_by_position: HashMap<usize, Uuid> = HashMap::new();
         for p in find_game_players_by_game(game_id, conn)? {
             player_id_by_position.insert(p.position as usize, p.id);
@@ -923,7 +932,10 @@ pub fn create_game_logs_from_cli(
     })
 }
 
-pub fn find_game_players_by_game(game_id: &Uuid, conn: &PgConnection) -> Result<Vec<GamePlayer>> {
+pub fn find_game_players_by_game(
+    game_id: &Uuid,
+    conn: &mut PgConnection,
+) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
 
     Ok(game_players::table
@@ -936,7 +948,7 @@ pub fn find_game_players_by_game(game_id: &Uuid, conn: &PgConnection) -> Result<
 pub fn find_game_player_by_user_and_game(
     user_id: &Uuid,
     game_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<GamePlayer>> {
     use crate::db::schema::game_players;
 
@@ -951,7 +963,7 @@ pub fn find_game_player_by_user_and_game(
 
 pub fn find_game_player_type_users_by_game(
     game_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayerTypeUser>> {
     use crate::db::schema::{game_players, game_versions, games, users};
 
@@ -981,7 +993,7 @@ pub fn find_game_player_type_users_by_game(
 
 pub fn find_game_players_with_user_by_game(
     game_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<(GamePlayer, User)>> {
     use crate::db::schema::{game_players, users};
 
@@ -1001,10 +1013,10 @@ pub struct CreatedGameLog {
 pub fn create_game_log(
     log: &NewGameLog,
     to: &[Uuid],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<CreatedGameLog> {
     use crate::db::schema::game_logs;
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let created_log: GameLog = diesel::insert_into(game_logs::table)
             .values(log)
             .get_result(conn)?;
@@ -1019,9 +1031,9 @@ pub fn create_game_log(
 pub fn create_game_log_targets(
     log_id: &Uuid,
     player_ids: &[Uuid],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GameLogTarget>> {
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let mut created = vec![];
         for id in player_ids {
             created.push(create_game_log_target(
@@ -1038,7 +1050,7 @@ pub fn create_game_log_targets(
 
 pub fn create_game_log_target(
     new_target: &NewGameLogTarget,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<GameLogTarget> {
     use crate::db::schema::game_log_targets;
 
@@ -1051,9 +1063,9 @@ pub fn create_game_log_target(
 pub fn create_game_users(
     ids: &[Uuid],
     emails: &[String],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<(UserEmail, User)>> {
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let mut users: Vec<(UserEmail, User)> = vec![];
         for id in ids.iter() {
             users.push(
@@ -1073,7 +1085,7 @@ pub fn create_game_users(
 
 pub fn find_user_with_primary_email(
     find_user_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<(UserEmail, User)>> {
     use crate::db::schema::{user_emails, users};
 
@@ -1088,7 +1100,7 @@ pub fn find_user_with_primary_email(
 
 pub fn find_user_with_primary_email_by_email(
     search_email: &str,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Option<(UserEmail, User)>> {
     use crate::db::schema::{user_emails, users};
 
@@ -1110,7 +1122,7 @@ pub fn find_user_with_primary_email_by_email(
     )
 }
 
-pub fn create_game(new_game: &NewGame, conn: &PgConnection) -> Result<Game> {
+pub fn create_game(new_game: &NewGame, conn: &mut PgConnection) -> Result<Game> {
     use crate::db::schema::games;
 
     Ok(diesel::insert_into(games::table)
@@ -1121,7 +1133,7 @@ pub fn create_game(new_game: &NewGame, conn: &PgConnection) -> Result<Game> {
 
 pub fn create_game_version(
     new_game_version: &NewGameVersion,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<GameVersion> {
     use crate::db::schema::game_versions;
 
@@ -1131,7 +1143,7 @@ pub fn create_game_version(
         .context("error inserting game version")?)
 }
 
-pub fn create_game_type(new_game_type: &NewGameType, conn: &PgConnection) -> Result<GameType> {
+pub fn create_game_type(new_game_type: &NewGameType, conn: &mut PgConnection) -> Result<GameType> {
     use crate::db::schema::game_types;
 
     Ok(diesel::insert_into(game_types::table)
@@ -1142,9 +1154,9 @@ pub fn create_game_type(new_game_type: &NewGameType, conn: &PgConnection) -> Res
 
 pub fn create_game_players(
     players: &[NewGamePlayer],
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GamePlayer>> {
-    conn.transaction(|| {
+    conn.transaction(|conn| {
         let mut created: Vec<GamePlayer> = vec![];
         for p in players.iter() {
             created.push(create_game_player(p, conn)?);
@@ -1153,7 +1165,7 @@ pub fn create_game_players(
     })
 }
 
-pub fn create_game_player(player: &NewGamePlayer, conn: &PgConnection) -> Result<GamePlayer> {
+pub fn create_game_player(player: &NewGamePlayer, conn: &mut PgConnection) -> Result<GamePlayer> {
     use crate::db::schema::game_players;
 
     Ok(diesel::insert_into(game_players::table)
@@ -1162,7 +1174,7 @@ pub fn create_game_player(player: &NewGamePlayer, conn: &PgConnection) -> Result
         .context("error inserting game player")?)
 }
 
-pub fn public_game_versions(conn: &PgConnection) -> Result<Vec<GameVersionType>> {
+pub fn public_game_versions(conn: &mut PgConnection) -> Result<Vec<GameVersionType>> {
     use crate::db::schema::{game_types, game_versions};
 
     Ok(game_versions::table
@@ -1179,7 +1191,10 @@ pub fn public_game_versions(conn: &PgConnection) -> Result<Vec<GameVersionType>>
         .collect())
 }
 
-pub fn find_public_game_logs_for_game(game_id: &Uuid, conn: &PgConnection) -> Result<Vec<GameLog>> {
+pub fn find_public_game_logs_for_game(
+    game_id: &Uuid,
+    conn: &mut PgConnection,
+) -> Result<Vec<GameLog>> {
     use crate::db::schema::game_logs;
 
     Ok(game_logs::table
@@ -1192,7 +1207,7 @@ pub fn find_public_game_logs_for_game(game_id: &Uuid, conn: &PgConnection) -> Re
 
 pub fn find_game_logs_for_player(
     game_player_id: &Uuid,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<Vec<GameLog>> {
     use crate::db::schema::{game_log_targets, game_logs, game_players};
 
@@ -1216,17 +1231,17 @@ pub fn find_game_logs_for_player(
 #[cfg(test)]
 fn with_db<F>(closure: F)
 where
-    F: Fn(&PgConnection),
+    F: Fn(&mut PgConnection),
 {
-    let conn = &CONN.w.get().unwrap();
-    conn.test_transaction::<_, Error, _>(|| {
+    let conn = &mut CONN.w.get().unwrap();
+    conn.test_transaction::<_, Error, _>(|conn| {
         closure(conn);
         Ok(())
     });
 }
 
 #[cfg(test)]
-fn create_test_game(players: usize, conn: &PgConnection) -> GameExtended {
+fn create_test_game(players: usize, conn: &mut PgConnection) -> GameExtended {
     let mut users = vec![];
     for p in 0..players {
         users.push(

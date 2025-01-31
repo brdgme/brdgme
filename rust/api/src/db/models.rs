@@ -6,7 +6,9 @@ use uuid::Uuid;
 
 use crate::db::schema::*;
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
 pub struct User {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -81,7 +83,9 @@ pub struct NewUserAuthToken {
     pub user_id: Uuid,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
 pub struct GameType {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -101,7 +105,9 @@ pub struct NewGameType<'a> {
     pub weight: f32,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
 #[belongs_to(GameType)]
 pub struct GameVersion {
     pub id: Uuid,
@@ -219,7 +225,9 @@ pub struct NewGame<'a> {
     pub game_state: &'a str,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
 #[belongs_to(Game)]
 #[belongs_to(User)]
 pub struct GamePlayer {
@@ -330,7 +338,9 @@ pub struct PublicGamePlayerTypeUser {
     pub game_type_user: PublicGameTypeUser,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
+)]
 #[belongs_to(Game)]
 pub struct GameLog {
     pub id: Uuid,
@@ -398,7 +408,9 @@ pub struct NewGameLogTarget {
     pub game_player_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Queryable, Identifiable, Associations)]
+#[derive(
+    Serialize, Deserialize, Debug, PartialEq, Clone, Queryable, Identifiable, Associations,
+)]
 #[belongs_to(GameType)]
 #[belongs_to(User)]
 pub struct GameTypeUser {
@@ -510,7 +522,7 @@ mod tests {
     #[test]
     #[ignore]
     fn insert_user_works() {
-        let conn = &*CONN.w.get().unwrap();
+        let conn = &mut *CONN.w.get().unwrap();
         conn.begin_test_transaction().unwrap();
         diesel::insert_into(schema::users::table)
             .values(&NewUser {

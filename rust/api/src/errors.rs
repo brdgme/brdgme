@@ -23,8 +23,8 @@ impl ControllerError {
     }
 }
 
-impl<'r> Responder<'r> for ControllerError {
-    fn respond_to(self, request: &Request) -> response::Result<'r> {
+impl<'r, 'o: 'r> Responder<'r, 'o> for ControllerError {
+    fn respond_to(self, request: &'r Request) -> response::Result<'o> {
         match self {
             ControllerError::BadRequest { ref message } => Ok(Response::build()
                 .status(Status::BadRequest)
@@ -39,7 +39,7 @@ impl<'r> Responder<'r> for ControllerError {
                     "Authorization, Content-Type",
                 )
                 .raw_header("Access-Control-Allow-Credentials", "true")
-                .sized_body(Cursor::new(message.to_owned()))
+                .sized_body(message.len(), Cursor::new(message.to_owned()))
                 .finalize()),
             ControllerError::Internal(inner) => {
                 error!("Internal error: {}", inner);

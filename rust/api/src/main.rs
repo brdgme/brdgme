@@ -3,11 +3,13 @@
 #![allow(unused_variables)]
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::too_many_arguments)]
-#![feature(decl_macro)]
 
 // We need this for schema.rs to work properly
 #[macro_use]
 extern crate diesel;
+
+#[macro_use]
+extern crate rocket;
 
 use rocket::routes;
 
@@ -16,18 +18,18 @@ mod controller;
 mod db;
 mod errors;
 mod game_client;
-mod mail;
 mod render;
 mod websocket;
 
 use std::sync::Mutex;
 use std::thread;
 
-fn main() {
+#[launch]
+fn rocket() -> _ {
     let (pub_queue, pub_queue_tx) = websocket::PubQueue::new();
     thread::spawn(move || pub_queue.run());
 
-    rocket::ignite()
+    rocket::build()
         .manage(Mutex::new(pub_queue_tx))
         .mount(
             "/game",
@@ -45,7 +47,5 @@ fn main() {
             "/auth",
             routes![controller::auth::create, controller::auth::confirm,],
         )
-        .mount("/mail", routes![controller::mail::index])
         .mount("/", routes![controller::options, controller::init])
-        .launch();
 }

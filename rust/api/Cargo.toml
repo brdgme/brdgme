@@ -9,27 +9,23 @@ brdgme_cmd = { path = "../lib/cmd" }
 brdgme_game = { path = "../lib/game" }
 brdgme_color = { path = "../lib/color" }
 brdgme_markup = { path = "../lib/markup" }
-lazy_static = "1.4.0"
-r2d2 = "0.8.9"
+lazy_static = "1.5.0"
+r2d2 = "0.8.10"
 rand = "0.9.0"
-chrono = "0.4.13"
-lettre = "0.9.3"
-lettre_email = "0.9.4"
-log = "0.4.11"
-env_logger = "0.7.1"
-uuid = { version = "0.6.5", features = ["serde", "v4"] }
-serde = { version = "1.0.114", features = ["derive"] }
-serde_json = "1.0.57"
-rocket = "0.4.5"
-rocket_codegen = "0.4.5"
-rocket_contrib = "0.4.5"
+chrono = "0.4.39"
+log = "0.4.25"
+env_logger = "0.11.6"
+uuid = { version = "1.12.1", features = ["serde", "v4"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.138"
+rocket = { version = "0.5.1", features = ["json"] }
+rocket_codegen = "0.5.1"
 email = "0.0.21"
-hyper = "0.10.16"
-hyper-rustls = "0.6.1"
-diesel = { version = "1.4.5", features = ["postgres", "uuid", "chrono", "32-column-tables"] }
+diesel = { version = "2.2.6", features = ["postgres", "uuid", "chrono", "32-column-tables"] }
 r2d2-diesel = "1.0.0"
-unicase = "2.6.0"
-redis = "0.17.0"
-anyhow = "1.0.32"
+unicase = "2.8.1"
+redis = "0.28.2"
+anyhow = "1.0.95"
 thiserror = "2.0.11"
-bytes = "0.5.6"
+bytes = "1.9.0"
+reqwest = { version = "0.12", default-features = false, features = ["http2", "charset", "json", "rustls-tls"] }

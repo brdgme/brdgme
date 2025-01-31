@@ -2,8 +2,8 @@ use anyhow::{anyhow, Context, Error};
 use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::Connection;
+use rocket::serde::json::Json;
 use rocket::{get, post, State};
-use rocket_contrib::json::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -40,7 +40,7 @@ pub fn create(
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
     let user_id = user.id;
     let data = data.into_inner();
-    let conn = &*CONN.w.get().context("unable to get connection")?;
+    let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
     let (created_game, created_logs, public_render, player_renders, user_ids) = conn
         .transaction::<_, Error, _>(move || {
@@ -178,7 +178,7 @@ pub fn show(
     user: Option<models::User>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
-    let conn = &*CONN.r.get().context("error getting connection")?;
+    let conn = &mut *CONN.r.get().context("error getting connection")?;
     let game_extended = query::find_game_extended(&id, conn)?;
     let game_player: Option<&models::GamePlayer> = user.and_then(|u| {
         game_extended
@@ -199,7 +199,7 @@ fn game_extended_to_show_response(
     game_player: Option<&models::GamePlayer>,
     game_extended: &query::GameExtended,
     render: Option<&game_client::RenderResponse>,
-    conn: &PgConnection,
+    conn: &mut PgConnection,
 ) -> Result<ShowResponse, ControllerError> {
     let public = game_extended.clone().into_public();
     let render: Cow<game_client::RenderResponse> = match render {
@@ -249,7 +249,7 @@ pub fn command(
     data: Json<CommandRequest>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
-    let conn = &*CONN.w.get().context("unable to get connection")?;
+    let conn = &mut *CONN.w.get().context("unable to get connection")?;
     conn.transaction::<_, ControllerError, _>(|| {
         let (game, game_version) = query::find_game_with_version(&id, conn)
             .context("error finding game")?
@@ -378,7 +378,7 @@ pub fn undo(
     pub_queue_tx: State<Mutex<Sender<websocket::Message>>>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
-    let conn = &*CONN.w.get().context("unable to get connection")?;
+    let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
     conn.transaction::<_, ControllerError, _>(|| {
         let (game, game_version) = query::find_game_with_version(&id, conn)
@@ -488,7 +488,7 @@ pub fn mark_read(
     user: models::User,
 ) -> Result<CORS<Json<Option<models::PublicGamePlayer>>>, ControllerError> {
     let id = id.into_uuid();
-    let conn = &*CONN.w.get().context("unable to get connection")?;
+    let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
     conn.transaction::<_, ControllerError, _>(|| {
         Ok(CORS(Json(
@@ -506,7 +506,7 @@ pub fn concede(
     pub_queue_tx: State<Mutex<Sender<websocket::Message>>>,
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
-    let conn = &*CONN.w.get().context("unable to get connection")?;
+    let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
     Ok(conn.transaction::<_, ControllerError, _>(|| {
         let (game, game_version) = query::find_game_with_version(&id, conn)
@@ -604,7 +604,7 @@ pub fn restart(
 ) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
     let user_id = user.id;
-    let conn = &*CONN.w.get().context("unable to get connection")?;
+    let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
     let (created_game, created_logs, public_render, player_renders, user_ids) = conn
         .transaction::<_, Error, _>(move || {

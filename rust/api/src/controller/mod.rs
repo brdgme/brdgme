@@ -2,8 +2,8 @@ use anyhow::Context;
 use rocket::http::RawStr;
 use rocket::request::{FromParam, Request};
 use rocket::response::{self, Responder};
+use rocket::serde::json::Json;
 use rocket::{get, options};
-use rocket_contrib::json::Json;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -12,7 +12,6 @@ use std::str::FromStr;
 
 pub mod auth;
 pub mod game;
-pub mod mail;
 
 use crate::db::{models, query, CONN};
 use crate::errors::ControllerError;
@@ -37,8 +36,8 @@ impl<'a> FromParam<'a> for UuidParam {
 
 pub struct CORS<R>(R);
 
-impl<'r, R: Responder<'r>> Responder<'r> for CORS<R> {
-    fn respond_to(self, request: &Request) -> response::Result<'r> {
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CORS<R> {
+    fn respond_to(self, request: &'r Request) -> response::Result<'o> {
         let mut response = self.0.respond_to(request)?;
         response.set_raw_header("Access-Control-Allow-Origin", "*");
         response.set_raw_header(
@@ -68,7 +67,7 @@ pub struct InitResponse {
 
 #[get("/init")]
 pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, ControllerError> {
-    let conn = &*CONN.r.get().context("unable to get connection")?;
+    let conn = &mut *CONN.r.get().context("unable to get connection")?;
 
     Ok(CORS(Json(InitResponse {
         game_version_types: query::public_game_versions(conn)
