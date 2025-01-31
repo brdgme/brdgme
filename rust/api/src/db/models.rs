@@ -6,9 +6,7 @@ use uuid::Uuid;
 
 use crate::db::schema::*;
 
-#[derive(
-    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
-)]
+#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Serialize, Deserialize)]
 pub struct User {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -83,9 +81,7 @@ pub struct NewUserAuthToken {
     pub user_id: Uuid,
 }
 
-#[derive(
-    Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize, Deserialize,
-)]
+#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Serialize, Deserialize)]
 pub struct GameType {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -455,7 +451,7 @@ pub struct NewFriend {
     pub has_accepted: Option<bool>,
 }
 
-#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Associations, Serialize)]
+#[derive(Debug, PartialEq, Clone, Queryable, Identifiable, Serialize)]
 pub struct Chat {
     pub id: Uuid,
     pub created_at: NaiveDateTime,

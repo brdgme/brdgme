@@ -1,5 +1,4 @@
 use anyhow::Context;
-use rocket::http::RawStr;
 use rocket::request::{FromParam, Request};
 use rocket::response::{self, Responder};
 use rocket::serde::json::Json;
@@ -24,10 +23,10 @@ impl UuidParam {
     }
 }
 
-impl<'a> FromParam<'a> for UuidParam {
+impl<'r> FromParam<'r> for UuidParam {
     type Error = ControllerError;
 
-    fn from_param(param: &'a RawStr) -> Result<Self, ControllerError> {
+    fn from_param(param: &'r str) -> Result<Self, Self::Error> {
         Ok(UuidParam(
             Uuid::from_str(param).context("failed to parse UUID")?,
         ))
