@@ -7,4 +7,7 @@
     npm.enable = true;
   };
   languages.rust.enable = true;
+  packages = with pkgs; [
+    postgresql
+  ];
 }
