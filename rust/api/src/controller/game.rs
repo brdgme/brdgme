@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
-use crate::controller::{UuidParam, CORS};
+use crate::controller::{Cors, UuidParam};
 use crate::db::CONN;
 use crate::db::{models, query};
 use crate::errors::ControllerError;
@@ -37,7 +37,7 @@ pub async fn create(
     data: Json<CreateRequest>,
     user: models::User,
     pub_queue_tx: &State<Mutex<Sender<websocket::Message>>>,
-) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
+) -> Result<Cors<Json<ShowResponse>>, ControllerError> {
     let user_id = user.id;
     let data = data.into_inner();
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
@@ -116,7 +116,7 @@ pub async fn create(
             .map_err::<Error, _>(|e| anyhow!("unable to get lock on pub_queue_tx: {}", e))?
             .clone(),
     )?;
-    Ok(CORS(Json(
+    Ok(Cors(Json(
         game_extended_to_show_response(
             player,
             &game_extended,
@@ -181,7 +181,7 @@ pub struct ShowResponse {
 pub async fn show(
     id: UuidParam,
     user: Option<models::User>,
-) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
+) -> Result<Cors<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
     let conn = &mut *CONN.r.get().context("error getting connection")?;
     let game_extended = query::find_game_extended(&id, conn)?;
@@ -192,7 +192,7 @@ pub async fn show(
             .find(|&gptu| u.id == gptu.user.id)
             .map(|gptu| &gptu.game_player)
     });
-    Ok(CORS(Json(
+    Ok(Cors(Json(
         game_extended_to_show_response(game_player, &game_extended, None, conn).await?,
     )))
 }
@@ -252,7 +252,7 @@ pub async fn command(
     user: models::User,
     pub_queue_tx: &State<Mutex<Sender<websocket::Message>>>,
     data: Json<CommandRequest>,
-) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
+) -> Result<Cors<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
@@ -368,7 +368,7 @@ pub async fn command(
         .iter()
         .find(|gptu| gptu.game_player.id == player.id)
         .map(|gptu| &gptu.game_player);
-    Ok(CORS(Json(
+    Ok(Cors(Json(
         game_extended_to_show_response(
             gp,
             &game_extended,
@@ -386,7 +386,7 @@ pub async fn undo(
     id: UuidParam,
     user: models::User,
     pub_queue_tx: &State<Mutex<Sender<websocket::Message>>>,
-) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
+) -> Result<Cors<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
@@ -484,7 +484,7 @@ pub async fn undo(
         .iter()
         .find(|gptu| gptu.game_player.id == player.id)
         .map(|gptu| &gptu.game_player);
-    Ok(CORS(Json(
+    Ok(Cors(Json(
         game_extended_to_show_response(
             gp,
             &game_extended,
@@ -501,12 +501,12 @@ pub async fn undo(
 pub fn mark_read(
     id: UuidParam,
     user: models::User,
-) -> Result<CORS<Json<Option<models::PublicGamePlayer>>>, ControllerError> {
+) -> Result<Cors<Json<Option<models::PublicGamePlayer>>>, ControllerError> {
     let id = id.into_uuid();
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
     conn.transaction::<_, ControllerError, _>(|conn| {
-        Ok(CORS(Json(
+        Ok(Cors(Json(
             query::mark_game_read(&id, &user.id, conn)
                 .context("error marking game read")?
                 .map(|gp| gp.into_public()),
@@ -519,7 +519,7 @@ pub async fn concede(
     id: UuidParam,
     user: models::User,
     pub_queue_tx: &State<Mutex<Sender<websocket::Message>>>,
-) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
+) -> Result<Cors<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
@@ -602,7 +602,7 @@ pub async fn concede(
         .iter()
         .find(|gptu| gptu.game_player.id == player.id)
         .map(|gptu| &gptu.game_player);
-    Ok(CORS(Json(
+    Ok(Cors(Json(
         game_extended_to_show_response(
             gp,
             &game_extended,
@@ -620,7 +620,7 @@ pub async fn restart(
     id: UuidParam,
     user: models::User,
     pub_queue_tx: &State<Mutex<Sender<websocket::Message>>>,
-) -> Result<CORS<Json<ShowResponse>>, ControllerError> {
+) -> Result<Cors<Json<ShowResponse>>, ControllerError> {
     let id = id.into_uuid();
     let user_id = user.id;
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
@@ -723,7 +723,7 @@ pub async fn restart(
         &tx,
     )?;
     websocket::enqueue_game_restarted(&id, &game_extended.game.id, &tokens, &tx)?;
-    Ok(CORS(Json(
+    Ok(Cors(Json(
         game_extended_to_show_response(
             player,
             &game_extended,

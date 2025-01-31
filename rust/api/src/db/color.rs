@@ -2,6 +2,7 @@ use anyhow::{anyhow, Error, Result};
 use rand::seq::SliceRandom;
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::str::FromStr;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -49,18 +50,21 @@ impl From<Color> for brdgme_color::Color {
     }
 }
 
-impl ToString for Color {
-    fn to_string(&self) -> String {
-        match *self {
-            Color::Green => "Green",
-            Color::Red => "Red",
-            Color::Blue => "Blue",
-            Color::Amber => "Amber",
-            Color::Purple => "Purple",
-            Color::Brown => "Brown",
-            Color::BlueGrey => "BlueGrey",
-        }
-        .to_string()
+impl fmt::Display for Color {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match *self {
+                Color::Green => "Green",
+                Color::Red => "Red",
+                Color::Blue => "Blue",
+                Color::Amber => "Amber",
+                Color::Purple => "Purple",
+                Color::Brown => "Brown",
+                Color::BlueGrey => "BlueGrey",
+            }
+        )
     }
 }
 
@@ -179,7 +183,7 @@ mod tests {
         assert_eq!(
             vec![Color::Amber, Color::Blue, Color::Green],
             choose(
-                &HashSet::from_iter(vec![Color::Amber, Color::Blue, Color::Green].iter()),
+                &HashSet::from_iter([Color::Amber, Color::Blue, Color::Green].iter()),
                 &[vec![], vec![Color::Blue, Color::Green], vec![Color::Green]],
             )
         );
@@ -191,7 +195,7 @@ mod tests {
         assert_eq!(
             vec![Color::Amber, Color::Amber, Color::Amber],
             choose(
-                &HashSet::from_iter(vec![Color::Amber].iter()),
+                &HashSet::from_iter([Color::Amber].iter()),
                 &[vec![], vec![Color::Blue, Color::Green], vec![Color::Green]],
             )
         );

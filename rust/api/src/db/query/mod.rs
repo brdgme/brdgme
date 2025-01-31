@@ -13,7 +13,6 @@ use brdgme_cmd::api::CliLog;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
-use std::usize::MAX as USIZE_MAX;
 
 use crate::db::color::{self, Color};
 use crate::db::models::*;
@@ -527,9 +526,9 @@ pub fn player_cannot_undo_set_undo_game_state(
 ) -> Result<Vec<GamePlayer>> {
     use crate::db::schema::game_players;
     diesel::update(game_players::table.filter(game_players::game_id.eq(game_id)))
-            .set(game_players::undo_game_state.eq(None::<String>))
-            .get_results(conn)
-            .context("error updating game players undo_game_state to None")
+        .set(game_players::undo_game_state.eq(None::<String>))
+        .get_results(conn)
+        .context("error updating game players undo_game_state to None")
 }
 
 pub struct UpdatedGame {
@@ -664,9 +663,9 @@ pub fn update_game_whose_turn(
     use crate::db::schema::game_players;
 
     diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
-            .set(game_players::is_turn.eq(game_players::position.eq_any(to_i32_vec(positions))))
-            .get_results(conn)
-            .context("error updating game players")
+        .set(game_players::is_turn.eq(game_players::position.eq_any(to_i32_vec(positions))))
+        .get_results(conn)
+        .context("error updating game players")
 }
 
 pub fn update_game_points(
@@ -710,12 +709,9 @@ pub fn update_game_eliminated(
     use crate::db::schema::game_players;
 
     diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
-            .set(
-                game_players::is_eliminated
-                    .eq(game_players::position.eq_any(to_i32_vec(positions))),
-            )
-            .get_results(conn)
-            .context("error updating game players")
+        .set(game_players::is_eliminated.eq(game_players::position.eq_any(to_i32_vec(positions))))
+        .get_results(conn)
+        .context("error updating game players")
 }
 
 pub fn update_game_placings(
@@ -736,9 +732,8 @@ pub fn update_game_placings(
 
         // We only update ratings if placings are provided and there haven't been any rating changes
         // yet.
-        let update_ratings: bool = !placings.is_empty()
-            && !game_players
-                .iter().any(|gp| gp.rating_change.is_some());
+        let update_ratings: bool =
+            !placings.is_empty() && !game_players.iter().any(|gp| gp.rating_change.is_some());
         if update_ratings {
             // We grab existing game type users up front.
             let game_player_type_users: Vec<(&GamePlayer, GameTypeUser)> = game_players
@@ -766,12 +761,12 @@ pub fn update_game_placings(
                     let a_score: f32 = match placings
                         .get(a_gp.position as usize)
                         .cloned()
-                        .unwrap_or(USIZE_MAX)
+                        .unwrap_or(usize::MAX)
                         .cmp(
                             &placings
                                 .get(b_gp.position as usize)
                                 .cloned()
-                                .unwrap_or(USIZE_MAX),
+                                .unwrap_or(usize::MAX),
                         ) {
                         Ordering::Less => 1.0,
                         Ordering::Equal => 0.5,
@@ -881,9 +876,9 @@ pub fn update_game_is_read(
     use crate::db::schema::game_players;
 
     diesel::update(game_players::table.filter(game_players::game_id.eq(id)))
-            .set(game_players::is_read.eq(game_players::id.eq_any(game_player_ids)))
-            .get_results(conn)
-            .context("error updating game players")
+        .set(game_players::is_read.eq(game_players::id.eq_any(game_player_ids)))
+        .get_results(conn)
+        .context("error updating game players")
 }
 
 pub fn create_game_logs_from_cli(

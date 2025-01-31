@@ -6,7 +6,7 @@ use rocket::serde::json::Json;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::controller::CORS;
+use crate::controller::Cors;
 use crate::db::models::*;
 use crate::db::{query, CONN};
 use crate::errors::ControllerError;
@@ -17,7 +17,7 @@ pub struct CreateForm {
 }
 
 #[post("/", data = "<data>")]
-pub fn create(data: Json<CreateForm>) -> Result<CORS<()>, ControllerError> {
+pub fn create(data: Json<CreateForm>) -> Result<Cors<()>, ControllerError> {
     let create_email = data.into_inner().email;
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
     let confirmation =
@@ -40,7 +40,7 @@ pub fn create(data: Json<CreateForm>) -> Result<CORS<()>, ControllerError> {
     //     )
     //     .context("unable to send login confirmation email")?;
 
-    Ok(CORS(()))
+    Ok(Cors(()))
 }
 
 #[derive(Deserialize)]
@@ -51,14 +51,14 @@ pub struct ConfirmRequest {
 
 #[post("/confirm", data = "<data>")]
 // pub fn confirm(data: Json<ConfirmRequest>) -> Result<CORS<Json<String>>> {
-pub fn confirm(data: Json<ConfirmRequest>) -> Result<CORS<Json<String>>, ControllerError> {
+pub fn confirm(data: Json<ConfirmRequest>) -> Result<Cors<Json<String>>, ControllerError> {
     let data = data.into_inner();
     let conn = &mut *CONN.w.get().context("unable to get connection")?;
 
     match query::user_login_confirm(&data.email, &data.code, conn)
         .context("unable to confirm login")?
     {
-        Some(token) => Ok(CORS(Json(token.id.to_string()))),
+        Some(token) => Ok(Cors(Json(token.id.to_string()))),
         None => Err(anyhow!("unable to confirm login").into()),
     }
 }

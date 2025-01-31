@@ -33,9 +33,9 @@ impl<'r> FromParam<'r> for UuidParam {
     }
 }
 
-pub struct CORS<R>(R);
+pub struct Cors<R>(R);
 
-impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CORS<R> {
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Cors<R> {
     fn respond_to(self, request: &'r Request) -> response::Result<'o> {
         let mut response = self.0.respond_to(request)?;
         response.set_raw_header("Access-Control-Allow-Origin", "*");
@@ -53,8 +53,8 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CORS<R> {
 }
 
 #[options("/<path..>")]
-pub fn options(path: PathBuf) -> CORS<()> {
-    CORS(())
+pub fn options(path: PathBuf) -> Cors<()> {
+    Cors(())
 }
 
 #[derive(Serialize, Debug)]
@@ -65,10 +65,10 @@ pub struct InitResponse {
 }
 
 #[get("/init")]
-pub fn init(user: Option<models::User>) -> Result<CORS<Json<InitResponse>>, ControllerError> {
+pub fn init(user: Option<models::User>) -> Result<Cors<Json<InitResponse>>, ControllerError> {
     let conn = &mut *CONN.r.get().context("unable to get connection")?;
 
-    Ok(CORS(Json(InitResponse {
+    Ok(Cors(Json(InitResponse {
         game_version_types: query::public_game_versions(conn)
             .context("unable to get public game versions")?
             .into_iter()
