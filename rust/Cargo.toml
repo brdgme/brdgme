@@ -15,6 +15,3 @@ members = [
     "tools/fuzz",
     "tools/repl",
 ]
-
-[build]
-rustflags = ["-g"]

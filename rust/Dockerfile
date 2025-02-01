@@ -5,7 +5,7 @@ FROM chef AS planner
 COPY rust .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM chef AS builder 
+FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --recipe-path recipe.json
@@ -19,11 +19,14 @@ WORKDIR /root
 COPY --from=builder /app/target/release/brdgme_api .
 CMD ["./brdgme_api"]
 
-FROM beefsack/webify:v1.3.0 AS acquire-1
-COPY --from=builder /app/target/release/acquire_1_cli /script
+FROM debian:bookworm-slim AS acquire-1
+COPY --from=builder /app/target/release/acquire_1_http .
+CMD ["./acquire_1_http"]
 
-FROM beefsack/webify:v1.3.0 AS lost-cities-1
-COPY --from=builder /app/target/release/lost_cities_1_cli /script
+FROM debian:bookworm-slim AS lost-cities-1
+COPY --from=builder /app/target/release/lost_cities_1_http .
+CMD ["./lost_cities_1_http"]
 
-FROM beefsack/webify:v1.3.0 AS lost-cities-2
-COPY --from=builder /app/target/release/lost_cities_2_cli /script
+FROM debian:bookworm-slim AS lost-cities-2
+COPY --from=builder /app/target/release/lost_cities_2_http .
+CMD ["./lost_cities_2_http"]

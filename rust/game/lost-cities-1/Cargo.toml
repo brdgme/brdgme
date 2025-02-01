@@ -12,3 +12,4 @@ brdgme_game = { path = "../../lib/game" }
 brdgme_markup = { path = "../../lib/markup" }
 rand = "0.9.0"
 serde = { version = "1.0.114", features = ["derive"] }
+tokio = { version = "1.43.0", features = ["full"] }
