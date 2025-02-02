@@ -13,10 +13,13 @@ spec:
         app: api
     spec:
       containers:
-      - name: api
-        image: brdgme/api
-        ports:
-        - containerPort: 8000
-        envFrom:
-        - secretRef:
-            name: postgres-config
+        - name: api
+          image: brdgme/api
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: postgres-config
+          env:
+            - name: ROCKET_ADDRESS
+              value: "0.0.0.0"
