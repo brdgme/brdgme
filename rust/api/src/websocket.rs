@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use lazy_static::lazy_static;
 use log::warn;
 use redis::{self, Client};
 use serde::Serialize;
@@ -15,10 +14,6 @@ use crate::controller::game::ShowResponse;
 use crate::db::models::*;
 use crate::db::query::{CreatedGameLog, PublicGameExtended};
 use crate::render;
-
-lazy_static! {
-    pub static ref CLIENT: Client = connect().unwrap();
-}
 
 pub fn connect() -> Result<Client> {
     Client::open(CONFIG.redis_url.as_ref()).context("unable to open client")
@@ -39,17 +34,20 @@ pub enum MessageKind {
 }
 
 pub struct PubQueue {
+    redis: Client,
     rx: Receiver<Message>,
 }
 
 impl PubQueue {
-    pub fn new() -> (Self, Sender<Message>) {
+    pub fn new() -> Result<(Self, Sender<Message>)> {
+        let redis = connect()?;
         let (tx, rx) = channel();
-        (PubQueue { rx }, tx)
+        Ok((PubQueue { redis, rx }, tx))
     }
 
     pub fn run(&self) -> Result<()> {
-        let mut conn = CLIENT
+        let mut conn = self
+            .redis
             .get_connection()
             .context("unable to get Redis connection from client")?;
         loop {

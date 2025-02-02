@@ -90,8 +90,7 @@ pub async fn create(
             .context("unable to create game")?;
             let created_logs = query::create_game_logs_from_cli(&created_game.game.id, logs, conn)
                 .context("unable to create game logs")?;
-            let mut user_ids = opponent_ids;
-            user_ids.push(user_id);
+            let user_ids: Vec<Uuid> = created_game.players.iter().map(|p| p.user_id).collect();
             Ok((
                 created_game,
                 created_logs,

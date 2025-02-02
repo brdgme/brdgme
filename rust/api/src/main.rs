@@ -26,7 +26,7 @@ use std::thread;
 
 #[launch]
 fn rocket() -> _ {
-    let (pub_queue, pub_queue_tx) = websocket::PubQueue::new();
+    let (pub_queue, pub_queue_tx) = websocket::PubQueue::new().expect("failed to create pub queue");
     thread::spawn(move || pub_queue.run());
 
     rocket::build()

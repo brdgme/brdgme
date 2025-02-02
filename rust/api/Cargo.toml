@@ -21,11 +21,21 @@ serde_json = "1.0.138"
 rocket = { version = "0.5.1", features = ["json"] }
 rocket_codegen = "0.5.1"
 email = "0.0.21"
-diesel = { version = "2.2.6", features = ["postgres", "uuid", "chrono", "32-column-tables"] }
+diesel = { version = "2.2.6", features = [
+    "postgres",
+    "uuid",
+    "chrono",
+    "32-column-tables",
+] }
 r2d2-diesel = "1.0.0"
 unicase = "2.8.1"
 redis = "0.28.2"
 anyhow = "1.0.95"
 thiserror = "2.0.11"
 bytes = "1.9.0"
-reqwest = { version = "0.12", default-features = false, features = ["http2", "charset", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "http2",
+    "charset",
+    "json",
+    "rustls-tls",
+] }
