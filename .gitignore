@@ -2,6 +2,8 @@ target
 .idea
 /bazel-*
 .vscode
+.sass-cache
+
 # Devenv
 .devenv*
 devenv.local.nix
