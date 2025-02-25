@@ -105,8 +105,8 @@ export const submitCodeFail = (): ISubmitCodeFail => ({
   type: SUBMIT_CODE_FAIL,
 });
 
-export type Action
-  = IUpdateEmail
+export type Action =
+  | IUpdateEmail
   | IUpdateCode
   | IUpdateMode
   | ISubmitEmail
@@ -114,19 +114,27 @@ export type Action
   | ISubmitEmailFail
   | ISubmitCode
   | ISubmitCodeSuccess
-  | ISubmitCodeFail
-  ;
+  | ISubmitCodeFail;
 
 export function reducer(state = new State(), action: Action): State {
   switch (action.type) {
-    case UPDATE_EMAIL: return state.set("email", action.payload);
-    case UPDATE_CODE: return state.set("code", action.payload);
-    case UPDATE_MODE: return state.set("mode", action.payload);
-    case SUBMIT_EMAIL: return state.set("mode", Mode.SubmittingEmail);
-    case SUBMIT_EMAIL_SUCCESS: return state.set("mode", Mode.EnteringCode);
-    case SUBMIT_EMAIL_FAIL: return state.set("mode", Mode.EnteringEmail);
-    case SUBMIT_CODE: return state.set("mode", Mode.SubmittingCode);
-    case SUBMIT_CODE_FAIL: return state.set("mode", Mode.EnteringCode);
-    default: return state;
+    case UPDATE_EMAIL:
+      return state.set("email", action.payload);
+    case UPDATE_CODE:
+      return state.set("code", action.payload);
+    case UPDATE_MODE:
+      return state.set("mode", action.payload);
+    case SUBMIT_EMAIL:
+      return state.set("mode", Mode.SubmittingEmail);
+    case SUBMIT_EMAIL_SUCCESS:
+      return state.set("mode", Mode.EnteringCode);
+    case SUBMIT_EMAIL_FAIL:
+      return state.set("mode", Mode.EnteringEmail);
+    case SUBMIT_CODE:
+      return state.set("mode", Mode.SubmittingCode);
+    case SUBMIT_CODE_FAIL:
+      return state.set("mode", Mode.EnteringCode);
+    default:
+      return state;
   }
 }

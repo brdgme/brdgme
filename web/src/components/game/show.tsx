@@ -52,7 +52,7 @@ interface IPropHandlers {
   onRedirect: (path: string) => void;
 }
 
-interface IProps extends IPropValues, IPropHandlers { }
+interface IProps extends IPropValues, IPropHandlers {}
 
 export class Component extends React.PureComponent<IProps, {}> {
   constructor(props: IProps, context?: any) {
@@ -63,7 +63,8 @@ export class Component extends React.PureComponent<IProps, {}> {
     this.focusCommandInput = this.focusCommandInput.bind(this);
     this.onCommandSubmit = this.onCommandSubmit.bind(this);
     this.handleSubMenuButtonClick = this.handleSubMenuButtonClick.bind(this);
-    this.handleSuggestionsContainerClick = this.handleSuggestionsContainerClick.bind(this);
+    this.handleSuggestionsContainerClick =
+      this.handleSuggestionsContainerClick.bind(this);
     this.handleCommandFocus = this.handleCommandFocus.bind(this);
     this.handleCommandBlur = this.handleCommandBlur.bind(this);
     this.renderMetaPlayer = this.renderMetaPlayer.bind(this);
@@ -71,62 +72,70 @@ export class Component extends React.PureComponent<IProps, {}> {
 
   public render(): JSX.Element {
     return (
-      <Layout
-        onSubMenuButtonClick={this.handleSubMenuButtonClick}
-      >
+      <Layout onSubMenuButtonClick={this.handleSubMenuButtonClick}>
         <div className="game-container">
           <div className="game-main">
             <div className="game-render">
-              {this.props.game && this.props.game.html
-                && <pre
+              {(this.props.game && this.props.game.html && (
+                <pre
                   dangerouslySetInnerHTML={{ __html: this.props.game.html }}
                 />
-                || <Spinner />
-              }
+              )) || <Spinner />}
             </div>
             {this.renderRecentLogs()}
             {this.renderSuggestionBox()}
             {!this.isMyTurn() && this.renderWhoseTurn()}
-            {this.isMyTurn() && this.props.game && this.props.game.game_player && <div
-              className={classNames({
-                "disabled": this.props.submittingCommand,
-                "game-command-input": true,
-              })}
-            >
-              {this.props.commandError && <div className="command-error">
-                {this.props.commandError}
-              </div>}
-              <form onSubmit={this.onCommandSubmit}>
-                <input
-                  ref="command"
-                  type="text"
-                  value={this.props.command}
-                  onChange={this.onCommandInputChange}
-                  onClick={this.onCommandPositionChange}
-                  onKeyUp={this.onCommandPositionChange}
-                  onFocus={this.handleCommandFocus}
-                  onBlur={this.handleCommandBlur}
-                  placeholder={!this.commandInputDisabled() && "Enter command..." || undefined}
-                  disabled={this.commandInputDisabled()}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                />
-                <input
-                  type="submit"
-                  value="Send"
-                  disabled={this.commandInputDisabled()}
-                />
-              </form>
-            </div>}
+            {this.isMyTurn() &&
+              this.props.game &&
+              this.props.game.game_player && (
+                <div
+                  className={classNames({
+                    disabled: this.props.submittingCommand,
+                    "game-command-input": true,
+                  })}
+                >
+                  {this.props.commandError && (
+                    <div className="command-error">
+                      {this.props.commandError}
+                    </div>
+                  )}
+                  <form onSubmit={this.onCommandSubmit}>
+                    <input
+                      ref="command"
+                      type="text"
+                      value={this.props.command}
+                      onChange={this.onCommandInputChange}
+                      onClick={this.onCommandPositionChange}
+                      onKeyUp={this.onCommandPositionChange}
+                      onFocus={this.handleCommandFocus}
+                      onBlur={this.handleCommandBlur}
+                      placeholder={
+                        (!this.commandInputDisabled() && "Enter command...") ||
+                        undefined
+                      }
+                      disabled={this.commandInputDisabled()}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                    />
+                    <input
+                      type="submit"
+                      value="Send"
+                      disabled={this.commandInputDisabled()}
+                    />
+                  </form>
+                </div>
+              )}
           </div>
           {this.renderMeta()}
         </div>
-        {this.props.subMenuOpen && <div
-          className="game-meta-close-underlay"
-          onClick={this.handleSubMenuButtonClick}
-        />}
+        {this.props.subMenuOpen && (
+          <div
+            className="game-meta-close-underlay"
+            onClick={this.handleSubMenuButtonClick}
+          />
+        )}
       </Layout>
     );
   }
@@ -149,16 +158,20 @@ export class Component extends React.PureComponent<IProps, {}> {
   }
 
   public componentDidUpdate(prevProps: IProps, prevState: {}) {
-    const prevLogLen = prevProps.game
-      && prevProps.game.game_logs
-      && prevProps.game.game_logs.size
-      || 0;
-    const nextLogLen = this.props.game
-      && this.props.game.game_logs
-      && this.props.game.game_logs.size
-      || 0;
-    if (nextLogLen > prevLogLen ||
-      !prevProps.subMenuOpen && this.props.subMenuOpen) {
+    const prevLogLen =
+      (prevProps.game &&
+        prevProps.game.game_logs &&
+        prevProps.game.game_logs.size) ||
+      0;
+    const nextLogLen =
+      (this.props.game &&
+        this.props.game.game_logs &&
+        this.props.game.game_logs.size) ||
+      0;
+    if (
+      nextLogLen > prevLogLen ||
+      (!prevProps.subMenuOpen && this.props.subMenuOpen)
+    ) {
       // New logs, scroll to bottom.
       this.scrollToLastLog();
     }
@@ -174,8 +187,9 @@ export class Component extends React.PureComponent<IProps, {}> {
       return [];
     }
     const commandSpec = this.props.game.command_spec.toJS();
-    const names =
-      this.props.game.game_players.map((gptu) => gptu.user.name).toArray();
+    const names = this.props.game.game_players
+      .map((gptu) => gptu.user.name)
+      .toArray();
     const fullCommand = Command.parse(
       this.props.command,
       0,
@@ -189,13 +203,21 @@ export class Component extends React.PureComponent<IProps, {}> {
       // Use the end of the last match, or the start of the current word if
       // the last match ends at the end of the last word.
       const lastMatch = Command.lastMatch(fullCommand);
-      if (!this.props.command.substr(lastMatch.offset, this.props.commandPos - lastMatch.offset).match(/\s/)) {
+      if (
+        !this.props.command
+          .substr(lastMatch.offset, this.props.commandPos - lastMatch.offset)
+          .match(/\s/)
+      ) {
         start = lastMatch.offset;
       }
     }
     if (start !== undefined) {
       const upToStart = Command.parse(
-        this.props.command.substr(0, start), 0, commandSpec, names);
+        this.props.command.substr(0, start),
+        0,
+        commandSpec,
+        names,
+      );
       allSuggestions = Command.suggestions(upToStart, start);
     }
     return suggestions;
@@ -206,12 +228,16 @@ export class Component extends React.PureComponent<IProps, {}> {
     if (logs.size === 0) {
       return undefined;
     }
-    return <div className="recent-logs-container">
-      <div className="recent-logs-header">Recent logs</div>
-      <div ref="recentLogs" className="recent-logs">
-        {logs.map((l) => <div dangerouslySetInnerHTML={{ __html: l.html }} />)}
+    return (
+      <div className="recent-logs-container">
+        <div className="recent-logs-header">Recent logs</div>
+        <div ref="recentLogs" className="recent-logs">
+          {logs.map((l) => (
+            <div dangerouslySetInnerHTML={{ __html: l.html }} />
+          ))}
+        </div>
       </div>
-    </div >;
+    );
   }
 
   private renderSuggestionBox(): JSX.Element | undefined {
@@ -219,32 +245,45 @@ export class Component extends React.PureComponent<IProps, {}> {
     if (suggestions.length === 0) {
       return undefined;
     }
-    return <div
-      className="suggestions-container"
-      onClick={this.handleSuggestionsContainerClick}
-    >
-      <div className="suggestions-content">
-        {this.renderSuggestions(suggestions)}
+    return (
+      <div
+        className="suggestions-container"
+        onClick={this.handleSuggestionsContainerClick}
+      >
+        <div className="suggestions-content">
+          {this.renderSuggestions(suggestions)}
+        </div>
       </div>
-    </div>;
+    );
   }
 
   private renderSuggestionDoc(s: Command.ISuggestionDoc): JSX.Element {
     // Render doc for a single command on one line.
-    if (s.values.length === 1 && s.values[0].kind === Command.SUGGESTION_VALUE) {
-      return <div className="suggestion-doc-item">
-        {this.renderSuggestionValueLink(s.values[0] as Command.ISuggestionValue)}
-        {s.desc && <span className="suggestion-doc-desc"> - {s.desc}</span>}
-      </div>;
+    if (
+      s.values.length === 1 &&
+      s.values[0].kind === Command.SUGGESTION_VALUE
+    ) {
+      return (
+        <div className="suggestion-doc-item">
+          {this.renderSuggestionValueLink(
+            s.values[0] as Command.ISuggestionValue,
+          )}
+          {s.desc && <span className="suggestion-doc-desc"> - {s.desc}</span>}
+        </div>
+      );
     }
-    return <div className="suggestion-doc">
-      {s.desc && <div className="suggestion-doc-header">
-        {s.desc && <span className="suggestion-doc-desc">{s.desc}</span>}
-      </div>}
-      <div className="suggestion-doc-values">
-        {this.renderSuggestions(s.values)}
+    return (
+      <div className="suggestion-doc">
+        {s.desc && (
+          <div className="suggestion-doc-header">
+            {s.desc && <span className="suggestion-doc-desc">{s.desc}</span>}
+          </div>
+        )}
+        <div className="suggestion-doc-values">
+          {this.renderSuggestions(s.values)}
+        </div>
       </div>
-    </div>;
+    );
   }
 
   private renderSuggestions(suggestions: Command.Suggestion[]): JSX.Element {
@@ -255,32 +294,42 @@ export class Component extends React.PureComponent<IProps, {}> {
     }
     */
     // Render suggestions on one line if they're all values.
-    if (suggestions.find((s) => s.kind === Command.SUGGESTION_DOC) === undefined) {
+    if (
+      suggestions.find((s) => s.kind === Command.SUGGESTION_DOC) === undefined
+    ) {
       const sLen = suggestions.length;
-      return <div>
-        {suggestions.map((s, index) => <span>
-          {this.renderSuggestionValueLink(s as Command.ISuggestionValue)}
-          {index < sLen - 1 && " "}
-        </span>)}
-      </div>;
+      return (
+        <div>
+          {suggestions.map((s, index) => (
+            <span>
+              {this.renderSuggestionValueLink(s as Command.ISuggestionValue)}
+              {index < sLen - 1 && " "}
+            </span>
+          ))}
+        </div>
+      );
     }
     // Otherwise render suggestions on separate lines.
-    return <div>
-      {suggestions.map((s) => {
-        switch (s.kind) {
-          case Command.SUGGESTION_VALUE:
-            return <div>
-              {this.renderSuggestionValueLink(s)}
-            </div>;
-          case Command.SUGGESTION_DOC:
-            return this.renderSuggestionDoc(s);
-        }
-      })}
-    </div>;
+    return (
+      <div>
+        {suggestions.map((s) => {
+          switch (s.kind) {
+            case Command.SUGGESTION_VALUE:
+              return <div>{this.renderSuggestionValueLink(s)}</div>;
+            case Command.SUGGESTION_DOC:
+              return this.renderSuggestionDoc(s);
+          }
+        })}
+      </div>
+    );
   }
 
   private recentLogs(): Immutable.List<Records.GameLogRendered> {
-    if (!this.props.game || !this.props.game.game_logs || !this.props.game.game_player) {
+    if (
+      !this.props.game ||
+      !this.props.game.game_logs ||
+      !this.props.game.game_player
+    ) {
       return Immutable.List();
     }
     const gp = this.props.game.game_player;
@@ -289,32 +338,45 @@ export class Component extends React.PureComponent<IProps, {}> {
     );
   }
 
-  private renderSuggestionsSummary(suggestions: Command.Suggestion[]): JSX.Element {
+  private renderSuggestionsSummary(
+    suggestions: Command.Suggestion[],
+  ): JSX.Element {
     const values = Command.suggestionValues(suggestions);
     const vLen = values.length;
     if (vLen === 0) {
       return <div />;
     }
-    return <div>You can {values.map((v, index) => <span>
-      <strong>{v}</strong>
-      {index < vLen - 2 && ", "}
-      {index === vLen - 2 && " or "}
-    </span>)}</div>;
+    return (
+      <div>
+        You can{" "}
+        {values.map((v, index) => (
+          <span>
+            <strong>{v}</strong>
+            {index < vLen - 2 && ", "}
+            {index === vLen - 2 && " or "}
+          </span>
+        ))}
+      </div>
+    );
   }
 
   private renderSuggestionValueLink(s: Command.ISuggestionValue): JSX.Element {
-    return <a onClick={(e) => {
-      e.preventDefault();
-      this.onCommandChange(
-        this.props.command.substr(0, s.offset)
-        + s.value
-        + " "
-        + this.props.command.substr(s.offset + (s.length || 0)),
-        s.offset + s.value.length + 1,
-      );
-    }}>
-      {s.value}
-    </a>;
+    return (
+      <a
+        onClick={(e) => {
+          e.preventDefault();
+          this.onCommandChange(
+            this.props.command.substr(0, s.offset) +
+              s.value +
+              " " +
+              this.props.command.substr(s.offset + (s.length || 0)),
+            s.offset + s.value.length + 1,
+          );
+        }}
+      >
+        {s.value}
+      </a>
+    );
   }
 
   private commandInputDisabled(): boolean {
@@ -327,8 +389,10 @@ export class Component extends React.PureComponent<IProps, {}> {
     if (this.props.game.game.is_finished) {
       return true;
     }
-    if (this.props.game.game_player === undefined
-      || !this.props.game.game_player.is_turn) {
+    if (
+      this.props.game.game_player === undefined ||
+      !this.props.game.game_player.is_turn
+    ) {
       return true;
     }
     return false;
@@ -346,92 +410,138 @@ export class Component extends React.PureComponent<IProps, {}> {
   }
 
   private renderMeta(): JSX.Element {
-    return <div className={classNames({
-      "game-meta": true,
-      "open": this.props.subMenuOpen,
-    })}>
-      <div className="game-meta-main">
-        {this.props.game && <div>
-          <h2>{this.props.game.game_type && this.props.game.game_type.name}</h2>
-          {this.props.game.game_players && this.props.game.game_players.map(this.renderMetaPlayer)}
-          {this.props.game.game_player && <div>
-            <h3>Actions</h3>
-            {!this.props.game.game.is_finished && this.props.game.game_players.size <= 2 && <div>
-              <a onClick={(e) => {
-                e.preventDefault();
-                if (confirm("Are you sure you want to concede?")) {
-                  this.props.onConcede(this.props.gameId);
-                }
-              }}>Concede</a>
-            </div>}
-            {this.props.game.game_player.can_undo && <div>
-              <a onClick={(e) => {
-                e.preventDefault();
-                this.props.onUndo(this.props.gameId);
-              }}>Undo</a>
-            </div>}
-            {this.props.game.game.restarted_game_id && <div>
-              <a onClick={(e) => {
-                e.preventDefault();
-                this.props.onRedirect(`/game/${this.props.game!.game.restarted_game_id}`);
-              }}>Go to restarted game</a>
-            </div>}
-            {this.props.game.game_player
-              && this.props.game.game.is_finished
-              && !this.props.game.game.restarted_game_id
-              && <div>
-                <a onClick={(e) => {
-                  e.preventDefault();
-                  this.props.onRestart(this.props.gameId);
-                }}>Restart</a>
-              </div>}
-          </div>}
-        </div>}
-      </div>
-      <div className="game-meta-logs">
-        <h2>Logs</h2>
-        <div className="game-meta-logs-content" ref="gameLogs">
-          {this.renderLogs()}
+    return (
+      <div
+        className={classNames({
+          "game-meta": true,
+          open: this.props.subMenuOpen,
+        })}
+      >
+        <div className="game-meta-main">
+          {this.props.game && (
+            <div>
+              <h2>
+                {this.props.game.game_type && this.props.game.game_type.name}
+              </h2>
+              {this.props.game.game_players &&
+                this.props.game.game_players.map(this.renderMetaPlayer)}
+              {this.props.game.game_player && (
+                <div>
+                  <h3>Actions</h3>
+                  {!this.props.game.game.is_finished &&
+                    this.props.game.game_players.size <= 2 && (
+                      <div>
+                        <a
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (confirm("Are you sure you want to concede?")) {
+                              this.props.onConcede(this.props.gameId);
+                            }
+                          }}
+                        >
+                          Concede
+                        </a>
+                      </div>
+                    )}
+                  {this.props.game.game_player.can_undo && (
+                    <div>
+                      <a
+                        onClick={(e) => {
+                          e.preventDefault();
+                          this.props.onUndo(this.props.gameId);
+                        }}
+                      >
+                        Undo
+                      </a>
+                    </div>
+                  )}
+                  {this.props.game.game.restarted_game_id && (
+                    <div>
+                      <a
+                        onClick={(e) => {
+                          e.preventDefault();
+                          this.props.onRedirect(
+                            `/game/${this.props.game!.game.restarted_game_id}`,
+                          );
+                        }}
+                      >
+                        Go to restarted game
+                      </a>
+                    </div>
+                  )}
+                  {this.props.game.game_player &&
+                    this.props.game.game.is_finished &&
+                    !this.props.game.game.restarted_game_id && (
+                      <div>
+                        <a
+                          onClick={(e) => {
+                            e.preventDefault();
+                            this.props.onRestart(this.props.gameId);
+                          }}
+                        >
+                          Restart
+                        </a>
+                      </div>
+                    )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="game-meta-logs">
+          <h2>Logs</h2>
+          <div className="game-meta-logs-content" ref="gameLogs">
+            {this.renderLogs()}
+          </div>
         </div>
       </div>
-    </div>;
+    );
   }
 
   private renderMetaPlayer(gp: Records.GamePlayerTypeUser): JSX.Element {
-    return <div>
+    return (
       <div>
-        <Player
-          name={gp.user.name}
-          color={gp.game_player.color}
-        />
-      </div>
-      <div style={{
-        marginLeft: "1em",
-      }}>
         <div>
-          <abbr
-            title="ELO rating, new players start at 1200"
-            style={{
-              cursor: "help",
-            }}
-          >Rating</abbr>
-          :&nbsp;
-          {gp.game_type_user.rating}
-          {typeof gp.game_player.rating_change === "number" &&
-            <span> ({this.renderRatingChange(gp.game_player.rating_change)})</span>}
+          <Player name={gp.user.name} color={gp.game_player.color} />
         </div>
-        {gp.game_player.points !== undefined && <div>
-          Points: {gp.game_player.points}
-        </div>}
+        <div
+          style={{
+            marginLeft: "1em",
+          }}
+        >
+          <div>
+            <abbr
+              title="ELO rating, new players start at 1200"
+              style={{
+                cursor: "help",
+              }}
+            >
+              Rating
+            </abbr>
+            :&nbsp;
+            {gp.game_type_user.rating}
+            {typeof gp.game_player.rating_change === "number" && (
+              <span>
+                {" "}
+                ({this.renderRatingChange(gp.game_player.rating_change)})
+              </span>
+            )}
+          </div>
+          {gp.game_player.points !== undefined && (
+            <div>Points: {gp.game_player.points}</div>
+          )}
+        </div>
       </div>
-    </div>;
+    );
   }
 
   private renderRatingChange(amount: number): JSX.Element {
-    return <span className="rating-change">
-      {this.renderRatingChangeIcon(amount)}
-      {Math.abs(amount)}
-    </span>;
+    return (
+      <span className="rating-change">
+        {this.renderRatingChangeIcon(amount)}
+        {Math.abs(amount)}
+      </span>
+    );
   }
 
   private renderRatingChangeIcon(amount: number): JSX.Element {
@@ -445,10 +555,12 @@ export class Component extends React.PureComponent<IProps, {}> {
   }
 
   private isMyTurn(): boolean {
-    return this.props.game
-      && this.props.game.game_player
-      && this.props.game.game_player.is_turn
-      || false;
+    return (
+      (this.props.game &&
+        this.props.game.game_player &&
+        this.props.game.game_player.is_turn) ||
+      false
+    );
   }
 
   private renderWhoseTurn(): JSX.Element[] {
@@ -462,40 +574,50 @@ export class Component extends React.PureComponent<IProps, {}> {
       content.push(<strong>Your turn!</strong>);
     }
     if (opponentWhoseTurn.size > 0) {
-      const opponents = opponentWhoseTurn.map((o) => <span> <Player
-        name={o.user.name}
-        color={o.game_player.color}
-      /></span>);
+      const opponents = opponentWhoseTurn.map((o) => (
+        <span>
+          {" "}
+          <Player name={o.user.name} color={o.game_player.color} />
+        </span>
+      ));
       if (isMyTurn) {
         content.push(<span> (also{opponents})</span>);
       } else {
         content.push(<span>Waiting on{opponents}</span>);
       }
     }
-    return [<div className={classNames({
-      "game-current-turn": true,
-      "my-turn": isMyTurn,
-    })}>
-      {content}
-    </div>];
+    return [
+      <div
+        className={classNames({
+          "game-current-turn": true,
+          "my-turn": isMyTurn,
+        })}
+      >
+        {content}
+      </div>,
+    ];
   }
 
   private opponentWhoseTurn(): Immutable.List<Records.GamePlayerTypeUser> {
-    return (this.props.game
-      && this.props.game.game_players.filter((gp) => {
-        if (gp === undefined) {
-          return false;
-        }
-        if (gp.game_player.is_turn === false) {
-          return false;
-        }
-        if (this.props.game!.game_player
-          && this.props.game!.game_player!.id === gp.game_player.id) {
-          return false;
-        }
-        return true;
-      })
-      || Immutable.List());
+    return (
+      (this.props.game &&
+        this.props.game.game_players.filter((gp) => {
+          if (gp === undefined) {
+            return false;
+          }
+          if (gp.game_player.is_turn === false) {
+            return false;
+          }
+          if (
+            this.props.game!.game_player &&
+            this.props.game!.game_player!.id === gp.game_player.id
+          ) {
+            return false;
+          }
+          return true;
+        })) ||
+      Immutable.List()
+    );
   }
 
   private fetchGameIfRequired(props: IProps) {
@@ -529,34 +651,40 @@ export class Component extends React.PureComponent<IProps, {}> {
   }
 
   private renderLogs(): JSX.Element {
-    if (this.props.game === undefined || this.props.game.game_logs === undefined) {
+    if (
+      this.props.game === undefined ||
+      this.props.game.game_logs === undefined
+    ) {
       return <div />;
     }
     const logs = this.props.game.game_logs;
     let lastLog: moment.Moment;
-    const renderedLogs: JSX.Element[] = logs.map((gl) => {
-      let timeEl: JSX.Element = <div />;
-      const logTime = moment.utc(gl.game_log.logged_at);
-      if (lastLog === undefined || logTime.clone().subtract(10, "minutes").isAfter(lastLog)) {
-        timeEl = (
-          <div className="log-time">- {this.formatLogTime(logTime)} -</div>
+    const renderedLogs: JSX.Element[] = logs
+      .map((gl) => {
+        let timeEl: JSX.Element = <div />;
+        const logTime = moment.utc(gl.game_log.logged_at);
+        if (
+          lastLog === undefined ||
+          logTime.clone().subtract(10, "minutes").isAfter(lastLog)
+        ) {
+          timeEl = (
+            <div className="log-time">- {this.formatLogTime(logTime)} -</div>
+          );
+        }
+        lastLog = logTime;
+        return (
+          <div className="game-log-entry">
+            {timeEl}
+            <div dangerouslySetInnerHTML={{ __html: gl.html }} />
+          </div>
         );
-      }
-      lastLog = logTime;
-      return (
-        <div className="game-log-entry">
-          {timeEl}
-          <div dangerouslySetInnerHTML={{ __html: gl.html }} />
-        </div>
-      );
-    }).toArray();
+      })
+      .toArray();
     return <div>{renderedLogs}</div>;
   }
 
   private commandSpec(): Immutable.Map<any, any> | undefined {
-    return this.props.game
-      && this.props.game.command_spec
-      || undefined;
+    return (this.props.game && this.props.game.command_spec) || undefined;
   }
 
   private onCommandInputChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -579,8 +707,10 @@ export class Component extends React.PureComponent<IProps, {}> {
   }
 
   private onCommandChange(command: string, commandPos: number) {
-    if (command !== this.props.command
-      || commandPos !== this.props.commandPos) {
+    if (
+      command !== this.props.command ||
+      commandPos !== this.props.commandPos
+    ) {
       this.props.onCommandChange(command, commandPos, this.commandSpec());
     }
   }
@@ -627,9 +757,13 @@ function mapStateToProps(state: AppState, ownProps: IOwnProps): IPropValues {
   };
 }
 
-function mapDispatchToProps(dispatch: Redux.Dispatch<{}>, ownProps: IOwnProps): IPropHandlers {
+function mapDispatchToProps(
+  dispatch: Redux.Dispatch<{}>,
+  ownProps: IOwnProps,
+): IPropHandlers {
   return {
-    onCommand: (gameId, command) => dispatch(Game.submitCommand(gameId, command)),
+    onCommand: (gameId, command) =>
+      dispatch(Game.submitCommand(gameId, command)),
     onCommandFocus: () => dispatch(GameShow.commandFocus()),
     onCommandBlur: () => dispatch(GameShow.commandBlur()),
     onCommandChange: (command, commandPos, commandSpec) =>

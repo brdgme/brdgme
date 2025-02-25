@@ -1,18 +1,21 @@
 export interface ICommandSpec {
-  Int?: { min?: number, max?: number };
+  Int?: { min?: number; max?: number };
   Token?: string;
-  Enum?: { values: string[], exact: boolean };
+  Enum?: { values: string[]; exact: boolean };
   OneOf?: CommandSpec[];
   Chain?: CommandSpec[];
-  Many?: { min?: number, max?: number, delim?: CommandSpec, spec: CommandSpec };
+  Many?: { min?: number; max?: number; delim?: CommandSpec; spec: CommandSpec };
   Opt?: CommandSpec;
-  Doc?: { name: string, desc?: string, spec: CommandSpec };
+  Doc?: { name: string; desc?: string; spec: CommandSpec };
 }
 
 export const COMMAND_SPEC_PLAYER = "Player";
 export const COMMAND_SPEC_SPACE = "Space";
 
-export type CommandSpec = ICommandSpec | typeof COMMAND_SPEC_PLAYER | typeof COMMAND_SPEC_SPACE;
+export type CommandSpec =
+  | ICommandSpec
+  | typeof COMMAND_SPEC_PLAYER
+  | typeof COMMAND_SPEC_SPACE;
 
 export interface IParseResult {
   kind: typeof MATCH_FULL | typeof MATCH_PARTIAL | typeof MATCH_ERROR;
@@ -37,7 +40,7 @@ export const MATCH_ERROR = "0_MATCH_ERROR";
  */
 function potentialIntValues(min?: number, max?: number): number[] {
   const start = min || 1;
-  const end = max || (start + 4);
+  const end = max || start + 4;
   const values: number[] = [];
   for (let i = start; i <= end; i++) {
     values.push(i);
@@ -46,7 +49,12 @@ function potentialIntValues(min?: number, max?: number): number[] {
 }
 
 const intRegex = /\-?\d+/;
-export function parseIntSpec(input: string, offset: number, min?: number, max?: number): IParseResult {
+export function parseIntSpec(
+  input: string,
+  offset: number,
+  min?: number,
+  max?: number,
+): IParseResult {
   // First we see if we have an actual integer match.
   const intMatches = intRegex.exec(input.substr(offset));
   // We also do an enum match so we can provide suggestions.
@@ -104,7 +112,12 @@ export function commonPrefix(s1: string, s2: string): string {
   return s1.substr(0, iterBound);
 }
 
-export function parseEnum(input: string, offset: number, values: string[], exact: boolean): IParseResult {
+export function parseEnum(
+  input: string,
+  offset: number,
+  values: string[],
+  exact: boolean,
+): IParseResult {
   let matches: IParseResult[] = [];
   let length = 0;
   for (const v of values) {
@@ -130,7 +143,9 @@ export function parseEnum(input: string, offset: number, values: string[], exact
   }
   if (matches.length === 1 && (matches[0].length || 0) > 0) {
     return Object.assign({}, matches[0], {
-      kind: (matches[0].kind === MATCH_FULL || !exact) && MATCH_FULL || MATCH_PARTIAL,
+      kind:
+        ((matches[0].kind === MATCH_FULL || !exact) && MATCH_FULL) ||
+        MATCH_PARTIAL,
     });
   }
   for (const m of matches) {
@@ -147,7 +162,11 @@ export function parseEnum(input: string, offset: number, values: string[], exact
   };
 }
 
-export function parseToken(input: string, offset: number, token: string): IParseResult {
+export function parseToken(
+  input: string,
+  offset: number,
+  token: string,
+): IParseResult {
   if (offset >= input.length) {
     return {
       kind: MATCH_PARTIAL,
@@ -163,7 +182,10 @@ export function parseToken(input: string, offset: number, token: string): IParse
       value: "",
     };
   }
-  const prefix = commonPrefix(input.substr(offset, tLen).toLowerCase(), token.toLowerCase());
+  const prefix = commonPrefix(
+    input.substr(offset, tLen).toLowerCase(),
+    token.toLowerCase(),
+  );
   const prefixLen = prefix.length;
   if (prefixLen === 0) {
     return {
@@ -173,7 +195,7 @@ export function parseToken(input: string, offset: number, token: string): IParse
     };
   }
   return {
-    kind: tLen === prefixLen && MATCH_FULL || MATCH_PARTIAL,
+    kind: (tLen === prefixLen && MATCH_FULL) || MATCH_PARTIAL,
     offset,
     length: prefixLen,
     value: token,
@@ -194,7 +216,7 @@ export function parseSpace(input: string, offset: number): IParseResult {
       kind: MATCH_FULL,
       offset,
       length: matches[0].length,
-      value: input.slice(offset, offset+matches[0].length),
+      value: input.slice(offset, offset + matches[0].length),
     };
   }
   return {
@@ -204,7 +226,12 @@ export function parseSpace(input: string, offset: number): IParseResult {
   };
 }
 
-export function parseOneOf(input: string, offset: number, specs: CommandSpec[], names: string[]): IParseResult {
+export function parseOneOf(
+  input: string,
+  offset: number,
+  specs: CommandSpec[],
+  names: string[],
+): IParseResult {
   let success = 0;
   const results: IParseResult[] = specs.map((s) => {
     const res = parse(input, offset, s, names);
@@ -220,7 +247,14 @@ export function parseOneOf(input: string, offset: number, specs: CommandSpec[], 
   };
 }
 
-export function parseDoc(input: string, offset: number, name: string, spec: CommandSpec, names: string[], desc?: string): IParseResult {
+export function parseDoc(
+  input: string,
+  offset: number,
+  name: string,
+  spec: CommandSpec,
+  names: string[],
+  desc?: string,
+): IParseResult {
   return {
     kind: MATCH_FULL,
     offset,
@@ -239,7 +273,11 @@ export interface IFlatResult {
  * version of the best matching branch.
  */
 export function flattenResult(result: IParseResult): IFlatResult {
-  if (result.kind !== MATCH_FULL || result.next === undefined || result.next.length === 0) {
+  if (
+    result.kind !== MATCH_FULL ||
+    result.next === undefined ||
+    result.next.length === 0
+  ) {
     return {
       flat: result,
       combined: result,
@@ -248,12 +286,11 @@ export function flattenResult(result: IParseResult): IFlatResult {
   let best: IFlatResult | undefined;
   for (const n of result.next) {
     const nFlat = flattenResult(n);
-    if (best === undefined
-      || nFlat.combined.kind > best.combined.kind
-      || (
-        nFlat.combined.kind === best.combined.kind
-        && (nFlat.combined.length || 0) > (best.combined.length || 0)
-      )
+    if (
+      best === undefined ||
+      nFlat.combined.kind > best.combined.kind ||
+      (nFlat.combined.kind === best.combined.kind &&
+        (nFlat.combined.length || 0) > (best.combined.length || 0))
     ) {
       best = nFlat;
     }
@@ -274,7 +311,10 @@ export function flattenResult(result: IParseResult): IFlatResult {
 /**
  * Appends the result as leaves to every branch of the tree.
  */
-export function pushResult(result: IParseResult, to: IParseResult): IParseResult {
+export function pushResult(
+  result: IParseResult,
+  to: IParseResult,
+): IParseResult {
   if (to.next === undefined || to.next.length === 0) {
     return Object.assign({}, to, {
       next: [result],
@@ -365,14 +405,19 @@ export function suggestionValues(ss: Suggestion[]): string[] {
   return values;
 }
 
-export function startOfMatch(result: IParseResult, at: number): number | undefined {
+export function startOfMatch(
+  result: IParseResult,
+  at: number,
+): number | undefined {
   if (at === 0) {
     return 0;
   }
-  if (result.value !== undefined
-    && (result.length || 0) > 0
-    && result.offset <= at
-    && result.offset + (result.length || 0) >= at) {
+  if (
+    result.value !== undefined &&
+    (result.length || 0) > 0 &&
+    result.offset <= at &&
+    result.offset + (result.length || 0) >= at
+  ) {
     return result.offset;
   }
   if (result.next !== undefined) {
@@ -415,11 +460,13 @@ export function parseChain(
     // No full match on this link of the chain or end of the chain, exit here.
     return result;
   }
-  const tailResult = parseChain(input, offset + (flatResult.combined.length || 0), tailSpecs, names);
-  return pushResult(
-    tailResult,
-    flatResult.flat,
+  const tailResult = parseChain(
+    input,
+    offset + (flatResult.combined.length || 0),
+    tailSpecs,
+    names,
   );
+  return pushResult(tailResult, flatResult.flat);
 }
 
 export function parseMany(
@@ -457,8 +504,11 @@ export function parseMany(
       result = itemResult;
     } else {
       // Otherwise we only append if relevant.
-      if (itemFlatResult.combined.kind === MATCH_ERROR &&
-        min !== undefined && matches < min) {
+      if (
+        itemFlatResult.combined.kind === MATCH_ERROR &&
+        min !== undefined &&
+        matches < min
+      ) {
         // We didn't parse another and haven't met the minimum yet, so this is an
         // error.
         result = pushResult(itemResult, result);
@@ -471,8 +521,10 @@ export function parseMany(
       }
     }
 
-    if (itemFlatResult.combined.kind !== MATCH_FULL ||
-      max !== undefined && matches == max) {
+    if (
+      itemFlatResult.combined.kind !== MATCH_FULL ||
+      (max !== undefined && matches == max)
+    ) {
       if (min !== undefined && matches < min) {
         result.kind = MATCH_PARTIAL;
       }
@@ -495,7 +547,7 @@ export function parseOpt(
       kind: MATCH_FULL,
       offset,
       length: 0,
-      value: '',
+      value: "",
     };
   }
   return subResult;
@@ -509,7 +561,12 @@ export function parsePlayer(
   return parseEnum(input, offset, names, false);
 }
 
-export function parse(input: string, offset: number, spec: CommandSpec, names: string[]): IParseResult {
+export function parse(
+  input: string,
+  offset: number,
+  spec: CommandSpec,
+  names: string[],
+): IParseResult {
   if (spec === COMMAND_SPEC_PLAYER) {
     return parsePlayer(input, offset, names);
   } else if (spec === COMMAND_SPEC_SPACE) {
@@ -521,15 +578,30 @@ export function parse(input: string, offset: number, spec: CommandSpec, names: s
   } else if (spec.Enum !== undefined) {
     return parseEnum(input, offset, spec.Enum.values, spec.Enum.exact);
   } else if (spec.OneOf !== undefined) {
-    return parseOneOf(input, offset,spec.OneOf, names);
+    return parseOneOf(input, offset, spec.OneOf, names);
   } else if (spec.Chain !== undefined) {
     return parseChain(input, offset, spec.Chain, names);
   } else if (spec.Many !== undefined) {
-    return parseMany(input, offset, spec.Many.spec, names, spec.Many.delim, spec.Many.min, spec.Many.max);
+    return parseMany(
+      input,
+      offset,
+      spec.Many.spec,
+      names,
+      spec.Many.delim,
+      spec.Many.min,
+      spec.Many.max,
+    );
   } else if (spec.Opt !== undefined) {
     return parseOpt(input, offset, spec.Opt, names);
   } else if (spec.Doc !== undefined) {
-    return parseDoc(input, offset, spec.Doc.name, spec.Doc.spec, names, spec.Doc.desc);
+    return parseDoc(
+      input,
+      offset,
+      spec.Doc.name,
+      spec.Doc.spec,
+      names,
+      spec.Doc.desc,
+    );
   }
   return {
     kind: MATCH_ERROR,

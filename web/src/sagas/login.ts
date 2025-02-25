@@ -9,7 +9,9 @@ export function* sagas(): IterableIterator<Effect> {
     yield takeEvery(Login.SUBMIT_CODE, submitLoginCode);
 }
 
-function* submitLoginEmail(action: Login.ISubmitEmail): IterableIterator<Effect> {
+function* submitLoginEmail(
+  action: Login.ISubmitEmail,
+): IterableIterator<Effect> {
   try {
     yield call(http.submitLoginEmail, action.payload || "");
     yield put(Login.submitEmailSuccess());

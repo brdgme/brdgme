@@ -7,39 +7,54 @@ export class State extends Immutable.Record({
   games: Immutable.Map<string, Records.GameExtended>(),
 }) {
   public updateGames(newGames: Immutable.List<Records.GameExtended>): this {
-    return this.set("games", this.games.withMutations((games) => {
-      newGames.forEach((g) => {
-        if (g === undefined) {
-          return;
-        }
-        let existing: Records.GameExtended | undefined = games.get(g.game.id);
-        if (existing !== undefined) {
-          if (existing !== undefined && existing.game.updated_at > g.game.updated_at) {
-            // Our internal one is already newer.
+    return this.set(
+      "games",
+      this.games.withMutations((games) => {
+        newGames.forEach((g) => {
+          if (g === undefined) {
             return;
           }
-          if (existing.game_player && !g.game_player) {
-            // We have a private view of the game, don't override with public.
-            return;
-          }
-        } else {
-          existing = new Records.GameExtended();
-        }
-        games.set(g.game.id, existing.withMutations((ex: Records.GameExtended) => {
-          const existingLogs = ex.game_logs || Immutable.List<Records.GameLogRendered>();
-          ex.merge(g).set("game_logs", existingLogs.withMutations((logs) => {
-            const logIds = logs.map((l: Records.GameLogRendered) => l.game_log.id).toSet();
-            if (g.game_logs !== undefined) {
-              g.game_logs.forEach((newLog: Records.GameLogRendered) => {
-                if (!logIds.contains(newLog.game_log.id)) {
-                  logs.push(newLog);
-                }
-              });
+          let existing: Records.GameExtended | undefined = games.get(g.game.id);
+          if (existing !== undefined) {
+            if (
+              existing !== undefined &&
+              existing.game.updated_at > g.game.updated_at
+            ) {
+              // Our internal one is already newer.
+              return;
             }
-          }));
-        }));
-      });
-    }));
+            if (existing.game_player && !g.game_player) {
+              // We have a private view of the game, don't override with public.
+              return;
+            }
+          } else {
+            existing = new Records.GameExtended();
+          }
+          games.set(
+            g.game.id,
+            existing.withMutations((ex: Records.GameExtended) => {
+              const existingLogs =
+                ex.game_logs || Immutable.List<Records.GameLogRendered>();
+              ex.merge(g).set(
+                "game_logs",
+                existingLogs.withMutations((logs) => {
+                  const logIds = logs
+                    .map((l: Records.GameLogRendered) => l.game_log.id)
+                    .toSet();
+                  if (g.game_logs !== undefined) {
+                    g.game_logs.forEach((newLog: Records.GameLogRendered) => {
+                      if (!logIds.contains(newLog.game_log.id)) {
+                        logs.push(newLog);
+                      }
+                    });
+                  }
+                }),
+              );
+            }),
+          );
+        });
+      }),
+    );
   }
 
   public updateGamePlayer(gamePlayer: Model.IGamePlayer): this {
@@ -48,22 +63,33 @@ export class State extends Immutable.Record({
     }
     return this.updateIn(
       ["games", gamePlayer.game_id],
-      (game: Records.GameExtended) => game.withMutations((g: Records.GameExtended) => {
-        if (g.game_player !== undefined && g.game_player.id === gamePlayer.id) {
-          g.update(
-            "game_player",
-            (gp) => gp && gp.merge(gamePlayer) || Records.GamePlayer.fromJS(gamePlayer));
-        }
-        g.update("game_players", (gps) => gps.map((gpu) => {
-          if (gpu.game_player.id === gamePlayer.id) {
-            return gpu.update(
+      (game: Records.GameExtended) =>
+        game.withMutations((g: Records.GameExtended) => {
+          if (
+            g.game_player !== undefined &&
+            g.game_player.id === gamePlayer.id
+          ) {
+            g.update(
               "game_player",
-              (gp) => gp.merge(gamePlayer),
+              (gp) =>
+                (gp && gp.merge(gamePlayer)) ||
+                Records.GamePlayer.fromJS(gamePlayer),
             );
           }
-          return gpu;
-        }).toList());
-      }));
+          g.update("game_players", (gps) =>
+            gps
+              .map((gpu) => {
+                if (gpu.game_player.id === gamePlayer.id) {
+                  return gpu.update("game_player", (gp) =>
+                    gp.merge(gamePlayer),
+                  );
+                }
+                return gpu;
+              })
+              .toList(),
+          );
+        }),
+    );
   }
 }
 
@@ -101,11 +127,12 @@ export interface IFetchGameSuccess {
   type: typeof FETCH_GAME_SUCCESS;
   payload: Model.IGameExtended;
 }
-export const fetchGameSuccess =
-  (game: Model.IGameExtended): IFetchGameSuccess => ({
-    type: FETCH_GAME_SUCCESS,
-    payload: game,
-  });
+export const fetchGameSuccess = (
+  game: Model.IGameExtended,
+): IFetchGameSuccess => ({
+  type: FETCH_GAME_SUCCESS,
+  payload: game,
+});
 
 export interface IFetchGameFail {
   type: typeof FETCH_GAME_FAIL;
@@ -116,11 +143,12 @@ export interface IUpdateGames {
   type: typeof UPDATE_GAMES;
   payload: Immutable.List<Records.GameExtended>;
 }
-export const updateGames =
-  (games: Immutable.List<Records.GameExtended>): IUpdateGames => ({
-    type: UPDATE_GAMES,
-    payload: games,
-  });
+export const updateGames = (
+  games: Immutable.List<Records.GameExtended>,
+): IUpdateGames => ({
+  type: UPDATE_GAMES,
+  payload: games,
+});
 
 export interface ISubmitCommand {
   type: typeof SUBMIT_COMMAND;
@@ -129,21 +157,24 @@ export interface ISubmitCommand {
     command: string;
   };
 }
-export const submitCommand =
-  (gameId: string, command: string): ISubmitCommand => ({
-    type: SUBMIT_COMMAND,
-    payload: { gameId, command },
-  });
+export const submitCommand = (
+  gameId: string,
+  command: string,
+): ISubmitCommand => ({
+  type: SUBMIT_COMMAND,
+  payload: { gameId, command },
+});
 
 export interface ISubmitCommandSuccess {
   type: typeof SUBMIT_COMMAND_SUCCESS;
   payload: Records.GameExtended;
 }
-export const submitCommandSuccess =
-  (game: Records.GameExtended): ISubmitCommandSuccess => ({
-    type: SUBMIT_COMMAND_SUCCESS,
-    payload: game,
-  });
+export const submitCommandSuccess = (
+  game: Records.GameExtended,
+): ISubmitCommandSuccess => ({
+  type: SUBMIT_COMMAND_SUCCESS,
+  payload: game,
+});
 
 export interface ISubmitCommandFail {
   type: typeof SUBMIT_COMMAND_FAIL;
@@ -158,21 +189,21 @@ export interface ISubmitUndo {
   type: typeof SUBMIT_UNDO;
   payload: string;
 }
-export const submitUndo =
-  (gameId: string): ISubmitUndo => ({
-    type: SUBMIT_UNDO,
-    payload: gameId,
-  });
+export const submitUndo = (gameId: string): ISubmitUndo => ({
+  type: SUBMIT_UNDO,
+  payload: gameId,
+});
 
 export interface ISubmitUndoSuccess {
   type: typeof SUBMIT_UNDO_SUCCESS;
   payload: Records.GameExtended;
 }
-export const submitUndoSuccess =
-  (game: Records.GameExtended): ISubmitUndoSuccess => ({
-    type: SUBMIT_UNDO_SUCCESS,
-    payload: game,
-  });
+export const submitUndoSuccess = (
+  game: Records.GameExtended,
+): ISubmitUndoSuccess => ({
+  type: SUBMIT_UNDO_SUCCESS,
+  payload: game,
+});
 
 export interface ISubmitUndoFail {
   type: typeof SUBMIT_UNDO_FAIL;
@@ -187,21 +218,21 @@ export interface ISubmitMarkRead {
   type: typeof SUBMIT_MARK_READ;
   payload: string;
 }
-export const submitMarkRead =
-  (gameId: string): ISubmitMarkRead => ({
-    type: SUBMIT_MARK_READ,
-    payload: gameId,
-  });
+export const submitMarkRead = (gameId: string): ISubmitMarkRead => ({
+  type: SUBMIT_MARK_READ,
+  payload: gameId,
+});
 
 export interface ISubmitMarkReadSuccess {
   type: typeof SUBMIT_MARK_READ_SUCCESS;
   payload: Model.IGamePlayer;
 }
-export const submitMarkReadSuccess =
-  (gamePlayer: Model.IGamePlayer): ISubmitMarkReadSuccess => ({
-    type: SUBMIT_MARK_READ_SUCCESS,
-    payload: gamePlayer,
-  });
+export const submitMarkReadSuccess = (
+  gamePlayer: Model.IGamePlayer,
+): ISubmitMarkReadSuccess => ({
+  type: SUBMIT_MARK_READ_SUCCESS,
+  payload: gamePlayer,
+});
 
 export interface ISubmitMarkReadFail {
   type: typeof SUBMIT_MARK_READ_FAIL;
@@ -216,21 +247,21 @@ export interface ISubmitConcede {
   type: typeof SUBMIT_CONCEDE;
   payload: string;
 }
-export const submitConcede =
-  (gameId: string): ISubmitConcede => ({
-    type: SUBMIT_CONCEDE,
-    payload: gameId,
-  });
+export const submitConcede = (gameId: string): ISubmitConcede => ({
+  type: SUBMIT_CONCEDE,
+  payload: gameId,
+});
 
 export interface ISubmitConcedeSuccess {
   type: typeof SUBMIT_CONCEDE_SUCCESS;
   payload: Model.IGameExtended;
 }
-export const submitConcedeSuccess =
-  (game: Model.IGameExtended): ISubmitConcedeSuccess => ({
-    type: SUBMIT_CONCEDE_SUCCESS,
-    payload: game,
-  });
+export const submitConcedeSuccess = (
+  game: Model.IGameExtended,
+): ISubmitConcedeSuccess => ({
+  type: SUBMIT_CONCEDE_SUCCESS,
+  payload: game,
+});
 
 export interface ISubmitConcedeFail {
   type: typeof SUBMIT_CONCEDE_FAIL;
@@ -245,11 +276,10 @@ export interface ISubmitRestart {
   type: typeof SUBMIT_RESTART;
   payload: string;
 }
-export const submitRestart =
-  (gameId: string): ISubmitRestart => ({
-    type: SUBMIT_RESTART,
-    payload: gameId,
-  });
+export const submitRestart = (gameId: string): ISubmitRestart => ({
+  type: SUBMIT_RESTART,
+  payload: gameId,
+});
 
 export interface ISubmitRestartSuccess {
   type: typeof SUBMIT_RESTART_SUCCESS;
@@ -290,8 +320,8 @@ export const gameRestarted = (
   payload: { gameId, restartedGameId },
 });
 
-export type Action
-  = IFetchGame
+export type Action =
+  | IFetchGame
   | IFetchGameSuccess
   | IFetchGameFail
   | IUpdateGames
@@ -310,32 +340,41 @@ export type Action
   | ISubmitRestart
   | ISubmitRestartSuccess
   | ISubmitRestartFail
-  | IGameRestarted
-  ;
+  | IGameRestarted;
 
 export function reducer(state = new State(), action: Action): State {
   switch (action.type) {
-    case FETCH_GAME_SUCCESS: return state.updateGames(
-      Records.GameExtended.fromJSList([action.payload]));
-    case UPDATE_GAMES: return state.updateGames(action.payload);
-    case SUBMIT_COMMAND_SUCCESS: return state.updateGames(
-      Records.GameExtended.fromJSList([action.payload]));
-    case SUBMIT_MARK_READ_SUCCESS: return state.updateGamePlayer(action.payload);
-    case SUBMIT_CONCEDE_SUCCESS: return state.updateGames(
-      Records.GameExtended.fromJSList([action.payload]));
-    case SUBMIT_RESTART_SUCCESS: return state
-      .updateGames(Records.GameExtended.fromJSList([action.payload.newGame]))
-      .updateIn(
-        ["games", action.payload.oldGameId, "game"],
-        (game: Records.Game) => game.set(
-          "restarted_game_id",
-          action.payload.newGame.game.id,
-        ),
+    case FETCH_GAME_SUCCESS:
+      return state.updateGames(
+        Records.GameExtended.fromJSList([action.payload]),
       );
-    case GAME_RESTARTED: return state.updateIn(
-      ["games", action.payload.gameId, "game"],
-      (game: Records.Game) => game.set("restarted_game_id", action.payload.restartedGameId),
-    );
-    default: return state;
+    case UPDATE_GAMES:
+      return state.updateGames(action.payload);
+    case SUBMIT_COMMAND_SUCCESS:
+      return state.updateGames(
+        Records.GameExtended.fromJSList([action.payload]),
+      );
+    case SUBMIT_MARK_READ_SUCCESS:
+      return state.updateGamePlayer(action.payload);
+    case SUBMIT_CONCEDE_SUCCESS:
+      return state.updateGames(
+        Records.GameExtended.fromJSList([action.payload]),
+      );
+    case SUBMIT_RESTART_SUCCESS:
+      return state
+        .updateGames(Records.GameExtended.fromJSList([action.payload.newGame]))
+        .updateIn(
+          ["games", action.payload.oldGameId, "game"],
+          (game: Records.Game) =>
+            game.set("restarted_game_id", action.payload.newGame.game.id),
+        );
+    case GAME_RESTARTED:
+      return state.updateIn(
+        ["games", action.payload.gameId, "game"],
+        (game: Records.Game) =>
+          game.set("restarted_game_id", action.payload.restartedGameId),
+      );
+    default:
+      return state;
   }
 }

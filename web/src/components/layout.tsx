@@ -26,7 +26,7 @@ interface IPropHandlers {
   onCloseMenu: () => void;
 }
 
-interface IProps extends IPropValues, IPropHandlers { }
+interface IProps extends IPropValues, IPropHandlers {}
 
 export class Component extends React.PureComponent<IProps, {}> {
   public constructor(props: IProps, context?: any) {
@@ -36,9 +36,13 @@ export class Component extends React.PureComponent<IProps, {}> {
   }
 
   public myNextGame(): Records.GameExtended | undefined {
-    return this.props.activeGames && this.props.activeGames.find((g) => {
-      return g.game_player && g.game_player.is_turn || false;
-    }) || undefined;
+    return (
+      (this.props.activeGames &&
+        this.props.activeGames.find((g) => {
+          return (g.game_player && g.game_player.is_turn) || false;
+        })) ||
+      undefined
+    );
   }
 
   public render() {
@@ -52,57 +56,81 @@ export class Component extends React.PureComponent<IProps, {}> {
 
     return (
       <div className="layout">
-        <div className={classNames({
-          "layout-header": true,
-          "my-turn": myNextGame !== undefined,
-        })}>
+        <div
+          className={classNames({
+            "layout-header": true,
+            "my-turn": myNextGame !== undefined,
+          })}
+        >
           <input type="button" onClick={this.handleToggleMenu} value="Menu" />
           <span className="header-title">brdg.me</span>
-          {this.props.onSubMenuButtonClick && <input
-            type="button"
-            onClick={this.props.onSubMenuButtonClick}
-            value="Sub menu"
-          />}
-          {myNextGame && <input
-            type="button"
-            onClick={() => this.props.onRedirect(`/game/${myNextGame.game.id}`)}
-            value="Next game"
-          />}
+          {this.props.onSubMenuButtonClick && (
+            <input
+              type="button"
+              onClick={this.props.onSubMenuButtonClick}
+              value="Sub menu"
+            />
+          )}
+          {myNextGame && (
+            <input
+              type="button"
+              onClick={() =>
+                this.props.onRedirect(`/game/${myNextGame.game.id}`)
+              }
+              value="Next game"
+            />
+          )}
         </div>
         <div className="layout-body">
-          <div className={classNames({
-            menu: true,
-            open: this.props.menuOpen,
-          })}>
+          <div
+            className={classNames({
+              menu: true,
+              open: this.props.menuOpen,
+            })}
+          >
             <h1>
-              <a onClick={(e) => {
-                e.preventDefault();
-                this.props.onRedirect("/");
-                this.props.onCloseMenu();
-              }}>brdg.me</a>
+              <a
+                onClick={(e) => {
+                  e.preventDefault();
+                  this.props.onRedirect("/");
+                  this.props.onCloseMenu();
+                }}
+              >
+                brdg.me
+              </a>
             </h1>
             <div className="subheading">
-              <a onClick={(e) => {
-                e.preventDefault();
-                this.props.onRedirect("/");
-                this.props.onCloseMenu();
-              }}>Lo-fi board games</a>
+              <a
+                onClick={(e) => {
+                  e.preventDefault();
+                  this.props.onRedirect("/");
+                  this.props.onCloseMenu();
+                }}
+              >
+                Lo-fi board games
+              </a>
             </div>
             {this.renderAuth()}
             <div>
-              <a onClick={(e) => {
-                e.preventDefault();
-                this.props.onRedirect("/game/new");
-                this.props.onCloseMenu();
-              }}>New game</a>
+              <a
+                onClick={(e) => {
+                  e.preventDefault();
+                  this.props.onRedirect("/game/new");
+                  this.props.onCloseMenu();
+                }}
+              >
+                New game
+              </a>
             </div>
             {this.renderActiveGames()}
           </div>
           <div className="content">{this.props.children}</div>
-          {this.props.menuOpen && <div
-            className="menu-close-underlay"
-            onClick={this.handleToggleMenu}
-          />}
+          {this.props.menuOpen && (
+            <div
+              className="menu-close-underlay"
+              onClick={this.handleToggleMenu}
+            />
+          )}
         </div>
       </div>
     );
@@ -110,29 +138,39 @@ export class Component extends React.PureComponent<IProps, {}> {
 
   private renderGame(game: Records.GameExtended): JSX.Element {
     const myPlayerId = game.game_player && game.game_player.id;
-    return <div className={classNames({
-      "layout-game": true,
-      "my-turn": game.game_player && game.game_player.is_turn,
-      "finished": game.game_player && game.game.is_finished && !game.game_player.is_read,
-    })}>
-      <a onClick={(e) => {
-        e.preventDefault();
-        this.props.onRedirect(`/game/${game.game.id}`);
-        this.props.onCloseMenu();
-      }}>
-        <div className="layout-game-name">
-          {game.game_type.name}
-        </div>
-        <div className="layout-game-opponents">
-          with {game.game_players
-            .filter((gp) => gp && gp.game_player.id !== myPlayerId || false)
-            .map((gp) => <span> <Player
-              name={gp.user.name}
-              color={gp.game_player.color}
-            /></span>)}
-        </div>
-      </a>
-    </div >;
+    return (
+      <div
+        className={classNames({
+          "layout-game": true,
+          "my-turn": game.game_player && game.game_player.is_turn,
+          finished:
+            game.game_player &&
+            game.game.is_finished &&
+            !game.game_player.is_read,
+        })}
+      >
+        <a
+          onClick={(e) => {
+            e.preventDefault();
+            this.props.onRedirect(`/game/${game.game.id}`);
+            this.props.onCloseMenu();
+          }}
+        >
+          <div className="layout-game-name">{game.game_type.name}</div>
+          <div className="layout-game-opponents">
+            with{" "}
+            {game.game_players
+              .filter((gp) => (gp && gp.game_player.id !== myPlayerId) || false)
+              .map((gp) => (
+                <span>
+                  {" "}
+                  <Player name={gp.user.name} color={gp.game_player.color} />
+                </span>
+              ))}
+          </div>
+        </a>
+      </div>
+    );
   }
 
   private renderActiveGames(): JSX.Element | undefined {
@@ -140,10 +178,12 @@ export class Component extends React.PureComponent<IProps, {}> {
     if (activeGames.size === 0) {
       return undefined;
     }
-    return <div>
-      <h2>Active games</h2>
-      {activeGames.map((g) => g && this.renderGame(g))}
-    </div>;
+    return (
+      <div>
+        <h2>Active games</h2>
+        {activeGames.map((g) => g && this.renderGame(g))}
+      </div>
+    );
   }
 
   private activeGames(): Immutable.List<Records.GameExtended> {
@@ -151,9 +191,10 @@ export class Component extends React.PureComponent<IProps, {}> {
       return Immutable.List();
     }
     return this.props.activeGames
-      .filter((ag) => ag.game_player && (
-        !ag.game.is_finished || !ag.game_player.is_read
-      ))
+      .filter(
+        (ag) =>
+          ag.game_player && (!ag.game.is_finished || !ag.game_player.is_read),
+      )
       .sort((ag1, ag2) => {
         // Finished games at the top.
         if (ag1.game.is_finished && !ag2.game.is_finished) {
@@ -191,28 +232,40 @@ export class Component extends React.PureComponent<IProps, {}> {
       return Immutable.List();
     }
     return this.props.activeGames
-      .filter((ag) => ag.game_player && ag.game_player.is_turn || false)
+      .filter((ag) => (ag.game_player && ag.game_player.is_turn) || false)
       .sortBy((ag) => ag.game_player!.is_turn_at)
       .toList();
   }
 
   private renderAuth(): JSX.Element {
     if (this.props.user !== undefined) {
-      return <div>
+      return (
         <div>
-          <a onClick={(e) => {
-            e.preventDefault();
-            this.props.onLogout();
-          }}>Logout</a>
+          <div>
+            <a
+              onClick={(e) => {
+                e.preventDefault();
+                this.props.onLogout();
+              }}
+            >
+              Logout
+            </a>
+          </div>
         </div>
-      </div>;
+      );
     } else {
-      return <div>
-        <a onClick={(e) => {
-          e.preventDefault();
-          this.props.onRedirect("/login");
-        }}>Log in</a>
-      </div>;
+      return (
+        <div>
+          <a
+            onClick={(e) => {
+              e.preventDefault();
+              this.props.onRedirect("/login");
+            }}
+          >
+            Log in
+          </a>
+        </div>
+      );
     }
   }
 
@@ -228,7 +281,8 @@ interface IOwnProps {
 function mapStateToProps(state: AppState, ownProps: IOwnProps): IPropValues {
   return {
     user: state.session.user,
-    activeGames: state.game.games.size > 0 && state.game.games.toList() || undefined,
+    activeGames:
+      (state.game.games.size > 0 && state.game.games.toList()) || undefined,
     menuOpen: state.layout.menuOpen,
     onSubMenuButtonClick: ownProps.onSubMenuButtonClick,
   };

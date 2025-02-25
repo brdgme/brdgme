@@ -15,11 +15,13 @@ export class State extends Immutable.Record({
   game_version_id: "",
   emails: Immutable.List<string>(),
   user_ids: Immutable.List<string>(),
-}) { }
+}) {}
 
 export const UPDATE_MODE = "brdgme/pages/game-new/UPDATE_MODE";
-export const FETCH_GAME_VERSION_TYPES = "brdgme/pages/game-new/FETCH_GAME_VERSION_TYPES";
-export const UPDATE_GAME_VERSION_ID = "brdgme/pages/game-new/UPDATE_GAME_VERSION_ID";
+export const FETCH_GAME_VERSION_TYPES =
+  "brdgme/pages/game-new/FETCH_GAME_VERSION_TYPES";
+export const UPDATE_GAME_VERSION_ID =
+  "brdgme/pages/game-new/UPDATE_GAME_VERSION_ID";
 export const ADD_EMAIL = "brdgme/pages/game-new/ADD_EMAIL";
 export const REMOVE_EMAIL = "brdgme/pages/game-new/REMOVE_EMAIL";
 export const UPDATE_EMAIL = "brdgme/pages/game-new/UPDATE_EMAIL";
@@ -39,7 +41,9 @@ export const updateMode = (mode: Mode): IUpdateMode => ({
   payload: mode,
 });
 
-export interface IFetchGameVersionTypes { type: typeof FETCH_GAME_VERSION_TYPES; }
+export interface IFetchGameVersionTypes {
+  type: typeof FETCH_GAME_VERSION_TYPES;
+}
 export const fetchGameVersionTypes = (): IFetchGameVersionTypes => ({
   type: FETCH_GAME_VERSION_TYPES,
 });
@@ -48,12 +52,16 @@ export interface IUpdateGameVersionId {
   type: typeof UPDATE_GAME_VERSION_ID;
   payload: string;
 }
-export const updateGameVersionId = (game_version_id: string): IUpdateGameVersionId => ({
+export const updateGameVersionId = (
+  game_version_id: string,
+): IUpdateGameVersionId => ({
   type: UPDATE_GAME_VERSION_ID,
   payload: game_version_id,
 });
 
-export interface IAddEmail { type: typeof ADD_EMAIL; }
+export interface IAddEmail {
+  type: typeof ADD_EMAIL;
+}
 export const addEmail = (): IAddEmail => ({ type: ADD_EMAIL });
 
 export interface IRemoveEmail {
@@ -77,7 +85,9 @@ export const updateEmail = (index: number, email: string): IUpdateEmail => ({
   payload: { index, email },
 });
 
-export interface IAddUserId { type: typeof ADD_USER_ID; }
+export interface IAddUserId {
+  type: typeof ADD_USER_ID;
+}
 export const addUserId = (): IAddUserId => ({ type: ADD_USER_ID });
 
 export interface IRemoveUserId {
@@ -96,7 +106,10 @@ export interface IUpdateUserId {
     user_id: string;
   };
 }
-export const updateUserId = (index: number, user_id: string): IUpdateUserId => ({
+export const updateUserId = (
+  index: number,
+  user_id: string,
+): IUpdateUserId => ({
   type: UPDATE_USER_ID,
   payload: { index, user_id },
 });
@@ -104,9 +117,9 @@ export const updateUserId = (index: number, user_id: string): IUpdateUserId => (
 export interface ISubmit {
   type: typeof SUBMIT;
   payload: {
-    game_version_id: string,
-    emails: Immutable.List<string>,
-    user_ids: Immutable.List<string>,
+    game_version_id: string;
+    emails: Immutable.List<string>;
+    user_ids: Immutable.List<string>;
   };
 }
 export const submit = (
@@ -136,8 +149,8 @@ export const submitFail = (error: string): ISubmitFail => ({
   payload: error,
 });
 
-export type Action
-  = IUpdateMode
+export type Action =
+  | IUpdateMode
   | IFetchGameVersionTypes
   | IUpdateGameVersionId
   | IAddEmail
@@ -148,43 +161,36 @@ export type Action
   | IUpdateUserId
   | ISubmit
   | ISubmitSuccess
-  | ISubmitFail
-  ;
+  | ISubmitFail;
 
 export function reducer(state = new State(), action: Action): State {
   switch (action.type) {
-    case UPDATE_MODE: return state.set("mode", action.payload);
-    case UPDATE_GAME_VERSION_ID: return state.set(
-      "game_version_id",
-      action.payload,
-    );
-    case ADD_EMAIL: return state.update(
-      "emails",
-      (emails) => emails.push(""),
-    );
-    case REMOVE_EMAIL: return state.update(
-      "emails",
-      (emails) => emails.delete(action.payload),
-    );
-    case UPDATE_EMAIL: return state.update(
-      "emails",
-      (emails) => emails.set(action.payload.index, action.payload.email),
-    );
-    case ADD_USER_ID: return state.update(
-      "user_ids",
-      (user_ids) => user_ids.push(""),
-    );
-    case REMOVE_USER_ID: return state.update(
-      "user_ids",
-      (user_ids) => user_ids.delete(action.payload),
-    );
-    case UPDATE_USER_ID: return state.update(
-      "user_ids",
-      (user_ids) => user_ids.set(action.payload.index, action.payload.user_id),
-    );
+    case UPDATE_MODE:
+      return state.set("mode", action.payload);
+    case UPDATE_GAME_VERSION_ID:
+      return state.set("game_version_id", action.payload);
+    case ADD_EMAIL:
+      return state.update("emails", (emails) => emails.push(""));
+    case REMOVE_EMAIL:
+      return state.update("emails", (emails) => emails.delete(action.payload));
+    case UPDATE_EMAIL:
+      return state.update("emails", (emails) =>
+        emails.set(action.payload.index, action.payload.email),
+      );
+    case ADD_USER_ID:
+      return state.update("user_ids", (user_ids) => user_ids.push(""));
+    case REMOVE_USER_ID:
+      return state.update("user_ids", (user_ids) =>
+        user_ids.delete(action.payload),
+      );
+    case UPDATE_USER_ID:
+      return state.update("user_ids", (user_ids) =>
+        user_ids.set(action.payload.index, action.payload.user_id),
+      );
     case SUBMIT_FAIL:
       alert(`Failed to create game: ${action.payload}`);
       return state;
-    default: return state;
+    default:
+      return state;
   }
 }

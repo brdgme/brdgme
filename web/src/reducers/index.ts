@@ -23,7 +23,7 @@ export class State extends Immutable.Record({
   pages: new Pages.State(),
   session: new Session.State(),
   ws: new WS.State(),
-}) { }
+}) {}
 
 const childrenReducer = combineReducers<State>({
   game: Game.reducer,
@@ -38,7 +38,9 @@ export type Action = IClearPageState;
 export function reducer(state: State = new State(), action: Action): State {
   state = childrenReducer(state, action);
   switch (action.type) {
-    case CLEAR_PAGE_STATE: return state.remove("pages");
-    default: return state;
+    case CLEAR_PAGE_STATE:
+      return state.remove("pages");
+    default:
+      return state;
   }
 }

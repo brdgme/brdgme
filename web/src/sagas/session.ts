@@ -1,6 +1,14 @@
 import * as Immutable from "immutable";
 import { eventChannel } from "redux-saga";
-import { call, Effect, fork, put, take, takeEvery, takeLatest } from "redux-saga/effects";
+import {
+  call,
+  Effect,
+  fork,
+  put,
+  take,
+  takeEvery,
+  takeLatest,
+} from "redux-saga/effects";
 
 import * as http from "../http";
 import * as Records from "../records";
@@ -19,7 +27,9 @@ export function* sagas(): IterableIterator<Effect> {
   yield fork(hashchange);
 }
 
-function* loginSuccess(action: Login.ISubmitCodeSuccess): IterableIterator<Effect> {
+function* loginSuccess(
+  action: Login.ISubmitCodeSuccess,
+): IterableIterator<Effect> {
   yield put(Session.updateToken(action.payload));
   yield put(Session.updatePath("/"));
 }
@@ -33,17 +43,19 @@ function* updateToken(action: Session.IUpdateToken): IterableIterator<Effect> {
   localStorage.setItem(LS_AUTH_TOKEN_OFFSET, action.payload);
   const init: http.IInitResponse = yield call(http.fetchInit, action.payload);
   yield put(Session.updateUser(Records.User.fromJS(init.user)));
-  yield put(Session.updateGameVersionTypes(
-    Immutable.List(
-      init.game_version_types.map(Records.GameVersionType.fromJS),
+  yield put(
+    Session.updateGameVersionTypes(
+      Immutable.List(
+        init.game_version_types.map(Records.GameVersionType.fromJS),
+      ),
     ),
-  ));
+  );
   yield put(Game.updateGames(Records.GameExtended.fromJSList(init.games)));
 }
 
 function* clearToken(action: Session.IClearToken): IterableIterator<Effect> {
   localStorage.removeItem(LS_AUTH_TOKEN_OFFSET);
-  location.reload(true);
+  location.reload();
 }
 
 function* hashchange(): IterableIterator<Effect> {

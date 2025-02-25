@@ -12,7 +12,7 @@ export class State extends Immutable.Record({
   suggestions: Immutable.List(),
   allSuggestions: Immutable.List(),
   subMenuOpen: false,
-}) { }
+}) {}
 
 export const UPDATE_COMMAND = "brdgme/pages/game-show/UPDATE_COMMAND";
 export const TOGGLE_SUB_MENU = "brdgme/pages/game-show/TOGGLE_SUB_MENU";
@@ -24,7 +24,7 @@ export interface IUpdateCommand {
   payload: {
     command: string;
     commandPos: number;
-    commandSpec?: Immutable.Map<any, any>,
+    commandSpec?: Immutable.Map<any, any>;
   };
 }
 export const updateCommand = (
@@ -51,8 +51,8 @@ export interface ICommandBlur {
 }
 export const commandBlur = (): ICommandBlur => ({ type: COMMAND_BLUR });
 
-type Action
-  = IUpdateCommand
+type Action =
+  | IUpdateCommand
   | IToggleSubMenu
   | ICommandFocus
   | ICommandBlur
@@ -60,12 +60,16 @@ type Action
 
 export function reducer(state = new State(), action: Action): State {
   switch (action.type) {
-    case UPDATE_COMMAND: return state
-      .set("command", action.payload.command)
-      .set("commandPos", action.payload.commandPos);
-    case COMMAND_FOCUS: return state.set("commandFocused", true);
-    case COMMAND_BLUR: return state.set("commandFocused", false);
-    case TOGGLE_SUB_MENU: return state.update("subMenuOpen", (s) => !s);
+    case UPDATE_COMMAND:
+      return state
+        .set("command", action.payload.command)
+        .set("commandPos", action.payload.commandPos);
+    case COMMAND_FOCUS:
+      return state.set("commandFocused", true);
+    case COMMAND_BLUR:
+      return state.set("commandFocused", false);
+    case TOGGLE_SUB_MENU:
+      return state.update("subMenuOpen", (s) => !s);
     case Game.SUBMIT_COMMAND:
     case Game.SUBMIT_UNDO:
       return state.set("submittingCommand", true);
@@ -76,11 +80,13 @@ export function reducer(state = new State(), action: Action): State {
         .set("command", "")
         .set("commandPos", 0)
         .remove("commandError");
-    case Game.SUBMIT_COMMAND_FAIL: return state
-      .set("commandError", action.payload)
-      .set("submittingCommand", false);
-    case Game.SUBMIT_UNDO_FAIL: return state
-      .set("submittingCommand", false);
-    default: return state;
+    case Game.SUBMIT_COMMAND_FAIL:
+      return state
+        .set("commandError", action.payload)
+        .set("submittingCommand", false);
+    case Game.SUBMIT_UNDO_FAIL:
+      return state.set("submittingCommand", false);
+    default:
+      return state;
   }
 }

@@ -163,13 +163,22 @@ export class GameExtended extends Immutable.Record({
       game: Game.fromJS(js.game),
       game_type: GameType.fromJS(js.game_type),
       game_version: GameVersion.fromJS(js.game_version),
-      game_player: js.game_player && GamePlayer.fromJS(js.game_player) || undefined,
-      game_players: Immutable.List<GamePlayerTypeUser>(js.game_players.map(GamePlayerTypeUser.fromJS)),
-      game_logs: js.game_logs && Immutable.List<GameLogRendered>(js.game_logs.map(GameLogRendered.fromJS)) || undefined,
+      game_player:
+        (js.game_player && GamePlayer.fromJS(js.game_player)) || undefined,
+      game_players: Immutable.List<GamePlayerTypeUser>(
+        js.game_players.map(GamePlayerTypeUser.fromJS),
+      ),
+      game_logs:
+        (js.game_logs &&
+          Immutable.List<GameLogRendered>(
+            js.game_logs.map(GameLogRendered.fromJS),
+          )) ||
+        undefined,
       pub_state: js.pub_state,
       html: js.html,
-      command_spec: js.command_spec && Immutable.fromJS(js.command_spec) || undefined,
-      chat: js.chat && ChatExtended.fromJS(js.chat) || undefined,
+      command_spec:
+        (js.command_spec && Immutable.fromJS(js.command_spec)) || undefined,
+      chat: (js.chat && ChatExtended.fromJS(js.chat)) || undefined,
     });
   }
 
@@ -222,7 +231,9 @@ export class ChatExtended extends Immutable.Record({
     return new ChatExtended({
       chat: Chat.fromJS(js.chat),
       chat_users: Immutable.List<ChatUser>(js.chat_users.map(ChatUser.fromJS)),
-      chat_messages: Immutable.List<ChatMessage>(js.chat_messages.map(ChatMessage.fromJS)),
+      chat_messages: Immutable.List<ChatMessage>(
+        js.chat_messages.map(ChatMessage.fromJS),
+      ),
     });
   }
 }

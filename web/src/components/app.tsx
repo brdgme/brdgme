@@ -16,17 +16,19 @@ interface IPropValues {
 }
 export class Component extends React.PureComponent<IPropValues, {}> {
   public render() {
-    return Router.first(this.props.path, [
-      Router.match("/login", () => <Login />),
-      Router.prefix("/game", (remaining) =>
-        Router.first(remaining, [
-          Router.match("/new", () => <GameNew />),
-          Router.empty(() => <GameIndex />),
-          Router.any(() => <GameShow gameId={remaining.substr(1)} />),
-        ]),
-      ),
-      Router.any(() => <Home />),
-    ]) || <div />;
+    return (
+      Router.first(this.props.path, [
+        Router.match("/login", () => <Login />),
+        Router.prefix("/game", (remaining) =>
+          Router.first(remaining, [
+            Router.match("/new", () => <GameNew />),
+            Router.empty(() => <GameIndex />),
+            Router.any(() => <GameShow gameId={remaining.substr(1)} />),
+          ]),
+        ),
+        Router.any(() => <Home />),
+      ]) || <div />
+    );
   }
 }
 

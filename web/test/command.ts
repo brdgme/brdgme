@@ -12,13 +12,19 @@ describe("Command.parseWhitespace", () => {
     assert.equal(result.value, "   ");
   });
   it("should parse newlines", () => {
-    const result = Command.parseSpace(`
-  hello `, 0);
+    const result = Command.parseSpace(
+      `
+  hello `,
+      0,
+    );
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 3);
-    assert.equal(result.value, `
-  `);
+    assert.equal(
+      result.value,
+      `
+  `,
+    );
   });
 });
 
@@ -109,7 +115,12 @@ describe("Command.parseEnum", () => {
     assert.equal(result.value, "Fartb");
   });
   it("should partial match all equal length common prefixes", () => {
-    const result = Command.parseEnum("Fargoo", 0, ["fart", "Fartb", "fae"], false);
+    const result = Command.parseEnum(
+      "Fargoo",
+      0,
+      ["fart", "Fartb", "fae"],
+      false,
+    );
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.isNotNull(result.next);
@@ -118,7 +129,12 @@ describe("Command.parseEnum", () => {
     assert.equal(result.next![1].value, "Fartb");
   });
   it("should full match unique common prefix", () => {
-    const result = Command.parseEnum("Fargoo", 0, ["fart", "Fam", "fae"], false);
+    const result = Command.parseEnum(
+      "Fargoo",
+      0,
+      ["fart", "Fam", "fae"],
+      false,
+    );
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 3);
@@ -128,14 +144,16 @@ describe("Command.parseEnum", () => {
 
 describe("Command.parseMany", () => {
   it("should parse a single item", () => {
-    const result = Command.flattenResult(Command.parseMany(
-      "fart   ",
-      0,
-      {
-        Token: "fart",
-      },
-      [],
-    )).combined;
+    const result = Command.flattenResult(
+      Command.parseMany(
+        "fart   ",
+        0,
+        {
+          Token: "fart",
+        },
+        [],
+      ),
+    ).combined;
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
     assert.equal(result.length, 4);
@@ -148,7 +166,7 @@ describe("Command.parseMany", () => {
       {
         Token: "fart",
       },
-      []
+      [],
     );
     assert.equal(result.kind, Command.MATCH_FULL);
     assert.equal(result.offset, 0);
@@ -222,13 +240,7 @@ describe("Command.parseMany", () => {
       0,
       {
         Enum: {
-          values: [
-            "fart",
-            "cheese",
-            "bacon",
-            "tomato",
-            "banana",
-          ],
+          values: ["fart", "cheese", "bacon", "tomato", "banana"],
           exact: false,
         },
       },
@@ -289,11 +301,7 @@ describe("Command.parseMany", () => {
       0,
       {
         Enum: {
-          values: [
-            "fart",
-            "cheese",
-            "bacon",
-          ],
+          values: ["fart", "cheese", "bacon"],
           exact: false,
         },
       },
@@ -313,18 +321,20 @@ describe("Command.parseMany", () => {
     assert.equal(result.next![2].offset, 0);
   });
   it("should recreate the value from the input", () => {
-    const result = Command.flattenResult(Command.parseMany(
-      "1 2 ",
-      0,
-      {
-        Int: {
-          min: 1,
-          max: 2,
-        }
-      },
-      [],
-      Command.COMMAND_SPEC_SPACE,
-    )).combined;
+    const result = Command.flattenResult(
+      Command.parseMany(
+        "1 2 ",
+        0,
+        {
+          Int: {
+            min: 1,
+            max: 2,
+          },
+        },
+        [],
+        Command.COMMAND_SPEC_SPACE,
+      ),
+    ).combined;
     assert.equal(result.kind, Command.MATCH_PARTIAL);
     assert.equal(result.offset, 0);
     assert.equal(result.value, "1 2");

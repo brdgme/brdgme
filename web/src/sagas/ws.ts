@@ -41,11 +41,15 @@ export function* sagas(): IterableIterator<Effect> {
   yield takeEvery(Session.CLEAR_TOKEN, clearToken);
 }
 
-export function* updateToken(action: Session.IUpdateToken): IterableIterator<Effect> {
+export function* updateToken(
+  action: Session.IUpdateToken,
+): IterableIterator<Effect> {
   yield put(WS.subscribeUser(action.payload));
 }
 
-export function* clearToken(action: Session.IClearToken): IterableIterator<Effect> {
+export function* clearToken(
+  action: Session.IClearToken,
+): IterableIterator<Effect> {
   yield put(WS.unsubscribeUser());
 }
 
@@ -59,7 +63,10 @@ export function* wsSaga(): IterableIterator<Effect> {
   while (true) {
     try {
       // yield put(WS.connecting());
-      const socket: WebSocket = yield call(connect, `ws://${window.location.host}/ws`);
+      const socket: WebSocket = yield call(
+        connect,
+        `ws://${window.location.host}/ws`,
+      );
       const socketClose = call(socketClosePromise, socket);
       // yield put(WS.connected());
       const s = yield fork(socketSagas, socket);
@@ -81,9 +88,10 @@ export function* wsSaga(): IterableIterator<Effect> {
   }
 }
 
-function socketClosePromise(socket: WebSocket): Promise<{}> {
+function socketClosePromise(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) =>
-    socket.addEventListener("close", () => resolve()));
+    socket.addEventListener("close", () => resolve()),
+  );
 }
 
 export function* handleMessages(socket: WebSocket): IterableIterator<Effect> {
@@ -92,14 +100,16 @@ export function* handleMessages(socket: WebSocket): IterableIterator<Effect> {
     const message: MessageEvent = yield take(chan);
     const data: IMessage = JSON.parse(message.data);
     if (data.GameUpdate) {
-      yield put(Game.updateGames(Records.GameExtended.fromJSList([
-        data.GameUpdate,
-      ])));
+      yield put(
+        Game.updateGames(Records.GameExtended.fromJSList([data.GameUpdate])),
+      );
     } else if (data.GameRestarted) {
-      yield put(Game.gameRestarted(
-        data.GameRestarted.game_id,
-        data.GameRestarted.restarted_game_id,
-      ));
+      yield put(
+        Game.gameRestarted(
+          data.GameRestarted.game_id,
+          data.GameRestarted.restarted_game_id,
+        ),
+      );
     }
   }
 }

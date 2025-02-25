@@ -1,5 +1,12 @@
 import * as Immutable from "immutable";
-import { call, Effect, put, select, takeEvery, takeLatest } from "redux-saga/effects";
+import {
+  call,
+  Effect,
+  put,
+  select,
+  takeEvery,
+  takeLatest,
+} from "redux-saga/effects";
 
 import * as http from "../http";
 import * as Model from "../model";
@@ -43,7 +50,9 @@ function* submitCommand(action: Game.ISubmitCommand): IterableIterator<Effect> {
     );
     yield put(Game.submitCommandSuccess(game));
   } catch (e) {
-    yield put(Game.submitCommandFail(e.response && e.response.text || e.message));
+    yield put(
+      Game.submitCommandFail((e.response && e.response.text) || e.message),
+    );
   }
 }
 
@@ -53,14 +62,12 @@ function* submitUndo(action: Game.ISubmitUndo): IterableIterator<Effect> {
     return;
   }
   try {
-    const game = yield call(
-      http.submitUndo,
-      action.payload,
-      token,
-    );
+    const game = yield call(http.submitUndo, action.payload, token);
     yield put(Game.submitUndoSuccess(game));
   } catch (e) {
-    yield put(Game.submitUndoFail(e.response && e.response.text || e.message));
+    yield put(
+      Game.submitUndoFail((e.response && e.response.text) || e.message),
+    );
   }
 }
 
@@ -78,11 +85,15 @@ function* submitRestart(action: Game.ISubmitRestart): IterableIterator<Effect> {
     yield put(Game.submitRestartSuccess(action.payload, game));
     yield put(Session.updatePath(`/game/${game.game.id}`));
   } catch (e) {
-    yield put(Game.submitRestartFail(e.response && e.response.text || e.message));
+    yield put(
+      Game.submitRestartFail((e.response && e.response.text) || e.message),
+    );
   }
 }
 
-function* submitMarkRead(action: Game.ISubmitMarkRead): IterableIterator<Effect> {
+function* submitMarkRead(
+  action: Game.ISubmitMarkRead,
+): IterableIterator<Effect> {
   const token: string = yield select((state: AppState) => state.session.token);
   if (token === undefined) {
     return;
@@ -95,7 +106,9 @@ function* submitMarkRead(action: Game.ISubmitMarkRead): IterableIterator<Effect>
     );
     yield put(Game.submitMarkReadSuccess(gamePlayer));
   } catch (e) {
-    yield put(Game.submitMarkReadFail(e.response && e.response.text || e.message));
+    yield put(
+      Game.submitMarkReadFail((e.response && e.response.text) || e.message),
+    );
   }
 }
 
@@ -105,14 +118,12 @@ function* submitConcede(action: Game.ISubmitConcede): IterableIterator<Effect> {
     return;
   }
   try {
-    const game = yield call(
-      http.submitGameConcede,
-      action.payload,
-      token,
-    );
+    const game = yield call(http.submitGameConcede, action.payload, token);
     yield put(Game.submitConcedeSuccess(game));
   } catch (e) {
-    yield put(Game.submitConcedeFail(e.response && e.response.text || e.message));
+    yield put(
+      Game.submitConcedeFail((e.response && e.response.text) || e.message),
+    );
   }
 }
 
@@ -122,17 +133,19 @@ function* submitNewGame(action: GameNew.ISubmit): IterableIterator<Effect> {
     return;
   }
   try {
-    const game = Records.GameExtended.fromJS(yield call(
-      http.submitNewGame,
-      action.payload.game_version_id,
-      action.payload.emails,
-      action.payload.user_ids,
-      token,
-    ));
+    const game = Records.GameExtended.fromJS(
+      yield call(
+        http.submitNewGame,
+        action.payload.game_version_id,
+        action.payload.emails,
+        action.payload.user_ids,
+        token,
+      ),
+    );
     yield put(Game.updateGames(Immutable.List([game])));
     yield put(Session.updatePath(`/game/${game.game.id}`));
     yield put(GameNew.submitSuccess(game));
   } catch (e) {
-    yield put(GameNew.submitFail(e.response && e.response.text || e.message));
+    yield put(GameNew.submitFail((e.response && e.response.text) || e.message));
   }
 }

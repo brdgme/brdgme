@@ -25,10 +25,7 @@ export function prefix<T>(
   };
 }
 
-export function match<T>(
-  p: string,
-  success: () => T | undefined,
-): Handler<T> {
+export function match<T>(p: string, success: () => T | undefined): Handler<T> {
   return (input: string) => {
     if (input === p) {
       return success();
@@ -37,15 +34,11 @@ export function match<T>(
   };
 }
 
-export function empty<T>(
-  success: () => T | undefined,
-): Handler<T> {
+export function empty<T>(success: () => T | undefined): Handler<T> {
   return match("", success);
 }
 
-export function any<T>(
-  success: () => T | undefined,
-): Handler<T> {
+export function any<T>(success: () => T | undefined): Handler<T> {
   return (input: string) => success();
 }
 

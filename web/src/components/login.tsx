@@ -18,7 +18,7 @@ export interface IPropHandlers {
   onSubmitEmail: (email: string) => void;
   onSubmitCode: (email: string, code: string) => void;
 }
-export interface IProps extends IPropValues, IPropHandlers { }
+export interface IProps extends IPropValues, IPropHandlers {}
 
 export class Component extends React.PureComponent<IProps, {}> {
   constructor(props: IProps, context?: any) {
@@ -36,10 +36,8 @@ export class Component extends React.PureComponent<IProps, {}> {
     return (
       <div className="login">
         <h1>brdg.me</h1>
-        <div className="subtitle">
-          Lo-fi board games, email / web
-        </div>
-        {this.props.mode === LoginReducer.Mode.EnteringEmail && (
+        <div className="subtitle">Lo-fi board games, email / web</div>
+        {(this.props.mode === LoginReducer.Mode.EnteringEmail && (
           <div>
             <div>Enter your email address to start</div>
             <form onSubmit={this.handleSubmitEmail}>
@@ -55,19 +53,23 @@ export class Component extends React.PureComponent<IProps, {}> {
                 <input type="submit" value="Get code" />
               </div>
               <div className="hasCode">
-                <a onClick={this.handleClickHaveCode}>I already have a login code</a>
+                <a onClick={this.handleClickHaveCode}>
+                  I already have a login code
+                </a>
               </div>
             </form>
           </div>
-        ) || (
-            <div>
-              Logging in as
-              <a onClick={this.handleClickChangeEmail}>{this.props.email}</a>
-            </div>
-          )}
+        )) || (
+          <div>
+            Logging in as
+            <a onClick={this.handleClickChangeEmail}>{this.props.email}</a>
+          </div>
+        )}
         {this.props.mode === LoginReducer.Mode.EnteringCode && (
           <div>
-            <div>A login code has been sent to your email, please enter it here</div>
+            <div>
+              A login code has been sent to your email, please enter it here
+            </div>
             <form onSubmit={this.handleSubmitCode}>
               <input
                 type="tel"
@@ -83,9 +85,7 @@ export class Component extends React.PureComponent<IProps, {}> {
           </div>
         )}
         {(this.props.mode === LoginReducer.Mode.SubmittingEmail ||
-          this.props.mode === LoginReducer.Mode.SubmittingCode) && (
-            <Spinner />
-          )}
+          this.props.mode === LoginReducer.Mode.SubmittingCode) && <Spinner />}
       </div>
     );
   }
@@ -102,7 +102,8 @@ export class Component extends React.PureComponent<IProps, {}> {
 
   private handleClickHaveCode(e: React.MouseEvent<HTMLAnchorElement>) {
     e.preventDefault();
-    const form = (e.currentTarget.parentElement!.parentElement) as HTMLFormElement;
+    const form = e.currentTarget.parentElement!
+      .parentElement as HTMLFormElement;
     if (form.reportValidity()) {
       this.props.onChangeMode(LoginReducer.Mode.EnteringCode);
     }
@@ -135,7 +136,8 @@ function mapDispatchToProps(dispatch: Redux.Dispatch<{}>): IPropHandlers {
     onChangeCode: (code) => dispatch(LoginReducer.updateCode(code)),
     onChangeEmail: (email) => dispatch(LoginReducer.updateEmail(email)),
     onChangeMode: (mode) => dispatch(LoginReducer.updateMode(mode)),
-    onSubmitCode: (email, code) => dispatch(LoginReducer.submitCode(email, code)),
+    onSubmitCode: (email, code) =>
+      dispatch(LoginReducer.submitCode(email, code)),
     onSubmitEmail: (email) => dispatch(LoginReducer.submitEmail(email)),
   };
 }

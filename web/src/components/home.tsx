@@ -10,8 +10,7 @@ import { Container as Layout } from "./layout";
 export class Component extends React.PureComponent<{}, {}> {
   public render() {
     return (
-      <Layout
-      >
+      <Layout>
         <h1>Home blah</h1>
       </Layout>
     );

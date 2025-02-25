@@ -11,7 +11,7 @@ export class State extends Immutable.Record({
   secondsBeforeReconnect: undefined as number | undefined,
   subUser: undefined as string | undefined,
   subGame: undefined as string | undefined,
-}) { }
+}) {}
 
 export const CONNECTED = "brdgme/ws/CONNECTED";
 export const CONNECTING = "brdgme/ws/CONNECTING";
@@ -21,17 +21,23 @@ export const UNSUBSCRIBE_USER = "brdgme/ws/UNSUBSCRIBE_USER";
 export const SUBSCRIBE_GAME = "brdgme/ws/SUBSCRIBE_GAME";
 export const UNSUBSCRIBE_GAME = "brdgme/ws/UNSUBSCRIBE_GAME";
 
-export interface IConnected { type: typeof CONNECTED; }
+export interface IConnected {
+  type: typeof CONNECTED;
+}
 export const connected = (): IConnected => ({ type: CONNECTED });
 
-export interface IConnecting { type: typeof CONNECTING; }
+export interface IConnecting {
+  type: typeof CONNECTING;
+}
 export const connecting = (): IConnecting => ({ type: CONNECTING });
 
 export interface IWaitingForReconnect {
   type: typeof WAITING_FOR_RECONNECT;
   payload: number;
 }
-export const waitingForReconnect = (waitSeconds: number): IWaitingForReconnect => ({
+export const waitingForReconnect = (
+  waitSeconds: number,
+): IWaitingForReconnect => ({
   type: WAITING_FOR_RECONNECT,
   payload: waitSeconds,
 });
@@ -45,7 +51,9 @@ export const subscribeUser = (token: string): ISubscribeUser => ({
   payload: token,
 });
 
-export interface IUnsubscribeUser { type: typeof UNSUBSCRIBE_USER; }
+export interface IUnsubscribeUser {
+  type: typeof UNSUBSCRIBE_USER;
+}
 export const unsubscribeUser = (): IUnsubscribeUser => ({
   type: UNSUBSCRIBE_USER,
 });
@@ -59,20 +67,21 @@ export const subscribeGame = (id: string): ISubscribeGame => ({
   payload: id,
 });
 
-export interface IUnsubscribeGame { type: typeof UNSUBSCRIBE_GAME; }
+export interface IUnsubscribeGame {
+  type: typeof UNSUBSCRIBE_GAME;
+}
 export const unsubscribeGame = (): IUnsubscribeGame => ({
   type: UNSUBSCRIBE_GAME,
 });
 
-export type Action
-  = IConnected
+export type Action =
+  | IConnected
   | IConnecting
   | IWaitingForReconnect
   | ISubscribeUser
   | IUnsubscribeUser
   | ISubscribeGame
-  | IUnsubscribeGame
-  ;
+  | IUnsubscribeGame;
 
 export function reducer(state = new State(), action: Action): State {
   switch (action.type) {
@@ -86,10 +95,15 @@ export function reducer(state = new State(), action: Action): State {
       return state
         .set("connectionState", ConnectionState.WaitingForReconnect)
         .set("secondsBeforeReconnect", action.payload);
-    case SUBSCRIBE_USER: return state.set("subUser", action.payload);
-    case UNSUBSCRIBE_USER: return state.remove("subUser");
-    case SUBSCRIBE_GAME: return state.set("subGame", action.payload);
-    case UNSUBSCRIBE_GAME: return state.remove("subGame");
-    default: return state;
+    case SUBSCRIBE_USER:
+      return state.set("subUser", action.payload);
+    case UNSUBSCRIBE_USER:
+      return state.remove("subUser");
+    case SUBSCRIBE_GAME:
+      return state.set("subGame", action.payload);
+    case UNSUBSCRIBE_GAME:
+      return state.remove("subGame");
+    default:
+      return state;
   }
 }

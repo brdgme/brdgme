@@ -16,7 +16,8 @@ import { reducer as App, State } from "./reducers";
 interface IMyWindow extends Window {
   __REDUX_DEVTOOLS_EXTENSION_COMPOSE__: <R>(a: R) => R;
 }
-const composeEnhancers = window.__REDUX_DEVTOOLS_EXTENSION_COMPOSE__ || Redux.compose;
+const composeEnhancers =
+  window.__REDUX_DEVTOOLS_EXTENSION_COMPOSE__ || Redux.compose;
 declare var window: IMyWindow;
 
 // Create store and initialise path and token.
@@ -24,9 +25,7 @@ const sagaMiddleware = createSagaMiddleware();
 const store = Redux.createStore(
   App,
   new State(),
-  composeEnhancers(Redux.applyMiddleware(
-    sagaMiddleware,
-  )),
+  composeEnhancers(Redux.applyMiddleware(sagaMiddleware)),
 );
 sagaMiddleware.run(sagas);
 store.dispatch(Session.updatePath(location.hash.substr(1)));
@@ -38,6 +37,6 @@ if (token !== null) {
 ReactDOM.render(
   <ReactRedux.Provider store={store}>
     <AppContainer />
-  </ReactRedux.Provider >,
+  </ReactRedux.Provider>,
   document.body,
 );
