@@ -1,8 +1,8 @@
-const webpack = require("webpack");
-// const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const HtmlWebpackPlugin = require("html-webpack-plugin");
+import { Configuration } from "webpack";
+// const webpack = require("webpack");
+import * as HtmlWebpackPlugin from "html-webpack-plugin";
 
-module.exports = {
+const config: Configuration = {
   entry: "./src/index.tsx",
   output: {
     filename: "bundle.js",
@@ -61,3 +61,5 @@ module.exports = {
     superagent: "superagent",
   },
 };
+
+export default config;

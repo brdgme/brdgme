@@ -1,6 +1,6 @@
 import * as Immutable from "immutable";
 import * as Redux from "redux";
-import { combineReducers } from "redux-immutable";
+import { combineReducers } from "redux";
 
 import * as Game from "./game";
 import * as Layout from "./layout";

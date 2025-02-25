@@ -1,5 +1,5 @@
 import * as Immutable from "immutable";
-import { combineReducers } from "redux-immutable";
+import { combineReducers } from "redux";
 
 import * as GameNew from "./game-new";
 import * as GameShow from "./game-show";
