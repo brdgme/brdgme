@@ -254,12 +254,12 @@ able to win the game.",
         input: &str,
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
-        let parser =
-            self.command_parser(player)
-                .ok_or_else::<GameError, _>(|| GameError::InvalidInput {
-                    message: "not your turn".to_string(),
-                })?;
-        let output = parser.parse(input, players)?;
+        let output = self
+            .command_parser(player)
+            .ok_or_else::<GameError, _>(|| GameError::InvalidInput {
+                message: "not your turn".to_string(),
+            })?
+            .parse(input, players)?;
         match output.value {
             Command::Play(loc) => self.handle_play_command(player, &loc),
             Command::Found(corp) => self.handle_found_command(player, corp),

@@ -1,9 +1,9 @@
-use brdgme_game::command::parser::*;
 use brdgme_game::Gamer;
+use brdgme_game::command::parser::*;
 
-use crate::card::{expeditions, Card, Expedition};
 use crate::Game;
 use crate::Phase;
+use crate::card::{Card, Expedition, expeditions};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Command {
@@ -14,7 +14,7 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<T = Command>>> {
+    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<T = Command> + '_>> {
         if self.is_finished() {
             return None;
         }

@@ -1,9 +1,9 @@
 use brdgme_game::command::parser::*;
 
-use crate::board::Loc;
-use crate::casino::{Casino, CASINOS};
-use crate::tile::TILES;
 use crate::Game;
+use crate::board::Loc;
+use crate::casino::{CASINOS, Casino};
+use crate::tile::TILES;
 
 pub enum Command {
     Build { loc: Loc, casino: Casino },
@@ -16,7 +16,7 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Box<dyn Parser<T = Command>> {
+    pub fn command_parser(&self, player: usize) -> Box<dyn Parser<T = Command> + '_> {
         let mut parsers: Vec<Box<dyn Parser<T = Command>>> = vec![];
         if self.can_build(player) {
             parsers.push(Box::new(self.build_parser(player)));

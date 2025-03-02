@@ -4,8 +4,8 @@ pub mod card;
 mod command;
 mod render;
 
-use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::command::Spec as CommandSpec;
+use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::{CommandResponse, Gamer, Log, Stat, Status};
@@ -14,7 +14,7 @@ use brdgme_markup::Node as N;
 use std::collections::HashMap;
 use std::default::Default;
 
-use card::{expeditions, Card, Expedition, Value};
+use card::{Card, Expedition, Value, expeditions};
 use command::Command;
 use rand::prelude::*;
 
@@ -556,11 +556,12 @@ impl Gamer for Game {
         input: &str,
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
-        let cp = match self.command_parser(player) {
+        let output = match self.command_parser(player) {
             Some(cp) => cp,
             None => return Err(GameError::invalid_input("not your turn".to_string())),
-        };
-        match cp.parse(input, players) {
+        }
+        .parse(input, players);
+        match output {
             Ok(ParseOutput {
                 value: Command::Play(c),
                 remaining,
@@ -718,9 +719,10 @@ mod test {
         game.draw(0).unwrap();
         discard_and_draw(&mut game, 1);
         // Shouldn't be able to play GX now.
-        assert!(game
-            .play(0, (Expedition::Green, Value::Investment).into())
-            .is_err());
+        assert!(
+            game.play(0, (Expedition::Green, Value::Investment).into())
+                .is_err()
+        );
         game.play(0, (Expedition::Green, Value::N(3)).into())
             .unwrap();
         game.draw(0).unwrap();
@@ -730,9 +732,10 @@ mod test {
         game.draw(0).unwrap();
         discard_and_draw(&mut game, 1);
         // Shouldn't be able to play Y2 now.
-        assert!(game
-            .play(0, (Expedition::Yellow, Value::N(2)).into())
-            .is_err());
+        assert!(
+            game.play(0, (Expedition::Yellow, Value::N(2)).into())
+                .is_err()
+        );
     }
 
     #[test]

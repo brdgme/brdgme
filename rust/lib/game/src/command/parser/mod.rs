@@ -22,7 +22,7 @@ pub trait Parser {
     type T;
 
     fn parse<'a>(&self, input: &'a str, names: &[String])
-        -> Result<Output<'a, Self::T>, GameError>;
+    -> Result<Output<'a, Self::T>, GameError>;
     fn expected(&self, names: &[String]) -> Vec<String>;
     fn to_spec(&self) -> CommandSpec;
 }

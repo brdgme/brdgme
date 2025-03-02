@@ -19,7 +19,7 @@ pub enum Command {
 }
 
 impl Game {
-    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<T = Command>>> {
+    pub fn command_parser(&self, player: usize) -> Option<Box<dyn Parser<T = Command> + '_>> {
         if self.is_finished() {
             return None;
         }
@@ -164,7 +164,7 @@ impl Game {
         )
     }
 
-    fn merge_parser(&self, corps: &[Corp]) -> impl Parser<T = Command> {
+    fn merge_parser(&self, corps: &[Corp]) -> impl Parser<T = Command> + use<> {
         Map::new(
             Chain4::new(
                 Doc::name_desc(
