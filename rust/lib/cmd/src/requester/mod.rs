@@ -10,7 +10,7 @@ pub trait Requester {
     fn request(&mut self, req: &Request) -> Result<Response, RequestError>;
 }
 
-pub fn parse_args(args: &[String]) -> Result<impl Requester, ParseArgsError> {
+pub fn parse_args(args: &[String]) -> Result<impl Requester + use<>, ParseArgsError> {
     let args_len = args.len();
     if args_len < 2 {
         return Err(ParseArgsError::TypeMissing);

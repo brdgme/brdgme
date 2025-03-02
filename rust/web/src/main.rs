@@ -1,39 +1,35 @@
+use dioxus::prelude::*;
 
-#[cfg(feature = "ssr")]
-#[tokio::main]
-async fn main() {
-    use axum::Router;
-    use leptos::logging::log;
-    use leptos::prelude::*;
-    use leptos_axum::{generate_route_list, LeptosRoutes};
-    use web::app::*;
+use views::{Blog, Home, Login};
 
-    let conf = get_configuration(None).unwrap();
-    let addr = conf.leptos_options.site_addr;
-    let leptos_options = conf.leptos_options;
-    // Generate the list of routes in your Leptos App
-    let routes = generate_route_list(App);
+mod components;
+mod views;
 
-    let app = Router::new()
-        .leptos_routes(&leptos_options, routes, {
-            let leptos_options = leptos_options.clone();
-            move || shell(leptos_options.clone())
-        })
-        .fallback(leptos_axum::file_and_error_handler(shell))
-        .with_state(leptos_options);
-
-    // run our app with hyper
-    // `axum::Server` is a re-export of `hyper::Server`
-    log!("listening on http://{}", &addr);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app.into_make_service())
-        .await
-        .unwrap();
+#[derive(Debug, Clone, Routable, PartialEq)]
+#[rustfmt::skip]
+enum Route {
+    #[route("/")]
+    Home {},
+    #[route("/blog/:id")]
+    Blog { id: i32 },
+    #[route("/login")]
+    Login {}, 
 }
 
-#[cfg(not(feature = "ssr"))]
-pub fn main() {
-    // no client-side main function
-    // unless we want this to work with e.g., Trunk for pure client-side testing
-    // see lib.rs for hydration function instead
+const FAVICON: Asset = asset!("/assets/favicon.ico");
+const STYLE_CSS: Asset = asset!("/assets/styling/style.css");
+
+fn main() {
+    dioxus::launch(App);
+}
+
+#[component]
+fn App() -> Element {
+    rsx! {
+        // Global app resources
+        document::Link { rel: "icon", href: FAVICON }
+        document::Link { rel: "stylesheet", href: STYLE_CSS }
+
+        Router::<Route> {}
+    }
 }

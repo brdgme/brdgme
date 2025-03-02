@@ -14,7 +14,7 @@ members = [
     "lib/rand_bot",
     "tools/fuzz",
     "tools/repl",
-    "web",
+    "web", "web",
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode
@@ -24,3 +24,13 @@ opt-level = 'z'
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

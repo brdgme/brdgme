@@ -1,10 +1,10 @@
-use brdgme_game::command::parser::*;
 use brdgme_game::Gamer;
+use brdgme_game::command::parser::*;
 
-use crate::board::Loc;
-use crate::corp::{Corp, CORPS};
 use crate::Game;
 use crate::Phase;
+use crate::board::Loc;
+use crate::corp::{CORPS, Corp};
 
 pub enum Command {
     Play(Loc),

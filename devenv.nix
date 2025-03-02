@@ -13,15 +13,11 @@
     targets = [ "wasm32-unknown-unknown" ];
   };
   packages = with pkgs; [
-    cargo-binutils
-    cargo-generate
-    cargo-leptos
+    cargo-binstall
     k9s
     kubectl
     minikube
     postgresql
-    sass
     skaffold
-    trunk
   ];
 }
