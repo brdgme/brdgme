@@ -1,10 +1,10 @@
 use std::ffi::OsString;
-use std::io::{stderr, BufWriter, Write};
+use std::io::{BufWriter, Write, stderr};
 use std::process::{Command, Stdio};
 
 use crate::api::{Request, Response};
-use crate::requester::error::RequestError;
 use crate::requester::Requester;
+use crate::requester::error::RequestError;
 
 pub struct LocalRequester {
     path: OsString,
@@ -25,7 +25,7 @@ impl Requester for LocalRequester {
             .spawn()?;
 
         {
-            let mut wr = cmd.stdin.as_mut().ok_or_else(|| RequestError::Stdin)?;
+            let mut wr = cmd.stdin.as_mut().ok_or(RequestError::Stdin)?;
             let mut bufwr = BufWriter::new(&mut wr);
 
             bufwr.write_all(serde_json::to_string(req)?.as_bytes())?;

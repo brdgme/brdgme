@@ -16,7 +16,11 @@ pub fn create(conn: &mut PgConnection) -> Result<Chat> {
         .context("error creating chat")
 }
 
-pub fn add_users(chat_id: Uuid, user_ids: &[Uuid], conn: &mut PgConnection) -> Result<Vec<ChatUser>> {
+pub fn add_users(
+    chat_id: Uuid,
+    user_ids: &[Uuid],
+    conn: &mut PgConnection,
+) -> Result<Vec<ChatUser>> {
     use crate::db::schema::chat_users;
 
     if user_ids.is_empty() {

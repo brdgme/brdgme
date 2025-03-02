@@ -3,10 +3,10 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::{stdin, stdout};
 
-use brdgme_color::{player_color, Style};
-use brdgme_game::command::doc;
+use brdgme_color::{Style, player_color};
 use brdgme_game::Status;
-use brdgme_markup::{self, ansi, from_lines, to_lines, transform, Node, Player, TNode};
+use brdgme_game::command::doc;
+use brdgme_markup::{self, Node, Player, TNode, ansi, from_lines, to_lines, transform};
 
 use crate::api::{CliLog, GameResponse, Request, Response};
 use crate::requester::Requester;

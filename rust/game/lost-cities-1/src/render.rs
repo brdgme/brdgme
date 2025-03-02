@@ -1,7 +1,7 @@
 use std::cmp;
 
-use super::{opponent, PlayerState, PubState, ROUNDS, START_ROUND};
-use crate::card::{by_expedition, expeditions, Card};
+use super::{PlayerState, PubState, ROUNDS, START_ROUND, opponent};
+use crate::card::{Card, by_expedition, expeditions};
 
 use brdgme_color::GREY;
 use brdgme_game::Renderer;

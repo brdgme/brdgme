@@ -1,9 +1,9 @@
 use combine::Parser;
 
-pub use crate::ast::{row_pad, row_pad_cell, Align, Node, Row, TNode};
+pub use crate::ast::{Align, Node, Row, TNode, row_pad, row_pad_cell};
 pub use crate::error::MarkupError;
 use crate::parser::markup;
-pub use crate::transform::{from_lines, to_lines, transform, Player};
+pub use crate::transform::{Player, from_lines, to_lines, transform};
 
 mod ansi;
 pub mod ast;

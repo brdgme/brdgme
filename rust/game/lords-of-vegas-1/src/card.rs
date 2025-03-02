@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use brdgme_markup::Node as N;
 
+use crate::STARTING_CARDS;
 use crate::board::Loc;
 use crate::casino::Casino;
 use crate::tile::{Payout, TILES};
-use crate::STARTING_CARDS;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Card {

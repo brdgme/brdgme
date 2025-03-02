@@ -138,7 +138,7 @@ impl Serialize for Loc {
 
 struct LocVisitor;
 
-impl<'de> Visitor<'de> for LocVisitor {
+impl Visitor<'_> for LocVisitor {
     type Value = Loc;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

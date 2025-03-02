@@ -6,8 +6,8 @@ use brdgme_game::Renderer;
 use brdgme_markup::ast::Cell;
 use brdgme_markup::{Align as A, Node as N, Row};
 
-use crate::card::{by_expedition, expeditions, Card};
-use crate::{next_player, PlayerState, PubState, END_ROUND, MAX_PLAYERS, ROUNDS, START_ROUND};
+use crate::card::{Card, by_expedition, expeditions};
+use crate::{END_ROUND, MAX_PLAYERS, PlayerState, PubState, ROUNDS, START_ROUND, next_player};
 
 const EXP_SPACER: &str = "  ";
 const TABLEAU_HEADER_SPACER: &str = "   ";
@@ -154,25 +154,27 @@ impl PubState {
                     opponent_tableaus.push(opp_tableau);
                 }
                 // Adjust all to the same height bottom aligned and render each as a table cell.
-                layout.push(N::Table(vec![opponent_tableaus
-                    .into_iter()
-                    .enumerate()
-                    .flat_map(|(i, mut opp_tableau)| {
-                        let mut cells: Vec<Cell> = vec![];
-                        if i > 0 {
-                            cells.push((A::Left, vec![N::text(OPPONENT_SPACER)]))
-                        }
-                        let height = opp_tableau.len();
-                        if height < tallest {
-                            let mut new_tableau: Vec<Row> =
-                                repeat(vec![]).take(tallest - height).collect();
-                            new_tableau.extend(opp_tableau);
-                            opp_tableau = new_tableau;
-                        }
-                        cells.push((A::Left, vec![N::Table(opp_tableau)]));
-                        cells
-                    })
-                    .collect()]))
+                layout.push(N::Table(vec![
+                    opponent_tableaus
+                        .into_iter()
+                        .enumerate()
+                        .flat_map(|(i, mut opp_tableau)| {
+                            let mut cells: Vec<Cell> = vec![];
+                            if i > 0 {
+                                cells.push((A::Left, vec![N::text(OPPONENT_SPACER)]))
+                            }
+                            let height = opp_tableau.len();
+                            if height < tallest {
+                                let mut new_tableau: Vec<Row> =
+                                    repeat(vec![]).take(tallest - height).collect();
+                                new_tableau.extend(opp_tableau);
+                                opp_tableau = new_tableau;
+                            }
+                            cells.push((A::Left, vec![N::Table(opp_tableau)]));
+                            cells
+                        })
+                        .collect(),
+                ]))
             }
             _ => unreachable!(),
         }

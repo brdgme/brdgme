@@ -1,17 +1,17 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
 
-use serde::{de::DeserializeOwned, Serialize};
-use warp::reject::Reject;
+use serde::{Serialize, de::DeserializeOwned};
 use warp::Filter;
+use warp::reject::Reject;
 
 use brdgme_game::Gamer;
 
 use crate::api::Request;
 use crate::requester;
+use crate::requester::Requester;
 use crate::requester::error::RequestError;
 use crate::requester::gamer::GameRequester;
-use crate::requester::Requester;
 
 impl Reject for RequestError {}
 

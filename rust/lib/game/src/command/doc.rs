@@ -3,13 +3,10 @@ use brdgme_markup::Node;
 
 use crate::command::Spec;
 
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Opts {
     pub name: Option<String>,
 }
-
-
 
 impl Spec {
     pub fn doc(&self) -> Vec<(Vec<Node>, Option<String>)> {
@@ -31,9 +28,7 @@ impl Spec {
             } => doc_many(spec, min, max, delim, opts)
                 .map(|d| vec![d])
                 .unwrap_or_default(),
-            Spec::Opt(ref spec) => doc_opt(spec, opts)
-                .map(|d| vec![d])
-                .unwrap_or_default(),
+            Spec::Opt(ref spec) => doc_opt(spec, opts).map(|d| vec![d]).unwrap_or_default(),
             Spec::Doc {
                 ref name,
                 ref desc,

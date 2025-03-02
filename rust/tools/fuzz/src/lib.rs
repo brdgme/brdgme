@@ -1,17 +1,17 @@
 use std::fmt::Debug;
-use std::sync::mpsc::{channel, Sender, TryRecvError};
+use std::sync::mpsc::{Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rand::prelude::*;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use brdgme_cmd::api;
 use brdgme_cmd::requester;
-use brdgme_game::{command, Gamer};
+use brdgme_game::{Gamer, command};
 
 pub fn fuzz<F, R>(new_requester: F)
 where
@@ -125,7 +125,7 @@ impl Fuzzer {
                 return Err(anyhow!(
                     "invalid response to player counts request: {:?}",
                     v
-                ))
+                ));
             }
         };
         Ok(Fuzzer {

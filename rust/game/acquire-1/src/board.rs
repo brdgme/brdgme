@@ -280,7 +280,7 @@ impl From<usize> for Loc {
     }
 }
 
-impl<'a> From<&'a Loc> for usize {
+impl From<&Loc> for usize {
     fn from(l: &Loc) -> Self {
         l.row * WIDTH + l.col
     }

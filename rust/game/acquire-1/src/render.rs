@@ -2,14 +2,14 @@ use std::iter::repeat;
 
 use brdgme_color::*;
 use brdgme_game::Renderer;
-use brdgme_markup::{row_pad, Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, row_pad};
 
-use crate::board::{self, Board, Loc, Tile};
-use crate::corp::{Corp, GAME_END_SIZE, MAJOR_MULT, MINOR_MULT};
 use crate::CanEnd;
 use crate::CanEndFalse;
 use crate::PlayerState;
 use crate::PubState;
+use crate::board::{self, Board, Loc, Tile};
+use crate::corp::{Corp, GAME_END_SIZE, MAJOR_MULT, MINOR_MULT};
 
 const TILE_WIDTH: usize = 5;
 const TILE_HEIGHT: usize = 2;

@@ -4,9 +4,9 @@ use std::io::{Read, Write};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use brdgme_game::Gamer;
 use brdgme_game::bot::Botter;
 use brdgme_game::command::Spec as CommandSpec;
-use brdgme_game::Gamer;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Request {

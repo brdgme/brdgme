@@ -3,9 +3,9 @@ use std::io::{Read, Write};
 use rand::prelude::*;
 
 use brdgme_cmd::bot_cli;
+use brdgme_game::Gamer;
 use brdgme_game::bot::{BotCommand, Botter, Fuzzer};
 use brdgme_game::command;
-use brdgme_game::Gamer;
 
 pub struct RandBot;
 

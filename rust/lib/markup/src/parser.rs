@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use combine::parser::char::{digit, letter, string};
-use combine::{attempt, choice, none_of, parser, ParseError, Stream};
-use combine::{many, many1, Parser};
+use combine::{ParseError, Stream, attempt, choice, none_of, parser};
+use combine::{Parser, many, many1};
 
 use brdgme_color::*;
 

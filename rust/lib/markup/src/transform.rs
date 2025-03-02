@@ -2,7 +2,7 @@ use std::cmp;
 use std::iter;
 use std::ops::Range;
 
-use brdgme_color::{player_color, Color};
+use brdgme_color::{Color, player_color};
 
 use crate::ast::{Align, BgRange, Col, ColTrans, ColType, Node, Row, TNode};
 

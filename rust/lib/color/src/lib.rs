@@ -108,7 +108,7 @@ impl<'a> Default for Style<'a> {
     }
 }
 
-impl<'a> Style<'a> {
+impl Style<'_> {
     pub fn ansi(self) -> String {
         format!(
             "\x1b[{b};38;2;{fgr};{fgg};{fgb};48;2;{bgr};{bgg};{bgb}m",

@@ -1,15 +1,15 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use brdgme_game::errors::GameError;
 use brdgme_game::{CommandResponse, Gamer, Renderer};
 
 use crate::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
-use crate::requester::error::RequestError;
 use crate::requester::Requester;
+use crate::requester::error::RequestError;
 
 pub struct GameRequester<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> {
     gamer: PhantomData<G>,

@@ -805,7 +805,7 @@ impl Game {
             major_bonus += minor_bonus;
         }
         // Round up to the nearest 100
-        let major_per = (major_bonus / BONUS_ROUNDING + major_len - 1) / major_len * BONUS_ROUNDING;
+        let major_per = (major_bonus / BONUS_ROUNDING).div_ceil(major_len) * BONUS_ROUNDING;
         logs.push(Game::bonus_log(&major, "Major", major_per));
         for p in &major {
             if *p == DUMMY_PLAYER_OFFSET {
@@ -817,8 +817,7 @@ impl Game {
         }
         if minor_len > 0 {
             // Round up to the nearest 100
-            let minor_per =
-                (minor_bonus / BONUS_ROUNDING + minor_len - 1) / minor_len * BONUS_ROUNDING;
+            let minor_per = (minor_bonus / BONUS_ROUNDING).div_ceil(minor_len) * BONUS_ROUNDING;
             logs.push(Game::bonus_log(&minor, "Minor", minor_per));
             for p in &minor {
                 if *p == DUMMY_PLAYER_OFFSET {

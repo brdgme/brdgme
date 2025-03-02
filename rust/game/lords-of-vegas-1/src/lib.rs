@@ -7,7 +7,7 @@ use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
 use crate::board::{Board, BoardTile, Loc, TileOwner};
-use crate::card::{render_cards, shuffled_deck, Card};
+use crate::card::{Card, render_cards, shuffled_deck};
 use crate::casino::Casino;
 use crate::command::Command;
 use crate::render::render_cash;

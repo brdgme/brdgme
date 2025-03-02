@@ -1,5 +1,5 @@
-use crate::command::parser::{Output, Parser};
 use crate::command::Spec as CommandSpec;
+use crate::command::parser::{Output, Parser};
 use crate::errors::*;
 
 type Chain2Output<PA, PB> = (<PA as Parser>::T, <PB as Parser>::T);
