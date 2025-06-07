@@ -1,8 +1,8 @@
-# Board Game Platform Migration Plan: Rocket/React to Dioxus Monolith
+# Board Game Platform Migration Plan: Rocket/React to Leptos/Axum Monolith
 
 ## Overview
 
-This document outlines the migration plan for consolidating the existing board game platform from a distributed architecture (Rocket API + React frontend + WebSocket server) into a unified Dioxus monolith application. The migration will also replace Diesel with SQLx and unify command parsing in Rust.
+This document outlines the migration plan for consolidating the existing board game platform from a distributed architecture (Rocket API + React frontend + WebSocket server) into a unified Leptos/Axum monolith application. The migration will also replace Diesel with SQLx and unify command parsing in Rust.
 
 ## Architecture Changes
 
@@ -14,9 +14,9 @@ This document outlines the migration plan for consolidating the existing board g
 - **Communication**: Redis pub/sub between API and WebSocket servers
 
 ### Target Architecture
-- **Monolith**: Rust/Dioxus/SQLx (`rust/web`)
+- **Monolith**: Rust/Leptos/Axum/SQLx (`rust/web`)
 - **Game Engines**: Unchanged (still separate processes)
-- **Communication**: Direct in-process communication for real-time updates
+- **Communication**: Direct in-process communication for real-time updates via Leptos Server Functions and WebSockets
 
 ## Prerequisites
 
@@ -132,62 +132,114 @@ Before starting the migration:
      }
      ```
 
-#### 1.2 Dioxus Application Structure
-1. **Set up Dioxus router and basic pages**
-   - Create `rust/web/src/routes/` directory
-   - Implement basic route structure:
+#### 1.2 Leptos/Axum Application Structure
+1. **Set up Axum server with Leptos integration**
+   - Create `rust/web/src/app.rs` for Leptos components
+   - Implement Axum routes and Leptos router:
+     ```rust
+     // rust/web/src/app.rs
+     use leptos::*;
+     use leptos_router::*;
+     
+     #[component]
+     pub fn App() -> impl IntoView {
+         view! {
+             <Router>
+                 <Routes>
+                     <Route path="/" view=Home/>
+                     <Route path="/login" view=Login/>
+                     <Route path="/games" view=Games/>
+                     <Route path="/games/:id" view=Game/>
+                 </Routes>
+             </Router>
+         }
+     }
+     ```
+   - Set up Axum server in `main.rs`:
      ```rust
      // rust/web/src/main.rs
-     use dioxus::prelude::*;
+     use axum::{Router, routing::get};
+     use leptos::*;
+     use leptos_axum::{generate_route_list, LeptosRoutes};
      
-     #[derive(Clone, Routable, Debug, PartialEq)]
-     enum Route {
-         #[route("/")]
-         Home,
-         #[route("/login")]
-         Login,
-         #[route("/games")]
-         Games,
-         #[route("/games/:id")]
-         Game { id: String },
+     #[tokio::main]
+     async fn main() {
+         let pool = create_pool().await.unwrap();
+         
+         let app = Router::new()
+             .leptos_routes(&leptos_options, generate_route_list(App), App)
+             .with_state(AppState { db_pool: pool });
+             
+         axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+             .serve(app.into_make_service())
+             .await
+             .unwrap();
      }
      ```
 
 2. **Create shared state management**
-   - Implement global state using Dioxus signals:
+   - Implement global state using Leptos context API:
      ```rust
      // rust/web/src/state.rs
-     use dioxus::prelude::*;
+     use leptos::*;
+     use sqlx::PgPool;
      
      #[derive(Clone)]
      pub struct AppState {
-         pub current_user: Signal<Option<User>>,
          pub db_pool: PgPool,
      }
+     
+     // In components, access via:
+     // let state = use_context::<AppState>().expect("AppState");
      ```
 
 ### Milestone 2: Authentication System (Week 3)
 
 #### 2.1 Port Authentication Logic
-1. **Migrate auth endpoints from Rocket to Dioxus server functions**
+1. **Migrate auth endpoints from Rocket to Leptos server functions**
    - Port `rust/api/src/controller/auth.rs` logic
    - Create server functions for login/logout:
      ```rust
      // rust/web/src/auth/server.rs
-     #[server(Login)]
-     async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
+     use leptos::*;
+     
+     #[server(Login, "/api")]
+     pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
+         // Access database via Axum state
+         let state = use_context::<AppState>().expect("AppState");
          // Port login logic from Rocket controller
      }
      ```
 
 2. **Implement session management**
-   - Use Dioxus fullstack session features
-   - Store auth tokens in cookies
-   - Create middleware for protected routes
+   - Use Axum session middleware with tower-sessions
+   - Store auth tokens in secure cookies
+   - Create Axum middleware for protected routes:
+     ```rust
+     // rust/web/src/auth/middleware.rs
+     use axum::{middleware::Next, response::Response};
+     
+     pub async fn auth_middleware(req: Request, next: Next) -> Response {
+         // Check session validity
+     }
+     ```
 
 3. **Create login UI component**
-   - Port React login component to Dioxus
-   - Use Dioxus forms and validation
+   - Port React login component to Leptos
+   - Use Leptos forms and validation:
+     ```rust
+     #[component]
+     pub fn Login() -> impl IntoView {
+         let login_action = create_server_action::<Login>();
+         
+         view! {
+             <ActionForm action=login_action>
+                 <input type="email" name="email" />
+                 <button type="submit">"Login"</button>
+             </ActionForm>
+         }
+     }
+     ```
 
 #### 2.2 User Management
 1. **User profile pages**
@@ -212,14 +264,14 @@ Before starting the migration:
    - Player invitation system
 
 #### 3.2 Active Games Display
-1. **Games list page**
+3. **Games list page**
    - Show user's active games
    - Display game status and turn information
-   - Implement real-time updates using Dioxus signals
+   - Implement real-time updates using Leptos reactive signals and resources
 
 2. **Game state management**
    - Port game state serialization/deserialization
-   - Create game state cache using Dioxus signals
+   - Create game state cache using Leptos signals and resources
 
 ### Milestone 4: Unified Command Parser (Week 6)
 
@@ -284,16 +336,37 @@ Before starting the migration:
 
 ### Milestone 6: Real-time Communication (Week 9-10)
 
-#### 6.1 WebSocket Replacement
-1. **Implement Server-Sent Events (SSE) or WebSockets in Dioxus**
+#### 6.1 WebSocket Implementation
+1. **Implement WebSockets using Axum**
    - Replace Node.js WebSocket server functionality
-   - Use Dioxus's built-in real-time capabilities
-   - Implement connection management
+   - Use Axum's WebSocket support:
+     ```rust
+     // rust/web/src/websocket.rs
+     use axum::{
+         extract::ws::{WebSocket, WebSocketUpgrade},
+         response::Response,
+     };
+     
+     pub async fn websocket_handler(
+         ws: WebSocketUpgrade,
+         State(state): State<AppState>,
+     ) -> Response {
+         ws.on_upgrade(move |socket| handle_socket(socket, state))
+     }
+     ```
+   - Implement connection management with tokio channels
 
 2. **Real-time game updates**
-   - Push game state changes to clients
-   - Update UI reactively using signals
-   - Handle connection recovery
+   - Push game state changes to clients via WebSocket
+   - Update UI reactively using Leptos signals
+   - Use Leptos resources for automatic refetching:
+     ```rust
+     let game_state = create_resource(
+         move || game_id.get(),
+         |id| async move { fetch_game_state(id).await }
+     );
+     ```
+   - Handle connection recovery with exponential backoff
 
 #### 6.2 Chat System
 1. **Port chat functionality**
@@ -444,25 +517,34 @@ rust/web/
 
 ### Best Practices
 
-1. **Use Dioxus idioms**
-   - Prefer signals over manual state management
+1. **Use Leptos idioms**
+   - Prefer reactive signals and resources over manual state management
    - Use server functions for all backend logic
-   - Leverage Dioxus router for navigation
+   - Leverage Leptos router for client-side navigation
+   - Use Suspense boundaries for loading states
 
-2. **SQLx best practices**
-   - Use compile-time query verification
+2. **Axum integration**
+   - Use Axum extractors for request data
+   - Implement proper middleware chains
+   - Leverage tower services for cross-cutting concerns
+
+3. **SQLx best practices**
+   - Use compile-time query verification with `query!` macro
    - Implement proper connection pooling
    - Use transactions for complex operations
+   - Prepare queries offline for CI/CD with `cargo sqlx prepare`
 
-3. **Error handling**
+4. **Error handling**
    - Use `Result` types consistently
-   - Implement proper error boundaries in UI
-   - Log errors appropriately
+   - Implement proper error boundaries in UI with `ErrorBoundary` component
+   - Use `tracing` for structured logging
+   - Create custom error types that implement `IntoResponse` for Axum
 
-4. **Performance considerations**
+5. **Performance considerations**
    - Implement pagination for large lists
-   - Use lazy loading for game states
-   - Cache frequently accessed data
+   - Use lazy loading for game states with Suspense
+   - Cache frequently accessed data with memoized signals
+   - Use server-side rendering (SSR) for initial page loads
 
 ## Risk Mitigation
 
@@ -480,7 +562,7 @@ rust/web/
    
    **Zero-downtime migration strategy:**
    ```
-   1. Deploy Dioxus app in read-only mode
+   1. Deploy Leptos/Axum app in read-only mode
    2. Verify all read operations work correctly
    3. Enable write operations for subset of users
    4. Gradually increase user percentage
@@ -517,4 +599,4 @@ rust/web/
 
 ## Conclusion
 
-This migration plan provides a structured approach to consolidating the board game platform into a Dioxus monolith. By following these milestones and guidelines, the migration can be completed systematically while minimizing risks and ensuring a smooth transition for users.
+This migration plan provides a structured approach to consolidating the board game platform into a Leptos/Axum monolith. By following these milestones and guidelines, the migration can be completed systematically while minimizing risks and ensuring a smooth transition for users. The combination of Leptos for reactive UI, Axum for robust server infrastructure, and SQLx for type-safe database access provides a solid foundation for a maintainable and performant application.

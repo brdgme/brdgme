@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: brdgme-postgres-dev
+    environment:
+      POSTGRES_DB: brdgme
+      POSTGRES_USER: brdgme_user
+      POSTGRES_PASSWORD: brdgme_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brdgme_user -d brdgme"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - brdgme-dev
+
+  redis:
+    image: redis:7-alpine
+    container_name: brdgme-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - brdgme-dev
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  brdgme-dev:
+    driver: bridge

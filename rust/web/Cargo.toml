@@ -9,12 +9,45 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 leptos = { version = "0.8.0" }
 leptos_router = { version = "0.8.0" }
-axum = { version = "0.8.0", optional = true }
+axum = { version = "0.8.0", optional = true, features = ["ws", "macros"] }
 console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = { version = "0.8.0" }
-tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 wasm-bindgen = { version = "=0.2.100", optional = true }
+
+# Database dependencies
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate"], optional = true }
+uuid = { version = "1.12.1", features = ["serde", "v4", "js"] }
+chrono = { version = "0.4.39", features = ["serde"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.138"
+
+# Additional server dependencies
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+tower = { version = "0.4", optional = true }
+tower-sessions = { version = "0.13", optional = true }
+tower-sessions-memory-store = { version = "0.13", optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
+anyhow = { version = "1.0.95", optional = true }
+thiserror = { version = "2.0.11", optional = true }
+async-trait = { version = "0.1", optional = true }
+
+# Email functionality
+email = { version = "0.0.21", optional = true }
+
+# Redis for background processing
+redis = { version = "0.28.2", optional = true }
+
+# Environment variables
+dotenv = { version = "0.15", optional = true }
+
+# Game engine dependencies from existing API
+brdgme_cmd = { path = "../lib/cmd", optional = true }
+brdgme_game = { path = "../lib/game", optional = true }
+brdgme_color = { path = "../lib/color", optional = true }
+brdgme_markup = { path = "../lib/markup", optional = true }
 
 [features]
 hydrate = [
@@ -29,6 +62,23 @@ ssr = [
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",
+    "dep:sqlx",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:tower",
+    "dep:tower-sessions",
+    "dep:anyhow",
+    "dep:thiserror",
+    "dep:email",
+    "dep:redis",
+    "dep:brdgme_cmd",
+    "dep:brdgme_game",
+    "dep:brdgme_color",
+    "dep:brdgme_markup",
+    "dep:dotenv",
+    "dep:tower-sessions-memory-store",
+    "dep:tower-http",
+    "dep:async-trait",
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode

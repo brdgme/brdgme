@@ -13,3 +13,38 @@ devenv.local.nix
 
 # pre-commit
 .pre-commit-config.yaml
+
+# Leptos development files
+rust/web/.env
+rust/web/target/
+rust/web/dist/
+rust/web/pkg/
+rust/web/.leptos/
+
+# SQLx offline query data
+rust/web/.sqlx/
+
+# Node modules (if any)
+node_modules/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Docker volumes (local development)
+postgres_data/
+redis_data/
