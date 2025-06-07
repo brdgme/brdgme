@@ -1,6 +1,4 @@
 [workspace]
-resolver = "2"
-
 members = [
     "api",
     "game/acquire-1",
@@ -14,23 +12,23 @@ members = [
     "lib/rand_bot",
     "tools/fuzz",
     "tools/repl",
-    "web", "web",
+    "web",
 ]
+resolver = "2"
 
-# Defines a size-optimized profile for the WASM bundle in release mode
-[profile.wasm-release]
-inherits = "release"
-opt-level = 'z'
-lto = true
-codegen-units = 1
-panic = "abort"
-
-[profile.wasm-dev]
+[profile.android-dev]
 inherits = "dev"
-opt-level = 1
 
 [profile.server-dev]
 inherits = "dev"
 
-[profile.android-dev]
+[profile.wasm-dev]
+opt-level = 1
 inherits = "dev"
+
+[profile.wasm-release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+inherits = "release"
