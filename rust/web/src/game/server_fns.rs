@@ -196,10 +196,8 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
             .map_err(|e| ServerFnError::new(format!("Failed to create game logs: {}", e)))?;
             
         // Broadcast update
-        let updated_ge = crate::db::find_game_extended(&pool, game_id).await.ok().flatten();
         broadcaster.broadcast(WebSocketMessage::GameUpdate { 
             game_id, 
-            game: updated_ge 
         });
         
         Ok(())

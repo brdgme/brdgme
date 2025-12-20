@@ -6,7 +6,6 @@ pub mod state;
 #[cfg(feature = "ssr")]
 pub mod db;
 
-#[cfg(feature = "ssr")]
 pub mod websocket;
 
 #[cfg(feature = "ssr")]

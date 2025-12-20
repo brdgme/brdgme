@@ -73,20 +73,18 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 - **Next Steps:**
     - **Phase 5: The Frontend (Leptos UI)**: Begin building the actual user interface in Rust, starting with the App Shell and Layout.
 
-### [Date] Phase 5.1 & 5.2 Complete: App Shell & Server Functions
-- **Completed:**
-    - Refactored `rust/web/src/app.rs` and `rust/web/src/components/layout.rs` to use dynamic data.
-    - Implemented `get_active_games` and `get_game_details` Server Functions in `rust/web/src/game/server_fns.rs`.
-    - Established shared types (`GameSummary`, `GameViewData`) for type-safe frontend-backend communication.
-    - Wired up `SidebarMenu` to display real active games and `GamePage` to render the live game board (HTML from ASCII).
+### [Date] Phase 5 Complete: Leptos Frontend Implementation
+- **Completed Frontend UI:**
+    - Developed a complete App Shell with modular components: `GameBoard` (ASCII-to-HTML), `GameMeta`, `GameLogs`, and `GameCommandInput`.
+    - Implemented Server Functions for active games, game details, and command submission.
+    - Ported legacy styling into the Leptos layout for visual consistency.
+- **Completed Interactivity:**
+    - Implemented client-side command parsing using `brdgme_game` parsers compiled to WASM, providing real-time suggestions and validation.
+    - Built a client-side WebSocket hook (`websocket_client.rs`) that triggers automatic resource refetches via a global `WebSocketTrigger` context.
+- **Infrastructure & Compatibility:**
+    - Updated `devenv.nix` with `cargo-leptos` and `dart-sass`.
+    - Resolved WASM target issues: pinned `wasm-bindgen` to `0.2.100`, enabled `js`/`wasm_js` features for `getrandom`, and gated non-WASM dependencies in `brdgme_cmd`.
+    - Updated Axum routing to modern `{id}` syntax.
 - **Next Steps:**
-    - **Phase 5.3: Build Game View Component**: Refactor the game board, meta-data, and logs into modular Leptos components.
-
-### [Date] Phase 5 Complete: Leptos Frontend UI
-- **Completed:**
-    - Built a dynamic App Shell with modular components (`GameBoard`, `GameMeta`, `GameLogs`, `GameCommandInput`).
-    - Implemented client-side command validation and suggestions using the `brdgme_game` parser compiled to WASM.
-    - Integrated real-time live updates via WebSockets, using a global `WebSocketTrigger` context to automatically refresh Leptos Resources (`get_active_games`, `get_game_details`).
-    - Successfully resolved WASM compatibility issues with `getrandom` and `brdgme_cmd` default features.
-- **Next Steps:**
-    - **Phase 6: Cutover & Cleanup**: Prepare for deployment by updating Docker/Skaffold and eventually removing legacy services.
+    - **Phase 5.5: Functional Verification**: Perform end-to-end testing of gameplay flows using restored production data.
+    - **Phase 6: Cutover & Cleanup**: Containerization and decommissioning of legacy services.

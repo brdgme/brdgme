@@ -11,13 +11,15 @@ pub fn use_websocket() {
     use gloo_net::websocket::futures::WebSocket;
     use futures_util::StreamExt;
     use crate::websocket::WebSocketMessage;
+    use leptos::task::spawn_local;
+    use leptos::logging::log;
     
     let trigger = expect_context::<WebSocketTrigger>();
     
     Effect::new(move |_| {
-        let loc = web_sys::window().unwrap().location();
-        let protocol = if loc.protocol().unwrap() == "https:" { "wss:" } else { "ws:" };
-        let host = loc.host().unwrap();
+        let loc = web_sys::window().expect("window should be available").location();
+        let protocol = if loc.protocol().expect("protocol should be available") == "https:" { "wss:" } else { "ws:" };
+        let host = loc.host().expect("host should be available");
         let url = format!("{}//{}/ws", protocol, host);
         
         match WebSocket::open(&url) {

@@ -61,26 +61,14 @@ We will perform the migration **in parallel** where possible, building the new s
     *   When the Game API (Phase 3) updates a game, it should push a message to this broadcaster.
     *   The WebSocket handler subscribes to this channel and pushes JSON updates to the connected client.
 
-## Phase 5: The Frontend (Leptos UI)
+## Phase 5: The Frontend (Leptos UI) [COMPLETE]
 **Goal:** Build the UI in Rust, replacing React.
 
-1.  **App Shell:**
-    *   Set up `rust/web/src/app.rs` with `leptos_router`.
-    *   Create `Layout` component (Navbar, Footer).
-2.  **Shared Types & Server Functions:**
-    *   **Action:** Define shared Rust structs for frontend-backend communication (e.g., User, GameSummary) in a common module available to both WASM and Server.
-    *   **Action:** Use **Leptos Server Functions** (`#[server]`) for internal API calls (e.g., `get_game`, `submit_move`).
-    *   *Benefit:* This avoids manual JSON serialization/deserialization for internal app communication, providing full type safety.
-3.  **Game View Component:**
-    *   Fetch game data via Server Functions.
-    *   Render the ASCII board. *Note: Use `brdgme_markup` crate (shared) to convert markup to HTML.*
-4.  **Interactive Command Input:**
-    *   **Crucial Step:** Import `brdgme_cmd` in the frontend code.
-    *   Use the parser *client-side* to validate input and show suggestions as the user types (Autocomplete).
-    *   On submit, call a Server Function to execute the move.
-5.  **Live Updates:**
-    *   Connect to the WebSocket endpoint established in Phase 4.
-    *   Update the local Leptos Signals when a game update message is received.
+## Phase 5.5: Functional Verification (Pending)
+**Goal:** Run the new application alongside production data and verify all features.
+1.  **Walkthrough:** Test game navigation, rendering, and move submission.
+2.  **Live Sync:** Verify that moves made in the new UI reflect instantly via WebSockets.
+3.  **UI Fidelity:** Ensure styling and lo-fi ASCII aesthetics match or improve upon the legacy frontend.
 
 ## Phase 6: Cutover & Cleanup
 **Goal:** Switch to the new system.

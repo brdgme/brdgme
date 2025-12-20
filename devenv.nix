@@ -14,6 +14,8 @@
   };
   packages = with pkgs; [
     cargo-binstall
+    cargo-leptos
+    dart-sass
     k9s
     kubectl
     minikube

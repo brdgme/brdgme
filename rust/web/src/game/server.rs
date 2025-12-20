@@ -78,10 +78,8 @@ pub async fn create_game(
     }
 
     // Broadcast update
-    let game_extended = db::find_game_extended(&pool, game.id).await.ok().flatten();
     broadcaster.broadcast(WebSocketMessage::GameUpdate { 
         game_id: game.id, 
-        game: game_extended 
     });
 
     (StatusCode::CREATED, Json(game)).into_response()
@@ -175,10 +173,8 @@ pub async fn play_command(
     }
 
     // Broadcast update
-    let game_extended = db::find_game_extended(&pool, id).await.ok().flatten();
     broadcaster.broadcast(WebSocketMessage::GameUpdate { 
         game_id: id, 
-        game: game_extended 
     });
 
     StatusCode::OK.into_response()
@@ -187,6 +183,6 @@ pub async fn play_command(
 pub fn api_routes() -> axum::Router<crate::state::AppState> {
     axum::Router::new()
         .route("/game/new", axum::routing::post(create_game))
-        .route("/game/:id", axum::routing::get(get_game))
-        .route("/game/:id/command", axum::routing::post(play_command))
+        .route("/game/{id}", axum::routing::get(get_game))
+        .route("/game/{id}/command", axum::routing::post(play_command))
 }
