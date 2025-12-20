@@ -7,5 +7,6 @@ mod repl;
 pub mod api;
 pub mod bot_cli;
 pub mod cli;
+#[cfg(feature = "http-server")]
 pub mod http;
 pub mod requester;

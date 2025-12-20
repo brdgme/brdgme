@@ -7,6 +7,12 @@ use crate::models::user::{User, UserEmail};
 use sqlx::PgPool;
 #[cfg(feature = "ssr")]
 use chrono::Utc;
+#[cfg(feature = "ssr")]
+use crate::auth::session::{set_user_session, get_user_from_session, clear_user_session, validate_session_token, invalidate_auth_token};
+#[cfg(feature = "ssr")]
+use tower_sessions::Session;
+#[cfg(feature = "ssr")]
+use leptos_axum::extract;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
@@ -153,7 +159,10 @@ pub async fn confirm_login(token: String) -> Result<AuthUser, ServerFnError> {
     .await
     .map_err(|e| ServerFnError::new(format!("Failed to clear confirmation: {}", e)))?;
     
-    // TODO: Set session with user data when session context is available
+    // Set session
+    let session: Session = extract().await.map_err(|e| ServerFnError::new(format!("Failed to extract session: {}", e)))?;
+    set_user_session(&session, &user, &user_email.email, auth_token_id).await
+        .map_err(|e| ServerFnError::new(format!("Failed to set session: {}", e)))?;
     
     Ok(AuthUser {
         id: user.id,
@@ -164,13 +173,39 @@ pub async fn confirm_login(token: String) -> Result<AuthUser, ServerFnError> {
 
 #[server(GetCurrentUser, "/api")]
 pub async fn get_current_user() -> Result<Option<AuthUser>, ServerFnError> {
-    // TODO: Implement session-based user authentication
-    // For now, return None (not logged in)
+    let session: Session = extract().await.map_err(|e| ServerFnError::new(format!("Failed to extract session: {}", e)))?;
+    let session_user = get_user_from_session(&session).await;
+    
+    if let Some(user) = session_user {
+        let pool = expect_context::<PgPool>();
+        // Validate token matches database
+        if validate_session_token(&pool, user.auth_token_id).await.unwrap_or(false) {
+            return Ok(Some(AuthUser {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+            }));
+        } else {
+            // Token invalid, clear session
+            let _ = clear_user_session(&session).await;
+        }
+    }
+    
     Ok(None)
 }
 
 #[server(Logout, "/api")]
 pub async fn logout() -> Result<bool, ServerFnError> {
-    // TODO: Implement logout by clearing session and invalidating tokens
+    let session: Session = extract().await.map_err(|e| ServerFnError::new(format!("Failed to extract session: {}", e)))?;
+    
+    // Get user to check for auth token to invalidate
+    if let Some(user) = get_user_from_session(&session).await {
+        let pool = expect_context::<PgPool>();
+        let _ = invalidate_auth_token(&pool, user.auth_token_id).await;
+    }
+    
+    clear_user_session(&session).await
+        .map_err(|e| ServerFnError::new(format!("Failed to clear session: {}", e)))?;
+        
     Ok(true)
 }
