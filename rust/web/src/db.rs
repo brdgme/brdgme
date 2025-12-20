@@ -250,6 +250,29 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 }
 
 #[cfg(feature = "ssr")]
+pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result<Vec<GameExtended>> {
+    let game_ids = sqlx::query!(
+        r#"
+        SELECT DISTINCT g.id
+        FROM games g
+        JOIN game_players gp ON g.id = gp.game_id
+        WHERE gp.user_id = $1 AND g.is_finished = false
+        "#,
+        user_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut games = Vec::new();
+    for row in game_ids {
+        if let Some(ge) = find_game_extended(pool, row.id).await? {
+            games.push(ge);
+        }
+    }
+    Ok(games)
+}
+
+#[cfg(feature = "ssr")]
 pub struct CreateGameOpts<'a> {
     pub game_version_id: Uuid,
     pub whose_turn: &'a [usize],

@@ -810,6 +810,229 @@ impl<TP: Parser> Parser for AfterSpace<TP> {
     }
 }
 
+impl Parser for CommandSpec {
+    type T = serde_json::Value;
+
+    fn parse<'a>(
+        &self,
+        input: &'a str,
+        names: &[String],
+    ) -> Result<Output<'a, Self::T>, GameError> {
+        match self {
+            CommandSpec::Int { min, max } => {
+                let out = Int { min: *min, max: *max }.parse(input, names)?;
+                Ok(Output {
+                    value: serde_json::Value::Number(out.value.into()),
+                    consumed: out.consumed,
+                    remaining: out.remaining,
+                })
+            }
+            CommandSpec::Token(token) => {
+                let out = Token::new(token.clone()).parse(input, names)?;
+                Ok(Output {
+                    value: serde_json::Value::String(out.value),
+                    consumed: out.consumed,
+                    remaining: out.remaining,
+                })
+            }
+            CommandSpec::Enum { values, exact } => {
+                let out = if *exact {
+                    Enum::exact(values.clone()).parse(input, names)?
+                } else {
+                    Enum::partial(values.clone()).parse(input, names)?
+                };
+                Ok(Output {
+                    value: serde_json::Value::String(out.value),
+                    consumed: out.consumed,
+                    remaining: out.remaining,
+                })
+            }
+            CommandSpec::OneOf(specs) => {
+                let mut errors: Vec<GameError> = vec![];
+                let mut error_consumed: usize = 0;
+                for s in specs {
+                    match s.parse(input, names) {
+                        Ok(output) => return Ok(output),
+                        Err(e) => {
+                            let mut e_consumed = 0;
+                            if let GameError::Parse { offset, .. } = e {
+                                e_consumed = offset;
+                            }
+                            match e_consumed.cmp(&error_consumed) {
+                                Ordering::Greater => {
+                                    errors = vec![e];
+                                    error_consumed = e_consumed;
+                                }
+                                Ordering::Equal => errors.push(e),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                let error_messages = &errors
+                    .iter()
+                    .filter_map(|e| {
+                        if let GameError::Parse { ref message, .. } = *e {
+                            message.to_owned()
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<String>>();
+                Err(GameError::Parse {
+                    message: if error_messages.is_empty() {
+                        None
+                    } else {
+                        Some(comma_list_or(error_messages))
+                    },
+                    expected: errors
+                        .iter()
+                        .flat_map(|e| match *e {
+                            GameError::Parse { ref expected, .. } => expected.clone(),
+                            _ => vec![],
+                        })
+                        .collect(),
+                    offset: error_consumed,
+                })
+            }
+            CommandSpec::Chain(specs) => {
+                let mut values = vec![];
+                let mut consumed_len = 0;
+                let mut remaining = input;
+                for s in specs {
+                    let out = s.parse(remaining, names)?;
+                    values.push(out.value);
+                    consumed_len += out.consumed.len();
+                    remaining = out.remaining;
+                }
+                Ok(Output {
+                    value: serde_json::Value::Array(values),
+                    consumed: &input[..consumed_len],
+                    remaining,
+                })
+            }
+            CommandSpec::Many {
+                spec,
+                min,
+                max,
+                delim,
+            } => {
+                let mut values = vec![];
+                let mut consumed_len = 0;
+                let mut remaining = input;
+                let mut first = true;
+                loop {
+                    if let Some(max_val) = max {
+                        if values.len() >= *max_val {
+                            break;
+                        }
+                    }
+                    let mut inner_remaining = remaining;
+                    let mut delim_len = 0;
+                    if !first {
+                        if let Some(d) = delim {
+                            match d.parse(remaining, names) {
+                                Ok(out) => {
+                                    inner_remaining = out.remaining;
+                                    delim_len = out.consumed.len();
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                    match spec.parse(inner_remaining, names) {
+                        Ok(out) => {
+                            values.push(out.value);
+                            consumed_len += delim_len + out.consumed.len();
+                            remaining = out.remaining;
+                            first = false;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                if let Some(min_val) = min {
+                    if values.len() < *min_val {
+                        return Err(GameError::Parse {
+                            message: Some(format!(
+                                "expected at least {} items but could only parse {}",
+                                min_val,
+                                values.len()
+                            )),
+                            expected: vec![],
+                            offset: 0,
+                        });
+                    }
+                }
+                Ok(Output {
+                    value: serde_json::Value::Array(values),
+                    consumed: &input[..consumed_len],
+                    remaining,
+                })
+            }
+            CommandSpec::Opt(spec) => {
+                Ok(match spec.parse(input, names) {
+                    Ok(out) => Output {
+                        value: out.value,
+                        consumed: out.consumed,
+                        remaining: out.remaining,
+                    },
+                    Err(_) => Output {
+                        value: serde_json::Value::Null,
+                        consumed: &input[..0],
+                        remaining: input,
+                    },
+                })
+            }
+            CommandSpec::Doc { spec, .. } => spec.parse(input, names),
+            CommandSpec::Player => {
+                let out = Player {}.parse(input, names)?;
+                Ok(Output {
+                    value: serde_json::Value::Number(out.value.into()),
+                    consumed: out.consumed,
+                    remaining: out.remaining,
+                })
+            }
+            CommandSpec::Space => {
+                let out = Space {}.parse(input, names)?;
+                Ok(Output {
+                    value: serde_json::Value::String(out.value),
+                    consumed: out.consumed,
+                    remaining: out.remaining,
+                })
+            }
+        }
+    }
+
+    fn expected(&self, names: &[String]) -> Vec<String> {
+        match self {
+            CommandSpec::Int { min, max } => Int { min: *min, max: *max }.expected(names),
+            CommandSpec::Token(token) => Token::new(token.clone()).expected(names),
+            CommandSpec::Enum { values, exact } => {
+                if *exact {
+                    Enum::exact(values.clone()).expected(names)
+                } else {
+                    Enum::partial(values.clone()).expected(names)
+                }
+            }
+            CommandSpec::OneOf(specs) => specs.iter().flat_map(|s| s.expected(names)).collect(),
+            CommandSpec::Chain(specs) => specs.get(0).map(|s| s.expected(names)).unwrap_or_default(),
+            CommandSpec::Many { spec, .. } => spec.expected(names),
+            CommandSpec::Opt(spec) => spec
+                .expected(names)
+                .iter()
+                .map(|e| format!("optional {}", e))
+                .collect(),
+            CommandSpec::Doc { name, .. } => vec![name.clone()],
+            CommandSpec::Player => Player {}.expected(names),
+            CommandSpec::Space => Space {}.expected(names),
+        }
+    }
+
+    fn to_spec(&self) -> CommandSpec {
+        self.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

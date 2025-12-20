@@ -439,6 +439,7 @@ dependencies = [
  "log",
  "rand 0.9.2",
  "serde",
+ "serde_json",
  "thiserror 2.0.17",
  "unicase",
 ]
@@ -4984,6 +4985,8 @@ dependencies = [
  "console_error_panic_hook",
  "dotenv",
  "email",
+ "futures-util",
+ "getrandom 0.3.4",
  "leptos",
  "leptos_axum",
  "leptos_meta",

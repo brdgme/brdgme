@@ -4,8 +4,8 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 
 ## Current Status
 
-**Current Phase:** Phase 3 (The New Backend (Axum Core))
-**Goal:** Replicate the core API logic (Auth, Game Orchestration) in Axum.
+**Current Phase:** Phase 6 (Cutover & Cleanup)
+**Goal:** Switch to the new system and remove legacy services.
 
 ### Progress Checklist
 
@@ -26,15 +26,15 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 - [x] **Step 3.4:** Implement Game API Endpoints
 
 #### Phase 4: WebSocket Integration
-- [ ] **Step 4.1:** Implement WebSocket Handler (`axum::extract::ws`)
-- [ ] **Step 4.2:** Implement Broadcast System (`tokio::sync::broadcast`)
+- [x] **Step 4.1:** Implement WebSocket Handler (`axum::extract::ws`)
+- [x] **Step 4.2:** Implement Broadcast System (`tokio::sync::broadcast`)
 
 #### Phase 5: The Frontend (Leptos UI)
-- [ ] **Step 5.1:** Build App Shell & Layout
-- [ ] **Step 5.2:** Shared Types & Server Functions
-- [ ] **Step 5.3:** Build Game View Component
-- [ ] **Step 5.4:** Implement Client-side Command Parsing
-- [ ] **Step 5.5:** Implement Live Updates (WebSocket connection)
+- [x] **Step 5.1:** Build App Shell & Layout
+- [x] **Step 5.2:** Shared Types & Server Functions
+- [x] **Step 5.3:** Build Game View Component
+- [x] **Step 5.4:** Implement Client-side Command Parsing
+- [x] **Step 5.5:** Implement Live Updates (WebSocket connection)
 
 #### Phase 6: Cutover & Cleanup
 - [ ] **Step 6.1:** Update Dockerfile
@@ -44,35 +44,6 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 ---
 
 ## Log
-
-### [Date] Phase 1 Initialization
-- Started work on refactoring `brdgme_cmd`.
-- **Challenge:** Need to separate HTTP logic from core logic in `brdgme_cmd` without breaking existing games that might rely on the HTTP server being present by default (until they are updated).
-- **Decision:** We will use a default feature `http-server` in `Cargo.toml`. This ensures existing backend code continues to work without modification, while the frontend can opt-out by disabling default features.
-
-### [Date] Phase 1 Complete / Phase 2 Start
-- **Completed:** Refactored `brdgme_cmd` to make `warp` dependency optional. Verified compilation without default features (WASM-ready).
-- **Started:** Phase 2 (Database Layer).
-- **Plan:**
-  1. Create `rust/web/migrations` directory.
-  2. Create `20250101000000_initial_setup.sql` translating the existing Diesel schema to SQLx-compatible SQL.
-  3. This includes tables: `users`, `games`, `game_versions`, `game_players`, `game_logs`, `chats`, etc.
-- **Pending:** Awaiting confirmation to proceed with filesystem modifications for migrations.
-
-### [Date] Phase 2 Complete & Phase 3 Start
-- **Completed:**
-    - Established SQLx database layer in `rust/web`.
-    - Migrated initial schema.
-    - Implemented `db.rs` with user and email management functions.
-    - Implemented Authentication (`auth/`) including `login`, `confirm_login`, `logout`, and `get_current_user` with `tower-sessions`.
-- **Infrastructure:**
-    - Updated `devenv.nix` to use `stable` Rust channel (resolving `rustc` version mismatch).
-    - Updated dependencies to latest stable versions:
-        - `leptos`: `0.8.14`
-        - `axum`: `0.8.7`
-        - `tower-sessions`: `0.14.0`
-- **Next Steps:**
-    - Proceed with **Phase 3.2: Implement Game Client Adapter**.
 
 ### [Date] Phase 2 Baseline & Phase 3 Adapter Complete
 - **Completed:**
@@ -92,3 +63,30 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
     - Successfully verified compilation with `cargo check`.
 - **Next Steps:**
     - **Phase 4: WebSocket Integration**: Implement real-time game updates using `tokio::sync::broadcast` and Axum WebSockets.
+
+### [Date] Phase 4 Complete: WebSocket Integration
+- **Completed:**
+    - Created `rust/web/src/websocket.rs` with `GameBroadcaster` using `tokio::sync::broadcast` for internal real-time event distribution.
+    - Implemented Axum WebSocket handler `/ws` to stream filtered game updates to clients.
+    - Integrated broadcasting into `create_game` and `play_command` endpoints.
+    - Added `futures-util` dependency for asynchronous stream management.
+- **Next Steps:**
+    - **Phase 5: The Frontend (Leptos UI)**: Begin building the actual user interface in Rust, starting with the App Shell and Layout.
+
+### [Date] Phase 5.1 & 5.2 Complete: App Shell & Server Functions
+- **Completed:**
+    - Refactored `rust/web/src/app.rs` and `rust/web/src/components/layout.rs` to use dynamic data.
+    - Implemented `get_active_games` and `get_game_details` Server Functions in `rust/web/src/game/server_fns.rs`.
+    - Established shared types (`GameSummary`, `GameViewData`) for type-safe frontend-backend communication.
+    - Wired up `SidebarMenu` to display real active games and `GamePage` to render the live game board (HTML from ASCII).
+- **Next Steps:**
+    - **Phase 5.3: Build Game View Component**: Refactor the game board, meta-data, and logs into modular Leptos components.
+
+### [Date] Phase 5 Complete: Leptos Frontend UI
+- **Completed:**
+    - Built a dynamic App Shell with modular components (`GameBoard`, `GameMeta`, `GameLogs`, `GameCommandInput`).
+    - Implemented client-side command validation and suggestions using the `brdgme_game` parser compiled to WASM.
+    - Integrated real-time live updates via WebSockets, using a global `WebSocketTrigger` context to automatically refresh Leptos Resources (`get_active_games`, `get_game_details`).
+    - Successfully resolved WASM compatibility issues with `getrandom` and `brdgme_cmd` default features.
+- **Next Steps:**
+    - **Phase 6: Cutover & Cleanup**: Prepare for deployment by updating Docker/Skaffold and eventually removing legacy services.

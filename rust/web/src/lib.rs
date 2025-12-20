@@ -7,11 +7,16 @@ pub mod state;
 pub mod db;
 
 #[cfg(feature = "ssr")]
+pub mod websocket;
+
+#[cfg(feature = "ssr")]
 pub mod models;
 
 pub mod auth;
 
 pub mod game;
+
+pub mod websocket_client;
 
 pub mod components;
 

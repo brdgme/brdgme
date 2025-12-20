@@ -2,5 +2,6 @@
 // This will be expanded in later milestones
 
 pub mod layout;
+pub mod game;
 
 pub use layout::*;

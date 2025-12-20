@@ -3,6 +3,8 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 
+use crate::game::server_fns::get_active_games;
+
 #[component]
 pub fn MainLayout(
     #[prop(default = false)] is_my_turn: bool,
@@ -38,34 +40,56 @@ pub fn MainLayout(
 
 #[component]
 pub fn SidebarMenu() -> impl IntoView {
+    let logout_action = ServerAction::<crate::auth::Logout>::new();
+    let on_logout = move |_| {
+        logout_action.dispatch(crate::auth::Logout {});
+    };
+
+    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let active_games = Resource::new(
+        move || trigger.last_update.get(), 
+        |_| async move { get_active_games().await }
+    );
+
     view! {
         <div class="menu">
-            <h1><a>"brdg.me"</a></h1>
-            <div class="subheading"><a>"Lo-fi board games"</a></div>
+            <h1><A href="/">"brdg.me"</A></h1>
+            <div class="subheading"><A href="/">"Lo-fi board games"</A></div>
             <div>
-                <div><a>"Logout"</a></div>
+                <div><a on:click=on_logout style="cursor:pointer">"Logout"</a></div>
             </div>
-            <div><a>"New game"</a></div>
+            <div><A href="/games">"New game"</A></div>
             <div>
                 <h2>"Active games"</h2>
-                <div class="layout-game">
-                    <A href="/games/1">
-                        <div class="layout-game-name">"Sushizock im Gockelwok"</div>
-                        <div class="layout-game-opponents">"with " <span>" " <strong class="brdgme-purple">"<Elly>"</strong></span><span>" " <strong class="brdgme-red">"<baconheist>"</strong></span></div>
-                    </A>
-                </div>
-                <div class="layout-game">
-                    <A href="/games/2">
-                        <div class="layout-game-name">"Lost Cities"</div>
-                        <div class="layout-game-opponents">"with " <span>" " <strong class="brdgme-red">"<baconheist>"</strong></span></div>
-                    </A>
-                </div>
-                <div class="layout-game">
-                    <A href="/games/3">
-                        <div class="layout-game-name">"Acquire"</div>
-                        <div class="layout-game-opponents">"with " <span>" " <strong class="brdgme-red">"<baconheist>"</strong></span></div>
-                    </A>
-                </div>
+                <Suspense fallback=move || view! { <p>"Loading games..."</p> }>
+                    {move || {
+                        active_games.get().map(|res| match res {
+                            Ok(games) => {
+                                if games.is_empty() {
+                                    view! { <p class="no-games">"No active games"</p> }.into_any()
+                                } else {
+                                    games.into_iter().map(|game| {
+                                        let id = game.id.to_string();
+                                        view! {
+                                            <div class="layout-game" class:my-turn=game.is_turn>
+                                                <A href=format!("/games/{}", id)>
+                                                    <div class="layout-game-name">{game.type_name}</div>
+                                                    <div class="layout-game-opponents">
+                                                        "with " 
+                                                        {game.opponents.into_iter().map(|opp| view! {
+                                                            <span>" " <strong class="brdgme-opponent">"<" {opp} ">"</strong></span>
+                                                        }).collect_view()}
+                                                    </div>
+                                                </A>
+                                            </div>
+                                        }.into_any()
+                                    }).collect_view().into_any()
+                                }
+                            },
+                            Err(_) => view! { <p class="error">"Error loading games"</p> }.into_any(),
+                        })
+                    }}
+                </Suspense>
             </div>
         </div>
     }

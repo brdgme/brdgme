@@ -9,6 +9,7 @@ use uuid::Uuid;
 use sqlx::PgPool;
 use crate::db::{self, CreateGameOpts};
 use crate::game::client;
+use crate::websocket::{GameBroadcaster, WebSocketMessage};
 use brdgme_cmd::api::{Request, Response};
 use brdgme_game::{Status};
 
@@ -21,9 +22,7 @@ pub struct CreateGameRequest {
 
 pub async fn create_game(
     State(pool): State<PgPool>,
-    // In a real app, we'd extract the user from the session here.
-    // For now, we'll assume a user_id is passed or handled via middleware.
-    // Since we are implementing the "Axum Core", let's see how to get the user.
+    State(broadcaster): State<GameBroadcaster>,
     Json(payload): Json<CreateGameRequest>,
 ) -> impl IntoResponse {
     // This is a placeholder for actual user authentication in Axum
@@ -78,6 +77,13 @@ pub async fn create_game(
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
     }
 
+    // Broadcast update
+    let game_extended = db::find_game_extended(&pool, game.id).await.ok().flatten();
+    broadcaster.broadcast(WebSocketMessage::GameUpdate { 
+        game_id: game.id, 
+        game: game_extended 
+    });
+
     (StatusCode::CREATED, Json(game)).into_response()
 }
 
@@ -99,6 +105,7 @@ pub struct CommandRequest {
 
 pub async fn play_command(
     State(pool): State<PgPool>,
+    State(broadcaster): State<GameBroadcaster>,
     Path(id): Path<Uuid>,
     Json(payload): Json<CommandRequest>,
 ) -> impl IntoResponse {
@@ -166,6 +173,13 @@ pub async fn play_command(
     if let Err(e) = db::create_game_logs(&pool, id, logs).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
     }
+
+    // Broadcast update
+    let game_extended = db::find_game_extended(&pool, id).await.ok().flatten();
+    broadcaster.broadcast(WebSocketMessage::GameUpdate { 
+        game_id: id, 
+        game: game_extended 
+    });
 
     StatusCode::OK.into_response()
 }

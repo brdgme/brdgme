@@ -10,6 +10,7 @@ async fn main() {
     use web::db::create_pool;
     use web::auth::session::create_session_layer;
     use web::state::AppState;
+    use web::websocket::GameBroadcaster;
 
 
     // Load environment variables from .env file
@@ -18,6 +19,9 @@ async fn main() {
     // Create database connection pool
     let pool = create_pool().await.expect("Failed to create database pool");
     
+    // Create broadcaster
+    let broadcaster = GameBroadcaster::new(1024);
+
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
@@ -25,6 +29,7 @@ async fn main() {
     let state = AppState {
         leptos_options: leptos_options.clone(),
         pool: pool.clone(),
+        broadcaster: broadcaster.clone(),
     };
 
     // Generate the list of routes in your Leptos App
@@ -32,6 +37,7 @@ async fn main() {
 
     let app = Router::new()
         .nest("/api", web::game::server::api_routes())
+        .route("/ws", axum::routing::get(web::websocket::ws_handler))
         .leptos_routes(&state, routes, {
             let leptos_options = state.leptos_options.clone();
             let pool = state.pool.clone();
