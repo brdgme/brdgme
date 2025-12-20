@@ -9,6 +9,7 @@ async fn main() {
     use web::app::*;
     use web::db::create_pool;
     use web::auth::session::create_session_layer;
+    use web::state::AppState;
 
 
     // Load environment variables from .env file
@@ -18,27 +19,33 @@ async fn main() {
     let pool = create_pool().await.expect("Failed to create database pool");
     
     let conf = get_configuration(None).unwrap();
-    let addr = conf.leptos_options.site_addr;
     let leptos_options = conf.leptos_options;
+    let addr = leptos_options.site_addr;
     
+    let state = AppState {
+        leptos_options: leptos_options.clone(),
+        pool: pool.clone(),
+    };
+
     // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
 
     let app = Router::new()
-        .leptos_routes(&leptos_options, routes, {
-            let leptos_options = leptos_options.clone();
-            let pool = pool.clone();
+        .nest("/api", web::game::server::api_routes())
+        .leptos_routes(&state, routes, {
+            let leptos_options = state.leptos_options.clone();
+            let pool = state.pool.clone();
             move || {
                 provide_context(pool.clone());
                 shell(leptos_options.clone())
             }
         })
-        .fallback(leptos_axum::file_and_error_handler({
+        .fallback(leptos_axum::file_and_error_handler::<AppState, _>({
             let leptos_options = leptos_options.clone();
             move |_| shell(leptos_options.clone())
         }))
         .layer(create_session_layer())
-        .with_state(leptos_options);
+        .with_state(state);
 
     // run our app with hyper
     log!("listening on http://{}", &addr);

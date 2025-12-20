@@ -21,8 +21,9 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 
 #### Phase 3: The New Backend (Axum Core)
 - [x] **Step 3.1:** Implement Authentication (`auth/`)
-- [ ] **Step 3.2:** Implement Game Client Adapter
-- [ ] **Step 3.3:** Implement Game API Endpoints
+- [x] **Step 3.2:** Implement Game Client Adapter
+- [x] **Step 3.3:** Contract Verification (Simple Mock)
+- [x] **Step 3.4:** Implement Game API Endpoints
 
 #### Phase 4: WebSocket Integration
 - [ ] **Step 4.1:** Implement WebSocket Handler (`axum::extract::ws`)
@@ -30,9 +31,10 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 
 #### Phase 5: The Frontend (Leptos UI)
 - [ ] **Step 5.1:** Build App Shell & Layout
-- [ ] **Step 5.2:** Build Game View Component
-- [ ] **Step 5.3:** Implement Client-side Command Parsing
-- [ ] **Step 5.4:** Implement Live Updates (WebSocket connection)
+- [ ] **Step 5.2:** Shared Types & Server Functions
+- [ ] **Step 5.3:** Build Game View Component
+- [ ] **Step 5.4:** Implement Client-side Command Parsing
+- [ ] **Step 5.5:** Implement Live Updates (WebSocket connection)
 
 #### Phase 6: Cutover & Cleanup
 - [ ] **Step 6.1:** Update Dockerfile
@@ -71,3 +73,22 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
         - `tower-sessions`: `0.14.0`
 - **Next Steps:**
     - Proceed with **Phase 3.2: Implement Game Client Adapter**.
+
+### [Date] Phase 2 Baseline & Phase 3 Adapter Complete
+- **Completed:**
+    - Successfully executed **Phase 2 Baseline Migration**: Applied `001_initial_schema.sql` to local PostgreSQL dev instance via `sqlx-cli`.
+    - **Phase 3.2 & 3.3 Complete**: Implemented `rust/web/src/game/client.rs` to handle communication with external game microservices. 
+    - Verified the adapter contract with a mock server test (`test_game_client_contract`).
+    - Added `reqwest` (with `rustls`) and `sqlx-cli` to the project environment (`devenv.nix`).
+    - Configured `DATABASE_URL` in `devenv.nix` for seamless development.
+- **Next Steps:**
+    - **Phase 3.4: Implement Game API Endpoints**: Wire the client adapter into Axum routes for creating and playing games.
+
+### [Date] Phase 3.4 Complete: Game API Endpoints
+- **Completed:**
+    - Implemented core game database logic in `rust/web/src/db.rs` using SQLx, including `create_game_with_users`, `find_game_extended`, and `update_game_command_success`.
+    - Created `rust/web/src/game/server.rs` with Axum handlers for `POST /api/game/new`, `GET /api/game/:id`, and `POST /api/game/:id/command`.
+    - Refactored application state in `rust/web/src/state.rs` to support a combined `AppState` (LeptosOptions + PgPool) shared between pure Axum handlers and Leptos routes.
+    - Successfully verified compilation with `cargo check`.
+- **Next Steps:**
+    - **Phase 4: WebSocket Integration**: Implement real-time game updates using `tokio::sync::broadcast` and Axum WebSockets.

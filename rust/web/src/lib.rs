@@ -1,6 +1,9 @@
 pub mod app;
 
 #[cfg(feature = "ssr")]
+pub mod state;
+
+#[cfg(feature = "ssr")]
 pub mod db;
 
 #[cfg(feature = "ssr")]

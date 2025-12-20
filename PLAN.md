@@ -18,31 +18,35 @@ We will perform the migration **in parallel** where possible, building the new s
 3.  **Verification:**
     *   Run `cargo check --target wasm32-unknown-unknown -p brdgme_cmd` to confirm WASM compatibility.
 
-## Phase 2: Database Layer (Async/SQLx)
+## Phase 2: Database Layer (Async/SQLx) [COMPLETE]
 **Goal:** Establish the data layer for the new Axum application, moving from Diesel (Sync) to SQLx (Async).
 
 1.  **Setup SQLx in `rust/web`:**
     *   Verify `sqlx` dependency in `rust/web/Cargo.toml` (postgres, runtime-tokio, uuid, chrono).
     *   Create a `.env` file in `rust/web` for the database URL.
-2.  **Migrate Schemas:**
+2.  **Migrate Schemas (Baseline Strategy):**
     *   Initialize `rust/web/migrations`.
-    *   Manually copy/convert schema definitions from `rust/api/migrations` (Diesel) to SQLx SQL files.
-    *   Key Tables: `users`, `games`, `game_versions`, `game_players`, `game_logs`.
+    *   **Action:** Create a single "baseline" migration file (e.g., `20250101000000_init.sql`) containing a snapshot of the *entire* existing database schema.
+    *   *Rationale:* This establishes the initial state without needing to port historical Diesel migrations. SQLx will manage all *future* schema changes relative to this baseline.
 3.  **Implement Data Access:**
     *   Create `rust/web/src/db.rs`.
     *   Implement basic user retrieval and session storage queries using SQLx.
 
 ## Phase 3: The New Backend (Axum Core)
 **Goal:** Replicate the core API logic (Auth, Game Orchestration) in Axum.
+*Note: "Play by Email" functionality is out of scope for this migration and will be re-implemented later.*
 
 1.  **Authentication:**
     *   Implement routes in `rust/web/src/auth/` for `login`, `register`, and `logout`.
     *   Use `tower-sessions` (already in Cargo.toml) for managing user sessions.
 2.  **Game Client Adapter:**
     *   Create `rust/web/src/game/client.rs`.
-    *   Implement an async client (using `reqwest`) to communicate with the Game Microservices (Go/Rust games).
-    *   Functionality: Send `New`, `Play`, `Status` commands to game services.
-3.  **Game API Endpoints:**
+    *   Implement an async client (using `reqwest`) to communicate with the external Game Microservices (Go/Rust games).
+    *   *Constraint:* This must still use JSON to communicate with the external services as defined in `ARCHITECTURE.md`.
+3.  **Contract Verification (Simple Mock):**
+    *   **Action:** Write a unit test that mocks a Game Service response.
+    *   Verify that `client.rs` correctly serializes commands and deserializes the specific JSON structure expected by the game services.
+4.  **Game API Endpoints:**
     *   Implement `POST /api/game/new`: Create a new game, call Game Service, save initial state to DB.
     *   Implement `POST /api/game/{id}/command`: Receive command, validate, send to Game Service, update DB.
     *   Implement `GET /api/game/{id}`: Retrieve game state.
@@ -63,14 +67,18 @@ We will perform the migration **in parallel** where possible, building the new s
 1.  **App Shell:**
     *   Set up `rust/web/src/app.rs` with `leptos_router`.
     *   Create `Layout` component (Navbar, Footer).
-2.  **Game View Component:**
-    *   Fetch game data from the Axum API (Server Functions or Resource loading).
+2.  **Shared Types & Server Functions:**
+    *   **Action:** Define shared Rust structs for frontend-backend communication (e.g., User, GameSummary) in a common module available to both WASM and Server.
+    *   **Action:** Use **Leptos Server Functions** (`#[server]`) for internal API calls (e.g., `get_game`, `submit_move`).
+    *   *Benefit:* This avoids manual JSON serialization/deserialization for internal app communication, providing full type safety.
+3.  **Game View Component:**
+    *   Fetch game data via Server Functions.
     *   Render the ASCII board. *Note: Use `brdgme_markup` crate (shared) to convert markup to HTML.*
-3.  **Interactive Command Input:**
+4.  **Interactive Command Input:**
     *   **Crucial Step:** Import `brdgme_cmd` in the frontend code.
     *   Use the parser *client-side* to validate input and show suggestions as the user types (Autocomplete).
-    *   On submit, send the command string to the Axum API.
-4.  **Live Updates:**
+    *   On submit, call a Server Function to execute the move.
+5.  **Live Updates:**
     *   Connect to the WebSocket endpoint established in Phase 4.
     *   Update the local Leptos Signals when a game update message is received.
 

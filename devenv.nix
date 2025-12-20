@@ -19,5 +19,8 @@
     minikube
     postgresql
     skaffold
+    sqlx-cli
   ];
+
+  env.DATABASE_URL = "postgres://brdgme_user:brdgme_password@localhost:5432/brdgme";
 }

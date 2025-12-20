@@ -1,8 +1,4 @@
-// Game module - placeholder for game-related functionality
-// This will be expanded in later milestones
-
+#[cfg(feature = "ssr")]
 pub mod client;
+#[cfg(feature = "ssr")]
 pub mod server;
-
-pub use client::*;
-pub use server::*;

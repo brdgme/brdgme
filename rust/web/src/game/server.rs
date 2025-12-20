@@ -1,238 +1,178 @@
-// Game server module - enhanced with real database operations
-
-use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+    Json,
+};
+use serde::Deserialize;
 use uuid::Uuid;
-use chrono::NaiveDateTime;
-#[cfg(feature = "ssr")]
-use crate::models::game::GameType;
-#[cfg(feature = "ssr")]
 use sqlx::PgPool;
+use crate::db::{self, CreateGameOpts};
+use crate::game::client;
+use brdgme_cmd::api::{Request, Response};
+use brdgme_game::{Status};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameListResponse {
-    pub games: Vec<GameSummary>,
+#[derive(Deserialize)]
+pub struct CreateGameRequest {
+    pub game_version_id: Uuid,
+    pub opponent_ids: Option<Vec<Uuid>>,
+    pub opponent_emails: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameSummary {
-    pub id: Uuid,
-    pub name: String,
-    pub game_type: String,
-    pub player_count: i32,
-    pub max_players: i32,
-    pub is_finished: bool,
-    pub created_at: NaiveDateTime,
-    pub is_user_turn: bool,
-}
+pub async fn create_game(
+    State(pool): State<PgPool>,
+    // In a real app, we'd extract the user from the session here.
+    // For now, we'll assume a user_id is passed or handled via middleware.
+    // Since we are implementing the "Axum Core", let's see how to get the user.
+    Json(payload): Json<CreateGameRequest>,
+) -> impl IntoResponse {
+    // This is a placeholder for actual user authentication in Axum
+    // In Leptos Server Functions, it's easier.
+    let user_id = Uuid::nil(); // TODO: get from session
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameDetail {
-    pub id: Uuid,
-    pub game_type: String,
-    pub is_finished: bool,
-    pub players: Vec<GamePlayerInfo>,
-    pub created_at: NaiveDateTime,
-    pub game_state: String,
-}
+    let opponent_ids = payload.opponent_ids.unwrap_or_default();
+    let opponent_emails = payload.opponent_emails.unwrap_or_default();
+    let player_count = 1 + opponent_ids.len() + opponent_emails.len();
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GamePlayerInfo {
-    pub id: Uuid,
-    pub user_name: String,
-    pub position: i32,
-    pub color: String,
-    pub has_accepted: bool,
-    pub is_turn: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameTypeInfo {
-    pub id: Uuid,
-    pub name: String,
-    pub player_counts: Vec<i32>,
-    pub weight: f32,
-}
-
-#[server(GetGames, "/api")]
-pub async fn get_games() -> Result<GameListResponse, ServerFnError> {
-    let pool = expect_context::<PgPool>();
-    
-    // Get active games with basic info
-    let games = sqlx::query!(
-        r#"
-        SELECT 
-            g.id,
-            gt.name as game_type_name,
-            g.is_finished,
-            g.created_at,
-            COUNT(gp.id) as player_count,
-            MAX(gt.player_counts[1]) as max_players
-        FROM games g
-        JOIN game_versions gv ON g.game_version_id = gv.id
-        JOIN game_types gt ON gv.game_type_id = gt.id
-        LEFT JOIN game_players gp ON g.id = gp.game_id
-        WHERE NOT g.is_finished
-        GROUP BY g.id, gt.name, g.is_finished, g.created_at
-        ORDER BY g.created_at DESC
-        LIMIT 20
-        "#
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-    
-    let game_summaries: Vec<GameSummary> = games
-        .into_iter()
-        .map(|row| GameSummary {
-            id: row.id,
-            name: format!("Game #{}", &row.id.to_string()[..8]),
-            game_type: row.game_type_name,
-            player_count: row.player_count.unwrap_or(0) as i32,
-            max_players: row.max_players.unwrap_or(2) as i32,
-            is_finished: row.is_finished,
-            created_at: row.created_at,
-            is_user_turn: false, // TODO: Calculate based on current user
-        })
-        .collect();
-    
-    Ok(GameListResponse {
-        games: game_summaries,
-    })
-}
-
-#[server(GetGame, "/api")]
-pub async fn get_game(id: String) -> Result<Option<GameDetail>, ServerFnError> {
-    let pool = expect_context::<PgPool>();
-    
-    let game_id = Uuid::parse_str(&id)
-        .map_err(|_| ServerFnError::new("Invalid game ID format".to_string()))?;
-    
-    // Get game with type info
-    let game_info = sqlx::query!(
-        r#"
-        SELECT 
-            g.id,
-            g.is_finished,
-            g.created_at,
-            g.game_state,
-            gt.name as game_type_name
-        FROM games g
-        JOIN game_versions gv ON g.game_version_id = gv.id
-        JOIN game_types gt ON gv.game_type_id = gt.id
-        WHERE g.id = $1
-        "#,
-        game_id
-    )
-    .fetch_optional(&pool)
-    .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-    
-    let Some(game) = game_info else {
-        return Ok(None);
+    let game_version = match db::find_game_version(&pool, payload.game_version_id).await {
+        Ok(Some(gv)) => gv,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Game version not found").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
     };
-    
-    // Get players for this game
-    let players = sqlx::query!(
-        r#"
-        SELECT 
-            gp.id,
-            gp.position,
-            gp.color,
-            gp.has_accepted,
-            gp.is_turn,
-            u.name as user_name
-        FROM game_players gp
-        JOIN users u ON gp.user_id = u.id
-        WHERE gp.game_id = $1
-        ORDER BY gp.position
-        "#,
-        game_id
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-    
-    let player_infos: Vec<GamePlayerInfo> = players
-        .into_iter()
-        .map(|row| GamePlayerInfo {
-            id: row.id,
-            user_name: row.user_name,
-            position: row.position,
-            color: row.color,
-            has_accepted: row.has_accepted,
-            is_turn: row.is_turn,
-        })
-        .collect();
-    
-    Ok(Some(GameDetail {
-        id: game.id,
-        game_type: game.game_type_name,
-        is_finished: game.is_finished,
-        players: player_infos,
-        created_at: game.created_at,
-        game_state: game.game_state,
-    }))
-}
 
-#[server(GetGameTypes, "/api")]
-pub async fn get_game_types() -> Result<Vec<GameTypeInfo>, ServerFnError> {
-    let pool = expect_context::<PgPool>();
-    
-    let game_types = sqlx::query_as!(
-        GameType,
-        "SELECT * FROM game_types ORDER BY name"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-    
-    let game_type_infos: Vec<GameTypeInfo> = game_types
-        .into_iter()
-        .map(|gt| GameTypeInfo {
-            id: gt.id,
-            name: gt.name,
-            player_counts: gt.player_counts,
-            weight: gt.weight,
-        })
-        .collect();
-    
-    Ok(game_type_infos)
-}
-
-#[server(CreateGame, "/api")]
-pub async fn create_game(game_type_id: String, _player_count: i32) -> Result<Uuid, ServerFnError> {
-    let pool = expect_context::<PgPool>();
-    
-    let game_type_uuid = Uuid::parse_str(&game_type_id)
-        .map_err(|_| ServerFnError::new("Invalid game type ID".to_string()))?;
-    
-    // Get the latest version of this game type
-    let game_version = sqlx::query!(
-        "SELECT id FROM game_versions WHERE game_type_id = $1 AND is_public = true AND NOT is_deprecated ORDER BY created_at DESC LIMIT 1",
-        game_type_uuid
-    )
-    .fetch_optional(&pool)
-    .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-    
-    let Some(version) = game_version else {
-        return Err(ServerFnError::new("No available version for this game type".to_string()));
+    let resp = match client::request(&game_version.uri, &Request::New { players: player_count }).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };
-    
-    // Create new game
-    let game_id = Uuid::new_v4();
-    let initial_state = "{}"; // TODO: Generate proper initial game state
-    
-    sqlx::query!(
-        "INSERT INTO games (id, game_version_id, is_finished, game_state) VALUES ($1, $2, false, $3)",
-        game_id,
-        version.id,
-        initial_state
-    )
-    .execute(&pool)
-    .await
-    .map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
-    
-    Ok(game_id)
+
+    let (game_info, logs, _public_render, _player_renders) = match resp {
+        Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
+    };
+
+    let (_is_finished, whose_turn, eliminated, placings) = match game_info.status {
+        Status::Active { whose_turn, eliminated } => (false, whose_turn, eliminated, vec![]),
+        Status::Finished { placings, .. } => (true, vec![], vec![], placings),
+    };
+
+    let game = match db::create_game_with_users(
+        &pool,
+        CreateGameOpts {
+            game_version_id: payload.game_version_id,
+            whose_turn: &whose_turn,
+            eliminated: &eliminated,
+            placings: &placings,
+            points: &game_info.points,
+            creator_id: user_id,
+            opponent_ids: &opponent_ids,
+            opponent_emails: &opponent_emails,
+            chat_id: None,
+            game_state: &game_info.state,
+        },
+    ).await {
+        Ok(g) => g,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game: {}", e)).into_response(),
+    };
+
+    if let Err(e) = db::create_game_logs(&pool, game.id, logs).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
+    }
+
+    (StatusCode::CREATED, Json(game)).into_response()
+}
+
+pub async fn get_game(
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    match db::find_game_extended(&pool, id).await {
+        Ok(Some(game)) => Json(game).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Game not found").into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CommandRequest {
+    pub command: String,
+}
+
+pub async fn play_command(
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<CommandRequest>,
+) -> impl IntoResponse {
+    let user_id = Uuid::nil(); // TODO: get from session
+
+    let game_extended = match db::find_game_extended(&pool, id).await {
+        Ok(Some(ge)) => ge,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Game not found").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    };
+
+    if game_extended.game.is_finished {
+        return (StatusCode::BAD_REQUEST, "Game is already finished").into_response();
+    }
+
+    let player = match game_extended.game_players.iter().find(|p| p.user.id == user_id) {
+        Some(p) => p,
+        None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
+    };
+
+    let names: Vec<String> = game_extended.game_players.iter().map(|p| p.user.name.clone()).collect();
+
+    let resp = match client::request(
+        &game_extended.game_version.uri,
+        &Request::Play {
+            player: player.game_player.position as usize,
+            game: game_extended.game.game_state.clone(),
+            command: payload.command,
+            names,
+        }
+    ).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
+    };
+
+    let (game_response, logs, _can_undo, remaining_input, _public_render, _player_renders) = match resp {
+        Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } => 
+            (game, logs, can_undo, remaining_input, public_render, player_renders),
+        Response::UserError { message } => return (StatusCode::BAD_REQUEST, message).into_response(),
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
+    };
+
+    if !remaining_input.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, format!("Unexpected input: {}", remaining_input)).into_response();
+    }
+
+    let (is_finished, whose_turn, _eliminated, placings) = match game_response.status {
+        Status::Active { whose_turn, eliminated } => (false, whose_turn, eliminated, vec![]),
+        Status::Finished { placings, .. } => (true, vec![], vec![], placings),
+    };
+
+    if let Err(e) = db::update_game_command_success(
+        &pool,
+        id,
+        player.game_player.id,
+        &game_response.state,
+        is_finished,
+        &whose_turn,
+        &placings,
+        &game_response.points,
+    ).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update game: {}", e)).into_response();
+    }
+
+    if let Err(e) = db::create_game_logs(&pool, id, logs).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
+    }
+
+    StatusCode::OK.into_response()
+}
+
+pub fn api_routes() -> axum::Router<crate::state::AppState> {
+    axum::Router::new()
+        .route("/game/new", axum::routing::post(create_game))
+        .route("/game/:id", axum::routing::get(get_game))
+        .route("/game/:id/command", axum::routing::post(play_command))
 }
