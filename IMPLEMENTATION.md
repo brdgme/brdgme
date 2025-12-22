@@ -37,9 +37,9 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 - [x] **Step 5.5:** Implement Live Updates (WebSocket connection)
 
 #### Phase 6: Cutover & Cleanup
-- [ ] **Step 6.1:** Update Dockerfile
-- [ ] **Step 6.2:** Update Skaffold
-- [ ] **Step 6.3:** Remove legacy code
+- [x] **Step 6.1:** Update Dockerfile
+- [x] **Step 6.2:** Update Skaffold
+- [ ] **Step 6.3:** Remove legacy code (Deferred for reference)
 
 ---
 

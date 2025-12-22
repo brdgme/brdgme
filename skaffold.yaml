@@ -7,18 +7,10 @@ build:
     useBuildkit: true
   artifacts:
   # Base services
-  - image: brdgme/api
-    docker:
-      dockerfile: rust/Dockerfile
-      target: api
   - image: brdgme/web
     docker:
-      dockerfile: web/Dockerfile
+      dockerfile: rust/Dockerfile
       target: web
-  - image: brdgme/websocket
-    docker:
-      dockerfile: websocket/Dockerfile
-      target: websocket
   # Games
   - image: brdgme/acquire-1
     docker:

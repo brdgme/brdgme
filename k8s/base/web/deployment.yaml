@@ -16,4 +16,4 @@ spec:
         - name: web
           image: brdgme/web
           ports:
-            - containerPort: 80
+            - containerPort: 3000
