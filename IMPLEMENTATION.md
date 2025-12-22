@@ -88,3 +88,34 @@ This document tracks the execution of the migration plan defined in `PLAN.md`. I
 - **Next Steps:**
     - **Phase 5.5: Functional Verification**: Perform end-to-end testing of gameplay flows using restored production data.
     - **Phase 6: Cutover & Cleanup**: Containerization and decommissioning of legacy services.
+
+### [Date] Phase 6 Refinement: Build & Dev Environment Stability
+- **Resolved Build Issues:**
+    - **cargo-leptos**: Switched to `cargo-binstall` in Dockerfile to avoid `serde` compilation errors during tool installation.
+    - **dart-sass**: Fixed pathing issues in Dockerfile by preserving directory structure.
+    - **WASM Build**: Isolated `cargo chef cook` for the `web` crate to prevent non-WASM dependencies (like `mio`, `socket2`) from breaking the WASM build graph.
+    - **Database/SQLx**: Implemented `SQLX_OFFLINE=true` support by generating `.sqlx` metadata. Added port-forwarding to Skaffold to allow local `cargo build` to verify queries against the K8s Postgres instance.
+- **Optimized Development Loop:**
+    - Refactored `skaffold.yaml` to implement a "fast by default" workflow.
+    - **Default Profile**: Deploys only backing services (Postgres, Redis) and Game Services, skipping the slow `web` build.
+    - **Port Forwarding**: Automatically forwards Postgres (5432) and Redis (6379) to localhost.
+    - **Hybrid Workflow**: Established a pattern of running `skaffold dev` for backend services while running `cargo leptos watch` locally for instant UI feedback.
+
+### 2025-12-22: Fixed Database Connection Pool in Server Functions
+- **Problem Diagnosed:**
+    - Server functions were failing with "Database pool not found" errors at runtime.
+    - The issue was caused by attempting to use Axum `State` extraction (`State<AppState>`) with `leptos_axum::extract()` in server functions.
+    - The `extract()` call had no state context, causing it to fail when trying to extract `AppState`.
+- **Solution Implemented:**
+    - Switched to Leptos's recommended **context-based dependency injection** pattern.
+    - Updated `main.rs` to use `leptos_routes_with_context()` instead of `leptos_routes()`.
+    - Provided `PgPool` and `GameBroadcaster` via `provide_context()` in the routing setup.
+    - Updated all server functions in `server_fns.rs` to use `use_context::<PgPool>()` and `use_context::<GameBroadcaster>()` instead of Axum state extraction.
+    - Changed from `expect_context()` (which panics) to `use_context()` with proper error handling.
+- **Outcome:**
+    - `cargo leptos build` now compiles successfully.
+    - `cargo leptos watch` runs without database connection errors.
+    - Server functions can now properly access the database pool and broadcaster.
+- **Technical Note:**
+    - This follows the Leptos best practice of using reactive context for dependency injection rather than Axum's state extraction system.
+    - The context is provided at the router level and automatically available to all server functions within that scope.

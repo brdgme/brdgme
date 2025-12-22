@@ -80,3 +80,22 @@ We will perform the migration **in parallel** where possible, building the new s
     *   Remove `api` (Rust/Rocket) and `websocket` (Node) deployments.
 3.  **Cleanup:**
     *   Delete `rust/api/`, `web/`, and `websocket/` directories once verified.
+
+## Development Workflow (Hybrid)
+
+To achieve fast iteration cycles while maintaining production parity for dependencies, we use a hybrid workflow:
+
+1.  **Backing Services (K8s):**
+    *   Run `skaffold dev --port-forward`.
+    *   This deploys Postgres, Redis, and all Game Microservices to the local Kubernetes cluster.
+    *   It **skips** building the `web` application to save time.
+    *   It automatically forwards Postgres (5432) and Redis (6379) to your host machine.
+
+2.  **Web Application (Host):**
+    *   Run `cargo leptos watch` inside `rust/web`.
+    *   This runs the monolithic web server locally on port 3000.
+    *   It connects to the backing services via the forwarded ports (`localhost:5432`).
+    *   It provides sub-second hot reloading for UI changes.
+
+**Full Cluster Test:**
+To test the full containerized stack (including the web container), run: `skaffold dev -p with-web`.

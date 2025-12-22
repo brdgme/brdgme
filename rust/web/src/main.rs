@@ -36,16 +36,24 @@ async fn main() {
     let routes = generate_route_list(App);
 
     let app = Router::new()
+        .leptos_routes_with_context(
+            &state,
+            routes,
+            {
+                let pool = pool.clone();
+                let broadcaster = broadcaster.clone();
+                move || {
+                    provide_context(pool.clone());
+                    provide_context(broadcaster.clone());
+                }
+            },
+            {
+                let leptos_options = state.leptos_options.clone();
+                move || shell(leptos_options.clone())
+            }
+        )
         .nest("/api", web::game::server::api_routes())
         .route("/ws", axum::routing::get(web::websocket::ws_handler))
-        .leptos_routes(&state, routes, {
-            let leptos_options = state.leptos_options.clone();
-            let pool = state.pool.clone();
-            move || {
-                provide_context(pool.clone());
-                shell(leptos_options.clone())
-            }
-        })
         .fallback(leptos_axum::file_and_error_handler::<AppState, _>({
             let leptos_options = leptos_options.clone();
             move |_| shell(leptos_options.clone())

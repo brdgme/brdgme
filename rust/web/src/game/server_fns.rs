@@ -37,8 +37,10 @@ pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
     {
         use sqlx::PgPool;
         use crate::auth::server::get_current_user;
-        
-        let pool = expect_context::<PgPool>();
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
         let user = get_current_user().await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
             
@@ -75,8 +77,10 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         use sqlx::PgPool;
         use crate::auth::server::get_current_user;
         use crate::game::client;
-        
-        let pool = expect_context::<PgPool>();
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
         let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
         
         let ge = crate::db::find_game_extended(&pool, game_id).await
@@ -137,9 +141,12 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
         use crate::websocket::{GameBroadcaster, WebSocketMessage};
         use brdgme_cmd::api::{Request, Response};
         use brdgme_game::Status;
-        
-        let pool = expect_context::<PgPool>();
-        let broadcaster = expect_context::<GameBroadcaster>();
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let broadcaster = use_context::<GameBroadcaster>()
+            .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
         let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
         
         let ge = crate::db::find_game_extended(&pool, game_id).await
