@@ -85,7 +85,7 @@ infrastructure phase. See `docs/VISION.md`.
 
 ---
 
-## Phase 5: Frontend (Leptos UI) [Complete]
+## Phase 5: Frontend (Leptos UI) [Defective]
 
 **Goal:** Build the UI in Rust, replacing React.
 
@@ -98,6 +98,20 @@ infrastructure phase. See `docs/VISION.md`.
 - [x] Implement WebSocket client hook (`websocket_client.rs`) that triggers
       resource refetches via a global `WebSocketTrigger` context.
 
+**Known defects (tracked in Phase 5.6):**
+- Login is non-functional end-to-end: `on_email_submit` and `on_code_submit`
+  in `app.rs` are not connected to the `Login` and `ConfirmLogin` server
+  functions.
+- Game creation and command submission are unauthenticated: Axum handlers use
+  `Uuid::nil()` as the user ID.
+- Turn enforcement is absent: any player can submit a command at any time.
+- `GameLogs` is a stub placeholder.
+- `DashboardPage` and `GamesPage` are stubs with no content.
+- Autocomplete suggestions are not prefix-filtered: all alternatives show for
+  every keystroke.
+- Suggestions are not clickable.
+- Command errors are silently discarded.
+
 **Notes:**
 - Added `cargo-leptos` and `dart-sass` to `devenv.nix`.
 - Pinned `wasm-bindgen` to `0.2.100`.
@@ -106,24 +120,258 @@ infrastructure phase. See `docs/VISION.md`.
 
 ---
 
-## Phase 5.5: Functional Verification [Pending]
+## Phase 5.5: Dev Environment Migration [Complete]
 
-**Goal:** Verify all features against production data before cutover.
+**Goal:** Replace the minikube-based dev environment with Kind + Cilium +
+Knative, and replace skaffold with Tilt. This is a prerequisite for the
+side-by-side validation phase, since the new `rust/web` service will run as a
+Knative Service in production.
 
-- [ ] Test game navigation, rendering, and move submission end-to-end.
-- [ ] Verify WebSocket updates reflect moves instantly.
-- [ ] Confirm lo-fi ASCII aesthetics match or improve on the legacy frontend.
+### Kind cluster + Cilium
+
+- [x] Write a Kind cluster config with the default CNI disabled
+      (`networking.disableDefaultCNI: true`). → `k8s/kind-config.yaml`
+- [ ] Install Cilium as the CNI into the Kind cluster. (manual: run
+      `scripts/setup-kind-cluster.sh`)
+- [ ] Verify pod networking and DNS work correctly.
+
+### Knative Serving
+
+- [ ] Install Knative Serving into the Kind cluster. (manual: run
+      `scripts/setup-kind-cluster.sh`)
+- [x] Configure Cilium as the Knative networking layer via `net-gateway-api`
+      (Cilium's GatewayClass + Knative Gateway API ingress class). Setup
+      automated in `scripts/setup-kind-cluster.sh`.
+- [ ] Verify a simple Knative Service deploys and is reachable.
+
+### k8s manifests: rust/web as a Knative Service
+
+- [x] Replace `k8s/base/web/deployment.yaml` and `k8s/base/web/service.yaml`
+      with a Knative `Service` manifest (`serving.knative.dev/v1`).
+- [x] Set `minScale: 1` - the monolith must not scale to zero.
+- [x] Game microservices remain as plain Deployments for now.
+
+### Tilt
+
+- [x] Write a `Tiltfile` covering:
+  - Deploy backing services (Postgres, Redis, SMTP, game microservices)
+    to the Kind cluster via `k8s/dev-without-web` kustomize path.
+  - Run `cargo leptos watch` as a local process for fast iteration (default
+    hybrid mode).
+  - Port-forwarding for Postgres (5432) and Redis (6379).
+- [x] Full-cluster mode added (`WEB_IN_CLUSTER=1`): builds `brdgme/web` and
+      deploys as Knative Service via `k8s/dev` kustomize path.
+- [ ] Remove `skaffold.yaml` once Tilt has been verified working. (kept for
+      reference until first successful `tilt up` run)
+
+### Production builds
+
+Production image builds and deploys are not driven by Tilt or skaffold:
+`docker build/push` per service, then `kubectl apply -k k8s/prod`. CI pipeline
+setup is out of scope.
 
 ---
 
-## Phase 6: Cutover & Cleanup [In Progress]
+## Phase 5.6: Pre-Cutover Fixes [In Progress]
 
-**Goal:** Switch to the new system and remove legacy services.
+**Goal:** Resolve all blockers and close critical gaps found in the parity
+review before the `leptos` branch replaces production. Full review in
+`docs/REVIEW.md`.
 
-- [x] Update `rust/Dockerfile` to build the `web` binary.
-- [x] Update `skaffold.yaml`: deploy `web` as main entry point, remove `api`
-      and `websocket` deployments.
-- [ ] Remove legacy directories: `rust/api/`, `web/`, `websocket/`.
+### Blockers (must fix before cutover)
+
+- [ ] **Auth in Axum handlers** (`game/server.rs`): Replace `Uuid::nil()` in
+      `create_game` and `play_command` with the authenticated user ID from the
+      session.
+- [ ] **Login UI wired to server functions** (`app.rs`): Connect
+      `on_email_submit` and `on_code_submit` to the `Login` and `ConfirmLogin`
+      server functions.
+- [ ] **Confirmation token not exposed in response** (`auth/server.rs`): Remove
+      the token from the login response body.
+- [ ] **Persistent session store** (`auth/session.rs`): Replace `MemoryStore`
+      with `tower-sessions-sqlx-store`. Requires a new SQLx migration to create
+      the sessions table (refer to `tower-sessions-sqlx-store` docs for the
+      schema) and adding the crate to `Cargo.toml`.
+- [ ] **`with_secure` env-driven** (`auth/session.rs`): Read from environment,
+      not hardcoded `false`.
+- [ ] **Graceful SIGTERM shutdown** (`main.rs`): Add
+      `axum::serve(...).with_graceful_shutdown(...)` listening for SIGTERM.
+- [ ] **Turn enforcement** (`game/server.rs`): Reject commands when it is not
+      the authenticated player's turn.
+- [ ] **Authenticate `GET /api/game/{id}`** (`game/server.rs`): Require a
+      valid session.
+- [ ] **`GamePlayer` model missing fields** (`models/game.rs`): Add
+      `last_turn_at`, `is_eliminated`, `is_read`, `points`, `undo_game_state`,
+      `rating_change`. Required before undo, mark_read, and points work.
+- [ ] **`update_game_command_success` writes all fields** (`db.rs`): Persist
+      `is_turn_at`, `last_turn_at`, `is_eliminated`, `undo_game_state`, and
+      points on every command.
+- [ ] **`find_game_extended` handles missing `game_type_users` row** (`db.rs`):
+      Use a LEFT JOIN with a default rating rather than erroring. Migration risk
+      for any existing game where a player row is absent.
+- [ ] **Token expiry check in `validate_session_token`** (`auth/session.rs`):
+      Auth tokens are currently permanent. Add an expiry check (30-day window
+      matching the old system).
+- [ ] **Email sending not implemented** (`auth/server.rs`): The confirmation
+      token is generated but never emailed. The old system sent the code via the
+      in-cluster SMTP service. The new system must do the same before real users
+      can log in. The SMTP service is already deployed.
+
+### Missing endpoints (non-blocking, needed for feature parity)
+
+- [ ] **`POST /game/{id}/undo`**: Restore `undo_game_state`, call `Status` on
+      the game service, clear all players' undo state, write a log entry,
+      broadcast.
+- [ ] **`POST /game/{id}/mark_read`**: Set `is_read = true` on the calling
+      player's `game_players` row.
+- [ ] **`POST /game/{id}/concede`**: Limited to 2-player games. Mark game
+      finished, write log entry, broadcast.
+- [ ] **`POST /game/{id}/restart`**: Create new game with same players, link
+      via `restarted_game_id`, broadcast `GameRestarted`. Client must navigate
+      to the new game URL on receipt.
+
+### Frontend gaps (non-blocking)
+
+- [ ] **New-game creation UI** (`app.rs`, `GamesPage`): Game type selector,
+      opponent email inputs, submit → redirect to new game. Requires a server
+      function returning available game types from `game_versions`.
+- [ ] **Game log rendering** (`components/game.rs`): Replace `GameLogs` stub
+      with actual log display: fetch logs, render markup to HTML, group by
+      10-minute windows, filter to logs since `last_turn_at`.
+- [ ] **Undo/concede/restart actions in `GameMeta`**: Wire the "Concede" anchor
+      and add "Undo" and "Restart" links with correct visibility conditions
+      (`can_undo`, game finished, `restarted_game_id` absent).
+- [ ] **"Whose turn" display** (`app.rs`): Replace generic "Waiting on
+      opponents..." with the specific player name(s) and color.
+- [ ] **Mark-read on game page load** (`app.rs`): Call `mark_read` when
+      `GamePage` mounts and when the game ID changes.
+- [ ] **`GameRestarted` WebSocket navigation** (`websocket_client.rs`): On
+      receipt of `GameRestarted`, navigate to the new game URL rather than
+      just incrementing the trigger counter.
+- [ ] **Command input: clear after server confirms** (`components/game.rs`):
+      Move `set_command("")` to run after `submit_action` succeeds, not before.
+- [ ] **Command errors surfaced to user** (`components/game.rs`): Observe
+      `submit_action` result and display errors.
+- [ ] **Clickable command suggestions** (`components/game.rs`): Clicking a
+      suggestion appends it to the command input.
+- [ ] **Autocomplete prefix filtering** (`rust/lib/game`): Add
+      `CommandSpec::suggest(input, names) -> Vec<String>` with prefix-aware
+      `Token` filtering. Do not change `parse()`. Update `GameCommandInput` to
+      call `suggest` instead of using `expected` from parse errors.
+
+### Code quality (non-blocking)
+
+- [ ] **Dead code removed**: `New*` model structs, `chat.rs`, `friends.rs`,
+      `PublicGameType` alias, `SESSION_AUTH_TOKEN_KEY`, `db::AppState`.
+- [ ] **`reqwest::Client` shared** (`game/client.rs`): Create once at startup,
+      store in `AppState`, reuse across requests.
+- [ ] **N+1 in `find_active_games_for_user`** (`db.rs`): Replace loop with a
+      single joined query.
+- [ ] **Duplicate command logic** (`game/server.rs` vs `server_fns.rs`):
+      Consolidate into one path.
+- [ ] **`NaiveDateTime` → `DateTime<Utc>`** (`models/`): Preserve timezone
+      throughout.
+- [ ] **Points persisted** (`db.rs`): Remove `_points` suppression in
+      `update_game_command_success`.
+- [ ] **Logout redirect/feedback** (`components/layout.rs`).
+- [ ] **WebSocket reconnection** (`websocket_client.rs`).
+- [ ] **`finished_at` set when `is_finished = true`** (`db.rs`): Verify schema
+      has no trigger; if not, set `finished_at` explicitly.
+
+---
+
+## Phase 6: NATS Integration [Pending]
+
+**Goal:** Replace the in-process `tokio::sync::broadcast` WebSocket fan-out
+with NATS Core pub/sub, enabling the monolith to run as multiple replicas.
+This also unblocks Redis removal.
+
+### Infrastructure
+
+- [ ] Add NATS Core to the Kind cluster dev environment (Tiltfile + k8s
+      manifests in `k8s/base/nats/`).
+- [ ] Add NATS to the `k8s/base/brdgme/kustomization.yaml` alongside Postgres
+      and Redis.
+
+### Application changes (`rust/web`)
+
+- [ ] Add `async-nats` to `rust/web/Cargo.toml` under the `ssr` feature.
+- [ ] Replace `GameBroadcaster` in `websocket.rs`: publish game updates to a
+      NATS subject (`game.{id}`) instead of a tokio broadcast channel.
+- [ ] Subscribe each WebSocket handler to the relevant NATS subject and forward
+      messages to the connected client.
+- [ ] Remove the `tokio::sync::broadcast` channel from `AppState` and
+      `GameBroadcaster`.
+- [ ] Remove the `redis` dependency from `Cargo.toml` (was listed but unused).
+
+### Cleanup
+
+- [ ] Remove Redis from `k8s/base/brdgme/kustomization.yaml` and delete
+      `k8s/base/redis/`.
+- [ ] Remove Redis port-forward from the Tiltfile.
+
+**Note:** NATS Core → JetStream upgrade path (for persistent message delivery)
+requires only a config flag change and a volume for persistence. No code change
+needed. Out of scope for this phase.
+
+---
+
+## Phase 7: Side-by-Side Validation [Pending]
+
+**Goal:** Run old and new systems simultaneously against the same database so
+they can be compared directly before committing to cutover. Legacy services
+(`rust/api`, `web`, `websocket`) are kept alive until `rust/web` is proven in
+production.
+
+Both systems share PostgreSQL and the game microservices. Auth mechanisms are
+different (Bearer token vs session cookie) so each requires a separate login -
+this is acceptable for testing. Real-time WebSocket updates do not cross system
+boundaries (a move in one UI will not push a notification to the other), but
+both UIs show correct state on next page load.
+
+### Risks
+
+- `web/Dockerfile` pins `node:14.7.0` (EOL April 2023). npm install may fail
+  against current registries. The old frontend build should be verified early
+  in this phase; if it fails, the Node version will need bumping.
+
+### Image naming
+
+The old React frontend (`web/Dockerfile`) and the new Leptos SSR app
+(`rust/Dockerfile` `web` target) previously shared the image tag `brdgme/web`.
+The new Leptos app keeps `brdgme/web`. The old React frontend is renamed to
+`brdgme/web-legacy`.
+
+### Infra changes needed
+
+- [x] New Leptos app: `rust/Dockerfile` `web` target → `brdgme/web`. k8s
+      manifests in `k8s/base/web/` unchanged.
+- [ ] Add `brdgme/web-legacy` image build to the Tiltfile (from
+      `web/Dockerfile`, final stage `web`, tagged `brdgme/web-legacy`).
+- [ ] Add `brdgme/api` and `brdgme/websocket` image builds to the Tiltfile.
+- [ ] Create `k8s/base/web-legacy/` manifests (Deployment + Service) using
+      `image: brdgme/web-legacy`. Mirror the structure of `k8s/base/web/` but
+      with `name: web-legacy`.
+- [ ] Create `k8s/base/legacy/kustomization.yaml` grouping `web-legacy`, `api`,
+      and `websocket` as the legacy stack.
+- [ ] Restore `api` and `websocket` manifests to an active kustomization overlay
+      alongside the legacy frontend.
+- [ ] Add hostname-based routing to the ingress: primary domain → `web`;
+      legacy subdomain (e.g. `old.brdgme.com`) → `web-legacy` + `api`.
+- [ ] Verify the old React frontend's API base URL is configured to point to
+      the `api` service, not `web`.
+
+### Decommission (once rust/web is proven in production)
+
+When the new system has run in production without issues, remove the legacy
+stack in this order:
+
+- [ ] Remove `api`, `websocket`, and `web-legacy` from the kustomization and
+      delete their k8s manifests.
+- [ ] Remove Redis (no longer needed once NATS replaces the old WebSocket
+      fan-out path).
+- [ ] Delete `rust/api/`, `web/`, and `websocket/` source directories.
+- [ ] Remove legacy image builds from the Tiltfile.
 
 **Notes (Build & Dev Environment):**
 - Switched to `cargo-binstall` in Dockerfile to avoid `serde` compilation
@@ -153,15 +401,27 @@ infrastructure phase. See `docs/VISION.md`.
 
 ## Development Workflow
 
-### Hybrid (Fast Iteration)
+Requires a Kind cluster with Cilium and Knative. Run once per workstation:
 
-1. Run `skaffold dev --port-forward` to deploy backing services (Postgres,
-   Redis, game microservices) to the local cluster and forward ports 5432 and
-   6379 to localhost.
-2. Run `cargo leptos watch` inside `rust/web` to start the monolith locally on
-   port 3000 with hot reloading.
+```
+bash scripts/setup-kind-cluster.sh
+```
+
+### Hybrid (Fast Iteration) - default
+
+```
+tilt up
+```
+
+Deploys backing services (Postgres, Redis, SMTP, game microservices) to Kind
+and port-forwards Postgres (5432) and Redis (6379) to localhost. Run
+`cargo leptos watch` inside `rust/web` for hot-reloading on port 3000.
 
 ### Full Cluster Test
 
-Run `skaffold dev -p with-web` to build and deploy the full containerised
-stack including the `web` container.
+```
+WEB_IN_CLUSTER=1 tilt up
+```
+
+Builds and deploys `brdgme/web` as a Knative Service into Kind alongside all
+backing services.

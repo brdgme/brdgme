@@ -25,16 +25,17 @@
   packages = with pkgs; [
     cargo-binstall
     cargo-leptos
+    chromium
     dart-sass
     k9s
+    kind
     kubectl
-    minikube
-    postgresql
-    skaffold
-    sqlx-cli
-    uv
-    chromium
+    kubernetes-helm
     playwright-driver.browsers
+    postgresql
+    sqlx-cli
+    tilt
+    uv
   ];
 
   env.DATABASE_URL = "postgres://brdgme_user:brdgme_password@localhost:5432/brdgme";
