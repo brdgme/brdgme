@@ -50,6 +50,19 @@ metadata:
   name: brdgme
 """))
 
+# Dev postgres credentials. In production this secret is managed outside Tilt.
+k8s_yaml(blob("""
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-config
+  namespace: brdgme
+stringData:
+  POSTGRES_USER: brdgme_user
+  POSTGRES_PASSWORD: brdgme_password
+  POSTGRES_DB: brdgme
+"""))
+
 if WEB_IN_CLUSTER:
     docker_build(
         "brdgme/web",

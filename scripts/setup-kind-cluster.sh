@@ -2,17 +2,19 @@
 # Sets up a local Kind cluster with Cilium CNI, Knative Serving, and
 # Cilium Gateway API as the Knative networking layer.
 #
-# Prerequisites: kind, helm, kubectl installed (all provided via devenv.nix).
+# Prerequisites: kind, helm, kubectl, docker installed (all provided via devenv.nix).
 #
 # Run once per workstation or after `kind delete cluster`.
 #
-# Version pins - check for newer releases before running:
-#   Cilium:           https://github.com/cilium/cilium/releases
-#   Knative Serving:  https://github.com/knative/serving/releases
+# Version pins match official documentation:
+#   Cilium:           https://docs.cilium.io/en/stable/installation/kind/
+#   Gateway API CRDs: https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/
+#   Knative Serving:  https://knative.dev/docs/install/yaml-install/serving/install-serving-with-yaml/
 #   net-gateway-api:  https://github.com/knative-extensions/net-gateway-api/releases
-#   Gateway API CRDs: https://github.com/kubernetes-sigs/gateway-api/releases
-CILIUM_VERSION="1.16.0"
-KNATIVE_VERSION="1.16.0"
+CILIUM_VERSION="1.19.1"
+GATEWAY_API_VERSION="v1.4.1"
+KNATIVE_SERVING_VERSION="1.21.1"
+NET_GATEWAY_API_VERSION="1.21.0"
 
 set -euo pipefail
 
@@ -21,15 +23,22 @@ echo "==> Creating Kind cluster..."
 kind create cluster --config k8s/kind-config.yaml
 
 # --- Gateway API CRDs (required by Cilium Gateway API support) ---
-echo "==> Installing Gateway API CRDs..."
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+# Version per https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/
+echo "==> Installing Gateway API CRDs ${GATEWAY_API_VERSION}..."
+kubectl apply -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
 
 # --- Cilium ---
-# kubeProxyReplacement=true means kube-proxy is not running, so Cilium cannot
-# reach the API server via its ClusterIP (10.96.0.1) during bootstrap. We
-# resolve this by pointing Cilium directly at the control plane node IP.
+# kubeProxyReplacement=true is required for Gateway API support and because
+# kube-proxy is disabled in kind-config.yaml. When kube-proxy is not running,
+# Cilium cannot reach the API server via its ClusterIP (10.96.0.1) during
+# bootstrap, so we point it directly at the control plane node IP.
+# Ref: https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
 API_SERVER_IP=$(docker inspect kind-control-plane \
   --format='{{.NetworkSettings.Networks.kind.IPAddress}}')
+
+echo "==> Preloading Cilium image ${CILIUM_VERSION}..."
+docker pull "quay.io/cilium/cilium:v${CILIUM_VERSION}"
+kind load docker-image "quay.io/cilium/cilium:v${CILIUM_VERSION}"
 
 echo "==> Installing Cilium ${CILIUM_VERSION} (API server: ${API_SERVER_IP}:6443)..."
 helm repo add cilium https://helm.cilium.io/ --force-update
@@ -47,17 +56,20 @@ echo "==> Waiting for Cilium to be ready..."
 kubectl -n kube-system rollout status daemonset/cilium --timeout=120s
 
 # --- Knative Serving ---
-echo "==> Installing Knative Serving ${KNATIVE_VERSION}..."
-kubectl apply -f "https://github.com/knative/serving/releases/download/knative-v${KNATIVE_VERSION}/serving-crds.yaml"
-kubectl apply -f "https://github.com/knative/serving/releases/download/knative-v${KNATIVE_VERSION}/serving-core.yaml"
+echo "==> Installing Knative Serving ${KNATIVE_SERVING_VERSION}..."
+kubectl apply -f "https://github.com/knative/serving/releases/download/knative-v${KNATIVE_SERVING_VERSION}/serving-crds.yaml"
+kubectl apply -f "https://github.com/knative/serving/releases/download/knative-v${KNATIVE_SERVING_VERSION}/serving-core.yaml"
 
 echo "==> Waiting for Knative Serving to be ready..."
 kubectl -n knative-serving rollout status deployment/controller --timeout=120s
 kubectl -n knative-serving rollout status deployment/webhook --timeout=120s
 
+echo "==> Configuring DNS (sslip.io)..."
+kubectl apply -f "https://github.com/knative/serving/releases/download/knative-v${KNATIVE_SERVING_VERSION}/serving-default-domain.yaml"
+
 # --- net-gateway-api (Cilium as Knative networking layer) ---
-echo "==> Installing net-gateway-api ${KNATIVE_VERSION}..."
-kubectl apply -f "https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v${KNATIVE_VERSION}/release.yaml"
+echo "==> Installing net-gateway-api ${NET_GATEWAY_API_VERSION}..."
+kubectl apply -f "https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v${NET_GATEWAY_API_VERSION}/release.yaml"
 
 # Create a Gateway for Knative to use (backed by Cilium's GatewayClass).
 echo "==> Creating Knative gateways using Cilium GatewayClass..."
@@ -77,7 +89,7 @@ spec:
         namespaces:
           from: All
 ---
-apiVersion: gateway.networking.k8s.io/v1beta1
+apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: knative-local-gateway
@@ -104,8 +116,8 @@ kubectl patch configmap/config-gateway \
   --type merge \
   --patch '{
     "data": {
-      "external-gateways": "knative-serving/knative-ingress-gateway",
-      "local-gateways": "knative-serving/knative-local-gateway"
+      "external-gateways": "- class: cilium\n  gateway: knative-serving/knative-ingress-gateway\n",
+      "local-gateways": "- class: cilium\n  gateway: knative-serving/knative-local-gateway\n"
     }
   }'
 
