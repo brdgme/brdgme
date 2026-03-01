@@ -131,18 +131,18 @@ Knative Service in production.
 
 - [x] Write a Kind cluster config with the default CNI disabled
       (`networking.disableDefaultCNI: true`). → `k8s/kind-config.yaml`
-- [ ] Install Cilium as the CNI into the Kind cluster. (manual: run
+- [x] Install Cilium as the CNI into the Kind cluster. (manual: run
       `scripts/setup-kind-cluster.sh`)
-- [ ] Verify pod networking and DNS work correctly.
+- [x] Verify pod networking and DNS work correctly.
 
 ### Knative Serving
 
-- [ ] Install Knative Serving into the Kind cluster. (manual: run
+- [x] Install Knative Serving into the Kind cluster. (manual: run
       `scripts/setup-kind-cluster.sh`)
 - [x] Configure Cilium as the Knative networking layer via `net-gateway-api`
       (Cilium's GatewayClass + Knative Gateway API ingress class). Setup
       automated in `scripts/setup-kind-cluster.sh`.
-- [ ] Verify a simple Knative Service deploys and is reachable.
+- [x] Verify a simple Knative Service deploys and is reachable.
 
 ### k8s manifests: rust/web as a Knative Service
 
@@ -161,13 +161,11 @@ Knative Service in production.
   - Port-forwarding for Postgres (5432) and Redis (6379).
 - [x] Full-cluster mode added (`WEB_IN_CLUSTER=1`): builds `brdgme/web` and
       deploys as Knative Service via `k8s/dev` kustomize path.
-- [ ] **Migrate CI to GitHub Actions** (prerequisite for skaffold and Travis
-      removal): Replace `.travis.yml` with GitHub Actions workflows. Build all
-      service images and push to GHCR (`ghcr.io/beefsack/brdgme/*`). Update
-      `k8s/prod` image references to GHCR. Deprecates both Travis CI and
-      `skaffold.yaml`.
-- [ ] Remove `skaffold.yaml` and `.travis.yml` once GitHub Actions CI is
-      verified working.
+- [x] **Migrate CI to GitHub Actions**: `.github/workflows/ci.yml` created.
+      Builds all service images and pushes to GHCR on master. `k8s/prod` image
+      references updated to GHCR via kustomize `images` overlay.
+- [x] Remove `skaffold.yaml` and `.travis.yml` once GitHub Actions CI is
+      verified working on master.
 
 ### Production builds
 

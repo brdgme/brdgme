@@ -50,9 +50,10 @@ All open source, always.
 ## Plan Status (docs/PLAN.md)
 - Phases 1-4: Complete
 - Phase 5: Defective (login broken, auth broken, stubs throughout - see Phase 5 notes)
-- Phase 5.5: Dev environment migration [Mostly Complete] - manifests/scripts/Tiltfile done; manual cluster verify still needed
-- Phase 5.6: Pre-cutover fixes (13 blockers including email sending, + parity gaps) [Next]
+- Phase 5.5: COMPLETE - cluster running, CI complete, skaffold/travis deleted
+- Phase 5.6: Pre-cutover fixes (13 blockers including email sending, + parity gaps) [Next after 5.5]
 - Phase 6: NATS integration (replaces tokio::sync::broadcast, unblocks Redis removal)
+- Phase 6.5: Production CD - ArgoCD + separate brdgme-config repo for image tags
 - Phase 7: Side-by-Side validation (old + new live together, then decommission)
 
 ## REVIEW.md Status (COMPLETE)
@@ -62,12 +63,15 @@ Item 38: Token parser false-positive autocomplete - add CommandSpec::suggest().
 
 ## Key Decisions
 - Old system kept alive (side-by-side) until rust/web proven in prod, then decommissioned
-- Tilt replaces skaffold for all local dev
+- Tilt replaces skaffold for all local dev; skaffold.yaml/.travis.yml deleted in Phase 5.5
 - rust/web deployed as Knative Service (not plain Deployment), minScale: 1
 - NATS in scope as Phase 6 (not post-cutover)
 - Email sending is a blocker for cutover (existing functionality, not new)
 - web/Dockerfile pins node:14.7.0 (EOL) - noted as risk in Phase 7
-- Production builds: docker build/push + kubectl apply -k k8s/prod (no Tilt/skaffold)
+- Production CD: GitHub Actions (CI/build/push to GHCR) + ArgoCD watching separate brdgme-config repo
+- ArgoCD Image Updater rejected - rollback override bug (issue #1249); separate config repo used instead
+- CI: .github/workflows/ci.yml - tests on all branches, image push to GHCR on master only
+- SQLx offline metadata at rust/.sqlx/ (29 files) - must be kept up to date when queries change (cargo sqlx prepare --workspace -- --features ssr)
 
 ## Long-term (out of scope now)
 - **Email**: third-party provider (Mailgun/Postmark), inbound via webhook→Knative Service

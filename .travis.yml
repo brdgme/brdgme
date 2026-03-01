@@ -1,5 +1,0 @@
-services:
-  - docker
-script:
-  - ./build.sh
-  - ./test.sh
