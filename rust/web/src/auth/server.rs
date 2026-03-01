@@ -103,12 +103,11 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     .await
     .map_err(|e| ServerFnError::new(format!("Failed to update user: {}", e)))?;
     
-    // TODO: Send email with confirmation link
-    // For now, we'll just return success with the token for testing
-    
+    // TODO: Send confirmation token via email (blocker: SMTP integration)
+
     Ok(LoginResponse {
         success: true,
-        message: format!("Login email sent! For testing, your confirmation token is: {}", confirmation_token),
+        message: "Login email sent".to_string(),
         user_id: Some(user_id),
     })
 }

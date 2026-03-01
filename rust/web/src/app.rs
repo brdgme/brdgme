@@ -3,10 +3,12 @@ use leptos::html;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{
     components::{Route, Router, Routes, A},
-    StaticSegment, ParamSegment,
+    hooks::use_navigate,
+    NavigateOptions, StaticSegment, ParamSegment,
 };
 use uuid::Uuid;
 
+use crate::auth::server::{login, confirm_login};
 use crate::components::MainLayout;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -72,22 +74,50 @@ fn HomePage() -> impl IntoView {
 fn LoginPage() -> impl IntoView {
     let (show_code_input, set_show_code_input) = signal(false);
     let (email, set_email) = signal(String::new());
-    
+
     let email_input = NodeRef::<html::Input>::new();
     let code_input = NodeRef::<html::Input>::new();
-    
+
+    let login_action = Action::new(|email: &String| {
+        let email = email.clone();
+        async move { login(email).await }
+    });
+
+    let confirm_action = Action::new(|token: &String| {
+        let token = token.clone();
+        async move { confirm_login(token).await }
+    });
+
+    // Show code input once server confirms email was sent.
+    Effect::new(move |_| {
+        if let Some(Ok(resp)) = login_action.value().get() {
+            if resp.success {
+                set_show_code_input.set(true);
+            }
+        }
+    });
+
+    // Navigate to dashboard on successful login.
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        if confirm_action.value().get().is_some_and(|r| r.is_ok()) {
+            navigate("/dashboard", NavigateOptions::default());
+        }
+    });
+
     let on_email_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let email_value = email_input.get().unwrap().value();
-        set_email.set(email_value);
-        set_show_code_input.set(true);
+        set_email.set(email_value.clone());
+        login_action.dispatch(email_value);
     };
-    
+
     let on_code_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
-        // TODO: Handle code submission
+        let token = code_input.get().unwrap().value();
+        confirm_action.dispatch(token);
     };
-    
+
     let show_code_link = move |_| {
         set_show_code_input.set(true);
     };
@@ -96,14 +126,14 @@ fn LoginPage() -> impl IntoView {
         <div class="login">
             <h1>"brdg.me"</h1>
             <div class="subtitle">"Lo-fi board games, email / web"</div>
-            
+
             <Show when=move || !show_code_input.get()>
                 <div>
                     <div>"Enter your email address to start"</div>
                     <form on:submit=on_email_submit>
                         <div>
-                            <input 
-                                type="email" 
+                            <input
+                                type="email"
                                 node_ref=email_input
                                 placeholder="Email address"
                                 required
@@ -114,9 +144,12 @@ fn LoginPage() -> impl IntoView {
                             <a on:click=show_code_link style="cursor:pointer">"I already have a login code"</a>
                         </div>
                     </form>
+                    <Show when=move || login_action.value().get().is_some_and(|r| r.is_err())>
+                        <div class="error">"Failed to send login email. Please try again."</div>
+                    </Show>
                 </div>
             </Show>
-            
+
             <Show when=move || show_code_input.get()>
                 <div>
                     <Show when=move || !email.get().is_empty()>
@@ -125,8 +158,8 @@ fn LoginPage() -> impl IntoView {
                     <div>
                         <div>"A login code has been sent to your email, please enter it here"</div>
                         <form on:submit=on_code_submit>
-                            <input 
-                                type="tel" 
+                            <input
+                                type="tel"
                                 pattern="[0-9]*"
                                 node_ref=code_input
                                 placeholder="Login code"
@@ -134,6 +167,9 @@ fn LoginPage() -> impl IntoView {
                             />
                             <input type="submit" value="Play!"/>
                         </form>
+                        <Show when=move || confirm_action.value().get().is_some_and(|r| r.is_err())>
+                            <div class="error">"Invalid or expired code. Please try again."</div>
+                        </Show>
                     </div>
                 </div>
             </Show>

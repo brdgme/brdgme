@@ -29,7 +29,7 @@ tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
 tower = { version = "0.4", optional = true }
 tower-sessions = { version = "0.14.0", optional = true }
-tower-sessions-memory-store = { version = "0.14.0", optional = true }
+tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"], optional = true }
 tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 anyhow = { version = "1.0.95", optional = true }
 thiserror = { version = "2.0.11", optional = true }
@@ -77,6 +77,7 @@ ssr = [
     "dep:tracing-subscriber",
     "dep:tower",
     "dep:tower-sessions",
+    "dep:tower-sessions-sqlx-store",
     "dep:anyhow",
     "dep:thiserror",
     "dep:email",
@@ -86,7 +87,6 @@ ssr = [
     "dep:brdgme_color",
     "dep:brdgme_markup",
     "dep:dotenv",
-    "dep:tower-sessions-memory-store",
     "dep:tower-http",
     "dep:async-trait",
     "dep:reqwest",

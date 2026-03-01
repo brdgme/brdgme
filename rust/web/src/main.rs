@@ -12,28 +12,23 @@ async fn main() {
     use web::state::AppState;
     use web::websocket::GameBroadcaster;
 
-
-    // Load environment variables from .env file
     dotenv::dotenv().ok();
-    
-    // Create database connection pool
+
     let pool = create_pool().await.expect("Failed to create database pool");
-    
-    // Create broadcaster
     let broadcaster = GameBroadcaster::new(1024);
 
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
-    
+
     let state = AppState {
         leptos_options: leptos_options.clone(),
         pool: pool.clone(),
         broadcaster: broadcaster.clone(),
     };
 
-    // Generate the list of routes in your Leptos App
     let routes = generate_route_list(App);
+    let session_layer = create_session_layer(&pool).await;
 
     let app = Router::new()
         .leptos_routes_with_context(
@@ -58,15 +53,36 @@ async fn main() {
             let leptos_options = leptos_options.clone();
             move |_| shell(leptos_options.clone())
         }))
-        .layer(create_session_layer())
+        .layer(session_layer)
         .with_state(state);
 
-    // run our app with hyper
     log!("listening on http://{}", &addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+}
+
+#[cfg(feature = "ssr")]
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+    };
+
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
 
 #[cfg(not(feature = "ssr"))]

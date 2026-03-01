@@ -2,89 +2,149 @@
 
 ## Phase 5.5: COMPLETE
 
-## This session: Legacy side-by-side dev environment
-
-### What was done
-
-**1. Legacy services added to Tiltfile (`LEGACY=1 tilt up`)**
-
-New `k8s/base/web-legacy/` manifests:
-- `service.yaml` - Knative Service (minScale: 1), nginx container with ConfigMap volume
-- `nginx-configmap.yaml` - proxies `/api/` → `http://api/` and `/ws` → `http://websocket/`
-- `kustomization.yaml`
-
-`k8s/base/api/` converted to Knative Service:
-- Removed `deployment.yaml`, replaced `service.yaml` with `serving.knative.dev/v1` Service
-- Retains `envFrom: secretRef: postgres-config` and `ROCKET_ADDRESS: 0.0.0.0`
-- `containerPort: 8000`, `minScale: 1`
-
-`k8s/base/websocket/` converted to Knative Service:
-- Removed `deployment.yaml`, replaced `service.yaml` with Knative Service
-- `REDIS_URL: redis://redis` env var
-- `containerPort: 80`, `minScale: 1`
-
-`k8s/dev-legacy/kustomization.yaml` created - groups all three with `namespace: brdgme`.
-
-Tiltfile:
-- `LEGACY = os.getenv("LEGACY", "") == "1"` env var
-- `k8s_kind('Service', api_version='serving.knative.dev/v1', ...)` - required so Tilt
-  recognises Knative Services as workloads (otherwise `k8s_resource` call errors)
-- `docker_build` for web-legacy, websocket, api when LEGACY=1
-- `k8s_resource("web-legacy", port_forwards=["3001:80"])`
-
-**2. `rust/api/Dockerfile` written** (new file)
-- Proper multi-stage build: `rust:slim-bookworm` builder, `debian:bookworm-slim` runtime
-- Replaces `rust/api/deploy/Dockerfile` which required a pre-built binary
-- CI `build-legacy` job updated to use `rust/api/Dockerfile`
-
-**3. `web/Dockerfile` fixed for Node 22**
-- `node:14.7.0` → `node:22` (EOL risk materialised - npm packages require >=18)
-- `webpack -p` → `webpack --mode production` (`-p` removed in webpack-cli v4)
-- `nginx:1.19.1` → `nginx:stable`
-- `web/package-lock.json` regenerated locally with npm 10
-
-**4. `acquire-1` test fix (CI)**
-- `board.rs:311-314`: `Loc::default().into()` ambiguous due to
-  `serde_json` adding `impl PartialEq<Value> for usize`
-- Fixed: `.into()` → `usize::from(...)` (explicit target type)
+## Phase 5.6: In Progress - 9 of 13 blockers coded, build currently broken
 
 ---
 
-## Local registry for Kind + Knative: RESOLVED
+## This session: Phase 5.6 Pre-Cutover Fixes
 
-Approach confirmed correct (officially recommended by Kind docs). Three components work together:
+### Completed this session (code written)
 
-1. **`k8s/kind-config.yaml`** - `containerdConfigPatches`: tells Kind nodes' containerd to use HTTP for `kind-registry:5000`
-2. **`scripts/setup-kind-cluster.sh`**: starts `registry:2` container, connects it to Kind network, creates `local-registry-hosting` ConfigMap (KEP-1755), patches `config-deployment` to skip digest resolution for `kind-registry:5000`
-3. **`Tiltfile`**: `default_registry('localhost:5000', host_from_cluster='kind-registry:5000')`
+**1. `scripts/setup-kind-cluster.sh` - local registry fix (Phase 5.5 completion)**
+- Added `local-registry-hosting` ConfigMap (KEP-1755)
+- Added `kubectl patch configmap/config-deployment` to add `kind-registry:5000`
+  to `registries-skipping-tag-resolving` - this was the missing piece that would
+  have caused Knative's controller to fail resolving image digests.
 
-The missing piece was the `config-deployment` patch - Knative's controller makes its own HTTP calls to resolve image digests and would fail on a plain-HTTP registry without this exemption.
+**2. `auth/session.rs` - rewrote session layer**
+- Replaced `MemoryStore` with `PostgresStore` from `tower-sessions-sqlx-store`
+- `create_session_layer(pool: &PgPool)` is now async; creates + migrates store internally
+  via `PostgresStore::new(pool).migrate().await`
+- `with_secure` now reads `SECURE_COOKIE` env var (`"true"` = secure, default false)
+- Expiry changed from 24 hours to 30 days (matching old system)
+- `validate_session_token` query updated:
+  `WHERE id = $1 AND created_at > NOW() - INTERVAL '30 days'`
+- Removed dead `SESSION_AUTH_TOKEN_KEY` constant
+- Simplified `set_user_session` (no longer stores separate auth token key)
+- Simplified `clear_user_session` (removes only `SESSION_USER_KEY`)
 
-### To test (cluster recreation required for containerd patch)
+**3. `auth/server.rs` - removed token from response**
+- `login()` response message changed from exposing the token to just "Login email sent"
+
+**4. `main.rs` - async session layer + SIGTERM**
+- `create_session_layer` call is now awaited
+- Added `shutdown_signal()` function: listens for SIGTERM and Ctrl+C via
+  `tokio::signal::unix` and `tokio::select!`
+- `axum::serve(...).with_graceful_shutdown(shutdown_signal())` wired in
+
+**5. `game/server.rs` - auth in all Axum handlers**
+- `create_game`, `get_game`, `play_command` all extract `session: Session`
+- `get_user_from_session(&session).await` checked; returns 401 if absent
+- `Uuid::nil()` replaced with `user.id` from session
+- Turn enforcement added to `play_command`:
+  `if !player.game_player.is_turn { return 403 }`
+
+**6. `app.rs` - login UI wired to server functions**
+- `login_action: Action<String, LoginResponse>` calls `login(email)` server fn
+- `confirm_action: Action<String, AuthUser>` calls `confirm_login(token)` server fn
+- `on_email_submit` dispatches `login_action`; code input only shown after
+  server confirms success (via `Effect` watching `login_action.value()`)
+- `on_code_submit` dispatches `confirm_action`
+- Navigates to `/dashboard` on successful confirm (via `use_navigate` + `Effect`)
+- Error messages shown below each form on failure
+
+**7. `Cargo.toml` - session store dependency**
+- `tower-sessions = "0.14.0"` (kept at 0.14.0, see blocker below)
+- Removed `tower-sessions-memory-store`
+- Added `tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"] }`
+
+---
+
+## BLOCKER: tower-sessions version conflict (build is broken)
+
+### The problem
+`tower-sessions-sqlx-store 0.15.0` depends on `tower-sessions-core 0.14.0`.
+`tower-sessions 0.15.0` depends on `tower-sessions-core 0.15.0`.
+Rust treats these as incompatible traits - `PostgresStore` does not implement
+the `SessionStore` trait version that `SessionManagerLayer` (from tower-sessions 0.15.0)
+requires.
+
+`tower-sessions 0.15.0` is the LATEST (0.14.0 was before it).
+`tower-sessions-sqlx-store 0.15.0` is the LATEST per crates.io.
+
+User preference: stay on latest stable. Current Cargo.toml has:
+- `tower-sessions = "0.14.0"` (temporarily reverted from 0.15.0 to attempt fix)
+- `tower-sessions-sqlx-store = "0.15.0"`
+This still causes the conflict because sqlx-store 0.15.0 uses core 0.14.0 and
+tower-sessions 0.14.0 also uses core 0.14.0 - this SHOULD be compatible.
+
+### What to try at start of next session
+
+First, verify the actual resolved versions with a live dependency tree:
 ```bash
-kind delete cluster
-bash scripts/setup-kind-cluster.sh
-# inside rust/web:
-sqlx migrate run
-# then:
-LEGACY=1 tilt up
+cargo tree -p web --features ssr 2>&1 | grep tower-sessions
 ```
 
+Then try:
+1. **`cargo update`** in `rust/` - the Cargo.lock may have stale entries
+   locking to incompatible patch versions. This is the most likely fix.
+2. If that doesn't work, check crates.io for a `tower-sessions-sqlx-store`
+   version > 0.15.0 that explicitly targets `tower-sessions-core 0.15.0`:
+   `cargo search tower-sessions-sqlx-store`
+3. If no newer sqlx-store exists, the only options are:
+   a. Keep `tower-sessions = "0.14.0"` and confirm that combination compiles
+   b. Wait for sqlx-store to publish a 0.16.0 targeting tower-sessions-core 0.15.0
+
+### After version conflict is resolved
+
+The `validate_session_token` query changed (added 30-day expiry check). The
+`.sqlx/` offline metadata file for the old query is now stale. Must regenerate:
+```bash
+# With tilt up (postgres running):
+cd rust
+cargo sqlx prepare --workspace -- --features ssr
+```
+Without this, `SQLX_OFFLINE=true` Docker builds will fail.
+
 ---
 
-## Next major task after local registry is resolved: Phase 5.6
+## Remaining Phase 5.6 blockers (not yet coded)
 
-See `docs/PLAN.md` Phase 5.6. Recommended order for blockers:
-1. Persistent session store (`tower-sessions-sqlx-store`)
-2. Login UI wired to server functions
-3. Confirmation token removed from response
-4. `with_secure` env-driven
-5. Token expiry (30-day)
-6. Email sending (SMTP)
-7. Auth in Axum handlers (replace `Uuid::nil()`)
-8. Authenticate `GET /api/game/{id}`
-9. Turn enforcement
-10. `GamePlayer` model missing fields
-11. `update_game_command_success` writes all fields
-12. `find_game_extended` LEFT JOIN for missing `game_type_users`
-13. Graceful SIGTERM shutdown
+In order of recommended priority:
+
+1. **`GamePlayer` model missing fields** (`models/game.rs`):
+   Add `last_turn_at`, `is_eliminated`, `is_read`, `points`, `undo_game_state`,
+   `rating_change`. Required before undo, mark_read, and points work.
+
+2. **`update_game_command_success` writes all fields** (`db.rs`):
+   Persist `is_turn_at`, `last_turn_at`, `is_eliminated`, `undo_game_state`,
+   and points on every command. Also set `finished_at` when `is_finished = true`
+   (verify no DB trigger does this).
+
+3. **`find_game_extended` handles missing `game_type_users` row** (`db.rs`):
+   Use LEFT JOIN with a default rating (1500) rather than erroring.
+
+4. **Email sending** (`auth/server.rs`):
+   Send confirmation token via in-cluster SMTP service. The SMTP pod is already
+   deployed. Use the `email` crate (already in Cargo.toml) or `lettre` (more
+   actively maintained - may be worth switching). Read SMTP host/port from env.
+
+---
+
+## Summary of all Phase 5.6 blocker status
+
+| # | Blocker | Status |
+|---|---------|--------|
+| 1 | Persistent session store | Coded, blocked by version conflict |
+| 2 | Login UI wired | Coded, pending compile |
+| 3 | Token not in response | Done |
+| 4 | `with_secure` env-driven | Coded, pending compile |
+| 5 | Token expiry 30-day | Coded, needs sqlx prepare |
+| 6 | Email sending | Not started |
+| 7 | Auth in Axum handlers | Coded, pending compile |
+| 8 | Authenticate GET /game/:id | Coded, pending compile |
+| 9 | Turn enforcement | Coded, pending compile |
+| 10 | GamePlayer missing fields | Not started |
+| 11 | update_game_command_success all fields | Not started |
+| 12 | find_game_extended LEFT JOIN | Not started |
+| 13 | Graceful SIGTERM | Done |

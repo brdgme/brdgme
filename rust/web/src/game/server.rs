@@ -7,11 +7,13 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 use sqlx::PgPool;
+use tower_sessions::Session;
+use crate::auth::session::get_user_from_session;
 use crate::db::{self, CreateGameOpts};
 use crate::game::client;
 use crate::websocket::{GameBroadcaster, WebSocketMessage};
 use brdgme_cmd::api::{Request, Response};
-use brdgme_game::{Status};
+use brdgme_game::Status;
 
 #[derive(Deserialize)]
 pub struct CreateGameRequest {
@@ -21,13 +23,15 @@ pub struct CreateGameRequest {
 }
 
 pub async fn create_game(
+    session: Session,
     State(pool): State<PgPool>,
     State(broadcaster): State<GameBroadcaster>,
     Json(payload): Json<CreateGameRequest>,
 ) -> impl IntoResponse {
-    // This is a placeholder for actual user authentication in Axum
-    // In Leptos Server Functions, it's easier.
-    let user_id = Uuid::nil(); // TODO: get from session
+    let user = match get_user_from_session(&session).await {
+        Some(u) => u,
+        None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
+    };
 
     let opponent_ids = payload.opponent_ids.unwrap_or_default();
     let opponent_emails = payload.opponent_emails.unwrap_or_default();
@@ -62,7 +66,7 @@ pub async fn create_game(
             eliminated: &eliminated,
             placings: &placings,
             points: &game_info.points,
-            creator_id: user_id,
+            creator_id: user.id,
             opponent_ids: &opponent_ids,
             opponent_emails: &opponent_emails,
             chat_id: None,
@@ -77,18 +81,20 @@ pub async fn create_game(
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
     }
 
-    // Broadcast update
-    broadcaster.broadcast(WebSocketMessage::GameUpdate { 
-        game_id: game.id, 
-    });
+    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: game.id });
 
     (StatusCode::CREATED, Json(game)).into_response()
 }
 
 pub async fn get_game(
+    session: Session,
     State(pool): State<PgPool>,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
+    if get_user_from_session(&session).await.is_none() {
+        return (StatusCode::UNAUTHORIZED, "Authentication required").into_response();
+    }
+
     match db::find_game_extended(&pool, id).await {
         Ok(Some(game)) => Json(game).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Game not found").into_response(),
@@ -102,12 +108,16 @@ pub struct CommandRequest {
 }
 
 pub async fn play_command(
+    session: Session,
     State(pool): State<PgPool>,
     State(broadcaster): State<GameBroadcaster>,
     Path(id): Path<Uuid>,
     Json(payload): Json<CommandRequest>,
 ) -> impl IntoResponse {
-    let user_id = Uuid::nil(); // TODO: get from session
+    let user = match get_user_from_session(&session).await {
+        Some(u) => u,
+        None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
+    };
 
     let game_extended = match db::find_game_extended(&pool, id).await {
         Ok(Some(ge)) => ge,
@@ -119,10 +129,14 @@ pub async fn play_command(
         return (StatusCode::BAD_REQUEST, "Game is already finished").into_response();
     }
 
-    let player = match game_extended.game_players.iter().find(|p| p.user.id == user_id) {
+    let player = match game_extended.game_players.iter().find(|p| p.user.id == user.id) {
         Some(p) => p,
         None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
     };
+
+    if !player.game_player.is_turn {
+        return (StatusCode::FORBIDDEN, "Not your turn").into_response();
+    }
 
     let names: Vec<String> = game_extended.game_players.iter().map(|p| p.user.name.clone()).collect();
 
@@ -140,7 +154,7 @@ pub async fn play_command(
     };
 
     let (game_response, logs, _can_undo, remaining_input, _public_render, _player_renders) = match resp {
-        Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } => 
+        Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } =>
             (game, logs, can_undo, remaining_input, public_render, player_renders),
         Response::UserError { message } => return (StatusCode::BAD_REQUEST, message).into_response(),
         _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
@@ -172,10 +186,7 @@ pub async fn play_command(
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
     }
 
-    // Broadcast update
-    broadcaster.broadcast(WebSocketMessage::GameUpdate { 
-        game_id: id, 
-    });
+    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: id });
 
     StatusCode::OK.into_response()
 }

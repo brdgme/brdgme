@@ -185,26 +185,29 @@ review before the `leptos` branch replaces production. Full review in
 
 ### Blockers (must fix before cutover)
 
-- [ ] **Auth in Axum handlers** (`game/server.rs`): Replace `Uuid::nil()` in
+- [x] **Auth in Axum handlers** (`game/server.rs`): Replace `Uuid::nil()` in
       `create_game` and `play_command` with the authenticated user ID from the
       session.
-- [ ] **Login UI wired to server functions** (`app.rs`): Connect
+- [x] **Login UI wired to server functions** (`app.rs`): Connect
       `on_email_submit` and `on_code_submit` to the `Login` and `ConfirmLogin`
-      server functions.
-- [ ] **Confirmation token not exposed in response** (`auth/server.rs`): Remove
-      the token from the login response body.
-- [ ] **Persistent session store** (`auth/session.rs`): Replace `MemoryStore`
-      with `tower-sessions-sqlx-store`. Requires a new SQLx migration to create
-      the sessions table (refer to `tower-sessions-sqlx-store` docs for the
-      schema) and adding the crate to `Cargo.toml`.
-- [ ] **`with_secure` env-driven** (`auth/session.rs`): Read from environment,
-      not hardcoded `false`.
-- [ ] **Graceful SIGTERM shutdown** (`main.rs`): Add
-      `axum::serve(...).with_graceful_shutdown(...)` listening for SIGTERM.
-- [ ] **Turn enforcement** (`game/server.rs`): Reject commands when it is not
-      the authenticated player's turn.
-- [ ] **Authenticate `GET /api/game/{id}`** (`game/server.rs`): Require a
-      valid session.
+      server functions via `Action`. Navigates to `/dashboard` on success.
+      Error messages shown on failure.
+- [x] **Confirmation token not exposed in response** (`auth/server.rs`): Token
+      removed from response message.
+- [~] **Persistent session store** (`auth/session.rs`): Code written -
+      `tower-sessions-sqlx-store 0.15.0` + `PostgresStore`, table created via
+      `store.migrate()` in `create_session_layer`. **BLOCKED**: version conflict
+      between `tower-sessions 0.15.0` (uses `tower-sessions-core 0.15.0`) and
+      `tower-sessions-sqlx-store 0.15.0` (uses `tower-sessions-core 0.14.0`).
+      See STATUS.md for resolution options.
+- [x] **`with_secure` env-driven** (`auth/session.rs`): Reads `SECURE_COOKIE`
+      env var (`"true"` = secure).
+- [x] **Graceful SIGTERM shutdown** (`main.rs`): Added `shutdown_signal()`
+      listening for SIGTERM and Ctrl+C.
+- [x] **Turn enforcement** (`game/server.rs`): Rejects commands when
+      `!player.game_player.is_turn`.
+- [x] **Authenticate `GET /api/game/{id}`** (`game/server.rs`): Returns 401
+      when no valid session.
 - [ ] **`GamePlayer` model missing fields** (`models/game.rs`): Add
       `last_turn_at`, `is_eliminated`, `is_read`, `points`, `undo_game_state`,
       `rating_change`. Required before undo, mark_read, and points work.
@@ -214,9 +217,9 @@ review before the `leptos` branch replaces production. Full review in
 - [ ] **`find_game_extended` handles missing `game_type_users` row** (`db.rs`):
       Use a LEFT JOIN with a default rating rather than erroring. Migration risk
       for any existing game where a player row is absent.
-- [ ] **Token expiry check in `validate_session_token`** (`auth/session.rs`):
-      Auth tokens are currently permanent. Add an expiry check (30-day window
-      matching the old system).
+- [x] **Token expiry check in `validate_session_token`** (`auth/session.rs`):
+      SQL query updated to `AND created_at > NOW() - INTERVAL '30 days'`.
+      **Requires `cargo sqlx prepare` re-run** (query hash changed).
 - [ ] **Email sending not implemented** (`auth/server.rs`): The confirmation
       token is generated but never emailed. The old system sent the code via the
       in-cluster SMTP service. The new system must do the same before real users
