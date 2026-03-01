@@ -116,7 +116,7 @@ jobs:
           - image: websocket
             file: websocket/Dockerfile
           - image: api
-            file: rust/api/deploy/Dockerfile
+            file: rust/api/Dockerfile
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

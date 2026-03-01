@@ -7,9 +7,14 @@
 # Full-cluster mode (WEB_IN_CLUSTER=1):
 #   Also builds brdgme/web and deploys it as a Knative Service in Kind.
 #
+# Legacy side-by-side mode (LEGACY=1):
+#   Also builds and deploys web-legacy, api, and websocket as Knative Services.
+#   The old React frontend is available at localhost:3001.
+#
 # Prerequisites: run scripts/setup-kind-cluster.sh once before `tilt up`.
 
 WEB_IN_CLUSTER = os.getenv("WEB_IN_CLUSTER", "") == "1"
+LEGACY = os.getenv("LEGACY", "") == "1"
 
 # --- Game image builds ---
 
@@ -38,6 +43,16 @@ for game in [
     "zombie-dice-1",
 ]:
     docker_build("brdgme/" + game, ".", dockerfile="brdgme-go/Dockerfile", target=game)
+
+# Push images to the local Kind registry. The host pushes to localhost:5000
+# (port-mapped from the kind-registry container); manifests reference
+# kind-registry:5000 which resolves inside the cluster via Docker network DNS.
+# Required for Knative: it resolves image digests from the registry directly,
+# so kind load docker-image is insufficient.
+default_registry('localhost:5000', host_from_cluster='kind-registry:5000')
+
+# Register Knative Service as a workload type so Tilt can track it.
+k8s_kind('Service', api_version='serving.knative.dev/v1', image_json_path='{.spec.template.spec.containers[0].image}')
 
 # --- Kubernetes resources ---
 
@@ -81,3 +96,10 @@ else:
 
 k8s_resource("postgres", port_forwards=["5432:5432"])
 k8s_resource("redis", port_forwards=["6379:6379"])
+
+if LEGACY:
+    docker_build("brdgme/web-legacy", ".", dockerfile="web/Dockerfile", target="web", only=["web/"])
+    docker_build("brdgme/websocket", ".", dockerfile="websocket/Dockerfile", target="websocket", only=["websocket/"])
+    docker_build("brdgme/api", ".", dockerfile="rust/api/Dockerfile", target="api", only=["rust/"])
+    k8s_yaml(kustomize("k8s/dev-legacy"))
+    k8s_resource("web-legacy", port_forwards=["3001:80"])

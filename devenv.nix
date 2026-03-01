@@ -27,6 +27,7 @@
     cargo-leptos
     chromium
     dart-sass
+    gh
     k9s
     kind
     kubectl

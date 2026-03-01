@@ -1,0 +1,23 @@
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: web-legacy
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+    spec:
+      containers:
+        - name: web-legacy
+          image: brdgme/web-legacy
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: web-legacy-nginx-conf

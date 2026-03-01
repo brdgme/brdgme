@@ -308,10 +308,10 @@ mod tests {
 
     #[test]
     fn loc_into_usize_works() {
-        assert_eq!(0_usize, Loc::default().into());
-        assert_eq!(8_usize, Loc { row: 0, col: 8 }.into());
-        assert_eq!(27_usize, Loc { row: 2, col: 3 }.into());
-        assert_eq!(23_usize, Loc { row: 1, col: 11 }.into());
+        assert_eq!(0_usize, usize::from(Loc::default()));
+        assert_eq!(8_usize, usize::from(Loc { row: 0, col: 8 }));
+        assert_eq!(27_usize, usize::from(Loc { row: 2, col: 3 }));
+        assert_eq!(23_usize, usize::from(Loc { row: 1, col: 11 }));
     }
 
     #[test]

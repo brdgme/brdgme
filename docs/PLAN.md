@@ -166,6 +166,9 @@ Knative Service in production.
       references updated to GHCR via kustomize `images` overlay.
 - [x] Remove `skaffold.yaml` and `.travis.yml` once GitHub Actions CI is
       verified working on master.
+- [x] **Local registry for Kind + Knative**: `registry:2` container +
+      containerd mirror patch + `config-deployment` skip for `kind-registry:5000`
+      + Tilt `default_registry`. Requires cluster recreation to take effect.
 
 ### Production builds
 
@@ -404,9 +407,8 @@ both UIs show correct state on next page load.
 
 ### Risks
 
-- `web/Dockerfile` pins `node:14.7.0` (EOL April 2023). npm install may fail
-  against current registries. The old frontend build should be verified early
-  in this phase; if it fails, the Node version will need bumping.
+- `web/Dockerfile` bumped to `node:20` (was `node:14.7.0`, EOL). Build
+  verified working.
 
 ### Image naming
 
@@ -419,9 +421,9 @@ The new Leptos app keeps `brdgme/web`. The old React frontend is renamed to
 
 - [x] New Leptos app: `rust/Dockerfile` `web` target → `brdgme/web`. k8s
       manifests in `k8s/base/web/` unchanged.
-- [ ] Add `brdgme/web-legacy` image build to the Tiltfile (from
+- [x] Add `brdgme/web-legacy` image build to the Tiltfile (from
       `web/Dockerfile`, final stage `web`, tagged `brdgme/web-legacy`).
-- [ ] Add `brdgme/api` and `brdgme/websocket` image builds to the Tiltfile.
+- [x] Add `brdgme/api` and `brdgme/websocket` image builds to the Tiltfile.
 - [ ] Create `k8s/base/web-legacy/` manifests (Deployment + Service) using
       `image: brdgme/web-legacy`. Mirror the structure of `k8s/base/web/` but
       with `name: web-legacy`.

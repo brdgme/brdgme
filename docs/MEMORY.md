@@ -50,7 +50,7 @@ All open source, always.
 ## Plan Status (docs/PLAN.md)
 - Phases 1-4: Complete
 - Phase 5: Defective (login broken, auth broken, stubs throughout - see Phase 5 notes)
-- Phase 5.5: COMPLETE - cluster running, CI complete, skaffold/travis deleted
+- Phase 5.5: Nearly complete - local registry for Kind+Knative written but not yet tested (see STATUS.md)
 - Phase 5.6: Pre-cutover fixes (13 blockers including email sending, + parity gaps) [Next after 5.5]
 - Phase 6: NATS integration (replaces tokio::sync::broadcast, unblocks Redis removal)
 - Phase 6.5: Production CD - ArgoCD + separate brdgme-config repo for image tags
@@ -64,10 +64,13 @@ Item 38: Token parser false-positive autocomplete - add CommandSpec::suggest().
 ## Key Decisions
 - Old system kept alive (side-by-side) until rust/web proven in prod, then decommissioned
 - Tilt replaces skaffold for all local dev; skaffold.yaml/.travis.yml deleted in Phase 5.5
-- rust/web deployed as Knative Service (not plain Deployment), minScale: 1
+- All services (rust/web + legacy api/websocket/web-legacy) deployed as Knative Services, minScale: 1
+- `LEGACY=1 tilt up` enables side-by-side dev (old React at localhost:3001)
+- Local registry (kind-registry:5000) needed for Kind+Knative: solution written, needs testing
 - NATS in scope as Phase 6 (not post-cutover)
 - Email sending is a blocker for cutover (existing functionality, not new)
-- web/Dockerfile pins node:14.7.0 (EOL) - noted as risk in Phase 7
+- web/Dockerfile bumped to node:22 (was node:14.7.0 EOL); webpack -p → --mode production
+- rust/api/Dockerfile: new proper multi-stage build replacing binary-only deploy artifact
 - Production CD: GitHub Actions (CI/build/push to GHCR) + ArgoCD watching separate brdgme-config repo
 - ArgoCD Image Updater rejected - rollback override bug (issue #1249); separate config repo used instead
 - CI: .github/workflows/ci.yml - tests on all branches, image push to GHCR on master only
