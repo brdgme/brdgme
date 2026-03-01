@@ -1,110 +1,69 @@
 # Current Work Status
 
-## Phase 5.5: COMPLETE
-
-## Phase 5.6: In Progress - 9 of 13 blockers coded, build currently broken
+## Phase 5.6: In Progress - 10 of 13 blockers complete, build working
 
 ---
 
-## This session: Phase 5.6 Pre-Cutover Fixes
+## This session: completed work
 
-### Completed this session (code written)
+### Dev environment fixes
 
-**1. `scripts/setup-kind-cluster.sh` - local registry fix (Phase 5.5 completion)**
-- Added `local-registry-hosting` ConfigMap (KEP-1755)
-- Added `kubectl patch configmap/config-deployment` to add `kind-registry:5000`
-  to `registries-skipping-tag-resolving` - this was the missing piece that would
-  have caused Knative's controller to fail resolving image digests.
+**Kind cluster recreation failure**
+- Root cause: previous kind version defaulted to K8s v1.35.0 which had a
+  kubelet startup bug. New kind v0.30.0 defaults to v1.34.0 - works correctly.
+- Fix: deleted and recreated cluster with `bash scripts/setup-kind-cluster.sh`.
 
-**2. `auth/session.rs` - rewrote session layer**
-- Replaced `MemoryStore` with `PostgresStore` from `tower-sessions-sqlx-store`
-- `create_session_layer(pool: &PgPool)` is now async; creates + migrates store internally
-  via `PostgresStore::new(pool).migrate().await`
-- `with_secure` now reads `SECURE_COOKIE` env var (`"true"` = secure, default false)
-- Expiry changed from 24 hours to 30 days (matching old system)
-- `validate_session_token` query updated:
-  `WHERE id = $1 AND created_at > NOW() - INTERVAL '30 days'`
-- Removed dead `SESSION_AUTH_TOKEN_KEY` constant
-- Simplified `set_user_session` (no longer stores separate auth token key)
-- Simplified `clear_user_session` (removes only `SESSION_USER_KEY`)
+**KEP-1755 ConfigMap corrected** (`scripts/setup-kind-cluster.sh`)
+- Was: `host: "kind-registry:5000"` (in-cluster address, caused Tilt to try
+  pushing from the host to an unresolvable hostname).
+- Fixed to: `host: "localhost:5000"` + `hostFromContainerRuntime: "kind-registry:5000"`.
+- Tilt reads the `host` field to know where to push images from the host.
 
-**3. `auth/server.rs` - removed token from response**
-- `login()` response message changed from exposing the token to just "Login email sent"
+**`wasm-bindgen-cli` missing from devenv** (`devenv.nix`, `rust/web/Cargo.toml`)
+- `cargo-leptos watch` requires `wasm-bindgen` binary in PATH.
+- Previously installed ad-hoc via `cargo install`; devenv rebuild wiped it.
+- Fix: added `wasm-bindgen-cli` to `devenv.nix` packages.
+- Version bump: nixpkgs has 0.2.108; Cargo.toml pin updated from `=0.2.100`
+  to `=0.2.108` to match. Cargo.lock updated via `cargo update -p wasm-bindgen`.
 
-**4. `main.rs` - async session layer + SIGTERM**
-- `create_session_layer` call is now awaited
-- Added `shutdown_signal()` function: listens for SIGTERM and Ctrl+C via
-  `tokio::signal::unix` and `tokio::select!`
-- `axum::serve(...).with_graceful_shutdown(shutdown_signal())` wired in
+**`rust/.gitignore` created**
+- `cargo-leptos`'s file watcher complained about missing `.gitignore`, causing
+  it to watch `target/` and making recompile detection slow.
 
-**5. `game/server.rs` - auth in all Axum handlers**
-- `create_game`, `get_game`, `play_command` all extract `session: Session`
-- `get_user_from_session(&session).await` checked; returns 401 if absent
-- `Uuid::nil()` replaced with `user.id` from session
-- Turn enforcement added to `play_command`:
-  `if !player.game_player.is_turn { return 403 }`
+### chrono -> time migration
 
-**6. `app.rs` - login UI wired to server functions**
-- `login_action: Action<String, LoginResponse>` calls `login(email)` server fn
-- `confirm_action: Action<String, AuthUser>` calls `confirm_login(token)` server fn
-- `on_email_submit` dispatches `login_action`; code input only shown after
-  server confirms success (via `Effect` watching `login_action.value()`)
-- `on_code_submit` dispatches `confirm_action`
-- Navigates to `/dashboard` on successful confirm (via `use_navigate` + `Effect`)
-- Error messages shown below each form on failure
+`tower-sessions-sqlx-store 0.15.0` hard-codes `sqlx/time` in its dependencies.
+When both `time` and `chrono` SQLx features are active, `query_as!` picks
+`time::PrimitiveDateTime` for `TIMESTAMP` columns and tries to convert to the
+struct field type via `From`. `NaiveDateTime: From<PrimitiveDateTime>` is not
+implemented, so every `query_as!` call failed to compile.
 
-**7. `Cargo.toml` - session store dependency**
-- `tower-sessions = "0.14.0"` (kept at 0.14.0, see blocker below)
-- Removed `tower-sessions-memory-store`
-- Added `tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"] }`
+Changes made:
+- `rust/lib/game/Cargo.toml`: `chrono` -> `time = { version = "0.3", features = ["serde"] }`
+- `rust/lib/cmd/Cargo.toml`: same
+- `rust/lib/game/src/game_log.rs`: `Log.at` changed from `chrono::NaiveDateTime`
+  to `time::PrimitiveDateTime`; constructors use `OffsetDateTime::now_utc()`
+- `rust/lib/game/src/bot.rs`: `chrono::Utc::now().timestamp()` replaced with
+  `std::time::Instant` (no time crate needed for a 1-second interval check)
+- `rust/lib/cmd/src/api.rs`: `CliLog.at` changed to `time::PrimitiveDateTime`
+- `rust/api/src/db/query/mod.rs`: conversion added at `logged_at: l.at` site
+  (old Rocket API uses Diesel which is chrono-based; conversion keeps it working)
+- `rust/web/src/models/*.rs`: all `chrono::NaiveDateTime` -> `time::PrimitiveDateTime`
+- `rust/web/src/auth/server.rs`: `Utc::now().naive_utc()` ->
+  `OffsetDateTime::now_utc()` + `PrimitiveDateTime::new(now.date(), now.time())`
+- `rust/web/Cargo.toml`: `chrono` removed, `time = { version = "0.3", features = ["serde"] }` added
 
----
+### tokio/signal feature added (`rust/web/Cargo.toml`)
 
-## BLOCKER: tower-sessions version conflict (build is broken)
+`tokio::signal` requires the `signal` feature. Was missing, causing `main.rs`
+`shutdown_signal()` to fail to compile. Added to the `tokio` dependency.
 
-### The problem
-`tower-sessions-sqlx-store 0.15.0` depends on `tower-sessions-core 0.14.0`.
-`tower-sessions 0.15.0` depends on `tower-sessions-core 0.15.0`.
-Rust treats these as incompatible traits - `PostgresStore` does not implement
-the `SessionStore` trait version that `SessionManagerLayer` (from tower-sessions 0.15.0)
-requires.
+### SQLx offline metadata regenerated
 
-`tower-sessions 0.15.0` is the LATEST (0.14.0 was before it).
-`tower-sessions-sqlx-store 0.15.0` is the LATEST per crates.io.
-
-User preference: stay on latest stable. Current Cargo.toml has:
-- `tower-sessions = "0.14.0"` (temporarily reverted from 0.15.0 to attempt fix)
-- `tower-sessions-sqlx-store = "0.15.0"`
-This still causes the conflict because sqlx-store 0.15.0 uses core 0.14.0 and
-tower-sessions 0.14.0 also uses core 0.14.0 - this SHOULD be compatible.
-
-### What to try at start of next session
-
-First, verify the actual resolved versions with a live dependency tree:
-```bash
-cargo tree -p web --features ssr 2>&1 | grep tower-sessions
-```
-
-Then try:
-1. **`cargo update`** in `rust/` - the Cargo.lock may have stale entries
-   locking to incompatible patch versions. This is the most likely fix.
-2. If that doesn't work, check crates.io for a `tower-sessions-sqlx-store`
-   version > 0.15.0 that explicitly targets `tower-sessions-core 0.15.0`:
-   `cargo search tower-sessions-sqlx-store`
-3. If no newer sqlx-store exists, the only options are:
-   a. Keep `tower-sessions = "0.14.0"` and confirm that combination compiles
-   b. Wait for sqlx-store to publish a 0.16.0 targeting tower-sessions-core 0.15.0
-
-### After version conflict is resolved
-
-The `validate_session_token` query changed (added 30-day expiry check). The
-`.sqlx/` offline metadata file for the old query is now stale. Must regenerate:
-```bash
-# With tilt up (postgres running):
-cd rust
-cargo sqlx prepare --workspace -- --features ssr
-```
-Without this, `SQLX_OFFLINE=true` Docker builds will fail.
+`cargo sqlx prepare` now run from `rust/web/` (not workspace root).
+Output: `rust/web/.sqlx/` (29 files). Must be committed.
+Previous location `rust/.sqlx/` is now empty (the workspace-level prepare
+finds no queries because all queries are in the `web` crate).
 
 ---
 
@@ -118,16 +77,30 @@ In order of recommended priority:
 
 2. **`update_game_command_success` writes all fields** (`db.rs`):
    Persist `is_turn_at`, `last_turn_at`, `is_eliminated`, `undo_game_state`,
-   and points on every command. Also set `finished_at` when `is_finished = true`
-   (verify no DB trigger does this).
+   and points on every command. Also set `finished_at` when `is_finished = true`.
 
 3. **`find_game_extended` handles missing `game_type_users` row** (`db.rs`):
    Use LEFT JOIN with a default rating (1500) rather than erroring.
 
 4. **Email sending** (`auth/server.rs`):
-   Send confirmation token via in-cluster SMTP service. The SMTP pod is already
-   deployed. Use the `email` crate (already in Cargo.toml) or `lettre` (more
-   actively maintained - may be worth switching). Read SMTP host/port from env.
+   Send confirmation token via in-cluster SMTP service. SMTP pod is deployed.
+   Use `lettre` (more actively maintained than the `email` crate already in
+   Cargo.toml; consider switching). Read SMTP host/port from env.
+
+---
+
+## What to do next
+
+Start with blocker 1 (GamePlayer missing fields) - it unblocks blockers 2 and
+the undo/mark_read endpoints. After adding fields to the model, re-run:
+
+```bash
+cd rust/web && cargo sqlx prepare -- --features ssr
+```
+
+The migration also needs updating since the schema lacks these columns. Add a
+new migration file `rust/web/migrations/002_game_player_fields.sql` with ALTER
+TABLE statements for each new column.
 
 ---
 
@@ -135,15 +108,15 @@ In order of recommended priority:
 
 | # | Blocker | Status |
 |---|---------|--------|
-| 1 | Persistent session store | Coded, blocked by version conflict |
-| 2 | Login UI wired | Coded, pending compile |
+| 1 | Persistent session store | Done |
+| 2 | Login UI wired | Done |
 | 3 | Token not in response | Done |
-| 4 | `with_secure` env-driven | Coded, pending compile |
-| 5 | Token expiry 30-day | Coded, needs sqlx prepare |
+| 4 | `with_secure` env-driven | Done |
+| 5 | Token expiry 30-day | Done |
 | 6 | Email sending | Not started |
-| 7 | Auth in Axum handlers | Coded, pending compile |
-| 8 | Authenticate GET /game/:id | Coded, pending compile |
-| 9 | Turn enforcement | Coded, pending compile |
+| 7 | Auth in Axum handlers | Done |
+| 8 | Authenticate GET /game/:id | Done |
+| 9 | Turn enforcement | Done |
 | 10 | GamePlayer missing fields | Not started |
 | 11 | update_game_command_success all fields | Not started |
 | 12 | find_game_extended LEFT JOIN | Not started |

@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -6,8 +6,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GameType {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub name: String,
     pub player_counts: Vec<i32>,
     pub weight: f32,
@@ -18,8 +18,8 @@ pub type PublicGameType = GameType;
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GameVersion {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub game_type_id: Uuid,
     pub name: String,
     pub uri: String,
@@ -44,8 +44,8 @@ impl GameVersion {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PublicGameVersion {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub game_type_id: Uuid,
     pub name: String,
     pub is_public: bool,
@@ -55,11 +55,11 @@ pub struct PublicGameVersion {
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Game {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub game_version_id: Uuid,
     pub is_finished: bool,
-    pub finished_at: Option<NaiveDateTime>,
+    pub finished_at: Option<PrimitiveDateTime>,
     pub game_state: String,
     pub chat_id: Option<Uuid>,
     pub restarted_game_id: Option<Uuid>,
@@ -68,34 +68,34 @@ pub struct Game {
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GamePlayer {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub game_id: Uuid,
     pub user_id: Uuid,
     pub position: i32,
     pub color: String,
     pub has_accepted: bool,
     pub is_turn: bool,
-    pub is_turn_at: NaiveDateTime,
+    pub is_turn_at: PrimitiveDateTime,
     pub place: Option<i32>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GameLog {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub game_id: Uuid,
     pub body: String,
     pub is_public: bool,
-    pub logged_at: NaiveDateTime,
+    pub logged_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GameLogTarget {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub game_log_id: Uuid,
     pub game_player_id: Uuid,
 }
@@ -103,11 +103,11 @@ pub struct GameLogTarget {
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GameTypeUser {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub game_type_id: Uuid,
     pub user_id: Uuid,
-    pub last_game_finished_at: Option<NaiveDateTime>,
+    pub last_game_finished_at: Option<PrimitiveDateTime>,
     pub rating: i32,
     pub peak_rating: i32,
 }
@@ -133,7 +133,7 @@ pub struct NewGameVersion {
 pub struct NewGame {
     pub game_version_id: Uuid,
     pub is_finished: bool,
-    pub finished_at: Option<NaiveDateTime>,
+    pub finished_at: Option<PrimitiveDateTime>,
     pub game_state: String,
     pub chat_id: Option<Uuid>,
     pub restarted_game_id: Option<Uuid>,
@@ -147,6 +147,6 @@ pub struct NewGamePlayer {
     pub color: String,
     pub has_accepted: bool,
     pub is_turn: bool,
-    pub is_turn_at: NaiveDateTime,
+    pub is_turn_at: PrimitiveDateTime,
     pub place: Option<i32>,
 }

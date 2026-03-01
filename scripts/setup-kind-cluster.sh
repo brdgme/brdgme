@@ -45,7 +45,8 @@ metadata:
   namespace: kube-public
 data:
   localRegistryHosting.v1: |
-    host: "kind-registry:5000"
+    host: "localhost:5000"
+    hostFromContainerRuntime: "kind-registry:5000"
     help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
 EOF
 

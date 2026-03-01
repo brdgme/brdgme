@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -6,8 +6,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Friend {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub source_user_id: Uuid,
     pub target_user_id: Uuid,
     pub has_accepted: Option<bool>,

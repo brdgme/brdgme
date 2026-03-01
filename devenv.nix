@@ -25,6 +25,7 @@
   packages = with pkgs; [
     cargo-binstall
     cargo-leptos
+    wasm-bindgen-cli
     chromium
     dart-sass
     gh

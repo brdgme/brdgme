@@ -90,12 +90,11 @@ impl<G: Gamer, B: Botter<G>> Fuzzer<G, B> {
     where
         O: Write,
     {
-        let mut last_status = chrono::Utc::now().timestamp();
+        let mut last_status = std::time::Instant::now();
         loop {
             self.next();
-            let now = chrono::Utc::now().timestamp();
-            if now - last_status > 1 {
-                last_status = now;
+            if last_status.elapsed().as_secs() >= 1 {
+                last_status = std::time::Instant::now();
                 writeln!(out, "{}", self.status()).unwrap();
             }
         }

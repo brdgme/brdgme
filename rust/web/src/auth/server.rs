@@ -6,7 +6,7 @@ use crate::models::user::{User, UserEmail};
 #[cfg(feature = "ssr")]
 use sqlx::PgPool;
 #[cfg(feature = "ssr")]
-use chrono::Utc;
+use time::OffsetDateTime;
 #[cfg(feature = "ssr")]
 use crate::auth::session::{set_user_session, get_user_from_session, clear_user_session, validate_session_token, invalidate_auth_token};
 #[cfg(feature = "ssr")]
@@ -90,7 +90,8 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     
     // Generate login confirmation token
     let confirmation_token = Uuid::new_v4().to_string();
-    let confirmation_time = Utc::now().naive_utc();
+    let now = OffsetDateTime::now_utc();
+    let confirmation_time = time::PrimitiveDateTime::new(now.date(), now.time());
     
     // Update user with login confirmation
     sqlx::query!(

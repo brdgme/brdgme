@@ -13,14 +13,14 @@ axum = { version = "0.8.7", optional = true, features = ["ws", "macros"] }
 console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.7", optional = true }
 leptos_meta = { version = "0.8.5" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
-wasm-bindgen = { version = "=0.2.100", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], optional = true }
+wasm-bindgen = { version = "=0.2.108", optional = true }
 
 # Database dependencies
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"], optional = true }
 uuid = { version = "1.12.1", features = ["serde", "v4", "js"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
-chrono = { version = "0.4.39", features = ["serde"] }
+time = { version = "0.3", features = ["serde"] }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
 

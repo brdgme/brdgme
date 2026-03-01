@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -6,12 +6,12 @@ use uuid::Uuid;
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct User {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub name: String,
     pub pref_colors: Vec<String>,
     pub login_confirmation: Option<String>,
-    pub login_confirmation_at: Option<NaiveDateTime>,
+    pub login_confirmation_at: Option<PrimitiveDateTime>,
 }
 
 impl User {
@@ -29,8 +29,8 @@ impl User {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PublicUser {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub name: String,
     pub pref_colors: Vec<String>,
 }
@@ -38,8 +38,8 @@ pub struct PublicUser {
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct UserEmail {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub user_id: Uuid,
     pub email: String,
     pub is_primary: bool,
@@ -48,8 +48,8 @@ pub struct UserEmail {
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct UserAuthToken {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub user_id: Uuid,
 }
 
@@ -59,7 +59,7 @@ pub struct NewUser {
     pub name: String,
     pub pref_colors: Vec<String>,
     pub login_confirmation: Option<String>,
-    pub login_confirmation_at: Option<NaiveDateTime>,
+    pub login_confirmation_at: Option<PrimitiveDateTime>,
 }
 
 #[derive(Debug)]

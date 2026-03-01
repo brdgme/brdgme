@@ -113,8 +113,8 @@ infrastructure phase. See `docs/VISION.md`.
 - Command errors are silently discarded.
 
 **Notes:**
-- Added `cargo-leptos` and `dart-sass` to `devenv.nix`.
-- Pinned `wasm-bindgen` to `0.2.100`.
+- Added `cargo-leptos`, `dart-sass`, and `wasm-bindgen-cli` to `devenv.nix`.
+- Pinned `wasm-bindgen` to `=0.2.108` (matches `wasm-bindgen-cli` in nixpkgs).
 - Enabled `js`/`wasm_js` features for `getrandom`.
 - Updated Axum routing to `{id}` syntax.
 
@@ -194,12 +194,9 @@ review before the `leptos` branch replaces production. Full review in
       Error messages shown on failure.
 - [x] **Confirmation token not exposed in response** (`auth/server.rs`): Token
       removed from response message.
-- [~] **Persistent session store** (`auth/session.rs`): Code written -
+- [x] **Persistent session store** (`auth/session.rs`):
       `tower-sessions-sqlx-store 0.15.0` + `PostgresStore`, table created via
-      `store.migrate()` in `create_session_layer`. **BLOCKED**: version conflict
-      between `tower-sessions 0.15.0` (uses `tower-sessions-core 0.15.0`) and
-      `tower-sessions-sqlx-store 0.15.0` (uses `tower-sessions-core 0.14.0`).
-      See STATUS.md for resolution options.
+      `store.migrate()` in `create_session_layer`.
 - [x] **`with_secure` env-driven** (`auth/session.rs`): Reads `SECURE_COOKIE`
       env var (`"true"` = secure).
 - [x] **Graceful SIGTERM shutdown** (`main.rs`): Added `shutdown_signal()`
@@ -219,7 +216,7 @@ review before the `leptos` branch replaces production. Full review in
       for any existing game where a player row is absent.
 - [x] **Token expiry check in `validate_session_token`** (`auth/session.rs`):
       SQL query updated to `AND created_at > NOW() - INTERVAL '30 days'`.
-      **Requires `cargo sqlx prepare` re-run** (query hash changed).
+      SQLx offline metadata regenerated.
 - [ ] **Email sending not implemented** (`auth/server.rs`): The confirmation
       token is generated but never emailed. The old system sent the code via the
       in-cluster SMTP service. The new system must do the same before real users
@@ -277,8 +274,11 @@ review before the `leptos` branch replaces production. Full review in
       single joined query.
 - [ ] **Duplicate command logic** (`game/server.rs` vs `server_fns.rs`):
       Consolidate into one path.
-- [ ] **`NaiveDateTime` → `DateTime<Utc>`** (`models/`): Preserve timezone
-      throughout.
+- [x] **`chrono` → `time`** (`models/`, `lib/game`, `lib/cmd`): Replaced
+      `chrono::NaiveDateTime` with `time::PrimitiveDateTime` throughout all
+      model structs, `brdgme_game::Log`, and `brdgme_cmd::CliLog`. Required
+      because `tower-sessions-sqlx-store` enables `sqlx/time` which takes
+      precedence over `sqlx/chrono` in type inference.
 - [ ] **Points persisted** (`db.rs`): Remove `_points` suppression in
       `update_game_command_success`.
 - [ ] **Logout redirect/feedback** (`components/layout.rs`).

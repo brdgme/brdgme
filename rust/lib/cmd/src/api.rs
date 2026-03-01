@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -33,7 +33,7 @@ pub enum Request {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CliLog {
     pub content: String,
-    pub at: NaiveDateTime,
+    pub at: PrimitiveDateTime,
     pub public: bool,
     pub to: Vec<usize>,
 }

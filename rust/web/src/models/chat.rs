@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -6,25 +6,25 @@ use uuid::Uuid;
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Chat {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct ChatUser {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub chat_id: Uuid,
     pub user_id: Uuid,
-    pub last_read_at: NaiveDateTime,
+    pub last_read_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: Uuid,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
     pub chat_user_id: Uuid,
     pub message: String,
 }
@@ -39,7 +39,7 @@ pub struct NewChat {
 pub struct NewChatUser {
     pub chat_id: Uuid,
     pub user_id: Uuid,
-    pub last_read_at: NaiveDateTime,
+    pub last_read_at: PrimitiveDateTime,
 }
 
 #[derive(Debug)]
