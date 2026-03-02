@@ -223,7 +223,7 @@ review before the `leptos` branch replaces production. Full review in
 
 ### Missing endpoints (non-blocking, needed for feature parity)
 
-- [ ] **`POST /game/{id}/undo`**: Restore `undo_game_state`, call `Status` on
+- [x] **`POST /game/{id}/undo`**: Restore `undo_game_state`, call `Status` on
       the game service, clear all players' undo state, write a log entry,
       broadcast.
 - [ ] **`POST /game/{id}/mark_read`**: Set `is_read = true` on the calling

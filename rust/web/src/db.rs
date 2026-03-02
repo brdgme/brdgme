@@ -494,6 +494,64 @@ pub async fn create_game_logs(
 }
 
 #[cfg(feature = "ssr")]
+pub async fn undo_game(
+    pool: &PgPool,
+    game_id: Uuid,
+    undo_state: &str,
+    whose_turn: &[usize],
+    eliminated: &[usize],
+    placings: &[usize],
+) -> Result<()> {
+    let is_finished = !placings.is_empty();
+    let mut tx = pool.begin().await?;
+
+    sqlx::query!(
+        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = NULL, updated_at = NOW() WHERE id = $3",
+        undo_state,
+        is_finished,
+        game_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    let players = sqlx::query!(
+        "SELECT id, position FROM game_players WHERE game_id = $1",
+        game_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for p in players {
+        let pos = p.position as usize;
+        let is_turn = whose_turn.contains(&pos);
+        let is_eliminated = eliminated.contains(&pos);
+        let place: Option<i32> = placings.get(pos).map(|&pl| pl as i32);
+
+        sqlx::query!(
+            r#"UPDATE game_players
+               SET is_turn = $1, is_eliminated = $2, place = $3, undo_game_state = NULL, updated_at = NOW()
+               WHERE id = $4"#,
+            is_turn,
+            is_eliminated,
+            place,
+            p.id
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    sqlx::query!(
+        "INSERT INTO game_logs (game_id, body, is_public, logged_at) VALUES ($1, 'Game undone.', true, NOW())",
+        game_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
 pub async fn update_game_command_success(
     pool: &PgPool,
     game_id: Uuid,

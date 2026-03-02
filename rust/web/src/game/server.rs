@@ -195,9 +195,64 @@ pub async fn play_command(
     StatusCode::OK.into_response()
 }
 
+pub async fn undo_game(
+    session: Session,
+    State(pool): State<PgPool>,
+    State(broadcaster): State<GameBroadcaster>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    let user = match get_user_from_session(&session).await {
+        Some(u) => u,
+        None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
+    };
+
+    let game_extended = match db::find_game_extended(&pool, id).await {
+        Ok(Some(ge)) => ge,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Game not found").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    };
+
+    let player = match game_extended.game_players.iter().find(|p| p.user.id == user.id) {
+        Some(p) => p,
+        None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
+    };
+
+    let undo_state = match &player.game_player.undo_game_state {
+        Some(s) => s.clone(),
+        None => return (StatusCode::BAD_REQUEST, "No undo state available").into_response(),
+    };
+
+    let resp = match client::request(
+        &game_extended.game_version.uri,
+        &Request::Status { game: undo_state.clone() },
+    ).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
+    };
+
+    let game_response = match resp {
+        Response::Status { game, .. } => game,
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
+    };
+
+    let (whose_turn, eliminated, placings) = match game_response.status {
+        Status::Active { whose_turn, eliminated } => (whose_turn, eliminated, vec![]),
+        Status::Finished { placings, .. } => (vec![], vec![], placings),
+    };
+
+    if let Err(e) = db::undo_game(&pool, id, &undo_state, &whose_turn, &eliminated, &placings).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to undo game: {}", e)).into_response();
+    }
+
+    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: id });
+
+    StatusCode::OK.into_response()
+}
+
 pub fn api_routes() -> axum::Router<crate::state::AppState> {
     axum::Router::new()
         .route("/game/new", axum::routing::post(create_game))
         .route("/game/{id}", axum::routing::get(get_game))
         .route("/game/{id}/command", axum::routing::post(play_command))
+        .route("/game/{id}/undo", axum::routing::post(undo_game))
 }

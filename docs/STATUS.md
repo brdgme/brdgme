@@ -4,7 +4,7 @@
 
 ---
 
-## This session: completed work
+## Last session: completed work
 
 ### GamePlayer model fields added (blockers 10, 11, 12)
 
@@ -64,41 +64,19 @@ Migration applied via `sqlx migrate run` from `rust/web/`.
 
 ## What to do next
 
-All Phase 5.6 blockers are complete. Next phase: **Phase 6 (NATS integration)**
-or tackle the non-blocking missing endpoints and frontend gaps listed in
-`docs/PLAN.md` Phase 5.6.
+Implement `POST /game/{id}/mark_read` in `game/server.rs`.
 
-Recommended order for remaining Phase 5.6 items before starting Phase 6:
-1. **`POST /game/{id}/undo`** endpoint - now unblocked by `undo_game_state` field.
-2. **`POST /game/{id}/mark_read`** endpoint - uses `is_read` field.
-3. **`POST /game/{id}/concede`** endpoint.
-4. **`POST /game/{id}/restart`** endpoint.
-5. Frontend gaps (game log rendering, clickable suggestions, command errors,
-   mark-read on load, whose-turn display, etc.).
+Logic:
+1. Authenticate; find game; verify caller is a player.
+2. `UPDATE game_players SET is_read = true WHERE id = $player_id`.
+3. Return 200.
 
-To enable email in local dev (hybrid mode), add to `devenv.nix`:
+Add the route to `api_routes()` in `game/server.rs`:
+```rust
+.route("/game/{id}/mark_read", axum::routing::post(mark_read))
 ```
-env.SMTP_HOST = "localhost";
-env.SMTP_PORT = "2525";  # or whatever port you forward from the cluster
+
+After adding, re-run:
+```bash
+cd rust/web && cargo sqlx prepare -- --features ssr
 ```
-Or port-forward the SMTP service: `kubectl port-forward -n brdgme svc/smtp 2525:25`.
-
----
-
-## Summary of all Phase 5.6 blocker status
-
-| # | Blocker | Status |
-|---|---------|--------|
-| 1 | Persistent session store | Done |
-| 2 | Login UI wired | Done |
-| 3 | Token not in response | Done |
-| 4 | `with_secure` env-driven | Done |
-| 5 | Token expiry 30-day | Done |
-| 6 | Email sending | Done |
-| 7 | Auth in Axum handlers | Done |
-| 8 | Authenticate GET /game/:id | Done |
-| 9 | Turn enforcement | Done |
-| 10 | GamePlayer missing fields | Done |
-| 11 | update_game_command_success all fields | Done |
-| 12 | find_game_extended LEFT JOIN | Done |
-| 13 | Graceful SIGTERM | Done |
