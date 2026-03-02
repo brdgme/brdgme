@@ -172,13 +172,16 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 
     let players_raw = sqlx::query!(
         r#"
-        SELECT 
-            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at, 
-            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position, 
-            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn, 
+        SELECT
+            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,
+            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,
+            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,
             gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,
-            u.id as u_id, u.created_at as u_created_at, u.updated_at as u_updated_at, 
-            u.name as u_name, u.pref_colors as u_pref_colors, 
+            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,
+            gp.is_read as gp_is_read, gp.points as gp_points,
+            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
+            u.id as u_id, u.created_at as u_created_at, u.updated_at as u_updated_at,
+            u.name as u_name, u.pref_colors as u_pref_colors,
             u.login_confirmation as u_login_confirmation, u.login_confirmation_at as u_login_confirmation_at,
             gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?", gtu.updated_at as "gtu_updated_at?",
             gtu.game_type_id as "gtu_game_type_id?", gtu.user_id as "gtu_user_id?",
@@ -198,7 +201,7 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 
     let mut game_players = Vec::new();
     for p in players_raw {
-        let gtu = if let (Some(gtu_id), Some(gtu_created_at), Some(gtu_updated_at), Some(gtu_game_type_id), Some(gtu_user_id), Some(gtu_rating), Some(gtu_peak_rating)) = 
+        let gtu = if let (Some(gtu_id), Some(gtu_created_at), Some(gtu_updated_at), Some(gtu_game_type_id), Some(gtu_user_id), Some(gtu_rating), Some(gtu_peak_rating)) =
             (p.gtu_id, p.gtu_created_at, p.gtu_updated_at, p.gtu_game_type_id, p.gtu_user_id, p.gtu_rating, p.gtu_peak_rating) {
             crate::models::game::GameTypeUser {
                 id: gtu_id,
@@ -211,7 +214,17 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
                 peak_rating: gtu_peak_rating,
             }
         } else {
-            return Err(anyhow::anyhow!("Game type user missing for player {}", p.u_id));
+            // No rating row yet for this player; use defaults.
+            crate::models::game::GameTypeUser {
+                id: Uuid::nil(),
+                created_at: p.gp_created_at,
+                updated_at: p.gp_created_at,
+                game_type_id: game_version.game_type_id,
+                user_id: p.u_id,
+                last_game_finished_at: None,
+                rating: 1500,
+                peak_rating: 1500,
+            }
         };
 
         game_players.push(GamePlayerExtended {
@@ -227,6 +240,12 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
                 is_turn: p.gp_is_turn,
                 is_turn_at: p.gp_is_turn_at,
                 place: p.gp_place,
+                last_turn_at: p.gp_last_turn_at,
+                is_eliminated: p.gp_is_eliminated,
+                is_read: p.gp_is_read,
+                points: p.gp_points,
+                undo_game_state: p.gp_undo_game_state,
+                rating_change: p.gp_rating_change,
             },
             user: crate::models::user::User {
                 id: p.u_id,
@@ -478,28 +497,36 @@ pub async fn create_game_logs(
 pub async fn update_game_command_success(
     pool: &PgPool,
     game_id: Uuid,
-    _game_player_id: Uuid,
-    game_state: &str,
+    played_player_id: Uuid,
+    prev_game_state: &str,
+    new_game_state: &str,
+    can_undo: bool,
     is_finished: bool,
     whose_turn: &[usize],
+    eliminated: &[usize],
     placings: &[usize],
-    _points: &[f32],
+    points: &[f32],
 ) -> Result<()> {
+    let now = {
+        let t = time::OffsetDateTime::now_utc();
+        time::PrimitiveDateTime::new(t.date(), t.time())
+    };
+    let finished_at: Option<time::PrimitiveDateTime> = if is_finished { Some(now) } else { None };
+
     let mut tx = pool.begin().await?;
 
-    // Update game state
     sqlx::query!(
-        "UPDATE games SET game_state = $1, is_finished = $2, updated_at = NOW() WHERE id = $3",
-        game_state,
+        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = COALESCE($3, finished_at), updated_at = NOW() WHERE id = $4",
+        new_game_state,
         is_finished,
+        finished_at,
         game_id
     )
     .execute(&mut *tx)
     .await?;
 
-    // Update players turn and placings
     let players = sqlx::query!(
-        "SELECT id, position FROM game_players WHERE game_id = $1",
+        "SELECT id, position, is_turn_at, last_turn_at FROM game_players WHERE game_id = $1",
         game_id
     )
     .fetch_all(&mut *tx)
@@ -509,11 +536,26 @@ pub async fn update_game_command_success(
         let pos = p.position as usize;
         let is_turn = whose_turn.contains(&pos);
         let place = placings.get(pos).map(|&pl| pl as i32);
-        
+        let is_eliminated = eliminated.contains(&pos);
+        let player_points = points.get(pos).copied();
+        let is_turn_at = if is_turn { now } else { p.is_turn_at };
+        let is_played = p.id == played_player_id;
+        let last_turn_at = if is_played { Some(now) } else { p.last_turn_at };
+        let undo_game_state: Option<&str> = if is_played && can_undo { Some(prev_game_state) } else { None };
+
         sqlx::query!(
-            "UPDATE game_players SET is_turn = $1, place = $2, updated_at = NOW() WHERE id = $3",
+            r#"UPDATE game_players
+               SET is_turn = $1, place = $2, is_eliminated = $3, points = $4,
+                   undo_game_state = $5, last_turn_at = $6, is_turn_at = $7,
+                   updated_at = NOW()
+               WHERE id = $8"#,
             is_turn,
             place,
+            is_eliminated,
+            player_points,
+            undo_game_state,
+            last_turn_at,
+            is_turn_at,
             p.id
         )
         .execute(&mut *tx)

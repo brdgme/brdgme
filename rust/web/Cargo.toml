@@ -36,7 +36,7 @@ thiserror = { version = "2.0.11", optional = true }
 async-trait = { version = "0.1", optional = true }
 
 # Email functionality
-email = { version = "0.0.21", optional = true }
+lettre = { version = "0.11", features = ["tokio1", "smtp-transport", "builder"], default-features = false, optional = true }
 
 # Redis for background processing
 redis = { version = "0.28.2", optional = true }
@@ -80,7 +80,7 @@ ssr = [
     "dep:tower-sessions-sqlx-store",
     "dep:anyhow",
     "dep:thiserror",
-    "dep:email",
+    "dep:lettre",
     "dep:redis",
     "dep:brdgme_cmd",
     "dep:brdgme_game",

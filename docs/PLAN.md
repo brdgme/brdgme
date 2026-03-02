@@ -205,22 +205,21 @@ review before the `leptos` branch replaces production. Full review in
       `!player.game_player.is_turn`.
 - [x] **Authenticate `GET /api/game/{id}`** (`game/server.rs`): Returns 401
       when no valid session.
-- [ ] **`GamePlayer` model missing fields** (`models/game.rs`): Add
+- [x] **`GamePlayer` model missing fields** (`models/game.rs`): Added
       `last_turn_at`, `is_eliminated`, `is_read`, `points`, `undo_game_state`,
-      `rating_change`. Required before undo, mark_read, and points work.
-- [ ] **`update_game_command_success` writes all fields** (`db.rs`): Persist
-      `is_turn_at`, `last_turn_at`, `is_eliminated`, `undo_game_state`, and
-      points on every command.
-- [ ] **`find_game_extended` handles missing `game_type_users` row** (`db.rs`):
-      Use a LEFT JOIN with a default rating rather than erroring. Migration risk
-      for any existing game where a player row is absent.
+      `rating_change`. Migration `002_game_player_fields.sql` applied.
+- [x] **`update_game_command_success` writes all fields** (`db.rs`): Persists
+      `is_turn_at`, `last_turn_at`, `is_eliminated`, `undo_game_state`, `points`,
+      and `finished_at` on every command.
+- [x] **`find_game_extended` handles missing `game_type_users` row** (`db.rs`):
+      Returns default `GameTypeUser` with rating 1500 instead of erroring.
 - [x] **Token expiry check in `validate_session_token`** (`auth/session.rs`):
       SQL query updated to `AND created_at > NOW() - INTERVAL '30 days'`.
       SQLx offline metadata regenerated.
-- [ ] **Email sending not implemented** (`auth/server.rs`): The confirmation
-      token is generated but never emailed. The old system sent the code via the
-      in-cluster SMTP service. The new system must do the same before real users
-      can log in. The SMTP service is already deployed.
+- [x] **Email sending** (`auth/server.rs`): `send_login_email` implemented
+      using `lettre 0.11` with `AsyncSmtpTransport` (plain SMTP, no TLS).
+      Reads `SMTP_HOST`, `SMTP_PORT` (default 25), `SMTP_FROM` from env.
+      Logs warning with token if `SMTP_HOST` unset (dev fallback).
 
 ### Missing endpoints (non-blocking, needed for feature parity)
 
@@ -279,12 +278,12 @@ review before the `leptos` branch replaces production. Full review in
       model structs, `brdgme_game::Log`, and `brdgme_cmd::CliLog`. Required
       because `tower-sessions-sqlx-store` enables `sqlx/time` which takes
       precedence over `sqlx/chrono` in type inference.
-- [ ] **Points persisted** (`db.rs`): Remove `_points` suppression in
-      `update_game_command_success`.
+- [x] **Points persisted** (`db.rs`): `_points` suppression removed;
+      points written per-player in `update_game_command_success`.
 - [ ] **Logout redirect/feedback** (`components/layout.rs`).
 - [ ] **WebSocket reconnection** (`websocket_client.rs`).
-- [ ] **`finished_at` set when `is_finished = true`** (`db.rs`): Verify schema
-      has no trigger; if not, set `finished_at` explicitly.
+- [x] **`finished_at` set when `is_finished = true`** (`db.rs`): Set via
+      `COALESCE($arg, finished_at)` in `update_game_command_success`.
 
 ---
 

@@ -172,29 +172,33 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
             }
         ).await.map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
         
-        let (game_response, logs, _can_undo, remaining_input, _public_render, _player_renders) = match resp {
-            Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } => 
+        let (game_response, logs, can_undo, remaining_input, _public_render, _player_renders) = match resp {
+            Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } =>
                 (game, logs, can_undo, remaining_input, public_render, player_renders),
             Response::UserError { message } => return Err(ServerFnError::new(message)),
             _ => return Err(ServerFnError::new("Unexpected response from game service")),
         };
-        
+
         if !remaining_input.trim().is_empty() {
             return Err(ServerFnError::new(format!("Unexpected input: {}", remaining_input)));
         }
-        
-        let (is_finished, whose_turn, _eliminated, placings) = match game_response.status {
+
+        let prev_game_state = ge.game.game_state.clone();
+        let (is_finished, whose_turn, eliminated, placings) = match game_response.status {
             Status::Active { whose_turn, eliminated } => (false, whose_turn, eliminated, vec![]),
             Status::Finished { placings, .. } => (true, vec![], vec![], placings),
         };
-        
+
         crate::db::update_game_command_success(
             &pool,
             game_id,
             player.game_player.id,
+            &prev_game_state,
             &game_response.state,
+            can_undo,
             is_finished,
             &whose_turn,
+            &eliminated,
             &placings,
             &game_response.points,
         ).await.map_err(|e| ServerFnError::new(format!("Failed to update game: {}", e)))?;

@@ -13,6 +13,51 @@ use crate::auth::session::{set_user_session, get_user_from_session, clear_user_s
 use tower_sessions::Session;
 #[cfg(feature = "ssr")]
 use leptos_axum::extract;
+#[cfg(feature = "ssr")]
+use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+
+#[cfg(feature = "ssr")]
+async fn send_login_email(to_email: &str, token: &str) {
+    let smtp_host = match std::env::var("SMTP_HOST") {
+        Ok(h) => h,
+        Err(_) => {
+            tracing::warn!(token, "SMTP_HOST not set; login token not emailed");
+            return;
+        }
+    };
+    let smtp_port: u16 = std::env::var("SMTP_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(25);
+    let from_addr = std::env::var("SMTP_FROM").unwrap_or_else(|_| "noreply@brdgme.com".to_string());
+
+    let email = match Message::builder()
+        .from(from_addr.parse().unwrap())
+        .to(match to_email.parse() {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::error!("Invalid to address {}: {}", to_email, e);
+                return;
+            }
+        })
+        .subject("Your brdgme login code")
+        .body(format!("Your login code is: {}\n\nThis code expires in 1 hour.", token))
+    {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("Failed to build email: {}", e);
+            return;
+        }
+    };
+
+    let mailer = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&smtp_host)
+        .port(smtp_port)
+        .build();
+
+    if let Err(e) = mailer.send(email).await {
+        tracing::error!("Failed to send login email to {}: {}", to_email, e);
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
@@ -104,7 +149,7 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     .await
     .map_err(|e| ServerFnError::new(format!("Failed to update user: {}", e)))?;
     
-    // TODO: Send confirmation token via email (blocker: SMTP integration)
+    send_login_email(&email, &confirmation_token).await;
 
     Ok(LoginResponse {
         success: true,

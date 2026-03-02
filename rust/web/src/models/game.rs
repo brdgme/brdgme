@@ -78,6 +78,12 @@ pub struct GamePlayer {
     pub is_turn: bool,
     pub is_turn_at: PrimitiveDateTime,
     pub place: Option<i32>,
+    pub last_turn_at: Option<PrimitiveDateTime>,
+    pub is_eliminated: bool,
+    pub is_read: bool,
+    pub points: Option<f32>,
+    pub undo_game_state: Option<String>,
+    pub rating_change: Option<i32>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

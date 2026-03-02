@@ -153,7 +153,7 @@ pub async fn play_command(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };
 
-    let (game_response, logs, _can_undo, remaining_input, _public_render, _player_renders) = match resp {
+    let (game_response, logs, can_undo, remaining_input, _public_render, _player_renders) = match resp {
         Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } =>
             (game, logs, can_undo, remaining_input, public_render, player_renders),
         Response::UserError { message } => return (StatusCode::BAD_REQUEST, message).into_response(),
@@ -164,7 +164,8 @@ pub async fn play_command(
         return (StatusCode::BAD_REQUEST, format!("Unexpected input: {}", remaining_input)).into_response();
     }
 
-    let (is_finished, whose_turn, _eliminated, placings) = match game_response.status {
+    let prev_game_state = game_extended.game.game_state.clone();
+    let (is_finished, whose_turn, eliminated, placings) = match game_response.status {
         Status::Active { whose_turn, eliminated } => (false, whose_turn, eliminated, vec![]),
         Status::Finished { placings, .. } => (true, vec![], vec![], placings),
     };
@@ -173,9 +174,12 @@ pub async fn play_command(
         &pool,
         id,
         player.game_player.id,
+        &prev_game_state,
         &game_response.state,
+        can_undo,
         is_finished,
         &whose_turn,
+        &eliminated,
         &placings,
         &game_response.points,
     ).await {
