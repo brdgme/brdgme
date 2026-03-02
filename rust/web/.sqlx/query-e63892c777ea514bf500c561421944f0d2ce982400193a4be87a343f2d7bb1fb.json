@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE game_players\n               SET is_turn = false, place = $1, undo_game_state = NULL, updated_at = NOW()\n               WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e63892c777ea514bf500c561421944f0d2ce982400193a4be87a343f2d7bb1fb"
+}

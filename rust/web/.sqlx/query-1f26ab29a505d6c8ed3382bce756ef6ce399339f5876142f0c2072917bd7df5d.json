@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT g.id\n        FROM games g\n        JOIN game_players gp ON g.id = gp.game_id\n        WHERE gp.user_id = $1 AND g.is_finished = false\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1f26ab29a505d6c8ed3382bce756ef6ce399339f5876142f0c2072917bd7df5d"
+}

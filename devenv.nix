@@ -23,6 +23,7 @@
   };
 
   packages = with pkgs; [
+    act
     cargo-binstall
     cargo-leptos
     wasm-bindgen-cli

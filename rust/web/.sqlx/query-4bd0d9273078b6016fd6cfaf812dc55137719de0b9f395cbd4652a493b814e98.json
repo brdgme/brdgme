@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE game_players\n               SET is_turn = $1, place = $2, is_eliminated = $3, points = $4,\n                   undo_game_state = $5, last_turn_at = $6, is_turn_at = $7,\n                   updated_at = NOW()\n               WHERE id = $8",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int4",
+        "Bool",
+        "Float4",
+        "Text",
+        "Timestamp",
+        "Timestamp",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4bd0d9273078b6016fd6cfaf812dc55137719de0b9f395cbd4652a493b814e98"
+}

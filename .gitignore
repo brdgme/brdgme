@@ -21,9 +21,6 @@ rust/web/dist/
 rust/web/pkg/
 rust/web/.leptos/
 
-# SQLx offline query data
-rust/web/.sqlx/
-
 # Node modules (if any)
 node_modules/
 
