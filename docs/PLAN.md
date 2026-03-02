@@ -177,7 +177,7 @@ above). `kubectl apply -k k8s/prod` is still the deploy mechanism.
 
 ---
 
-## Phase 5.6: Pre-Cutover Fixes [In Progress]
+## Phase 5.6: Pre-Cutover Fixes [In Progress - blockers done, frontend gaps remain]
 
 **Goal:** Resolve all blockers and close critical gaps found in the parity
 review before the `leptos` branch replaces production. Full review in
@@ -226,11 +226,11 @@ review before the `leptos` branch replaces production. Full review in
 - [x] **`POST /game/{id}/undo`**: Restore `undo_game_state`, call `Status` on
       the game service, clear all players' undo state, write a log entry,
       broadcast.
-- [ ] **`POST /game/{id}/mark_read`**: Set `is_read = true` on the calling
+- [x] **`POST /game/{id}/mark_read`**: Set `is_read = true` on the calling
       player's `game_players` row.
-- [ ] **`POST /game/{id}/concede`**: Limited to 2-player games. Mark game
+- [x] **`POST /game/{id}/concede`**: Limited to 2-player games. Mark game
       finished, write log entry, broadcast.
-- [ ] **`POST /game/{id}/restart`**: Create new game with same players, link
+- [x] **`POST /game/{id}/restart`**: Create new game with same players, link
       via `restarted_game_id`, broadcast `GameRestarted`. Client must navigate
       to the new game URL on receipt.
 

@@ -249,10 +249,169 @@ pub async fn undo_game(
     StatusCode::OK.into_response()
 }
 
+pub async fn restart_game(
+    session: Session,
+    State(pool): State<PgPool>,
+    State(broadcaster): State<GameBroadcaster>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    let user = match get_user_from_session(&session).await {
+        Some(u) => u,
+        None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
+    };
+
+    let game_extended = match db::find_game_extended(&pool, id).await {
+        Ok(Some(ge)) => ge,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Game not found").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    };
+
+    if !game_extended.game.is_finished {
+        return (StatusCode::BAD_REQUEST, "Game is not finished").into_response();
+    }
+
+    if game_extended.game.restarted_game_id.is_some() {
+        return (StatusCode::BAD_REQUEST, "Game has already been restarted").into_response();
+    }
+
+    if !game_extended.game_players.iter().any(|p| p.user.id == user.id) {
+        return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response();
+    }
+
+    let player_count = game_extended.game_players.len();
+    let resp = match client::request(
+        &game_extended.game_version.uri,
+        &Request::New { players: player_count },
+    ).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
+    };
+
+    let (game_info, logs, _public_render, _player_renders) = match resp {
+        Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
+    };
+
+    let (whose_turn, eliminated, placings) = match game_info.status {
+        Status::Active { whose_turn, eliminated } => (whose_turn, eliminated, vec![]),
+        Status::Finished { placings, .. } => (vec![], vec![], placings),
+    };
+
+    let opponent_ids: Vec<Uuid> = game_extended.game_players.iter()
+        .filter(|p| p.user.id != user.id)
+        .map(|p| p.user.id)
+        .collect();
+
+    let new_game = match db::create_game_with_users(
+        &pool,
+        db::CreateGameOpts {
+            game_version_id: game_extended.game.game_version_id,
+            whose_turn: &whose_turn,
+            eliminated: &eliminated,
+            placings: &placings,
+            points: &game_info.points,
+            creator_id: user.id,
+            opponent_ids: &opponent_ids,
+            opponent_emails: &[],
+            chat_id: None,
+            game_state: &game_info.state,
+        },
+    ).await {
+        Ok(g) => g,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game: {}", e)).into_response(),
+    };
+
+    if let Err(e) = db::create_game_logs(&pool, new_game.id, logs).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
+    }
+
+    if let Err(_) = sqlx::query!(
+        "UPDATE games SET restarted_game_id = $1, updated_at = NOW() WHERE id = $2",
+        new_game.id,
+        id
+    )
+    .execute(&pool)
+    .await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+    }
+
+    broadcaster.broadcast(WebSocketMessage::GameRestarted { game_id: id, restarted_game_id: new_game.id });
+
+    (StatusCode::CREATED, Json(new_game)).into_response()
+}
+
+pub async fn concede_game(
+    session: Session,
+    State(pool): State<PgPool>,
+    State(broadcaster): State<GameBroadcaster>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    let user = match get_user_from_session(&session).await {
+        Some(u) => u,
+        None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
+    };
+
+    let game_extended = match db::find_game_extended(&pool, id).await {
+        Ok(Some(ge)) => ge,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Game not found").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    };
+
+    if game_extended.game.is_finished {
+        return (StatusCode::BAD_REQUEST, "Game is already finished").into_response();
+    }
+
+    if game_extended.game_players.len() != 2 {
+        return (StatusCode::BAD_REQUEST, "Concede is only available in 2-player games").into_response();
+    }
+
+    let player = match game_extended.game_players.iter().find(|p| p.user.id == user.id) {
+        Some(p) => p,
+        None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
+    };
+
+    if let Err(e) = db::concede_game(&pool, id, player.game_player.id, &player.user.name).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to concede game: {}", e)).into_response();
+    }
+
+    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: id });
+
+    StatusCode::OK.into_response()
+}
+
+pub async fn mark_read(
+    session: Session,
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    let user = match get_user_from_session(&session).await {
+        Some(u) => u,
+        None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
+    };
+
+    let game_extended = match db::find_game_extended(&pool, id).await {
+        Ok(Some(ge)) => ge,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Game not found").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    };
+
+    if !game_extended.game_players.iter().any(|p| p.user.id == user.id) {
+        return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response();
+    }
+
+    match db::mark_game_read(&pool, id, user.id).await {
+        Ok(_) => StatusCode::OK.into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    }
+}
+
 pub fn api_routes() -> axum::Router<crate::state::AppState> {
     axum::Router::new()
         .route("/game/new", axum::routing::post(create_game))
         .route("/game/{id}", axum::routing::get(get_game))
         .route("/game/{id}/command", axum::routing::post(play_command))
         .route("/game/{id}/undo", axum::routing::post(undo_game))
+        .route("/game/{id}/mark_read", axum::routing::post(mark_read))
+        .route("/game/{id}/concede", axum::routing::post(concede_game))
+        .route("/game/{id}/restart", axum::routing::post(restart_game))
 }

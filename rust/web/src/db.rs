@@ -494,6 +494,67 @@ pub async fn create_game_logs(
 }
 
 #[cfg(feature = "ssr")]
+pub async fn concede_game(
+    pool: &PgPool,
+    game_id: Uuid,
+    conceding_player_id: Uuid,
+    conceding_name: &str,
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query!(
+        "UPDATE games SET is_finished = true, finished_at = NOW(), updated_at = NOW() WHERE id = $1",
+        game_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    let players = sqlx::query!(
+        "SELECT id FROM game_players WHERE game_id = $1 ORDER BY position",
+        game_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for p in &players {
+        let place: i32 = if p.id == conceding_player_id { 2 } else { 1 };
+        sqlx::query!(
+            r#"UPDATE game_players
+               SET is_turn = false, place = $1, undo_game_state = NULL, updated_at = NOW()
+               WHERE id = $2"#,
+            place,
+            p.id
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    let log_body = format!("{} conceded.", conceding_name);
+    sqlx::query!(
+        "INSERT INTO game_logs (game_id, body, is_public, logged_at) VALUES ($1, $2, true, NOW())",
+        game_id,
+        log_body
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn mark_game_read(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        "UPDATE game_players SET is_read = true, updated_at = NOW() WHERE game_id = $1 AND user_id = $2",
+        game_id,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
 pub async fn undo_game(
     pool: &PgPool,
     game_id: Uuid,
@@ -549,6 +610,31 @@ pub async fn undo_game(
 
     tx.commit().await?;
     Ok(())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn get_game_logs(
+    pool: &PgPool,
+    game_id: Uuid,
+    game_player_id: Uuid,
+) -> Result<Vec<crate::models::game::GameLog>> {
+    sqlx::query_as!(
+        crate::models::game::GameLog,
+        r#"
+        SELECT id, created_at, updated_at, game_id, body, is_public, logged_at
+        FROM game_logs
+        WHERE game_id = $1
+          AND (is_public = true OR id IN (
+              SELECT game_log_id FROM game_log_targets WHERE game_player_id = $2
+          ))
+        ORDER BY logged_at ASC
+        "#,
+        game_id,
+        game_player_id,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
 }
 
 #[cfg(feature = "ssr")]

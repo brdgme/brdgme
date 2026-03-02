@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use crate::game::server_fns::{GameViewData, PlayerViewData, SubmitCommand};
 use brdgme_game::command::parser::Parser;
+use uuid::Uuid;
 
 #[component]
 pub fn GameBoard(html: String) -> impl IntoView {
@@ -50,14 +51,71 @@ fn PlayerInfo(player: PlayerViewData) -> impl IntoView {
     }
 }
 
+fn window_key(dt: time::PrimitiveDateTime) -> time::PrimitiveDateTime {
+    let minute = dt.minute() / 10 * 10;
+    time::PrimitiveDateTime::new(
+        dt.date(),
+        time::Time::from_hms(dt.hour(), minute, 0).unwrap_or(dt.time()),
+    )
+}
+
+fn format_window(dt: time::PrimitiveDateTime) -> String {
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        dt.year(), dt.month() as u8, dt.day(), dt.hour(), dt.minute()
+    )
+}
+
 #[component]
-pub fn GameLogs() -> impl IntoView {
+pub fn GameLogs(game_id: Uuid) -> impl IntoView {
+    use crate::game::server_fns::get_game_logs;
+
+    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let logs = Resource::new(
+        move || (game_id, trigger.last_update.get()),
+        |(id, _)| async move { get_game_logs(id).await },
+    );
+
     view! {
         <div class="recent-logs-container">
-            <div class="recent-logs-header">"Recent logs"</div>
-            <div class="recent-logs">
-                <div>"Log entries would go here"</div>
-            </div>
+            <Suspense fallback=|| ()>
+                {move || logs.get().map(|result| match result {
+                    Err(_) => view! { <div class="recent-logs-error">"Failed to load logs."</div> }.into_any(),
+                    Ok(entries) => {
+                        // Group into 10-minute windows
+                        let mut windows: Vec<(time::PrimitiveDateTime, Vec<_>)> = vec![];
+                        for entry in entries {
+                            let key = window_key(entry.logged_at);
+                            if let Some(last) = windows.last_mut() {
+                                if last.0 == key {
+                                    last.1.push(entry);
+                                    continue;
+                                }
+                            }
+                            windows.push((key, vec![entry]));
+                        }
+                        view! {
+                            <div class="recent-logs">
+                                {windows.into_iter().map(|(window_start, entries)| {
+                                    let heading = format_window(window_start);
+                                    view! {
+                                        <div class="log-window">
+                                            <div class="log-window-heading">{heading}</div>
+                                            {entries.into_iter().map(|entry| view! {
+                                                <div
+                                                    class="log-entry"
+                                                    class:log-entry-new=entry.is_new
+                                                    inner_html=entry.body_html
+                                                />
+                                            }).collect_view()}
+                                        </div>
+                                    }
+                                }).collect_view()}
+                            </div>
+                        }.into_any()
+                    },
+                })}
+            </Suspense>
         </div>
     }
 }

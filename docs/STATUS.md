@@ -1,82 +1,65 @@
 # Current Work Status
 
-## Phase 5.6: COMPLETE - All 13 blockers done
+## Phase 5.6: In Progress
+
+All 13 blockers resolved. All 4 missing API endpoints implemented.
+Frontend gaps and code quality items remain (see PLAN.md).
 
 ---
 
-## Last session: completed work
+## Completed this session
 
-### GamePlayer model fields added (blockers 10, 11, 12)
+### Game log rendering
 
-**Migration `002_game_player_fields.sql`**
-Added missing columns to `game_players`:
-- `last_turn_at TIMESTAMP` - when the player last took their turn
-- `is_eliminated BOOLEAN NOT NULL DEFAULT false`
-- `is_read BOOLEAN NOT NULL DEFAULT false`
-- `points REAL` - per-player points from game service
-- `undo_game_state TEXT` - pre-command state stored for undo
-- `rating_change INTEGER`
+- `db::get_game_logs(pool, game_id, game_player_id)` - fetches public logs and
+  private logs targeted at the player, ordered by `logged_at ASC`.
+- `GameLogEntry { body_html, logged_at, is_new }` struct in `server_fns.rs`.
+- `get_game_logs(game_id)` server fn - authenticates, finds caller's
+  `game_player`, computes `is_new` from `last_turn_at`, renders markup to HTML.
+- `GameLogs` component - takes `game_id: Uuid`, fetches via `Resource`, groups
+  into 10-minute windows with headings, marks new logs with `log-entry-new` CSS class.
+- SQLx offline metadata regenerated; SSR and WASM builds both clean.
 
-Migration applied via `sqlx migrate run` from `rust/web/`.
+### Missing API endpoints (`game/server.rs`, `db.rs`)
 
-**`models/game.rs`**: `GamePlayer` struct updated with all six new fields.
+**`POST /game/{id}/undo`**
+- Authenticates caller; verifies they have a non-NULL `undo_game_state`.
+- Calls `Request::Status` on the game service with the saved undo state.
+- `db::undo_game`: transaction resets `games.game_state`, clears
+  `is_finished`/`finished_at` based on Status result, updates each player's
+  `is_turn`/`is_eliminated`/`place`, sets `undo_game_state = NULL` for all
+  players, inserts `"Game undone."` public log.
+- Broadcasts `GameUpdate`.
 
-**`db.rs` - `find_game_extended`** (blocker 12):
-- Query extended to select all new `game_players` columns.
-- Missing `game_type_users` row no longer errors; returns a default
-  `GameTypeUser` with `rating = 1500`, `peak_rating = 1500`, `id = Uuid::nil()`.
+**`POST /game/{id}/mark_read`**
+- Authenticates caller; verifies they are a player.
+- `db::mark_game_read`: `UPDATE game_players SET is_read = true WHERE game_id = $1 AND user_id = $2`.
 
-**`db.rs` - `update_game_command_success`** (blocker 11):
-- Added parameters: `played_player_id`, `prev_game_state`, `new_game_state`,
-  `can_undo`, `eliminated`.
-- Removed suppressed `_points` and `_game_player_id` prefixes.
-- Games table: sets `finished_at = COALESCE($arg, finished_at)` on completion.
-- Players loop: writes `is_eliminated`, `points`, `is_turn_at` (updated when
-  turn becomes true), `last_turn_at` (set to NOW for the player who played),
-  `undo_game_state` (set to prev state for played player if `can_undo`).
+**`POST /game/{id}/concede`**
+- Rejects if game finished or player count != 2.
+- `db::concede_game`: transaction sets `is_finished = true/finished_at = NOW()`,
+  assigns `place = 1` to winner and `place = 2` to conceder, clears
+  `undo_game_state` for all players, inserts `"$name conceded."` public log.
+- Broadcasts `GameUpdate`.
 
-**`game/server.rs` and `game/server_fns.rs`**:
-- Propagate `can_undo` and `eliminated` from game service response.
-- Pass `prev_game_state` (pre-command) and `new_game_state` separately.
-
-### Email sending implemented (blocker 6)
-
-**`rust/web/Cargo.toml`**:
-- Replaced `email = "0.0.21"` with
-  `lettre = { version = "0.11", features = ["tokio1", "smtp-transport", "builder"], default-features = false }`.
-
-**`auth/server.rs`**:
-- `send_login_email(to, token)` added: builds a `Message`, connects to SMTP
-  via `AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)` (plain
-  SMTP, no TLS - matches in-cluster `namshi/smtp` relay on port 25).
-- Reads `SMTP_HOST` (required), `SMTP_PORT` (default 25), `SMTP_FROM`
-  (default `noreply@brdgme.com`) from env.
-- If `SMTP_HOST` is unset, logs a warning with the token (dev fallback) and
-  returns without error.
-- `login()` server function calls `send_login_email` after writing the token.
-
-### SQLx offline metadata regenerated
-
-`cargo sqlx prepare -- --features ssr` run from `rust/web/` after migration.
-`SQLX_OFFLINE=true cargo check --features ssr` passes.
+**`POST /game/{id}/restart`**
+- Rejects if game not finished or `restarted_game_id` already set.
+- Calls `Request::New` on the game service with same player count.
+- Creates new game via existing `create_game_with_users`.
+- `UPDATE games SET restarted_game_id = $new_id WHERE id = $old_id`.
+- Broadcasts `GameRestarted { game_id, restarted_game_id }`.
+- Returns `201 Created` with new game JSON.
 
 ---
 
-## What to do next
+## Immediate next tasks (Phase 5.6 frontend gaps)
 
-Implement `POST /game/{id}/mark_read` in `game/server.rs`.
+From PLAN.md Phase 5.6 - remaining frontend/UI items:
 
-Logic:
-1. Authenticate; find game; verify caller is a player.
-2. `UPDATE game_players SET is_read = true WHERE id = $player_id`.
-3. Return 200.
-
-Add the route to `api_routes()` in `game/server.rs`:
-```rust
-.route("/game/{id}/mark_read", axum::routing::post(mark_read))
-```
-
-After adding, re-run:
-```bash
-cd rust/web && cargo sqlx prepare -- --features ssr
-```
+1. **New-game UI** - page to create a new game (pick game type, invite players).
+2. **Action buttons** - Undo, Concede, Restart wired to their endpoints in `GameMeta`.
+3. **Dashboard active game list** - render `get_active_games` results in the
+   sidebar/dashboard with turn indicators and navigation links.
+4. **Game finished state** - show result/placing when `is_finished = true`.
+5. **CSS for log classes** - `log-entry-new`, `log-window`, `log-window-heading`
+   need styles in `style/main.scss`.

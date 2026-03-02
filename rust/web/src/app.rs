@@ -241,7 +241,7 @@ fn GamePage() -> impl IntoView {
                                             <div class="game-container">
                                                 <div class="game-main">
                                                     <GameBoard html=html />
-                                                    <GameLogs />
+                                                    <GameLogs game_id=id />
                                                     <Show when=move || is_my_turn>
                                                         <GameCommandInput 
                                                             game_id=id 

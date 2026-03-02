@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameSummary {
@@ -29,6 +30,13 @@ pub struct PlayerViewData {
     pub rating: i32,
     pub points: f32,
     pub is_turn: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameLogEntry {
+    pub body_html: String,
+    pub logged_at: PrimitiveDateTime,
+    pub is_new: bool,
 }
 
 #[server(GetActiveGames, "/api")]
@@ -207,11 +215,57 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
             .map_err(|e| ServerFnError::new(format!("Failed to create game logs: {}", e)))?;
             
         // Broadcast update
-        broadcaster.broadcast(WebSocketMessage::GameUpdate { 
-            game_id, 
+        broadcaster.broadcast(WebSocketMessage::GameUpdate {
+            game_id,
         });
-        
+
         Ok(())
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(GetGameLogs, "/api")]
+pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use crate::auth::server::get_current_user;
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        let ge = crate::db::find_game_extended(&pool, game_id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+            .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+        let player = ge.game_players.iter().find(|p| p.user.id == user.id)
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
+
+        let last_turn_at = player.game_player.last_turn_at;
+        let game_player_id = player.game_player.id;
+
+        let logs = crate::db::get_game_logs(&pool, game_id, game_player_id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+        let markup_players: Vec<brdgme_markup::Player> = ge.game_players.iter().map(|p| {
+            use std::str::FromStr;
+            brdgme_markup::Player {
+                name: p.user.name.clone(),
+                color: brdgme_color::Color::from_str(&p.game_player.color.to_lowercase()).unwrap_or(brdgme_color::WHITE),
+            }
+        }).collect();
+
+        let entries = logs.into_iter().map(|log| {
+            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
+            let body_html = brdgme_markup::html(&brdgme_markup::transform(&nodes, &markup_players));
+            let is_new = last_turn_at.map(|lta| log.logged_at > lta).unwrap_or(false);
+            GameLogEntry { body_html, logged_at: log.logged_at, is_new }
+        }).collect();
+
+        Ok(entries)
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!()
