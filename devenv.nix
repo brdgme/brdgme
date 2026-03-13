@@ -33,8 +33,7 @@
     k9s
     kind
     kubectl
-    kubernetes-helm
-    playwright-driver.browsers
+playwright-driver.browsers
     postgresql
     sqlx-cli
     tilt
