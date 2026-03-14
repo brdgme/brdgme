@@ -280,7 +280,7 @@ review before the `leptos` branch replaces production. Full review in
       precedence over `sqlx/chrono` in type inference.
 - [x] **Points persisted** (`db.rs`): `_points` suppression removed;
       points written per-player in `update_game_command_success`.
-- [ ] **Logout redirect/feedback** (`components/layout.rs`).
+- [x] **Logout redirect/feedback** (`components/layout.rs`): Navigate to `/login` after logout action succeeds.
 - [ ] **WebSocket reconnection** (`websocket_client.rs`).
 - [x] **`finished_at` set when `is_finished = true`** (`db.rs`): Set via
       `COALESCE($arg, finished_at)` in `update_game_command_success`.

@@ -9,46 +9,23 @@ Frontend gaps and code quality items remain (see PLAN.md).
 
 ## Completed this session
 
-### Game log rendering
+### Dev environment fixes
 
-- `db::get_game_logs(pool, game_id, game_player_id)` - fetches public logs and
-  private logs targeted at the player, ordered by `logged_at ASC`.
-- `GameLogEntry { body_html, logged_at, is_new }` struct in `server_fns.rs`.
-- `get_game_logs(game_id)` server fn - authenticates, finds caller's
-  `game_player`, computes `is_new` from `last_turn_at`, renders markup to HTML.
-- `GameLogs` component - takes `game_id: Uuid`, fetches via `Resource`, groups
-  into 10-minute windows with headings, marks new logs with `log-entry-new` CSS class.
-- SQLx offline metadata regenerated; SSR and WASM builds both clean.
+- `k8s/kind-config.yaml`: pinned node image to `kindest/node:v1.34.0` to avoid
+  kubelet bug in v1.35.0.
+- `scripts/setup-kind-cluster.sh`: Kourier URL updated to `knative-extensions`
+  org (repo moved); separate `KOURIER_VERSION="1.21.0"` variable added since
+  Kourier does not publish patch releases matching Knative Serving.
 
-### Missing API endpoints (`game/server.rs`, `db.rs`)
+### Auth fixes
 
-**`POST /game/{id}/undo`**
-- Authenticates caller; verifies they have a non-NULL `undo_game_state`.
-- Calls `Request::Status` on the game service with the saved undo state.
-- `db::undo_game`: transaction resets `games.game_state`, clears
-  `is_finished`/`finished_at` based on Status result, updates each player's
-  `is_turn`/`is_eliminated`/`place`, sets `undo_game_state = NULL` for all
-  players, inserts `"Game undone."` public log.
-- Broadcasts `GameUpdate`.
-
-**`POST /game/{id}/mark_read`**
-- Authenticates caller; verifies they are a player.
-- `db::mark_game_read`: `UPDATE game_players SET is_read = true WHERE game_id = $1 AND user_id = $2`.
-
-**`POST /game/{id}/concede`**
-- Rejects if game finished or player count != 2.
-- `db::concede_game`: transaction sets `is_finished = true/finished_at = NOW()`,
-  assigns `place = 1` to winner and `place = 2` to conceder, clears
-  `undo_game_state` for all players, inserts `"$name conceded."` public log.
-- Broadcasts `GameUpdate`.
-
-**`POST /game/{id}/restart`**
-- Rejects if game not finished or `restarted_game_id` already set.
-- Calls `Request::New` on the game service with same player count.
-- Creates new game via existing `create_game_with_users`.
-- `UPDATE games SET restarted_game_id = $new_id WHERE id = $old_id`.
-- Broadcasts `GameRestarted { game_id, restarted_game_id }`.
-- Returns `201 Created` with new game JSON.
+- Login confirmation token changed from UUID to 6-digit numeric code
+  (`format!("{:06}", rand::random::<u32>() % 1_000_000)`) to match frontend
+  `type="tel"` / `pattern="[0-9]*"` validation.
+- Logout now navigates to `/login` after `ServerAction` succeeds (`Effect` added
+  in `SidebarMenu`).
+- Email link on login code entry screen now resets back to email entry form on
+  click.
 
 ---
 

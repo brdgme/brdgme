@@ -133,8 +133,8 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         new_user_id
     };
     
-    // Generate login confirmation token
-    let confirmation_token = Uuid::new_v4().to_string();
+    // Generate 6-digit login confirmation token
+    let confirmation_token = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let now = OffsetDateTime::now_utc();
     let confirmation_time = time::PrimitiveDateTime::new(now.date(), now.time());
     

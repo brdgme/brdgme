@@ -25,15 +25,14 @@ All open source, always.
 
 ## Target Architecture (agreed)
 - **Platform**: DigitalOcean Kubernetes, Sydney (SYD1)
-- **Dev cluster**: Kind + Cilium + Knative (replacing minikube + skaffold)
+- **Dev cluster**: Kind + Knative/Kourier (replacing minikube + skaffold; Cilium removed)
 - **Dev tooling**: Tilt (replacing skaffold)
-- **CNI**: Cilium
 - **Always-on core**: rust/web as Knative Service (minScale: 1, not scale-to-zero)
 - **WebSocket fan-out**: NATS Core in-cluster (replaces tokio::sync::broadcast)
 - **Game services**: plain Deployments now, Knative Serving long-term
 - **Operator**: kube-rs operator watching GameType CRDs (post-cutover)
 - **Database**: PostgreSQL
-- **Ingress**: Cilium Gateway API + single load balancer
+- **Ingress**: Kourier (Knative default) for dev; production ingress TBD
 - **No Redis** (replaced by NATS), **No Node.js**, **No Rocket** (after decommission)
 - NATS Core→JetStream upgrade path: single config flag, needs volume for persistence
 

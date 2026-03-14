@@ -5,8 +5,12 @@
 #
 # Run once per workstation or after `kind delete cluster`.
 #
-# Version pin: https://github.com/knative/serving/releases
+# Version pins:
+#   Serving:  https://github.com/knative/serving/releases
+#   Kourier:  https://github.com/knative-extensions/net-kourier/releases
+#   (Kourier moved to knative-extensions org and does not publish patch releases)
 KNATIVE_VERSION="1.21.1"
+KOURIER_VERSION="1.21.0"
 
 set -euo pipefail
 
@@ -52,8 +56,8 @@ kubectl -n knative-serving rollout status deployment/controller --timeout=120s
 kubectl -n knative-serving rollout status deployment/webhook --timeout=120s
 
 # --- Kourier ingress ---
-echo "==> Installing Kourier ${KNATIVE_VERSION}..."
-kubectl apply -f "https://github.com/knative/net-kourier/releases/download/knative-v${KNATIVE_VERSION}/kourier.yaml"
+echo "==> Installing Kourier ${KOURIER_VERSION}..."
+kubectl apply -f "https://github.com/knative-extensions/net-kourier/releases/download/knative-v${KOURIER_VERSION}/kourier.yaml"
 kubectl patch configmap/config-network \
   --namespace knative-serving \
   --type merge \

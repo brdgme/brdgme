@@ -153,7 +153,7 @@ fn LoginPage() -> impl IntoView {
             <Show when=move || show_code_input.get()>
                 <div>
                     <Show when=move || !email.get().is_empty()>
-                        <div>"Logging in as " <a>{email.get()}</a></div>
+                        <div>"Logging in as " <a on:click=move |_| set_show_code_input.set(false) style="cursor:pointer">{email.get()}</a></div>
                     </Show>
                     <div>
                         <div>"A login code has been sent to your email, please enter it here"</div>

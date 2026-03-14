@@ -2,6 +2,8 @@
 
 use leptos::prelude::*;
 use leptos_router::components::A;
+use leptos_router::hooks::use_navigate;
+use leptos_router::NavigateOptions;
 
 use crate::game::server_fns::get_active_games;
 
@@ -41,6 +43,12 @@ pub fn MainLayout(
 #[component]
 pub fn SidebarMenu() -> impl IntoView {
     let logout_action = ServerAction::<crate::auth::Logout>::new();
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        if logout_action.value().get().is_some_and(|r| r.is_ok()) {
+            navigate("/login", NavigateOptions::default());
+        }
+    });
     let on_logout = move |_| {
         logout_action.dispatch(crate::auth::Logout {});
     };
