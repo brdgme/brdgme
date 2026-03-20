@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: splendor-1
+  namespace: brdgme
+spec:
+  typeName: Splendor
+  playerCounts: [2, 3, 4]
+  weight: 2.0

@@ -118,6 +118,37 @@ pub async fn find_game_version(pool: &PgPool, id: Uuid) -> Result<Option<crate::
 }
 
 #[cfg(feature = "ssr")]
+pub async fn find_available_game_types(
+    pool: &PgPool,
+) -> Result<Vec<(crate::models::game::GameType, Vec<crate::models::game::GameVersion>)>> {
+    let types = sqlx::query_as!(
+        crate::models::game::GameType,
+        "SELECT id, created_at, updated_at, name, player_counts, weight FROM game_types ORDER BY name"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let versions = sqlx::query_as!(
+        crate::models::game::GameVersion,
+        "SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated \
+         FROM game_versions WHERE is_public = true AND is_deprecated = false ORDER BY name"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let result = types
+        .into_iter()
+        .map(|gt| {
+            let gv: Vec<_> = versions.iter().filter(|v| v.game_type_id == gt.id).cloned().collect();
+            (gt, gv)
+        })
+        .filter(|(_, gv)| !gv.is_empty())
+        .collect();
+
+    Ok(result)
+}
+
+#[cfg(feature = "ssr")]
 pub async fn find_game(pool: &PgPool, id: Uuid) -> Result<Option<crate::models::game::Game>> {
     sqlx::query_as!(
         crate::models::game::Game,

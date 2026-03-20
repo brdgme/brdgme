@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: roll-through-the-ages-1
+  namespace: brdgme
+spec:
+  typeName: Roll Through the Ages
+  playerCounts: [2, 3, 4]
+  weight: 1.5

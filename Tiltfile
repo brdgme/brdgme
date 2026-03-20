@@ -16,6 +16,9 @@
 WEB_IN_CLUSTER = os.getenv("WEB_IN_CLUSTER", "") == "1"
 LEGACY = os.getenv("LEGACY", "") == "1"
 
+# Dev environment only - credentials are not sensitive here.
+secret_settings(disable_scrub=True)
+
 # --- Game image builds ---
 
 # Rust games
@@ -90,12 +93,23 @@ else:
     k8s_yaml(kustomize("k8s/dev-without-web"))
     local_resource(
         "web",
-        serve_cmd="cd rust/web && cargo leptos watch",
+        serve_cmd="cd rust/web && mirrord exec --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch",
         links=["http://localhost:3000"],
     )
 
 k8s_resource("postgres", port_forwards=["5432:5432"])
 k8s_resource("redis", port_forwards=["6379:6379"])
+
+local_resource(
+    "crd-ready",
+    cmd="kubectl wait --for=condition=established --timeout=60s crd/gameversions.brdgme.com",
+)
+
+local_resource(
+    "operator",
+    serve_cmd="cd rust && DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme RUST_LOG=info cargo run -p brdgme-operator",
+    resource_deps=["postgres", "crd-ready"],
+)
 
 if LEGACY:
     docker_build("brdgme/web-legacy", ".", dockerfile="web/Dockerfile", target="web", only=["web/"])

@@ -3,7 +3,12 @@
 #
 # Prerequisites: kind, kubectl, docker (all provided via devenv.nix).
 #
-# Run once per workstation or after `kind delete cluster`.
+# IDEMPOTENT: this script must remain safe to run against an existing cluster.
+# All steps use guards or commands that are no-ops when already applied.
+# Exception: Kind has no "apply" equivalent for cluster config - changes to
+# k8s/kind-config.yaml (node count, port mappings, CNI settings, etc.) require
+# a manual `kind delete cluster` followed by re-running this script. There is
+# no way to reconcile Kind cluster config in-place.
 #
 # Version pins:
 #   Serving:  https://github.com/knative/serving/releases
@@ -26,7 +31,12 @@ fi
 
 # --- Kind cluster ---
 echo "==> Creating Kind cluster..."
-kind create cluster --config k8s/kind-config.yaml
+if ! kind get clusters 2>/dev/null | grep -q '^kind$'; then
+  kind create cluster --config k8s/kind-config.yaml
+else
+  echo "    Cluster already exists, skipping creation."
+  kubectl config use-context kind-kind
+fi
 
 # Connect registry to Kind network so pods can reach it as "kind-registry:5000".
 echo "==> Connecting registry to Kind network..."
@@ -54,6 +64,15 @@ kubectl apply -f "https://github.com/knative/serving/releases/download/knative-v
 echo "==> Waiting for Knative Serving to be ready..."
 kubectl -n knative-serving rollout status deployment/controller --timeout=120s
 kubectl -n knative-serving rollout status deployment/webhook --timeout=120s
+
+# rollout status returns as soon as the pod is ready, but the webhook needs
+# additional time to register its endpoint with the API server. Poll until
+# the webhook service endpoint has a ready address before proceeding.
+echo "==> Waiting for Knative webhook endpoint to register..."
+until kubectl -n knative-serving get endpoints webhook \
+      -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -qE '[0-9]+'; do
+    sleep 2
+done
 
 # --- Kourier ingress ---
 echo "==> Installing Kourier ${KOURIER_VERSION}..."

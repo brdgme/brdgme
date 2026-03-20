@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: lost-cities-2
+  namespace: brdgme
+spec:
+  typeName: Lost Cities 2
+  playerCounts: [2, 3]
+  weight: 1.5

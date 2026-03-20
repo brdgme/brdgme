@@ -26,6 +26,7 @@
     act
     cargo-binstall
     cargo-leptos
+    mirrord
     wasm-bindgen-cli
     chromium
     dart-sass

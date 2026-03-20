@@ -21,7 +21,7 @@ async fn send_login_email(to_email: &str, token: &str) {
     let smtp_host = match std::env::var("SMTP_HOST") {
         Ok(h) => h,
         Err(_) => {
-            tracing::warn!(token, "SMTP_HOST not set; login token not emailed");
+            println!("\n==> LOGIN CODE for {}: {}\n", to_email, token);
             return;
         }
     };

@@ -3,40 +3,62 @@
 ## Phase 5.6: In Progress
 
 All 13 blockers resolved. All 4 missing API endpoints implemented.
+New-game creation UI complete. Operator built and running.
 Frontend gaps and code quality items remain (see PLAN.md).
 
 ---
 
 ## Completed this session
 
-### Dev environment fixes
+### Kubernetes operator (`rust/operator`)
 
-- `k8s/kind-config.yaml`: pinned node image to `kindest/node:v1.34.0` to avoid
-  kubelet bug in v1.35.0.
-- `scripts/setup-kind-cluster.sh`: Kourier URL updated to `knative-extensions`
-  org (repo moved); separate `KOURIER_VERSION="1.21.0"` variable added since
-  Kourier does not publish patch releases matching Knative Serving.
+- Built `brdgme-operator`: kube-rs operator watching `GameVersion` CRDs.
+- `GameVersion` CRD defined in `k8s/base/operator/crd.yaml`.
+- Operator upserts `game_types` and `game_versions` rows in PostgreSQL on
+  reconcile. Uses finalizers to set `is_public = false` on deletion.
+- `is_deprecated` field on `GameVersion` spec - used for `lost-cities-1`
+  which remains running for in-progress games but cannot start new ones.
+- Migration `003_game_type_constraints.sql`: unique constraints on
+  `game_types(name)` and `game_versions(game_type_id, name)` for upserts.
+- 20 `GameVersion` CR YAML files colocated with each game in
+  `k8s/base/game/{name}/game-version.yaml`.
+- Operator runs as a `local_resource` in Tilt hybrid mode with
+  `RUST_LOG=info` for visible reconcile output.
+- `crd-ready` Tilt local_resource uses `kubectl wait --for=condition=established`
+  to gate operator startup on CRD registration.
 
-### Auth fixes
+### New-game creation UI
 
-- Login confirmation token changed from UUID to 6-digit numeric code
-  (`format!("{:06}", rand::random::<u32>() % 1_000_000)`) to match frontend
-  `type="tel"` / `pattern="[0-9]*"` validation.
-- Logout now navigates to `/login` after `ServerAction` succeeds (`Effect` added
-  in `SidebarMenu`).
-- Email link on login code entry screen now resets back to email entry form on
-  click.
+- `GamesPage` implemented: game type selector, optional version selector,
+  player count selector, opponent email inputs, submit → redirect to new game.
+- `get_available_game_types` server function queries `game_types` joined with
+  non-deprecated `game_versions`.
+- `create_new_game` server function: calls game service, creates DB records,
+  broadcasts WebSocket update, returns new game ID.
+- SQLx offline metadata regenerated after adding new queries.
+
+### Dev environment improvements
+
+- `secret_settings(disable_scrub=True)` in Tiltfile: prevents Tilt from
+  redacting "brdgme" (the DB name) from all log output.
+- `scripts/setup-kind-cluster.sh`: made idempotent (guards `kind create
+  cluster`); fixed Kourier webhook race condition by polling endpoint
+  registration instead of using `rollout status`.
+- Dev login: login codes now printed to stdout via `println!` when SMTP is
+  unavailable, making local testing straightforward.
+- `mirrord` added to `devenv.nix`; Tiltfile wraps `cargo leptos watch` with
+  `mirrord exec --target pod/postgres-0 --target-namespace brdgme` so the
+  local web server can resolve `*.svc.cluster.local` DNS without any
+  application-level hacks or `/etc/hosts` modification.
 
 ---
 
 ## Immediate next tasks (Phase 5.6 frontend gaps)
 
-From PLAN.md Phase 5.6 - remaining frontend/UI items:
-
-1. **New-game UI** - page to create a new game (pick game type, invite players).
-2. **Action buttons** - Undo, Concede, Restart wired to their endpoints in `GameMeta`.
-3. **Dashboard active game list** - render `get_active_games` results in the
-   sidebar/dashboard with turn indicators and navigation links.
-4. **Game finished state** - show result/placing when `is_finished = true`.
-5. **CSS for log classes** - `log-entry-new`, `log-window`, `log-window-heading`
-   need styles in `style/main.scss`.
+1. **Game log rendering** - replace `GameLogs` stub with actual log display.
+2. **Undo/concede/restart actions** - wire buttons in `GameMeta`.
+3. **"Whose turn" display** - show specific player name(s) and color.
+4. **Mark-read on game page load** - call `mark_read` when `GamePage` mounts.
+5. **`GameRestarted` WebSocket navigation** - navigate to new game URL on receipt.
+6. **Command input UX** - clear after confirmation, surface errors, clickable suggestions.
+7. **Autocomplete prefix filtering** - add `CommandSpec::suggest()`.

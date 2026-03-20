@@ -234,11 +234,31 @@ review before the `leptos` branch replaces production. Full review in
       via `restarted_game_id`, broadcast `GameRestarted`. Client must navigate
       to the new game URL on receipt.
 
+### Operator (`rust/operator`) [Complete]
+
+- [x] **`GameVersion` CRD** (`k8s/base/operator/crd.yaml`): Namespaced CRD
+      with `typeName`, `playerCounts`, `weight`, `isDeprecated` fields.
+- [x] **kube-rs operator**: Reconciles `GameVersion` CRs by upserting
+      `game_types` and `game_versions` rows in PostgreSQL. Finalizer ensures
+      `is_public = false` is written before CR deletion.
+- [x] **`is_deprecated` support**: `lost-cities-1` CR has `isDeprecated: true`
+      - kept running for in-progress games, excluded from new game creation.
+- [x] **Migration 003**: Unique constraints on `game_types(name)` and
+      `game_versions(game_type_id, name)` enabling `ON CONFLICT` upserts.
+- [x] **20 `GameVersion` CR files** colocated with each game in
+      `k8s/base/game/{name}/game-version.yaml`.
+- [x] **Tilt integration**: `crd-ready` resource gates operator startup on CRD
+      establishment; operator runs as `local_resource` with `RUST_LOG=info`.
+- [x] **mirrord**: Added to `devenv.nix`; Tiltfile wraps `cargo leptos watch`
+      with `mirrord exec --target pod/postgres-0 --target-namespace brdgme`
+      so the local web server resolves `*.svc.cluster.local` without application
+      changes or `/etc/hosts` modification.
+
 ### Frontend gaps (non-blocking)
 
-- [ ] **New-game creation UI** (`app.rs`, `GamesPage`): Game type selector,
-      opponent email inputs, submit → redirect to new game. Requires a server
-      function returning available game types from `game_versions`.
+- [x] **New-game creation UI** (`app.rs`, `GamesPage`): Game type selector,
+      optional version selector, player count selector, opponent email inputs,
+      submit → redirect to new game.
 - [ ] **Game log rendering** (`components/game.rs`): Replace `GameLogs` stub
       with actual log display: fetch logs, render markup to HTML, group by
       10-minute windows, filter to logs since `last_turn_at`.
@@ -490,9 +510,10 @@ bash scripts/setup-kind-cluster.sh
 tilt up
 ```
 
-Deploys backing services (Postgres, Redis, SMTP, game microservices) to Kind
-and port-forwards Postgres (5432) and Redis (6379) to localhost. Run
-`cargo leptos watch` inside `rust/web` for hot-reloading on port 3000.
+Deploys backing services (Postgres, Redis, SMTP, game microservices, operator)
+to Kind. Runs `cargo leptos watch` locally via mirrord so the web server can
+resolve cluster-internal DNS (`*.brdgme.svc.cluster.local`) without any
+application changes. Hot-reloading on port 3000.
 
 ### Full Cluster Test
 

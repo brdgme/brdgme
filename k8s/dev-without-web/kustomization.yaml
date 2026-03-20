@@ -1,6 +1,7 @@
 namespace: brdgme
 resources:
 - ../base/game
+- ../base/operator
 - ../base/postgres
 - ../base/redis
 - ../base/smtp

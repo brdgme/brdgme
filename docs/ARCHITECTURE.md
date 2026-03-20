@@ -18,15 +18,14 @@ graph TD
     NATS[NATS Core]
     Knative[Knative Services\ngame microservices]
     Operator[brdgme Operator]
-    CRDs[GameType CRDs]
+    CRDs[GameVersion CRDs]
 
     Browser -->|HTTP + WebSocket| Monolith
     Monolith <-->|queries| PG
     Monolith <-->|pub/sub fan-out| NATS
     Monolith -->|game commands| Knative
     CRDs --> Operator
-    Operator -->|creates/manages| Knative
-    Operator -->|upserts game_versions| PG
+    Operator -->|upserts game_types + game_versions| PG
 ```
 
 ## Core Components
@@ -60,11 +59,13 @@ defined in this document. Knative handles scale-to-zero automatically.
 Bridges Kubernetes infrastructure and the application database. The core API
 has no knowledge of Kubernetes.
 
-- Watches `GameType` custom resources.
-- Creates and manages the corresponding Knative Service for each game type.
-- Upserts game metadata into `game_versions` in PostgreSQL.
-- Uses Kubernetes Finalizers to guarantee `is_available = false` is written
-  to the database before a `GameType` resource is deleted.
+- Watches `GameVersion` custom resources (`gameversions.brdgme.com/v1`).
+- Each CR represents one deployed game version (e.g. `acquire-1`, `lost-cities-2`).
+- Upserts `game_types` and `game_versions` rows in PostgreSQL on reconcile.
+- Uses Kubernetes finalizers to guarantee `is_public = false` is written
+  to the database before a `GameVersion` resource is deleted.
+- `is_deprecated: true` on a CR keeps the service running for in-progress games
+  but excludes it from new game creation.
 - Performs a full reconciliation on startup to recover from state drift.
 
 ## Data Flow: Game Move
@@ -204,8 +205,9 @@ Get valid player counts for the game type.
 Key tables in PostgreSQL:
 
 - **`users`**: User identities, credentials, and preferences.
-- **`game_versions`**: Available game types. Managed by the operator. Includes
-  `is_available` flag for soft-deletion and a unique index on `(name, version)`.
+- **`game_types`**: Game type identities (e.g. "Lost Cities"). Managed by the operator.
+- **`game_versions`**: Deployed game versions. Managed by the operator. Includes
+  `is_public` and `is_deprecated` flags; unique constraint on `(game_type_id, name)`.
 - **`games`**: Active and finished game instances. Stores the serialized
   `game_state` blob.
 - **`game_players`**: Links `users` to `games`, storing player position and

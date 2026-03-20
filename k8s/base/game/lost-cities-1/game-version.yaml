@@ -1,0 +1,10 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: lost-cities-1
+  namespace: brdgme
+spec:
+  typeName: Lost Cities
+  playerCounts: [2]
+  weight: 1.5
+  isDeprecated: true

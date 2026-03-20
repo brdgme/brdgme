@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: modern-art-1
+  namespace: brdgme
+spec:
+  typeName: Modern Art
+  playerCounts: [3, 4, 5]
+  weight: 2.0

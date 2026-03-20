@@ -33,6 +33,20 @@ pub struct PlayerViewData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameVersionInfo {
+    pub id: Uuid,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameTypeInfo {
+    pub id: Uuid,
+    pub name: String,
+    pub player_counts: Vec<i32>,
+    pub versions: Vec<GameVersionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameLogEntry {
     pub body_html: String,
     pub logged_at: PrimitiveDateTime,
@@ -220,6 +234,100 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
         });
 
         Ok(())
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(GetAvailableGameTypes, "/api")]
+pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use crate::auth::server::get_current_user;
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let _ = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        let game_types = crate::db::find_available_game_types(&pool).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+        Ok(game_types.into_iter().map(|(gt, versions)| GameTypeInfo {
+            id: gt.id,
+            name: gt.name,
+            player_counts: gt.player_counts,
+            versions: versions.into_iter().map(|gv| GameVersionInfo {
+                id: gv.id,
+                name: gv.name,
+            }).collect(),
+        }).collect())
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(CreateNewGame, "/api")]
+pub async fn create_new_game(game_version_id: Uuid, opponent_emails: Vec<String>) -> Result<Uuid, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use crate::auth::server::get_current_user;
+        use crate::game::client;
+        use crate::websocket::{GameBroadcaster, WebSocketMessage};
+        use crate::db::CreateGameOpts;
+        use brdgme_cmd::api::{Request, Response};
+        use brdgme_game::Status;
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let broadcaster = use_context::<GameBroadcaster>()
+            .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
+        let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        let player_count = 1 + opponent_emails.len();
+
+        let game_version = crate::db::find_game_version(&pool, game_version_id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+            .ok_or_else(|| ServerFnError::new("Game version not found"))?;
+
+        let resp = client::request(&game_version.uri, &Request::New { players: player_count }).await
+            .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
+
+        let (game_info, logs, _public_render, _player_renders) = match resp {
+            Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
+            _ => return Err(ServerFnError::new("Unexpected response from game service")),
+        };
+
+        let (whose_turn, eliminated, placings) = match game_info.status {
+            Status::Active { whose_turn, eliminated } => (whose_turn, eliminated, vec![]),
+            Status::Finished { placings, .. } => (vec![], vec![], placings),
+        };
+
+        let game = crate::db::create_game_with_users(
+            &pool,
+            CreateGameOpts {
+                game_version_id,
+                whose_turn: &whose_turn,
+                eliminated: &eliminated,
+                placings: &placings,
+                points: &game_info.points,
+                creator_id: user.id,
+                opponent_ids: &[],
+                opponent_emails: &opponent_emails,
+                chat_id: None,
+                game_state: &game_info.state,
+            },
+        ).await.map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
+
+        crate::db::create_game_logs(&pool, game.id, logs).await
+            .map_err(|e| ServerFnError::new(format!("Failed to create logs: {}", e)))?;
+
+        broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: game.id });
+
+        Ok(game.id)
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!()

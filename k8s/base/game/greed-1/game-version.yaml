@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: greed-1
+  namespace: brdgme
+spec:
+  typeName: Greed
+  playerCounts: [2, 3, 4, 5, 6]
+  weight: 1.0

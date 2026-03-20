@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: battleship-1
+  namespace: brdgme
+spec:
+  typeName: Battleship
+  playerCounts: [2]
+  weight: 1.0

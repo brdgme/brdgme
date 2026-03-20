@@ -179,10 +179,180 @@ fn LoginPage() -> impl IntoView {
 
 #[component]
 fn GamesPage() -> impl IntoView {
+    use crate::game::server_fns::{get_available_game_types, create_new_game};
+
+    let game_types = Resource::new(|| (), |_| get_available_game_types());
+
+    let (selected_type_id, set_selected_type_id) = signal(None::<Uuid>);
+    let (selected_version_id, set_selected_version_id) = signal(None::<Uuid>);
+    let (player_count, set_player_count) = signal(2i32);
+    let (opponent_emails, set_opponent_emails) = signal(vec![String::new()]);
+
+    // Initialize selections when game types first load.
+    Effect::new(move |_| {
+        if let Some(Ok(types)) = game_types.get() {
+            if selected_type_id.get_untracked().is_none() {
+                if let Some(first) = types.first() {
+                    set_selected_type_id.set(Some(first.id));
+                    set_selected_version_id.set(first.versions.first().map(|v| v.id));
+                    set_player_count.set(first.player_counts.first().copied().unwrap_or(2));
+                }
+            }
+        }
+    });
+
+    // Resize opponent email list when player count changes.
+    Effect::new(move |_| {
+        let n = (player_count.get() - 1).max(0) as usize;
+        set_opponent_emails.update(|v| v.resize(n, String::new()));
+    });
+
+    let create_action = Action::new(|(version_id, emails): &(Uuid, Vec<String>)| {
+        let version_id = *version_id;
+        let emails = emails.clone();
+        async move { create_new_game(version_id, emails).await }
+    });
+
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        if let Some(Ok(id)) = create_action.value().get() {
+            navigate(&format!("/games/{}", id), NavigateOptions::default());
+        }
+    });
+
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        if let Some(version_id) = selected_version_id.get_untracked() {
+            create_action.dispatch((version_id, opponent_emails.get_untracked()));
+        }
+    };
+
     view! {
         <MainLayout>
-            <h1>"Games"</h1>
-            <p>"Browse active games and create new ones."</p>
+            <div class="new-game">
+                <h1>"New Game"</h1>
+                <Suspense fallback=|| view! { <p>"Loading..."</p> }>
+                    {move || game_types.get().map(|result| {
+                        let types = match result {
+                            Err(e) => return view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
+                            Ok(t) if t.is_empty() => return view! { <p>"No games available."</p> }.into_any(),
+                            Ok(t) => t,
+                        };
+                        let types = StoredValue::new(types);
+                        view! {
+                            <form on:submit=on_submit>
+                                <div class="form-row">
+                                    <label>"Game"</label>
+                                    <select on:change=move |ev| {
+                                        if let Ok(id) = event_target_value(&ev).parse::<Uuid>() {
+                                            if let Some(gt) = types.with_value(|t| t.iter().find(|g| g.id == id).cloned()) {
+                                                set_selected_type_id.set(Some(id));
+                                                set_selected_version_id.set(gt.versions.first().map(|v| v.id));
+                                                set_player_count.set(gt.player_counts.first().copied().unwrap_or(2));
+                                            }
+                                        }
+                                    }>
+                                        {types.with_value(|t| t.iter().map(|gt| {
+                                            let id = gt.id.to_string();
+                                            let name = gt.name.clone();
+                                            view! { <option value=id>{name}</option> }
+                                        }).collect_view())}
+                                    </select>
+                                </div>
+
+                                {move || types.with_value(|t| {
+                                    t.iter().find(|gt| Some(gt.id) == selected_type_id.get()).map(|gt| {
+                                        let version_row = if gt.versions.len() > 1 {
+                                            let versions = gt.versions.clone();
+                                            view! {
+                                                <div class="form-row">
+                                                    <label>"Version"</label>
+                                                    <select on:change=move |ev| {
+                                                        set_selected_version_id.set(event_target_value(&ev).parse::<Uuid>().ok());
+                                                    }>
+                                                        {versions.iter().map(|v| {
+                                                            let id = v.id.to_string();
+                                                            let name = v.name.clone();
+                                                            view! { <option value=id>{name}</option> }
+                                                        }).collect_view()}
+                                                    </select>
+                                                </div>
+                                            }.into_any()
+                                        } else {
+                                            view! {}.into_any()
+                                        };
+
+                                        let count_row = if gt.player_counts.len() > 1 {
+                                            let counts = gt.player_counts.clone();
+                                            view! {
+                                                <div class="form-row">
+                                                    <label>"Players"</label>
+                                                    <select on:change=move |ev| {
+                                                        if let Ok(n) = event_target_value(&ev).parse::<i32>() {
+                                                            set_player_count.set(n);
+                                                        }
+                                                    }>
+                                                        {counts.iter().map(|&n| {
+                                                            view! { <option value=n.to_string()>{n}</option> }
+                                                        }).collect_view()}
+                                                    </select>
+                                                </div>
+                                            }.into_any()
+                                        } else {
+                                            view! {}.into_any()
+                                        };
+
+                                        view! {
+                                            {version_row}
+                                            {count_row}
+                                        }.into_any()
+                                    })
+                                })}
+
+                                {move || {
+                                    let n = (player_count.get() - 1).max(0) as usize;
+                                    (0..n).map(|i| view! {
+                                        <div class="form-row">
+                                            <label>"Opponent " {i + 1} " email"</label>
+                                            <input
+                                                type="email"
+                                                placeholder="Email address"
+                                                required
+                                                prop:value=move || opponent_emails.get().get(i).cloned().unwrap_or_default()
+                                                on:input=move |ev| {
+                                                    let val = event_target_value(&ev);
+                                                    set_opponent_emails.update(|v| {
+                                                        if let Some(e) = v.get_mut(i) {
+                                                            *e = val;
+                                                        }
+                                                    });
+                                                }
+                                            />
+                                        </div>
+                                    }).collect_view()
+                                }}
+
+                                <div class="form-row">
+                                    <input
+                                        type="submit"
+                                        value="Create Game"
+                                        disabled=move || create_action.pending().get()
+                                    />
+                                </div>
+
+                                <Show when=move || create_action.value().get().is_some_and(|r| r.is_err())>
+                                    <div class="error">
+                                        {move || create_action.value().get()
+                                            .and_then(|r| r.err())
+                                            .map(|e| e.to_string())
+                                            .unwrap_or_default()}
+                                    </div>
+                                </Show>
+                            </form>
+                        }.into_any()
+                    })}
+                </Suspense>
+            </div>
         </MainLayout>
     }
 }

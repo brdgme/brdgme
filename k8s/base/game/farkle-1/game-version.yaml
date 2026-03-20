@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: farkle-1
+  namespace: brdgme
+spec:
+  typeName: Farkle
+  playerCounts: [2, 3, 4, 5, 6]
+  weight: 1.0

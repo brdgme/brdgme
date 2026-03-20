@@ -1,0 +1,9 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: for-sale-1
+  namespace: brdgme
+spec:
+  typeName: For Sale
+  playerCounts: [3, 4, 5]
+  weight: 1.0
