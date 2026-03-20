@@ -1,6 +1,5 @@
 use leptos::prelude::*;
 use crate::game::server_fns::{GameViewData, PlayerViewData, SubmitCommand};
-use brdgme_game::command::parser::Parser;
 use uuid::Uuid;
 
 #[component]
@@ -166,68 +165,86 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     }
 }
 
+fn word_prefix(input: &str) -> &str {
+    match input.rfind(' ') {
+        Some(i) => &input[..i + 1],
+        None => "",
+    }
+}
+
 #[component]
 pub fn GameCommandInput(
-    game_id: uuid::Uuid, 
+    game_id: uuid::Uuid,
     command_spec: Option<brdgme_game::command::Spec>,
     player_names: Vec<String>,
 ) -> impl IntoView {
     let (command, set_command) = signal(String::new());
-    
+
     let submit_action = ServerAction::<SubmitCommand>::new();
-    
+
+    // Clear command on successful submit.
+    Effect::new(move |_| {
+        if let Some(Ok(_)) = submit_action.value().get() {
+            set_command.set(String::new());
+        }
+    });
+
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
-        let cmd = command.get();
+        let cmd = command.get_untracked();
         if !cmd.is_empty() {
-            submit_action.dispatch(SubmitCommand {
-                game_id,
-                command: cmd,
-            });
-            set_command.set(String::new());
+            submit_action.dispatch(SubmitCommand { game_id, command: cmd });
         }
     };
 
-    let suggestions = move || {
+    let suggestions = Memo::new(move |_| -> Vec<brdgme_game::command::Suggestion> {
         let current_input = command.get();
-        if let Some(ref spec) = command_spec {
-            // Very basic suggestion logic for now: 
-            // try to parse and get expected tokens
-            match spec.parse(&current_input, &player_names) {
-                Ok(out) => {
-                    if out.remaining.is_empty() {
-                        vec!["<enter>".to_string()]
-                    } else {
-                        // This case shouldn't happen much with recursive descent
-                        vec![]
-                    }
-                }
-                Err(brdgme_game::errors::GameError::Parse { expected, .. }) => {
-                    expected
-                }
-                _ => vec![]
-            }
-        } else {
-            vec![]
-        }
+        let Some(ref spec) = command_spec else { return vec![] };
+        spec.suggest(&current_input, &player_names)
+    });
+
+    let error_msg = move || {
+        submit_action.value().get().and_then(|r| match r {
+            Err(e) => Some(e.to_string()),
+            Ok(_) => None,
+        })
     };
 
     view! {
         <div class="game-command-input-container">
-            <div class="suggestions-container">
-                <div class="suggestions-content">
-                    {move || suggestions().into_iter().map(|s| view! {
-                        <div class="suggestion-item">{s}</div>
-                    }).collect_view()}
+            <Show when=move || !suggestions.get().is_empty()>
+                <div class="suggestions-container">
+                    <div class="suggestions-content">
+                        {move || suggestions.get().into_iter().map(|s| {
+                            let value = s.value.clone();
+                            let on_click = move |ev: leptos::ev::MouseEvent| {
+                                ev.prevent_default();
+                                let current = command.get_untracked();
+                                let prefix = word_prefix(&current);
+                                set_command.set(format!("{}{} ", prefix, value));
+                            };
+                            view! {
+                                <div class="suggestion-doc-item">
+                                    <a href="#" on:click=on_click>{s.value}</a>
+                                    {s.desc.map(|d| view! {
+                                        <span class="suggestion-doc-desc">" - " {d}</span>
+                                    })}
+                                </div>
+                            }
+                        }).collect_view()}
+                    </div>
                 </div>
-            </div>
+            </Show>
             <div class="game-command-input">
+                {move || error_msg().map(|e| view! {
+                    <div class="command-error">{e}</div>
+                })}
                 <form on:submit=on_submit>
-                    <input 
-                        type="text" 
-                        placeholder="Enter command..." 
-                        autocomplete="off" 
-                        autocapitalize="none" 
+                    <input
+                        type="text"
+                        placeholder="Enter command..."
+                        autocomplete="off"
+                        autocapitalize="none"
                         spellcheck="false"
                         prop:value=command
                         on:input=move |ev| set_command.set(event_target_value(&ev))

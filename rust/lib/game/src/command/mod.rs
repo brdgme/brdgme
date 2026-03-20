@@ -2,6 +2,13 @@ use serde::{Deserialize, Serialize};
 
 pub mod doc;
 pub mod parser;
+pub mod suggest;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Suggestion {
+    pub value: String,
+    pub desc: Option<String>,
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Spec {
