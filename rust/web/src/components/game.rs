@@ -12,6 +12,7 @@ pub fn GameBoard(html: String) -> impl IntoView {
 
 #[component]
 pub fn GameMeta(data: GameViewData) -> impl IntoView {
+    let game_id = data.id;
     view! {
         <div class="game-meta">
             <div class="game-meta-main">
@@ -29,7 +30,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
             <div class="game-meta-logs">
                 <h2>"Logs"</h2>
                 <div class="game-meta-logs-content">
-                    <div>"Full game logs here"</div>
+                    <GameLogs game_id=game_id />
                 </div>
             </div>
         </div>
@@ -59,11 +60,52 @@ fn window_key(dt: time::PrimitiveDateTime) -> time::PrimitiveDateTime {
     )
 }
 
-fn format_window(dt: time::PrimitiveDateTime) -> String {
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        dt.year(), dt.month() as u8, dt.day(), dt.hour(), dt.minute()
-    )
+fn format_log_time(dt: time::PrimitiveDateTime) -> String {
+    let month_abbr = match dt.month() {
+        time::Month::January => "Jan",
+        time::Month::February => "Feb",
+        time::Month::March => "Mar",
+        time::Month::April => "Apr",
+        time::Month::May => "May",
+        time::Month::June => "Jun",
+        time::Month::July => "Jul",
+        time::Month::August => "Aug",
+        time::Month::September => "Sep",
+        time::Month::October => "Oct",
+        time::Month::November => "Nov",
+        time::Month::December => "Dec",
+    };
+    let hour12 = dt.hour() % 12;
+    let hour12 = if hour12 == 0 { 12 } else { hour12 };
+    let ampm = if dt.hour() < 12 { "AM" } else { "PM" };
+    format!("{} {}, {}:{:02} {}", month_abbr, dt.day(), hour12, dt.minute(), ampm)
+}
+
+fn render_log_entries(entries: Vec<crate::game::server_fns::GameLogEntry>) -> impl IntoView {
+    // Group into 10-minute windows; show log-time only on first entry of each group.
+    let mut windows: Vec<(time::PrimitiveDateTime, Vec<_>)> = vec![];
+    for entry in entries {
+        let key = window_key(entry.logged_at);
+        if let Some(last) = windows.last_mut() {
+            if last.0 == key {
+                last.1.push(entry);
+                continue;
+            }
+        }
+        windows.push((key, vec![entry]));
+    }
+    windows.into_iter().map(|(window_start, entries)| {
+        let time_label = format_log_time(window_start);
+        entries.into_iter().enumerate().map(move |(i, entry)| {
+            let label = if i == 0 { format!("- {} -", time_label) } else { String::new() };
+            view! {
+                <div class="game-log-entry">
+                    <div class="log-time">{label}</div>
+                    <div inner_html=entry.body_html />
+                </div>
+            }
+        }).collect_view()
+    }).collect_view()
 }
 
 #[component]
@@ -77,46 +119,50 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     );
 
     view! {
-        <div class="recent-logs-container">
-            <Suspense fallback=|| ()>
-                {move || logs.get().map(|result| match result {
-                    Err(_) => view! { <div class="recent-logs-error">"Failed to load logs."</div> }.into_any(),
-                    Ok(entries) => {
-                        // Group into 10-minute windows
-                        let mut windows: Vec<(time::PrimitiveDateTime, Vec<_>)> = vec![];
-                        for entry in entries {
-                            let key = window_key(entry.logged_at);
-                            if let Some(last) = windows.last_mut() {
-                                if last.0 == key {
-                                    last.1.push(entry);
-                                    continue;
-                                }
-                            }
-                            windows.push((key, vec![entry]));
-                        }
-                        view! {
-                            <div class="recent-logs">
-                                {windows.into_iter().map(|(window_start, entries)| {
-                                    let heading = format_window(window_start);
-                                    view! {
-                                        <div class="log-window">
-                                            <div class="log-window-heading">{heading}</div>
-                                            {entries.into_iter().map(|entry| view! {
-                                                <div
-                                                    class="log-entry"
-                                                    class:log-entry-new=entry.is_new
-                                                    inner_html=entry.body_html
-                                                />
-                                            }).collect_view()}
-                                        </div>
-                                    }
-                                }).collect_view()}
+        <Suspense fallback=|| ()>
+            {move || logs.get().map(|result| match result {
+                Err(_) => view! { <div>"Failed to load logs."</div> }.into_any(),
+                Ok(entries) => view! {
+                    <div class="game-logs">
+                        {render_log_entries(entries)}
+                    </div>
+                }.into_any(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
+    use crate::game::server_fns::get_game_logs;
+
+    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let logs = Resource::new(
+        move || (game_id, trigger.last_update.get()),
+        |(id, _)| async move { get_game_logs(id).await },
+    );
+
+    view! {
+        <Suspense fallback=|| ()>
+            {move || logs.get().map(|result| match result {
+                Err(_) => None,
+                Ok(entries) => {
+                    let recent: Vec<_> = entries.into_iter().filter(|e| e.is_new).collect();
+                    if recent.is_empty() {
+                        None
+                    } else {
+                        Some(view! {
+                            <div class="recent-logs-container">
+                                <div class="recent-logs-header">"Recent logs"</div>
+                                <div class="recent-logs game-logs">
+                                    {render_log_entries(recent)}
+                                </div>
                             </div>
-                        }.into_any()
-                    },
-                })}
-            </Suspense>
-        </div>
+                        })
+                    }
+                },
+            })}
+        </Suspense>
     }
 }
 
