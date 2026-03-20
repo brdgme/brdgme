@@ -6,7 +6,7 @@ use uuid::Uuid;
 #[component]
 pub fn GameBoard(html: String) -> impl IntoView {
     view! {
-        <div class="game-render" inner_html=html></div>
+        <div class="game-render"><pre inner_html=html></pre></div>
     }
 }
 
