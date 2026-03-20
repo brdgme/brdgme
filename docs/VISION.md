@@ -1,5 +1,15 @@
 # brdgme Vision
 
+## Documentation Principles
+
+Documentation exists to get a developer or agent productive immediately. Every
+sentence must carry information a reader cannot trivially infer from the code.
+
+- No prose for its own sake. No summaries of what the code already says.
+- Capture decisions, constraints, and non-obvious behavior only.
+- Prefer dense lists over paragraphs.
+- A short accurate document is better than a long stale one. Delete freely.
+
 ## What brdgme Is
 
 brdgme is a lo-fi multiplayer board gaming platform. Games are played via web
@@ -29,7 +39,7 @@ graph TD
     PG[(PostgreSQL)]
     NATS[NATS Core]
     Knative[Knative Services\ngame microservices]
-    CRDs[GameType CRDs]
+    CRDs[GameVersion CRDs]
     Operator[brdgme Operator]
 
     Browser -->|HTTP + WebSocket| Monolith
@@ -37,8 +47,7 @@ graph TD
     Monolith <-->|pub/sub fan-out| NATS
     Monolith -->|game commands| Knative
     CRDs --> Operator
-    Operator -->|creates/manages| Knative
-    Operator -->|upserts game_versions| PG
+    Operator -->|upserts game_types + game_versions| PG
 ```
 
 ### Always-On Core
@@ -67,24 +76,17 @@ time. The contract is stable and does not change.
 
 ### brdgme Kubernetes Operator
 
-A custom Kubernetes operator (Rust, `kube-rs`) manages the lifecycle of game
-types without the core API having any knowledge of Kubernetes:
+A custom Kubernetes operator (Rust, `kube-rs`) bridges Kubernetes and the
+application database without the core API having any knowledge of Kubernetes:
 
-- Watches `GameType` custom resources.
-- Creates and manages the corresponding Knative Service.
-- Upserts game metadata (name, version, Knative URL) into the `game_versions`
-  PostgreSQL table.
-- Sets `is_available = false` when a `GameType` is removed, using Kubernetes
-  Finalizers to guarantee the database update completes before the resource is
-  deleted.
-- Performs a full reconciliation on startup to recover from any state drift
-  that occurred while the operator was offline.
+- Watches `GameVersion` custom resources (`gameversions.brdgme.com/v1`).
+- Upserts `game_types` and `game_versions` rows in PostgreSQL on reconcile.
+- Uses finalizers to guarantee `is_public = false` is written before a resource is deleted.
+- `is_deprecated: true` on a CR keeps the service running for in-progress games
+  but excludes it from new game creation.
 
-The `game_versions` table uses a unique index on `(name, version)` and a soft-
-delete `is_available` flag to preserve foreign key integrity with game history.
-
-The core API reads `game_versions` from PostgreSQL as it does today. It has no
-RBAC permissions and no awareness of the cluster.
+Long-term goal: operator also manages the Knative Service lifecycle for each
+game version (currently game services are plain Deployments managed by Tilt).
 
 ## Infrastructure
 
