@@ -4,11 +4,17 @@ use uuid::Uuid;
 use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpponentSummary {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameSummary {
     pub id: Uuid,
     pub name: String,
     pub type_name: String,
-    pub opponents: Vec<String>,
+    pub opponents: Vec<OpponentSummary>,
     pub is_turn: bool,
 }
 
@@ -69,16 +75,28 @@ pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
         let games = crate::db::find_active_games_for_user(&user.id, &pool).await
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
             
-        Ok(games.into_iter().map(|ge| {
+        let mut games = games;
+        games.sort_by(|a, b| {
+            let a_turn = a.game_players.iter().any(|p| p.user.id == user.id && p.game_player.is_turn);
+            let b_turn = b.game_players.iter().any(|p| p.user.id == user.id && p.game_player.is_turn);
+            b_turn.cmp(&a_turn).then(b.game.updated_at.cmp(&a.game.updated_at))
+        });
+        let summaries: Vec<GameSummary> = games.into_iter().map(|ge| {
             let opponents = ge.game_players.iter()
                 .filter(|p| p.user.id != user.id)
-                .map(|p| p.user.name.clone())
+                .map(|p| {
+                    use std::str::FromStr;
+                    let color = brdgme_color::Color::from_str(&p.game_player.color.to_lowercase())
+                        .unwrap_or(brdgme_color::WHITE)
+                        .hex();
+                    OpponentSummary { name: p.user.name.clone(), color }
+                })
                 .collect();
             let is_turn = ge.game_players.iter()
                 .find(|p| p.user.id == user.id)
                 .map(|p| p.game_player.is_turn)
                 .unwrap_or(false);
-                
+
             GameSummary {
                 id: ge.game.id,
                 name: ge.game_version.name,
@@ -86,7 +104,8 @@ pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
                 opponents,
                 is_turn,
             }
-        }).collect())
+        }).collect();
+        Ok(summaries)
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!()

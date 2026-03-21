@@ -85,7 +85,7 @@ pub fn SidebarMenu() -> impl IntoView {
                                                     <div class="layout-game-opponents">
                                                         "with " 
                                                         {game.opponents.into_iter().map(|opp| view! {
-                                                            <span>" " <strong class="brdgme-opponent">"<" {opp} ">"</strong></span>
+                                                            <span>" " <strong class="brdgme-opponent" style=format!("color:{}", opp.color)>"<" {opp.name} ">"</strong></span>
                                                         }).collect_view()}
                                                     </div>
                                                 </A>
