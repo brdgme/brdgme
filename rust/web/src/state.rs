@@ -8,6 +8,7 @@ pub struct AppState {
     pub leptos_options: LeptosOptions,
     pub pool: PgPool,
     pub broadcaster: GameBroadcaster,
+    pub http_client: reqwest::Client,
 }
 
 impl FromRef<AppState> for LeptosOptions {
@@ -25,5 +26,11 @@ impl FromRef<AppState> for PgPool {
 impl FromRef<AppState> for GameBroadcaster {
     fn from_ref(app_state: &AppState) -> GameBroadcaster {
         app_state.broadcaster.clone()
+    }
+}
+
+impl FromRef<AppState> for reqwest::Client {
+    fn from_ref(app_state: &AppState) -> reqwest::Client {
+        app_state.http_client.clone()
     }
 }

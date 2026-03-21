@@ -13,7 +13,6 @@ pub struct GameType {
     pub weight: f32,
 }
 
-pub type PublicGameType = GameType;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GameVersion {
@@ -118,41 +117,3 @@ pub struct GameTypeUser {
     pub peak_rating: i32,
 }
 
-// Insert structs for creating new records
-#[derive(Debug)]
-pub struct NewGameType {
-    pub name: String,
-    pub player_counts: Vec<i32>,
-    pub weight: f32,
-}
-
-#[derive(Debug)]
-pub struct NewGameVersion {
-    pub game_type_id: Uuid,
-    pub name: String,
-    pub uri: String,
-    pub is_public: bool,
-    pub is_deprecated: bool,
-}
-
-#[derive(Debug)]
-pub struct NewGame {
-    pub game_version_id: Uuid,
-    pub is_finished: bool,
-    pub finished_at: Option<PrimitiveDateTime>,
-    pub game_state: String,
-    pub chat_id: Option<Uuid>,
-    pub restarted_game_id: Option<Uuid>,
-}
-
-#[derive(Debug)]
-pub struct NewGamePlayer {
-    pub game_id: Uuid,
-    pub user_id: Uuid,
-    pub position: i32,
-    pub color: String,
-    pub has_accepted: bool,
-    pub is_turn: bool,
-    pub is_turn_at: PrimitiveDateTime,
-    pub place: Option<i32>,
-}

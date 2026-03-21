@@ -82,7 +82,7 @@ fn PlayerInfo(player: PlayerViewData) -> impl IntoView {
     view! {
         <div class="player-info">
             <div class:brdgme-is-turn=player.is_turn>
-                <strong>"<" {player.name} ">"</strong>
+                <PlayerName name=player.name color=player.color />
             </div>
             <div style="margin-left: 1em;">
                 <div><abbr title="ELO rating" style="cursor: help;">"Rating"</abbr>": " {player.rating}</div>
@@ -203,6 +203,14 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
                 },
             })}
         </Suspense>
+    }
+}
+
+/// Renders a player name as `<name>` in the player's color.
+#[component]
+pub fn PlayerName(name: String, color: String) -> impl IntoView {
+    view! {
+        <strong style=format!("color:{}", color)>"<" {name} ">"</strong>
     }
 }
 

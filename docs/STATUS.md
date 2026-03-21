@@ -88,12 +88,11 @@ Exhaustively compared `001_initial_schema.sql` against the production schema
 
 ---
 
-## Immediate next tasks (Phase 5.6 remaining)
+## Immediate next tasks
 
-1. **Dead code removal** - `New*` model structs, `chat.rs`, `friends.rs`,
-   `PublicGameType` alias, `SESSION_AUTH_TOKEN_KEY`, `db::AppState`.
-2. **`reqwest::Client` shared** - create once at startup, store in `AppState`.
-3. **N+1 in `find_active_games_for_user`** - replace loop with joined query.
-4. **Duplicate command logic** - consolidate `game/server.rs` vs `server_fns.rs`.
-5. **WebSocket reconnection** - auto-reconnect on disconnect.
-6. **Phase 6** - Redis pub/sub to replace tokio broadcast.
+**Phase 5.6 is complete.** All blockers, endpoints, frontend gaps, and code
+quality items resolved.
+
+Next phase: **Phase 6** - Redis pub/sub to replace `tokio::sync::broadcast`.
+This is required for multi-replica correctness and side-by-side validation.
+See PLAN.md Phase 6 for the full task list.

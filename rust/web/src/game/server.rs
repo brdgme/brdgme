@@ -26,6 +26,7 @@ pub async fn create_game(
     session: Session,
     State(pool): State<PgPool>,
     State(broadcaster): State<GameBroadcaster>,
+    State(http_client): State<reqwest::Client>,
     Json(payload): Json<CreateGameRequest>,
 ) -> impl IntoResponse {
     let user = match get_user_from_session(&session).await {
@@ -43,7 +44,7 @@ pub async fn create_game(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
     };
 
-    let resp = match client::request(&game_version.uri, &Request::New { players: player_count }).await {
+    let resp = match client::request(&http_client, &game_version.uri, &Request::New { players: player_count }).await {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };
@@ -111,6 +112,7 @@ pub async fn play_command(
     session: Session,
     State(pool): State<PgPool>,
     State(broadcaster): State<GameBroadcaster>,
+    State(http_client): State<reqwest::Client>,
     Path(id): Path<Uuid>,
     Json(payload): Json<CommandRequest>,
 ) -> impl IntoResponse {
@@ -119,86 +121,17 @@ pub async fn play_command(
         None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
     };
 
-    let game_extended = match db::find_game_extended(&pool, id).await {
-        Ok(Some(ge)) => ge,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Game not found").into_response(),
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
-    };
-
-    if game_extended.game.is_finished {
-        return (StatusCode::BAD_REQUEST, "Game is already finished").into_response();
+    match super::execute_command(&pool, &http_client, &broadcaster, id, user.id, payload.command).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
-
-    let player = match game_extended.game_players.iter().find(|p| p.user.id == user.id) {
-        Some(p) => p,
-        None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
-    };
-
-    if !player.game_player.is_turn {
-        return (StatusCode::FORBIDDEN, "Not your turn").into_response();
-    }
-
-    let names: Vec<String> = game_extended.game_players.iter().map(|p| p.user.name.clone()).collect();
-
-    let resp = match client::request(
-        &game_extended.game_version.uri,
-        &Request::Play {
-            player: player.game_player.position as usize,
-            game: game_extended.game.game_state.clone(),
-            command: payload.command,
-            names,
-        }
-    ).await {
-        Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
-    };
-
-    let (game_response, logs, can_undo, remaining_input, _public_render, _player_renders) = match resp {
-        Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } =>
-            (game, logs, can_undo, remaining_input, public_render, player_renders),
-        Response::UserError { message } => return (StatusCode::BAD_REQUEST, message).into_response(),
-        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
-    };
-
-    if !remaining_input.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, format!("Unexpected input: {}", remaining_input)).into_response();
-    }
-
-    let prev_game_state = game_extended.game.game_state.clone();
-    let (is_finished, whose_turn, eliminated, placings) = match game_response.status {
-        Status::Active { whose_turn, eliminated } => (false, whose_turn, eliminated, vec![]),
-        Status::Finished { placings, .. } => (true, vec![], vec![], placings),
-    };
-
-    if let Err(e) = db::update_game_command_success(
-        &pool,
-        id,
-        player.game_player.id,
-        &prev_game_state,
-        &game_response.state,
-        can_undo,
-        is_finished,
-        &whose_turn,
-        &eliminated,
-        &placings,
-        &game_response.points,
-    ).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update game: {}", e)).into_response();
-    }
-
-    if let Err(e) = db::create_game_logs(&pool, id, logs).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
-    }
-
-    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: id });
-
-    StatusCode::OK.into_response()
 }
 
 pub async fn undo_game(
     session: Session,
     State(pool): State<PgPool>,
     State(broadcaster): State<GameBroadcaster>,
+    State(http_client): State<reqwest::Client>,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
     let user = match get_user_from_session(&session).await {
@@ -222,10 +155,7 @@ pub async fn undo_game(
         None => return (StatusCode::BAD_REQUEST, "No undo state available").into_response(),
     };
 
-    let resp = match client::request(
-        &game_extended.game_version.uri,
-        &Request::Status { game: undo_state.clone() },
-    ).await {
+    let resp = match client::request(&http_client, &game_extended.game_version.uri, &brdgme_cmd::api::Request::Status { game: undo_state.clone() }).await {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };
@@ -253,6 +183,7 @@ pub async fn restart_game(
     session: Session,
     State(pool): State<PgPool>,
     State(broadcaster): State<GameBroadcaster>,
+    State(http_client): State<reqwest::Client>,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
     let user = match get_user_from_session(&session).await {
@@ -279,10 +210,7 @@ pub async fn restart_game(
     }
 
     let player_count = game_extended.game_players.len();
-    let resp = match client::request(
-        &game_extended.game_version.uri,
-        &Request::New { players: player_count },
-    ).await {
+    let resp = match client::request(&http_client, &game_extended.game_version.uri, &Request::New { players: player_count }).await {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };

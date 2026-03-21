@@ -5725,6 +5725,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "gloo-net",
+ "gloo-timers",
  "leptos",
  "leptos_axum",
  "leptos_meta",

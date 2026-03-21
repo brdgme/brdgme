@@ -17,6 +17,7 @@ async fn main() {
 
     let pool = create_pool().await.expect("Failed to create database pool");
     let broadcaster = GameBroadcaster::new(1024);
+    let http_client = reqwest::Client::new();
 
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
@@ -26,6 +27,7 @@ async fn main() {
         leptos_options: leptos_options.clone(),
         pool: pool.clone(),
         broadcaster: broadcaster.clone(),
+        http_client: http_client.clone(),
     };
 
     let routes = generate_route_list(App);
@@ -38,9 +40,11 @@ async fn main() {
             {
                 let pool = pool.clone();
                 let broadcaster = broadcaster.clone();
+                let http_client = http_client.clone();
                 move || {
                     provide_context(pool.clone());
                     provide_context(broadcaster.clone());
+                    provide_context(http_client.clone());
                 }
             },
             {

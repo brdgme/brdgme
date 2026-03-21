@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_navigate;
 use leptos_router::NavigateOptions;
+use crate::components::game::PlayerName;
 
 use crate::game::server_fns::get_active_games;
 
@@ -85,7 +86,7 @@ pub fn SidebarMenu() -> impl IntoView {
                                                     <div class="layout-game-opponents">
                                                         "with " 
                                                         {game.opponents.into_iter().map(|opp| view! {
-                                                            <span>" " <strong class="brdgme-opponent" style=format!("color:{}", opp.color)>"<" {opp.name} ">"</strong></span>
+                                                            <span>" " <PlayerName name=opp.name color=opp.color /></span>
                                                         }).collect_view()}
                                                     </div>
                                                 </A>

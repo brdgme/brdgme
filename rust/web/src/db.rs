@@ -18,19 +18,6 @@ pub async fn create_pool() -> Result<PgPool> {
 }
 
 #[cfg(feature = "ssr")]
-#[derive(Clone)]
-pub struct AppState {
-    pub db_pool: PgPool,
-}
-
-#[cfg(feature = "ssr")]
-impl AppState {
-    pub fn new(db_pool: PgPool) -> Self {
-        Self { db_pool }
-    }
-}
-
-#[cfg(feature = "ssr")]
 pub async fn create_user(pool: &PgPool, new_user: NewUser) -> Result<User> {
     sqlx::query_as!(
         User,
@@ -298,24 +285,146 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 
 #[cfg(feature = "ssr")]
 pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result<Vec<GameExtended>> {
-    let game_ids = sqlx::query!(
+    // Fetch all active games for this user in a single query joining all required tables.
+    let rows = sqlx::query!(
         r#"
-        SELECT DISTINCT g.id
+        SELECT
+            g.id as g_id, g.created_at as g_created_at, g.updated_at as g_updated_at,
+            g.game_version_id, g.is_finished, g.finished_at, g.game_state,
+            g.chat_id, g.restarted_game_id,
+            gv.id as gv_id, gv.created_at as gv_created_at, gv.updated_at as gv_updated_at,
+            gv.game_type_id, gv.name as gv_name, gv.uri, gv.is_public, gv.is_deprecated,
+            gt.id as gt_id, gt.created_at as gt_created_at, gt.updated_at as gt_updated_at,
+            gt.name as gt_name, gt.player_counts, gt.weight,
+            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,
+            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,
+            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,
+            gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,
+            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,
+            gp.is_read as gp_is_read, gp.points as gp_points,
+            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
+            u.id as u_id, u.created_at as u_created_at, u.updated_at as u_updated_at,
+            u.name as u_name, u.pref_colors as u_pref_colors,
+            u.login_confirmation as u_login_confirmation,
+            u.login_confirmation_at as u_login_confirmation_at,
+            gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?",
+            gtu.updated_at as "gtu_updated_at?", gtu.game_type_id as "gtu_game_type_id?",
+            gtu.user_id as "gtu_user_id?", gtu.last_game_finished_at as "gtu_last_game_finished_at?",
+            gtu.rating as "gtu_rating?", gtu.peak_rating as "gtu_peak_rating?"
         FROM games g
-        JOIN game_players gp ON g.id = gp.game_id
-        WHERE gp.user_id = $1 AND g.is_finished = false
+        JOIN game_versions gv ON gv.id = g.game_version_id
+        JOIN game_types gt ON gt.id = gv.game_type_id
+        JOIN game_players gp ON gp.game_id = g.id
+        JOIN users u ON u.id = gp.user_id
+        LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = gv.game_type_id
+        WHERE g.is_finished = false
+          AND g.id IN (
+              SELECT game_id FROM game_players WHERE user_id = $1
+          )
+        ORDER BY g.id, gp.position
         "#,
         user_id
     )
     .fetch_all(pool)
     .await?;
 
-    let mut games = Vec::new();
-    for row in game_ids {
-        if let Some(ge) = find_game_extended(pool, row.id).await? {
-            games.push(ge);
+    // Group rows by game_id, building GameExtended structs.
+    let mut games: Vec<GameExtended> = Vec::new();
+    for row in rows {
+        let game_id = row.g_id;
+        if games.last().map(|g| g.game.id) != Some(game_id) {
+            games.push(GameExtended {
+                game: crate::models::game::Game {
+                    id: row.g_id,
+                    created_at: row.g_created_at,
+                    updated_at: row.g_updated_at,
+                    game_version_id: row.game_version_id,
+                    is_finished: row.is_finished,
+                    finished_at: row.finished_at,
+                    game_state: row.game_state.clone(),
+                    chat_id: row.chat_id,
+                    restarted_game_id: row.restarted_game_id,
+                },
+                game_type: crate::models::game::GameType {
+                    id: row.gt_id,
+                    created_at: row.gt_created_at,
+                    updated_at: row.gt_updated_at,
+                    name: row.gt_name.clone(),
+                    player_counts: row.player_counts.clone(),
+                    weight: row.weight,
+                },
+                game_version: crate::models::game::GameVersion {
+                    id: row.gv_id,
+                    created_at: row.gv_created_at,
+                    updated_at: row.gv_updated_at,
+                    game_type_id: row.game_type_id,
+                    name: row.gv_name.clone(),
+                    uri: row.uri.clone(),
+                    is_public: row.is_public,
+                    is_deprecated: row.is_deprecated,
+                },
+                game_players: Vec::new(),
+            });
         }
+
+        let gtu = if let (Some(gtu_id), Some(gtu_created_at), Some(gtu_updated_at), Some(gtu_game_type_id), Some(gtu_user_id), Some(gtu_rating), Some(gtu_peak_rating)) =
+            (row.gtu_id, row.gtu_created_at, row.gtu_updated_at, row.gtu_game_type_id, row.gtu_user_id, row.gtu_rating, row.gtu_peak_rating) {
+            crate::models::game::GameTypeUser {
+                id: gtu_id,
+                created_at: gtu_created_at,
+                updated_at: gtu_updated_at,
+                game_type_id: gtu_game_type_id,
+                user_id: gtu_user_id,
+                last_game_finished_at: row.gtu_last_game_finished_at,
+                rating: gtu_rating,
+                peak_rating: gtu_peak_rating,
+            }
+        } else {
+            crate::models::game::GameTypeUser {
+                id: Uuid::nil(),
+                created_at: row.gp_created_at,
+                updated_at: row.gp_created_at,
+                game_type_id: row.game_type_id,
+                user_id: row.u_id,
+                last_game_finished_at: None,
+                rating: 1500,
+                peak_rating: 1500,
+            }
+        };
+
+        games.last_mut().unwrap().game_players.push(GamePlayerExtended {
+            game_player: crate::models::game::GamePlayer {
+                id: row.gp_id,
+                created_at: row.gp_created_at,
+                updated_at: row.gp_updated_at,
+                game_id: row.gp_game_id,
+                user_id: row.gp_user_id,
+                position: row.gp_position,
+                color: row.gp_color,
+                has_accepted: row.gp_has_accepted,
+                is_turn: row.gp_is_turn,
+                is_turn_at: row.gp_is_turn_at,
+                place: row.gp_place,
+                last_turn_at: row.gp_last_turn_at,
+                is_eliminated: row.gp_is_eliminated,
+                is_read: row.gp_is_read,
+                points: row.gp_points,
+                undo_game_state: row.gp_undo_game_state,
+                rating_change: row.gp_rating_change,
+            },
+            user: crate::models::user::User {
+                id: row.u_id,
+                created_at: row.u_created_at,
+                updated_at: row.u_updated_at,
+                name: row.u_name,
+                pref_colors: row.u_pref_colors,
+                login_confirmation: row.u_login_confirmation,
+                login_confirmation_at: row.u_login_confirmation_at,
+            },
+            game_type_user: gtu,
+        });
     }
+
     Ok(games)
 }
 

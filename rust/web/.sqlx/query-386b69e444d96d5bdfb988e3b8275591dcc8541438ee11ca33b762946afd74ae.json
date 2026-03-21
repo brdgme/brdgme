@@ -1,0 +1,346 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            g.id as g_id, g.created_at as g_created_at, g.updated_at as g_updated_at,\n            g.game_version_id, g.is_finished, g.finished_at, g.game_state,\n            g.chat_id, g.restarted_game_id,\n            gv.id as gv_id, gv.created_at as gv_created_at, gv.updated_at as gv_updated_at,\n            gv.game_type_id, gv.name as gv_name, gv.uri, gv.is_public, gv.is_deprecated,\n            gt.id as gt_id, gt.created_at as gt_created_at, gt.updated_at as gt_updated_at,\n            gt.name as gt_name, gt.player_counts, gt.weight,\n            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,\n            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,\n            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,\n            gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,\n            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,\n            gp.is_read as gp_is_read, gp.points as gp_points,\n            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,\n            u.id as u_id, u.created_at as u_created_at, u.updated_at as u_updated_at,\n            u.name as u_name, u.pref_colors as u_pref_colors,\n            u.login_confirmation as u_login_confirmation,\n            u.login_confirmation_at as u_login_confirmation_at,\n            gtu.id as \"gtu_id?\", gtu.created_at as \"gtu_created_at?\",\n            gtu.updated_at as \"gtu_updated_at?\", gtu.game_type_id as \"gtu_game_type_id?\",\n            gtu.user_id as \"gtu_user_id?\", gtu.last_game_finished_at as \"gtu_last_game_finished_at?\",\n            gtu.rating as \"gtu_rating?\", gtu.peak_rating as \"gtu_peak_rating?\"\n        FROM games g\n        JOIN game_versions gv ON gv.id = g.game_version_id\n        JOIN game_types gt ON gt.id = gv.game_type_id\n        JOIN game_players gp ON gp.game_id = g.id\n        JOIN users u ON u.id = gp.user_id\n        LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = gv.game_type_id\n        WHERE g.is_finished = false\n          AND g.id IN (\n              SELECT game_id FROM game_players WHERE user_id = $1\n          )\n        ORDER BY g.id, gp.position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "g_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "g_created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 2,
+        "name": "g_updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 3,
+        "name": "game_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_finished",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "finished_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 6,
+        "name": "game_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "chat_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "restarted_game_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "gv_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "gv_created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 11,
+        "name": "gv_updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 12,
+        "name": "game_type_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "gv_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "is_public",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "is_deprecated",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "gt_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
+        "name": "gt_created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 19,
+        "name": "gt_updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 20,
+        "name": "gt_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "player_counts",
+        "type_info": "Int4Array"
+      },
+      {
+        "ordinal": 22,
+        "name": "weight",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 23,
+        "name": "gp_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 24,
+        "name": "gp_created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 25,
+        "name": "gp_updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 26,
+        "name": "gp_game_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 27,
+        "name": "gp_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 28,
+        "name": "gp_position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 29,
+        "name": "gp_color",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 30,
+        "name": "gp_has_accepted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 31,
+        "name": "gp_is_turn",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 32,
+        "name": "gp_is_turn_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 33,
+        "name": "gp_place",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 34,
+        "name": "gp_last_turn_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 35,
+        "name": "gp_is_eliminated",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 36,
+        "name": "gp_is_read",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 37,
+        "name": "gp_points",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 38,
+        "name": "gp_undo_game_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 39,
+        "name": "gp_rating_change",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 40,
+        "name": "u_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 41,
+        "name": "u_created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 42,
+        "name": "u_updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 43,
+        "name": "u_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 44,
+        "name": "u_pref_colors",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 45,
+        "name": "u_login_confirmation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 46,
+        "name": "u_login_confirmation_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 47,
+        "name": "gtu_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 48,
+        "name": "gtu_created_at?",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 49,
+        "name": "gtu_updated_at?",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 50,
+        "name": "gtu_game_type_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 51,
+        "name": "gtu_user_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 52,
+        "name": "gtu_last_game_finished_at?",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 53,
+        "name": "gtu_rating?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 54,
+        "name": "gtu_peak_rating?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "386b69e444d96d5bdfb988e3b8275591dcc8541438ee11ca33b762946afd74ae"
+}

@@ -2,8 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use brdgme_cmd::api::{PlayerRender, PubRender, Request, Response};
 use brdgme_game::command::Spec as CommandSpec;
 
-pub async fn request(uri: &str, request: &Request) -> Result<Response> {
-    let client = reqwest::Client::new();
+pub async fn request(client: &reqwest::Client, uri: &str, request: &Request) -> Result<Response> {
     let res = client.post(uri).json(&request).send().await?;
     match res.json().await.context("error parsing JSON response")? {
         Response::SystemError { message } => Err(anyhow!("{}", message)),
@@ -38,22 +37,22 @@ impl From<PlayerRender> for RenderResponse {
     }
 }
 
-pub async fn render(uri: &str, game: String, player: Option<usize>) -> Result<RenderResponse> {
+pub async fn render(client: &reqwest::Client, uri: &str, game: String, player: Option<usize>) -> Result<RenderResponse> {
     match player {
-        Some(p) => player_render(uri, game, p).await,
-        None => pub_render(uri, game).await,
+        Some(p) => player_render(client, uri, game, p).await,
+        None => pub_render(client, uri, game).await,
     }
 }
 
-pub async fn pub_render(uri: &str, game: String) -> Result<RenderResponse> {
-    match request(uri, &Request::PubRender { game }).await? {
+pub async fn pub_render(client: &reqwest::Client, uri: &str, game: String) -> Result<RenderResponse> {
+    match request(client, uri, &Request::PubRender { game }).await? {
         Response::PubRender { render } => Ok(render.into()),
         _ => Err(anyhow!("invalid response type")),
     }
 }
 
-pub async fn player_render(uri: &str, game: String, player: usize) -> Result<RenderResponse> {
-    match request(uri, &Request::PlayerRender { player, game }).await? {
+pub async fn player_render(client: &reqwest::Client, uri: &str, game: String, player: usize) -> Result<RenderResponse> {
+    match request(client, uri, &Request::PlayerRender { player, game }).await? {
         Response::PlayerRender { render } => Ok(render.into()),
         _ => Err(anyhow!("invalid response type")),
     }
@@ -106,7 +105,8 @@ mod tests {
         // 2. Execute Client Request
         let uri = format!("http://{}", addr);
         let req = Request::New { players: 2 };
-        let resp = request(&uri, &req).await.expect("request failed");
+        let client = reqwest::Client::new();
+        let resp = request(&client, &uri, &req).await.expect("request failed");
 
         // 3. Verify Response
         match resp {

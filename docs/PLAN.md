@@ -283,14 +283,14 @@ review before the `leptos` branch replaces production. Full review in
 
 ### Code quality (non-blocking)
 
-- [ ] **Dead code removed**: `New*` model structs, `chat.rs`, `friends.rs`,
-      `PublicGameType` alias, `SESSION_AUTH_TOKEN_KEY`, `db::AppState`.
-- [ ] **`reqwest::Client` shared** (`game/client.rs`): Create once at startup,
-      store in `AppState`, reuse across requests.
-- [ ] **N+1 in `find_active_games_for_user`** (`db.rs`): Replace loop with a
-      single joined query.
-- [ ] **Duplicate command logic** (`game/server.rs` vs `server_fns.rs`):
-      Consolidate into one path.
+- [x] **Dead code removed**: `New*` model structs, `chat.rs`, `friends.rs`,
+      `PublicGameType` alias, `db::AppState` deleted or removed.
+- [x] **`reqwest::Client` shared** (`game/client.rs`): Created once in `main.rs`,
+      stored in `AppState`, provided as Leptos context; all `client::` fns take `&Client`.
+- [x] **N+1 in `find_active_games_for_user`** (`db.rs`): Replaced loop with a
+      single joined query across all required tables; SQLx cache updated.
+- [x] **Duplicate command logic** (`game/server.rs` vs `server_fns.rs`):
+      Extracted into `game::execute_command`; both callers delegate to it.
 - [x] **`chrono` → `time`** (`models/`, `lib/game`, `lib/cmd`): Replaced
       `chrono::NaiveDateTime` with `time::PrimitiveDateTime` throughout all
       model structs, `brdgme_game::Log`, and `brdgme_cmd::CliLog`. Required
@@ -299,7 +299,8 @@ review before the `leptos` branch replaces production. Full review in
 - [x] **Points persisted** (`db.rs`): `_points` suppression removed;
       points written per-player in `update_game_command_success`.
 - [x] **Logout redirect/feedback** (`components/layout.rs`): Navigate to `/login` after logout action succeeds.
-- [ ] **WebSocket reconnection** (`websocket_client.rs`).
+- [x] **WebSocket reconnection** (`websocket_client.rs`): Reconnects with a
+      2-second delay after disconnect; `use_websocket` now runs a `spawn_local` loop.
 - [x] **`finished_at` set when `is_finished = true`** (`db.rs`): Set via
       `COALESCE($arg, finished_at)` in `update_game_command_success`.
 

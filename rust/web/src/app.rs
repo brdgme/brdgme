@@ -428,10 +428,12 @@ fn GamePage() -> impl IntoView {
                         let html = data.html.clone();
                         let command_spec = data.command_spec.clone();
                         let player_names: Vec<String> = data.players.iter().map(|p| p.name.clone()).collect();
-                        let waiting_on: Vec<String> = data.players.iter()
-                            .filter(|p| p.is_turn)
-                            .map(|p| p.name.clone())
-                            .collect();
+                        let waiting_on = StoredValue::new(
+                            data.players.iter()
+                                .filter(|p| p.is_turn)
+                                .map(|p| (p.name.clone(), p.color.clone()))
+                                .collect::<Vec<_>>()
+                        );
 
                         view! {
                             <MainLayout is_my_turn=is_my_turn has_sub_menu=true has_next_game=is_my_turn>
@@ -448,7 +450,17 @@ fn GamePage() -> impl IntoView {
                                         </Show>
                                         <Show when=move || !is_my_turn && !is_finished>
                                             <div class="game-current-turn">
-                                                <span>"Waiting on: " {waiting_on.join(", ")}</span>
+                                                "Waiting on: "
+                                                {waiting_on.with_value(|w| w.iter().enumerate().map(|(i, (name, color))| {
+                                                    let name = name.clone();
+                                                    let color = color.clone();
+                                                    view! {
+                                                        <span>
+                                                            {if i > 0 { ", " } else { "" }}
+                                                            <PlayerName name=name color=color />
+                                                        </span>
+                                                    }
+                                                }).collect_view())}
                                             </div>
                                         </Show>
                                     </div>
