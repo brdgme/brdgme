@@ -9,7 +9,7 @@
 #
 # Legacy side-by-side mode (LEGACY=1):
 #   Also builds and deploys web-legacy, api, and websocket as Knative Services.
-#   The old React frontend is available at localhost:3001.
+#   Services are accessible via lvh.me domain routing on port 8080.
 #
 # Prerequisites: run scripts/setup-kind-cluster.sh once before `tilt up`.
 
@@ -79,6 +79,7 @@ stringData:
   POSTGRES_USER: brdgme_user
   POSTGRES_PASSWORD: brdgme_password
   POSTGRES_DB: brdgme
+  DATABASE_URL: postgres://brdgme_user:brdgme_password@postgres/brdgme
 """))
 
 if WEB_IN_CLUSTER:
@@ -100,6 +101,18 @@ else:
 k8s_resource("postgres", port_forwards=["5432:5432"])
 k8s_resource("redis", port_forwards=["6379:6379"])
 
+# Run migrations manually. Trigger from the Tilt UI or via:
+#   cd rust/web && sqlx migrate run
+# After running migrations, regenerate SQLx query metadata:
+#   cd rust/web && cargo sqlx prepare -- --features ssr
+local_resource(
+    "migrate",
+    cmd="cd rust/web && sqlx migrate run",
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    auto_init=False,
+    resource_deps=["postgres"],
+)
+
 local_resource(
     "crd-ready",
     cmd="kubectl wait --for=condition=established --timeout=60s crd/gameversions.brdgme.com",
@@ -116,4 +129,6 @@ if LEGACY:
     docker_build("brdgme/websocket", ".", dockerfile="websocket/Dockerfile", target="websocket", only=["websocket/"])
     docker_build("brdgme/api", ".", dockerfile="rust/api/Dockerfile", target="api", only=["rust/"])
     k8s_yaml(kustomize("k8s/dev-legacy"))
-    k8s_resource("web-legacy", port_forwards=["3001:80"])
+    k8s_resource("web-legacy", links=["http://web-legacy.brdgme.lvh.me:8080"])
+    k8s_resource("api", links=["http://api.brdgme.lvh.me:8080"])
+    k8s_resource("websocket", links=["http://websocket.brdgme.lvh.me:8080"])

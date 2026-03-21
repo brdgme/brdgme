@@ -29,7 +29,12 @@ iteration - use only for cluster integration testing.
 LEGACY=1 tilt up
 ```
 
-Also deploys legacy stack (old React frontend at localhost:3001).
+Also deploys legacy stack. Services are accessible via domain-based routing
+through Kourier on port 8080 (all `*.lvh.me` subdomains resolve to 127.0.0.1):
+
+- `http://web-legacy.brdgme.lvh.me:8080` - old React frontend
+- `http://api.brdgme.lvh.me:8080` - old Rocket API
+- `http://websocket.brdgme.lvh.me:8080` - old WebSocket service
 
 ## Hybrid Mode Networking
 
@@ -90,11 +95,56 @@ postgres://brdgme_user:brdgme_password@localhost:5432/brdgme
 Migrations live in `rust/web/migrations/`. SQLx runs them automatically on
 web server startup via `create_pool()`. The operator does not run migrations.
 
+**Backup** (writes to a file inside the pod, then copies it out to avoid kubectl
+streaming issues with large dumps):
+```bash
+kubectl exec -n brdgme postgres-0 -- pg_dump -U brdgme_user -Fc -f /tmp/backup.dump brdgme
+kubectl cp brdgme/postgres-0:/tmp/backup.dump backup.dump
+kubectl exec -n brdgme postgres-0 -- rm /tmp/backup.dump
+```
+
+Verify the dump is complete:
+```bash
+pg_restore --list backup.dump
+```
+
+**Drop and recreate the database** (useful when restoring a backup):
+```bash
+kubectl exec -n brdgme postgres-0 -- psql -U brdgme_user -d postgres \
+  -c "DROP DATABASE IF EXISTS brdgme WITH (FORCE);" \
+  -c "CREATE DATABASE brdgme OWNER brdgme_user;"
+```
+
+**Restore from backup** (copy the file into the pod first - piping binary data
+through `kubectl exec -i` is unreliable and produces "end of file" errors):
+```bash
+kubectl cp backup.dump brdgme/postgres-0:/tmp/restore.dump
+kubectl exec -n brdgme postgres-0 -- pg_restore --no-owner --no-acl \
+  -U brdgme_user -d brdgme /tmp/restore.dump
+kubectl exec -n brdgme postgres-0 -- rm /tmp/restore.dump
+```
+
+After restore, start the web server - SQLx migrations run automatically on
+startup and are additive, so they apply cleanly on top of a restored schema.
+
 ## Game Types in Dev
 
 Game types are populated by the operator reconciling `GameVersion` CRs. If the
 new game page shows no games, check that the `operator` Tilt resource is
 healthy and has logged "Upserting game version" for each game.
+
+## Dev vs Prod Configuration
+
+k8s manifests under `k8s/` reflect how the system runs in production. They are
+not modified for dev convenience. Dev-specific workarounds (port-forwarding,
+local process substitutions) belong in the Tiltfile only.
+
+Knative Services are exposed via Kourier. The Kourier LoadBalancer service is
+patched to NodePort 31080, mapped to host port 8080 via `extraPortMappings` in
+`k8s/kind-config.yaml`. Knative is configured to use `lvh.me` as its base
+domain (`*.lvh.me` resolves to 127.0.0.1 via public DNS), so each service is
+reachable at `{service}.{namespace}.lvh.me:8080` without any `/etc/hosts`
+changes.
 
 ## Tilt Resource Notes
 

@@ -6,7 +6,7 @@ metadata:
   labels:
     app: redis
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
    - port: 6379
   selector:

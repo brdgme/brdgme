@@ -3,6 +3,11 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
   image: kindest/node:v1.34.0
+  extraPortMappings:
+  # Kourier NodePort for domain-based routing (*.brdgme.lvh.me:8080 in dev).
+  - containerPort: 31080
+    hostPort: 8080
+    protocol: TCP
 containerdConfigPatches:
 - |-
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."kind-registry:5000"]
