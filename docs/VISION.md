@@ -95,7 +95,23 @@ game version (currently game services are plain Deployments managed by Tilt).
 - **Serverless runtime**: Knative Serving.
 - **Database**: PostgreSQL.
 - **Message bus**: NATS Core (in-cluster).
-- **Ingress**: Cilium Gateway API, single load balancer.
+- **Ingress**: Kourier (Knative's networking layer), single DO load balancer.
+
+### Domain routing
+
+All services are Knative Services. Routing uses Knative `DomainMapping` to
+assign custom hostnames. Kourier routes by hostname; no separate nginx Ingress
+is needed.
+
+| Domain | Knative Service | Notes |
+|---|---|---|
+| `brdg.me` | `web` | Leptos monolith, always on (minScale: 1) |
+| `legacy.brdg.me` | `web-legacy` | Legacy React frontend, side-by-side only |
+| `api.brdg.me` | `api` | Legacy Rocket API, side-by-side only |
+| `ws.brdg.me` | `websocket` | Legacy Node.js WS, side-by-side only |
+
+Legacy services (`web-legacy`, `api`, `websocket`) are removed after cutover.
+TLS via cert-manager on each `DomainMapping`.
 
 Estimated baseline cost: ~$63/month (3x 2GB nodes + load balancer + PostgreSQL
 storage minimum).

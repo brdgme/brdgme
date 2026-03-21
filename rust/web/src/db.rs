@@ -428,12 +428,13 @@ pub async fn create_game_with_users(
     for (pos, user) in users.iter().enumerate() {
         let color = colors.get(pos).unwrap_or(&"BlueGrey").to_string();
         let is_turn = opts.whose_turn.contains(&pos);
+        let is_eliminated = opts.eliminated.contains(&pos);
         let place = opts.placings.get(pos).map(|&p| p as i32);
-        
+
         sqlx::query!(
             r#"
-            INSERT INTO game_players (game_id, user_id, position, color, has_accepted, is_turn, is_turn_at, place)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
+            INSERT INTO game_players (game_id, user_id, position, color, has_accepted, is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7, false, $8)
             "#,
             game.id,
             user.id,
@@ -441,6 +442,7 @@ pub async fn create_game_with_users(
             color,
             user.id == opts.creator_id,
             is_turn,
+            is_eliminated,
             place
         )
         .execute(&mut *tx)
@@ -712,7 +714,7 @@ pub async fn update_game_command_success(
         let player_points = points.get(pos).copied();
         let is_turn_at = if is_turn { now } else { p.is_turn_at };
         let is_played = p.id == played_player_id;
-        let last_turn_at = if is_played { Some(now) } else { p.last_turn_at };
+        let last_turn_at = if is_played { now } else { p.last_turn_at };
         let undo_game_state: Option<&str> = if is_played && can_undo { Some(prev_game_state) } else { None };
 
         sqlx::query!(

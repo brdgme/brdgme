@@ -45,7 +45,7 @@ for game in [
     "texas-holdem-1",
     "zombie-dice-1",
 ]:
-    docker_build("brdgme/" + game, ".", dockerfile="brdgme-go/Dockerfile", target=game)
+    docker_build("brdgme/" + game, ".", dockerfile="brdgme-go/Dockerfile", target=game, only=["brdgme-go/", "go.mod"])
 
 # Push images to the local Kind registry. The host pushes to localhost:5000
 # (port-mapped from the kind-registry container); manifests reference

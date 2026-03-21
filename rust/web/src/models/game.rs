@@ -78,7 +78,7 @@ pub struct GamePlayer {
     pub is_turn: bool,
     pub is_turn_at: PrimitiveDateTime,
     pub place: Option<i32>,
-    pub last_turn_at: Option<PrimitiveDateTime>,
+    pub last_turn_at: PrimitiveDateTime,
     pub is_eliminated: bool,
     pub is_read: bool,
     pub points: Option<f32>,

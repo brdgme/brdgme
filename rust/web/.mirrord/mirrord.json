@@ -1,0 +1,7 @@
+{
+  "feature": {
+    "network": {
+      "incoming": "off"
+    }
+  }
+}

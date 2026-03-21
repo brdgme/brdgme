@@ -453,8 +453,19 @@ The new Leptos app keeps `brdgme/web`. The old React frontend is renamed to
       and `websocket` as the legacy stack.
 - [ ] Restore `api` and `websocket` manifests to an active kustomization overlay
       alongside the legacy frontend.
-- [ ] Add hostname-based routing to the ingress: primary domain → `web`;
-      legacy subdomain (e.g. `old.brdgme.com`) → `web-legacy` + `api`.
+- [ ] Configure Knative domain to `brdg.me` (patch `config-domain` in
+      `knative-serving`).
+- [ ] Create Knative `DomainMapping` resources (one per service) to assign
+      custom hostnames. All services are already Knative Services, so Kourier
+      routes by hostname automatically:
+      - `brdg.me` → `web`
+      - `legacy.brdg.me` → `web-legacy`
+      - `api.brdg.me` → `api`
+      - `ws.brdg.me` → `websocket`
+- [ ] Remove `k8s/base/ingress/` (nginx Ingress) - Kourier becomes the sole
+      external entry point once DomainMappings are in place.
+- [ ] TLS: cert-manager with certificates on each DomainMapping (Knative
+      `CertificateClass` annotation), or a wildcard `*.brdg.me` cert.
 - [ ] Verify the old React frontend's API base URL is configured to point to
       the `api` service, not `web`.
 
@@ -498,7 +509,7 @@ stack in this order:
 
 ## Development Workflow
 
-Requires a Kind cluster with Cilium and Knative. Run once per workstation:
+Requires a Kind cluster with Knative (Kourier ingress). Run once per workstation:
 
 ```
 bash scripts/setup-kind-cluster.sh
@@ -513,7 +524,10 @@ tilt up
 Deploys backing services (Postgres, Redis, SMTP, game microservices, operator)
 to Kind. Runs `cargo leptos watch` locally via mirrord so the web server can
 resolve cluster-internal DNS (`*.brdgme.svc.cluster.local`) without any
-application changes. Hot-reloading on port 3000.
+application changes. Hot-reloading at `http://localhost:3000`.
+
+Note: in this mode there is no `web` Knative Service in the cluster, so
+`web.brdgme.lvh.me:8080` is not available. Use `localhost:3000` instead.
 
 ### Full Cluster Test
 
