@@ -306,6 +306,17 @@ review before the `leptos` branch replaces production. Full review in
 
 ---
 
+## Bug fixes [Pending - prioritised above Phase 6]
+
+- [ ] **Restart 500 error**: `restart_game` returns "Game service error: error
+      parsing JSON response". Investigate JSON contract mismatch or unreachable
+      game service URI on restart path.
+- [ ] **Concede confirmation**: "Concede" link fires immediately. Add a
+      `window.confirm("Are you sure you want to concede?")` check in the click
+      handler before dispatching the action, matching web-legacy behaviour.
+
+---
+
 ## Phase 6: Redis pub/sub in rust/web [Pending - HIGH PRIORITY]
 
 **Goal:** Replace the in-process `tokio::sync::broadcast` WebSocket fan-out

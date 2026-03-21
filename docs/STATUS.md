@@ -90,9 +90,13 @@ Exhaustively compared `001_initial_schema.sql` against the production schema
 
 ## Immediate next tasks
 
-**Phase 5.6 is complete.** All blockers, endpoints, frontend gaps, and code
-quality items resolved.
+1. **Restart 500 error** - `restart_game` returns "Game service error: error
+   parsing JSON response". Needs investigation; likely a JSON contract mismatch
+   or unreachable game service URI on restart.
+2. **Concede confirmation** - "Concede" link fires immediately with no
+   confirmation. Should show a browser `window.confirm()` dialog first
+   ("Are you sure you want to concede?"), matching web-legacy behaviour.
 
-Next phase: **Phase 6** - Redis pub/sub to replace `tokio::sync::broadcast`.
-This is required for multi-replica correctness and side-by-side validation.
-See PLAN.md Phase 6 for the full task list.
+Next phase after the above: **Phase 6** - Redis pub/sub to replace
+`tokio::sync::broadcast`. Required for multi-replica correctness and
+side-by-side validation. See PLAN.md Phase 6.
