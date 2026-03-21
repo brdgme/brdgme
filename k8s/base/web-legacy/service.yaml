@@ -14,10 +14,3 @@ spec:
           image: brdgme/web-legacy
           ports:
             - containerPort: 80
-          volumeMounts:
-            - name: nginx-conf
-              mountPath: /etc/nginx/conf.d
-      volumes:
-        - name: nginx-conf
-          configMap:
-            name: web-legacy-nginx-conf

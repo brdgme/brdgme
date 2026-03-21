@@ -63,9 +63,13 @@ export function* wsSaga(): IterableIterator<Effect> {
   while (true) {
     try {
       // yield put(WS.connecting());
+      const wsScheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsParts = window.location.hostname.split(".");
+      wsParts[0] = "websocket";
+      const wsPort = window.location.port ? `:${window.location.port}` : "";
       const socket: WebSocket = yield call(
         connect,
-        `ws://${window.location.host}/ws`,
+        `${wsScheme}//${wsParts.join(".")}${wsPort}`,
       );
       const socketClose = call(socketClosePromise, socket);
       // yield put(WS.connected());

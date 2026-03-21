@@ -3,9 +3,18 @@ import * as superagent from "superagent";
 
 import * as Model from "./model";
 
+// Derives the API base URL from the current hostname by replacing the first
+// subdomain with "api". e.g. web-legacy.brdgme.lvh.me:8080 → api.brdgme.lvh.me:8080
+const API_BASE = (() => {
+  const parts = window.location.hostname.split(".");
+  parts[0] = "api";
+  const port = window.location.port ? `:${window.location.port}` : "";
+  return `${window.location.protocol}//${parts.join(".")}${port}`;
+})();
+
 export async function submitLoginEmail(email: string): Promise<{}> {
   return superagent
-    .post(`/api/auth`)
+    .post(`${API_BASE}/auth`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send({ email });
@@ -16,7 +25,7 @@ export async function submitLoginCode(
   code: string,
 ): Promise<string> {
   return superagent
-    .post(`/api/auth/confirm`)
+    .post(`${API_BASE}/auth/confirm`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
     .send({ email, code })
@@ -27,7 +36,7 @@ export async function fetchActiveGames(
   token: string,
 ): Promise<Model.IGameExtended[]> {
   return superagent
-    .get(`/api/game/my_active`)
+    .get(`${API_BASE}/game/my_active`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -39,7 +48,7 @@ export async function fetchGame(
   token?: string,
 ): Promise<Model.IGameExtended> {
   return superagent
-    .get(`/api/game/${id}`)
+    .get(`${API_BASE}/game/${id}`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -52,7 +61,7 @@ export async function submitGameCommand(
   token: string,
 ): Promise<Model.IGameExtended> {
   return superagent
-    .post(`/api/game/${id}/command`)
+    .post(`${API_BASE}/game/${id}/command`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -65,7 +74,7 @@ export async function submitMarkGameRead(
   token: string,
 ): Promise<Model.IGamePlayer> {
   return superagent
-    .post(`/api/game/${id}/mark_read`)
+    .post(`${API_BASE}/game/${id}/mark_read`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -78,7 +87,7 @@ export async function submitGameConcede(
   token: string,
 ): Promise<Model.IGameExtended> {
   return superagent
-    .post(`/api/game/${id}/concede`)
+    .post(`${API_BASE}/game/${id}/concede`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -91,7 +100,7 @@ export async function submitUndo(
   token: string,
 ): Promise<Model.IGameExtended> {
   return superagent
-    .post(`/api/game/${id}/undo`)
+    .post(`${API_BASE}/game/${id}/undo`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -104,7 +113,7 @@ export async function submitRestart(
   token: string,
 ): Promise<Model.IGameExtended> {
   return superagent
-    .post(`/api/game/${id}/restart`)
+    .post(`${API_BASE}/game/${id}/restart`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")
@@ -120,7 +129,7 @@ export interface IInitResponse {
 
 export async function fetchInit(token?: string): Promise<IInitResponse> {
   let req = superagent
-    .get(`/api/init`)
+    .get(`${API_BASE}/init`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json");
   if (token !== undefined) {
@@ -136,7 +145,7 @@ export async function submitNewGame(
   token: string,
 ): Promise<Model.IGameExtended> {
   return superagent
-    .post(`/api/game`)
+    .post(`${API_BASE}/game`)
     .set("Authorization", `Bearer ${token}`)
     .set("Content-Type", "application/json")
     .set("Accept", "application/json")

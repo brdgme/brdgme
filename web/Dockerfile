@@ -12,3 +12,4 @@ RUN npm test
 
 FROM nginx:stable AS web
 COPY --from=web-builder /src/dist /usr/share/nginx/html
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
