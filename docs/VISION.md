@@ -118,12 +118,15 @@ storage minimum).
 
 ## What is Removed
 
-The following legacy services are removed after cutover:
+The following are removed in sequence:
 
+**After legacy decommission (Phase 7):**
 - `rust/api`: Rocket API server (replaced by `rust/web`).
 - `web`: React/Redux/Webpack frontend (replaced by Leptos in `rust/web`).
-- `websocket`: Node.js WebSocket service (replaced by NATS + monolith).
-- Redis: previously required for WebSocket fan-out (replaced by NATS Core).
+- `websocket`: Node.js WebSocket service (replaced by Redis pub/sub + monolith).
+
+**After NATS migration (Phase 8):**
+- Redis: replaced by NATS Core for WebSocket fan-out.
 
 ## Planned Features (Long-Term, Out of Scope for Current Migration)
 

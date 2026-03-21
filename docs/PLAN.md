@@ -307,39 +307,46 @@ review before the `leptos` branch replaces production. Full review in
 
 ---
 
-## Phase 6: NATS Integration [Pending]
+## Phase 6: Redis pub/sub in rust/web [Pending - HIGH PRIORITY]
 
 **Goal:** Replace the in-process `tokio::sync::broadcast` WebSocket fan-out
-with NATS Core pub/sub, enabling the monolith to run as multiple replicas.
-This also unblocks Redis removal.
+with Redis pub/sub. This is a blocker for two things:
 
-### Infrastructure
+1. **Multi-replica correctness** - `tokio::sync::broadcast` is in-process only;
+   a move on replica A never reaches clients connected to replica B.
+2. **Side-by-side validation** - during Phase 7, both `rust/web` and the legacy
+   stack share Redis. Publishing to the same `game.{id}` channels means a move
+   in either system triggers a WebSocket notification for clients on the other.
 
-- [ ] Add NATS Core to the Kind cluster dev environment (Tiltfile + k8s
-      manifests in `k8s/base/nats/`).
-- [ ] Add NATS to the `k8s/base/brdgme/kustomization.yaml` alongside Postgres
-      and Redis.
+Redis is already in the cluster and the legacy API already uses `game.{id}`
+channel naming. NATS replaces Redis in Phase 8, after legacy decommission.
+
+### Channel contract (matches legacy API)
+
+The legacy API publishes to:
+- `game.{game_id}` - public update, broadcast to all players watching a game
+- `user.{user_auth_token_id}` - player-specific update (includes command_spec)
+
+`rust/web` uses session cookies, not bearer tokens, so `user.*` channels are
+not applicable. Publishing to `game.{id}` is sufficient for multi-replica
+fanout and cross-system notifications.
+
+The legacy websocket service forwards raw Redis messages to WebSocket clients.
+`rust/web` clients treat any message on a subscribed channel as a trigger to
+refetch state (they ignore message content). The legacy React frontend may not
+parse `rust/web`-published messages correctly, but legacy users will see correct
+state on next page load. This is acceptable for the validation period.
 
 ### Application changes (`rust/web`)
 
-- [ ] Add `async-nats` to `rust/web/Cargo.toml` under the `ssr` feature.
-- [ ] Replace `GameBroadcaster` in `websocket.rs`: publish game updates to a
-      NATS subject (`game.{id}`) instead of a tokio broadcast channel.
-- [ ] Subscribe each WebSocket handler to the relevant NATS subject and forward
-      messages to the connected client.
-- [ ] Remove the `tokio::sync::broadcast` channel from `AppState` and
-      `GameBroadcaster`.
-- [ ] Remove the `redis` dependency from `Cargo.toml` (was listed but unused).
-
-### Cleanup
-
-- [ ] Remove Redis from `k8s/base/brdgme/kustomization.yaml` and delete
-      `k8s/base/redis/`.
-- [ ] Remove Redis port-forward from the Tiltfile.
-
-**Note:** NATS Core → JetStream upgrade path (for persistent message delivery)
-requires only a config flag change and a volume for persistence. No code change
-needed. Out of scope for this phase.
+- [ ] Add `redis` to `rust/web/Cargo.toml` under the `ssr` feature (or promote
+      the existing unused dependency).
+- [ ] Replace `GameBroadcaster` in `websocket.rs`: publish a message to
+      `game.{id}` via Redis `PUBLISH` instead of tokio broadcast.
+- [ ] Subscribe each WebSocket handler to `game.{id}` via Redis `SUBSCRIBE`
+      and forward messages to the connected client (trigger refetch).
+- [ ] Remove `tokio::sync::broadcast` from `AppState` and `GameBroadcaster`.
+- [ ] Read `REDIS_URL` env var for the Redis connection (matches legacy config).
 
 ---
 
@@ -421,11 +428,13 @@ they can be compared directly before committing to cutover. Legacy services
 (`rust/api`, `web`, `websocket`) are kept alive until `rust/web` is proven in
 production.
 
-Both systems share PostgreSQL and the game microservices. Auth mechanisms are
-different (Bearer token vs session cookie) so each requires a separate login -
-this is acceptable for testing. Real-time WebSocket updates do not cross system
-boundaries (a move in one UI will not push a notification to the other), but
-both UIs show correct state on next page load.
+Both systems share PostgreSQL, Redis, and the game microservices. Auth
+mechanisms are different (Bearer token vs session cookie) so each requires a
+separate login - this is acceptable for testing. Both systems publish to Redis
+`game.{id}` channels (after Phase 6), so a move in either UI triggers a
+WebSocket notification for clients on the other. Legacy clients may not render
+the `rust/web` message payload correctly but will see correct state on next
+page load.
 
 ### Risks
 
@@ -476,10 +485,11 @@ stack in this order:
 
 - [ ] Remove `api`, `websocket`, and `web-legacy` from the kustomization and
       delete their k8s manifests.
-- [ ] Remove Redis (no longer needed once NATS replaces the old WebSocket
-      fan-out path).
 - [ ] Delete `rust/api/`, `web/`, and `websocket/` source directories.
 - [ ] Remove legacy image builds from the Tiltfile.
+
+Redis remains after this step - it is still used by `rust/web`. Removal
+happens in Phase 8.
 
 **Notes (Build & Dev Environment):**
 - Switched to `cargo-binstall` in Dockerfile to avoid `serde` compilation
@@ -504,6 +514,27 @@ stack in this order:
   - Server functions use `use_context::<PgPool>()` instead of Axum state
     extraction.
   - `use_context()` with error handling instead of `expect_context()`.
+
+---
+
+## Phase 8: NATS Migration [Pending]
+
+**Goal:** Replace Redis pub/sub with NATS Core, then remove Redis entirely.
+This phase runs after legacy decommission so there are no cross-system
+compatibility concerns.
+
+- [ ] Add NATS Core to the Kind cluster dev environment (Tiltfile + k8s
+      manifests in `k8s/base/nats/`).
+- [ ] Add NATS to `k8s/base/brdgme/kustomization.yaml`.
+- [ ] Replace Redis `PUBLISH`/`SUBSCRIBE` in `rust/web/src/websocket.rs` with
+      `async-nats` publish/subscribe on the same `game.{id}` subject naming.
+- [ ] Remove the `redis` dependency from `rust/web/Cargo.toml`.
+- [ ] Remove Redis from `k8s/base/brdgme/kustomization.yaml` and delete
+      `k8s/base/redis/`.
+- [ ] Remove Redis port-forward from the Tiltfile.
+
+**Note:** NATS Core → JetStream upgrade path (persistent delivery) requires
+only a config flag change and a volume. No code change needed.
 
 ---
 
