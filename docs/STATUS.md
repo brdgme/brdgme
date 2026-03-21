@@ -8,7 +8,7 @@ Frontend gaps and code quality items remain (see PLAN.md).
 
 ---
 
-## Completed this session (2026-03-21)
+## Completed this session (2026-03-21, continued)
 
 ### Dev environment: Cilium -> Kourier revert
 
@@ -88,14 +88,12 @@ Exhaustively compared `001_initial_schema.sql` against the production schema
 
 ---
 
-## Immediate next tasks (Phase 5.6 frontend gaps)
+## Immediate next tasks (Phase 5.6 remaining)
 
-1. **web-legacy routing** - finish `k8s/base/web-legacy/nginx-configmap.yaml`,
-   `web/src/http.ts`, `web/src/sagas/ws.ts` changes (uncommitted, in progress).
-2. **Game log rendering** - replace `GameLogs` stub with actual log display.
-3. **Undo/concede/restart actions** - wire buttons in `GameMeta`.
-4. **"Whose turn" display** - show specific player name(s) and color.
-5. **Mark-read on game page load** - call `mark_read` when `GamePage` mounts.
-6. **`GameRestarted` WebSocket navigation** - navigate to new game URL on receipt.
-7. **Command input UX** - clear after confirmation, surface errors, clickable suggestions.
-8. **Autocomplete prefix filtering** - add `CommandSpec::suggest()`.
+1. **Dead code removal** - `New*` model structs, `chat.rs`, `friends.rs`,
+   `PublicGameType` alias, `SESSION_AUTH_TOKEN_KEY`, `db::AppState`.
+2. **`reqwest::Client` shared** - create once at startup, store in `AppState`.
+3. **N+1 in `find_active_games_for_user`** - replace loop with joined query.
+4. **Duplicate command logic** - consolidate `game/server.rs` vs `server_fns.rs`.
+5. **WebSocket reconnection** - auto-reconnect on disconnect.
+6. **Phase 6** - Redis pub/sub to replace tokio broadcast.

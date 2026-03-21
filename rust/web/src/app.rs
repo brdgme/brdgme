@@ -37,9 +37,12 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
     
     let (last_update, set_last_update) = signal(0u64);
+    let (game_restarted, set_game_restarted) = signal(None::<(uuid::Uuid, uuid::Uuid)>);
     provide_context(crate::websocket_client::WebSocketTrigger {
         last_update,
         set_last_update,
+        game_restarted,
+        set_game_restarted,
     });
     crate::websocket_client::use_websocket();
 
@@ -376,15 +379,34 @@ fn DashboardPage() -> impl IntoView {
 
 #[component]
 fn GamePage() -> impl IntoView {
-    use crate::game::server_fns::get_game_details;
+    use crate::game::server_fns::{get_game_details, mark_read};
     use crate::components::game::*;
     use std::str::FromStr;
 
     let params = leptos_router::hooks::use_params_map();
     let game_id = move || params.get().get("id").as_deref().and_then(|id| Uuid::from_str(id).ok());
-    
+
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
-    
+
+    // Navigate to new game when GameRestarted arrives for the current game.
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        if let Some((old_id, new_id)) = trigger.game_restarted.get() {
+            if Some(old_id) == game_id() {
+                navigate(&format!("/games/{}", new_id), NavigateOptions::default());
+            }
+        }
+    });
+
+    // Call mark_read on mount and whenever the game ID changes.
+    Effect::new(move |_| {
+        if let Some(id) = game_id() {
+            leptos::task::spawn_local(async move {
+                let _ = mark_read(id).await;
+            });
+        }
+    });
+
     let game_data = Resource::new(
         move || (game_id(), trigger.last_update.get()),
         |(id, _)| async move {
@@ -394,43 +416,47 @@ fn GamePage() -> impl IntoView {
             }
         }
     );
-    
+
     view! {
         <Suspense fallback=move || view! { <MainLayout><div>"Loading game..."</div></MainLayout> }>
-                        {move || {
-                            game_data.get().map(|res| match res {
-                                Ok(data) => {
-                                    let is_my_turn = data.is_my_turn;
-                                    let id = data.id;
-                                    let html = data.html.clone();
-                                    let command_spec = data.command_spec.clone();
-                                    let player_names: Vec<String> = data.players.iter().map(|p| p.name.clone()).collect();
-                                    
-                                    view! {
-                                        <MainLayout is_my_turn=is_my_turn has_sub_menu=true has_next_game=is_my_turn>
-                                            <div class="game-container">
-                                                <div class="game-main">
-                                                    <GameBoard html=html />
-                                                    <RecentGameLogs game_id=id />
-                                                    <Show when=move || is_my_turn>
-                                                        <GameCommandInput 
-                                                            game_id=id 
-                                                            command_spec=command_spec.clone() 
-                                                            player_names=player_names.clone()
-                                                        />
-                                                    </Show>
-                                                    <Show when=move || !is_my_turn>
-                                                        <div class="game-current-turn">
-                                                            <span>"Waiting on opponents..."</span>
-                                                        </div>
-                                                    </Show>
-                                                </div>
-                                                <GameMeta data=data />
+            {move || {
+                game_data.get().map(|res| match res {
+                    Ok(data) => {
+                        let is_my_turn = data.is_my_turn;
+                        let is_finished = data.is_finished;
+                        let id = data.id;
+                        let html = data.html.clone();
+                        let command_spec = data.command_spec.clone();
+                        let player_names: Vec<String> = data.players.iter().map(|p| p.name.clone()).collect();
+                        let waiting_on: Vec<String> = data.players.iter()
+                            .filter(|p| p.is_turn)
+                            .map(|p| p.name.clone())
+                            .collect();
+
+                        view! {
+                            <MainLayout is_my_turn=is_my_turn has_sub_menu=true has_next_game=is_my_turn>
+                                <div class="game-container">
+                                    <div class="game-main">
+                                        <GameBoard html=html />
+                                        <RecentGameLogs game_id=id />
+                                        <Show when=move || is_my_turn>
+                                            <GameCommandInput
+                                                game_id=id
+                                                command_spec=command_spec.clone()
+                                                player_names=player_names.clone()
+                                            />
+                                        </Show>
+                                        <Show when=move || !is_my_turn && !is_finished>
+                                            <div class="game-current-turn">
+                                                <span>"Waiting on: " {waiting_on.join(", ")}</span>
                                             </div>
-                                        </MainLayout>
-                                    }.into_any()
-                                },
-            
+                                        </Show>
+                                    </div>
+                                    <GameMeta data=data />
+                                </div>
+                            </MainLayout>
+                        }.into_any()
+                    },
                     Err(e) => view! { <MainLayout><div class="error">"Error: " {e.to_string()}</div></MainLayout> }.into_any(),
                 })
             }}

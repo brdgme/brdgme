@@ -1,5 +1,6 @@
 use leptos::prelude::*;
-use crate::game::server_fns::{GameViewData, PlayerViewData, SubmitCommand};
+use leptos_router::{hooks::use_navigate, NavigateOptions};
+use crate::game::server_fns::{GameViewData, PlayerViewData, SubmitCommand, UndoGame, ConcedeGame, RestartGame};
 use uuid::Uuid;
 
 #[component]
@@ -12,6 +13,23 @@ pub fn GameBoard(html: String) -> impl IntoView {
 #[component]
 pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let game_id = data.id;
+    let can_undo = data.can_undo;
+    let is_finished = data.is_finished;
+    let is_2player = data.is_2player;
+    let can_restart = is_finished && data.restarted_game_id.is_none();
+
+    let undo_action = ServerAction::<UndoGame>::new();
+    let concede_action = ServerAction::<ConcedeGame>::new();
+    let restart_action = ServerAction::<RestartGame>::new();
+
+    // Navigate to new game after restart.
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        if let Some(Ok(new_id)) = restart_action.value().get() {
+            navigate(&format!("/games/{}", new_id), NavigateOptions::default());
+        }
+    });
+
     view! {
         <div class="game-meta">
             <div class="game-meta-main">
@@ -22,7 +40,30 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                     }).collect_view()}
                     <div class="game-actions">
                         <h3>"Actions"</h3>
-                        <div><a>"Concede"</a></div>
+                        <Show when=move || can_undo>
+                            <div>
+                                <a href="#" on:click=move |ev| {
+                                    ev.prevent_default();
+                                    undo_action.dispatch(UndoGame { game_id });
+                                }>"Undo"</a>
+                            </div>
+                        </Show>
+                        <Show when=move || !is_finished && is_2player>
+                            <div>
+                                <a href="#" on:click=move |ev| {
+                                    ev.prevent_default();
+                                    concede_action.dispatch(ConcedeGame { game_id });
+                                }>"Concede"</a>
+                            </div>
+                        </Show>
+                        <Show when=move || can_restart>
+                            <div>
+                                <a href="#" on:click=move |ev| {
+                                    ev.prevent_default();
+                                    restart_action.dispatch(RestartGame { game_id });
+                                }>"Restart"</a>
+                            </div>
+                        </Show>
                     </div>
                 </div>
             </div>

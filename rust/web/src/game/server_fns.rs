@@ -25,6 +25,10 @@ pub struct GameViewData {
     pub version_name: String,
     pub html: String,
     pub is_my_turn: bool,
+    pub is_finished: bool,
+    pub can_undo: bool,
+    pub restarted_game_id: Option<Uuid>,
+    pub is_2player: bool,
     pub players: Vec<PlayerViewData>,
     pub command_spec: Option<brdgme_game::command::Spec>,
 }
@@ -158,11 +162,15 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             version_name: ge.game_version.name,
             html,
             is_my_turn: player.map(|p| p.game_player.is_turn).unwrap_or(false),
+            is_finished: ge.game.is_finished,
+            can_undo: player.and_then(|p| p.game_player.undo_game_state.as_ref()).is_some(),
+            restarted_game_id: ge.game.restarted_game_id,
+            is_2player: ge.game_players.len() == 2,
             players: ge.game_players.iter().map(|p| PlayerViewData {
                 name: p.user.name.clone(),
                 color: p.game_player.color.clone(),
                 rating: p.game_type_user.rating,
-                points: 0.0, // TODO: add points to db
+                points: 0.0,
                 is_turn: p.game_player.is_turn,
             }).collect(),
             command_spec: render_resp.command_spec,
@@ -393,6 +401,199 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
         }).collect();
 
         Ok(entries)
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(MarkRead, "/api")]
+pub async fn mark_read(game_id: Uuid) -> Result<(), ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use crate::auth::server::get_current_user;
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        crate::db::mark_game_read(&pool, game_id, user.id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(UndoGame, "/api")]
+pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use crate::auth::server::get_current_user;
+        use crate::game::client;
+        use crate::websocket::{GameBroadcaster, WebSocketMessage};
+        use brdgme_cmd::api::{Request, Response};
+        use brdgme_game::Status;
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let broadcaster = use_context::<GameBroadcaster>()
+            .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
+        let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        let ge = crate::db::find_game_extended(&pool, game_id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+            .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+        let player = ge.game_players.iter().find(|p| p.user.id == user.id)
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
+
+        let undo_state = player.game_player.undo_game_state.clone()
+            .ok_or_else(|| ServerFnError::new("No undo state available"))?;
+
+        let resp = client::request(&ge.game_version.uri, &Request::Status { game: undo_state.clone() }).await
+            .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
+
+        let game_response = match resp {
+            Response::Status { game, .. } => game,
+            _ => return Err(ServerFnError::new("Unexpected response from game service")),
+        };
+
+        let (whose_turn, eliminated, placings) = match game_response.status {
+            Status::Active { whose_turn, eliminated } => (whose_turn, eliminated, vec![]),
+            Status::Finished { placings, .. } => (vec![], vec![], placings),
+        };
+
+        crate::db::undo_game(&pool, game_id, &undo_state, &whose_turn, &eliminated, &placings).await
+            .map_err(|e| ServerFnError::new(format!("Failed to undo game: {}", e)))?;
+
+        broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id });
+        Ok(())
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(ConcedeGame, "/api")]
+pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use crate::auth::server::get_current_user;
+        use crate::websocket::{GameBroadcaster, WebSocketMessage};
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let broadcaster = use_context::<GameBroadcaster>()
+            .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
+        let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        let ge = crate::db::find_game_extended(&pool, game_id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+            .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+        if ge.game.is_finished {
+            return Err(ServerFnError::new("Game is already finished"));
+        }
+        if ge.game_players.len() != 2 {
+            return Err(ServerFnError::new("Concede is only available in 2-player games"));
+        }
+
+        let player = ge.game_players.iter().find(|p| p.user.id == user.id)
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
+
+        crate::db::concede_game(&pool, game_id, player.game_player.id, &player.user.name).await
+            .map_err(|e| ServerFnError::new(format!("Failed to concede game: {}", e)))?;
+
+        broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id });
+        Ok(())
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(RestartGame, "/api")]
+pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use crate::auth::server::get_current_user;
+        use crate::game::client;
+        use crate::websocket::{GameBroadcaster, WebSocketMessage};
+        use crate::db::CreateGameOpts;
+        use brdgme_cmd::api::{Request, Response};
+        use brdgme_game::Status;
+        use leptos::prelude::*;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let broadcaster = use_context::<GameBroadcaster>()
+            .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
+        let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        let ge = crate::db::find_game_extended(&pool, game_id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+            .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+        if !ge.game.is_finished {
+            return Err(ServerFnError::new("Game is not finished"));
+        }
+        if ge.game.restarted_game_id.is_some() {
+            return Err(ServerFnError::new("Game has already been restarted"));
+        }
+        if !ge.game_players.iter().any(|p| p.user.id == user.id) {
+            return Err(ServerFnError::new("You are not a player in this game"));
+        }
+
+        let player_count = ge.game_players.len();
+        let resp = client::request(&ge.game_version.uri, &Request::New { players: player_count }).await
+            .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
+
+        let (game_info, logs, _public_render, _player_renders) = match resp {
+            Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
+            _ => return Err(ServerFnError::new("Unexpected response from game service")),
+        };
+
+        let (whose_turn, eliminated, placings) = match game_info.status {
+            Status::Active { whose_turn, eliminated } => (whose_turn, eliminated, vec![]),
+            Status::Finished { placings, .. } => (vec![], vec![], placings),
+        };
+
+        let opponent_ids: Vec<Uuid> = ge.game_players.iter()
+            .filter(|p| p.user.id != user.id)
+            .map(|p| p.user.id)
+            .collect();
+
+        let new_game = crate::db::create_game_with_users(&pool, CreateGameOpts {
+            game_version_id: ge.game.game_version_id,
+            whose_turn: &whose_turn,
+            eliminated: &eliminated,
+            placings: &placings,
+            points: &game_info.points,
+            creator_id: user.id,
+            opponent_ids: &opponent_ids,
+            opponent_emails: &[],
+            chat_id: None,
+            game_state: &game_info.state,
+        }).await.map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
+
+        crate::db::create_game_logs(&pool, new_game.id, logs).await
+            .map_err(|e| ServerFnError::new(format!("Failed to create game logs: {}", e)))?;
+
+        sqlx::query!(
+            "UPDATE games SET restarted_game_id = $1, updated_at = NOW() WHERE id = $2",
+            new_game.id,
+            game_id
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+        broadcaster.broadcast(WebSocketMessage::GameRestarted { game_id, restarted_game_id: new_game.id });
+        Ok(new_game.id)
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!()

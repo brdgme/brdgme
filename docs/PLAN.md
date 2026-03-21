@@ -259,29 +259,27 @@ review before the `leptos` branch replaces production. Full review in
 - [x] **New-game creation UI** (`app.rs`, `GamesPage`): Game type selector,
       optional version selector, player count selector, opponent email inputs,
       submit → redirect to new game.
-- [ ] **Game log rendering** (`components/game.rs`): Replace `GameLogs` stub
-      with actual log display: fetch logs, render markup to HTML, group by
+- [x] **Game log rendering** (`components/game.rs`): `GameLogs` and
+      `RecentGameLogs` components fetch logs, render markup to HTML, group by
       10-minute windows, filter to logs since `last_turn_at`.
-- [ ] **Undo/concede/restart actions in `GameMeta`**: Wire the "Concede" anchor
-      and add "Undo" and "Restart" links with correct visibility conditions
-      (`can_undo`, game finished, `restarted_game_id` absent).
-- [ ] **"Whose turn" display** (`app.rs`): Replace generic "Waiting on
-      opponents..." with the specific player name(s) and color.
-- [ ] **Mark-read on game page load** (`app.rs`): Call `mark_read` when
-      `GamePage` mounts and when the game ID changes.
-- [ ] **`GameRestarted` WebSocket navigation** (`websocket_client.rs`): On
-      receipt of `GameRestarted`, navigate to the new game URL rather than
-      just incrementing the trigger counter.
-- [ ] **Command input: clear after server confirms** (`components/game.rs`):
-      Move `set_command("")` to run after `submit_action` succeeds, not before.
-- [ ] **Command errors surfaced to user** (`components/game.rs`): Observe
-      `submit_action` result and display errors.
-- [ ] **Clickable command suggestions** (`components/game.rs`): Clicking a
-      suggestion appends it to the command input.
-- [ ] **Autocomplete prefix filtering** (`rust/lib/game`): Add
-      `CommandSpec::suggest(input, names) -> Vec<String>` with prefix-aware
-      `Token` filtering. Do not change `parse()`. Update `GameCommandInput` to
-      call `suggest` instead of using `expected` from parse errors.
+- [x] **Undo/concede/restart actions in `GameMeta`**: `UndoGame`,
+      `ConcedeGame`, `RestartGame` server functions wired; visibility
+      conditions enforced (`can_undo`, `is_finished`, `restarted_game_id`).
+- [x] **"Whose turn" display** (`app.rs`): Shows specific player names
+      from `players` filtered by `is_turn`.
+- [x] **Mark-read on game page load** (`app.rs`): `mark_read` called via
+      `Effect` on mount and game ID change.
+- [x] **`GameRestarted` WebSocket navigation** (`websocket_client.rs`):
+      `WebSocketTrigger` extended with `game_restarted` signal; `GamePage`
+      navigates to new game URL on receipt.
+- [x] **Command input: clear after server confirms** (`components/game.rs`):
+      `Effect` runs `set_command("")` after `submit_action` succeeds.
+- [x] **Command errors surfaced to user** (`components/game.rs`): `error_msg`
+      memo observes `submit_action` result and displays errors.
+- [x] **Clickable command suggestions** (`components/game.rs`): Click handler
+      appends suggestion value to command input.
+- [x] **Autocomplete prefix filtering** (`rust/lib/game`): `CommandSpec::suggest`
+      called from `GameCommandInput`.
 
 ### Code quality (non-blocking)
 
