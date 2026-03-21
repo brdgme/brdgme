@@ -1,10 +1,12 @@
--- Initial schema migration for board game platform
--- This migration is idempotent and safe to run on existing databases
+-- Initial schema migration - exact replication of production schema as of 2026-03-21.
+-- All statements are idempotent and safe to run on an existing production database.
+-- Diesel ORM artifacts (diesel_set_updated_at, diesel_manage_updated_at, set_updated_at
+-- triggers) are removed in favour of the standard update_updated_at() trigger pattern.
 
--- Create extensions
+-- Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Create types
+-- Types
 DO $$ BEGIN
     CREATE TYPE public.color AS ENUM (
         'Green',
@@ -19,33 +21,62 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
--- Create functions for updated_at triggers
-CREATE OR REPLACE FUNCTION public.diesel_set_updated_at() RETURNS trigger
+-- Functions
+CREATE OR REPLACE FUNCTION public.update_updated_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    IF (
-        NEW IS DISTINCT FROM OLD AND
-        NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at
-    ) THEN
-        NEW.updated_at := current_timestamp;
-    END IF;
+    NEW.updated_at = now() AT TIME ZONE 'utc';
     RETURN NEW;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.diesel_manage_updated_at(_tbl regclass) RETURNS void
+CREATE OR REPLACE FUNCTION public.update_finished_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    EXECUTE format('CREATE TRIGGER set_updated_at BEFORE UPDATE ON %s
-                    FOR EACH ROW EXECUTE PROCEDURE diesel_set_updated_at()', _tbl);
-EXCEPTION
-    WHEN duplicate_object THEN null;
+    NEW.finished_at = now() AT TIME ZONE 'utc';
+    RETURN NEW;
 END;
 $$;
 
--- Create tables
+CREATE OR REPLACE FUNCTION public.update_is_turn_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.is_turn_at = now() AT TIME ZONE 'utc';
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.update_last_turn_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.last_turn_at = now() AT TIME ZONE 'utc';
+    RETURN NEW;
+END;
+$$;
+
+-- Remove Diesel ORM artifacts
+DROP TRIGGER IF EXISTS set_updated_at ON public.users;
+DROP TRIGGER IF EXISTS set_updated_at ON public.user_emails;
+DROP TRIGGER IF EXISTS set_updated_at ON public.user_auth_tokens;
+DROP TRIGGER IF EXISTS set_updated_at ON public.friends;
+DROP TRIGGER IF EXISTS set_updated_at ON public.chats;
+DROP TRIGGER IF EXISTS set_updated_at ON public.chat_users;
+DROP TRIGGER IF EXISTS set_updated_at ON public.chat_messages;
+DROP TRIGGER IF EXISTS set_updated_at ON public.game_types;
+DROP TRIGGER IF EXISTS set_updated_at ON public.game_type_users;
+DROP TRIGGER IF EXISTS set_updated_at ON public.game_versions;
+DROP TRIGGER IF EXISTS set_updated_at ON public.games;
+DROP TRIGGER IF EXISTS set_updated_at ON public.game_players;
+DROP TRIGGER IF EXISTS set_updated_at ON public.game_logs;
+DROP TRIGGER IF EXISTS set_updated_at ON public.game_log_targets;
+DROP FUNCTION IF EXISTS public.diesel_manage_updated_at(regclass);
+DROP FUNCTION IF EXISTS public.diesel_set_updated_at();
+
+-- Tables
 
 CREATE TABLE IF NOT EXISTS public.users (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
@@ -160,7 +191,13 @@ CREATE TABLE IF NOT EXISTS public.game_players (
     has_accepted boolean NOT NULL,
     is_turn boolean NOT NULL,
     is_turn_at timestamp without time zone NOT NULL,
-    place integer
+    last_turn_at timestamp without time zone NOT NULL,
+    is_eliminated boolean NOT NULL,
+    is_read boolean NOT NULL,
+    points real,
+    undo_game_state text,
+    place integer,
+    rating_change integer
 );
 
 CREATE TABLE IF NOT EXISTS public.game_logs (
@@ -181,194 +218,157 @@ CREATE TABLE IF NOT EXISTS public.game_log_targets (
     game_player_id uuid NOT NULL
 );
 
--- Add primary keys if they don't exist
+-- Primary key constraints
 DO $$
 BEGIN
-    -- Users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_pkey') THEN
         ALTER TABLE ONLY public.users ADD CONSTRAINT users_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- User emails
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_emails_pkey') THEN
         ALTER TABLE ONLY public.user_emails ADD CONSTRAINT user_emails_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- User auth tokens
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_auth_tokens_pkey') THEN
         ALTER TABLE ONLY public.user_auth_tokens ADD CONSTRAINT user_auth_tokens_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Friends
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'friends_pkey') THEN
         ALTER TABLE ONLY public.friends ADD CONSTRAINT friends_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Chats
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chats_pkey') THEN
         ALTER TABLE ONLY public.chats ADD CONSTRAINT chats_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Chat users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_users_pkey') THEN
         ALTER TABLE ONLY public.chat_users ADD CONSTRAINT chat_users_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Chat messages
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_messages_pkey') THEN
         ALTER TABLE ONLY public.chat_messages ADD CONSTRAINT chat_messages_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Game types
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_types_pkey') THEN
         ALTER TABLE ONLY public.game_types ADD CONSTRAINT game_types_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Game type users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_type_users_pkey') THEN
         ALTER TABLE ONLY public.game_type_users ADD CONSTRAINT game_type_users_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Game versions
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_versions_pkey') THEN
         ALTER TABLE ONLY public.game_versions ADD CONSTRAINT game_versions_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Games
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'games_pkey') THEN
         ALTER TABLE ONLY public.games ADD CONSTRAINT games_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Game players
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_players_pkey') THEN
         ALTER TABLE ONLY public.game_players ADD CONSTRAINT game_players_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Game logs
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_logs_pkey') THEN
         ALTER TABLE ONLY public.game_logs ADD CONSTRAINT game_logs_pkey PRIMARY KEY (id);
     END IF;
-    
-    -- Game log targets
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_log_targets_pkey') THEN
         ALTER TABLE ONLY public.game_log_targets ADD CONSTRAINT game_log_targets_pkey PRIMARY KEY (id);
     END IF;
 END$$;
 
--- Add foreign key constraints if they don't exist
+-- Unique constraints
 DO $$
 BEGIN
-    -- User emails -> users
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_name_key') THEN
+        ALTER TABLE ONLY public.users ADD CONSTRAINT users_name_key UNIQUE (name);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_emails_email_key') THEN
+        ALTER TABLE ONLY public.user_emails ADD CONSTRAINT user_emails_email_key UNIQUE (email);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_type_users_game_type_id_user_id_key') THEN
+        ALTER TABLE ONLY public.game_type_users ADD CONSTRAINT game_type_users_game_type_id_user_id_key UNIQUE (game_type_id, user_id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_versions_game_type_id_name_key') THEN
+        ALTER TABLE ONLY public.game_versions ADD CONSTRAINT game_versions_game_type_id_name_key UNIQUE (game_type_id, name);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_players_game_id_color_key') THEN
+        ALTER TABLE ONLY public.game_players ADD CONSTRAINT game_players_game_id_color_key UNIQUE (game_id, color);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_players_game_id_position_key') THEN
+        ALTER TABLE ONLY public.game_players ADD CONSTRAINT game_players_game_id_position_key UNIQUE (game_id, "position");
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_players_game_id_user_id_key') THEN
+        ALTER TABLE ONLY public.game_players ADD CONSTRAINT game_players_game_id_user_id_key UNIQUE (game_id, user_id);
+    END IF;
+END$$;
+
+-- Foreign key constraints
+DO $$
+BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_emails_user_id_fkey') THEN
         ALTER TABLE ONLY public.user_emails
             ADD CONSTRAINT user_emails_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
     END IF;
-    
-    -- User auth tokens -> users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_auth_tokens_user_id_fkey') THEN
         ALTER TABLE ONLY public.user_auth_tokens
             ADD CONSTRAINT user_auth_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
     END IF;
-    
-    -- Friends -> users (source)
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'friends_source_user_id_fkey') THEN
         ALTER TABLE ONLY public.friends
             ADD CONSTRAINT friends_source_user_id_fkey FOREIGN KEY (source_user_id) REFERENCES public.users(id);
     END IF;
-    
-    -- Friends -> users (target)
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'friends_target_user_id_fkey') THEN
         ALTER TABLE ONLY public.friends
             ADD CONSTRAINT friends_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id);
     END IF;
-    
-    -- Chat users -> chats
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_users_chat_id_fkey') THEN
         ALTER TABLE ONLY public.chat_users
             ADD CONSTRAINT chat_users_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id);
     END IF;
-    
-    -- Chat users -> users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_users_user_id_fkey') THEN
         ALTER TABLE ONLY public.chat_users
             ADD CONSTRAINT chat_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
     END IF;
-    
-    -- Chat messages -> chat users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_messages_chat_user_id_fkey') THEN
         ALTER TABLE ONLY public.chat_messages
             ADD CONSTRAINT chat_messages_chat_user_id_fkey FOREIGN KEY (chat_user_id) REFERENCES public.chat_users(id);
     END IF;
-    
-    -- Game type users -> game types
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_type_users_game_type_id_fkey') THEN
         ALTER TABLE ONLY public.game_type_users
             ADD CONSTRAINT game_type_users_game_type_id_fkey FOREIGN KEY (game_type_id) REFERENCES public.game_types(id);
     END IF;
-    
-    -- Game type users -> users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_type_users_user_id_fkey') THEN
         ALTER TABLE ONLY public.game_type_users
             ADD CONSTRAINT game_type_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
     END IF;
-    
-    -- Game versions -> game types
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_versions_game_type_id_fkey') THEN
         ALTER TABLE ONLY public.game_versions
             ADD CONSTRAINT game_versions_game_type_id_fkey FOREIGN KEY (game_type_id) REFERENCES public.game_types(id);
     END IF;
-    
-    -- Games -> game versions
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'games_game_version_id_fkey') THEN
         ALTER TABLE ONLY public.games
             ADD CONSTRAINT games_game_version_id_fkey FOREIGN KEY (game_version_id) REFERENCES public.game_versions(id);
     END IF;
-    
-    -- Games -> chats
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'games_chat_id_fkey') THEN
         ALTER TABLE ONLY public.games
             ADD CONSTRAINT games_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id);
     END IF;
-    
-    -- Games -> games (restarted)
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'games_restarted_game_id_fkey') THEN
         ALTER TABLE ONLY public.games
             ADD CONSTRAINT games_restarted_game_id_fkey FOREIGN KEY (restarted_game_id) REFERENCES public.games(id);
     END IF;
-    
-    -- Game players -> games
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_players_game_id_fkey') THEN
         ALTER TABLE ONLY public.game_players
             ADD CONSTRAINT game_players_game_id_fkey FOREIGN KEY (game_id) REFERENCES public.games(id);
     END IF;
-    
-    -- Game players -> users
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_players_user_id_fkey') THEN
         ALTER TABLE ONLY public.game_players
             ADD CONSTRAINT game_players_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
     END IF;
-    
-    -- Game logs -> games
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_logs_game_id_fkey') THEN
         ALTER TABLE ONLY public.game_logs
             ADD CONSTRAINT game_logs_game_id_fkey FOREIGN KEY (game_id) REFERENCES public.games(id);
     END IF;
-    
-    -- Game log targets -> game logs
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_log_targets_game_log_id_fkey') THEN
         ALTER TABLE ONLY public.game_log_targets
             ADD CONSTRAINT game_log_targets_game_log_id_fkey FOREIGN KEY (game_log_id) REFERENCES public.game_logs(id);
     END IF;
-    
-    -- Game log targets -> game players
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'game_log_targets_game_player_id_fkey') THEN
         ALTER TABLE ONLY public.game_log_targets
             ADD CONSTRAINT game_log_targets_game_player_id_fkey FOREIGN KEY (game_player_id) REFERENCES public.game_players(id);
     END IF;
 END$$;
 
--- Create indexes if they don't exist
-CREATE INDEX IF NOT EXISTS idx_user_emails_email ON public.user_emails(email);
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_user_emails_user_id ON public.user_emails(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_auth_tokens_user_id ON public.user_auth_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_friends_source_user_id ON public.friends(source_user_id);
@@ -388,18 +388,77 @@ CREATE INDEX IF NOT EXISTS idx_game_logs_game_id ON public.game_logs(game_id);
 CREATE INDEX IF NOT EXISTS idx_game_log_targets_game_log_id ON public.game_log_targets(game_log_id);
 CREATE INDEX IF NOT EXISTS idx_game_log_targets_game_player_id ON public.game_log_targets(game_player_id);
 
--- Set up triggers for updated_at columns
-SELECT public.diesel_manage_updated_at('public.users');
-SELECT public.diesel_manage_updated_at('public.user_emails');
-SELECT public.diesel_manage_updated_at('public.user_auth_tokens');
-SELECT public.diesel_manage_updated_at('public.friends');
-SELECT public.diesel_manage_updated_at('public.chats');
-SELECT public.diesel_manage_updated_at('public.chat_users');
-SELECT public.diesel_manage_updated_at('public.chat_messages');
-SELECT public.diesel_manage_updated_at('public.game_types');
-SELECT public.diesel_manage_updated_at('public.game_type_users');
-SELECT public.diesel_manage_updated_at('public.game_versions');
-SELECT public.diesel_manage_updated_at('public.games');
-SELECT public.diesel_manage_updated_at('public.game_players');
-SELECT public.diesel_manage_updated_at('public.game_logs');
-SELECT public.diesel_manage_updated_at('public.game_log_targets');
+-- Triggers
+CREATE OR REPLACE TRIGGER update_users_updated_at
+    BEFORE UPDATE ON public.users
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_user_emails_updated_at
+    BEFORE UPDATE ON public.user_emails
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_user_auth_tokens_updated_at
+    BEFORE UPDATE ON public.user_auth_tokens
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_friends_updated_at
+    BEFORE UPDATE ON public.friends
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_chats_updated_at
+    BEFORE UPDATE ON public.chats
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_chat_users_updated_at
+    BEFORE UPDATE ON public.chat_users
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_chat_messages_updated_at
+    BEFORE UPDATE ON public.chat_messages
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_game_types_updated_at
+    BEFORE UPDATE ON public.game_types
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_game_type_users_updated_at
+    BEFORE UPDATE ON public.game_type_users
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_game_versions_updated_at
+    BEFORE UPDATE ON public.game_versions
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_games_updated_at
+    BEFORE UPDATE ON public.games
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_game_players_updated_at
+    BEFORE UPDATE ON public.game_players
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_game_logs_updated_at
+    BEFORE UPDATE ON public.game_logs
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_game_log_targets_updated_at
+    BEFORE UPDATE ON public.game_log_targets
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_finished_at
+    BEFORE UPDATE ON public.games
+    FOR EACH ROW
+    WHEN ((old.is_finished = false) AND (new.is_finished = true))
+    EXECUTE FUNCTION public.update_finished_at();
+
+CREATE OR REPLACE TRIGGER update_is_turn_at
+    BEFORE UPDATE ON public.game_players
+    FOR EACH ROW
+    WHEN ((old.is_turn = false) AND (new.is_turn = true))
+    EXECUTE FUNCTION public.update_is_turn_at();
+
+CREATE OR REPLACE TRIGGER update_last_turn_at
+    BEFORE UPDATE ON public.game_players
+    FOR EACH ROW
+    WHEN ((old.is_turn = true) AND (new.is_turn = false))
+    EXECUTE FUNCTION public.update_last_turn_at();

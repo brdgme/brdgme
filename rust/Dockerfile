@@ -45,6 +45,19 @@ ENV SQLX_OFFLINE=true
 WORKDIR /app/web
 RUN cargo leptos build --release
 
+# --- Builder for migrate ---
+FROM chef AS migrate-builder
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-gnu.tgz | tar -xvz \
+    && mv cargo-binstall /usr/local/cargo/bin/cargo-binstall
+RUN cargo binstall sqlx-cli --no-confirm
+
+# --- Final Stage for migrate ---
+FROM debian:bookworm-slim AS migrate
+RUN apt-get -y update && apt-get install -y --no-install-recommends libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=migrate-builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
+COPY rust/web/migrations /migrations
+CMD ["sqlx", "migrate", "run", "--source", "/migrations"]
+
 # --- Final Stage for Web ---
 FROM debian:bookworm-slim AS web
 RUN apt-get -y update && apt-get install -y --no-install-recommends libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*

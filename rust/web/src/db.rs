@@ -14,9 +14,6 @@ pub async fn create_pool() -> Result<PgPool> {
 
     let pool = PgPool::connect(&database_url).await?;
 
-    // Run migrations (will skip existing tables)
-    sqlx::migrate!("./migrations").run(&pool).await?;
-
     Ok(pool)
 }
 
