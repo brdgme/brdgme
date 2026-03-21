@@ -92,8 +92,17 @@ Connection string (also in `devenv.nix` as `DATABASE_URL`):
 postgres://brdgme_user:brdgme_password@localhost:5432/brdgme
 ```
 
-Migrations live in `rust/web/migrations/`. SQLx runs them automatically on
-web server startup via `create_pool()`. The operator does not run migrations.
+Migrations live in `rust/web/migrations/`. They are NOT run automatically on
+startup. Run them manually via the Tilt UI (`migrate` resource) or:
+
+```bash
+cd rust/web && sqlx migrate run
+```
+
+The operator does not run migrations.
+
+In production, migrations run as a pre-sync ArgoCD Job (`k8s/base/web/migrate-job.yaml`)
+before the new web deployment rolls out.
 
 **Backup** (writes to a file inside the pod, then copies it out to avoid kubectl
 streaming issues with large dumps):
@@ -124,8 +133,12 @@ kubectl exec -n brdgme postgres-0 -- pg_restore --no-owner --no-acl \
 kubectl exec -n brdgme postgres-0 -- rm /tmp/restore.dump
 ```
 
-After restore, start the web server - SQLx migrations run automatically on
-startup and are additive, so they apply cleanly on top of a restored schema.
+After restore, run migrations before starting the web server:
+```bash
+cd rust/web && sqlx migrate run
+```
+Migrations are idempotent and additive - safe to run on top of a restored
+production schema.
 
 ## Game Types in Dev
 

@@ -24,7 +24,7 @@ RUN cargo build --release --workspace --exclude web
 # --- Builder for Web (Leptos) ---
 FROM chef AS web-builder
 # Install Web Tools (Sass, binstall, cargo-leptos, wasm target)
-RUN curl -L https://github.com/sass/dart-sass/releases/download/1.77.8/dart-sass-1.77.8-linux-x64.tar.gz | tar -xz \
+RUN curl -L https://github.com/sass/dart-sass/releases/download/1.97.3/dart-sass-1.97.3-linux-x64.tar.gz | tar -xz \
     && mv dart-sass /usr/local/lib/dart-sass \
     && ln -s /usr/local/lib/dart-sass/sass /usr/local/bin/sass \
     && chmod +x /usr/local/bin/sass
@@ -32,7 +32,8 @@ RUN curl -L https://github.com/sass/dart-sass/releases/download/1.77.8/dart-sass
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-gnu.tgz | tar -xvz \
     && mv cargo-binstall /usr/local/cargo/bin/cargo-binstall
 
-RUN cargo binstall cargo-leptos --version 0.2.42 -y
+RUN cargo binstall cargo-leptos --version 0.3.5 -y
+RUN cargo binstall wasm-bindgen-cli --version 0.2.108 -y
 RUN rustup target add wasm32-unknown-unknown
 
 COPY --from=planner /app/recipe.json recipe.json
@@ -49,7 +50,7 @@ RUN cargo leptos build --release
 FROM chef AS migrate-builder
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-gnu.tgz | tar -xvz \
     && mv cargo-binstall /usr/local/cargo/bin/cargo-binstall
-RUN cargo binstall sqlx-cli --no-confirm
+RUN cargo binstall sqlx-cli --version 0.8.6 --no-confirm
 
 # --- Final Stage for migrate ---
 FROM debian:bookworm-slim AS migrate

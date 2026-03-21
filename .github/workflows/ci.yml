@@ -33,6 +33,8 @@ jobs:
           file: brdgme-go/Dockerfile
           target: go-test
           push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   build-web:
     needs: [test-rust]
@@ -73,9 +75,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        game: [acquire-1, lost-cities-1, lost-cities-2]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -86,9 +85,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
-        id: meta
+        id: meta-acquire-1
         with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/${{ matrix.game }}
+          images: ghcr.io/${{ github.repository_owner }}/brdgme/acquire-1
           tags: |
             type=sha
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
@@ -96,10 +95,44 @@ jobs:
         with:
           context: .
           file: rust/Dockerfile
-          target: ${{ matrix.game }}
+          target: acquire-1
           push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-acquire-1.outputs.tags }}
+          labels: ${{ steps.meta-acquire-1.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/metadata-action@v5
+        id: meta-lost-cities-1
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/brdgme/lost-cities-1
+          tags: |
+            type=sha
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: rust/Dockerfile
+          target: lost-cities-1
+          push: ${{ github.ref == 'refs/heads/master' }}
+          tags: ${{ steps.meta-lost-cities-1.outputs.tags }}
+          labels: ${{ steps.meta-lost-cities-1.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/metadata-action@v5
+        id: meta-lost-cities-2
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/brdgme/lost-cities-2
+          tags: |
+            type=sha
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: rust/Dockerfile
+          target: lost-cities-2
+          push: ${{ github.ref == 'refs/heads/master' }}
+          tags: ${{ steps.meta-lost-cities-2.outputs.tags }}
+          labels: ${{ steps.meta-lost-cities-2.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -149,26 +182,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        game:
-          - age-of-war-1
-          - battleship-1
-          - category-5-1
-          - cathedral-1
-          - farkle-1
-          - for-sale-1
-          - greed-1
-          - liars-dice-1
-          - love-letter-1
-          - modern-art-1
-          - no-thanks-1
-          - roll-through-the-ages-1
-          - splendor-1
-          - sushi-go-1
-          - sushizock-1
-          - texas-holdem-1
-          - zombie-dice-1
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -178,20 +191,29 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/${{ matrix.game }}
-          tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: brdgme-go/Dockerfile
-          target: ${{ matrix.game }}
-          push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Build and push Go games
+        env:
+          OWNER: ${{ github.repository_owner }}
+          PUSH: ${{ github.ref == 'refs/heads/master' }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          PUSH_FLAG=""
+          if [ "${PUSH}" = "true" ]; then PUSH_FLAG="--push"; fi
+          for GAME in \
+            age-of-war-1 battleship-1 category-5-1 cathedral-1 farkle-1 \
+            for-sale-1 greed-1 liars-dice-1 love-letter-1 modern-art-1 \
+            no-thanks-1 roll-through-the-ages-1 splendor-1 sushi-go-1 \
+            sushizock-1 texas-holdem-1 zombie-dice-1; do
+            TAGS="-t ghcr.io/${OWNER}/brdgme/${GAME}:sha-${SHORT_SHA}"
+            if [ "${PUSH}" = "true" ]; then
+              TAGS="${TAGS} -t ghcr.io/${OWNER}/brdgme/${GAME}:latest"
+            fi
+            docker buildx build \
+              --target "${GAME}" \
+              ${TAGS} \
+              --cache-from type=gha \
+              --cache-to type=gha,mode=max \
+              ${PUSH_FLAG} \
+              -f brdgme-go/Dockerfile \
+              .
+          done
