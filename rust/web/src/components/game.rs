@@ -16,7 +16,8 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let can_undo = data.can_undo;
     let is_finished = data.is_finished;
     let is_2player = data.is_2player;
-    let can_restart = is_finished && data.restarted_game_id.is_none();
+    let restarted_game_id = data.restarted_game_id;
+    let can_restart = is_finished && restarted_game_id.is_none();
 
     let undo_action = ServerAction::<UndoGame>::new();
     let concede_action = ServerAction::<ConcedeGame>::new();
@@ -52,7 +53,12 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                             <div>
                                 <a href="#" on:click=move |ev| {
                                     ev.prevent_default();
-                                    concede_action.dispatch(ConcedeGame { game_id });
+                                    let confirmed = web_sys::window()
+                                        .and_then(|w| w.confirm_with_message("Are you sure you want to concede?").ok())
+                                        .unwrap_or(false);
+                                    if confirmed {
+                                        concede_action.dispatch(ConcedeGame { game_id });
+                                    }
                                 }>"Concede"</a>
                             </div>
                         </Show>
@@ -62,6 +68,13 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                                     ev.prevent_default();
                                     restart_action.dispatch(RestartGame { game_id });
                                 }>"Restart"</a>
+                            </div>
+                        </Show>
+                        <Show when=move || restarted_game_id.is_some()>
+                            <div>
+                                <a href=move || restarted_game_id.map(|id| format!("/games/{}", id)).unwrap_or_default()>
+                                    "Go to new game"
+                                </a>
                             </div>
                         </Show>
                     </div>

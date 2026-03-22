@@ -1,12 +1,9 @@
 use leptos::prelude::*;
-use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug)]
 pub struct WebSocketTrigger {
     pub last_update: ReadSignal<u64>,
     pub set_last_update: WriteSignal<u64>,
-    pub game_restarted: ReadSignal<Option<(Uuid, Uuid)>>,
-    pub set_game_restarted: WriteSignal<Option<(Uuid, Uuid)>>,
 }
 
 #[cfg(feature = "hydrate")]
@@ -36,8 +33,7 @@ pub fn use_websocket() {
                                         WebSocketMessage::GameUpdate { .. } => {
                                             trigger.set_last_update.update(|n| *n += 1);
                                         }
-                                        WebSocketMessage::GameRestarted { game_id, restarted_game_id } => {
-                                            trigger.set_game_restarted.set(Some((game_id, restarted_game_id)));
+                                        WebSocketMessage::GameRestarted { .. } => {
                                             trigger.set_last_update.update(|n| *n += 1);
                                         }
                                     }

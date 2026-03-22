@@ -4,9 +4,12 @@ use brdgme_game::command::Spec as CommandSpec;
 
 pub async fn request(client: &reqwest::Client, uri: &str, request: &Request) -> Result<Response> {
     let res = client.post(uri).json(&request).send().await?;
-    match res.json().await.context("error parsing JSON response")? {
+    let body = res.text().await.context("error reading response body")?;
+    let resp: Response = serde_json::from_str(&body)
+        .with_context(|| format!("error parsing response: {}", body))?;
+    match resp {
         Response::SystemError { message } => Err(anyhow!("{}", message)),
-        default => Ok(default),
+        other => Ok(other),
     }
 }
 

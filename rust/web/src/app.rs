@@ -37,12 +37,9 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
     
     let (last_update, set_last_update) = signal(0u64);
-    let (game_restarted, set_game_restarted) = signal(None::<(uuid::Uuid, uuid::Uuid)>);
     provide_context(crate::websocket_client::WebSocketTrigger {
         last_update,
         set_last_update,
-        game_restarted,
-        set_game_restarted,
     });
     crate::websocket_client::use_websocket();
 
@@ -387,16 +384,6 @@ fn GamePage() -> impl IntoView {
     let game_id = move || params.get().get("id").as_deref().and_then(|id| Uuid::from_str(id).ok());
 
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
-
-    // Navigate to new game when GameRestarted arrives for the current game.
-    let navigate = use_navigate();
-    Effect::new(move |_| {
-        if let Some((old_id, new_id)) = trigger.game_restarted.get() {
-            if Some(old_id) == game_id() {
-                navigate(&format!("/games/{}", new_id), NavigateOptions::default());
-            }
-        }
-    });
 
     // Call mark_read on mount and whenever the game ID changes.
     Effect::new(move |_| {

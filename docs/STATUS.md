@@ -90,13 +90,24 @@ Exhaustively compared `001_initial_schema.sql` against the production schema
 
 ## Immediate next tasks
 
-1. **Restart 500 error** - `restart_game` returns "Game service error: error
-   parsing JSON response". Needs investigation; likely a JSON contract mismatch
-   or unreachable game service URI on restart.
-2. **Concede confirmation** - "Concede" link fires immediately with no
-   confirmation. Should show a browser `window.confirm()` dialog first
-   ("Are you sure you want to concede?"), matching web-legacy behaviour.
+Next phase: **Phase 6** - Redis pub/sub to replace `tokio::sync::broadcast`.
+Required for multi-replica correctness and side-by-side validation.
+See PLAN.md Phase 6.
 
-Next phase after the above: **Phase 6** - Redis pub/sub to replace
-`tokio::sync::broadcast`. Required for multi-replica correctness and
-side-by-side validation. See PLAN.md Phase 6.
+---
+
+## Completed this session (2026-03-22)
+
+### Concede confirmation
+
+- `components/game.rs`: Added `window.confirm("Are you sure you want to concede?")`
+  before dispatching `ConcedeGame` action. Added `"Window"` to web-sys features
+  in `Cargo.toml`.
+
+### Restart error diagnostics
+
+- `game/client.rs`: `client::request` now reads the response body as text first,
+  then parses JSON. On failure the raw body is included in the error message:
+  "error parsing response: {raw body}". This will expose the actual game service
+  response on the next restart attempt so the root cause can be identified.
+  (Previously the error was "error parsing JSON response" with no further detail.)
