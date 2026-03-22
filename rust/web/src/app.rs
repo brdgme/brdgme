@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::auth::server::{login, confirm_login};
 use crate::components::MainLayout;
+use crate::game::server_fns::{get_active_games, GameSummary};
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -42,6 +43,12 @@ pub fn App() -> impl IntoView {
         set_last_update,
     });
     crate::websocket_client::use_websocket();
+
+    let active_games: Resource<Result<Vec<GameSummary>, ServerFnError>> = Resource::new(
+        move || last_update.get(),
+        |_| async move { get_active_games().await },
+    );
+    provide_context(active_games);
 
     view! {
         <Stylesheet id="leptos" href="/pkg/web.css"/>

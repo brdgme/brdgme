@@ -269,9 +269,10 @@ review before the `leptos` branch replaces production. Full review in
       from `players` filtered by `is_turn`.
 - [x] **Mark-read on game page load** (`app.rs`): `mark_read` called via
       `Effect` on mount and game ID change.
-- [x] **`GameRestarted` WebSocket navigation** (`websocket_client.rs`):
-      `WebSocketTrigger` extended with `game_restarted` signal; `GamePage`
-      navigates to new game URL on receipt.
+- [x] **`GameRestarted` WebSocket navigation**: `GameRestarted` WS message
+      triggers a refetch (same as `GameUpdate`). Player who clicked Restart
+      navigates via `restart_action` effect. Other players see the finished
+      game and a "Go to new game" link once `restarted_game_id` is populated.
 - [x] **Command input: clear after server confirms** (`components/game.rs`):
       `Effect` runs `set_command("")` after `submit_action` succeeds.
 - [x] **Command errors surfaced to user** (`components/game.rs`): `error_msg`
@@ -306,14 +307,16 @@ review before the `leptos` branch replaces production. Full review in
 
 ---
 
-## Bug fixes [Pending - prioritised above Phase 6]
+## Bug fixes [Partially resolved]
 
 - [ ] **Restart 500 error**: `restart_game` returns "Game service error: error
-      parsing JSON response". Investigate JSON contract mismatch or unreachable
-      game service URI on restart path.
-- [ ] **Concede confirmation**: "Concede" link fires immediately. Add a
-      `window.confirm("Are you sure you want to concede?")` check in the click
-      handler before dispatching the action, matching web-legacy behaviour.
+      parsing JSON response". Diagnostics improved: `client::request` now reads
+      response body as text first and includes it in the error message. Root
+      cause still unknown - needs a live restart attempt to capture the raw
+      game service response.
+- [x] **Concede confirmation**: Added `window.confirm("Are you sure you want to
+      concede?")` in the click handler before dispatching `ConcedeGame`.
+      `"Window"` added to web-sys features.
 
 ---
 

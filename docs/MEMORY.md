@@ -25,11 +25,9 @@ Active branch: `leptos` - Rust/Leptos rewrite of all frontend + backend.
 
 ## Plan Status
 - Phases 1-5.5: complete
-- Phase 5.6: in progress - blockers done, endpoints done, new-game UI done, operator done
-  - Remaining: game log rendering, action buttons (undo/concede/restart),
-    whose-turn display, mark-read on mount, WebSocket navigation on restart,
-    command UX fixes, autocomplete prefix filtering, code quality items
-- Phase 6: NATS (replaces tokio broadcast, unblocks Redis removal)
+- Phase 5.6: functionally complete - one open bug: restart 500 (diagnostics
+  added 2026-03-22, raw response will be captured on next live restart attempt)
+- Phase 6: Redis pub/sub (replaces tokio broadcast, required for multi-replica + side-by-side)
 - Phase 6.5: ArgoCD production CD
 - Phase 7: side-by-side validation then legacy decommission
 

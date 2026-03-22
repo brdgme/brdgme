@@ -6,7 +6,7 @@ use leptos_router::hooks::use_navigate;
 use leptos_router::NavigateOptions;
 use crate::components::game::PlayerName;
 
-use crate::game::server_fns::get_active_games;
+use crate::game::server_fns::GameSummary;
 
 #[component]
 pub fn MainLayout(
@@ -54,11 +54,7 @@ pub fn SidebarMenu() -> impl IntoView {
         logout_action.dispatch(crate::auth::Logout {});
     };
 
-    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
-    let active_games = Resource::new(
-        move || trigger.last_update.get(), 
-        |_| async move { get_active_games().await }
-    );
+    let active_games = expect_context::<Resource<Result<Vec<GameSummary>, ServerFnError>>>();
 
     view! {
         <div class="menu">

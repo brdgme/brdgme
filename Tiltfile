@@ -94,8 +94,9 @@ else:
     k8s_yaml(kustomize("k8s/dev-without-web"))
     local_resource(
         "web",
-        serve_cmd="cd rust/web && mirrord exec --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch",
+        serve_cmd="cd rust/web && SQLX_OFFLINE=true mirrord exec --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch",
         links=["http://localhost:3000"],
+        resource_deps=["postgres"],
     )
 
 k8s_resource("postgres", port_forwards=["5432:5432"])

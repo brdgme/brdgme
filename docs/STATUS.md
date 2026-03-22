@@ -111,3 +111,25 @@ See PLAN.md Phase 6.
   "error parsing response: {raw body}". This will expose the actual game service
   response on the next restart attempt so the root cause can be identified.
   (Previously the error was "error parsing JSON response" with no further detail.)
+
+### "Go to new game" link / GameRestarted behaviour change
+
+- `websocket_client.rs`: Removed `game_restarted`/`set_game_restarted` signals
+  from `WebSocketTrigger`. `GameRestarted` WS message now triggers a refetch
+  (same as `GameUpdate`). Removed navigate-on-GameRestarted effect from `app.rs`.
+- `components/game.rs`: Added "Go to new game" link shown when
+  `restarted_game_id.is_some()`. Player who clicked Restart still auto-navigates
+  via the `restart_action` effect. Other players see finished game + link.
+
+### Sidebar flash fix (active games list)
+
+- `app.rs`: Lifted `active_games` Resource from `SidebarMenu` to `App` level,
+  provided via context. Resource persists across route changes.
+- `components/layout.rs`: `SidebarMenu` reads `active_games` from context instead
+  of creating its own. Sidebar no longer flashes "Loading..." on navigation.
+
+### Tilt SQLX_OFFLINE fix
+
+- `Tiltfile`: Added `SQLX_OFFLINE=true` to the `web` local_resource `serve_cmd`
+  and `resource_deps=["postgres"]`. Prevents `cargo leptos watch` recompile
+  failures when the mirrord port-forward drops mid-session.
