@@ -412,7 +412,7 @@ fn GamePage() -> impl IntoView {
     );
 
     view! {
-        <Suspense fallback=move || view! { <MainLayout><div>"Loading game..."</div></MainLayout> }>
+        <Suspense fallback=move || view! { <MainLayout><div></div></MainLayout> }>
             {move || {
                 game_data.get().map(|res| match res {
                     Ok(data) => {

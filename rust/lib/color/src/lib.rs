@@ -34,15 +34,7 @@ impl Color {
     }
 
     pub fn hex(self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b,)
-    }
-
-    pub fn ansi_fg(self) -> String {
-        format!("\x1b[38;2;{};{};{}m", self.r, self.g, self.b,)
-    }
-
-    pub fn ansi_bg(self) -> String {
-        format!("\x1b[48;2;{};{};{}m", self.r, self.g, self.b,)
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
     }
 
     pub fn from_hex(s: &str) -> Result<Self, ColorError> {
@@ -58,15 +50,8 @@ impl Color {
             });
         }
         Err(ColorError::Parse {
-            message: format!(
-                r##"expected input in the format of "#aabbcc", got "{}" "##,
-                s
-            ),
+            message: format!(r##"expected "#aabbcc", got "{}""##, s),
         })
-    }
-
-    pub fn from_rgb(_s: &str) -> Result<Self, ColorError> {
-        unimplemented!()
     }
 }
 
@@ -74,17 +59,14 @@ impl FromStr for Color {
     type Err = ColorError;
     fn from_str(s: &str) -> Result<Self, ColorError> {
         if let Some(c) = named(s) {
-            return Ok(c.to_owned());
+            return Ok(*c);
         }
         if let Ok(c) = Color::from_hex(s) {
             return Ok(c);
         }
-        if let Ok(c) = Color::from_rgb(s) {
-            return Ok(c);
-        }
         Err(ColorError::Parse {
             message: format!(
-                r##"could not find color "{}", please supply a known color name, a hex code in the format "#aabbcc" or RGB in the format "rgb(0,128,255)""##,
+                r##"could not find color "{}"; supply a known color name or hex code "#aabbcc""##,
                 s
             ),
         })
@@ -121,117 +103,28 @@ impl Style<'_> {
             bgb = self.bg.b,
         )
     }
-
-    pub fn html_style(self) -> String {
-        format!(
-            "font-weight:{};color:{};background-color:{};",
-            if self.bold { "bold" } else { "normal" },
-            self.fg.hex(),
-            self.bg.hex(),
-        )
-    }
 }
 
-pub static RED: Color = Color {
-    r: 211,
-    g: 47,
-    b: 47,
-};
-pub static PINK: Color = Color {
-    r: 194,
-    g: 24,
-    b: 91,
-};
-pub static PURPLE: Color = Color {
-    r: 123,
-    g: 31,
-    b: 162,
-};
-pub static DEEP_PURPLE: Color = Color {
-    r: 81,
-    g: 45,
-    b: 168,
-};
-pub static INDIGO: Color = Color {
-    r: 48,
-    g: 63,
-    b: 159,
-};
-pub static BLUE: Color = Color {
-    r: 25,
-    g: 118,
-    b: 210,
-};
-pub static LIGHT_BLUE: Color = Color {
-    r: 2,
-    g: 136,
-    b: 209,
-};
-pub static CYAN: Color = Color {
-    r: 0,
-    g: 151,
-    b: 167,
-};
-pub static TEAL: Color = Color {
-    r: 0,
-    g: 121,
-    b: 107,
-};
-pub static GREEN: Color = Color {
-    r: 56,
-    g: 142,
-    b: 60,
-};
-pub static LIGHT_GREEN: Color = Color {
-    r: 104,
-    g: 159,
-    b: 56,
-};
-pub static LIME: Color = Color {
-    r: 175,
-    g: 180,
-    b: 43,
-};
-pub static YELLOW: Color = Color {
-    r: 251,
-    g: 192,
-    b: 45,
-};
-pub static AMBER: Color = Color {
-    r: 255,
-    g: 160,
-    b: 0,
-};
-pub static ORANGE: Color = Color {
-    r: 245,
-    g: 124,
-    b: 0,
-};
-pub static DEEP_ORANGE: Color = Color {
-    r: 230,
-    g: 74,
-    b: 25,
-};
-pub static BROWN: Color = Color {
-    r: 93,
-    g: 64,
-    b: 55,
-};
-pub static GREY: Color = Color {
-    r: 97,
-    g: 97,
-    b: 97,
-};
-pub static BLUE_GREY: Color = Color {
-    r: 69,
-    g: 90,
-    b: 100,
-};
-pub static WHITE: Color = Color {
-    r: 255,
-    g: 255,
-    b: 255,
-};
+pub static RED: Color = Color { r: 211, g: 47, b: 47 };
+pub static PINK: Color = Color { r: 194, g: 24, b: 91 };
+pub static PURPLE: Color = Color { r: 123, g: 31, b: 162 };
+pub static DEEP_PURPLE: Color = Color { r: 81, g: 45, b: 168 };
+pub static INDIGO: Color = Color { r: 48, g: 63, b: 159 };
+pub static BLUE: Color = Color { r: 25, g: 118, b: 210 };
+pub static LIGHT_BLUE: Color = Color { r: 2, g: 136, b: 209 };
+pub static CYAN: Color = Color { r: 0, g: 151, b: 167 };
+pub static TEAL: Color = Color { r: 0, g: 121, b: 107 };
+pub static GREEN: Color = Color { r: 56, g: 142, b: 60 };
+pub static LIGHT_GREEN: Color = Color { r: 104, g: 159, b: 56 };
+pub static LIME: Color = Color { r: 175, g: 180, b: 43 };
+pub static YELLOW: Color = Color { r: 251, g: 192, b: 45 };
+pub static AMBER: Color = Color { r: 255, g: 160, b: 0 };
+pub static ORANGE: Color = Color { r: 245, g: 124, b: 0 };
+pub static DEEP_ORANGE: Color = Color { r: 230, g: 74, b: 25 };
+pub static BROWN: Color = Color { r: 93, g: 64, b: 55 };
+pub static GREY: Color = Color { r: 97, g: 97, b: 97 };
+pub static BLUE_GREY: Color = Color { r: 69, g: 90, b: 100 };
+pub static WHITE: Color = Color { r: 255, g: 255, b: 255 };
 pub static BLACK: Color = Color { r: 0, g: 0, b: 0 };
 
 impl fmt::Display for Color {
@@ -240,36 +133,44 @@ impl fmt::Display for Color {
     }
 }
 
-pub fn player_colors() -> Vec<&'static Color> {
-    vec![&GREEN, &RED, &BLUE, &AMBER, &PURPLE, &BROWN, &BLUE_GREY]
+static PLAYER_COLORS: &[Color] = &[GREEN, RED, BLUE, AMBER, PURPLE, BROWN, BLUE_GREY];
+
+pub fn player_colors() -> &'static [Color] {
+    PLAYER_COLORS
 }
 
-pub fn player_color<'a>(player: usize) -> &'a Color {
-    let pc = player_colors();
-    pc[player % pc.len()]
+pub fn player_color(player: usize) -> &'static Color {
+    &PLAYER_COLORS[player % PLAYER_COLORS.len()]
 }
 
-pub fn named(name: &str) -> Option<&'static Color> {
-    match name {
+// Normalises a color name to lowercase alpha-only before matching.
+// Accepts any casing and separator style: "BlueGrey", "blue_grey", "blue-grey" all match.
+fn named(name: &str) -> Option<&'static Color> {
+    let key: String = name
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .collect::<String>()
+        .to_lowercase();
+    match key.as_str() {
         "red" => Some(&RED),
         "pink" => Some(&PINK),
         "purple" => Some(&PURPLE),
-        "deep_purple" => Some(&DEEP_PURPLE),
+        "deeppurple" => Some(&DEEP_PURPLE),
         "indigo" => Some(&INDIGO),
         "blue" => Some(&BLUE),
-        "light_blue" => Some(&LIGHT_BLUE),
+        "lightblue" => Some(&LIGHT_BLUE),
         "cyan" => Some(&CYAN),
         "teal" => Some(&TEAL),
         "green" => Some(&GREEN),
-        "light_green" => Some(&LIGHT_GREEN),
+        "lightgreen" => Some(&LIGHT_GREEN),
         "lime" => Some(&LIME),
         "yellow" => Some(&YELLOW),
         "amber" => Some(&AMBER),
         "orange" => Some(&ORANGE),
-        "deep_orange" => Some(&DEEP_ORANGE),
+        "deeporange" => Some(&DEEP_ORANGE),
         "brown" => Some(&BROWN),
         "grey" => Some(&GREY),
-        "blue_grey" => Some(&BLUE_GREY),
+        "bluegrey" => Some(&BLUE_GREY),
         "white" => Some(&WHITE),
         "black" => Some(&BLACK),
         _ => None,
@@ -283,5 +184,13 @@ mod tests {
     #[test]
     fn color_from_hex_works() {
         assert_eq!(Color::from_hex(&RED.hex()).expect("error parsing hex"), RED);
+    }
+
+    #[test]
+    fn color_from_str_named_works() {
+        assert_eq!("Green".parse::<Color>().unwrap(), GREEN);
+        assert_eq!("BlueGrey".parse::<Color>().unwrap(), BLUE_GREY);
+        assert_eq!("blue_grey".parse::<Color>().unwrap(), BLUE_GREY);
+        assert_eq!("BLUE_GREY".parse::<Color>().unwrap(), BLUE_GREY);
     }
 }

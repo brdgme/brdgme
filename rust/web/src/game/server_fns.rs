@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use time::PrimitiveDateTime;
 
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpponentSummary {
     pub name: String,
@@ -90,9 +91,7 @@ pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
                 .filter(|p| p.user.id != user.id)
                 .map(|p| {
                     use std::str::FromStr;
-                    let color = brdgme_color::Color::from_str(&p.game_player.color.to_lowercase())
-                        .unwrap_or(brdgme_color::WHITE)
-                        .hex();
+                    let color = brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE).hex();
                     OpponentSummary { name: p.user.name.clone(), color }
                 })
                 .collect();
@@ -153,7 +152,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             use std::str::FromStr;
             markup_players.push(brdgme_markup::Player {
                 name: p.user.name.clone(),
-                color: brdgme_color::Color::from_str(&p.game_player.color.to_lowercase()).unwrap_or(brdgme_color::WHITE),
+                color: brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE),
             });
         }
         
@@ -171,9 +170,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             is_2player: ge.game_players.len() == 2,
             players: ge.game_players.iter().map(|p| {
                 use std::str::FromStr;
-                let color = brdgme_color::Color::from_str(&p.game_player.color.to_lowercase())
-                    .unwrap_or(brdgme_color::WHITE)
-                    .hex();
+                let color = brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE).hex();
                 PlayerViewData {
                     name: p.user.name.clone(),
                     color,
@@ -338,7 +335,7 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
             use std::str::FromStr;
             brdgme_markup::Player {
                 name: p.user.name.clone(),
-                color: brdgme_color::Color::from_str(&p.game_player.color.to_lowercase()).unwrap_or(brdgme_color::WHITE),
+                color: brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE),
             }
         }).collect();
 

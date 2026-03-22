@@ -161,16 +161,12 @@ where
         string("{{/c}}"),
     )
         .map(|(_, col, _, children, _)| {
-            Node::Fg(
-                match col.as_ref() {
-                    "magenta" => Some(&PURPLE),
-                    _ => named(&col),
-                }
-                .unwrap_or(&BLACK)
-                .to_owned()
-                .into(),
-                children,
-            )
+            let color = if col == "magenta" {
+                PURPLE
+            } else {
+                Color::from_str(&col).unwrap_or(BLACK)
+            };
+            Node::Fg(color.into(), children)
         })
 }
 
