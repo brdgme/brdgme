@@ -11,7 +11,7 @@ use tower_sessions::Session;
 use crate::auth::session::get_user_from_session;
 use crate::db::{self, CreateGameOpts};
 use crate::game::client;
-use crate::websocket::{GameBroadcaster, WebSocketMessage};
+use crate::websocket::GameBroadcaster;
 use brdgme_cmd::api::{Request, Response};
 use brdgme_game::Status;
 
@@ -49,7 +49,7 @@ pub async fn create_game(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };
 
-    let (game_info, logs, _public_render, _player_renders) = match resp {
+    let (game_info, logs, public_render, player_renders) = match resp {
         Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
         _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
     };
@@ -82,7 +82,10 @@ pub async fn create_game(
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
     }
 
-    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: game.id });
+    if let Ok(Some(ge)) = db::find_game_extended(&pool, game.id).await {
+        let all_logs = db::get_all_game_logs(&pool, game.id).await.unwrap_or_default();
+        broadcaster.broadcast_game_update(&pool, &ge, &all_logs, &public_render, &player_renders).await;
+    }
 
     (StatusCode::CREATED, Json(game)).into_response()
 }
@@ -160,8 +163,8 @@ pub async fn undo_game(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };
 
-    let game_response = match resp {
-        Response::Status { game, .. } => game,
+    let (game_response, public_render, player_renders) = match resp {
+        Response::Status { game, public_render, player_renders } => (game, public_render, player_renders),
         _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
     };
 
@@ -174,7 +177,10 @@ pub async fn undo_game(
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to undo game: {}", e)).into_response();
     }
 
-    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: id });
+    if let Ok(Some(updated_ge)) = db::find_game_extended(&pool, id).await {
+        let all_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
+        broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+    }
 
     StatusCode::OK.into_response()
 }
@@ -215,7 +221,7 @@ pub async fn restart_game(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
     };
 
-    let (game_info, logs, _public_render, _player_renders) = match resp {
+    let (game_info, logs, public_render, player_renders) = match resp {
         Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
         _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
     };
@@ -263,7 +269,19 @@ pub async fn restart_game(
         return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
     }
 
-    broadcaster.broadcast(WebSocketMessage::GameRestarted { game_id: id, restarted_game_id: new_game.id });
+    if let Ok(Some(new_ge)) = db::find_game_extended(&pool, new_game.id).await {
+        let all_logs = db::get_all_game_logs(&pool, new_game.id).await.unwrap_or_default();
+        broadcaster.broadcast_game_update(&pool, &new_ge, &all_logs, &public_render, &player_renders).await;
+    }
+
+    if let Ok(Some(old_ge)) = db::find_game_extended(&pool, id).await {
+        if let Ok(Response::Status { public_render: old_pub, player_renders: old_pr, .. }) =
+            client::request(&http_client, &old_ge.game_version.uri, &Request::Status { game: old_ge.game.game_state.clone() }).await
+        {
+            let old_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
+            broadcaster.broadcast_game_update(&pool, &old_ge, &old_logs, &old_pub, &old_pr).await;
+        }
+    }
 
     (StatusCode::CREATED, Json(new_game)).into_response()
 }
@@ -272,6 +290,7 @@ pub async fn concede_game(
     session: Session,
     State(pool): State<PgPool>,
     State(broadcaster): State<GameBroadcaster>,
+    State(http_client): State<reqwest::Client>,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
     let user = match get_user_from_session(&session).await {
@@ -302,7 +321,17 @@ pub async fn concede_game(
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to concede game: {}", e)).into_response();
     }
 
-    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id: id });
+    if let Ok(Some(updated_ge)) = db::find_game_extended(&pool, id).await {
+        let all_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
+        match client::request(&http_client, &updated_ge.game_version.uri, &Request::Status { game: updated_ge.game.game_state.clone() }).await {
+            Ok(Response::Status { public_render, player_renders, .. }) => {
+                broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+            }
+            _ => {
+                tracing::error!("Unexpected response from game service on concede status call for game {}", id);
+            }
+        }
+    }
 
     StatusCode::OK.into_response()
 }

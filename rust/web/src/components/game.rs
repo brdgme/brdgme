@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use leptos_router::{hooks::use_navigate, NavigateOptions};
-use crate::game::server_fns::{GameViewData, PlayerViewData, SubmitCommand, UndoGame, ConcedeGame, RestartGame};
+use crate::game::server_fns::{GameViewData, PlayerViewData, GameLogEntry, SubmitCommand, UndoGame, ConcedeGame, RestartGame};
+use crate::websocket::BrdgmeGameUpdate;
 use uuid::Uuid;
 
 #[component]
@@ -178,16 +179,25 @@ fn render_log_entries(entries: Vec<crate::game::server_fns::GameLogEntry>, show_
 pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
-    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
     let logs = Resource::new(
-        move || (game_id, trigger.last_update.get()),
-        |(id, _)| async move { get_game_logs(id).await },
+        move || game_id,
+        |id| async move { get_game_logs(id).await },
     );
+
+    let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
+        if let Some(ws) = ws_game.get() {
+            if ws.game_id == game_id {
+                return Some(Ok(ws.logs));
+            }
+        }
+        logs.get()
+    };
 
     let logs_ref = NodeRef::<leptos::html::Div>::new();
 
     Effect::new(move |_| {
-        let _ = logs.get();
+        let _ = effective_logs();
         leptos::prelude::request_animation_frame(move || {
             if let Some(el) = logs_ref.get_untracked() {
                 if let Some(parent) = el.parent_element() {
@@ -198,16 +208,14 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     });
 
     view! {
-        <Suspense fallback=|| ()>
-            {move || logs.get().map(|result| match result {
-                Err(_) => view! { <div>"Failed to load logs."</div> }.into_any(),
-                Ok(entries) => view! {
-                    <div class="game-logs" node_ref=logs_ref>
-                        {render_log_entries(entries, true)}
-                    </div>
-                }.into_any(),
-            })}
-        </Suspense>
+        {move || effective_logs().map(|result| match result {
+            Err(_) => view! { <div>"Failed to load logs."</div> }.into_any(),
+            Ok(entries) => view! {
+                <div class="game-logs" node_ref=logs_ref>
+                    {render_log_entries(entries, true)}
+                </div>
+            }.into_any(),
+        })}
     }
 }
 
@@ -215,16 +223,25 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
 pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
-    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
     let logs = Resource::new(
-        move || (game_id, trigger.last_update.get()),
-        |(id, _)| async move { get_game_logs(id).await },
+        move || game_id,
+        |id| async move { get_game_logs(id).await },
     );
+
+    let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
+        if let Some(ws) = ws_game.get() {
+            if ws.game_id == game_id {
+                return Some(Ok(ws.logs));
+            }
+        }
+        logs.get()
+    };
 
     let recent_ref = NodeRef::<leptos::html::Div>::new();
 
     Effect::new(move |_| {
-        let _ = logs.get();
+        let _ = effective_logs();
         leptos::prelude::request_animation_frame(move || {
             if let Some(el) = recent_ref.get_untracked() {
                 el.set_scroll_top(el.scroll_height());
@@ -233,26 +250,24 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     });
 
     view! {
-        <Suspense fallback=|| ()>
-            {move || logs.get().map(|result| match result {
-                Err(_) => None,
-                Ok(entries) => {
-                    let recent: Vec<_> = entries.into_iter().filter(|e| e.is_new).collect();
-                    if recent.is_empty() {
-                        None
-                    } else {
-                        Some(view! {
-                            <div class="recent-logs-container">
-                                <div class="recent-logs-header">"Recent logs"</div>
-                                <div class="recent-logs game-logs" node_ref=recent_ref>
-                                    {render_log_entries(recent, false)}
-                                </div>
+        {move || effective_logs().map(|result| match result {
+            Err(_) => None,
+            Ok(entries) => {
+                let recent: Vec<_> = entries.into_iter().filter(|e| e.is_new).collect();
+                if recent.is_empty() {
+                    None
+                } else {
+                    Some(view! {
+                        <div class="recent-logs-container">
+                            <div class="recent-logs-header">"Recent logs"</div>
+                            <div class="recent-logs game-logs" node_ref=recent_ref>
+                                {render_log_entries(recent, false)}
                             </div>
-                        })
-                    }
-                },
-            })}
-        </Suspense>
+                        </div>
+                    })
+                }
+            },
+        })}
     }
 }
 

@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::auth::server::{login, confirm_login};
 use crate::components::MainLayout;
 use crate::game::server_fns::{get_active_games, GameSummary};
+use crate::websocket::BrdgmeGameUpdate;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -42,6 +43,7 @@ pub fn App() -> impl IntoView {
         last_update,
         set_last_update,
     });
+    provide_context(RwSignal::<Option<BrdgmeGameUpdate>>::new(None));
     crate::websocket_client::use_websocket();
 
     let active_games: Resource<Result<Vec<GameSummary>, ServerFnError>> = Resource::new(
@@ -390,7 +392,7 @@ fn GamePage() -> impl IntoView {
     let params = leptos_router::hooks::use_params_map();
     let game_id = move || params.get().get("id").as_deref().and_then(|id| Uuid::from_str(id).ok());
 
-    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
 
     // Call mark_read on mount and whenever the game ID changes.
     Effect::new(move |_| {
@@ -401,9 +403,10 @@ fn GamePage() -> impl IntoView {
         }
     });
 
+    // Initial load only - WS signal handles subsequent updates.
     let game_data = Resource::new(
-        move || (game_id(), trigger.last_update.get()),
-        |(id, _)| async move {
+        move || game_id(),
+        |id| async move {
             match id {
                 Some(id) => get_game_details(id).await,
                 None => Err(ServerFnError::new("Invalid Game ID")),
@@ -411,10 +414,21 @@ fn GamePage() -> impl IntoView {
         }
     );
 
+    // Prefer WS data for the current game, fall back to resource.
+    let effective_data = move || {
+        let current_id = game_id();
+        if let Some(ws) = ws_game.get() {
+            if Some(ws.game_id) == current_id {
+                return Some(Ok(ws.game_view));
+            }
+        }
+        game_data.get()
+    };
+
     view! {
         <Transition fallback=move || view! { <MainLayout><div></div></MainLayout> }>
             {move || {
-                game_data.get().map(|res| match res {
+                effective_data().map(|res| match res {
                     Ok(data) => {
                         let is_my_turn = data.is_my_turn;
                         let is_finished = data.is_finished;

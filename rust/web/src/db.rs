@@ -755,6 +755,26 @@ pub async fn undo_game(
 }
 
 #[cfg(feature = "ssr")]
+pub async fn get_all_game_logs(
+    pool: &PgPool,
+    game_id: Uuid,
+) -> Result<Vec<crate::models::game::GameLog>> {
+    sqlx::query_as!(
+        crate::models::game::GameLog,
+        r#"
+        SELECT id, created_at, updated_at, game_id, body, is_public, logged_at
+        FROM game_logs
+        WHERE game_id = $1
+        ORDER BY logged_at ASC
+        "#,
+        game_id,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
+#[cfg(feature = "ssr")]
 pub async fn get_game_logs(
     pool: &PgPool,
     game_id: Uuid,

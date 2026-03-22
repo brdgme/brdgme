@@ -9,7 +9,7 @@ Active branch: `leptos` - Rust/Leptos rewrite of all frontend + backend.
 - `VISION.md` - timeless goals and principles
 - `ARCHITECTURE.md` - system design, components, JSON contract, DB schema
 - `PLAN.md` - phase-by-phase migration plan, source of truth for next tasks
-- `SCRATCH.md` - current session notes and open issues
+- `SCRATCH.md` - deleted; no longer used
 - `DEV.md` - setup, daily workflow, SQLx, Rust conventions, gotchas
 
 ## Repo Structure
@@ -27,11 +27,16 @@ Active branch: `leptos` - Rust/Leptos rewrite of all frontend + backend.
 - Phases 1-5.5: complete
 - Phase 5.6: functionally complete - one open bug: restart 500 (diagnostics
   added 2026-03-22, raw response will be captured on next live restart attempt)
-- Bug fixes (2026-03-22 session 3): recent logs is_new logic, width layout,
-  timestamps, scroll-to-bottom, page flash, undo log markup, immediate re-fetch
-  after actions. See PLAN.md "Bug fixes" section and SCRATCH.md.
-- Phase 6: Redis pub/sub (replaces tokio broadcast, required for multi-replica + side-by-side)
-- Phase 6.5: ArgoCD production CD
+- Phase 6: complete (2026-03-22 sessions 4-5):
+  - Redis pub/sub replaces tokio broadcast
+  - Server publishes full legacy-format ShowResponse to `game.{id}` and
+    `user.{token_id}` for web-legacy React compat
+  - Server publishes `BrdgmeUpdate` (GameViewData + logs) to `ws.{user_id}`
+    for rust/web Leptos direct signal updates (no re-fetch)
+  - `/ws` handler is session-aware; subscribes to `game.*` + `ws.{user_id}`
+  - `GameRestarted` WS event removed - regular BrdgmeUpdate for old game
+    carries `restarted_game_id` (same as legacy always did)
+- Phase 6.5: ArgoCD production CD (next)
 - Phase 7: side-by-side validation then legacy decommission
 
 ## Production Status
@@ -63,5 +68,9 @@ keeps the service running for in-progress games but blocks new game creation.
 **Sessions:** `tower-sessions-sqlx-store` with PostgreSQL. Sessions are
 persistent across restarts. `SECURE_COOKIE=true` must be set in production.
 
-**WebSocket:** Currently uses `tokio::sync::broadcast` - single replica only.
-NATS replaces this in Phase 6.
+**WebSocket:** Uses Redis pub/sub (Phase 6 complete). Three channels:
+- `game.{id}` - legacy ShowResponse format (public, for web-legacy compat)
+- `user.{auth_token_id}` - legacy ShowResponse with private data (for web-legacy)
+- `ws.{user_id}` - `BrdgmeUpdate` (GameViewData + logs) for rust/web Leptos
+`/ws` handler is session-aware; subscribes to `game.*` + `ws.{user_id}`.
+Multi-replica safe. NATS replaces Redis in Phase 8 (after legacy decommission).

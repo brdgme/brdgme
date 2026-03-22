@@ -15,7 +15,6 @@ pub async fn execute_command(
 ) -> anyhow::Result<()> {
     use brdgme_cmd::api::{Request, Response};
     use brdgme_game::Status;
-    use crate::websocket::WebSocketMessage;
 
     let ge = crate::db::find_game_extended(pool, game_id).await?
         .ok_or_else(|| anyhow::anyhow!("Game not found"))?;
@@ -40,9 +39,9 @@ pub async fn execute_command(
         names,
     }).await?;
 
-    let (game_response, logs, can_undo, remaining_input) = match resp {
-        Response::Play { game, logs, can_undo, remaining_input, .. } =>
-            (game, logs, can_undo, remaining_input),
+    let (game_response, logs, can_undo, remaining_input, public_render, player_renders) = match resp {
+        Response::Play { game, logs, can_undo, remaining_input, public_render, player_renders } =>
+            (game, logs, can_undo, remaining_input, public_render, player_renders),
         Response::UserError { message } => return Err(anyhow::anyhow!("{}", message)),
         _ => return Err(anyhow::anyhow!("Unexpected response from game service")),
     };
@@ -73,6 +72,10 @@ pub async fn execute_command(
 
     crate::db::create_game_logs(pool, game_id, logs).await?;
 
-    broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id });
+    // Fetch updated state for broadcast
+    if let Ok(Some(updated_ge)) = crate::db::find_game_extended(pool, game_id).await {
+        let all_logs = crate::db::get_all_game_logs(pool, game_id).await.unwrap_or_default();
+        broadcaster.broadcast_game_update(pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+    }
     Ok(())
 }

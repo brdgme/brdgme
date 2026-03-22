@@ -16,7 +16,13 @@ async fn main() {
     dotenv::dotenv().ok();
 
     let pool = create_pool().await.expect("Failed to create database pool");
-    let broadcaster = GameBroadcaster::new(1024);
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://redis".to_string());
+    let redis_client = redis::Client::open(redis_url).expect("Failed to create Redis client");
+    let redis_conn = redis_client
+        .get_multiplexed_tokio_connection()
+        .await
+        .expect("Failed to connect to Redis");
+    let broadcaster = GameBroadcaster::new(redis_conn, redis_client);
     let http_client = reqwest::Client::new();
 
     let conf = get_configuration(None).unwrap();

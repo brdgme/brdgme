@@ -10,11 +10,12 @@ pub struct WebSocketTrigger {
 pub fn use_websocket() {
     use gloo_net::websocket::futures::WebSocket;
     use futures_util::StreamExt;
-    use crate::websocket::WebSocketMessage;
+    use crate::websocket::{WebSocketMessage, BrdgmeGameUpdate};
     use leptos::task::spawn_local;
     use leptos::logging::log;
 
     let trigger = expect_context::<WebSocketTrigger>();
+    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
 
     spawn_local(async move {
         let loc = web_sys::window().expect("window should be available").location();
@@ -28,15 +29,11 @@ pub fn use_websocket() {
                     while let Some(msg) = ws.next().await {
                         match msg {
                             Ok(gloo_net::websocket::Message::Text(text)) => {
-                                if let Ok(ws_msg) = serde_json::from_str::<WebSocketMessage>(&text) {
-                                    match ws_msg {
-                                        WebSocketMessage::GameUpdate { .. } => {
-                                            trigger.set_last_update.update(|n| *n += 1);
-                                        }
-                                        WebSocketMessage::GameRestarted { .. } => {
-                                            trigger.set_last_update.update(|n| *n += 1);
-                                        }
-                                    }
+                                if let Ok(WebSocketMessage::BrdgmeUpdate(update)) =
+                                    serde_json::from_str::<WebSocketMessage>(&text)
+                                {
+                                    ws_game.set(Some(update));
+                                    trigger.set_last_update.update(|n| *n += 1);
                                 }
                             }
                             Err(e) => {
