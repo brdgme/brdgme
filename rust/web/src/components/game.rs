@@ -19,9 +19,22 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let restarted_game_id = data.restarted_game_id;
     let can_restart = is_finished && restarted_game_id.is_none();
 
+    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
     let undo_action = ServerAction::<UndoGame>::new();
     let concede_action = ServerAction::<ConcedeGame>::new();
     let restart_action = ServerAction::<RestartGame>::new();
+
+    // Trigger re-fetch after undo/concede.
+    Effect::new(move |_| {
+        if let Some(Ok(())) = undo_action.value().get() {
+            trigger.set_last_update.update(|n| *n += 1);
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(())) = concede_action.value().get() {
+            trigger.set_last_update.update(|n| *n += 1);
+        }
+    });
 
     // Navigate to new game after restart.
     let navigate = use_navigate();
@@ -134,7 +147,7 @@ fn format_log_time(dt: time::PrimitiveDateTime) -> String {
     format!("{} {}, {}:{:02} {}", month_abbr, dt.day(), hour12, dt.minute(), ampm)
 }
 
-fn render_log_entries(entries: Vec<crate::game::server_fns::GameLogEntry>) -> impl IntoView {
+fn render_log_entries(entries: Vec<crate::game::server_fns::GameLogEntry>, show_timestamp: bool) -> impl IntoView {
     // Group into 10-minute windows; show log-time only on first entry of each group.
     let mut windows: Vec<(time::PrimitiveDateTime, Vec<_>)> = vec![];
     for entry in entries {
@@ -147,13 +160,13 @@ fn render_log_entries(entries: Vec<crate::game::server_fns::GameLogEntry>) -> im
         }
         windows.push((key, vec![entry]));
     }
-    windows.into_iter().map(|(window_start, entries)| {
+    windows.into_iter().map(move |(window_start, entries)| {
         let time_label = format_log_time(window_start);
         entries.into_iter().enumerate().map(move |(i, entry)| {
-            let label = if i == 0 { format!("- {} -", time_label) } else { String::new() };
+            let label = if show_timestamp && i == 0 { Some(format!("- {} -", time_label)) } else { None };
             view! {
                 <div class="game-log-entry">
-                    <div class="log-time">{label}</div>
+                    {label.map(|l| view! { <div class="log-time">{l}</div> })}
                     <div inner_html=entry.body_html />
                 </div>
             }
@@ -171,13 +184,26 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
         |(id, _)| async move { get_game_logs(id).await },
     );
 
+    let logs_ref = NodeRef::<leptos::html::Div>::new();
+
+    Effect::new(move |_| {
+        let _ = logs.get();
+        leptos::prelude::request_animation_frame(move || {
+            if let Some(el) = logs_ref.get_untracked() {
+                if let Some(parent) = el.parent_element() {
+                    parent.set_scroll_top(parent.scroll_height());
+                }
+            }
+        });
+    });
+
     view! {
         <Suspense fallback=|| ()>
             {move || logs.get().map(|result| match result {
                 Err(_) => view! { <div>"Failed to load logs."</div> }.into_any(),
                 Ok(entries) => view! {
-                    <div class="game-logs">
-                        {render_log_entries(entries)}
+                    <div class="game-logs" node_ref=logs_ref>
+                        {render_log_entries(entries, true)}
                     </div>
                 }.into_any(),
             })}
@@ -195,6 +221,17 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
         |(id, _)| async move { get_game_logs(id).await },
     );
 
+    let recent_ref = NodeRef::<leptos::html::Div>::new();
+
+    Effect::new(move |_| {
+        let _ = logs.get();
+        leptos::prelude::request_animation_frame(move || {
+            if let Some(el) = recent_ref.get_untracked() {
+                el.set_scroll_top(el.scroll_height());
+            }
+        });
+    });
+
     view! {
         <Suspense fallback=|| ()>
             {move || logs.get().map(|result| match result {
@@ -207,8 +244,8 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
                         Some(view! {
                             <div class="recent-logs-container">
                                 <div class="recent-logs-header">"Recent logs"</div>
-                                <div class="recent-logs game-logs">
-                                    {render_log_entries(recent)}
+                                <div class="recent-logs game-logs" node_ref=recent_ref>
+                                    {render_log_entries(recent, false)}
                                 </div>
                             </div>
                         })
@@ -241,13 +278,15 @@ pub fn GameCommandInput(
     player_names: Vec<String>,
 ) -> impl IntoView {
     let (command, set_command) = signal(String::new());
+    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
 
     let submit_action = ServerAction::<SubmitCommand>::new();
 
-    // Clear command on successful submit.
+    // Clear command and trigger re-fetch on successful submit.
     Effect::new(move |_| {
         if let Some(Ok(_)) = submit_action.value().get() {
             set_command.set(String::new());
+            trigger.set_last_update.update(|n| *n += 1);
         }
     });
 
@@ -273,27 +312,60 @@ pub fn GameCommandInput(
     };
 
     view! {
-        <div class="game-command-input-container">
+        <>
             <Show when=move || !suggestions.get().is_empty()>
                 <div class="suggestions-container">
                     <div class="suggestions-content">
-                        {move || suggestions.get().into_iter().map(|s| {
-                            let value = s.value.clone();
-                            let on_click = move |ev: leptos::ev::MouseEvent| {
-                                ev.prevent_default();
-                                let current = command.get_untracked();
-                                let prefix = word_prefix(&current);
-                                set_command.set(format!("{}{} ", prefix, value));
-                            };
-                            view! {
-                                <div class="suggestion-doc-item">
-                                    <a href="#" on:click=on_click>{s.value}</a>
-                                    {s.desc.map(|d| view! {
-                                        <span class="suggestion-doc-desc">" - " {d}</span>
-                                    })}
-                                </div>
+                        {move || {
+                            // Group consecutive suggestions sharing the same desc.
+                            let mut groups: Vec<(Option<String>, Vec<String>)> = vec![];
+                            for s in suggestions.get() {
+                                if let Some(last) = groups.last_mut() {
+                                    if last.0 == s.desc {
+                                        last.1.push(s.value);
+                                        continue;
+                                    }
+                                }
+                                groups.push((s.desc, vec![s.value]));
                             }
-                        }).collect_view()}
+                            groups.into_iter().map(|(desc, values)| {
+                                let make_link = |value: String| {
+                                    let value2 = value.clone();
+                                    let on_click = move |ev: leptos::ev::MouseEvent| {
+                                        ev.prevent_default();
+                                        let current = command.get_untracked();
+                                        let prefix = word_prefix(&current);
+                                        set_command.set(format!("{}{} ", prefix, value2));
+                                    };
+                                    view! { <a href="#" on:click=on_click>{value}</a> }
+                                };
+                                if values.len() == 1 {
+                                    let value = values.into_iter().next().unwrap();
+                                    leptos::either::Either::Left(view! {
+                                        <div class="suggestion-doc-item">
+                                            {make_link(value)}
+                                            {desc.map(|d| view! {
+                                                <span class="suggestion-doc-desc">" - " {d}</span>
+                                            })}
+                                        </div>
+                                    })
+                                } else {
+                                    let value_views = values.into_iter()
+                                        .map(|v| view! { <span>{make_link(v)}" "</span> })
+                                        .collect_view();
+                                    leptos::either::Either::Right(view! {
+                                        <div class="suggestion-doc">
+                                            {desc.map(|d| view! {
+                                                <div class="suggestion-doc-header">
+                                                    <span class="suggestion-doc-desc">{d}</span>
+                                                </div>
+                                            })}
+                                            <div class="suggestion-doc-values">{value_views}</div>
+                                        </div>
+                                    })
+                                }
+                            }).collect_view()
+                        }}
                     </div>
                 </div>
             </Show>
@@ -314,6 +386,6 @@ pub fn GameCommandInput(
                     <input type="submit" value="Send"/>
                 </form>
             </div>
-        </div>
+        </>
     }
 }

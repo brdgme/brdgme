@@ -317,6 +317,32 @@ review before the `leptos` branch replaces production. Full review in
 - [x] **Concede confirmation**: Added `window.confirm("Are you sure you want to
       concede?")` in the click handler before dispatching `ConcedeGame`.
       `"Window"` added to web-sys features.
+- [x] **Recent logs `is_new` always false**: `logged_at` (game service time) is
+      set before `last_turn_at` is written to DB, so `logged_at > last_turn_at`
+      was always false. Fixed: `log.created_at >= last_turn_at` (DB insert time,
+      set after `last_turn_at` commits). Matches web-legacy.
+- [x] **Suggestions/command input too narrow**: `game-command-input-container`
+      wrapper div had no explicit width; as a centered flex child its children's
+      `width: 63%` resolved against an unsized parent. Fixed: return a fragment
+      `<>` from `GameCommandInput` so both elements are direct children of
+      `.game-main` and correctly receive 63% of its width.
+- [x] **Timestamp shown in recent logs**: `render_log_entries` now takes
+      `show_timestamp: bool`; recent logs pass `false`, sidebar logs pass `true`.
+      Also fixed: empty `log-time` divs (block elements adding blank lines) now
+      only rendered when a label exists.
+- [x] **Scroll to bottom**: `NodeRef` + `Effect::new` + `request_animation_frame`
+      in `RecentGameLogs` (scrolls `.recent-logs`) and `GameLogs` (scrolls
+      `.game-meta-logs-content` via `parent_element()`).
+- [x] **Page flash on command submit**: Outer `Suspense` → `Transition` for the
+      game data resource. `Transition` keeps previous content visible during
+      re-fetches; `Suspense` was blanking the screen on every WebSocket update.
+- [x] **Undo log plain text**: Was inserting `'Game undone.'` directly. Fixed:
+      `db::undo_game` takes `player_position: usize` and inserts
+      `{{player N}} used an undo` markup, rendered as the player name in color.
+- [x] **No UI update after command/undo/concede**: rust/web relied solely on the
+      WebSocket round-trip for re-fetches. Fixed: increment `trigger.last_update`
+      immediately in the client-side `Effect` when any server action returns
+      `Ok(())`. WebSocket still fires for other players as before.
 
 ---
 

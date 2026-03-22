@@ -170,7 +170,7 @@ pub async fn undo_game(
         Status::Finished { placings, .. } => (vec![], vec![], placings),
     };
 
-    if let Err(e) = db::undo_game(&pool, id, &undo_state, &whose_turn, &eliminated, &placings).await {
+    if let Err(e) = db::undo_game(&pool, id, &undo_state, player.game_player.position as usize, &whose_turn, &eliminated, &placings).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to undo game: {}", e)).into_response();
     }
 

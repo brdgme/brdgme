@@ -698,6 +698,7 @@ pub async fn undo_game(
     pool: &PgPool,
     game_id: Uuid,
     undo_state: &str,
+    player_position: usize,
     whose_turn: &[usize],
     eliminated: &[usize],
     placings: &[usize],
@@ -740,9 +741,11 @@ pub async fn undo_game(
         .await?;
     }
 
+    let undo_log_body = format!("{{{{player {}}}}} used an undo", player_position);
     sqlx::query!(
-        "INSERT INTO game_logs (game_id, body, is_public, logged_at) VALUES ($1, 'Game undone.', true, NOW())",
-        game_id
+        "INSERT INTO game_logs (game_id, body, is_public, logged_at) VALUES ($1, $2, true, NOW())",
+        game_id,
+        undo_log_body,
     )
     .execute(&mut *tx)
     .await?;

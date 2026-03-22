@@ -342,7 +342,7 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
         let entries = logs.into_iter().map(|log| {
             let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
             let body_html = brdgme_markup::html(&brdgme_markup::transform(&nodes, &markup_players));
-            let is_new = log.logged_at > last_turn_at;
+            let is_new = log.created_at >= last_turn_at;
             GameLogEntry { body_html, logged_at: log.logged_at, is_new }
         }).collect();
 
@@ -414,7 +414,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
             Status::Finished { placings, .. } => (vec![], vec![], placings),
         };
 
-        crate::db::undo_game(&pool, game_id, &undo_state, &whose_turn, &eliminated, &placings).await
+        crate::db::undo_game(&pool, game_id, &undo_state, player.game_player.position as usize, &whose_turn, &eliminated, &placings).await
             .map_err(|e| ServerFnError::new(format!("Failed to undo game: {}", e)))?;
 
         broadcaster.broadcast(WebSocketMessage::GameUpdate { game_id });

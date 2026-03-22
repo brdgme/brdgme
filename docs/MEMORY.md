@@ -9,7 +9,7 @@ Active branch: `leptos` - Rust/Leptos rewrite of all frontend + backend.
 - `VISION.md` - timeless goals and principles
 - `ARCHITECTURE.md` - system design, components, JSON contract, DB schema
 - `PLAN.md` - phase-by-phase migration plan, source of truth for next tasks
-- `STATUS.md` - current session progress and immediate next tasks
+- `SCRATCH.md` - current session notes and open issues
 - `DEV.md` - setup, daily workflow, SQLx, Rust conventions, gotchas
 
 ## Repo Structure
@@ -27,6 +27,9 @@ Active branch: `leptos` - Rust/Leptos rewrite of all frontend + backend.
 - Phases 1-5.5: complete
 - Phase 5.6: functionally complete - one open bug: restart 500 (diagnostics
   added 2026-03-22, raw response will be captured on next live restart attempt)
+- Bug fixes (2026-03-22 session 3): recent logs is_new logic, width layout,
+  timestamps, scroll-to-bottom, page flash, undo log markup, immediate re-fetch
+  after actions. See PLAN.md "Bug fixes" section and SCRATCH.md.
 - Phase 6: Redis pub/sub (replaces tokio broadcast, required for multi-replica + side-by-side)
 - Phase 6.5: ArgoCD production CD
 - Phase 7: side-by-side validation then legacy decommission

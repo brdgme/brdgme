@@ -412,7 +412,7 @@ fn GamePage() -> impl IntoView {
     );
 
     view! {
-        <Suspense fallback=move || view! { <MainLayout><div></div></MainLayout> }>
+        <Transition fallback=move || view! { <MainLayout><div></div></MainLayout> }>
             {move || {
                 game_data.get().map(|res| match res {
                     Ok(data) => {
@@ -466,6 +466,6 @@ fn GamePage() -> impl IntoView {
                     Err(e) => view! { <MainLayout><div class="error">"Error: " {e.to_string()}</div></MainLayout> }.into_any(),
                 })
             }}
-        </Suspense>
+        </Transition>
     }
 }
