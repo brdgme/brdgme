@@ -515,28 +515,30 @@ The new Leptos app keeps `brdgme/web`. The old React frontend is renamed to
 - [x] Add `brdgme/web-legacy` image build to the Tiltfile (from
       `web/Dockerfile`, final stage `web`, tagged `brdgme/web-legacy`).
 - [x] Add `brdgme/api` and `brdgme/websocket` image builds to the Tiltfile.
-- [ ] Create `k8s/base/web-legacy/` manifests (Deployment + Service) using
+- [x] Create `k8s/base/web-legacy/` manifests (Deployment + Service) using
       `image: brdgme/web-legacy`. Mirror the structure of `k8s/base/web/` but
       with `name: web-legacy`.
-- [ ] Create `k8s/base/legacy/kustomization.yaml` grouping `web-legacy`, `api`,
+- [x] Create `k8s/base/legacy/kustomization.yaml` grouping `web-legacy`, `api`,
       and `websocket` as the legacy stack.
-- [ ] Restore `api` and `websocket` manifests to an active kustomization overlay
-      alongside the legacy frontend.
-- [ ] Configure Knative domain to `brdg.me` (patch `config-domain` in
-      `knative-serving`).
-- [ ] Create Knative `DomainMapping` resources (one per service) to assign
+- [x] Restore `api` and `websocket` manifests to an active kustomization overlay
+      alongside the legacy frontend. (`k8s/base/brdgme` now includes `../legacy`)
+- [x] Configure Knative domain to `brdg.me` (patch `config-domain` in
+      `knative-serving`). (`k8s/prod/knative-serving/config-domain.yaml`)
+- [x] Create Knative `DomainMapping` resources (one per service) to assign
       custom hostnames. All services are already Knative Services, so Kourier
       routes by hostname automatically:
       - `brdg.me` → `web`
       - `legacy.brdg.me` → `web-legacy`
       - `api.brdg.me` → `api`
       - `ws.brdg.me` → `websocket`
-- [ ] Remove `k8s/base/ingress/` (nginx Ingress) - Kourier becomes the sole
-      external entry point once DomainMappings are in place.
+      (`k8s/base/domain-mapping/`, included in `k8s/prod/app/`)
+- [x] Remove `k8s/base/ingress/` (nginx Ingress) from `k8s/base/brdgme` -
+      Kourier is the sole external entry point via DomainMappings.
 - [ ] TLS: cert-manager with certificates on each DomainMapping (Knative
       `CertificateClass` annotation), or a wildcard `*.brdg.me` cert.
-- [ ] Verify the old React frontend's API base URL is configured to point to
-      the `api` service, not `web`.
+- [x] Verify the old React frontend's API base URL is configured to point to
+      the `api` service - confirmed: `http.ts` derives URL by replacing first
+      subdomain with `api` (`legacy.brdg.me` → `api.brdg.me`).
 
 ### Decommission (once rust/web is proven in production)
 

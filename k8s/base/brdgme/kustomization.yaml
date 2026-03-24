@@ -1,6 +1,6 @@
 bases:
 - ../game
-- ../ingress
+- ../legacy
 - ../postgres
 - ../redis
 - ../smtp

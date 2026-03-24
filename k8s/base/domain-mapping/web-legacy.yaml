@@ -1,0 +1,10 @@
+---
+apiVersion: serving.knative.dev/v1beta1
+kind: DomainMapping
+metadata:
+  name: legacy.brdg.me
+spec:
+  ref:
+    name: web-legacy
+    kind: Service
+    apiVersion: serving.knative.dev/v1

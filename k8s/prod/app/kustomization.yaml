@@ -1,6 +1,7 @@
 namespace: brdgme
 bases:
 - ../../base/brdgme
+- ../../base/domain-mapping
 images:
 - name: brdgme/web
   newName: ghcr.io/beefsack/brdgme/web

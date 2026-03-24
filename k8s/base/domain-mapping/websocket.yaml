@@ -1,0 +1,10 @@
+---
+apiVersion: serving.knative.dev/v1beta1
+kind: DomainMapping
+metadata:
+  name: ws.brdg.me
+spec:
+  ref:
+    name: websocket
+    kind: Service
+    apiVersion: serving.knative.dev/v1
