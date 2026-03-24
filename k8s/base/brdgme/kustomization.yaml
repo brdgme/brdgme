@@ -1,6 +1,7 @@
 bases:
 - ../game
 - ../legacy
+- ../migrate
 - ../postgres
 - ../redis
 - ../smtp

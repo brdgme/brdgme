@@ -1,0 +1,28 @@
+---
+# ArgoCD Application for brdgme.
+#
+# Initially points to this repo. Once brdgme-config is created and the GitHub
+# Actions deploy step is wired up, update repoURL and targetRevision to point
+# there instead - that repo becomes the source of truth for image tags.
+#
+# Bootstrap: kubectl apply -n argocd -f k8s/argocd/brdgme-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: brdgme
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/brdgme/brdgme.git
+    targetRevision: master
+    path: k8s/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: brdgme
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

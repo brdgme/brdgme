@@ -424,21 +424,22 @@ PreSync hook so a failed migration halts the sync before any pods are replaced.
 
 ### ArgoCD Application manifest
 
-- [ ] Create `k8s/argocd/brdgme-app.yaml`: an `Application` resource pointing
+- [x] Create `k8s/argocd/brdgme-app.yaml`: an `Application` resource pointing
       to this repo, `k8s/prod` kustomize path, auto-sync enabled, prune
       enabled, self-heal enabled.
-- [ ] Commit the `Application` manifest to the repo so ArgoCD manages itself
+- [x] Commit the `Application` manifest to the repo so ArgoCD manages itself
       (app-of-apps pattern is not needed at this scale - a single Application
       is sufficient).
 
 ### Database migration PreSync hook
 
-- [ ] Create `k8s/base/migrate/job.yaml`: a `Job` that runs
-      `sqlx migrate run` using the `brdgme/web` image and the `postgres-config`
-      secret. Annotate with:
+- [x] Create `k8s/base/migrate/job.yaml`: a `Job` that runs
+      `sqlx migrate run` using the `brdgme/migrate` image (dedicated
+      Dockerfile target in `rust/Dockerfile`) and the `postgres-config` secret.
+      Annotate with:
       - `argocd.argoproj.io/hook: PreSync`
       - `argocd.argoproj.io/hook-delete-policy: BeforeHookCreation`
-- [ ] Add `k8s/base/migrate/` to `k8s/base/brdgme/kustomization.yaml`.
+- [x] Add `k8s/base/migrate/` to `k8s/base/brdgme/kustomization.yaml`.
 - [ ] Verify: a failed migration halts the ArgoCD sync and leaves the running
       pods untouched.
 
@@ -534,8 +535,15 @@ The new Leptos app keeps `brdgme/web`. The old React frontend is renamed to
       (`k8s/base/domain-mapping/`, included in `k8s/prod/app/`)
 - [x] Remove `k8s/base/ingress/` (nginx Ingress) from `k8s/base/brdgme` -
       Kourier is the sole external entry point via DomainMappings.
-- [ ] TLS: cert-manager with certificates on each DomainMapping (Knative
-      `CertificateClass` annotation), or a wildcard `*.brdg.me` cert.
+- [x] TLS: cert-manager with per-DomainMapping certificates via
+      `networking.knative.dev/certificate-class: cert-manager.io` annotation.
+      `k8s/base/cert-manager/cluster-issuer.yaml`: Let's Encrypt `ClusterIssuer`
+      using HTTP01 solver with `kourier.ingress.networking.knative.dev` ingress
+      class. `k8s/prod/knative-serving/`: `config-certmanager.yaml` (issuer ref)
+      and `config-network.yaml` (auto-tls: enabled, http-protocol: redirected).
+      Prerequisites (one-time, not in kustomize - cluster infrastructure):
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+        kubectl apply -f https://github.com/knative/net-certmanager/releases/download/knative-v1.21.0/release.yaml
 - [x] Verify the old React frontend's API base URL is configured to point to
       the `api` service - confirmed: `http.ts` derives URL by replacing first
       subdomain with `api` (`legacy.brdg.me` → `api.brdg.me`).

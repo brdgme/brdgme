@@ -1,0 +1,12 @@
+---
+# Enable automatic TLS provisioning via cert-manager for all Knative Services
+# and DomainMapping resources.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-network
+  namespace: knative-serving
+data:
+  auto-tls: enabled
+  certificate-class: cert-manager.io
+  http-protocol: redirected

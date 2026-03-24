@@ -1,0 +1,11 @@
+---
+# Tells Knative's net-certmanager which ClusterIssuer to use.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-certmanager
+  namespace: knative-serving
+data:
+  issuerRef: |
+    kind: ClusterIssuer
+    name: letsencrypt

@@ -68,6 +68,23 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - uses: docker/metadata-action@v5
+        id: meta-migrate
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/brdgme/migrate
+          tags: |
+            type=sha
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: rust/Dockerfile
+          target: migrate
+          push: ${{ github.ref == 'refs/heads/master' }}
+          tags: ${{ steps.meta-migrate.outputs.tags }}
+          labels: ${{ steps.meta-migrate.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   build-rust-games:
     needs: [test-rust]
