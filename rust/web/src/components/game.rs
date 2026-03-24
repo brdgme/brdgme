@@ -271,7 +271,6 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     }
 }
 
-/// Renders a player name as `<name>` in the player's color.
 #[component]
 pub fn PlayerName(name: String, color: String) -> impl IntoView {
     view! {

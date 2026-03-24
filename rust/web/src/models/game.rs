@@ -26,31 +26,6 @@ pub struct GameVersion {
     pub is_deprecated: bool,
 }
 
-impl GameVersion {
-    pub fn into_public(self) -> PublicGameVersion {
-        PublicGameVersion {
-            id: self.id,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-            game_type_id: self.game_type_id,
-            name: self.name,
-            is_public: self.is_public,
-            is_deprecated: self.is_deprecated,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct PublicGameVersion {
-    pub id: Uuid,
-    pub created_at: PrimitiveDateTime,
-    pub updated_at: PrimitiveDateTime,
-    pub game_type_id: Uuid,
-    pub name: String,
-    pub is_public: bool,
-    pub is_deprecated: bool,
-}
-
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Game {
     pub id: Uuid,
@@ -94,15 +69,6 @@ pub struct GameLog {
     pub body: String,
     pub is_public: bool,
     pub logged_at: PrimitiveDateTime,
-}
-
-#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
-pub struct GameLogTarget {
-    pub id: Uuid,
-    pub created_at: PrimitiveDateTime,
-    pub updated_at: PrimitiveDateTime,
-    pub game_log_id: Uuid,
-    pub game_player_id: Uuid,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

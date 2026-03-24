@@ -31,8 +31,16 @@ async fn send_login_email(to_email: &str, token: &str) {
         .unwrap_or(25);
     let from_addr = std::env::var("SMTP_FROM").unwrap_or_else(|_| "noreply@brdgme.com".to_string());
 
+    let from_mailbox = match from_addr.parse() {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("Invalid SMTP_FROM address '{}': {}", from_addr, e);
+            return;
+        }
+    };
+
     let email = match Message::builder()
-        .from(from_addr.parse().unwrap())
+        .from(from_mailbox)
         .to(match to_email.parse() {
             Ok(a) => a,
             Err(e) => {
@@ -68,7 +76,6 @@ pub struct LoginRequest {
 pub struct LoginResponse {
     pub success: bool,
     pub message: String,
-    pub user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,81 +87,76 @@ pub struct AuthUser {
 
 #[server(Login, "/api")]
 pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
-    // Validate email format
     if email.is_empty() || !email.contains('@') {
         return Ok(LoginResponse {
             success: false,
             message: "Invalid email address".to_string(),
-            user_id: None,
         });
     }
-    
-    // Get database pool from Leptos context
+
     let pool = expect_context::<PgPool>();
-    
-    // Check if user exists with this email
+    let mut tx = pool.begin().await
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
     let user_email = sqlx::query_as!(
         UserEmail,
         "SELECT * FROM user_emails WHERE email = $1 AND is_primary = true",
         email
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-    
+
     let user_id = if let Some(user_email) = user_email {
         user_email.user_id
     } else {
-        // Create new user if doesn't exist
         let new_user_id = Uuid::new_v4();
         let username = email.split('@').next().unwrap_or("user").to_string();
-        
-        // Insert new user
+
         sqlx::query!(
             "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)",
             new_user_id,
             username,
             &Vec::<String>::new()
         )
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ServerFnError::new(format!("Failed to create user: {}", e)))?;
-        
-        // Insert user email
+
         sqlx::query!(
             "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
             new_user_id,
             email
         )
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ServerFnError::new(format!("Failed to create user email: {}", e)))?;
-        
+
         new_user_id
     };
-    
-    // Generate 6-digit login confirmation token
+
     let confirmation_token = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let now = OffsetDateTime::now_utc();
     let confirmation_time = time::PrimitiveDateTime::new(now.date(), now.time());
-    
-    // Update user with login confirmation
+
     sqlx::query!(
         "UPDATE users SET login_confirmation = $1, login_confirmation_at = $2 WHERE id = $3",
         confirmation_token,
         confirmation_time,
         user_id
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ServerFnError::new(format!("Failed to update user: {}", e)))?;
-    
+
+    tx.commit().await
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
     send_login_email(&email, &confirmation_token).await;
 
     Ok(LoginResponse {
         success: true,
         message: "Login email sent".to_string(),
-        user_id: Some(user_id),
     })
 }
 

@@ -259,13 +259,14 @@ pub async fn restart_game(
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
     }
 
-    if let Err(_) = sqlx::query!(
+    if let Err(e) = sqlx::query!(
         "UPDATE games SET restarted_game_id = $1, updated_at = NOW() WHERE id = $2",
         new_game.id,
         id
     )
     .execute(&pool)
     .await {
+        tracing::error!("Failed to set restarted_game_id on game {}: {}", id, e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
     }
 
@@ -346,19 +347,26 @@ pub async fn mark_read(
         None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
     };
 
-    let game_extended = match db::find_game_extended(&pool, id).await {
-        Ok(Some(ge)) => ge,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Game not found").into_response(),
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
-    };
+    let is_player = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM game_players WHERE game_id = $1 AND user_id = $2)",
+        id,
+        user.id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(Some(false))
+    .unwrap_or(false);
 
-    if !game_extended.game_players.iter().any(|p| p.user.id == user.id) {
+    if !is_player {
         return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response();
     }
 
     match db::mark_game_read(&pool, id, user.id).await {
-        Ok(_) => StatusCode::OK.into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to mark game {} read: {}", id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
+        }
     }
 }
 

@@ -354,7 +354,6 @@ mod ssr {
                 }).collect();
 
                 let player_html = render_markup(&player_render.render, &markup_players);
-                let player_html_clone = player_html.clone();
                 let legacy_gp = legacy_game_players.iter()
                     .find(|p| p.game_player.id == gpe.game_player.id)
                     .map(|p| p.game_player.clone());
@@ -390,7 +389,7 @@ mod ssr {
                     game_players: legacy_game_players.clone(),
                     game_logs: player_legacy_logs,
                     pub_state: Some(player_render.player_state.clone()),
-                    html: player_html,
+                    html: player_html.clone(),
                     command_spec: player_render.command_spec.clone(),
                     chat: None,
                 };
@@ -445,7 +444,7 @@ mod ssr {
                     id: game_extended.game.id,
                     type_name: game_extended.game_type.name.clone(),
                     version_name: game_extended.game_version.name.clone(),
-                    html: player_html_clone,
+                    html: player_html,
                     is_my_turn: gpe.game_player.is_turn,
                     is_finished: game_extended.game.is_finished,
                     can_undo: gpe.game_player.undo_game_state.is_some(),
@@ -489,7 +488,7 @@ mod ssr {
     }
 
     async fn handle_socket(socket: WebSocket, broadcaster: GameBroadcaster, user_id: Option<Uuid>) {
-        let (mut sender, mut _receiver) = socket.split();
+        let (mut sender, _receiver) = socket.split();
 
         let mut pubsub = match broadcaster.client.get_async_pubsub().await {
             Ok(p) => p,

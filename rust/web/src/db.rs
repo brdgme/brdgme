@@ -3,9 +3,49 @@ use sqlx::postgres::PgPool;
 #[cfg(feature = "ssr")]
 use anyhow::Result;
 #[cfg(feature = "ssr")]
-use crate::models::user::{User, NewUser, NewUserEmail};
+use crate::models::user::User;
 #[cfg(feature = "ssr")]
 use uuid::Uuid;
+
+#[cfg(feature = "ssr")]
+fn build_game_type_user(
+    id: Option<Uuid>,
+    created_at: Option<time::PrimitiveDateTime>,
+    updated_at: Option<time::PrimitiveDateTime>,
+    game_type_id: Option<Uuid>,
+    user_id: Option<Uuid>,
+    last_game_finished_at: Option<time::PrimitiveDateTime>,
+    rating: Option<i32>,
+    peak_rating: Option<i32>,
+    default_user_id: Uuid,
+    default_game_type_id: Uuid,
+    default_ts: time::PrimitiveDateTime,
+) -> crate::models::game::GameTypeUser {
+    match (id, created_at, updated_at, game_type_id, user_id, rating, peak_rating) {
+        (Some(id), Some(created_at), Some(updated_at), Some(game_type_id), Some(user_id), Some(rating), Some(peak_rating)) => {
+            crate::models::game::GameTypeUser {
+                id,
+                created_at,
+                updated_at,
+                game_type_id,
+                user_id,
+                last_game_finished_at,
+                rating,
+                peak_rating,
+            }
+        }
+        _ => crate::models::game::GameTypeUser {
+            id: Uuid::nil(),
+            created_at: default_ts,
+            updated_at: default_ts,
+            game_type_id: default_game_type_id,
+            user_id: default_user_id,
+            last_game_finished_at: None,
+            rating: 1500,
+            peak_rating: 1500,
+        }
+    }
+}
 
 #[cfg(feature = "ssr")]
 pub async fn create_pool() -> Result<PgPool> {
@@ -15,41 +55,6 @@ pub async fn create_pool() -> Result<PgPool> {
     let pool = PgPool::connect(&database_url).await?;
 
     Ok(pool)
-}
-
-#[cfg(feature = "ssr")]
-pub async fn create_user(pool: &PgPool, new_user: NewUser) -> Result<User> {
-    sqlx::query_as!(
-        User,
-        r#"
-        INSERT INTO users (name, pref_colors, login_confirmation, login_confirmation_at)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, created_at, updated_at, name, pref_colors, login_confirmation, login_confirmation_at
-        "#,
-        new_user.name,
-        &new_user.pref_colors,
-        new_user.login_confirmation,
-        new_user.login_confirmation_at
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(Into::into)
-}
-
-#[cfg(feature = "ssr")]
-pub async fn create_user_email(pool: &PgPool, new_email: NewUserEmail) -> Result<()> {
-    sqlx::query!(
-        r#"
-        INSERT INTO user_emails (user_id, email, is_primary)
-        VALUES ($1, $2, $3)
-        "#,
-        new_email.user_id,
-        new_email.email,
-        new_email.is_primary
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
 }
 
 #[cfg(feature = "ssr")]
@@ -163,7 +168,6 @@ pub struct GameExtended {
     pub game_type: crate::models::game::GameType,
     pub game_version: crate::models::game::GameVersion,
     pub game_players: Vec<GamePlayerExtended>,
-    // Chat is omitted for now as it's not yet fully implemented in models
 }
 
 #[cfg(feature = "ssr")]
@@ -216,31 +220,12 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 
     let mut game_players = Vec::new();
     for p in players_raw {
-        let gtu = if let (Some(gtu_id), Some(gtu_created_at), Some(gtu_updated_at), Some(gtu_game_type_id), Some(gtu_user_id), Some(gtu_rating), Some(gtu_peak_rating)) =
-            (p.gtu_id, p.gtu_created_at, p.gtu_updated_at, p.gtu_game_type_id, p.gtu_user_id, p.gtu_rating, p.gtu_peak_rating) {
-            crate::models::game::GameTypeUser {
-                id: gtu_id,
-                created_at: gtu_created_at,
-                updated_at: gtu_updated_at,
-                game_type_id: gtu_game_type_id,
-                user_id: gtu_user_id,
-                last_game_finished_at: p.gtu_last_game_finished_at,
-                rating: gtu_rating,
-                peak_rating: gtu_peak_rating,
-            }
-        } else {
-            // No rating row yet for this player; use defaults.
-            crate::models::game::GameTypeUser {
-                id: Uuid::nil(),
-                created_at: p.gp_created_at,
-                updated_at: p.gp_created_at,
-                game_type_id: game_version.game_type_id,
-                user_id: p.u_id,
-                last_game_finished_at: None,
-                rating: 1500,
-                peak_rating: 1500,
-            }
-        };
+        let gtu = build_game_type_user(
+            p.gtu_id, p.gtu_created_at, p.gtu_updated_at,
+            p.gtu_game_type_id, p.gtu_user_id, p.gtu_last_game_finished_at,
+            p.gtu_rating, p.gtu_peak_rating,
+            p.u_id, game_version.game_type_id, p.gp_created_at,
+        );
 
         game_players.push(GamePlayerExtended {
             game_player: crate::models::game::GamePlayer {
@@ -367,30 +352,12 @@ pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result
             });
         }
 
-        let gtu = if let (Some(gtu_id), Some(gtu_created_at), Some(gtu_updated_at), Some(gtu_game_type_id), Some(gtu_user_id), Some(gtu_rating), Some(gtu_peak_rating)) =
-            (row.gtu_id, row.gtu_created_at, row.gtu_updated_at, row.gtu_game_type_id, row.gtu_user_id, row.gtu_rating, row.gtu_peak_rating) {
-            crate::models::game::GameTypeUser {
-                id: gtu_id,
-                created_at: gtu_created_at,
-                updated_at: gtu_updated_at,
-                game_type_id: gtu_game_type_id,
-                user_id: gtu_user_id,
-                last_game_finished_at: row.gtu_last_game_finished_at,
-                rating: gtu_rating,
-                peak_rating: gtu_peak_rating,
-            }
-        } else {
-            crate::models::game::GameTypeUser {
-                id: Uuid::nil(),
-                created_at: row.gp_created_at,
-                updated_at: row.gp_created_at,
-                game_type_id: row.game_type_id,
-                user_id: row.u_id,
-                last_game_finished_at: None,
-                rating: 1500,
-                peak_rating: 1500,
-            }
-        };
+        let gtu = build_game_type_user(
+            row.gtu_id, row.gtu_created_at, row.gtu_updated_at,
+            row.gtu_game_type_id, row.gtu_user_id, row.gtu_last_game_finished_at,
+            row.gtu_rating, row.gtu_peak_rating,
+            row.u_id, row.game_type_id, row.gp_created_at,
+        );
 
         games.last_mut().unwrap().game_players.push(GamePlayerExtended {
             game_player: crate::models::game::GamePlayer {
@@ -476,7 +443,12 @@ pub async fn create_game_with_users(
 
     // Opponent Emails
     for email in opts.opponent_emails {
-        let user = if let Some(u) = get_user_by_email(pool, email).await? {
+        let user = if let Some(u) = sqlx::query_as!(
+            crate::models::user::User,
+            r#"SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.login_confirmation, u.login_confirmation_at
+               FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1"#,
+            email
+        ).fetch_optional(&mut *tx).await? {
             u
         } else {
             // Create new user for email
@@ -534,6 +506,10 @@ pub async fn create_game_with_users(
     .await?;
 
     // 5. Create Players
+    let game_type_id = find_game_version(pool, opts.game_version_id).await?
+        .ok_or_else(|| anyhow::anyhow!("Game version not found"))?
+        .game_type_id;
+
     for (pos, user) in users.iter().enumerate() {
         let color = colors.get(pos).unwrap_or(&"BlueGrey").to_string();
         let is_turn = opts.whose_turn.contains(&pos);
@@ -557,17 +533,13 @@ pub async fn create_game_with_users(
         .execute(&mut *tx)
         .await?;
 
-        // Ensure GameTypeUser exists
-        let game_version = find_game_version(pool, opts.game_version_id).await?
-            .ok_or_else(|| anyhow::anyhow!("Game version not found"))?;
-            
         sqlx::query!(
             r#"
             INSERT INTO game_type_users (game_type_id, user_id)
             VALUES ($1, $2)
             ON CONFLICT DO NOTHING
             "#,
-            game_version.game_type_id,
+            game_type_id,
             user.id
         )
         .execute(&mut *tx)

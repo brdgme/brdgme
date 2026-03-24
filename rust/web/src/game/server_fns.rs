@@ -175,7 +175,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                     name: p.user.name.clone(),
                     color,
                     rating: p.game_type_user.rating,
-                    points: 0.0,
+                    points: p.game_player.points.unwrap_or(0.0),
                     is_turn: p.game_player.is_turn,
                 }
             }).collect(),

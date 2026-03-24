@@ -14,6 +14,7 @@ async fn main() {
     use web::websocket::GameBroadcaster;
 
     dotenv::dotenv().ok();
+    tracing_subscriber::fmt::init();
 
     let pool = create_pool().await.expect("Failed to create database pool");
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://redis".to_string());

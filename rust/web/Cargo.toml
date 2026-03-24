@@ -33,7 +33,6 @@ tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"], optio
 tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 anyhow = { version = "1.0.95", optional = true }
 thiserror = { version = "2.0.11", optional = true }
-async-trait = { version = "0.1", optional = true }
 
 # Email functionality
 lettre = { version = "0.11", features = ["tokio1", "smtp-transport", "builder"], default-features = false, optional = true }
@@ -89,7 +88,6 @@ ssr = [
     "dep:brdgme_markup",
     "dep:dotenv",
     "dep:tower-http",
-    "dep:async-trait",
     "dep:reqwest",
 ]
 

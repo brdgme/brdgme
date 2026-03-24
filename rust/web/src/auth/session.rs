@@ -68,7 +68,7 @@ pub async fn validate_session_token(
     auth_token_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let token_exists = sqlx::query!(
-        "SELECT id FROM user_auth_tokens WHERE id = $1 AND created_at > NOW() - INTERVAL '30 days'",
+        "SELECT id FROM user_auth_tokens WHERE id = $1",
         auth_token_id
     )
     .fetch_optional(pool)

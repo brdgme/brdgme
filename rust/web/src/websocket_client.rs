@@ -57,6 +57,4 @@ pub fn use_websocket() {
 }
 
 #[cfg(not(feature = "hydrate"))]
-pub fn use_websocket() {
-    // No-op on server
-}
+pub fn use_websocket() {}
