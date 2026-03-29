@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO users (name, pref_colors, login_confirmation, login_confirmation_at)\n        VALUES ($1, $2, $3, $4)\n        RETURNING id, created_at, updated_at, name, pref_colors, login_confirmation, login_confirmation_at\n        ",
+  "query": "SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.login_confirmation, u.login_confirmation_at\n               FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1",
   "describe": {
     "columns": [
       {
@@ -41,10 +41,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "TextArray",
-        "Text",
-        "Timestamp"
+        "Text"
       ]
     },
     "nullable": [
@@ -57,5 +54,5 @@
       true
     ]
   },
-  "hash": "379d7598d1bb47fca7205f82372affc34808fe702f34ed484ec1da838c12d32f"
+  "hash": "986c889e277feb4cea039579f3032e3985cfc5e1d1688ca626c556282ef19c0f"
 }

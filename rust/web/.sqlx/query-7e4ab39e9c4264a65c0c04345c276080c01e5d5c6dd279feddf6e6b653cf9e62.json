@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id FROM user_auth_tokens WHERE id = $1 AND created_at > NOW() - INTERVAL '30 days'",
+  "query": "SELECT id FROM user_auth_tokens WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "84cd8617d65eb7bc259a5dea682ad40374bf0080e28512ed742043de6618abbd"
+  "hash": "7e4ab39e9c4264a65c0c04345c276080c01e5d5c6dd279feddf6e6b653cf9e62"
 }
