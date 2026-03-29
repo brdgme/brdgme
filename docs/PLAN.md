@@ -407,6 +407,186 @@ re-fetch needed for game state or logs. `active_games` sidebar still re-fetches
 
 ---
 
+## Phase 9: LLM Bots [Pending]
+
+**Goal:** Add bot players backed by an in-cluster LLM. Bots receive the
+rendered game state and available commands, produce a command string, and
+submit it via the monolith. No external LLM services - all inference runs
+in-cluster.
+
+### Design decisions
+
+- **Model**: `qwen2.5:3b` (default). Configurable via `BOT_MODEL` env var so
+  dev can use a larger GPU-accelerated model and prod uses the constrained one.
+- **Inference server**: Ollama (`ollama/ollama` image, official). No custom
+  container. Interact purely via Ollama's HTTP API.
+- **Ollama deployment**: Knative Service with `minScale: 1` (consistent with
+  other services). Configure `timeout-seconds` to 300 to accommodate slow CPU
+  inference. PVC for model weights (`/root/.ollama`) so models survive pod
+  restarts without re-download.
+- **Bot caller**: separate Knative Service (`rust/bot` crate). Receives a
+  trigger from the monolith, assembles the prompt, calls Ollama, validates the
+  response, and submits the command back to the monolith via an internal API
+  key. Can scale to zero - it is only active during bot turns.
+- **Internal auth**: monolith accepts an `X-Internal-Key` header (env var
+  `INTERNAL_API_KEY`) on bot command submission, bypassing session auth. The
+  bot caller and monolith share this key via a Kubernetes Secret.
+- **GPU**: optional. When a GPU node is present (NVIDIA device plugin
+  installed), Ollama requests `nvidia.com/gpu: 1`. Controlled by
+  `OLLAMA_GPU_ENABLED` env var in the Tiltfile/overlay. Prod defaults to CPU.
+- **Difficulty**: `easy`, `medium`, `hard`. Stored on `game_players`. Controls
+  a section of the system prompt describing the expected play style.
+- **Retry on invalid command**: up to 5 attempts. Each failed attempt appends
+  the rejected command and validation error to the next prompt. If all attempts
+  fail, the bot skips its turn and logs a system message.
+- **Rendered state**: the bot receives `player_renders[n].render` (the ASCII
+  render from the game service `Status` response) - the same output shown to
+  human players. No raw state structure documentation needed.
+
+### Game contract extension
+
+- [ ] Add `Rules` request type to the game contract in `ARCHITECTURE.md` and
+      `rust/lib/game/src/lib.rs` (or wherever the contract types live).
+      Request: `"Rules"`. Response: `{"Rules": {"rules": "markdown string"}}`.
+      Returns static, human-readable rules for the game. Exposed in the UI and
+      passed to the bot as part of the system prompt.
+- [ ] Implement `Rules` handler in every game microservice. The rules text
+      should describe game objectives, turn structure, and scoring clearly
+      enough for both humans and an LLM to understand valid strategy.
+
+### Database changes
+
+- [ ] Migration: add `bot_difficulty` column (`TEXT`, nullable) to
+      `game_players`. When non-null (`'easy'`, `'medium'`, `'hard'`), this
+      player slot is a bot. `user_id` remains non-null - a bot user record is
+      created per difficulty level (see below).
+- [ ] Migration: add three system bot user records to a seed migration:
+      `bot-easy@brdg.me`, `bot-medium@brdg.me`, `bot-hard@brdg.me` with fixed
+      UUIDs. These are never logged in to directly; they exist so `user_id` FK
+      constraints are satisfied and bot moves appear in game history with a
+      recognisable player name.
+
+### Monolith changes (`rust/web`)
+
+- [ ] Add `POST /api/internal/game/{id}/command` route that accepts
+      `X-Internal-Key` header auth instead of session auth. Delegates to the
+      same `game::execute_command` function used by the regular play endpoint.
+      Returns the same response shape.
+- [ ] After `execute_command` completes successfully (in `play_command`,
+      `undo_game`, `concede_game`, `restart_game` handlers), check if the next
+      player(s) have a non-null `bot_difficulty`. If so, spawn a background
+      task (`tokio::spawn`) that POSTs to the bot caller Knative Service with
+      `{"game_id": "...", "player_position": N}`. Fire-and-forget - do not
+      await the result or block the response.
+- [ ] Add `BOT_SERVICE_URL` env var. If unset, bot triggering is disabled
+      (allows running without the bot service in dev).
+- [ ] New game creation: accept bot player slots in `CreateGameOpts`. A bot
+      slot has a `bot_difficulty` instead of a `user_id`. The `create_game`
+      handler resolves bot slots to the corresponding fixed bot user UUIDs and
+      writes `bot_difficulty` to `game_players`.
+- [ ] New game UI: allow selecting bot opponents (easy/medium/hard) instead of
+      entering an email address for any opponent slot.
+
+### Bot caller service (`rust/bot`)
+
+New Rust binary crate. Deployed as a Knative Service. Receives trigger POSTs
+from the monolith, assembles the full prompt, calls Ollama, retries on failure,
+then submits the command to the monolith's internal endpoint.
+
+- [ ] Create `rust/bot/` crate with a minimal Axum server exposing
+      `POST /trigger`.
+- [ ] Request body: `{"game_id": "uuid", "player_position": 0, "difficulty":
+      "medium"}`.
+- [ ] On trigger:
+  1. Fetch game record from DB to get `game_version_id` and current
+     `game_state`.
+  2. Call game service `Status` to get `player_renders[player_position].render`
+     (rendered board state) and `player_renders[player_position].command_spec`
+     (available commands as structured spec).
+  3. Call game service `Rules` to get the rules text.
+  4. Assemble prompt (see Prompt structure below).
+  5. POST to Ollama `/api/generate` with the assembled prompt.
+  6. Parse the returned command string (trim whitespace, strip any surrounding
+     explanation text - instruct the model to return only the command).
+  7. POST to monolith `POST /api/internal/game/{id}/command` with the command.
+  8. If the monolith returns a validation error, append the rejected command and
+     error to the prompt and retry (up to 5 attempts).
+  9. If all retries fail, POST to monolith's internal endpoint with a
+     `__bot_skip` sentinel that the monolith translates to a "Bot could not
+     move" log entry and advances the turn.
+- [ ] Read env vars: `DATABASE_URL`, `BOT_MODEL` (default `qwen2.5:3b`),
+      `OLLAMA_URL` (default `http://ollama.brdgme.svc.cluster.local`),
+      `MONOLITH_URL`, `INTERNAL_API_KEY`.
+- [ ] Add `rust/bot/Dockerfile` target to `rust/Dockerfile` (multi-stage,
+      reuse the existing chef/planner pattern).
+
+### Prompt structure
+
+The prompt is assembled from these components in order:
+
+**System prompt:**
+1. Platform context: brdgme is a turn-based board gaming platform; moves are
+   plain text commands; the model's sole job is to produce one valid command.
+2. Command spec explanation: how to read the `CommandSpec` structure
+   (alternatives, sequences, token types).
+3. Difficulty instructions: for `easy` - play randomly and avoid optimal moves;
+   for `medium` - play reasonably but make occasional suboptimal choices; for
+   `hard` - play to win, use strong strategy.
+4. Game rules (from the `Rules` endpoint).
+
+**User prompt (per turn):**
+1. Current rendered board state (from `player_renders[n].render`).
+2. Available commands right now (from `player_renders[n].command_spec` rendered
+   as a human-readable summary).
+3. Recent game log (last 30 entries) - helps infer opponent strategy.
+4. If retrying: list of previously attempted commands this turn and the
+   validation error each produced.
+5. Instruction: "Respond with only the command string, nothing else."
+
+### Ollama infrastructure
+
+- [ ] `k8s/base/ollama/`: Knative Service manifest for `ollama/ollama`, PVC
+      for `/root/.ollama`, `BOT_MODEL` env var, `timeout-seconds: 300`
+      annotation. Include `nvidia.com/gpu: 1` resource request (tolerated when
+      no GPU node is present via a `preferredDuringScheduling` affinity rather
+      than a hard requirement, so it degrades gracefully to CPU).
+- [ ] Add `k8s/base/ollama/` to `k8s/base/brdgme/kustomization.yaml`.
+- [ ] `k8s/base/bot/`: Knative Service manifest for `brdgme/bot` image. Reads
+      `OLLAMA_URL`, `MONOLITH_URL`, `INTERNAL_API_KEY` from env/secret.
+- [ ] Add `k8s/base/bot/` to `k8s/base/brdgme/kustomization.yaml`.
+- [ ] Add `brdgme/bot` image build to the Tiltfile.
+- [ ] Add Ollama to the Tiltfile as a local_resource or k8s resource in dev.
+      Use `BOT_IN_CLUSTER=1` flag (analogous to `WEB_IN_CLUSTER=1`) to
+      opt in; default hybrid mode does not deploy Ollama locally to keep dev
+      startup fast.
+
+### NVIDIA GPU setup (dev)
+
+- [ ] Install NVIDIA Container Toolkit on the host (one-time, manual).
+- [ ] Add NVIDIA device plugin DaemonSet to `scripts/setup-kind-cluster.sh`
+      (conditional on a `--gpu` flag so other devs without a GPU are not
+      affected).
+- [ ] Add `BOT_GPU_ENABLED=1` flag to the Tiltfile. When set, the Ollama
+      Knative Service gets a `nodeSelector: {gpu: "true"}` and
+      `resources.limits: {"nvidia.com/gpu": "1"}` via a kustomize patch in
+      `k8s/dev/`.
+
+### Notes
+
+- Ollama pulls the model on first start and caches it in the PVC. On a fresh
+  cluster, the first bot move will be slow while the model downloads. Subsequent
+  starts are instant.
+- The bot caller does not need a game session. It authenticates to the monolith
+  via `INTERNAL_API_KEY` only.
+- Bot user records (easy/medium/hard) should have `login_confirmation = NULL`
+  so they can never be logged in to via the normal auth flow.
+- Prod runs CPU inference. `qwen2.5:3b` at Q4 quantization is ~1.8GB, fits
+  within a 2GB memory limit with overhead. Set `resources.limits.memory: 3Gi`
+  on the Ollama Service to give the model loading process headroom.
+
+
+---
+
 ## Phase 6.5: Production CD (ArgoCD) [Pending]
 
 **Goal:** Replace manual `kubectl apply -k k8s/prod` with ArgoCD for GitOps
