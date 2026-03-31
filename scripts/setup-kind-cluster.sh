@@ -20,7 +20,11 @@ set -euo pipefail
 # kind load docker-image is insufficient. A registry reachable from within the
 # cluster is required.
 echo "==> Starting local registry (kind-registry:5000)..."
-if [ "$(docker inspect -f '{{.State.Running}}' kind-registry 2>/dev/null)" != "true" ]; then
+if [ "$(docker inspect -f '{{.State.Running}}' kind-registry 2>/dev/null)" == "true" ]; then
+  echo "    Registry already running, skipping."
+elif docker inspect kind-registry &>/dev/null; then
+  docker start kind-registry
+else
   docker run --detach --restart=no --name kind-registry \
     --publish "127.0.0.1:5000:5000" registry:2
 fi
@@ -33,6 +37,12 @@ else
   echo "    Cluster already exists, skipping creation."
   kubectl config use-context kind-kind
 fi
+
+# Disable auto-restart so Kind does not start on boot. The cluster should only
+# run when explicitly started for development (via `docker start kind-control-plane`
+# or `tilt up` after starting the cluster manually).
+echo "==> Setting Kind cluster restart policy to 'no'..."
+docker update --restart=no kind-control-plane
 
 # Connect registry to Kind network so pods can reach it as "kind-registry:5000".
 echo "==> Connecting registry to Kind network..."
