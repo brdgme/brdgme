@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::net::SocketAddr;
 
 use serde::{Serialize, de::DeserializeOwned};
+use tokio::signal::unix::{SignalKind, signal};
 use warp::Filter;
 use warp::reject::Reject;
 
@@ -23,5 +24,12 @@ pub async fn serve<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
         let mut g: GameRequester<G> = requester::gamer::new();
         warp::reply::json(&g.request(&req).unwrap())
     });
-    warp::serve(handler).run(addr).await
+    let shutdown = async {
+        signal(SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    let (_, server) = warp::serve(handler).bind_with_graceful_shutdown(addr.into(), shutdown);
+    server.await
 }
