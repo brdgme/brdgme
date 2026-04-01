@@ -409,21 +409,32 @@ re-fetch needed for game state or logs. `active_games` sidebar still re-fetches
 
 ## Phase 9: LLM Bots [Pending]
 
-**Goal:** Add bot players backed by an in-cluster LLM. Bots receive the
-rendered game state and available commands, produce a command string, and
-submit it via the monolith. No external LLM services - all inference runs
-in-cluster.
+**Goal:** Add bot players backed by an external LLM via the Ollama HTTP API.
+Bots receive the rendered game state and available commands, produce a command
+string, and submit it via the monolith. Ollama runs outside the cluster - on
+the dev host in development, and via Ollama Cloud (or a home GPU over
+Tailscale) in production.
 
 ### Design decisions
 
-- **Model**: `qwen2.5:3b` (default). Configurable via `BOT_MODEL` env var so
-  dev can use a larger GPU-accelerated model and prod uses the constrained one.
-- **Inference server**: Ollama (`ollama/ollama` image, official). No custom
-  container. Interact purely via Ollama's HTTP API.
-- **Ollama deployment**: Knative Service with `minScale: 1` (consistent with
-  other services). Configure `timeout-seconds` to 300 to accommodate slow CPU
-  inference. PVC for model weights (`/root/.ollama`) so models survive pod
-  restarts without re-download.
+- **Model**: `qwen3.5:4b` with thinking disabled (`think: false` option). Small
+  enough for fast inference; qwen3.5 instruction-following quality is strong at
+  this size. Configurable via `BOT_MODEL` env var. Default is `qwen3.5:4b`
+  (matches Ollama Cloud prod). Override locally to e.g. `qwen3.5:9b` on an
+  RTX 5080 for better quality.
+- **Thinking disabled**: qwen3 models support an extended thinking mode that
+  produces verbose chain-of-thought output. Disabling it (`think: false` in
+  the Ollama `/api/generate` request) gives faster, more concise responses
+  which is what we want for a single command string.
+- **Inference server**: External Ollama instance. Interact purely via Ollama's
+  HTTP API (`/api/generate`). No in-cluster Ollama deployment.
+- **Ollama Cloud (prod)**: Uses Ollama Cloud as the inference backend. Requires
+  a Bearer token (`OLLAMA_API_KEY` env var). The free tier quotas (5 hours / 7
+  days) are sufficient for async turn-based play with a small model and thinking
+  disabled. Home GPU over Tailscale is a viable fallback (see notes).
+- **Dev**: Ollama runs as a service on the dev host. Bot caller points to
+  `http://localhost:11434` by default (hybrid mode) or to the host gateway IP
+  when running fully in-cluster. No cluster-side Ollama deployment needed.
 - **Bot caller**: separate Knative Service (`rust/bot` crate). Receives a
   trigger from the monolith, assembles the prompt, calls Ollama, validates the
   response, and submits the command back to the monolith via an internal API
@@ -431,14 +442,21 @@ in-cluster.
 - **Internal auth**: monolith accepts an `X-Internal-Key` header (env var
   `INTERNAL_API_KEY`) on bot command submission, bypassing session auth. The
   bot caller and monolith share this key via a Kubernetes Secret.
-- **GPU**: optional. When a GPU node is present (NVIDIA device plugin
-  installed), Ollama requests `nvidia.com/gpu: 1`. Controlled by
-  `OLLAMA_GPU_ENABLED` env var in the Tiltfile/overlay. Prod defaults to CPU.
-- **Difficulty**: `easy`, `medium`, `hard`. Stored on `game_players`. Controls
+- **Difficulty**: `easy`, `medium`, `hard`. Stored in `game_bots`. Controls
   a section of the system prompt describing the expected play style.
+- **Bot player storage**: bots are a first-class concept via a `game_bots`
+  table (not fake user records). `game_players.user_id` is nullable;
+  `game_players.game_bot_id` is a nullable FK to `game_bots`. A CHECK
+  constraint enforces exactly one is non-null.
 - **Retry on invalid command**: up to 5 attempts. Each failed attempt appends
-  the rejected command and validation error to the next prompt. If all attempts
-  fail, the bot skips its turn and logs a system message.
+  the rejected command and validation error to the next prompt. If all retries
+  fail, the bot caller logs the failure and does nothing - the turn remains
+  with the bot. Resolution of stuck bot turns (broader randomisation, concede,
+  etc.) is deferred to a later iteration.
+- **Bot triggering**: v1 uses direct HTTP (monolith POSTs trigger to bot
+  caller). Future: event-driven via NATS after Phase 8 - monolith publishes
+  "bot turn" event, bot service subscribes, publishes "bot command" event back.
+  This fits naturally once NATS is in place.
 - **Rendered state**: the bot receives `player_renders[n].render` (the ASCII
   render from the game service `Status` response) - the same output shown to
   human players. No raw state structure documentation needed.
@@ -456,34 +474,56 @@ in-cluster.
 
 ### Database changes
 
-- [ ] Migration: add `bot_difficulty` column (`TEXT`, nullable) to
-      `game_players`. When non-null (`'easy'`, `'medium'`, `'hard'`), this
-      player slot is a bot. `user_id` remains non-null - a bot user record is
-      created per difficulty level (see below).
-- [ ] Migration: add three system bot user records to a seed migration:
-      `bot-easy@brdg.me`, `bot-medium@brdg.me`, `bot-hard@brdg.me` with fixed
-      UUIDs. These are never logged in to directly; they exist so `user_id` FK
-      constraints are satisfied and bot moves appear in game history with a
-      recognisable player name.
+- [ ] Migration: create `game_bots` table:
+      - `id UUID PRIMARY KEY`
+      - `game_id UUID NOT NULL REFERENCES games(id)`
+      - `name TEXT NOT NULL` - display name within the game (e.g. "Bot", "HAL")
+      - `difficulty TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard'))`
+      - `personality TEXT` - nullable, reserved for future use (e.g. "aggressive", "timid")
+      - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+      - `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+      - `UNIQUE (game_id, name)`
+- [ ] Migration: alter `game_players`:
+      - Make `user_id` nullable.
+      - Add `game_bot_id UUID REFERENCES game_bots(id)` (nullable).
+      - Add CHECK constraint: `(user_id IS NOT NULL) != (game_bot_id IS NOT NULL)`
+
+**Note: `user_id` nullable is a wide-impact change.** Every callsite that
+touches `game_players` is affected:
+- `GamePlayer` Rust model changes to `user_id: Option<Uuid>` - all callsites
+  must handle the Option.
+- SQLx `query_as!` macros will infer the new nullability and fail to compile
+  until updated. Regenerate the SQLx cache after the migration.
+- Any query joining `game_players → users` on `user_id` must become a LEFT
+  JOIN to include bot player rows.
+- UI player name display must fall back to `game_bots.name` when `user_id`
+  is null.
+- Email/notification logic must skip `game_players` rows where `user_id IS NULL`.
 
 ### Monolith changes (`rust/web`)
 
 - [ ] Add `POST /api/internal/game/{id}/command` route that accepts
-      `X-Internal-Key` header auth instead of session auth. Delegates to the
-      same `game::execute_command` function used by the regular play endpoint.
-      Returns the same response shape.
+      `X-Internal-Key` header auth instead of session auth. Accepts
+      `player_position` in the request body; resolves the `game_players` row
+      at that position to identify which player is acting (no session needed).
+      Delegates to the same `game::execute_command` function used by the
+      regular play endpoint.
 - [ ] After `execute_command` completes successfully (in `play_command`,
-      `undo_game`, `concede_game`, `restart_game` handlers), check if the next
-      player(s) have a non-null `bot_difficulty`. If so, spawn a background
-      task (`tokio::spawn`) that POSTs to the bot caller Knative Service with
-      `{"game_id": "...", "player_position": N}`. Fire-and-forget - do not
-      await the result or block the response.
+      `undo_game`, `concede_game`, `restart_game` handlers), query `game_players`
+      for any players whose turn it now is and have a non-null `game_bot_id`.
+      For each, spawn a background task (`tokio::spawn`) that POSTs to the bot
+      caller with `{"game_id": "...", "player_position": N, "difficulty": "..."}`.
+      Fire-and-forget - do not await the result or block the response.
+- [ ] After `create_game` completes, apply the same bot-turn check: if any
+      player with a non-null `game_bot_id` has `is_turn = true` immediately
+      after game creation (i.e. the game service assigned first turn to a bot),
+      trigger the bot caller.
 - [ ] Add `BOT_SERVICE_URL` env var. If unset, bot triggering is disabled
       (allows running without the bot service in dev).
 - [ ] New game creation: accept bot player slots in `CreateGameOpts`. A bot
-      slot has a `bot_difficulty` instead of a `user_id`. The `create_game`
-      handler resolves bot slots to the corresponding fixed bot user UUIDs and
-      writes `bot_difficulty` to `game_players`.
+      slot specifies `name` and `difficulty`. The `create_game` handler inserts
+      a `game_bots` row and a `game_players` row with `game_bot_id` set and
+      `user_id` null.
 - [ ] New game UI: allow selecting bot opponents (easy/medium/hard) instead of
       entering an email address for any opponent slot.
 
@@ -504,18 +544,21 @@ then submits the command to the monolith's internal endpoint.
      (rendered board state) and `player_renders[player_position].command_spec`
      (available commands as structured spec).
   3. Call game service `Rules` to get the rules text.
-  4. Assemble prompt (see Prompt structure below).
-  5. POST to Ollama `/api/generate` with the assembled prompt.
-  6. Parse the returned command string (trim whitespace, strip any surrounding
+  4. Fetch recent game logs from DB (last 30 entries).
+  5. Assemble prompt (see Prompt structure below).
+  6. POST to Ollama `/api/chat` with the assembled prompt.
+  7. Parse the returned command string (trim whitespace, strip any surrounding
      explanation text - instruct the model to return only the command).
-  7. POST to monolith `POST /api/internal/game/{id}/command` with the command.
-  8. If the monolith returns a validation error, append the rejected command and
-     error to the prompt and retry (up to 5 attempts).
-  9. If all retries fail, POST to monolith's internal endpoint with a
-     `__bot_skip` sentinel that the monolith translates to a "Bot could not
-     move" log entry and advances the turn.
-- [ ] Read env vars: `DATABASE_URL`, `BOT_MODEL` (default `qwen2.5:3b`),
-      `OLLAMA_URL` (default `http://ollama.brdgme.svc.cluster.local`),
+  8. POST to monolith `POST /api/internal/game/{id}/command` with the command
+     and `player_position`.
+  9. If the monolith returns a validation error, append the rejected command and
+     error to the prompt and retry from step 6 (up to 5 attempts total).
+  10. If all retries fail, log the failure and exit. The turn remains with the
+      bot. Stuck bot turn resolution is deferred (see Design decisions).
+- [ ] Read env vars: `DATABASE_URL`, `BOT_MODEL` (default `qwen3.5:4b`),
+      `OLLAMA_URL` (default `http://localhost:11434`),
+      `OLLAMA_API_KEY` (optional; when set, sent as `Authorization: Bearer <key>`
+      - required for Ollama Cloud, omitted for local/Tailscale),
       `MONOLITH_URL`, `INTERNAL_API_KEY`.
 - [ ] Add `rust/bot/Dockerfile` target to `rust/Dockerfile` (multi-stage,
       reuse the existing chef/planner pattern).
@@ -543,46 +586,56 @@ The prompt is assembled from these components in order:
    validation error each produced.
 5. Instruction: "Respond with only the command string, nothing else."
 
-### Ollama infrastructure
+### Bot k8s manifests
 
-- [ ] `k8s/base/ollama/`: Knative Service manifest for `ollama/ollama`, PVC
-      for `/root/.ollama`, `BOT_MODEL` env var, `timeout-seconds: 300`
-      annotation. Include `nvidia.com/gpu: 1` resource request (tolerated when
-      no GPU node is present via a `preferredDuringScheduling` affinity rather
-      than a hard requirement, so it degrades gracefully to CPU).
-- [ ] Add `k8s/base/ollama/` to `k8s/base/brdgme/kustomization.yaml`.
 - [ ] `k8s/base/bot/`: Knative Service manifest for `brdgme/bot` image. Reads
-      `OLLAMA_URL`, `MONOLITH_URL`, `INTERNAL_API_KEY` from env/secret.
+      `OLLAMA_URL`, `OLLAMA_API_KEY`, `MONOLITH_URL`, `INTERNAL_API_KEY` from
+      env/secret. `OLLAMA_API_KEY` comes from a Kubernetes Secret (prod only).
 - [ ] Add `k8s/base/bot/` to `k8s/base/brdgme/kustomization.yaml`.
 - [ ] Add `brdgme/bot` image build to the Tiltfile.
-- [ ] Add Ollama to the Tiltfile as a local_resource or k8s resource in dev.
-      Use `BOT_IN_CLUSTER=1` flag (analogous to `WEB_IN_CLUSTER=1`) to
-      opt in; default hybrid mode does not deploy Ollama locally to keep dev
-      startup fast.
 
-### NVIDIA GPU setup (dev)
+### Ollama configuration
 
-- [ ] Install NVIDIA Container Toolkit on the host (one-time, manual).
-- [ ] Add NVIDIA device plugin DaemonSet to `scripts/setup-kind-cluster.sh`
-      (conditional on a `--gpu` flag so other devs without a GPU are not
-      affected).
-- [ ] Add `BOT_GPU_ENABLED=1` flag to the Tiltfile. When set, the Ollama
-      Knative Service gets a `nodeSelector: {gpu: "true"}` and
-      `resources.limits: {"nvidia.com/gpu": "1"}` via a kustomize patch in
-      `k8s/dev/`.
+Ollama runs outside the cluster. No in-cluster Ollama deployment.
+
+**Dev (hybrid mode - default `tilt up`):**
+
+`rust/bot` runs as a local process. Ollama is already running as a system
+service on the dev host. Set `OLLAMA_URL=http://localhost:11434` in the local
+environment (or accept the default). Pull the model once:
+
+```sh
+ollama pull qwen3:4b
+```
+
+No Kind cluster changes needed. `BOT_SERVICE_URL` must point to the local bot
+process; if unset, bot triggering is disabled and only the model can be tested
+manually.
+
+**Prod:**
+
+Uses Ollama Cloud. Set `OLLAMA_URL` to the Ollama Cloud API endpoint and
+`OLLAMA_API_KEY` to the API key (Kubernetes Secret). Model is specified via
+`BOT_MODEL` env var - Ollama Cloud hosts the model remotely, no local pull
+needed.
+
+**Home GPU over Tailscale (prod alternative):**
+
+Ollama running on an RTX 5080/3080 or RX 9060 XT at home, exposed via
+Tailscale. Set `OLLAMA_URL` to the Tailscale IP/hostname of the home machine.
+No `OLLAMA_API_KEY` needed (Tailscale handles network auth). Tradeoffs: depends
+on home machine being on and Tailscale connection being stable. Suitable as a
+fallback or for cost reduction once validated.
 
 ### Notes
 
-- Ollama pulls the model on first start and caches it in the PVC. On a fresh
-  cluster, the first bot move will be slow while the model downloads. Subsequent
-  starts are instant.
 - The bot caller does not need a game session. It authenticates to the monolith
   via `INTERNAL_API_KEY` only.
-- Bot user records (easy/medium/hard) should have `login_confirmation = NULL`
-  so they can never be logged in to via the normal auth flow.
-- Prod runs CPU inference. `qwen2.5:3b` at Q4 quantization is ~1.8GB, fits
-  within a 2GB memory limit with overhead. Set `resources.limits.memory: 3Gi`
-  on the Ollama Service to give the model loading process headroom.
+- Bot players have no `users` row. `game_players.user_id` is null for bots;
+  `game_players.game_bot_id` points to the `game_bots` row for that game.
+- `think: false` must be set in the Ollama `/api/chat` request body for
+  qwen3.5 models to suppress chain-of-thought output and keep responses fast
+  and concise. It is a top-level field alongside `model` and `messages`.
 
 
 ---
