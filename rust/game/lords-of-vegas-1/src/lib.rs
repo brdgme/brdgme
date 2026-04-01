@@ -206,6 +206,10 @@ impl Gamer for Game {
     fn player_counts() -> Vec<usize> {
         (2..7).collect()
     }
+
+    fn rules() -> String {
+        String::new()
+    }
 }
 
 impl Game {

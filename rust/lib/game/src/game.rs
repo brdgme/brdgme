@@ -113,6 +113,10 @@ pub trait Gamer: Sized {
     fn points(&self) -> Vec<f32> {
         vec![]
     }
+
+    fn rules() -> String {
+        String::new()
+    }
 }
 
 pub trait Renderer {

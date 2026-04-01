@@ -407,7 +407,7 @@ re-fetch needed for game state or logs. `active_games` sidebar still re-fetches
 
 ---
 
-## Phase 9: LLM Bots [Pending]
+## Phase 9: LLM Bots [In Progress]
 
 **Goal:** Add bot players backed by an external LLM via the Ollama HTTP API.
 Bots receive the rendered game state and available commands, produce a command
@@ -424,10 +424,10 @@ Tailscale) in production.
   RTX 5080 for better quality.
 - **Thinking disabled**: qwen3 models support an extended thinking mode that
   produces verbose chain-of-thought output. Disabling it (`think: false` in
-  the Ollama `/api/generate` request) gives faster, more concise responses
+  the Ollama `/api/chat` request) gives faster, more concise responses
   which is what we want for a single command string.
 - **Inference server**: External Ollama instance. Interact purely via Ollama's
-  HTTP API (`/api/generate`). No in-cluster Ollama deployment.
+  HTTP API (`/api/chat`). No in-cluster Ollama deployment.
 - **Ollama Cloud (prod)**: Uses Ollama Cloud as the inference backend. Requires
   a Bearer token (`OLLAMA_API_KEY` env var). The free tier quotas (5 hours / 7
   days) are sufficient for async turn-based play with a small model and thinking
@@ -463,69 +463,49 @@ Tailscale) in production.
 
 ### Game contract extension
 
-- [ ] Add `Rules` request type to the game contract in `ARCHITECTURE.md` and
-      `rust/lib/game/src/lib.rs` (or wherever the contract types live).
-      Request: `"Rules"`. Response: `{"Rules": {"rules": "markdown string"}}`.
-      Returns static, human-readable rules for the game. Exposed in the UI and
-      passed to the bot as part of the system prompt.
-- [ ] Implement `Rules` handler in every game microservice. The rules text
-      should describe game objectives, turn structure, and scoring clearly
-      enough for both humans and an LLM to understand valid strategy.
+- [x] Add `Rules` request/response variants to `rust/lib/cmd/src/api.rs`.
+- [x] Implement `Rules` handler in `rust/lib/cmd/src/requester/gamer.rs`.
+- [x] Add `fn rules() -> String` to `Gamer` trait in `rust/lib/game/src/game.rs`
+      (default: empty string).
+- [x] Add empty stub `fn rules()` to all 4 Rust games (acquire-1, lords-of-vegas-1,
+      lost-cities-1, lost-cities-2). Rules text deferred - will use
+      `include_str!("../rules.md")` pattern when written.
 
 ### Database changes
 
-- [ ] Migration: create `game_bots` table:
-      - `id UUID PRIMARY KEY`
-      - `game_id UUID NOT NULL REFERENCES games(id)`
-      - `name TEXT NOT NULL` - display name within the game (e.g. "Bot", "HAL")
-      - `difficulty TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard'))`
-      - `personality TEXT` - nullable, reserved for future use (e.g. "aggressive", "timid")
-      - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-      - `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-      - `UNIQUE (game_id, name)`
-- [ ] Migration: alter `game_players`:
-      - Make `user_id` nullable.
-      - Add `game_bot_id UUID REFERENCES game_bots(id)` (nullable).
-      - Add CHECK constraint: `(user_id IS NOT NULL) != (game_bot_id IS NOT NULL)`
-
-**Note: `user_id` nullable is a wide-impact change.** Every callsite that
-touches `game_players` is affected:
-- `GamePlayer` Rust model changes to `user_id: Option<Uuid>` - all callsites
-  must handle the Option.
-- SQLx `query_as!` macros will infer the new nullability and fail to compile
-  until updated. Regenerate the SQLx cache after the migration.
-- Any query joining `game_players → users` on `user_id` must become a LEFT
-  JOIN to include bot player rows.
-- UI player name display must fall back to `game_bots.name` when `user_id`
-  is null.
-- Email/notification logic must skip `game_players` rows where `user_id IS NULL`.
+- [x] Migration `003_game_bots.sql`: `game_bots` table, nullable `user_id`,
+      `game_bot_id` FK, XOR CHECK constraint. Migration applied to dev DB.
+- [x] `GamePlayer.user_id: Option<Uuid>` in `rust/web/src/models/game.rs`.
+- [x] `GameBot` struct added to `rust/web/src/models/game.rs`.
+- [x] `GamePlayerExtended` updated: `user: Option<User>`, `game_bot: Option<GameBot>`,
+      `name()` helper. In `rust/web/src/db.rs`.
+- [x] `find_game_extended` and `find_active_games_for_user` queries updated to
+      LEFT JOIN users + LEFT JOIN game_bots. SQLx cache regenerated.
+- [x] All callsites updated: `mod.rs`, `server.rs`, `server_fns.rs`, `websocket.rs`.
+      `user.id` accesses guarded with `as_ref().is_some_and()`. Bot players skipped
+      for WS publishing. `name()` used everywhere instead of `user.name`.
 
 ### Monolith changes (`rust/web`)
 
-- [ ] Add `POST /api/internal/game/{id}/command` route that accepts
-      `X-Internal-Key` header auth instead of session auth. Accepts
-      `player_position` in the request body; resolves the `game_players` row
-      at that position to identify which player is acting (no session needed).
-      Delegates to the same `game::execute_command` function used by the
-      regular play endpoint.
-- [ ] After `execute_command` completes successfully (in `play_command`,
-      `undo_game`, `concede_game`, `restart_game` handlers), query `game_players`
-      for any players whose turn it now is and have a non-null `game_bot_id`.
-      For each, spawn a background task (`tokio::spawn`) that POSTs to the bot
-      caller with `{"game_id": "...", "player_position": N, "difficulty": "..."}`.
-      Fire-and-forget - do not await the result or block the response.
-- [ ] After `create_game` completes, apply the same bot-turn check: if any
-      player with a non-null `game_bot_id` has `is_turn = true` immediately
-      after game creation (i.e. the game service assigned first turn to a bot),
-      trigger the bot caller.
-- [ ] Add `BOT_SERVICE_URL` env var. If unset, bot triggering is disabled
-      (allows running without the bot service in dev).
-- [ ] New game creation: accept bot player slots in `CreateGameOpts`. A bot
-      slot specifies `name` and `difficulty`. The `create_game` handler inserts
-      a `game_bots` row and a `game_players` row with `game_bot_id` set and
-      `user_id` null.
-- [ ] New game UI: allow selecting bot opponents (easy/medium/hard) instead of
-      entering an email address for any opponent slot.
+- [x] `execute_command` refactored to take `player_position: usize` instead of
+      `user_id`. `play_command` and `submit_command` server fn do a lightweight
+      position lookup first.
+- [x] `POST /api/internal/game/{id}/command` added to `server.rs`. Auth via
+      `X-Internal-Key` header checked against `INTERNAL_API_KEY` env var.
+      Calls `execute_command` with position from request body.
+- [x] `trigger_bot_turns` helper added to `mod.rs`. Reads `BOT_SERVICE_URL`
+      env var (disabled if unset). For each bot player with `is_turn = true`,
+      spawns background `tokio::spawn` POSTing to `BOT_SERVICE_URL/trigger`.
+- [x] `trigger_bot_turns` called from `execute_command` (after broadcast).
+- [ ] `trigger_bot_turns` called from `server.rs`: `undo_game`, `concede_game`,
+      `restart_game` - **IN PROGRESS, was mid-edit when session ended**.
+      `create_game` in `server.rs` already done.
+- [ ] `trigger_bot_turns` called from `server_fns.rs`: `concede_game`,
+      `restart_game`, `create_new_game` server fns.
+- [ ] New game creation with bot slots: extend `CreateGameOpts` in `db.rs` to
+      accept `bot_slots: Vec<BotSlot>`. In handler, insert `game_bots` rows
+      then `game_players` rows with `game_bot_id` set and `user_id = NULL`.
+- [ ] New game UI: allow selecting bot opponents (easy/medium/hard).
 
 ### Bot caller service (`rust/bot`)
 

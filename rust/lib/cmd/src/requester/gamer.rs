@@ -45,6 +45,7 @@ impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for Game
                 let game = serde_json::from_str(game)?;
                 Ok(handle_player_render::<G>(player, &game))
             }
+            Request::Rules => Ok(handle_rules::<G>()),
         }
     }
 }
@@ -170,4 +171,8 @@ fn handle_player_render<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>
             command_spec: game.command_spec(player),
         },
     }
+}
+
+fn handle_rules<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> Response {
+    Response::Rules { rules: G::rules() }
 }

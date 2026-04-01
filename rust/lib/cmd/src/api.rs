@@ -28,6 +28,7 @@ pub enum Request {
         player: usize,
         game: String,
     },
+    Rules,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -102,6 +103,9 @@ pub enum Response {
     },
     PlayerRender {
         render: PlayerRender,
+    },
+    Rules {
+        rules: String,
     },
     UserError {
         message: String,

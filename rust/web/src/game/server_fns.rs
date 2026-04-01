@@ -82,21 +82,21 @@ pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
             
         let mut games = games;
         games.sort_by(|a, b| {
-            let a_turn = a.game_players.iter().any(|p| p.user.id == user.id && p.game_player.is_turn);
-            let b_turn = b.game_players.iter().any(|p| p.user.id == user.id && p.game_player.is_turn);
+            let a_turn = a.game_players.iter().any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
+            let b_turn = b.game_players.iter().any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
             b_turn.cmp(&a_turn).then(b.game.updated_at.cmp(&a.game.updated_at))
         });
         let summaries: Vec<GameSummary> = games.into_iter().map(|ge| {
             let opponents = ge.game_players.iter()
-                .filter(|p| p.user.id != user.id)
+                .filter(|p| !p.user.as_ref().is_some_and(|u| u.id == user.id))
                 .map(|p| {
                     use std::str::FromStr;
                     let color = brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE).hex();
-                    OpponentSummary { name: p.user.name.clone(), color }
+                    OpponentSummary { name: p.name().to_string(), color }
                 })
                 .collect();
             let is_turn = ge.game_players.iter()
-                .find(|p| p.user.id == user.id)
+                .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
                 .map(|p| p.game_player.is_turn)
                 .unwrap_or(false);
 
@@ -133,7 +133,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
             .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
-        let player = ge.game_players.iter().find(|p| p.user.id == user.id);
+        let player = ge.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
 
         let render_resp = client::render(
             &http_client,
@@ -151,7 +151,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         for p in &ge.game_players {
             use std::str::FromStr;
             markup_players.push(brdgme_markup::Player {
-                name: p.user.name.clone(),
+                name: p.name().to_string(),
                 color: brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE),
             });
         }
@@ -172,7 +172,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 use std::str::FromStr;
                 let color = brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE).hex();
                 PlayerViewData {
-                    name: p.user.name.clone(),
+                    name: p.name().to_string(),
                     color,
                     rating: p.game_type_user.rating,
                     points: p.game_player.points.unwrap_or(0.0),
@@ -203,7 +203,17 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
             .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
         let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-        super::execute_command(&pool, &http_client, &broadcaster, game_id, user.id, command).await
+        let position: i32 = sqlx::query_scalar!(
+            "SELECT position FROM game_players WHERE game_id = $1 AND user_id = $2",
+            game_id,
+            user.id
+        )
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
+
+        super::execute_command(&pool, &http_client, &broadcaster, game_id, position as usize, command).await
             .map_err(|e| ServerFnError::new(e.to_string()))
     }
     #[cfg(not(feature = "ssr"))]
@@ -325,7 +335,7 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
             .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
-        let player = ge.game_players.iter().find(|p| p.user.id == user.id)
+        let player = ge.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
             .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
         let last_turn_at = player.game_player.last_turn_at;
@@ -337,7 +347,7 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
         let markup_players: Vec<brdgme_markup::Player> = ge.game_players.iter().map(|p| {
             use std::str::FromStr;
             brdgme_markup::Player {
-                name: p.user.name.clone(),
+                name: p.name().to_string(),
                 color: brdgme_color::Color::from_str(&p.game_player.color).unwrap_or(brdgme_color::WHITE),
             }
         }).collect();
@@ -398,7 +408,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
             .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
-        let player = ge.game_players.iter().find(|p| p.user.id == user.id)
+        let player = ge.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
             .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
         let undo_state = player.game_player.undo_game_state.clone()
@@ -460,10 +470,10 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
             return Err(ServerFnError::new("Concede is only available in 2-player games"));
         }
 
-        let player = ge.game_players.iter().find(|p| p.user.id == user.id)
+        let player = ge.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
             .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
-        crate::db::concede_game(&pool, game_id, player.game_player.id, &player.user.name).await
+        crate::db::concede_game(&pool, game_id, player.game_player.id, player.name()).await
             .map_err(|e| ServerFnError::new(format!("Failed to concede game: {}", e)))?;
 
         if let Ok(Some(updated_ge)) = crate::db::find_game_extended(&pool, game_id).await {
@@ -514,7 +524,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         if ge.game.restarted_game_id.is_some() {
             return Err(ServerFnError::new("Game has already been restarted"));
         }
-        if !ge.game_players.iter().any(|p| p.user.id == user.id) {
+        if !ge.game_players.iter().any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id)) {
             return Err(ServerFnError::new("You are not a player in this game"));
         }
 
@@ -533,8 +543,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         };
 
         let opponent_ids: Vec<Uuid> = ge.game_players.iter()
-            .filter(|p| p.user.id != user.id)
-            .map(|p| p.user.id)
+            .filter_map(|p| p.user.as_ref().filter(|u| u.id != user.id).map(|u| u.id))
             .collect();
 
         let new_game = crate::db::create_game_with_users(&pool, CreateGameOpts {

@@ -39,13 +39,21 @@ pub struct Game {
     pub restarted_game_id: Option<Uuid>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameBot {
+    pub id: Uuid,
+    pub game_id: Uuid,
+    pub name: String,
+    pub difficulty: String,
+}
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GamePlayer {
     pub id: Uuid,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
     pub game_id: Uuid,
-    pub user_id: Uuid,
+    pub user_id: Option<Uuid>,
     pub position: i32,
     pub color: String,
     pub has_accepted: bool,

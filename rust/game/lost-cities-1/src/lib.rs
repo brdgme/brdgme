@@ -617,6 +617,10 @@ impl Gamer for Game {
     fn player_count(&self) -> usize {
         2
     }
+
+    fn rules() -> String {
+        String::new()
+    }
 }
 
 pub fn score(cards: &[Card]) -> isize {

@@ -17,7 +17,7 @@ fn build_game_type_user(
     last_game_finished_at: Option<time::PrimitiveDateTime>,
     rating: Option<i32>,
     peak_rating: Option<i32>,
-    default_user_id: Uuid,
+    default_user_id: Option<Uuid>,
     default_game_type_id: Uuid,
     default_ts: time::PrimitiveDateTime,
 ) -> crate::models::game::GameTypeUser {
@@ -39,7 +39,7 @@ fn build_game_type_user(
             created_at: default_ts,
             updated_at: default_ts,
             game_type_id: default_game_type_id,
-            user_id: default_user_id,
+            user_id: default_user_id.unwrap_or(Uuid::nil()),
             last_game_finished_at: None,
             rating: 1500,
             peak_rating: 1500,
@@ -157,8 +157,22 @@ pub async fn find_game(pool: &PgPool, id: Uuid) -> Result<Option<crate::models::
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GamePlayerExtended {
     pub game_player: crate::models::game::GamePlayer,
-    pub user: crate::models::user::User,
+    pub user: Option<crate::models::user::User>,
+    pub game_bot: Option<crate::models::game::GameBot>,
     pub game_type_user: crate::models::game::GameTypeUser,
+}
+
+#[cfg(feature = "ssr")]
+impl GamePlayerExtended {
+    pub fn name(&self) -> &str {
+        if let Some(u) = &self.user {
+            &u.name
+        } else if let Some(b) = &self.game_bot {
+            &b.name
+        } else {
+            "Bot"
+        }
+    }
 }
 
 #[cfg(feature = "ssr")]
@@ -199,16 +213,19 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,
             gp.is_read as gp_is_read, gp.points as gp_points,
             gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
-            u.id as u_id, u.created_at as u_created_at, u.updated_at as u_updated_at,
-            u.name as u_name, u.pref_colors as u_pref_colors,
-            u.login_confirmation as u_login_confirmation, u.login_confirmation_at as u_login_confirmation_at,
+            u.id as "u_id?", u.created_at as "u_created_at?", u.updated_at as "u_updated_at?",
+            u.name as "u_name?", u.pref_colors as "u_pref_colors?",
+            u.login_confirmation as "u_login_confirmation?", u.login_confirmation_at as "u_login_confirmation_at?",
             gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?", gtu.updated_at as "gtu_updated_at?",
             gtu.game_type_id as "gtu_game_type_id?", gtu.user_id as "gtu_user_id?",
             gtu.last_game_finished_at as "gtu_last_game_finished_at?", gtu.rating as "gtu_rating?",
-            gtu.peak_rating as "gtu_peak_rating?"
+            gtu.peak_rating as "gtu_peak_rating?",
+            gb.id as "gb_id?", gb.game_id as "gb_game_id?", gb.name as "gb_name?",
+            gb.difficulty as "gb_difficulty?"
         FROM game_players gp
-        JOIN users u ON gp.user_id = u.id
+        LEFT JOIN users u ON gp.user_id = u.id
         LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = $2
+        LEFT JOIN game_bots gb ON gp.game_bot_id = gb.id
         WHERE gp.game_id = $1
         ORDER BY gp.position
         "#,
@@ -226,6 +243,21 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             p.gtu_rating, p.gtu_peak_rating,
             p.u_id, game_version.game_type_id, p.gp_created_at,
         );
+        let user = p.u_id.map(|id| crate::models::user::User {
+            id,
+            created_at: p.u_created_at.unwrap(),
+            updated_at: p.u_updated_at.unwrap(),
+            name: p.u_name.unwrap(),
+            pref_colors: p.u_pref_colors.unwrap(),
+            login_confirmation: p.u_login_confirmation,
+            login_confirmation_at: p.u_login_confirmation_at,
+        });
+        let game_bot = p.gb_id.map(|id| crate::models::game::GameBot {
+            id,
+            game_id: p.gb_game_id.unwrap(),
+            name: p.gb_name.unwrap(),
+            difficulty: p.gb_difficulty.unwrap(),
+        });
 
         game_players.push(GamePlayerExtended {
             game_player: crate::models::game::GamePlayer {
@@ -247,15 +279,8 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
                 undo_game_state: p.gp_undo_game_state,
                 rating_change: p.gp_rating_change,
             },
-            user: crate::models::user::User {
-                id: p.u_id,
-                created_at: p.u_created_at,
-                updated_at: p.u_updated_at,
-                name: p.u_name,
-                pref_colors: p.u_pref_colors,
-                login_confirmation: p.u_login_confirmation,
-                login_confirmation_at: p.u_login_confirmation_at,
-            },
+            user,
+            game_bot,
             game_type_user: gtu,
         });
     }
@@ -288,20 +313,23 @@ pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result
             gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,
             gp.is_read as gp_is_read, gp.points as gp_points,
             gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
-            u.id as u_id, u.created_at as u_created_at, u.updated_at as u_updated_at,
-            u.name as u_name, u.pref_colors as u_pref_colors,
-            u.login_confirmation as u_login_confirmation,
-            u.login_confirmation_at as u_login_confirmation_at,
+            u.id as "u_id?", u.created_at as "u_created_at?", u.updated_at as "u_updated_at?",
+            u.name as "u_name?", u.pref_colors as "u_pref_colors?",
+            u.login_confirmation as "u_login_confirmation?",
+            u.login_confirmation_at as "u_login_confirmation_at?",
             gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?",
             gtu.updated_at as "gtu_updated_at?", gtu.game_type_id as "gtu_game_type_id?",
             gtu.user_id as "gtu_user_id?", gtu.last_game_finished_at as "gtu_last_game_finished_at?",
-            gtu.rating as "gtu_rating?", gtu.peak_rating as "gtu_peak_rating?"
+            gtu.rating as "gtu_rating?", gtu.peak_rating as "gtu_peak_rating?",
+            gb.id as "gb_id?", gb.game_id as "gb_game_id?", gb.name as "gb_name?",
+            gb.difficulty as "gb_difficulty?"
         FROM games g
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt ON gt.id = gv.game_type_id
         JOIN game_players gp ON gp.game_id = g.id
-        JOIN users u ON u.id = gp.user_id
+        LEFT JOIN users u ON u.id = gp.user_id
         LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = gv.game_type_id
+        LEFT JOIN game_bots gb ON gp.game_bot_id = gb.id
         WHERE g.is_finished = false
           AND g.id IN (
               SELECT game_id FROM game_players WHERE user_id = $1
@@ -358,6 +386,21 @@ pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result
             row.gtu_rating, row.gtu_peak_rating,
             row.u_id, row.game_type_id, row.gp_created_at,
         );
+        let user = row.u_id.map(|id| crate::models::user::User {
+            id,
+            created_at: row.u_created_at.unwrap(),
+            updated_at: row.u_updated_at.unwrap(),
+            name: row.u_name.unwrap(),
+            pref_colors: row.u_pref_colors.unwrap(),
+            login_confirmation: row.u_login_confirmation,
+            login_confirmation_at: row.u_login_confirmation_at,
+        });
+        let game_bot = row.gb_id.map(|id| crate::models::game::GameBot {
+            id,
+            game_id: row.gb_game_id.unwrap(),
+            name: row.gb_name.unwrap(),
+            difficulty: row.gb_difficulty.unwrap(),
+        });
 
         games.last_mut().unwrap().game_players.push(GamePlayerExtended {
             game_player: crate::models::game::GamePlayer {
@@ -379,15 +422,8 @@ pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result
                 undo_game_state: row.gp_undo_game_state,
                 rating_change: row.gp_rating_change,
             },
-            user: crate::models::user::User {
-                id: row.u_id,
-                created_at: row.u_created_at,
-                updated_at: row.u_updated_at,
-                name: row.u_name,
-                pref_colors: row.u_pref_colors,
-                login_confirmation: row.u_login_confirmation,
-                login_confirmation_at: row.u_login_confirmation_at,
-            },
+            user,
+            game_bot,
             game_type_user: gtu,
         });
     }

@@ -622,6 +622,10 @@ impl Gamer for Game {
     fn player_count(&self) -> usize {
         self.players
     }
+
+    fn rules() -> String {
+        String::new()
+    }
 }
 
 fn next_player(player: usize, players: usize) -> usize {

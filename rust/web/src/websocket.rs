@@ -76,7 +76,7 @@ mod ssr {
         created_at: PrimitiveDateTime,
         updated_at: PrimitiveDateTime,
         game_id: Uuid,
-        user_id: Uuid,
+        user_id: Option<Uuid>,
         position: i32,
         color: String,
         has_accepted: bool,
@@ -159,7 +159,7 @@ mod ssr {
         game_extended.game_players.iter().map(|p| {
             use std::str::FromStr;
             brdgme_markup::Player {
-                name: p.user.name.clone(),
+                name: p.name().to_string(),
                 color: brdgme_color::Color::from_str(&p.game_player.color)
                     .unwrap_or(brdgme_color::WHITE),
             }
@@ -192,12 +192,21 @@ mod ssr {
                 place: p.game_player.place,
                 rating_change: p.game_player.rating_change,
             },
-            user: LegacyUser {
-                id: p.user.id,
-                created_at: p.user.created_at,
-                updated_at: p.user.updated_at,
-                name: p.user.name.clone(),
-                pref_colors: p.user.pref_colors.clone(),
+            user: match &p.user {
+                Some(u) => LegacyUser {
+                    id: u.id,
+                    created_at: u.created_at,
+                    updated_at: u.updated_at,
+                    name: u.name.clone(),
+                    pref_colors: u.pref_colors.clone(),
+                },
+                None => LegacyUser {
+                    id: p.game_bot.as_ref().map(|b| b.id).unwrap_or(Uuid::nil()),
+                    created_at: p.game_player.created_at,
+                    updated_at: p.game_player.updated_at,
+                    name: p.name().to_string(),
+                    pref_colors: vec![],
+                },
             },
             game_type_user: LegacyGameTypeUser {
                 id: p.game_type_user.id,
@@ -402,77 +411,80 @@ mod ssr {
                     }
                 };
 
-                // Look up auth tokens for this player's user_id
-                let user_id = gpe.user.id;
-                let token_ids = sqlx::query(
-                    "SELECT id FROM user_auth_tokens WHERE user_id = $1"
-                )
-                .bind(user_id)
-                .fetch_all(pool)
-                .await;
+                if let Some(ref user) = gpe.user {
+                    let user_id = user.id;
 
-                match token_ids {
-                    Ok(rows) => {
-                        for row in rows {
-                            use sqlx::Row;
-                            let token_id: Uuid = match row.try_get("id") {
-                                Ok(id) => id,
-                                Err(e) => {
-                                    tracing::error!("Failed to get token id: {}", e);
-                                    continue;
-                                }
-                            };
-                            self.publish(&format!("user.{}", token_id), &private_payload).await;
+                    // Look up auth tokens for this player's user_id
+                    let token_ids = sqlx::query(
+                        "SELECT id FROM user_auth_tokens WHERE user_id = $1"
+                    )
+                    .bind(user_id)
+                    .fetch_all(pool)
+                    .await;
+
+                    match token_ids {
+                        Ok(rows) => {
+                            for row in rows {
+                                use sqlx::Row;
+                                let token_id: Uuid = match row.try_get("id") {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        tracing::error!("Failed to get token id: {}", e);
+                                        continue;
+                                    }
+                                };
+                                self.publish(&format!("user.{}", token_id), &private_payload).await;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to fetch auth tokens for user {}: {}", user_id, e);
                         }
                     }
-                    Err(e) => {
-                        tracing::error!("Failed to fetch auth tokens for user {}: {}", user_id, e);
-                    }
-                }
 
-                // Publish Leptos-specific update directly to the user's WS channel.
-                let last_turn_at = gpe.game_player.last_turn_at;
-                let log_entries: Vec<GameLogEntry> = player_logs.iter().map(|log| {
-                    GameLogEntry {
-                        body_html: render_markup(&log.body, &markup_players),
-                        logged_at: log.logged_at,
-                        is_new: log.created_at >= last_turn_at,
-                    }
-                }).collect();
-
-                let game_view = GameViewData {
-                    id: game_extended.game.id,
-                    type_name: game_extended.game_type.name.clone(),
-                    version_name: game_extended.game_version.name.clone(),
-                    html: player_html,
-                    is_my_turn: gpe.game_player.is_turn,
-                    is_finished: game_extended.game.is_finished,
-                    can_undo: gpe.game_player.undo_game_state.is_some(),
-                    restarted_game_id: game_extended.game.restarted_game_id,
-                    is_2player: game_extended.game_players.len() == 2,
-                    players: game_extended.game_players.iter().map(|p| {
-                        use std::str::FromStr;
-                        let color = brdgme_color::Color::from_str(&p.game_player.color)
-                            .unwrap_or(brdgme_color::WHITE)
-                            .hex();
-                        PlayerViewData {
-                            name: p.user.name.clone(),
-                            color,
-                            rating: p.game_type_user.rating,
-                            points: p.game_player.points.unwrap_or(0.0),
-                            is_turn: p.game_player.is_turn,
+                    // Publish Leptos-specific update directly to the user's WS channel.
+                    let last_turn_at = gpe.game_player.last_turn_at;
+                    let log_entries: Vec<GameLogEntry> = player_logs.iter().map(|log| {
+                        GameLogEntry {
+                            body_html: render_markup(&log.body, &markup_players),
+                            logged_at: log.logged_at,
+                            is_new: log.created_at >= last_turn_at,
                         }
-                    }).collect(),
-                    command_spec: player_render.command_spec.clone(),
-                };
+                    }).collect();
 
-                let brdgme_msg = WebSocketMessage::BrdgmeUpdate(super::BrdgmeGameUpdate {
-                    game_id,
-                    game_view,
-                    logs: log_entries,
-                });
-                if let Ok(brdgme_payload) = serde_json::to_string(&brdgme_msg) {
-                    self.publish(&format!("ws.{}", user_id), &brdgme_payload).await;
+                    let game_view = GameViewData {
+                        id: game_extended.game.id,
+                        type_name: game_extended.game_type.name.clone(),
+                        version_name: game_extended.game_version.name.clone(),
+                        html: player_html,
+                        is_my_turn: gpe.game_player.is_turn,
+                        is_finished: game_extended.game.is_finished,
+                        can_undo: gpe.game_player.undo_game_state.is_some(),
+                        restarted_game_id: game_extended.game.restarted_game_id,
+                        is_2player: game_extended.game_players.len() == 2,
+                        players: game_extended.game_players.iter().map(|p| {
+                            use std::str::FromStr;
+                            let color = brdgme_color::Color::from_str(&p.game_player.color)
+                                .unwrap_or(brdgme_color::WHITE)
+                                .hex();
+                            PlayerViewData {
+                                name: p.name().to_string(),
+                                color,
+                                rating: p.game_type_user.rating,
+                                points: p.game_player.points.unwrap_or(0.0),
+                                is_turn: p.game_player.is_turn,
+                            }
+                        }).collect(),
+                        command_spec: player_render.command_spec.clone(),
+                    };
+
+                    let brdgme_msg = WebSocketMessage::BrdgmeUpdate(super::BrdgmeGameUpdate {
+                        game_id,
+                        game_view,
+                        logs: log_entries,
+                    });
+                    if let Ok(brdgme_payload) = serde_json::to_string(&brdgme_msg) {
+                        self.publish(&format!("ws.{}", user_id), &brdgme_payload).await;
+                    }
                 }
             }
         }

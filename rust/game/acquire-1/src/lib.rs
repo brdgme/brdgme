@@ -295,6 +295,10 @@ able to win the game.",
             .map(|p| self.player_score(p) as f32)
             .collect()
     }
+
+    fn rules() -> String {
+        String::new()
+    }
 }
 
 #[derive(Debug, PartialEq)]

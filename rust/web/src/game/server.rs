@@ -85,6 +85,7 @@ pub async fn create_game(
     if let Ok(Some(ge)) = db::find_game_extended(&pool, game.id).await {
         let all_logs = db::get_all_game_logs(&pool, game.id).await.unwrap_or_default();
         broadcaster.broadcast_game_update(&pool, &ge, &all_logs, &public_render, &player_renders).await;
+        super::trigger_bot_turns(&http_client, &ge).await;
     }
 
     (StatusCode::CREATED, Json(game)).into_response()
@@ -124,7 +125,51 @@ pub async fn play_command(
         None => return (StatusCode::UNAUTHORIZED, "Authentication required").into_response(),
     };
 
-    match super::execute_command(&pool, &http_client, &broadcaster, id, user.id, payload.command).await {
+    let position: i32 = match sqlx::query_scalar!(
+        "SELECT position FROM game_players WHERE game_id = $1 AND user_id = $2",
+        id,
+        user.id
+    )
+    .fetch_optional(&pool)
+    .await {
+        Ok(Some(pos)) => pos,
+        Ok(None) => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+    };
+
+    match super::execute_command(&pool, &http_client, &broadcaster, id, position as usize, payload.command).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct InternalCommandRequest {
+    pub player_position: usize,
+    pub command: String,
+}
+
+pub async fn internal_play_command(
+    State(pool): State<PgPool>,
+    State(broadcaster): State<GameBroadcaster>,
+    State(http_client): State<reqwest::Client>,
+    Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<InternalCommandRequest>,
+) -> impl IntoResponse {
+    let expected_key = match std::env::var("INTERNAL_API_KEY") {
+        Ok(k) => k,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_API_KEY not configured").into_response(),
+    };
+    let provided_key = match headers.get("X-Internal-Key").and_then(|v| v.to_str().ok()) {
+        Some(k) => k.to_string(),
+        None => return (StatusCode::UNAUTHORIZED, "Missing X-Internal-Key header").into_response(),
+    };
+    if provided_key != expected_key {
+        return (StatusCode::UNAUTHORIZED, "Invalid internal key").into_response();
+    }
+
+    match super::execute_command(&pool, &http_client, &broadcaster, id, payload.player_position, payload.command).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
@@ -148,7 +193,7 @@ pub async fn undo_game(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
     };
 
-    let player = match game_extended.game_players.iter().find(|p| p.user.id == user.id) {
+    let player = match game_extended.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id)) {
         Some(p) => p,
         None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
     };
@@ -211,7 +256,7 @@ pub async fn restart_game(
         return (StatusCode::BAD_REQUEST, "Game has already been restarted").into_response();
     }
 
-    if !game_extended.game_players.iter().any(|p| p.user.id == user.id) {
+    if !game_extended.game_players.iter().any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id)) {
         return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response();
     }
 
@@ -232,8 +277,7 @@ pub async fn restart_game(
     };
 
     let opponent_ids: Vec<Uuid> = game_extended.game_players.iter()
-        .filter(|p| p.user.id != user.id)
-        .map(|p| p.user.id)
+        .filter_map(|p| p.user.as_ref().filter(|u| u.id != user.id).map(|u| u.id))
         .collect();
 
     let new_game = match db::create_game_with_users(
@@ -313,12 +357,12 @@ pub async fn concede_game(
         return (StatusCode::BAD_REQUEST, "Concede is only available in 2-player games").into_response();
     }
 
-    let player = match game_extended.game_players.iter().find(|p| p.user.id == user.id) {
+    let player = match game_extended.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id)) {
         Some(p) => p,
         None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
     };
 
-    if let Err(e) = db::concede_game(&pool, id, player.game_player.id, &player.user.name).await {
+    if let Err(e) = db::concede_game(&pool, id, player.game_player.id, player.name()).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to concede game: {}", e)).into_response();
     }
 
@@ -379,4 +423,5 @@ pub fn api_routes() -> axum::Router<crate::state::AppState> {
         .route("/game/{id}/mark_read", axum::routing::post(mark_read))
         .route("/game/{id}/concede", axum::routing::post(concede_game))
         .route("/game/{id}/restart", axum::routing::post(restart_game))
+        .route("/internal/game/{id}/command", axum::routing::post(internal_play_command))
 }
