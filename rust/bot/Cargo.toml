@@ -19,6 +19,9 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 brdgme_cmd = { path = "../lib/cmd", default-features = false }
+brdgme_color = { path = "../lib/color" }
 brdgme_game = { path = "../lib/game" }
 brdgme_markup = { path = "../lib/markup" }
+minijinja = "2"
+serde_yaml = "0.9"
 time = { version = "0.3", features = ["serde"] }

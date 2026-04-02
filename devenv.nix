@@ -34,6 +34,7 @@
     k9s
     kind
     kubectl
+    retry
 playwright-driver.browsers
     postgresql
     sqlx-cli

@@ -15,6 +15,7 @@ KOURIER_VERSION="1.21.0"
 
 set -euo pipefail
 
+
 # --- Local registry ---
 # Knative resolves image digests from the registry before scheduling pods, so
 # kind load docker-image is insufficient. A registry reachable from within the
@@ -35,6 +36,14 @@ if ! kind get clusters 2>/dev/null | grep -q '^kind$'; then
   kind create cluster --config k8s/kind-config.yaml
 else
   echo "    Cluster already exists, skipping creation."
+  if [ "$(docker inspect -f '{{.State.Running}}' kind-control-plane 2>/dev/null)" != "true" ]; then
+    echo "    Control plane container is stopped, starting..."
+    docker start kind-control-plane
+    echo "    Waiting for API server to become ready..."
+    until kubectl --context kind-kind cluster-info &>/dev/null; do
+      sleep 2
+    done
+  fi
   kubectl config use-context kind-kind
 fi
 
@@ -96,14 +105,14 @@ kubectl patch svc kourier \
   --type merge \
   --patch '{"spec":{"type":"NodePort","ports":[{"name":"http2","port":80,"protocol":"TCP","targetPort":8080,"nodePort":31080},{"name":"https","port":443,"protocol":"TCP","targetPort":8443,"nodePort":31443}]}}'
 
-kubectl patch configmap/config-network \
+retry kubectl patch configmap/config-network \
   --namespace knative-serving \
   --type merge \
   --patch '{"data":{"ingress-class":"kourier.ingress.networking.knative.dev"}}'
 
 # Skip image digest resolution for the local registry.
 echo "==> Configuring Knative to skip digest resolution for kind-registry:5000..."
-kubectl patch configmap/config-deployment \
+retry kubectl patch configmap/config-deployment \
   -n knative-serving \
   --type merge \
   --patch '{"data":{"registries-skipping-tag-resolving":"kind.local,ko.local,dev.local,kind-registry:5000"}}'
@@ -113,7 +122,7 @@ kubectl patch configmap/config-deployment \
 # services are reachable at {service}.{namespace}.lvh.me:8080 without
 # any /etc/hosts changes (useful on NixOS where /etc/hosts is read-only).
 echo "==> Configuring Knative domain (lvh.me)..."
-kubectl patch configmap/config-domain \
+retry kubectl patch configmap/config-domain \
   --namespace knative-serving \
   --type merge \
   --patch '{"data":{"lvh.me":"","example.com":null}}'

@@ -543,70 +543,53 @@ then submits the command to the monolith's internal endpoint.
 - `rust/game/acquire-1/RULES.md` written: board layout, corporations, pricing,
   mergers, bonuses, rendering guide, command reference.
 - `fn rules()` updated to `include_str!("../RULES.md").to_string()`.
+- 2-player special rule corrected: dummy share count uses a D6 roll (1-6), not
+  a drawn tile's column number (1-12). Rules now match the game implementation.
 
-### Prompt structure (pending — high priority)
+### Prompt structure [Complete]
 
-The prompt is assembled to maximise Ollama KV cache reuse. Content that never
-changes comes first (longest shared prefix = most cache hits); dynamic
-per-turn content comes last. Variables must not appear in early messages.
+`rust/bot/system_prompt.md` is a single MiniJinja template rendered at the
+start of each Ollama attempt. It covers the full prompt in one document:
 
-**Message 1 — system (fully static, cached forever):**
-1. Platform context: brdgme is a turn-based board gaming platform; moves are
-   plain text commands; the model's sole job is to produce one valid command.
-2. Command spec syntax explanation: a fixed description of how to read the
-   CommandSpec structure (alternatives, sequences, token types, YAML format).
-   This is hardcoded prose, not derived from runtime data.
-3. Difficulty instructions: for `easy` - play casually and make suboptimal
-   moves occasionally; for `hard` - play at the highest level possible.
-   NOTE: difficulty goes here even though it varies per bot, because the
-   system role message as a whole should be kept static for caching. Consider
-   splitting into two system messages if Ollama supports prefix caching across
-   messages, or accept one cache miss per difficulty tier (only 3 variants).
+1. **Persona**: expert board gamer, maximise fun and play to win.
+2. **Task**: respond with exactly one plain-text command, no other text.
+3. **Skill rating**: `{{ difficulty }}` injected; all three levels (easy/medium/
+   hard) described so the model understands the full scale.
+4. **Command parser rules**: documentation for all 10 `Spec` variants (`Token`,
+   `OneOf`, `Chain`, `Doc`, `Space`, `Opt`, `Enum`, `Int`, `Player`, `Many`)
+   with YAML examples and plain-text command examples. Real Acquire `Buy`-phase
+   spec included as a worked example.
+5. **Game rules**: `{% if game_rules %}{{ game_rules }}{% endif %}` — omitted
+   when the game has no rules text.
+6. **Players**: `{% for player in players %}` loop with name, score, colour.
+   Bot's own player marked `(you)`.
+7. **Game render**: `{{ game_render }}` inside a ` ```html ` fence — markup
+   converted to HTML via `brdgme_markup::html` with player references resolved.
+8. **Recent logs**: `{% for log in recent_logs %}` — each log body converted
+   from brdgme markup to HTML.
+9. **Command spec**: `{{ command_spec }}` inside a ` ```yaml ` fence —
+   serialised via `serde_json::to_value` → `serde_yaml::to_string` to produce
+   the mapping style (`Token: done`) rather than native YAML tags (`!Token`).
+10. **Failed commands**: `{% if failed_commands %}` block listing each prior
+    rejected command and its error. Omitted on the first attempt.
 
-**Message 2 — user (static per game type, cached per game type):**
-- Game rules text (from the `Rules` endpoint).
-- Empty if the game has no rules text yet.
+`rust/bot/src/prompt.rs` provides `markup_to_html`, `spec_to_yaml`,
+`render_prompt`, and 15 unit tests covering all conditional sections, HTML
+render quality, log rendering, player loop, and YAML spec format.
 
-**Message 3 — user (static per game instance, cached per game):**
-- Number of players in this game.
-- Full player list with positions and names.
+`BotContext` now carries `render_html`, `command_spec_yaml`, `recent_logs_html`,
+and `points` (scores). The retry loop accumulates `FailedCommand` entries and
+re-renders the full template on each attempt rather than building a multi-turn
+conversation.
 
-**Message 4 — user (static per player per game):**
-- Which player you are (position number and name).
+**KV cache restructure (future optimisation)**
 
-**Message 5 — user (dynamic, changes every turn):**
-1. Current rendered board state (`player_renders[n].render`).
-2. Recent game log (last 30 entries), oldest first.
-3. Available commands (`player_renders[n].command_spec` serialised as YAML —
-   more compact and readable than JSON, saves tokens).
-4. Instruction: "Respond with only the command string, nothing else."
-
-**On validation failure**, two messages are appended (roles: assistant, user):
-- assistant: the rejected command string.
-- user: `"That command was invalid: <error>. Please try again."`.
-
-**CommandSpec serialisation format: YAML not JSON**
-
-The CommandSpec is currently serialised with `serde_json::to_string_pretty`.
-Switch to YAML (`serde_yaml` crate):
-- More compact: no quote delimiters on keys, less punctuation.
-- More readable: LLMs handle YAML well (high training data prevalence).
-- Saves tokens on every bot turn.
-- No ambiguity risk: CommandSpec is pure data structures (no multiline strings).
-
-**Caching rationale**
-
-Ollama caches KV attention states for prompt prefixes. The longer the unchanged
-prefix across requests to the same model, the more inference is skipped:
-- Message 1 (system): cached across all bot turns for all games forever.
-- Message 2 (rules): cached per game type — reused every turn of every Acquire
-  game, for example.
-- Messages 3-4 (player context): cached per game instance.
-- Message 5 (game state): always recomputed — unavoidably dynamic.
-
-Current implementation has player name, difficulty, and player list in the
-system prompt, breaking prefix caching on the first message. Fixing this is
-the primary motivation for the restructure.
+The current design puts all content — including dynamic game state — into a
+single system message re-rendered each turn. This is correct and simple, but
+foregoes Ollama prefix caching. A future restructure would split into multiple
+messages with static content first (persona + parser docs → system; rules →
+per-game-type user message) so Ollama can cache the long static prefix across
+turns. Deferred until the bot is validated working well end-to-end.
 
 ### Bot k8s manifests
 

@@ -150,10 +150,10 @@ At game end:
 
 ## 2-player special rule
 
-A dummy shareholder participates in merger bonuses. When a merger occurs, draw
-a tile: its column number (1-12) is the dummy's share count in the acquired
-corporation. Bonuses the dummy would receive stay in the bank. The dummy
-competes for bonuses at game end the same way.
+A dummy shareholder participates in merger bonuses. When a merger occurs, roll
+a six-sided die (D6): the result (1-6) is the dummy's share count in the
+acquired corporation. Bonuses the dummy would receive stay in the bank. The
+dummy competes for bonuses at game end the same way.
 
 ---
 

@@ -1,6 +1,10 @@
+mod prompt;
+
 use anyhow::{anyhow, Context, Result};
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Router};
 use brdgme_cmd::api::{Request, Response};
+use brdgme_color::player_color;
+use prompt::{FailedCommand, PlayerInfo, PromptContext, markup_to_html, render_prompt, spec_to_yaml};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
@@ -149,21 +153,34 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         _ => String::new(),
     };
 
-    let mut ctx = load_bot_context(
+    let mut bot_ctx = load_bot_context(
         &state,
         &game_service_uri,
         req.game_id,
         req.player_position,
         game_state,
+        &names,
     ).await.context("Failed to load initial bot context")?;
-
-    let system_prompt = build_system_prompt(&rules, &bot_name, &req.difficulty, &names, req.player_position as usize);
-    let mut messages = build_initial_messages(&system_prompt, &ctx);
 
     let internal_url = format!("{}/api/internal/game/{}/command", monolith_url, req.game_id);
     const MAX_ATTEMPTS: usize = 20;
+    let mut failed_commands: Vec<FailedCommand> = Vec::new();
 
     for attempt in 0..MAX_ATTEMPTS {
+        let prompt_ctx = build_prompt_context(
+            &rules,
+            &bot_name,
+            &req.difficulty,
+            &names,
+            req.player_position as usize,
+            &bot_ctx,
+            std::mem::take(&mut failed_commands),
+        );
+        let messages = build_messages(&prompt_ctx)
+            .with_context(|| format!("Failed to build messages on attempt {}", attempt + 1))?;
+        // Restore failed_commands from the context (build_prompt_context consumed it).
+        failed_commands = prompt_ctx.failed_commands;
+
         let raw_response = call_ollama(&state.http, &ollama_url, &bot_model, &messages, ollama_api_key.as_deref())
             .await
             .with_context(|| format!("Ollama call failed on attempt {}", attempt + 1))?;
@@ -204,7 +221,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         }
 
         let current_game_state: String = recheck.try_get("game_state").context("game_state recheck")?;
-        if current_game_state != ctx.game_state {
+        if current_game_state != bot_ctx.game_state {
             tracing::warn!(
                 trace_id = %trace_id,
                 game_id = %req.game_id,
@@ -212,14 +229,15 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
                 attempt,
                 "Game state changed while Ollama was thinking, refreshing context and retrying"
             );
-            ctx = load_bot_context(
+            bot_ctx = load_bot_context(
                 &state,
                 &game_service_uri,
                 req.game_id,
                 req.player_position,
                 current_game_state,
+                &names,
             ).await.context("Failed to refresh bot context")?;
-            messages = build_initial_messages(&system_prompt, &ctx);
+            failed_commands.clear();
             continue;
         }
 
@@ -277,10 +295,9 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             "Bot command rejected, retrying"
         );
 
-        messages.push(OllamaMessage { role: "assistant".to_string(), content: command.clone() });
-        messages.push(OllamaMessage {
-            role: "user".to_string(),
-            content: format!("That command was invalid: {}. Please try again with a different command.", error_body),
+        failed_commands.push(FailedCommand {
+            command,
+            error: error_body,
         });
     }
 
@@ -289,9 +306,10 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
 
 struct BotContext {
     game_state: String,
-    render: String,
-    command_spec: Option<brdgme_game::command::Spec>,
-    recent_logs: Vec<String>,
+    render_html: String,
+    command_spec_yaml: String,
+    recent_logs_html: Vec<String>,
+    points: Vec<f32>,
 }
 
 async fn load_bot_context(
@@ -300,6 +318,7 @@ async fn load_bot_context(
     game_id: uuid::Uuid,
     player_position: i32,
     game_state: String,
+    names: &[String],
 ) -> Result<BotContext> {
     let status_resp = call_game_service(
         &state.http,
@@ -309,39 +328,55 @@ async fn load_bot_context(
     .await
     .context("Game service Status call failed")?;
 
-    let (render, command_spec) = match status_resp {
-        Response::Status { player_renders, .. } => {
+    let (render_markup, command_spec, points) = match status_resp {
+        Response::Status { game, player_renders, .. } => {
             let pr = player_renders
                 .into_iter()
                 .nth(player_position as usize)
                 .ok_or_else(|| anyhow!("Player position out of range"))?;
-            (pr.render, pr.command_spec)
+            (pr.render, pr.command_spec, game.points)
         }
         _ => return Err(anyhow!("Unexpected response from game service")),
     };
 
+    let render_html = markup_to_html(&render_markup, names);
+    let command_spec_yaml = command_spec
+        .as_ref()
+        .map(spec_to_yaml)
+        .unwrap_or_default();
+
     let log_rows = sqlx::query(
-        "SELECT body FROM game_logs WHERE game_id = $1 ORDER BY logged_at DESC LIMIT 30",
+        "SELECT body FROM game_logs WHERE game_id = $1 ORDER BY logged_at DESC LIMIT 20",
     )
     .bind(game_id)
     .fetch_all(&state.pool)
     .await
     .context("Failed to fetch game logs")?;
 
-    let recent_logs: Vec<String> = log_rows
+    let recent_logs_html: Vec<String> = log_rows
         .into_iter()
         .rev()
-        .map(|r| r.try_get::<String, _>("body").unwrap_or_default())
+        .map(|r| {
+            let body = r.try_get::<String, _>("body").unwrap_or_default();
+            markup_to_html(&body, names)
+        })
         .collect();
 
-    Ok(BotContext { game_state, render, command_spec, recent_logs })
+    Ok(BotContext { game_state, render_html, command_spec_yaml, recent_logs_html, points })
 }
 
-fn build_initial_messages(system_prompt: &str, ctx: &BotContext) -> Vec<OllamaMessage> {
-    vec![
-        OllamaMessage { role: "system".to_string(), content: system_prompt.to_string() },
-        OllamaMessage { role: "user".to_string(), content: build_user_prompt(&ctx.render, &ctx.command_spec, &ctx.recent_logs) },
-    ]
+fn build_messages(
+    ctx: &PromptContext,
+) -> Result<Vec<OllamaMessage>> {
+    let content = render_prompt(ctx)
+        .context("Failed to render system prompt template")?;
+    Ok(vec![
+        OllamaMessage { role: "system".to_string(), content },
+        OllamaMessage {
+            role: "user".to_string(),
+            content: "Please provide your command now.".to_string(),
+        },
+    ])
 }
 
 async fn call_game_service(
@@ -397,62 +432,43 @@ async fn call_ollama(
     Ok(chat_resp.message.content)
 }
 
-fn build_system_prompt(rules: &str, bot_name: &str, difficulty: &str, names: &[String], player_position: usize) -> String {
-    let my_name = names.get(player_position).map(|s| s.as_str()).unwrap_or(bot_name);
-    let difficulty_note = match difficulty {
-        "easy" => "Play casually and make suboptimal moves occasionally.",
-        "hard" => "Play at the highest level possible, analysing the position carefully.",
-        _ => "Play at a reasonable level.",
-    };
-    let players_list = names.iter().enumerate()
-        .map(|(i, n)| if i == player_position { format!("{} (you)", n) } else { n.clone() })
-        .collect::<Vec<_>>()
-        .join(", ");
+fn build_prompt_context(
+    rules: &str,
+    bot_name: &str,
+    difficulty: &str,
+    names: &[String],
+    player_position: usize,
+    bot_ctx: &BotContext,
+    failed_commands: Vec<FailedCommand>,
+) -> PromptContext {
+    let my_name = names
+        .get(player_position)
+        .map(|s| s.as_str())
+        .unwrap_or(bot_name)
+        .to_string();
+    let my_colour = format!("{}", player_color(player_position));
 
-    let mut prompt = format!(
-        "You are {}, a bot playing a board game. You are player {} (0-indexed) in a game with players: {}.\n\
-         {}\n\
-         Commands are plain text. In the available commands syntax: bold/plain keywords must be typed exactly; \
-         [name] is a placeholder - replace it with one of the listed values; 1-3 means a number in that range; \
-         ? means optional; * means zero or more; + means one or more.\n\
-         Respond with a single plain text command only. Do not include any explanation or additional text.",
-        my_name, player_position, players_list, difficulty_note
-    );
-    if !rules.is_empty() {
-        prompt.push_str("\n\n## Game Rules\n\n");
-        prompt.push_str(rules);
+    let players = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| PlayerInfo {
+            name: name.clone(),
+            colour: format!("{}", player_color(i)),
+            score: bot_ctx.points.get(i).copied().unwrap_or(0.0),
+        })
+        .collect();
+
+    PromptContext {
+        game_rules: rules.to_string(),
+        difficulty: difficulty.to_string(),
+        my_name,
+        my_colour,
+        players,
+        game_render: bot_ctx.render_html.clone(),
+        recent_logs: bot_ctx.recent_logs_html.clone(),
+        command_spec: bot_ctx.command_spec_yaml.clone(),
+        failed_commands,
     }
-    prompt
-}
-
-fn build_user_prompt(
-    render: &str,
-    command_spec: &Option<brdgme_game::command::Spec>,
-    recent_logs: &[String],
-) -> String {
-    let mut prompt = String::new();
-
-    if !recent_logs.is_empty() {
-        prompt.push_str("## Recent game log\n\n");
-        for log in recent_logs {
-            prompt.push_str(log);
-            prompt.push('\n');
-        }
-        prompt.push('\n');
-    }
-
-    prompt.push_str("## Current game state\n\n");
-    prompt.push_str(render);
-    prompt.push('\n');
-
-    if let Some(spec) = command_spec {
-        prompt.push_str("\n## Available commands\n\n");
-        prompt.push_str(&serde_json::to_string_pretty(spec).unwrap_or_default());
-        prompt.push('\n');
-    }
-
-    prompt.push_str("\nWhat is your next move? Respond with the command only.");
-    prompt
 }
 
 #[tokio::main]
