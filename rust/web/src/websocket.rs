@@ -472,6 +472,7 @@ mod ssr {
                                 rating: p.game_type_user.rating,
                                 points: p.game_player.points.unwrap_or(0.0),
                                 is_turn: p.game_player.is_turn,
+                                is_bot: p.game_bot.is_some(),
                             }
                         }).collect(),
                         command_spec: player_render.command_spec.clone(),

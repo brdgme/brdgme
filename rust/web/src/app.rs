@@ -186,16 +186,29 @@ fn LoginPage() -> impl IntoView {
     }
 }
 
+/// Per-opponent slot state: either a human (email) or a bot (name + difficulty).
+#[derive(Debug, Clone)]
+enum OpponentSlot {
+    Human(String),
+    Bot { name: String, difficulty: String },
+}
+
+impl Default for OpponentSlot {
+    fn default() -> Self {
+        OpponentSlot::Human(String::new())
+    }
+}
+
 #[component]
 fn GamesPage() -> impl IntoView {
-    use crate::game::server_fns::{get_available_game_types, create_new_game};
+    use crate::game::server_fns::{get_available_game_types, create_new_game, BotSlot};
 
     let game_types = Resource::new(|| (), |_| get_available_game_types());
 
     let (selected_type_id, set_selected_type_id) = signal(None::<Uuid>);
     let (selected_version_id, set_selected_version_id) = signal(None::<Uuid>);
     let (player_count, set_player_count) = signal(2i32);
-    let (opponent_emails, set_opponent_emails) = signal(vec![String::new()]);
+    let (opponent_slots, set_opponent_slots) = signal(vec![OpponentSlot::default()]);
 
     // Initialize selections when game types first load.
     Effect::new(move |_| {
@@ -210,16 +223,17 @@ fn GamesPage() -> impl IntoView {
         }
     });
 
-    // Resize opponent email list when player count changes.
+    // Resize opponent slot list when player count changes.
     Effect::new(move |_| {
         let n = (player_count.get() - 1).max(0) as usize;
-        set_opponent_emails.update(|v| v.resize(n, String::new()));
+        set_opponent_slots.update(|v| v.resize_with(n, OpponentSlot::default));
     });
 
-    let create_action = Action::new(|(version_id, emails): &(Uuid, Vec<String>)| {
+    let create_action = Action::new(|(version_id, emails, bots): &(Uuid, Vec<String>, Vec<BotSlot>)| {
         let version_id = *version_id;
-        let emails = emails.clone();
-        async move { create_new_game(version_id, emails).await }
+        let emails = if emails.is_empty() { None } else { Some(emails.clone()) };
+        let bots = if bots.is_empty() { None } else { Some(bots.clone()) };
+        async move { create_new_game(version_id, emails, bots).await }
     });
 
     let navigate = use_navigate();
@@ -232,7 +246,16 @@ fn GamesPage() -> impl IntoView {
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         if let Some(version_id) = selected_version_id.get_untracked() {
-            create_action.dispatch((version_id, opponent_emails.get_untracked()));
+            let slots = opponent_slots.get_untracked();
+            let mut emails = Vec::new();
+            let mut bots = Vec::new();
+            for slot in slots {
+                match slot {
+                    OpponentSlot::Human(email) => emails.push(email),
+                    OpponentSlot::Bot { name, difficulty } => bots.push(BotSlot { name, difficulty }),
+                }
+            }
+            create_action.dispatch((version_id, emails, bots));
         }
     };
 
@@ -320,24 +343,84 @@ fn GamesPage() -> impl IntoView {
 
                                 {move || {
                                     let n = (player_count.get() - 1).max(0) as usize;
-                                    (0..n).map(|i| view! {
-                                        <div class="form-row">
-                                            <label>"Opponent " {i + 1} " email"</label>
-                                            <input
-                                                type="email"
-                                                placeholder="Email address"
-                                                required
-                                                prop:value=move || opponent_emails.get().get(i).cloned().unwrap_or_default()
-                                                on:input=move |ev| {
+                                    (0..n).map(|i| {
+                                        let slot = move || opponent_slots.get().get(i).cloned().unwrap_or_default();
+                                        let is_bot = move || matches!(slot(), OpponentSlot::Bot { .. });
+                                        view! {
+                                            <div class="form-row">
+                                                <label>"Opponent " {i + 1}</label>
+                                                <select on:change=move |ev| {
                                                     let val = event_target_value(&ev);
-                                                    set_opponent_emails.update(|v| {
-                                                        if let Some(e) = v.get_mut(i) {
-                                                            *e = val;
+                                                    set_opponent_slots.update(|v| {
+                                                        if let Some(s) = v.get_mut(i) {
+                                                            *s = if val == "bot" {
+                                                                OpponentSlot::Bot { name: format!("Bot {}", i + 1), difficulty: "medium".to_string() }
+                                                            } else {
+                                                                OpponentSlot::Human(String::new())
+                                                            };
                                                         }
                                                     });
-                                                }
-                                            />
-                                        </div>
+                                                }>
+                                                    <option value="human" selected=move || !is_bot()>"Human"</option>
+                                                    <option value="bot" selected=move || is_bot()>"Bot"</option>
+                                                </select>
+                                            </div>
+                                            <Show when=move || !is_bot()>
+                                                <div class="form-row">
+                                                    <label>"Email"</label>
+                                                    <input
+                                                        type="email"
+                                                        placeholder="Email address"
+                                                        required
+                                                        prop:value=move || match slot() { OpponentSlot::Human(e) => e, _ => String::new() }
+                                                        on:input=move |ev| {
+                                                            let val = event_target_value(&ev);
+                                                            set_opponent_slots.update(|v| {
+                                                                if let Some(s) = v.get_mut(i) {
+                                                                    *s = OpponentSlot::Human(val);
+                                                                }
+                                                            });
+                                                        }
+                                                    />
+                                                </div>
+                                            </Show>
+                                            <Show when=move || is_bot()>
+                                                <div class="form-row">
+                                                    <label>"Bot name"</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Bot name"
+                                                        required
+                                                        prop:value=move || match slot() { OpponentSlot::Bot { name, .. } => name, _ => String::new() }
+                                                        on:input=move |ev| {
+                                                            let val = event_target_value(&ev);
+                                                            set_opponent_slots.update(|v| {
+                                                                if let Some(s) = v.get_mut(i) {
+                                                                    if let OpponentSlot::Bot { name, .. } = s {
+                                                                        *name = val;
+                                                                    }
+                                                                }
+                                                            });
+                                                        }
+                                                    />
+                                                </div>
+                                                <div class="form-row">
+                                                    <label>"Difficulty"</label>
+                                                    <select on:change=move |ev| {
+                                                        let val = event_target_value(&ev);
+                                                        set_opponent_slots.update(|v| {
+                                                            if let Some(OpponentSlot::Bot { difficulty, .. }) = v.get_mut(i) {
+                                                                *difficulty = val;
+                                                            }
+                                                        });
+                                                    }>
+                                                        <option value="easy">"Easy"</option>
+                                                        <option value="medium" selected=true>"Medium"</option>
+                                                        <option value="hard">"Hard"</option>
+                                                    </select>
+                                                </div>
+                                            </Show>
+                                        }
                                     }).collect_view()
                                 }}
 

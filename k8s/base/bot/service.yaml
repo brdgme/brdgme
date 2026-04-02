@@ -1,0 +1,21 @@
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: bot
+spec:
+  template:
+    spec:
+      containers:
+        - name: bot
+          image: brdgme/bot
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: postgres-config
+            - secretRef:
+                name: bot-config
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:4000"

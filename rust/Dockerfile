@@ -73,6 +73,12 @@ EXPOSE 3000
 CMD ["./brdgme_web"]
 
 # --- Final Stages for Games ---
+FROM debian:bookworm-slim AS bot
+RUN apt-get -y update && apt-get install -y --no-install-recommends libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/bot .
+EXPOSE 4000
+CMD ["./bot"]
+
 FROM debian:bookworm-slim AS acquire-1
 COPY --from=builder /app/target/release/acquire_1_http .
 CMD ["./acquire_1_http"]

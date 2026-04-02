@@ -297,7 +297,7 @@ able to win the game.",
     }
 
     fn rules() -> String {
-        String::new()
+        include_str!("../RULES.md").to_string()
     }
 }
 

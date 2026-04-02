@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 use leptos_router::{hooks::use_navigate, NavigateOptions};
-use crate::game::server_fns::{GameViewData, PlayerViewData, GameLogEntry, SubmitCommand, UndoGame, ConcedeGame, RestartGame};
+use crate::game::server_fns::{GameViewData, PlayerViewData, GameLogEntry, SubmitCommand, UndoGame, ConcedeGame, RestartGame, BumpBotTurns};
 use crate::websocket::BrdgmeGameUpdate;
 use uuid::Uuid;
 
@@ -20,10 +20,13 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let restarted_game_id = data.restarted_game_id;
     let can_restart = is_finished && restarted_game_id.is_none();
 
+    let has_bot_waiting = data.players.iter().any(|p| p.is_bot && p.is_turn);
+
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
     let undo_action = ServerAction::<UndoGame>::new();
     let concede_action = ServerAction::<ConcedeGame>::new();
     let restart_action = ServerAction::<RestartGame>::new();
+    let bump_bot_action = ServerAction::<BumpBotTurns>::new();
 
     // Trigger re-fetch after undo/concede.
     Effect::new(move |_| {
@@ -89,6 +92,14 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                                 <a href=move || restarted_game_id.map(|id| format!("/games/{}", id)).unwrap_or_default()>
                                     "Go to new game"
                                 </a>
+                            </div>
+                        </Show>
+                        <Show when=move || has_bot_waiting>
+                            <div>
+                                <a href="#" on:click=move |ev| {
+                                    ev.prevent_default();
+                                    bump_bot_action.dispatch(BumpBotTurns { game_id });
+                                }>"Bump bot to play"</a>
                             </div>
                         </Show>
                     </div>

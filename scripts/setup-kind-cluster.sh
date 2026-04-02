@@ -118,6 +118,14 @@ kubectl patch configmap/config-domain \
   --type merge \
   --patch '{"data":{"lvh.me":"","example.com":null}}'
 
+# --- brdgme CRD ---
+# Installed here rather than managed by Tilt to avoid a deadlock: Tilt would
+# need to delete the CRD before re-applying it, but the CRD cannot be deleted
+# while GameVersion custom resources have operator finalizers on them, and the
+# operator only runs after Tilt has finished applying manifests.
+echo "==> Installing brdgme GameVersion CRD..."
+kubectl apply -f k8s/base/operator/crd.yaml
+
 echo ""
 echo "==> Cluster ready. Run 'tilt up' to start the dev environment."
 echo "    Legacy services available at http://{service}.brdgme.lvh.me:8080"

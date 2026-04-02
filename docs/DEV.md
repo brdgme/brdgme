@@ -164,3 +164,21 @@ changes.
 - `crd-ready` gates the operator on CRD establishment - do not remove this dependency
 - Tilt scrubbing disabled (`secret_settings(disable_scrub=True)`) so "brdgme" appears in logs
 - Game `GameVersion` CRs live alongside each game: `k8s/base/game/{name}/game-version.yaml`
+- The `gameversions.brdgme.com` CRD is installed by `setup-kind-cluster.sh`, not by Tilt.
+  Tilt must never own the CRD: it cannot delete it safely while GameVersion CRs have operator
+  finalizers and the operator isn't yet running.
+
+## Recovery: CRD stuck in terminating state
+
+If `gameversions.brdgme.com` gets stuck deleting (Tilt reports "timeout waiting for delete"):
+
+```bash
+kubectl get gameversions -A -o name | xargs -I{} kubectl patch {} -n brdgme --type=merge -p '{"metadata":{"finalizers":[]}}'
+```
+
+This strips the operator finalizers so Kubernetes can complete the deletion. Re-apply the CRD
+afterwards with:
+
+```bash
+kubectl apply -f k8s/base/operator/crd.yaml
+```

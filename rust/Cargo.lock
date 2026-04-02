@@ -405,6 +405,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "brdgme_cmd",
+ "brdgme_game",
+ "brdgme_markup",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "brdgme-operator"
 version = "0.1.0"
 dependencies = [

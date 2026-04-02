@@ -20,6 +20,7 @@ pub struct CreateGameRequest {
     pub game_version_id: Uuid,
     pub opponent_ids: Option<Vec<Uuid>>,
     pub opponent_emails: Option<Vec<String>>,
+    pub bot_slots: Option<Vec<db::BotSlot>>,
 }
 
 pub async fn create_game(
@@ -36,7 +37,8 @@ pub async fn create_game(
 
     let opponent_ids = payload.opponent_ids.unwrap_or_default();
     let opponent_emails = payload.opponent_emails.unwrap_or_default();
-    let player_count = 1 + opponent_ids.len() + opponent_emails.len();
+    let bot_slots = payload.bot_slots.unwrap_or_default();
+    let player_count = 1 + opponent_ids.len() + opponent_emails.len() + bot_slots.len();
 
     let game_version = match db::find_game_version(&pool, payload.game_version_id).await {
         Ok(Some(gv)) => gv,
@@ -70,6 +72,7 @@ pub async fn create_game(
             creator_id: user.id,
             opponent_ids: &opponent_ids,
             opponent_emails: &opponent_emails,
+            bot_slots: &bot_slots,
             chat_id: None,
             game_state: &game_info.state,
         },
@@ -225,6 +228,7 @@ pub async fn undo_game(
     if let Ok(Some(updated_ge)) = db::find_game_extended(&pool, id).await {
         let all_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
         broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+        super::trigger_bot_turns(&http_client, &updated_ge).await;
     }
 
     StatusCode::OK.into_response()
@@ -291,6 +295,7 @@ pub async fn restart_game(
             creator_id: user.id,
             opponent_ids: &opponent_ids,
             opponent_emails: &[],
+            bot_slots: &[],
             chat_id: None,
             game_state: &game_info.state,
         },
@@ -317,6 +322,7 @@ pub async fn restart_game(
     if let Ok(Some(new_ge)) = db::find_game_extended(&pool, new_game.id).await {
         let all_logs = db::get_all_game_logs(&pool, new_game.id).await.unwrap_or_default();
         broadcaster.broadcast_game_update(&pool, &new_ge, &all_logs, &public_render, &player_renders).await;
+        super::trigger_bot_turns(&http_client, &new_ge).await;
     }
 
     if let Ok(Some(old_ge)) = db::find_game_extended(&pool, id).await {
@@ -371,6 +377,7 @@ pub async fn concede_game(
         match client::request(&http_client, &updated_ge.game_version.uri, &Request::Status { game: updated_ge.game.game_state.clone() }).await {
             Ok(Response::Status { public_render, player_renders, .. }) => {
                 broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+                super::trigger_bot_turns(&http_client, &updated_ge).await;
             }
             _ => {
                 tracing::error!("Unexpected response from game service on concede status call for game {}", id);

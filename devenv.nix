@@ -39,6 +39,7 @@ playwright-driver.browsers
     sqlx-cli
     tilt
     uv
+    poppler-utils
   ];
 
   env.DATABASE_URL = "postgres://brdgme_user:brdgme_password@localhost:5432/brdgme";

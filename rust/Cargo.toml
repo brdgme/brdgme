@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "api",
+    "bot",
     "game/acquire-1",
     "game/lords-of-vegas-1",
     "game/lost-cities-1",

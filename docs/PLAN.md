@@ -448,7 +448,7 @@ Tailscale) in production.
   table (not fake user records). `game_players.user_id` is nullable;
   `game_players.game_bot_id` is a nullable FK to `game_bots`. A CHECK
   constraint enforces exactly one is non-null.
-- **Retry on invalid command**: up to 5 attempts. Each failed attempt appends
+- **Retry on invalid command**: up to 20 attempts. Each failed attempt appends
   the rejected command and validation error to the next prompt. If all retries
   fail, the bot caller logs the failure and does nothing - the turn remains
   with the bot. Resolution of stuck bot turns (broader randomisation, concede,
@@ -497,15 +497,27 @@ Tailscale) in production.
       env var (disabled if unset). For each bot player with `is_turn = true`,
       spawns background `tokio::spawn` POSTing to `BOT_SERVICE_URL/trigger`.
 - [x] `trigger_bot_turns` called from `execute_command` (after broadcast).
-- [ ] `trigger_bot_turns` called from `server.rs`: `undo_game`, `concede_game`,
-      `restart_game` - **IN PROGRESS, was mid-edit when session ended**.
-      `create_game` in `server.rs` already done.
-- [ ] `trigger_bot_turns` called from `server_fns.rs`: `concede_game`,
+- [x] `trigger_bot_turns` called from `server.rs`: `create_game`, `undo_game`,
+      `concede_game`, `restart_game`.
+- [x] `trigger_bot_turns` called from `server_fns.rs`: `concede_game`,
       `restart_game`, `create_new_game` server fns.
-- [ ] New game creation with bot slots: extend `CreateGameOpts` in `db.rs` to
-      accept `bot_slots: Vec<BotSlot>`. In handler, insert `game_bots` rows
-      then `game_players` rows with `game_bot_id` set and `user_id = NULL`.
-- [ ] New game UI: allow selecting bot opponents (easy/medium/hard).
+- [x] New game creation with bot slots: `CreateGameOpts` extended with
+      `bot_slots: &[BotSlot]`. Handler inserts `game_bots` rows then
+      `game_players` rows with `game_bot_id` set and `user_id = NULL`.
+- [x] New game UI: per-opponent slot Human/Bot toggle with name + difficulty
+      fields. `opponent_emails` and `bot_slots` use `Option<Vec<_>>` to handle
+      absent form fields in URL encoding.
+- [x] `is_bot: bool` added to `PlayerViewData`; populated in both
+      `server_fns.rs` and `websocket.rs`.
+- [x] "Bump bot to play" link in `GameMeta` actions panel: shown when any bot
+      player has `is_turn = true`. Dispatches `BumpBotTurns` server fn which
+      calls `trigger_bot_turns`. Auth-gated to game players only.
+- [x] Bot stale-turn race condition (two layers):
+  - Pre-Ollama: check `is_turn` from initial DB fetch; bail early if false.
+  - Post-Ollama: re-query `is_turn` and `game_state` after each Ollama response.
+    If not their turn: bail. If game state changed (e.g. undo): refresh render,
+    logs, command spec via `load_bot_context` helper; reset conversation and
+    retry Ollama with fresh context. Attempt counter continues across refreshes.
 
 ### Bot caller service (`rust/bot`)
 
@@ -513,66 +525,98 @@ New Rust binary crate. Deployed as a Knative Service. Receives trigger POSTs
 from the monolith, assembles the full prompt, calls Ollama, retries on failure,
 then submits the command to the monolith's internal endpoint.
 
-- [ ] Create `rust/bot/` crate with a minimal Axum server exposing
-      `POST /trigger`.
-- [ ] Request body: `{"game_id": "uuid", "player_position": 0, "difficulty":
-      "medium"}`.
-- [ ] On trigger:
-  1. Fetch game record from DB to get `game_version_id` and current
-     `game_state`.
-  2. Call game service `Status` to get `player_renders[player_position].render`
-     (rendered board state) and `player_renders[player_position].command_spec`
-     (available commands as structured spec).
-  3. Call game service `Rules` to get the rules text.
-  4. Fetch recent game logs from DB (last 30 entries).
-  5. Assemble prompt (see Prompt structure below).
-  6. POST to Ollama `/api/chat` with the assembled prompt.
-  7. Parse the returned command string (trim whitespace, strip any surrounding
-     explanation text - instruct the model to return only the command).
-  8. POST to monolith `POST /api/internal/game/{id}/command` with the command
-     and `player_position`.
-  9. If the monolith returns a validation error, append the rejected command and
-     error to the prompt and retry from step 6 (up to 5 attempts total).
-  10. If all retries fail, log the failure and exit. The turn remains with the
-      bot. Stuck bot turn resolution is deferred (see Design decisions).
-- [ ] Read env vars: `DATABASE_URL`, `BOT_MODEL` (default `qwen3.5:4b`),
-      `OLLAMA_URL` (default `http://localhost:11434`),
-      `OLLAMA_API_KEY` (optional; when set, sent as `Authorization: Bearer <key>`
-      - required for Ollama Cloud, omitted for local/Tailscale),
-      `MONOLITH_URL`, `INTERNAL_API_KEY`.
-- [ ] Add `rust/bot/Dockerfile` target to `rust/Dockerfile` (multi-stage,
-      reuse the existing chef/planner pattern).
+- [x] `rust/bot/` crate: minimal Axum server on port 4000, `POST /trigger`.
+- [x] Request body: `{"game_id": "uuid", "player_position": 0, "difficulty": "medium"}`.
+- [x] On trigger: fetch game + player names + logs from DB; call game service
+      `Status` for render + command spec; call `Rules`; assemble prompt; POST to
+      Ollama `/api/chat`; retry up to 20 times on validation error; on hard
+      failure log error and leave turn with bot.
+- [x] `load_bot_context` helper: fetches render, command spec, logs. Called at
+      start and on mid-loop state refresh.
+- [x] Env vars: `DATABASE_URL`, `BOT_MODEL`, `OLLAMA_URL`, `OLLAMA_API_KEY`,
+      `MONOLITH_URL`, `INTERNAL_API_KEY`. Dynamic sqlx queries (no .sqlx cache).
+- [x] `rust/bot` Dockerfile target added to `rust/Dockerfile`.
+- [x] `rust/bot` added to workspace `Cargo.toml`.
 
-### Prompt structure
+### Acquire rules [Complete]
 
-The prompt is assembled from these components in order:
+- `rust/game/acquire-1/RULES.md` written: board layout, corporations, pricing,
+  mergers, bonuses, rendering guide, command reference.
+- `fn rules()` updated to `include_str!("../RULES.md").to_string()`.
 
-**System prompt:**
+### Prompt structure (pending — high priority)
+
+The prompt is assembled to maximise Ollama KV cache reuse. Content that never
+changes comes first (longest shared prefix = most cache hits); dynamic
+per-turn content comes last. Variables must not appear in early messages.
+
+**Message 1 — system (fully static, cached forever):**
 1. Platform context: brdgme is a turn-based board gaming platform; moves are
    plain text commands; the model's sole job is to produce one valid command.
-2. Command spec explanation: how to read the `CommandSpec` structure
-   (alternatives, sequences, token types).
-3. Difficulty instructions: for `easy` - play randomly and avoid optimal moves;
-   for `medium` - play reasonably but make occasional suboptimal choices; for
-   `hard` - play to win, use strong strategy.
-4. Game rules (from the `Rules` endpoint).
+2. Command spec syntax explanation: a fixed description of how to read the
+   CommandSpec structure (alternatives, sequences, token types, YAML format).
+   This is hardcoded prose, not derived from runtime data.
+3. Difficulty instructions: for `easy` - play casually and make suboptimal
+   moves occasionally; for `hard` - play at the highest level possible.
+   NOTE: difficulty goes here even though it varies per bot, because the
+   system role message as a whole should be kept static for caching. Consider
+   splitting into two system messages if Ollama supports prefix caching across
+   messages, or accept one cache miss per difficulty tier (only 3 variants).
 
-**User prompt (per turn):**
-1. Current rendered board state (from `player_renders[n].render`).
-2. Available commands right now (from `player_renders[n].command_spec` rendered
-   as a human-readable summary).
-3. Recent game log (last 30 entries) - helps infer opponent strategy.
-4. If retrying: list of previously attempted commands this turn and the
-   validation error each produced.
-5. Instruction: "Respond with only the command string, nothing else."
+**Message 2 — user (static per game type, cached per game type):**
+- Game rules text (from the `Rules` endpoint).
+- Empty if the game has no rules text yet.
+
+**Message 3 — user (static per game instance, cached per game):**
+- Number of players in this game.
+- Full player list with positions and names.
+
+**Message 4 — user (static per player per game):**
+- Which player you are (position number and name).
+
+**Message 5 — user (dynamic, changes every turn):**
+1. Current rendered board state (`player_renders[n].render`).
+2. Recent game log (last 30 entries), oldest first.
+3. Available commands (`player_renders[n].command_spec` serialised as YAML —
+   more compact and readable than JSON, saves tokens).
+4. Instruction: "Respond with only the command string, nothing else."
+
+**On validation failure**, two messages are appended (roles: assistant, user):
+- assistant: the rejected command string.
+- user: `"That command was invalid: <error>. Please try again."`.
+
+**CommandSpec serialisation format: YAML not JSON**
+
+The CommandSpec is currently serialised with `serde_json::to_string_pretty`.
+Switch to YAML (`serde_yaml` crate):
+- More compact: no quote delimiters on keys, less punctuation.
+- More readable: LLMs handle YAML well (high training data prevalence).
+- Saves tokens on every bot turn.
+- No ambiguity risk: CommandSpec is pure data structures (no multiline strings).
+
+**Caching rationale**
+
+Ollama caches KV attention states for prompt prefixes. The longer the unchanged
+prefix across requests to the same model, the more inference is skipped:
+- Message 1 (system): cached across all bot turns for all games forever.
+- Message 2 (rules): cached per game type — reused every turn of every Acquire
+  game, for example.
+- Messages 3-4 (player context): cached per game instance.
+- Message 5 (game state): always recomputed — unavoidably dynamic.
+
+Current implementation has player name, difficulty, and player list in the
+system prompt, breaking prefix caching on the first message. Fixing this is
+the primary motivation for the restructure.
 
 ### Bot k8s manifests
 
-- [ ] `k8s/base/bot/`: Knative Service manifest for `brdgme/bot` image. Reads
-      `OLLAMA_URL`, `OLLAMA_API_KEY`, `MONOLITH_URL`, `INTERNAL_API_KEY` from
-      env/secret. `OLLAMA_API_KEY` comes from a Kubernetes Secret (prod only).
-- [ ] Add `k8s/base/bot/` to `k8s/base/brdgme/kustomization.yaml`.
-- [ ] Add `brdgme/bot` image build to the Tiltfile.
+- [x] `k8s/base/bot/service.yaml`: Knative Service for `brdgme/bot` image.
+      Reads `postgres-config` + `bot-config` secrets.
+- [x] `k8s/base/bot/` added to `k8s/base/brdgme/kustomization.yaml`.
+- [x] Tiltfile: bot `local_resource` in hybrid mode with `MONOLITH_URL`,
+      `INTERNAL_API_KEY`, `OLLAMA_URL`; web gets `BOT_SERVICE_URL` and
+      `INTERNAL_API_KEY`. Full-cluster mode builds `brdgme/bot` and creates
+      `bot-config` secret.
 
 ### Ollama configuration
 
@@ -607,6 +651,84 @@ No `OLLAMA_API_KEY` needed (Tailscale handles network auth). Tradeoffs: depends
 on home machine being on and Tailscale connection being stable. Suitable as a
 fallback or for cost reduction once validated.
 
+### Bot service logging improvements [Complete]
+
+Structured logging at key points in `run_bot_turn`. Each log entry should
+include a `trace_id` (a `Uuid::new_v4()` generated at the start of each
+trigger request) so all log lines for a single bot turn can be correlated
+even when multiple bots are running concurrently.
+
+**On trigger received:**
+- trace_id, game_id, game name (e.g. "Acquire"), player position, player name,
+  difficulty.
+
+**On each Ollama response:**
+- trace_id, attempt number, full raw response text from Ollama (so invalid
+  commands and hallucinations can be inspected).
+
+**On command submitted to monolith:**
+- trace_id, attempt number, command string, HTTP status code.
+- If rejected: validation error body returned by the monolith.
+- If accepted: log success.
+
+**On retry due to validation failure:**
+- trace_id, attempt number, reason (validation error summary).
+
+**On game state change detected mid-loop:**
+- trace_id, attempt number, note that game state changed while Ollama was
+  thinking and context is being refreshed.
+
+**On hard failure (all attempts exhausted):**
+- trace_id, final error, number of attempts made.
+
+Implementation notes:
+- Use `tracing::info!` for normal flow, `tracing::warn!` for retries and state
+  refreshes, `tracing::error!` for hard failures.
+- All fields as structured key-value pairs (not interpolated into the message
+  string) so they are machine-parseable in production log aggregation.
+- The trace_id should be passed through `run_bot_turn` and all helpers rather
+  than stored in a global.
+
+### ELO ratings (future)
+
+`update_game_command_success` does not yet update `game_type_users.rating`,
+`game_type_users.peak_rating`, or `game_players.rating_change`. When ELO is
+implemented the rule must be: **only update ratings for human players, and only
+with respect to other human players in the same game**. Any game that includes
+at least one bot player must not affect any human rating.
+
+### Optimistic locking (pending)
+
+`execute_command` reads game state, makes an external HTTP call to the game
+service, then writes back. A concurrent undo or second bot trigger could modify
+the row between read and write. Fix using optimistic locking on `games.updated_at`
+(microsecond-precision timestamp, set by trigger on every UPDATE):
+
+1. Read `game.updated_at` in `execute_command` alongside `game_state`.
+2. Pass `expected_updated_at` to `update_game_command_success`.
+3. Change the UPDATE to:
+   `UPDATE games SET ... WHERE id = $1 AND updated_at = $expected`
+4. Check `rows_affected == 1`; if 0 return a conflict error to the caller.
+   - Human player gets a "please retry" error.
+   - Bot retries via its existing retry loop (the conflict is treated like a
+     validation error - the next attempt re-fetches fresh state via the
+     post-Ollama state-change detection already in place).
+
+No migration needed - `updated_at` already exists on `games` with the required
+precision. Changes required: `execute_command` in `game/mod.rs`, signature and
+UPDATE query in `update_game_command_success` in `db.rs`.
+
+### NATS eventing (future)
+
+v1 bot triggering uses direct HTTP (monolith POSTs to bot service). This will
+be replaced with NATS eventing in a later phase:
+- Monolith publishes "bot turn needed" event to NATS.
+- Bot service subscribes, processes, publishes "bot command" event back.
+- Eliminates the direct coupling and makes bot triggering resilient to bot
+  service restarts. Also naturally handles simultaneous bot turns and chaining.
+The in-process `tokio::sync::broadcast` WebSocket fan-out is also a candidate
+for replacement with NATS Core (noted in Phase 4).
+
 ### Notes
 
 - The bot caller does not need a game session. It authenticates to the monolith
@@ -616,6 +738,18 @@ fallback or for cost reduction once validated.
 - `think: false` must be set in the Ollama `/api/chat` request body for
   qwen3.5 models to suppress chain-of-thought output and keep responses fast
   and concise. It is a top-level field alongside `model` and `messages`.
+- mirrord intercepts all outgoing TCP including `localhost`. Both `rust/web` and
+  `rust/bot` have `outgoing.filter.local: ["127.0.0.1"]` in their mirrord
+  configs so localhost connections (Ollama on 11434, cross-service calls) bypass
+  the proxy and use the host network directly.
+- Bot restart limitation: `restart_game` only collects human `opponent_ids`;
+  bots are not recreated in the restarted game.
+- XOR CHECK constraint on `game_players` enforces exactly one of `user_id` /
+  `game_bot_id` is non-null.
+- `BotSlot` is defined in `game/server_fns.rs` (not SSR-gated) and re-exported
+  from `db.rs`. It must compile on WASM as a server fn parameter.
+- The GameVersion CRD is managed outside Tilt in `setup-kind-cluster.sh` to
+  avoid finalizer deadlocks. Do not add it back to any kustomization.
 
 
 ---

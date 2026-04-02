@@ -7,6 +7,8 @@ use crate::models::user::User;
 #[cfg(feature = "ssr")]
 use uuid::Uuid;
 
+pub use crate::game::server_fns::BotSlot;
+
 #[cfg(feature = "ssr")]
 fn build_game_type_user(
     id: Option<Uuid>,
@@ -441,8 +443,15 @@ pub struct CreateGameOpts<'a> {
     pub creator_id: Uuid,
     pub opponent_ids: &'a [Uuid],
     pub opponent_emails: &'a [String],
+    pub bot_slots: &'a [BotSlot],
     pub chat_id: Option<Uuid>,
     pub game_state: &'a str,
+}
+
+#[cfg(feature = "ssr")]
+enum PlayerSlotInternal {
+    User(User),
+    Bot { name: String, difficulty: String },
 }
 
 #[cfg(feature = "ssr")]
@@ -452,9 +461,9 @@ pub async fn create_game_with_users(
 ) -> Result<crate::models::game::Game> {
     let mut tx = pool.begin().await?;
 
-    // 1. Find or create users
-    let mut users = Vec::new();
-    
+    // 1. Find or create users; collect all slots (users + bots)
+    let mut slots: Vec<PlayerSlotInternal> = Vec::new();
+
     // Creator
     let creator = sqlx::query_as!(
         crate::models::user::User,
@@ -463,7 +472,7 @@ pub async fn create_game_with_users(
     )
     .fetch_one(&mut *tx)
     .await?;
-    users.push(creator);
+    slots.push(PlayerSlotInternal::User(creator));
 
     // Opponent IDs
     for &id in opts.opponent_ids {
@@ -474,7 +483,7 @@ pub async fn create_game_with_users(
         )
         .fetch_one(&mut *tx)
         .await?;
-        users.push(opponent);
+        slots.push(PlayerSlotInternal::User(opponent));
     }
 
     // Opponent Emails
@@ -490,7 +499,7 @@ pub async fn create_game_with_users(
             // Create new user for email
             let new_user_id = Uuid::new_v4();
             let username = email.split('@').next().unwrap_or("user").to_string();
-            
+
             let u = sqlx::query_as!(
                 crate::models::user::User,
                 "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
@@ -500,7 +509,7 @@ pub async fn create_game_with_users(
             )
             .fetch_one(&mut *tx)
             .await?;
-            
+
             sqlx::query!(
                 "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
                 new_user_id,
@@ -508,22 +517,27 @@ pub async fn create_game_with_users(
             )
             .execute(&mut *tx)
             .await?;
-            
+
             u
         };
-        users.push(user);
+        slots.push(PlayerSlotInternal::User(user));
+    }
+
+    // Bot slots
+    for bot in opts.bot_slots {
+        slots.push(PlayerSlotInternal::Bot { name: bot.name.clone(), difficulty: bot.difficulty.clone() });
     }
 
     // 2. Randomize player order
     {
         use rand::seq::SliceRandom;
         let mut rng = rand::rng();
-        users.shuffle(&mut rng);
+        slots.shuffle(&mut rng);
     }
 
     // 3. Assign colors
     let colors = vec!["Green", "Red", "Blue", "Amber", "Purple", "Brown", "BlueGrey"];
-    
+
     // 4. Create Game
     let is_finished = !opts.placings.is_empty();
     let game = sqlx::query_as!(
@@ -546,40 +560,70 @@ pub async fn create_game_with_users(
         .ok_or_else(|| anyhow::anyhow!("Game version not found"))?
         .game_type_id;
 
-    for (pos, user) in users.iter().enumerate() {
+    for (pos, slot) in slots.iter().enumerate() {
         let color = colors.get(pos).unwrap_or(&"BlueGrey").to_string();
         let is_turn = opts.whose_turn.contains(&pos);
         let is_eliminated = opts.eliminated.contains(&pos);
         let place = opts.placings.get(pos).map(|&p| p as i32);
 
-        sqlx::query!(
-            r#"
-            INSERT INTO game_players (game_id, user_id, position, color, has_accepted, is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7, false, $8)
-            "#,
-            game.id,
-            user.id,
-            pos as i32,
-            color,
-            user.id == opts.creator_id,
-            is_turn,
-            is_eliminated,
-            place
-        )
-        .execute(&mut *tx)
-        .await?;
+        match slot {
+            PlayerSlotInternal::User(user) => {
+                sqlx::query!(
+                    r#"
+                    INSERT INTO game_players (game_id, user_id, position, color, has_accepted, is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place)
+                    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7, false, $8)
+                    "#,
+                    game.id,
+                    user.id,
+                    pos as i32,
+                    color,
+                    user.id == opts.creator_id,
+                    is_turn,
+                    is_eliminated,
+                    place
+                )
+                .execute(&mut *tx)
+                .await?;
 
-        sqlx::query!(
-            r#"
-            INSERT INTO game_type_users (game_type_id, user_id)
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING
-            "#,
-            game_type_id,
-            user.id
-        )
-        .execute(&mut *tx)
-        .await?;
+                sqlx::query!(
+                    r#"
+                    INSERT INTO game_type_users (game_type_id, user_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT DO NOTHING
+                    "#,
+                    game_type_id,
+                    user.id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            PlayerSlotInternal::Bot { name, difficulty } => {
+                let bot_id = sqlx::query_scalar!(
+                    "INSERT INTO game_bots (game_id, name, difficulty) VALUES ($1, $2, $3) RETURNING id",
+                    game.id,
+                    name,
+                    difficulty
+                )
+                .fetch_one(&mut *tx)
+                .await?;
+
+                sqlx::query!(
+                    r#"
+                    INSERT INTO game_players (game_id, game_bot_id, position, color, has_accepted, is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place)
+                    VALUES ($1, $2, $3, $4, true, $5, NOW(), NOW(), $6, true, $7)
+                    "#,
+                    game.id,
+                    bot_id,
+                    pos as i32,
+                    color,
+                    is_turn,
+                    is_eliminated,
+                    place
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
     }
 
     tx.commit().await?;

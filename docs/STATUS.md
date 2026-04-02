@@ -1,161 +1,158 @@
-# Phase 9 Implementation Status
+# Current Status
 
-## What is complete
+## Active work: bot system prompt documentation
 
-### DB migration + model changes
-- `rust/web/migrations/003_game_bots.sql` - created, applied to dev DB.
-- `GamePlayer.user_id: Option<Uuid>` in models/game.rs.
-- `GameBot` struct in models/game.rs.
-- `GamePlayerExtended`: `user: Option<User>`, `game_bot: Option<GameBot>`, `name()` helper.
-- `find_game_extended` and `find_active_games_for_user`: LEFT JOIN users + LEFT JOIN game_bots.
-- SQLx cache regenerated (`rust/web/.sqlx/`). Compile verified clean.
+Writing static markdown documentation for the command spec grammar to embed in the
+bot system prompt, so the LLM can reliably produce valid plain text commands.
 
-### Game contract - Rules endpoint
-- `rust/lib/cmd/src/api.rs`: `Rules` added to `Request` and `Response` enums.
-- `rust/lib/cmd/src/requester/gamer.rs`: `handle_rules::<G>()` dispatch added.
-- `rust/lib/game/src/game.rs`: `fn rules() -> String` on `Gamer` trait (default empty).
-- All 4 Rust games: empty stub `fn rules() -> String { String::new() }`.
-- Rules text deferred. When writing: `include_str!("../rules.md")` in each game,
-  file at `rust/game/<name>/rules.md`.
+### What was done this session
 
-### Callsite fixes (all files)
-- `game/mod.rs`: `is_some_and`, `name()`.
-- `game/server.rs`: all handlers updated.
-- `game/server_fns.rs`: all handlers updated.
-- `websocket.rs`: `build_markup_players`, `build_legacy_game_players` (synthetic LegacyUser
-  for bots), `LegacyGamePlayer.user_id: Option<Uuid>`, per-player broadcast loop wrapped in
-  `if let Some(ref user) = gpe.user`, `PlayerViewData.name` uses `p.name()`.
+- Added `RULES.md` for Acquire and implemented `Gamer::rules()` in `acquire-1/src/lib.rs`
+  to include it via `include_str!`. First end-to-end test with rules context returned
+  HTTP 200 after ~25 min (20 Ollama attempts).
+- Fixed bot log visibility: `RUST_LOG=info` was missing from the bot `serve_cmd` in
+  the Tiltfile. All `tracing::info!` calls were silently dropped. Now visible in Tilt.
+- Identified that the bot was generating raw JSON command spec output instead of plain
+  text commands. Root cause: the user prompt fed the raw JSON spec to the LLM with no
+  explanation of how to interpret it.
+- Queried the acquire-1 service for the current game state (game
+  `63cd2468-a5d1-4f41-ad53-ba25c7390ccd`, player 1) and saved the full response to
+  `docs/acquire1_status.json`.
+- Extracted the command spec for player 1 and converted to YAML, saved to
+  `docs/command_spec.yaml`. This is the `Buy` phase spec (buy shares or done).
+- Created `rust/bot/system_prompt.md` as a static markdown file for the bot system
+  prompt. Dynamic game context (render, logs, command spec) will be appended separately
+  at runtime. Current content is the static preamble only.
+- Next step: write command spec node documentation in `system_prompt.md` so the LLM
+  understands how to read a grammar tree and produce a valid plain text command.
 
-### execute_command refactor
-- `execute_command` now takes `player_position: usize` (not `user_id`).
-- `play_command` (server.rs) and `submit_command` server fn (server_fns.rs) do a lightweight
-  `SELECT position FROM game_players WHERE game_id = $1 AND user_id = $2` before calling it.
+### Completed unstaged work (pre-existing, not yet committed)
 
-### Internal command endpoint
-- `POST /api/internal/game/{id}/command` in `server.rs`.
-- Auth: `X-Internal-Key` header vs `INTERNAL_API_KEY` env var.
-- Body: `{ "player_position": N, "command": "..." }`.
-- Route registered in `api_routes()`.
+#### Bot service (`rust/bot/`)
 
-### trigger_bot_turns helper
-- `pub async fn trigger_bot_turns(http_client, ge)` in `game/mod.rs`.
-- Reads `BOT_SERVICE_URL` env var - returns immediately if unset.
-- For each bot player with `is_turn = true`: spawns background tokio task posting
-  `{ "game_id": "...", "player_position": N, "difficulty": "..." }` to `BOT_SERVICE_URL/trigger`.
-- Called from `execute_command` after broadcast (covers play/undo via server_fns).
-- Called from `create_game` handler in `server.rs` after broadcast.
+- Bot crate created at `rust/bot/` and added to the workspace (`rust/Cargo.toml`).
+- `rust/Dockerfile` extended with a `bot` build target.
+- `k8s/base/bot/` manifests created; added to `k8s/base/brdgme/kustomization.yaml`.
+- Bot runs as a local Tilt resource (hybrid mode) with mirrord for cluster DNS access,
+  and as an in-cluster Knative Service in `WEB_IN_CLUSTER=1` mode.
+- `INTERNAL_API_KEY`, `MONOLITH_URL`, `OLLAMA_URL`, `BOT_MODEL` wired via env / Secret.
 
----
+#### Bot trigger integration in web (`rust/web/`)
 
-## What is incomplete / next steps (in order)
+- `trigger_bot_turns` wired into `create_game`, `undo_game`, `concede_game`,
+  `restart_game` in `server.rs`.
+- `trigger_bot_turns` wired into `concede_game`, `restart_game`, `create_new_game`
+  server fns in `server_fns.rs`.
+- `BumpBotTurns` server fn added; "Bump bot to play" link shown in `GameMeta` actions
+  panel when any bot player has `is_turn = true`. Auth-gated to game players only.
+- `is_bot: bool` added to `PlayerViewData`; populated in both `server_fns.rs` and
+  `websocket.rs`.
+- Bot stale-turn race condition handled (two layers): `is_turn` re-checked from DB
+  before submitting to Ollama, and again after Ollama responds.
 
-### 1. Add trigger_bot_turns to remaining server.rs handlers - IMMEDIATE NEXT
+#### Bot game creation UI (`rust/web/src/app.rs`)
 
-The session ended mid-edit in `server.rs`. These three handlers broadcast but do NOT yet
-call `trigger_bot_turns`:
+- Per-opponent `OpponentSlot` enum: `Human(email)` or `Bot { name, difficulty }`.
+- New game form updated with Human/Bot toggle per opponent slot, name and difficulty
+  fields for bot slots.
+- `opponent_emails` and `bot_slots` passed as `Option<Vec<_>>` to handle absent fields
+  in URL encoding.
 
-**`undo_game`** - find the block:
-```rust
-if let Ok(Some(updated_ge)) = db::find_game_extended(&pool, id).await {
-    let all_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
-    broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
-}
+#### Database (`rust/web/src/db.rs`)
 
-StatusCode::OK.into_response()
-```
-Add after the broadcast:
-```rust
-    super::trigger_bot_turns(&http_client, &updated_ge).await;
-```
+- `CreateGameOpts` extended with `bot_slots: &[BotSlot]`.
+- `create_game_with_users` inserts `game_bots` rows and `game_players` rows with
+  `game_bot_id` set and `user_id = NULL` for bot slots.
 
-**`restart_game`** - the new game broadcast block:
-```rust
-if let Ok(Some(new_ge)) = db::find_game_extended(&pool, new_game.id).await {
-    let all_logs = db::get_all_game_logs(&pool, new_game.id).await.unwrap_or_default();
-    broadcaster.broadcast_game_update(&pool, &new_ge, &all_logs, &public_render, &player_renders).await;
-}
-```
-Add after the broadcast:
-```rust
-    super::trigger_bot_turns(&http_client, &new_ge).await;
-```
+#### Infrastructure
 
-**`concede_game`** - the broadcast block:
-```rust
-Ok(Response::Status { public_render, player_renders, .. }) => {
-    broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
-}
-```
-Add after the broadcast (inside the `Ok` arm):
-```rust
-super::trigger_bot_turns(&http_client, &updated_ge).await;
+- CRD moved out of Tilt and into `scripts/setup-kind-cluster.sh` to avoid a deadlock
+  (Tilt cannot safely delete a CRD that has resources with operator finalizers while
+  the operator is not yet running). `k8s/base/operator/kustomization.yaml` no longer
+  references `crd.yaml`.
+- `docs/DEV.md` updated: CRD ownership note and recovery procedure for a CRD stuck in
+  terminating state.
+- `devenv.nix`: added `poppler-utils`.
+
+### Command spec parsers missing from command_spec.yaml
+
+The captured `docs/command_spec.yaml` is from the `Buy` phase and only exercises 7 of
+the 10 `Spec` variants. The three not present, with example YAML encodings:
+
+#### `Opt`
+
+Wraps an inner spec that may be omitted entirely.
+
+```yaml
+Opt:
+  Token: undo
 ```
 
-### 2. Add trigger_bot_turns to server_fns.rs handlers
+#### `Many`
 
-In `concede_game` server fn: after the broadcast block (same pattern as server.rs).
-In `restart_game` server fn: after the new game broadcast block.
-In `create_new_game` server fn (if it exists): after broadcast.
+Repeats an inner spec a number of times. `min` and `max` are nullable integers.
+`delim` is a nullable inner spec used as a separator between repetitions.
 
-### 3. New game creation with bot slots
-
-- Add `BotSlot { name: String, difficulty: String }` struct to `db.rs`.
-- Extend `CreateGameOpts` with `bot_slots: &[BotSlot]`.
-- In `create_game_with_users` (db.rs): for each bot slot, INSERT into `game_bots`
-  then INSERT into `game_players` with `game_bot_id` set and `user_id = NULL`.
-- Extend `CreateGameRequest` in `server.rs` to accept optional `bot_slots`.
-- Extend `create_new_game` server fn in `server_fns.rs` similarly.
-- Update new game UI component to offer bot difficulty selection per opponent slot.
-
-### 4. rust/bot crate
-
-New workspace member. Minimal Axum server with `POST /trigger`.
-- Reads: `DATABASE_URL`, `BOT_MODEL` (default `qwen3.5:4b`), `OLLAMA_URL`
-  (default `http://localhost:11434`), `OLLAMA_API_KEY` (optional Bearer token),
-  `MONOLITH_URL`, `INTERNAL_API_KEY`.
-- On trigger: fetch game from DB, call game service `Status`, call `Rules`,
-  fetch last 30 logs, assemble prompt, POST to `OLLAMA_URL/api/chat` with
-  `{ "model": "...", "think": false, "stream": false, "messages": [...] }`.
-  If `OLLAMA_API_KEY` set, add `Authorization: Bearer <key>` header.
-  Parse response command, POST to monolith internal endpoint. Retry up to 5x
-  on validation error (append rejected command + error to conversation).
-- Add `rust/bot/` to workspace `rust/Cargo.toml`.
-- Add Dockerfile target to `rust/Dockerfile` (reuse chef/planner pattern).
-
-### 5. k8s manifests
-
-- `k8s/base/bot/`: Knative Service for `brdgme/bot` image.
-  Env: `OLLAMA_URL`, `OLLAMA_API_KEY` (Secret), `MONOLITH_URL`,
-  `INTERNAL_API_KEY` (Secret), `DATABASE_URL` (Secret), `BOT_MODEL`.
-- Add to `k8s/base/brdgme/kustomization.yaml`.
-
-### 6. Tiltfile
-
-Add `local_resource` for `rust/bot` in hybrid mode:
-```python
-local_resource(
-    "bot",
-    serve_cmd="cd rust/bot && SQLX_OFFLINE=true mirrord exec --target pod/postgres-0 --target-namespace brdgme -- cargo run",
-    resource_deps=["postgres"],
-)
+```yaml
+Many:
+  spec:
+    Token: item
+  min: 1
+  max: 3
+  delim: null
 ```
 
-### 7. Rules text (deferred)
+With a delimiter:
 
-After end-to-end working, write `rust/game/<name>/rules.md` for each game and
-update each `fn rules()` stub to `include_str!("../rules.md").to_string()`.
-Go games need separate handling in their codebase.
+```yaml
+Many:
+  spec:
+    Enum:
+      values:
+        - American
+        - Sackson
+      exact: false
+  min: null
+  max: null
+  delim:
+    Token: ","
+```
 
----
+#### `Player`
 
-## Key decisions
+A unit variant with no fields. Matches a player number (0-indexed) or player name.
 
-- **No in-cluster Ollama** - external Ollama API only (local, Tailscale, or Ollama Cloud).
-- **Model**: `qwen3.5:4b` default, `think: false` always, `BOT_MODEL` env var overrides.
-- **API**: `/api/chat` endpoint (not `/api/generate`) - consistent across all backends.
-- **execute_command takes position** - not user_id. User-facing endpoints do a lightweight
-  position lookup first. Internal endpoint passes position from request body directly.
-- **XOR CHECK constraint** on game_players enforces exactly one of user_id/game_bot_id.
-- **Synthetic LegacyUser for bots** in websocket.rs: uses bot.id as user id, empty pref_colors.
-- **Bot restart limitation**: bots not recreated on restart - only human opponent_ids collected.
-- **Go games Rules**: not implemented; bot caller handles empty rules response gracefully.
+```yaml
+- Player
+```
+
+Or as the sole spec:
+
+```yaml
+Player
+```
+
+### Current command_spec.yaml (Buy phase, player 1)
+
+See `docs/command_spec.yaml`. Parsers present: `OneOf`, `Chain`, `Doc`, `Space`,
+`Token`, `Int`, `Enum`.
+
+### Next steps (in order)
+
+1. **Command spec documentation** — write documentation for every `Spec` node type in
+   `rust/bot/system_prompt.md` with YAML examples and plain text command examples.
+
+2. **Wire system prompt from markdown** — load `system_prompt.md` at runtime in the
+   bot and append dynamic game context (render, logs, command spec as YAML).
+
+3. **Switch command spec serialisation to YAML** — convert `command_spec` from JSON
+   to YAML in `build_user_prompt` so it matches the documented format.
+
+4. **Prompt restructure** (PLAN.md Phase 9) — restructure messages for Ollama KV cache
+   reuse.
+
+5. **Optimistic locking** (PLAN.md Phase 9) — `execute_command` +
+   `update_game_command_success`.
+
+6. **Rules for other games** — write `RULES.md` for lords-of-vegas-1, lost-cities-1,
+   lost-cities-2 once bot is confirmed working end-to-end on Acquire.

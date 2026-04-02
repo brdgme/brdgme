@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use time::PrimitiveDateTime;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotSlot {
+    pub name: String,
+    pub difficulty: String,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpponentSummary {
@@ -41,6 +47,7 @@ pub struct PlayerViewData {
     pub rating: i32,
     pub points: f32,
     pub is_turn: bool,
+    pub is_bot: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +184,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                     rating: p.game_type_user.rating,
                     points: p.game_player.points.unwrap_or(0.0),
                     is_turn: p.game_player.is_turn,
+                    is_bot: p.game_bot.is_some(),
                 }
             }).collect(),
             command_spec: render_resp.command_spec,
@@ -250,7 +258,7 @@ pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnErr
 }
 
 #[server(CreateNewGame, "/api")]
-pub async fn create_new_game(game_version_id: Uuid, opponent_emails: Vec<String>) -> Result<Uuid, ServerFnError> {
+pub async fn create_new_game(game_version_id: Uuid, opponent_emails: Option<Vec<String>>, bot_slots: Option<Vec<BotSlot>>) -> Result<Uuid, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
         use sqlx::PgPool;
@@ -270,7 +278,9 @@ pub async fn create_new_game(game_version_id: Uuid, opponent_emails: Vec<String>
             .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
         let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-        let player_count = 1 + opponent_emails.len();
+        let opponent_emails = opponent_emails.unwrap_or_default();
+        let bot_slots = bot_slots.unwrap_or_default();
+        let player_count = 1 + opponent_emails.len() + bot_slots.len();
 
         let game_version = crate::db::find_game_version(&pool, game_version_id).await
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
@@ -300,6 +310,7 @@ pub async fn create_new_game(game_version_id: Uuid, opponent_emails: Vec<String>
                 creator_id: user.id,
                 opponent_ids: &[],
                 opponent_emails: &opponent_emails,
+                bot_slots: &bot_slots,
                 chat_id: None,
                 game_state: &game_info.state,
             },
@@ -311,6 +322,7 @@ pub async fn create_new_game(game_version_id: Uuid, opponent_emails: Vec<String>
         if let Ok(Some(ge)) = crate::db::find_game_extended(&pool, game.id).await {
             let all_logs = crate::db::get_all_game_logs(&pool, game.id).await.unwrap_or_default();
             broadcaster.broadcast_game_update(&pool, &ge, &all_logs, &public_render, &player_renders).await;
+            crate::game::trigger_bot_turns(&http_client, &ge).await;
         }
 
         Ok(game.id)
@@ -433,6 +445,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         if let Ok(Some(updated_ge)) = crate::db::find_game_extended(&pool, game_id).await {
             let all_logs = crate::db::get_all_game_logs(&pool, game_id).await.unwrap_or_default();
             broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+            crate::game::trigger_bot_turns(&http_client, &updated_ge).await;
         }
         Ok(())
     }
@@ -481,6 +494,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
             match client::request(&http_client, &updated_ge.game_version.uri, &Request::Status { game: updated_ge.game.game_state.clone() }).await {
                 Ok(Response::Status { public_render, player_renders, .. }) => {
                     broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+                    crate::game::trigger_bot_turns(&http_client, &updated_ge).await;
                 }
                 _ => {
                     tracing::error!("Unexpected response from game service on concede status call for game {}", game_id);
@@ -555,6 +569,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             creator_id: user.id,
             opponent_ids: &opponent_ids,
             opponent_emails: &[],
+            bot_slots: &[],
             chat_id: None,
             game_state: &game_info.state,
         }).await.map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
@@ -575,6 +590,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         if let Ok(Some(new_ge)) = crate::db::find_game_extended(&pool, new_game.id).await {
             let all_logs = crate::db::get_all_game_logs(&pool, new_game.id).await.unwrap_or_default();
             broadcaster.broadcast_game_update(&pool, &new_ge, &all_logs, &public_render, &player_renders).await;
+            crate::game::trigger_bot_turns(&http_client, &new_ge).await;
         }
 
         // Broadcast update for the old game with restarted_game_id now set, so
@@ -589,6 +605,37 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         }
 
         Ok(new_game.id)
+    }
+    #[cfg(not(feature = "ssr"))]
+    unreachable!()
+}
+
+#[server(BumpBotTurns, "/api")]
+pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
+    #[cfg(feature = "ssr")]
+    {
+        use sqlx::PgPool;
+        use leptos::prelude::*;
+        use crate::auth::server::get_current_user;
+
+        let pool = use_context::<PgPool>()
+            .ok_or_else(|| ServerFnError::new("Database pool not found"))?;
+        let http_client = use_context::<reqwest::Client>()
+            .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
+        let user = get_current_user().await?.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+        let ge = crate::db::find_game_extended(&pool, game_id).await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+            .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+        // Only players in the game can bump bots.
+        let is_player = ge.game_players.iter().any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
+        if !is_player {
+            return Err(ServerFnError::new("You are not a player in this game"));
+        }
+
+        crate::game::trigger_bot_turns(&http_client, &ge).await;
+        Ok(())
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!()

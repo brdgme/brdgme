@@ -1,4 +1,5 @@
 bases:
+- ../bot
 - ../game
 - ../legacy
 - ../migrate
