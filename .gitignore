@@ -14,6 +14,9 @@ devenv.local.nix
 # pre-commit
 .pre-commit-config.yaml
 
+# Local dev environment (machine-specific secrets, never commit)
+.env
+
 # Leptos development files
 rust/web/.env
 rust/web/target/

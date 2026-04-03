@@ -19,7 +19,6 @@ LEGACY = os.getenv("LEGACY", "") == "1"
 # Fixed dev-only values (not sensitive in a local Kind cluster).
 INTERNAL_API_KEY_DEV = "dev-internal-key"
 BOT_SERVICE_URL_DEV = "http://localhost:4000"
-OLLAMA_URL_DEV = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Dev environment only - credentials are not sensitive here.
 secret_settings(disable_scrub=True)
@@ -111,14 +110,20 @@ metadata:
 stringData:
   INTERNAL_API_KEY: {internal_key}
   MONOLITH_URL: http://web.brdgme.svc.cluster.local
-  OLLAMA_URL: {ollama_url}
-  BOT_MODEL: qwen3.5:4b
-""".format(internal_key=INTERNAL_API_KEY_DEV, ollama_url=OLLAMA_URL_DEV)))
+  LLM_URL: {llm_url}
+  LLM_API_KEY: {llm_api_key}
+  BOT_MODEL: {bot_model}
+""".format(
+        internal_key=INTERNAL_API_KEY_DEV,
+        llm_url=os.getenv("LLM_URL", "http://localhost:11434"),
+        llm_api_key=os.getenv("LLM_API_KEY", ""),
+        bot_model=os.getenv("BOT_MODEL", "qwen3:4b"),
+    )))
 else:
     k8s_yaml(kustomize("k8s/dev-without-web"))
     local_resource(
         "web",
-        serve_cmd="cd rust/web && SQLX_OFFLINE=true BOT_SERVICE_URL={bot_url} INTERNAL_API_KEY={key} mirrord exec --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch".format(
+        serve_cmd="cd rust/web && SQLX_OFFLINE=true BOT_SERVICE_URL={bot_url} INTERNAL_API_KEY={key} mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch".format(
             bot_url=BOT_SERVICE_URL_DEV,
             key=INTERNAL_API_KEY_DEV,
         ),
@@ -127,9 +132,8 @@ else:
     )
     local_resource(
         "bot",
-        serve_cmd="cd rust/bot && RUST_LOG=info MONOLITH_URL=http://localhost:3000 INTERNAL_API_KEY={key} OLLAMA_URL={ollama_url} mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo run".format(
+        serve_cmd="set -a && [ -f .env ] && . ./.env; set +a && cd rust/bot && RUST_LOG=${{RUST_LOG:-info}} INTERNAL_API_KEY={key} MONOLITH_URL=http://localhost:3000 mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo run".format(
             key=INTERNAL_API_KEY_DEV,
-            ollama_url=OLLAMA_URL_DEV,
         ),
         resource_deps=["postgres"],
     )

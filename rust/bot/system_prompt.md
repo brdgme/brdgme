@@ -291,6 +291,23 @@ done
 
 Note that even if you provide a valid command for the command parser rules, it may still be invalid based on the game state. For example, you don't have enough money to buy shares, or there might not be enough shares left. In this case, we will provide information on the reason why your last command failed at the end of the prompt.
 
+# brdgme markup
+
+All game rendering uses a custom markup format called "brdgme markup" which is very similar to Handlebars, however it doesn't use `#` for start tags.
+
+Both the game render as well as the game log messages use brdgme markup.
+
+The available tags in brdgme markup are:
+
+{% raw -%}
+- `{{b}}...{{/b}}` - bold (typically used to highlight playable or important elements)
+- `{{fg rgb(r,g,b)}}...{{/fg}}` - foreground colour
+- `{{bg rgb(r,g,b)}}...{{/bg}}` - background colour
+- Player references (`{{player N}}`) are already resolved to player names, zero indexed.
+{%- endraw %}
+
+# Information relating to the current game session
+
 All of the information below relates specifically to the game you are playing right now.
 
 {% if game_rules %}
@@ -311,15 +328,17 @@ All of the current players in the game are listed below, including yourself. If 
 
 # Game render
 
-Below is a rendering of the game as it is right now in HTML format. There is only text, however some basic styling may be applied to the text such as colours and weight and this is generally conveying information important to the game.
+The game render is in brdgme markup, as documented above.
 
-```html
+```text
 {{ game_render }}
 ```
 
 # Recent game logs
 
 The 20 most recent game logs are listed below in chronological order to help you understand what has happened recently in the game.
+
+Game logs are in brdgme markup, as documented above.
 
 {% for log in recent_logs %}
 - {{ log }}

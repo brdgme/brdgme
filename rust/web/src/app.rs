@@ -487,7 +487,10 @@ fn GamePage() -> impl IntoView {
     });
 
     // Initial load only - WS signal handles subsequent updates.
-    let game_data = Resource::new(
+    // Blocking so SSR waits for data and serialises it to the client, avoiding
+    // a second fetch on hydration and preventing the stuck-loading state on
+    // hard refresh.
+    let game_data = Resource::new_blocking(
         move || game_id(),
         |id| async move {
             match id {

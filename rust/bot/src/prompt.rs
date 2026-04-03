@@ -1,6 +1,4 @@
-use brdgme_color::player_color;
 use brdgme_game::command::Spec;
-use brdgme_markup::{Player, from_string, html, transform};
 use minijinja::{Environment, context};
 use serde::Serialize;
 
@@ -32,22 +30,14 @@ pub struct PromptContext {
     pub failed_commands: Vec<FailedCommand>,
 }
 
-/// Convert a brdgme markup string to HTML, resolving player references using
-/// the supplied name list. Falls back to the raw string on parse failure.
-pub fn markup_to_html(markup: &str, names: &[String]) -> String {
-    let players: Vec<Player> = names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| Player {
-            name: name.clone(),
-            color: player_color(i).to_owned(),
-        })
-        .collect();
-
-    match from_string(markup) {
-        Ok((nodes, _)) => html(&transform(&nodes, &players)),
-        Err(_) => markup.to_string(),
+/// Resolve `{{player N}}` references in brdgme markup to player names.
+/// All other markup tags are passed through unchanged.
+pub fn markup_resolve_players(markup: &str, names: &[String]) -> String {
+    let mut result = markup.to_string();
+    for (i, name) in names.iter().enumerate() {
+        result = result.replace(&format!("{{{{player {i}}}}}"), name);
     }
+    result
 }
 
 /// Serialise a command Spec to a YAML string.
@@ -101,9 +91,9 @@ mod tests {
                     score: 4500.0,
                 },
             ],
-            game_render: "<b>Board state</b>".to_string(),
+            game_render: "{{b}}Board state{{/b}}".to_string(),
             recent_logs: vec![
-                "Alice placed <b>C4</b>".to_string(),
+                "Alice placed {{b}}C4{{/b}}".to_string(),
                 "Bob bought 2 Sackson".to_string(),
             ],
             command_spec: "Token: done".to_string(),
@@ -143,23 +133,22 @@ mod tests {
     }
 
     #[test]
-    fn renders_game_render_as_html() {
+    fn renders_game_render_as_markup() {
         let output = render_prompt(&base_ctx()).unwrap();
         assert!(
-            output.contains("<b>Board state</b>"),
-            "game render HTML not present verbatim"
+            output.contains("{{b}}Board state{{/b}}"),
+            "game render markup not present verbatim"
         );
-        // Confirm it's inside an html code fence
         assert!(
-            output.contains("```html\n<b>Board state</b>"),
-            "game render not in html fence"
+            output.contains("```text\n{{b}}Board state{{/b}}"),
+            "game render not in text fence"
         );
     }
 
     #[test]
     fn renders_logs() {
         let output = render_prompt(&base_ctx()).unwrap();
-        assert!(output.contains("Alice placed <b>C4</b>"), "log 1 missing");
+        assert!(output.contains("Alice placed {{b}}C4{{/b}}"), "log 1 missing");
         assert!(output.contains("Bob bought 2 Sackson"), "log 2 missing");
     }
 
@@ -214,28 +203,19 @@ mod tests {
     }
 
     #[test]
-    fn markup_to_html_converts_bold() {
+    fn markup_resolve_players_replaces_player_refs() {
         let names = vec!["Alice".to_string(), "Bob".to_string()];
-        let markup = "{{b}}hello{{/b}}";
-        let out = markup_to_html(markup, &names);
-        assert!(out.contains("<b>hello</b>"), "bold not converted: {}", out);
+        let markup = "{{player 0}} played a tile, then {{player 1}} responded";
+        let out = markup_resolve_players(markup, &names);
+        assert_eq!(out, "Alice played a tile, then Bob responded");
     }
 
     #[test]
-    fn markup_to_html_resolves_player_reference() {
-        let names = vec!["Alice".to_string(), "Bob".to_string()];
-        let markup = "{{player 0}} played a tile";
-        let out = markup_to_html(markup, &names);
-        assert!(out.contains("Alice"), "player name not resolved: {}", out);
-        assert!(!out.contains("{{player 0}}"), "raw markup left in output: {}", out);
-    }
-
-    #[test]
-    fn markup_to_html_falls_back_on_invalid_input() {
-        let names: Vec<String> = vec![];
-        let raw = "plain text with no markup";
-        let out = markup_to_html(raw, &names);
-        assert_eq!(out, raw);
+    fn markup_resolve_players_leaves_other_tags_intact() {
+        let names = vec!["Alice".to_string()];
+        let markup = "{{b}}bold{{/b}} and {{fg rgb(255,0,0)}}red{{/fg}}";
+        let out = markup_resolve_players(markup, &names);
+        assert_eq!(out, markup);
     }
 
     #[test]

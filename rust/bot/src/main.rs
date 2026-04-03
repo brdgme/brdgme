@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Router};
 use brdgme_cmd::api::{Request, Response};
 use brdgme_color::player_color;
-use prompt::{FailedCommand, PlayerInfo, PromptContext, markup_to_html, render_prompt, spec_to_yaml};
+use prompt::{FailedCommand, PlayerInfo, PromptContext, markup_resolve_players, render_prompt, spec_to_yaml};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
@@ -14,6 +14,12 @@ use uuid::Uuid;
 struct AppState {
     pool: PgPool,
     http: reqwest::Client,
+    llm_url: String,
+    llm_api_key: Option<String>,
+    bot_model: String,
+    reasoning_effort: Option<String>,
+    monolith_url: String,
+    internal_api_key: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -24,22 +30,34 @@ struct TriggerRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OllamaMessage {
+struct ChatMessage {
     role: String,
     content: String,
 }
 
 #[derive(Debug, Serialize)]
-struct OllamaChatRequest {
+struct ChatRequest {
     model: String,
-    messages: Vec<OllamaMessage>,
-    think: bool,
+    messages: Vec<ChatMessage>,
     stream: bool,
+    temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct OllamaChatResponse {
-    message: OllamaMessage,
+struct ChatResponseMessage {
+    content: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatChoice {
+    message: ChatResponseMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
 }
 
 #[derive(Serialize)]
@@ -56,22 +74,13 @@ async fn trigger(
     match run_bot_turn(&state, payload, trace_id).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => {
-            tracing::error!(trace_id = %trace_id, error = %e, "Bot turn hard failed - game is stuck waiting for bot");
+            tracing::error!(trace_id = %trace_id, error = ?e, "Bot turn hard failed - game is stuck waiting for bot");
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
 }
 
 async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> Result<()> {
-    let ollama_url = std::env::var("OLLAMA_URL")
-        .unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let bot_model = std::env::var("BOT_MODEL")
-        .unwrap_or_else(|_| "qwen3.5:4b".to_string());
-    let monolith_url = std::env::var("MONOLITH_URL")
-        .context("MONOLITH_URL must be set")?;
-    let internal_key = std::env::var("INTERNAL_API_KEY")
-        .context("INTERNAL_API_KEY must be set")?;
-    let ollama_api_key = std::env::var("OLLAMA_API_KEY").ok();
 
     // 1. Fetch game data from DB.
     let row = sqlx::query(
@@ -162,7 +171,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         &names,
     ).await.context("Failed to load initial bot context")?;
 
-    let internal_url = format!("{}/api/internal/game/{}/command", monolith_url, req.game_id);
+    let internal_url = format!("{}/api/internal/game/{}/command", state.monolith_url, req.game_id);
     const MAX_ATTEMPTS: usize = 20;
     let mut failed_commands: Vec<FailedCommand> = Vec::new();
 
@@ -181,7 +190,14 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         // Restore failed_commands from the context (build_prompt_context consumed it).
         failed_commands = prompt_ctx.failed_commands;
 
-        let raw_response = call_ollama(&state.http, &ollama_url, &bot_model, &messages, ollama_api_key.as_deref())
+        tracing::trace!(
+            trace_id = %trace_id,
+            attempt,
+            prompt = %messages.first().map(|m| m.content.as_str()).unwrap_or(""),
+            "Rendered prompt"
+        );
+
+        let raw_response = call_llm(&state.http, &state.llm_url, &state.bot_model, &messages, state.llm_api_key.as_deref(), state.reasoning_effort.clone())
             .await
             .with_context(|| format!("Ollama call failed on attempt {}", attempt + 1))?;
 
@@ -252,7 +268,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
 
         let result = state.http
             .post(&internal_url)
-            .header("X-Internal-Key", &internal_key)
+            .header("X-Internal-Key", &state.internal_api_key)
             .json(&InternalCommandRequest {
                 player_position: req.player_position,
                 command: command.clone(),
@@ -306,9 +322,9 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
 
 struct BotContext {
     game_state: String,
-    render_html: String,
+    render: String,
     command_spec_yaml: String,
-    recent_logs_html: Vec<String>,
+    recent_logs: Vec<String>,
     points: Vec<f32>,
 }
 
@@ -339,7 +355,7 @@ async fn load_bot_context(
         _ => return Err(anyhow!("Unexpected response from game service")),
     };
 
-    let render_html = markup_to_html(&render_markup, names);
+    let render = markup_resolve_players(&render_markup, names);
     let command_spec_yaml = command_spec
         .as_ref()
         .map(spec_to_yaml)
@@ -353,26 +369,26 @@ async fn load_bot_context(
     .await
     .context("Failed to fetch game logs")?;
 
-    let recent_logs_html: Vec<String> = log_rows
+    let recent_logs: Vec<String> = log_rows
         .into_iter()
         .rev()
         .map(|r| {
             let body = r.try_get::<String, _>("body").unwrap_or_default();
-            markup_to_html(&body, names)
+            markup_resolve_players(&body, names)
         })
         .collect();
 
-    Ok(BotContext { game_state, render_html, command_spec_yaml, recent_logs_html, points })
+    Ok(BotContext { game_state, render, command_spec_yaml, recent_logs, points })
 }
 
 fn build_messages(
     ctx: &PromptContext,
-) -> Result<Vec<OllamaMessage>> {
+) -> Result<Vec<ChatMessage>> {
     let content = render_prompt(ctx)
         .context("Failed to render system prompt template")?;
     Ok(vec![
-        OllamaMessage { role: "system".to_string(), content },
-        OllamaMessage {
+        ChatMessage { role: "system".to_string(), content },
+        ChatMessage {
             role: "user".to_string(),
             content: "Please provide your command now.".to_string(),
         },
@@ -400,19 +416,21 @@ async fn call_game_service(
     resp.json::<Response>().await.context("Failed to parse game service response")
 }
 
-async fn call_ollama(
+async fn call_llm(
     http: &reqwest::Client,
-    ollama_url: &str,
+    llm_url: &str,
     model: &str,
-    messages: &[OllamaMessage],
+    messages: &[ChatMessage],
     api_key: Option<&str>,
+    reasoning_effort: Option<String>,
 ) -> Result<String> {
-    let url = format!("{}/api/chat", ollama_url);
-    let body = OllamaChatRequest {
+    let url = format!("{}/v1/chat/completions", llm_url);
+    let body = ChatRequest {
         model: model.to_string(),
         messages: messages.to_vec(),
-        think: false,
         stream: false,
+        temperature: 0.2,
+        reasoning_effort,
     };
 
     let mut req = http.post(&url).json(&body);
@@ -420,16 +438,19 @@ async fn call_ollama(
         req = req.header("Authorization", format!("Bearer {}", key));
     }
 
-    let resp = req.send().await.context("HTTP request to Ollama failed")?;
+    let resp = req.send().await.context("HTTP request to LLM failed")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("Ollama returned {}: {}", status, body));
+        return Err(anyhow!("LLM returned {}: {}", status, body));
     }
 
-    let chat_resp: OllamaChatResponse = resp.json().await.context("Failed to parse Ollama response")?;
-    Ok(chat_resp.message.content)
+    let chat_resp: ChatResponse = resp.json().await.context("Failed to parse LLM response")?;
+    chat_resp.choices.into_iter().next()
+        .ok_or_else(|| anyhow!("LLM returned no choices"))?
+        .message.content
+        .ok_or_else(|| anyhow!("LLM returned null content (reasoning budget exhausted?)"))
 }
 
 fn build_prompt_context(
@@ -464,8 +485,8 @@ fn build_prompt_context(
         my_name,
         my_colour,
         players,
-        game_render: bot_ctx.render_html.clone(),
-        recent_logs: bot_ctx.recent_logs_html.clone(),
+        game_render: bot_ctx.render.clone(),
+        recent_logs: bot_ctx.recent_logs.clone(),
         command_spec: bot_ctx.command_spec_yaml.clone(),
         failed_commands,
     }
@@ -475,11 +496,19 @@ fn build_prompt_context(
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    let llm_url = std::env::var("LLM_URL").context("LLM_URL must be set")?;
+    let llm_api_key = std::env::var("LLM_API_KEY").ok();
+    let bot_model = std::env::var("BOT_MODEL").context("BOT_MODEL must be set")?;
+    let reasoning_effort = Some(std::env::var("REASONING_EFFORT").unwrap_or_else(|_| "low".to_string()));
+    let monolith_url = std::env::var("MONOLITH_URL").context("MONOLITH_URL must be set")?;
+    let internal_api_key = std::env::var("INTERNAL_API_KEY").context("INTERNAL_API_KEY must be set")?;
+    tracing::info!(llm_url = %llm_url, bot_model = %bot_model, reasoning_effort = ?reasoning_effort, "Bot service starting");
+
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
     let pool = PgPool::connect(&database_url).await.context("Failed to connect to database")?;
 
     let http = reqwest::Client::new();
-    let state = Arc::new(AppState { pool, http });
+    let state = Arc::new(AppState { pool, http, llm_url, llm_api_key, bot_model, reasoning_effort, monolith_url, internal_api_key });
 
     let app = Router::new()
         .route("/trigger", axum::routing::post(trigger))

@@ -74,10 +74,14 @@ pub async fn execute_command(
     crate::db::create_game_logs(pool, game_id, logs).await?;
 
     // Fetch updated state for broadcast and bot triggering
-    if let Ok(Some(updated_ge)) = crate::db::find_game_extended(pool, game_id).await {
-        let all_logs = crate::db::get_all_game_logs(pool, game_id).await.unwrap_or_default();
-        broadcaster.broadcast_game_update(pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
-        trigger_bot_turns(http_client, &updated_ge).await;
+    match crate::db::find_game_extended(pool, game_id).await {
+        Ok(Some(updated_ge)) => {
+            let all_logs = crate::db::get_all_game_logs(pool, game_id).await.unwrap_or_default();
+            broadcaster.broadcast_game_update(pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+            trigger_bot_turns(http_client, &updated_ge).await;
+        }
+        Ok(None) => tracing::warn!(%game_id, "Game not found after command execution"),
+        Err(e) => tracing::warn!(%game_id, "Failed to reload game after command execution: {}", e),
     }
     Ok(())
 }
@@ -89,10 +93,20 @@ pub async fn trigger_bot_turns(
 ) {
     let bot_service_url = match std::env::var("BOT_SERVICE_URL") {
         Ok(u) => u,
-        Err(_) => return,
+        Err(_) => {
+            tracing::warn!(game_id = %ge.game.id, "BOT_SERVICE_URL not set, skipping bot triggers");
+            return;
+        }
     };
 
     for player in &ge.game_players {
+        tracing::debug!(
+            game_id = %ge.game.id,
+            position = player.game_player.position,
+            is_turn = player.game_player.is_turn,
+            is_bot = player.game_bot.is_some(),
+            "Checking player for bot trigger"
+        );
         if !player.game_player.is_turn {
             continue;
         }
@@ -101,6 +115,13 @@ pub async fn trigger_bot_turns(
             None => continue,
         };
         let url = format!("{}/trigger", bot_service_url);
+        tracing::info!(
+            game_id = %ge.game.id,
+            position = player.game_player.position,
+            difficulty = %bot.difficulty,
+            %url,
+            "Triggering bot turn"
+        );
         let body = serde_json::json!({
             "game_id": ge.game.id,
             "player_position": player.game_player.position,
@@ -108,8 +129,14 @@ pub async fn trigger_bot_turns(
         });
         let client = http_client.clone();
         tokio::spawn(async move {
-            if let Err(e) = client.post(&url).json(&body).send().await {
-                tracing::warn!("Failed to trigger bot turn: {}", e);
+            match client.post(&url).json(&body).send().await {
+                Err(e) => tracing::warn!(%url, "Failed to trigger bot turn: {}", e),
+                Ok(r) if !r.status().is_success() => {
+                    let status = r.status();
+                    let body = r.text().await.unwrap_or_default();
+                    tracing::warn!(%url, %status, "Bot trigger returned error: {}", body);
+                }
+                Ok(_) => tracing::debug!(%url, "Bot turn triggered successfully"),
             }
         });
     }

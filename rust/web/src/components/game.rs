@@ -304,14 +304,25 @@ pub fn GameCommandInput(
 ) -> impl IntoView {
     let (command, set_command) = signal(String::new());
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let input_ref = NodeRef::<leptos::html::Input>::new();
 
     let submit_action = ServerAction::<SubmitCommand>::new();
 
-    // Clear command and trigger re-fetch on successful submit.
+    // Focus input on mount (works for both hard refresh and client-side navigation).
+    Effect::new(move |_| {
+        if let Some(el) = input_ref.get() {
+            let _ = el.focus();
+        }
+    });
+
+    // Clear command, refocus input, and trigger re-fetch on successful submit.
     Effect::new(move |_| {
         if let Some(Ok(_)) = submit_action.value().get() {
             set_command.set(String::new());
             trigger.set_last_update.update(|n| *n += 1);
+            if let Some(el) = input_ref.get() {
+                let _ = el.focus();
+            }
         }
     });
 
@@ -405,6 +416,7 @@ pub fn GameCommandInput(
                         autocomplete="off"
                         autocapitalize="none"
                         spellcheck="false"
+                        node_ref=input_ref
                         prop:value=command
                         on:input=move |ev| set_command.set(event_target_value(&ev))
                     />

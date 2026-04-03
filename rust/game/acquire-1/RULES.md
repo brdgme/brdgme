@@ -214,3 +214,19 @@ Only the commands valid for the current game phase will be accepted.
   shares are left, others may be blocked from buying in.
 - Safe corporations (11+ tiles) cannot be acquired, so their bonuses only pay
   at game end.
+- Each corporation has exactly 25 shares total. Owning 13 guarantees majority
+  bonus - once you have secured majority there is no need to buy more solely
+  for that purpose.
+- Buying into a small corporation early is a strong investment: as it grows,
+  share value increases, you benefit from shareholder bonuses if it is acquired,
+  and you can trade shares into the surviving corporation at a favourable rate.
+- Since players can only buy 3 shares per turn, a lead of 4 shares in a
+  corporation is generally safe majority. The exception is mergers, where
+  players may trade shares into the surviving corporation in bulk.
+- Running out of money is very dangerous. Without cash you cannot buy shares,
+  which locks you out of bonuses. If short on cash, prioritise triggering or
+  participating in a merger where you hold shares in the acquired corporation,
+  to earn a bonus and free up capital.
+- Concentrating all shares in one corporation is high risk. Aim to hold minor
+  or major shareholder position in as many corporations as possible to maximise
+  the number of bonuses you receive.
