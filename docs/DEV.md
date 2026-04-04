@@ -140,6 +140,20 @@ cd rust/web && sqlx migrate run
 Migrations are idempotent and additive - safe to run on top of a restored
 production schema.
 
+## Bot / LLM Configuration
+
+The bot reads LLM settings from `.env` in the project root (loaded by the Tilt
+`bot` resource via `set -a && . ./.env`). Current dev config:
+
+```
+LLM_URL=https://openrouter.ai/api
+LLM_API_KEY=<openrouter key>
+BOT_MODEL=openai/gpt-5-nano
+REASONING_EFFORT=medium
+```
+
+`LLM_API_KEY` is not committed. Set it in `.env` locally.
+
 ## Game Types in Dev
 
 Game types are populated by the operator reconciling `GameVersion` CRs. If the

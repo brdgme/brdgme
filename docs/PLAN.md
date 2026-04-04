@@ -787,6 +787,80 @@ Bot changes:
 
 ---
 
+## Phase 5.6.1: Remove active_games context [Pending]
+
+**Goal:** `active_games` is created in `App()` and consumed only by
+`SidebarMenu`. It was hoisted to `App()` unnecessarily, which broke Leptos's
+SSR resource tracking and caused a hydration crash. Move it to where it
+belongs.
+
+- [ ] Remove `active_games` `LocalResource` creation and `provide_context`
+  call from `App()` in `rust/web/src/app.rs`. Remove the now-unused
+  `get_active_games` import.
+- [ ] In `SidebarMenu` (`rust/web/src/components/layout.rs`), replace the
+  `expect_context` call with a `LocalResource::new` created directly in the
+  component. Read `WebSocketTrigger` from context (already app-wide) to drive
+  refetches when `last_update` changes.
+- [ ] Remove the now-unused `GameSummary` import from `layout.rs`.
+
+---
+
+## Phase 5.7: Eliminate runtime panics in rust/web [Pending]
+
+**Goal:** Replace all panic-prone code in `rust/web/src` that could crash the
+server process or the WASM frontend at runtime with proper error handling.
+Startup panics (`main.rs`, `auth/session.rs`, `db.rs` env var) are
+intentional and excluded.
+
+**Background:** An audit of `rust/web/src` found 47 instances of `.unwrap()`,
+`.expect()`, `unreachable!()`, and `panic!()`. Most are either in tests or in
+`#[cfg(not(feature = "ssr"))]` stubs (correct). The following are runtime risks:
+
+### Cases to fix
+
+- [ ] **`db.rs:407` - `games.last_mut().unwrap()`** (`find_active_games_for_user`
+  or similar): called after pushing game rows into a `Vec`. If the `Vec` is
+  empty when a game_player row is encountered (e.g. due to unexpected query
+  ordering or a schema inconsistency), this panics the server. Replace with an
+  explicit check that returns an `Err` with a descriptive message.
+
+- [ ] **`db.rs:250-261` and `db.rs:393-404` - co-nullable LEFT JOIN unwraps**:
+  User fields (`u_created_at`, `u_updated_at`, `u_name`, `u_pref_colors`) are
+  unwrapped inside a `p.u_id.map(|id| ...)` closure, and bot fields
+  (`gb_game_id`, `gb_name`, `gb_difficulty`) likewise inside `p.gb_id.map(...)`.
+  These are logically safe (if the id column is non-null, the other columns of
+  the same LEFT JOIN row must be non-null), but they are not enforced by the
+  type system. If the query ever changes or a nullable column is added, this
+  will silently panic. Replace with `ok_or_else(|| ...)` and `?` propagation,
+  returning an `anyhow::Error` or `sqlx::Error`.
+
+- [ ] **`app.rs:121` and `app.rs:128` - `NodeRef::get().unwrap()` in form
+  submit handlers** (`on_email_submit`, `on_code_submit`): if the DOM node
+  referenced by `email_input` or `code_input` is not yet mounted when the
+  submit event fires, this panics the WASM process and kills the frontend.
+  Replace with `.get().map(|el| el.value()).unwrap_or_default()` or log a
+  warning and return early on `None`.
+
+- [ ] **`websocket_client.rs:21-23` - `window()`, `protocol()`, `host()`
+  `.expect()` calls**: these run in WASM only (client-side) so `window()` is
+  guaranteed. However `loc.protocol()` and `loc.host()` are fallible JS APIs
+  returning `Result`. If they ever return `Err` (e.g. in a sandboxed iframe
+  context), the WASM panics. Replace with graceful fallback: default to `ws:`
+  and log an error if protocol/host cannot be read.
+
+### Excluded (intentional)
+
+- `main.rs`, `auth/session.rs`, `db.rs:55`: startup failures where the
+  process cannot run without the resource. Panicking at boot is correct.
+- `game/client.rs`: all within `#[cfg(test)]`. Panics in tests are fine.
+- `server_fns.rs` `unreachable!()` in `#[cfg(not(feature = "ssr"))]` stubs:
+  these paths are never compiled into the server and are never reachable on
+  the client, so they are correct as-is.
+- `components/game.rs:373` - `values.into_iter().next().unwrap()`: guarded by
+  `values.len() == 1` on the preceding line; `unwrap()` is provably safe.
+
+---
+
 ## Phase 6.5: Production CD (ArgoCD) [Pending]
 
 **Goal:** Replace manual `kubectl apply -k k8s/prod` with ArgoCD for GitOps
