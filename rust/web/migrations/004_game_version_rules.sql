@@ -1,0 +1,2 @@
+ALTER TABLE public.game_versions
+    ADD COLUMN IF NOT EXISTS rules TEXT NOT NULL DEFAULT '';

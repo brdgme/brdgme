@@ -5,5 +5,4 @@ metadata:
   namespace: brdgme
 spec:
   typeName: Acquire
-  playerCounts: [2, 3, 4, 5, 6]
   weight: 2.5

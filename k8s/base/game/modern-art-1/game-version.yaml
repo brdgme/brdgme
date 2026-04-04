@@ -5,5 +5,4 @@ metadata:
   namespace: brdgme
 spec:
   typeName: Modern Art
-  playerCounts: [3, 4, 5]
   weight: 2.0

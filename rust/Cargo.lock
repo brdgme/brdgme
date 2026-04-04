@@ -431,9 +431,11 @@ dependencies = [
 name = "brdgme-operator"
 version = "0.1.0"
 dependencies = [
+ "brdgme_cmd",
  "futures",
  "k8s-openapi",
  "kube",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",

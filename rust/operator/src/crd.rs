@@ -16,8 +16,6 @@ use serde::{Deserialize, Serialize};
 pub struct GameVersionSpec {
     /// Human-readable game type name stored in game_types.name (e.g. "Acquire").
     pub type_name: String,
-    /// Valid player counts for this game.
-    pub player_counts: Vec<i32>,
     /// Game complexity weight (0.0 = light, 5.0 = heavy).
     #[serde(default)]
     pub weight: f32,

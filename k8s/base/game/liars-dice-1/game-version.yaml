@@ -4,6 +4,5 @@ metadata:
   name: liars-dice-1
   namespace: brdgme
 spec:
-  typeName: Liars Dice
-  playerCounts: [2, 3, 4, 5, 6]
+  typeName: Liar's Dice
   weight: 1.0

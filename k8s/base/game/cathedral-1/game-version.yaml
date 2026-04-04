@@ -5,5 +5,4 @@ metadata:
   namespace: brdgme
 spec:
   typeName: Cathedral
-  playerCounts: [2]
   weight: 1.5

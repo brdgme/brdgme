@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use brdgme_cmd::api::{Request, Response};
 use futures::StreamExt;
 use kube::{
     Api, Client, ResourceExt,
@@ -22,11 +23,29 @@ pub enum Error {
     Kube(#[from] kube::Error),
     #[error("Database error: {0}")]
     Sql(#[from] sqlx::Error),
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("Game service error: {0}")]
+    GameService(String),
 }
 
 pub struct Ctx {
     pub client: Client,
     pub pool: PgPool,
+    pub http: reqwest::Client,
+}
+
+async fn game_service_request(
+    client: &reqwest::Client,
+    uri: &str,
+    request: &Request,
+) -> Result<Response, Error> {
+    let resp = client.post(uri).json(request).send().await?;
+    let response: Response = resp.json().await?;
+    match response {
+        Response::SystemError { message } => Err(Error::GameService(message)),
+        other => Ok(other),
+    }
 }
 
 async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
@@ -75,14 +94,27 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
         .unwrap_or_else(|_| format!("http://{}.{}.svc.cluster.local", name, ns));
     info!(name, uri, "Upserting game version");
 
+    let player_counts = match game_service_request(&ctx.http, &uri, &Request::PlayerCounts).await? {
+        Response::PlayerCounts { player_counts } => {
+            player_counts.into_iter().map(|c| c as i32).collect::<Vec<_>>()
+        }
+        other => return Err(Error::GameService(format!("unexpected response to PlayerCounts: {:?}", other))),
+    };
+
+    let rules = match game_service_request(&ctx.http, &uri, &Request::Rules).await? {
+        Response::Rules { rules } => rules,
+        other => return Err(Error::GameService(format!("unexpected response to Rules: {:?}", other))),
+    };
+
     upsert_game_type_and_version(
         &ctx.pool,
         &obj.spec.type_name,
-        &obj.spec.player_counts,
+        &player_counts,
         obj.spec.weight,
         &name,
         &uri,
         obj.spec.is_deprecated,
+        &rules,
     )
     .await?;
 
@@ -97,6 +129,7 @@ async fn upsert_game_type_and_version(
     version_name: &str,
     uri: &str,
     is_deprecated: bool,
+    rules: &str,
 ) -> Result<(), sqlx::Error> {
     let game_type_id: Uuid = sqlx::query_scalar(
         r#"
@@ -117,12 +150,13 @@ async fn upsert_game_type_and_version(
 
     sqlx::query(
         r#"
-        INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
-        VALUES ($1, $2, $3, true, $4)
+        INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated, rules)
+        VALUES ($1, $2, $3, true, $4, $5)
         ON CONFLICT (game_type_id, name) DO UPDATE
             SET uri           = EXCLUDED.uri,
                 is_public     = true,
                 is_deprecated = EXCLUDED.is_deprecated,
+                rules         = EXCLUDED.rules,
                 updated_at    = NOW()
         "#,
     )
@@ -130,6 +164,7 @@ async fn upsert_game_type_and_version(
     .bind(version_name)
     .bind(uri)
     .bind(is_deprecated)
+    .bind(rules)
     .execute(pool)
     .await?;
 
@@ -143,7 +178,8 @@ fn error_policy(obj: Arc<GameVersion>, err: &Error, _ctx: Arc<Ctx>) -> Action {
 
 pub async fn run(client: Client, pool: PgPool) {
     let api: Api<GameVersion> = Api::all(client.clone());
-    let ctx = Arc::new(Ctx { client, pool });
+    let http = reqwest::Client::new();
+    let ctx = Arc::new(Ctx { client, pool, http });
     Controller::new(api, watcher::Config::default())
         .shutdown_on_signal()
         .run(reconcile, error_policy, ctx)

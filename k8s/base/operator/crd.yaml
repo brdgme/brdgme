@@ -14,16 +14,11 @@ spec:
         properties:
           spec:
             type: object
-            required: [typeName, playerCounts]
+            required: [typeName]
             properties:
               typeName:
                 type: string
                 description: Human-readable game type name (e.g. "Acquire").
-              playerCounts:
-                type: array
-                items:
-                  type: integer
-                description: Valid player counts for this game.
               weight:
                 type: number
                 default: 0
@@ -45,9 +40,6 @@ spec:
     - name: Display Name
       type: string
       jsonPath: .spec.typeName
-    - name: Players
-      type: string
-      jsonPath: .spec.playerCounts
   scope: Namespaced
   names:
     plural: gameversions

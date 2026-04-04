@@ -85,7 +85,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     // 1. Fetch game data from DB.
     let row = sqlx::query(
         r#"
-        SELECT g.game_state, gv.uri, gt.name as game_name, gb.name as bot_name, gp.is_turn
+        SELECT g.game_state, gv.uri, gv.rules, gt.name as game_name, gb.name as bot_name, gp.is_turn
         FROM games g
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt ON gt.id = gv.game_type_id
@@ -113,6 +113,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
 
     let game_state: String = row.try_get("game_state").context("game_state")?;
     let game_service_uri: String = row.try_get("uri").context("uri")?;
+    let rules: String = row.try_get("rules").unwrap_or_default();
     let game_name: String = row.try_get("game_name").unwrap_or_else(|_| "unknown".to_string());
     let bot_name: String = row.try_get::<Option<String>, _>("bot_name")
         .unwrap_or(None)
@@ -157,11 +158,6 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
 
     // 3. Load game context (state, render, logs). Extracted into a helper so it can be
     //    refreshed mid-loop if the game state changes while Ollama is thinking.
-    let rules = match call_game_service(&state.http, &game_service_uri, &Request::Rules).await {
-        Ok(Response::Rules { rules }) => rules,
-        _ => String::new(),
-    };
-
     let mut bot_ctx = load_bot_context(
         &state,
         &game_service_uri,

@@ -4,6 +4,5 @@ metadata:
   name: lost-cities-2
   namespace: brdgme
 spec:
-  typeName: Lost Cities 2
-  playerCounts: [2, 3]
+  typeName: Lost Cities
   weight: 1.5

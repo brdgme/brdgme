@@ -4,6 +4,5 @@ metadata:
   name: sushizock-1
   namespace: brdgme
 spec:
-  typeName: Sushizock
-  playerCounts: [2, 3, 4, 5]
+  typeName: Sushizock im Gockelwok
   weight: 1.0

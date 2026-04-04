@@ -5,5 +5,4 @@ metadata:
   namespace: brdgme
 spec:
   typeName: Battleship
-  playerCounts: [2]
   weight: 1.0
