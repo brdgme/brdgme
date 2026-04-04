@@ -191,10 +191,7 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
     let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
-    let logs = Resource::new(
-        move || game_id,
-        |id| async move { get_game_logs(id).await },
-    );
+    let logs = LocalResource::new(move || async move { get_game_logs(game_id).await });
 
     let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
         if let Some(ws) = ws_game.get() {
@@ -235,10 +232,7 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
     let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
-    let logs = Resource::new(
-        move || game_id,
-        |id| async move { get_game_logs(id).await },
-    );
+    let logs = LocalResource::new(move || async move { get_game_logs(game_id).await });
 
     let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
         if let Some(ws) = ws_game.get() {
