@@ -616,7 +616,7 @@ impl Gamer for Game {
     }
 
     fn player_counts() -> Vec<usize> {
-        (MIN_PLAYERS..MAX_PLAYERS).collect()
+        (MIN_PLAYERS..=MAX_PLAYERS).collect()
     }
 
     fn player_count(&self) -> usize {
@@ -624,7 +624,7 @@ impl Gamer for Game {
     }
 
     fn rules() -> String {
-        String::new()
+        include_str!("../RULES.md").to_string()
     }
 }
 
