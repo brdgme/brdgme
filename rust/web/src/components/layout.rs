@@ -52,7 +52,7 @@ pub fn SidebarMenu() -> impl IntoView {
         logout_action.dispatch(crate::auth::Logout {});
     };
 
-    let active_games = expect_context::<Resource<Result<Vec<GameSummary>, ServerFnError>>>();
+    let active_games = expect_context::<LocalResource<Result<Vec<GameSummary>, ServerFnError>>>();
 
     view! {
         <div class="menu">
@@ -64,35 +64,32 @@ pub fn SidebarMenu() -> impl IntoView {
             <div><A href="/games">"New game"</A></div>
             <div>
                 <h2>"Active games"</h2>
-                <Suspense fallback=move || view! { <p>"Loading games..."</p> }>
-                    {move || {
-                        active_games.get().map(|res| match res {
-                            Ok(games) => {
-                                if games.is_empty() {
-                                    view! { <p class="no-games">"No active games"</p> }.into_any()
-                                } else {
-                                    games.into_iter().map(|game| {
-                                        let id = game.id.to_string();
-                                        view! {
-                                            <div class="layout-game" class:my-turn=game.is_turn>
-                                                <A href=format!("/games/{}", id)>
-                                                    <div class="layout-game-name">{game.type_name}</div>
-                                                    <div class="layout-game-opponents">
-                                                        "with " 
-                                                        {game.opponents.into_iter().map(|opp| view! {
-                                                            <span>" " <PlayerName name=opp.name color=opp.color /></span>
-                                                        }).collect_view()}
-                                                    </div>
-                                                </A>
+                {move || match active_games.get() {
+                    None => view! { <p>"Loading games..."</p> }.into_any(),
+                    Some(Err(_)) => view! { <p class="error">"Error loading games"</p> }.into_any(),
+                    Some(Ok(games)) => {
+                        if games.is_empty() {
+                            view! { <p class="no-games">"No active games"</p> }.into_any()
+                        } else {
+                            games.into_iter().map(|game| {
+                                let id = game.id.to_string();
+                                view! {
+                                    <div class="layout-game" class:my-turn=game.is_turn>
+                                        <A href=format!("/games/{}", id)>
+                                            <div class="layout-game-name">{game.type_name}</div>
+                                            <div class="layout-game-opponents">
+                                                "with "
+                                                {game.opponents.into_iter().map(|opp| view! {
+                                                    <span>" " <PlayerName name=opp.name color=opp.color /></span>
+                                                }).collect_view()}
                                             </div>
-                                        }.into_any()
-                                    }).collect_view().into_any()
-                                }
-                            },
-                            Err(_) => view! { <p class="error">"Error loading games"</p> }.into_any(),
-                        })
-                    }}
-                </Suspense>
+                                        </A>
+                                    </div>
+                                }.into_any()
+                            }).collect_view().into_any()
+                        }
+                    },
+                }}
             </div>
         </div>
     }

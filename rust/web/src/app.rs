@@ -46,9 +46,11 @@ pub fn App() -> impl IntoView {
     provide_context(RwSignal::<Option<BrdgmeGameUpdate>>::new(None));
     crate::websocket_client::use_websocket();
 
-    let active_games: Resource<Result<Vec<GameSummary>, ServerFnError>> = Resource::new(
-        move || last_update.get(),
-        |_| async move { get_active_games().await },
+    let active_games: LocalResource<Result<Vec<GameSummary>, ServerFnError>> = LocalResource::new(
+        move || async move {
+            let _ = last_update.get();
+            get_active_games().await
+        },
     );
     provide_context(active_games);
 
@@ -512,7 +514,7 @@ fn GamePage() -> impl IntoView {
     };
 
     view! {
-        <Transition fallback=move || view! { <MainLayout><div></div></MainLayout> }>
+        <Suspense fallback=move || view! { <MainLayout><div></div></MainLayout> }>
             {move || {
                 effective_data().map(|res| match res {
                     Ok(data) => {
@@ -566,6 +568,6 @@ fn GamePage() -> impl IntoView {
                     Err(e) => view! { <MainLayout><div class="error">"Error: " {e.to_string()}</div></MainLayout> }.into_any(),
                 })
             }}
-        </Transition>
+        </Suspense>
     }
 }
