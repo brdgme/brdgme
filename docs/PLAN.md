@@ -1,5 +1,7 @@
 # Monolith Migration Plan
 
+**Current focus (in order):** Phase 5.7 runtime panics → Restart 500 error → 3-player render → Phase 9 NATS bot eventing → Phase 6.5 ArgoCD → Phase 7 legacy decommission.
+
 ## Objective
 
 Consolidate the `brdgme` platform into a single Rust-based monolithic
@@ -177,7 +179,7 @@ above). `kubectl apply -k k8s/prod` is still the deploy mechanism.
 
 ---
 
-## Phase 5.6: Pre-Cutover Fixes [In Progress - blockers done, frontend gaps remain]
+## Phase 5.6: Pre-Cutover Fixes [Complete]
 
 **Goal:** Resolve all blockers and close critical gaps found in the parity
 review before the `leptos` branch replaces production. Full review in
@@ -315,6 +317,17 @@ review before the `leptos` branch replaces production. Full review in
       response body as text first and includes it in the error message. Root
       cause still unknown - needs a live restart attempt to capture the raw
       game service response.
+- [ ] **Bot restart limitation**: when a game is restarted, bots from the
+      original game are not carried over to the new game. The `restart_game`
+      handler (`game/server.rs`) copies players but does not check
+      `game_players.game_bot_id` and create corresponding `game_bots` rows in
+      the new game.
+- [ ] **Optimistic locking missing in `execute_command`**: two concurrent
+      requests (e.g. two players submitting at the same instant, or a bot and a
+      player) can both read the same game state, both call the game service, and
+      both attempt to write back. The second write silently overwrites the first.
+      Needs a version/etag column on `games` and a conditional update that
+      errors on conflict.
 - [x] **Concede confirmation**: Added `window.confirm("Are you sure you want to
       concede?")` in the click handler before dispatching `ConcedeGame`.
       `"Window"` added to web-sys features.

@@ -124,14 +124,15 @@ will panic. Fix by making the element always present and toggling visibility:
 ### Reactive props for layout components
 
 When a layout component (like `MainLayout`) sits outside `Suspense` but its
-props depend on async data, use `MaybeSignal<bool>` (from
-`reactive_graph::wrappers`) with `#[prop(into, default)]`. This allows callers
-to pass either a static `bool` or a reactive `Memo<bool>`/`Signal<bool>`.
+props depend on async data, use `Signal<bool>` with `#[prop(into, default)]`.
+`Signal<T>` is in `leptos::prelude::*` — no extra import needed. It implements
+`From<T>` (so `Signal::from(false)` works as a default), `From<Memo<T>>`, and
+`From<RwSignal<T>>`, and is `Copy`.
 
 ```rust
 #[component]
 pub fn MainLayout(
-    #[prop(into, default)] is_my_turn: MaybeSignal<bool>,
+    #[prop(into, default = Signal::from(false))] is_my_turn: Signal<bool>,
     ...
 ) -> impl IntoView {
     view! {
@@ -142,9 +143,25 @@ pub fn MainLayout(
 }
 ```
 
+Callers pass a static `bool` (converted via `Signal::from(true)`), or a reactive
+`Memo<bool>` (converted via `Signal::from(memo)`):
+
+```rust
+let is_my_turn = Memo::new(move |_| { ... });
+view! {
+    <MainLayout
+        is_my_turn=Signal::from(is_my_turn)
+        has_sub_menu=Signal::from(true)
+    >
+```
+
 In `GamePage`, derive the value with a `Memo` that reads from both the blocking
 resource and the WS signal. In hydrate mode the `Memo` returns `false` until the
 resource deserializes — this changes a CSS class only (no structural mismatch).
+
+**Do not use `MaybeSignal<T>`.** It is deprecated in `reactive_graph 0.2.11` in
+favour of `Signal<T>`. `Signal<T>` covers the same use-cases and is always
+`Copy`.
 
 ### Resource placement
 
@@ -218,6 +235,22 @@ the HTML structure produced on the server matches the client's initial render
 exactly. Avoid conditional rendering that produces structurally different
 output on server vs client. When in doubt, use `LocalResource` to ensure both
 sides start from the same empty state.
+
+---
+
+## Dependency Management
+
+**`wasm-bindgen` is pinned** to `=0.2.108` in `Cargo.toml` to match the
+`wasm-bindgen-cli` version provided by nixpkgs. Do not update it without
+updating `devenv.nix` in lockstep. A version mismatch between the CLI and the
+crate causes the WASM build to fail at link time.
+
+**Other pinned-by-ecosystem crates** (as of 2026-04-04): `gloo-net 0.6`,
+`gloo-timers 0.3`, `js-sys/web-sys 0.3.85`, `tower 0.4`, `tower-sessions 0.14`,
+`reqwest 0.12`, `redis 0.28`. Newer major versions have breaking API changes and
+require coordinated updates. Run `cargo update --verbose` periodically to check
+for patch-level updates; ignore "Unchanged" lines where a newer major version
+exists but the Cargo.toml constraint intentionally excludes it.
 
 ---
 
