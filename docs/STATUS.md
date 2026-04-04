@@ -1,105 +1,111 @@
 # Current Status
 
-## Session: 2026-04-04
+## Session: 2026-04-04 (continued)
 
-### Pending infra (must do before Tilt restart if not already applied)
+### Completed this session
 
-These steps were identified last session and may not yet be applied:
+**Phase 5.6.1: active_games context removed**
+- `App()` no longer creates `active_games` `LocalResource` or provides it via context
+- `SidebarMenu` (`components/layout.rs`) now creates its own `LocalResource`, reading `WebSocketTrigger` from context to drive refetches
+- Removed unused `get_active_games`/`GameSummary` imports from `app.rs`
 
-1. `kubectl apply -f k8s/base/operator/crd.yaml` - removes `playerCounts` from
-   CRD required fields
-2. `cd rust/web && sqlx migrate run` - applies migration 004 which adds `rules`
-   column to `game_versions`
+**GamesPage resource type fixed**
+- `game_types` changed from `Resource::new` to `LocalResource::new`
+- `Suspense` wrapper removed; replaced with direct `match game_types.get()` with explicit `None => "Loading..."` arm
+- Rationale: `Resource::new` in streaming SSR emits a `<!-- -->` placeholder in initial HTML; if WASM hydration runs before streaming JS fills the template, client finds `<!-- -->` where it expects content
 
-After both, Tilt restart is safe. The operator will reconcile all GameVersion
-CRs, fetching `player_counts` and `rules` from each game service and writing
-them to the DB.
+**docs/CODING.md updated** with two new sections:
+- `Resource::new` table row: explains streaming SSR placeholder mechanism
+- "Resource read order inside Suspense closures": documents that `game_data.get()` must be read unconditionally before any short-circuit (ws_game check), otherwise Suspense never tracks the resource as a dependency
+- "Suspense vs no Suspense": corrected from "Suspense + new_blocking is safe" to the actual behaviour discovered this session (see below)
 
-### What was completed this session
+---
 
-**Operator: player counts and rules from game service**
-- Operator now calls `Request::PlayerCounts` and `Request::Rules` against each
-  game service during reconcile and writes both to the DB
-- `playerCounts` removed from the GameVersion CRD spec - the operator derives
-  it from the game service instead
-- Bot reads rules from `gv.rules` DB column; no longer calls the game service
-  for rules at runtime
-- Migration 004 adds `rules TEXT NOT NULL DEFAULT ''` to `game_versions`
+### Hydration investigation: key discoveries
 
-**Lost Cities rules (both versions)**
-- `rust/game/lost-cities-1/RULES.md` and `rust/game/lost-cities-2/RULES.md`
-  created with full rules, scoring examples, commands, real brdgme markup
-  renders, and strategy section
-- Real renders extracted locally: built `lost_cities_2_cli`, fetched game state
-  from DB via `psql`, piped as a `Status` request, extracted with `jq`. Game
-  used: `700c8363-70c7-436d-9d05-7bab2c48649d` (round 2 of 3, 2-player)
-- Both games' `rules()` method now uses `include_str!("../RULES.md")` — Tilt
-  rebuilds the game container whenever RULES.md changes
-- 3-player render still pending: user to create a 3-player game in a future
-  session and add the render to `lost-cities-2/RULES.md`
+**Problem:** Hard refresh on game page produced:
+`A hydration error at layout.rs:16:10 — expected <div>, found <!-- -->`
 
-**docs/RULES.md**
-- Updated real-render extraction to document the local CLI approach:
-  build `<game>_cli`, fetch game state with `psql`, construct `Status` request
-  with `jq -Rs`, extract render with `jq -r`
-- Replaces the previous `kubectl exec` approach
+**Root cause (multi-layer):**
 
-**Leptos hydration fixes (`rust/web/src`)**
-Three separate SSR/hydration mismatch bugs fixed. All caused the same symptom:
-Leptos's `tachys` panicking on hard refresh with "Unrecoverable hydration
-error". None were caused by application logic panics — they were structural
-mismatches between server-rendered HTML and the client's initial reactive state.
+1. **`Suspense` always introduces a streaming boundary**, even with `Resource::new_blocking`. The SSR HTML contains a streaming placeholder `<!-- -->` at the Suspense position. WASM hydration runs before (or independently of) the streaming JS that fills in the template, so the client finds `<!-- -->` where it expects `MainLayout`'s `<div class="layout">`.
 
-- `GameLogs` and `RecentGameLogs` (`components/game.rs`): changed `Resource::new`
-  to `LocalResource::new`. The old serializable resource was immediately
-  available on the client but rendered `None` on SSR, causing a mismatch when
-  logs were present.
-- `App()` `active_games` (`app.rs`): changed from `Resource::new` to
-  `LocalResource::new`. `Resource::new_blocking` was tried first but didn't
-  resolve the issue because the resource was passed via context and the `Suspense`
-  in `SidebarMenu` could not track it correctly across the component boundary.
-- `GamePage` (`app.rs`): changed `Transition` to `Suspense`. `Transition` renders
-  children directly on SSR with no fallback mechanism — when `game_data` was
-  `None` synchronously, SSR emitted `<!-- -->` while the client had serialised
-  data immediately and rendered the full game layout.
+2. **`Resource::new_blocking` without `Suspense`**: Leptos warns at runtime: "reading a resource in hydrate mode outside a Suspense or effect causes hydration mismatch errors." In hydrate mode (WASM), `game_data.get()` returns `None` initially (even for `new_blocking`), because resource deserialization is not synchronously available during the first reactive pass. This produced a NEW error at `game.rs:347` (expected `<div class="suggestions-container">`, found `<!-- -->`): SSR rendered full game content (is_my_turn=true → GameCommandInput rendered), but WASM rendered the `None` branch (`<MainLayout><div></div></MainLayout>`).
 
-**Coding guidelines and plan updates**
-- `docs/CODING.md` created: project-wide rules for error handling, Leptos
-  resource types, SSR/hydration contracts, context usage, and component design
-- `docs/PLAN.md`: Phase 5.6.1 added (move `active_games` out of `App()` context
-  into `SidebarMenu`) and Phase 5.7 added (eliminate runtime panics in
-  `rust/web/src` — four specific cases documented)
-- `docs/DEV.md`: bot/LLM config section added; `.env` contents no longer need
-  to live in STATUS.md
+**Experiments performed:**
+- Fix 1: Ensured `game_data.get()` is read before `ws_game.get()` in the Suspense closure → did NOT fix layout.rs:16 (Suspense streaming is the real cause, not resource tracking)
+- Fix 2: Removed `Suspense` entirely → fixed layout.rs:16, introduced game.rs:347 (resource None in hydrate mode)
 
-### Known open issues
+**Current state of GamePage:** No Suspense, direct `match effective` with `None => <MainLayout><div/></MainLayout>`. Still has game.rs:347 error because `game_data.get()` = None in hydrate mode.
 
-- **3-player render**: `lost-cities-2/RULES.md` has a placeholder. User to
-  create a 3-player game and extract a real render to replace it.
-- **`active_games` in context** (Phase 5.6.1): `active_games` resource still
-  lives in `App()` and is passed via context to `SidebarMenu`. This violates
-  the ownership rule in `docs/CODING.md` and was the original cause of the
-  hydration bug. Fix is described in PLAN.md Phase 5.6.1.
-- **Runtime panics in `rust/web`** (Phase 5.7): Four cases identified in the
-  audit — `db.rs:407` (`last_mut().unwrap()`), co-nullable LEFT JOIN unwraps in
-  `db.rs`, `NodeRef::get().unwrap()` in `app.rs` form handlers,
-  `websocket_client.rs` JS API `.expect()` calls. Details in PLAN.md Phase 5.7.
-- **Restart 500 error**: `restart_game` returns "Game service error: error
-  parsing JSON response". Diagnostics in place but root cause not yet found.
-- **Bot restart limitation**: `restart_game` only collects human `opponent_ids`;
-  bots are not recreated in the restarted game.
-- **Optimistic locking**: race condition in `execute_command` +
-  `update_game_command_success`. Design in PLAN.md.
+---
+
+### Immediate plan: fix remaining hydration error
+
+**Problem:** `Resource::new_blocking` outside Suspense → `None` in hydrate mode → structural mismatch (game content missing on client but present in SSR HTML).
+
+**Correct approach** (not yet implemented):
+- `MainLayout` must be OUTSIDE `Suspense` (prevents layout.rs:16)
+- Game content must be INSIDE `Suspense` (allows Suspense to defer hydration until resource deserializes, prevents game.rs:347)
+- `is_my_turn`/`has_next_game`/`has_sub_menu` props on `MainLayout` must accept reactive types (`MaybeSignal<bool>`) so they update after resource deserializes
+
+**Required changes:**
+
+1. **`MainLayout` (`components/layout.rs`):**
+   - Change `is_my_turn: bool`, `has_sub_menu: bool`, `has_next_game: bool` to `#[prop(into, default)] is_my_turn: MaybeSignal<bool>` etc.
+   - `MaybeSignal` is in `reactive_graph::wrappers` — check if exported from `leptos::prelude::*` or needs explicit import from `reactive_graph::wrappers::MaybeSignal`
+   - Change `class:my-turn=is_my_turn` to `class:my-turn=move || is_my_turn.get()`
+   - `has_sub_menu` and `has_next_game` conditionals produce STRUCTURAL differences (`<input>` vs `<span>`). This causes hydration mismatch if value differs between SSR and client. Fix: always render `<input>` but use `style:visibility` or `hidden` attribute conditionally — CSS changes don't cause structural hydration errors, only element type/hierarchy does.
+
+2. **`GamePage` (`app.rs`):**
+   - Create `Memo<bool>` for `is_my_turn`: reads `game_data.get()` + `ws_game.get()`, defaults to `false` when `None`
+   - Structure:
+     ```rust
+     view! {
+         <MainLayout is_my_turn=is_my_turn has_sub_menu=true has_next_game=is_my_turn>
+             <Suspense fallback=|| view! { <div></div> }>
+                 {move || {
+                     let base = game_data.get(); // read first for Suspense tracking
+                     let effective = ws_game.get()
+                         .filter(|ws| Some(ws.game_id) == game_id())
+                         .map(|ws| Ok(ws.game_view))
+                         .or(base);
+                     effective.map(|res| match res {
+                         Ok(data) => { game content (no MainLayout) }.into_any(),
+                         Err(e) => { error div (no MainLayout) }.into_any(),
+                     })
+                 }}
+             </Suspense>
+         </MainLayout>
+     }
+     ```
+   - `is_my_turn` Memo starts `false` in hydrate mode (class change only, not structural) → no hydration error
+   - `Suspense` properly defers game content hydration → SSR and client both have game content → match ✓
+
+**Why `has_sub_menu`/`has_next_game` structural change matters:**
+- SSR (new_blocking resolved): `is_my_turn=true` → `has_next_game=true` → renders `<input type="button" value="Next game"/>`
+- Client hydrate (Memo starts false): `has_next_game=false` → renders `<span></span>`
+- Structural mismatch if these use `if X { <input> } else { <span> }` pattern
+- Fix: replace with always-rendered-but-conditionally-visible `<input hidden=move || !has_next_game.get()/>` or `style:display`
+
+**`MaybeSignal` import:** `reactive_graph::wrappers` has `MaybeSignal<T>`. `leptos::prelude::*` re-exports `reactive_graph::prelude::*` but does NOT appear to re-export `wrappers`. May need explicit: `use reactive_graph::wrappers::read::MaybeSignal;` in `layout.rs`. Confirm by compiling.
+
+---
+
+### Known open issues (unchanged from previous session)
+
+- **Runtime panics in `rust/web`** (Phase 5.7): 4 cases — `db.rs:407`, co-nullable LEFT JOIN unwraps, `NodeRef::get().unwrap()` in `app.rs:121,128`, `websocket_client.rs:21-23`
+- **Restart 500 error**: root cause unknown
+- **Bot restart limitation**: bots not recreated in restarted game
+- **Optimistic locking**: race condition in `execute_command`
+- **3-player render**: placeholder in `lost-cities-2/RULES.md`
+- **NATS bot eventing** (Phase 9): not yet started
 
 ### Next steps (in order)
 
-1. **Apply CRD + migration** if not yet done, then restart Tilt
-2. **Phase 5.6.1** — move `active_games` resource into `SidebarMenu`
-3. **Phase 5.7** — fix runtime panics in `rust/web`
-4. **3-player render** — create a 3-player Lost Cities game, extract render,
-   update `lost-cities-2/RULES.md`
-5. **Phase 9: NATS bot eventing**
-6. **Continue bot quality testing** on Acquire
-7. **Rules for other games** — `lords-of-vegas-1`, remaining games
-8. **Phase 6.5** — Production CD (ArgoCD)
-9. **Phase 7** — Side-by-side validation then legacy decommission
+1. **Fix remaining hydration error** (see plan above) — implement `MaybeSignal<bool>` on `MainLayout`, restructure `GamePage` with `MainLayout` outside `Suspense`
+2. **Phase 5.7** — fix runtime panics
+3. **3-player render** — create Lost Cities 3-player game, extract render
+4. **Phase 9** — NATS bot eventing
+5. **Phase 6.5** — ArgoCD CD
+6. **Phase 7** — legacy decommission

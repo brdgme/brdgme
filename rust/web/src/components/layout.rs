@@ -3,31 +3,23 @@ use leptos_router::components::A;
 use leptos_router::hooks::use_navigate;
 use leptos_router::NavigateOptions;
 use crate::components::game::PlayerName;
-
-use crate::game::server_fns::GameSummary;
+use crate::game::server_fns::{get_active_games, GameSummary};
 
 #[component]
 pub fn MainLayout(
-    #[prop(default = false)] is_my_turn: bool,
-    #[prop(default = false)] has_sub_menu: bool,
-    #[prop(default = false)] has_next_game: bool,
+    #[prop(into, default = Signal::from(false))] is_my_turn: Signal<bool>,
+    #[prop(into, default = Signal::from(false))] has_sub_menu: Signal<bool>,
+    #[prop(into, default = Signal::from(false))] has_next_game: Signal<bool>,
     children: Children,
 ) -> impl IntoView {
     view! {
         <div class="layout">
-            <div class="layout-header" class:my-turn=is_my_turn>
+            <div class="layout-header" class:my-turn=move || is_my_turn.get()>
                 <input type="button" value="Menu"/>
                 <span class="header-title">"brdg.me"</span>
-                {if has_sub_menu {
-                    view! { <input type="button" value="Sub menu"/> }.into_any()
-                } else {
-                    view! { <span></span> }.into_any()
-                }}
-                {if has_next_game {
-                    view! { <input type="button" value="Next game"/> }.into_any()
-                } else {
-                    view! { <span></span> }.into_any()
-                }}
+                // Always render same element type; toggle visibility to avoid structural mismatch
+                <input type="button" value="Sub menu" hidden=move || !has_sub_menu.get()/>
+                <input type="button" value="Next game" hidden=move || !has_next_game.get()/>
             </div>
             <div class="layout-body">
                 <SidebarMenu />
@@ -52,7 +44,13 @@ pub fn SidebarMenu() -> impl IntoView {
         logout_action.dispatch(crate::auth::Logout {});
     };
 
-    let active_games = expect_context::<LocalResource<Result<Vec<GameSummary>, ServerFnError>>>();
+    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let active_games: LocalResource<Result<Vec<GameSummary>, ServerFnError>> = LocalResource::new(
+        move || async move {
+            let _ = trigger.last_update.get();
+            get_active_games().await
+        },
+    );
 
     view! {
         <div class="menu">

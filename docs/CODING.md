@@ -44,24 +44,107 @@ navigation and only appear on hard refresh, making them easy to miss.
 | Type | SSR behaviour | When to use |
 |------|--------------|-------------|
 | `Resource::new_blocking` | Blocks page response until resolved; data available immediately on client | Data that must be in the initial HTML (game board, page content) |
-| `Resource::new` | Requires `Suspense` in the same component to resolve during SSR | Rarely needed; prefer `new_blocking` or `LocalResource` |
+| `Resource::new` | In streaming SSR, emits a `<!-- -->` placeholder in initial HTML and streams resolved content via `<template>`. If WASM hydration runs before the streaming JS processes the template, client sees `<!-- -->` where it expects content. | Rarely needed; prefer `new_blocking` or `LocalResource` |
 | `LocalResource::new` | Always `None` on SSR; fetches fresh after hydration | Secondary UI data where a loading state after hydration is acceptable (sidebar lists, log panels) |
 
 **`LocalResource` is the safe default for anything that is not core page
 content.** It cannot produce a hydration mismatch because SSR and client both
 start as `None`.
 
-### Suspense vs Transition
+### Suspense and new_blocking
 
-- Use `Suspense` when the component renders for the first time on a hard
-  refresh. `Suspense` with a `new_blocking` resource blocks the page and
-  renders the actual resolved content, so SSR and client always agree.
-- `Transition` keeps the previous content visible while new content loads.
-  It does not render the fallback on SSR initial render - it renders the
-  children directly with whatever reactive values are available
-  synchronously. If those values are `None`, SSR emits `<!-- -->` and the
-  client hydrates against missing content. Avoid `Transition` for top-level
-  page components that need SSR data.
+Two conflicting constraints apply to `Resource::new_blocking`:
+
+1. **`Suspense` introduces a streaming placeholder `<!-- -->` at its boundary**
+   in SSR output, even when all tracked resources are `new_blocking`. Any DOM
+   node placed inside a `Suspense` may appear as `<!-- -->` in the initial HTML,
+   causing a hydration mismatch if WASM expects a real element there.
+
+2. **Reading `new_blocking` outside `Suspense` returns `None` in hydrate mode.**
+   Leptos warns: "reading a resource in hydrate mode outside a Suspense or
+   effect causes hydration mismatch errors." Without `Suspense`, the resource
+   is `None` during the initial WASM reactive pass, so any content that depends
+   on it renders as `<!-- -->` on the client while SSR had the resolved content.
+
+**The solution: keep layout wrappers outside `Suspense`, data-dependent content inside.**
+
+```rust
+// Wrong: layout wrapper inside Suspense → <!-- --> at layout level
+<Suspense fallback=...>
+    {move || game_data.get().map(|_| view! { <MainLayout>...</MainLayout> })}
+</Suspense>
+
+// Wrong: no Suspense → game_data is None in hydrate mode → content is <!-- -->
+{move || game_data.get().map(|_| view! { <div class="game-board">...</div> })}
+
+// Correct: layout outside, content inside Suspense
+<MainLayout>
+    <Suspense fallback=|| view! { <div></div> }>
+        {move || {
+            let base = game_data.get(); // read first so Suspense tracks it
+            base.map(|res| match res { ... })
+        }}
+    </Suspense>
+</MainLayout>
+```
+
+The layout wrapper (`MainLayout`) is always in the initial SSR HTML — no
+streaming placeholder risk. `Suspense` defers hydration of the inner content
+until `game_data` deserializes from the serialized resource state, at which
+point both SSR and client have the resolved data. Match ✓.
+
+`Transition` renders children directly on SSR with no fallback mechanism.
+If those values are `None`, SSR emits `<!-- -->`. Avoid `Transition` for
+components that need SSR data.
+
+### Structural vs attribute hydration mismatches
+
+Leptos hydration checks **element type and hierarchy** — it does not check
+attribute values, class names, or inline styles. This means:
+
+- **Structural differences** (different element types, presence/absence of
+  elements) always cause hydration errors.
+- **Attribute/class differences** (e.g. a class present on SSR but absent on
+  client) do not cause errors — reactive bindings attach after the structural
+  traversal and update the DOM without panicking.
+
+Consequence: when a component prop controls which element to render (e.g.
+`if condition { <input/> } else { <span/> }`), and that prop depends on async
+data that starts as `false`/`None` in hydrate mode, the structural mismatch
+will panic. Fix by making the element always present and toggling visibility:
+
+```rust
+// Wrong: structural difference when condition differs between SSR and client
+{if has_next_game { view! { <input.../> } else { view! { <span/> } }}
+
+// Correct: same element always rendered; only a CSS attribute changes
+<input type="button" value="Next game" hidden=move || !has_next_game.get()/>
+```
+
+### Reactive props for layout components
+
+When a layout component (like `MainLayout`) sits outside `Suspense` but its
+props depend on async data, use `MaybeSignal<bool>` (from
+`reactive_graph::wrappers`) with `#[prop(into, default)]`. This allows callers
+to pass either a static `bool` or a reactive `Memo<bool>`/`Signal<bool>`.
+
+```rust
+#[component]
+pub fn MainLayout(
+    #[prop(into, default)] is_my_turn: MaybeSignal<bool>,
+    ...
+) -> impl IntoView {
+    view! {
+        <div class:my-turn=move || is_my_turn.get()>
+            ...
+        </div>
+    }
+}
+```
+
+In `GamePage`, derive the value with a `Memo` that reads from both the blocking
+resource and the WS signal. In hydrate mode the `Memo` returns `false` until the
+resource deserializes — this changes a CSS class only (no structural mismatch).
 
 ### Resource placement
 
@@ -69,6 +152,35 @@ A resource must be created in the same component (or a direct ancestor) that
 owns the `Suspense` tracking it. Passing a resource via context and then
 reading it inside a `Suspense` in a different component breaks SSR tracking -
 the `Suspense` cannot see the resource as pending and will not wait for it.
+
+### Resource read order inside Suspense closures
+
+`Suspense` tracks resources by observing which ones are read during the
+evaluation of its children. If a closure inside `Suspense` reads a context
+signal first and returns early before calling `.get()` on the resource,
+the `Suspense` never sees the resource and will not wait for it on SSR.
+
+**Always bind the resource read unconditionally before any branching logic:**
+
+```rust
+// Wrong: ws_game check can short-circuit before game_data is read
+{move || {
+    if let Some(ws) = ws_game.get() {
+        if ws.game_id == id { return Some(Ok(ws.data)); }
+    }
+    game_data.get().map(...)
+}}
+
+// Correct: game_data is always read first; Suspense always sees it
+{move || {
+    let base = game_data.get();        // Suspense sees this unconditionally
+    let effective = ws_game.get()
+        .filter(|ws| ws.game_id == id)
+        .map(|ws| Ok(ws.data))
+        .or(base);
+    effective.map(...)
+}}
+```
 
 ---
 

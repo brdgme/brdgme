@@ -10,7 +10,6 @@ use uuid::Uuid;
 
 use crate::auth::server::{login, confirm_login};
 use crate::components::MainLayout;
-use crate::game::server_fns::{get_active_games, GameSummary};
 use crate::websocket::BrdgmeGameUpdate;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -45,14 +44,6 @@ pub fn App() -> impl IntoView {
     });
     provide_context(RwSignal::<Option<BrdgmeGameUpdate>>::new(None));
     crate::websocket_client::use_websocket();
-
-    let active_games: LocalResource<Result<Vec<GameSummary>, ServerFnError>> = LocalResource::new(
-        move || async move {
-            let _ = last_update.get();
-            get_active_games().await
-        },
-    );
-    provide_context(active_games);
 
     view! {
         <Stylesheet id="leptos" href="/pkg/web.css"/>
@@ -205,7 +196,7 @@ impl Default for OpponentSlot {
 fn GamesPage() -> impl IntoView {
     use crate::game::server_fns::{get_available_game_types, create_new_game, BotSlot};
 
-    let game_types = Resource::new(|| (), |_| get_available_game_types());
+    let game_types = LocalResource::new(|| get_available_game_types());
 
     let (selected_type_id, set_selected_type_id) = signal(None::<Uuid>);
     let (selected_version_id, set_selected_version_id) = signal(None::<Uuid>);
@@ -265,13 +256,11 @@ fn GamesPage() -> impl IntoView {
         <MainLayout>
             <div class="new-game">
                 <h1>"New Game"</h1>
-                <Suspense fallback=|| view! { <p>"Loading..."</p> }>
-                    {move || game_types.get().map(|result| {
-                        let types = match result {
-                            Err(e) => return view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
-                            Ok(t) if t.is_empty() => return view! { <p>"No games available."</p> }.into_any(),
-                            Ok(t) => t,
-                        };
+                {move || match game_types.get() {
+                    None => view! { <p>"Loading..."</p> }.into_any(),
+                    Some(Err(e)) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
+                    Some(Ok(t)) if t.is_empty() => view! { <p>"No games available."</p> }.into_any(),
+                    Some(Ok(types)) => {
                         let types = StoredValue::new(types);
                         view! {
                             <form on:submit=on_submit>
@@ -444,8 +433,8 @@ fn GamesPage() -> impl IntoView {
                                 </Show>
                             </form>
                         }.into_any()
-                    })}
-                </Suspense>
+                    }
+                }}
             </div>
         </MainLayout>
     }
@@ -502,49 +491,65 @@ fn GamePage() -> impl IntoView {
         }
     );
 
-    // Prefer WS data for the current game, fall back to resource.
-    let effective_data = move || {
+    // is_my_turn starts false in hydrate mode (Memo returns false until resource
+    // deserializes). This only changes a CSS class — no structural mismatch.
+    let is_my_turn = Memo::new(move |_| {
         let current_id = game_id();
-        if let Some(ws) = ws_game.get() {
-            if Some(ws.game_id) == current_id {
-                return Some(Ok(ws.game_view));
-            }
-        }
+        let from_ws = ws_game.get()
+            .filter(|ws| Some(ws.game_id) == current_id)
+            .map(|ws| ws.game_view.is_my_turn);
+        if let Some(v) = from_ws { return v; }
         game_data.get()
-    };
+            .and_then(|r| r.ok())
+            .map(|d| d.is_my_turn)
+            .unwrap_or(false)
+    });
 
+    // MainLayout is outside Suspense so it is always in the initial SSR HTML
+    // with no streaming placeholder risk. Suspense defers hydration of game
+    // content until game_data deserializes, matching SSR and client structure.
     view! {
-        <Suspense fallback=move || view! { <MainLayout><div></div></MainLayout> }>
-            {move || {
-                effective_data().map(|res| match res {
-                    Ok(data) => {
-                        let is_my_turn = data.is_my_turn;
-                        let is_finished = data.is_finished;
-                        let id = data.id;
-                        let html = data.html.clone();
-                        let command_spec = data.command_spec.clone();
-                        let player_names: Vec<String> = data.players.iter().map(|p| p.name.clone()).collect();
-                        let waiting_on = StoredValue::new(
-                            data.players.iter()
-                                .filter(|p| p.is_turn)
-                                .map(|p| (p.name.clone(), p.color.clone()))
-                                .collect::<Vec<_>>()
-                        );
-
-                        view! {
-                            <MainLayout is_my_turn=is_my_turn has_sub_menu=true has_next_game=is_my_turn>
+        <MainLayout
+            is_my_turn=Signal::from(is_my_turn)
+            has_sub_menu=Signal::from(true)
+            has_next_game=Signal::from(is_my_turn)
+        >
+            <Suspense fallback=|| view! { <div></div> }>
+                {move || {
+                    let base = game_data.get(); // read first so Suspense tracks it
+                    let current_id = game_id();
+                    let effective = ws_game.get()
+                        .filter(|ws| Some(ws.game_id) == current_id)
+                        .map(|ws| Ok(ws.game_view))
+                        .or(base);
+                    effective.map(|res| match res {
+                        Err(e) => view! { <div class="error">"Error: " {e.to_string()}</div> }.into_any(),
+                        Ok(data) => {
+                            let is_turn = data.is_my_turn;
+                            let is_finished = data.is_finished;
+                            let id = data.id;
+                            let html = data.html.clone();
+                            let command_spec = data.command_spec.clone();
+                            let player_names: Vec<String> = data.players.iter().map(|p| p.name.clone()).collect();
+                            let waiting_on = StoredValue::new(
+                                data.players.iter()
+                                    .filter(|p| p.is_turn)
+                                    .map(|p| (p.name.clone(), p.color.clone()))
+                                    .collect::<Vec<_>>()
+                            );
+                            view! {
                                 <div class="game-container">
                                     <div class="game-main">
                                         <GameBoard html=html />
                                         <RecentGameLogs game_id=id />
-                                        <Show when=move || is_my_turn>
+                                        <Show when=move || is_turn>
                                             <GameCommandInput
                                                 game_id=id
                                                 command_spec=command_spec.clone()
                                                 player_names=player_names.clone()
                                             />
                                         </Show>
-                                        <Show when=move || !is_my_turn && !is_finished>
+                                        <Show when=move || !is_turn && !is_finished>
                                             <div class="game-current-turn">
                                                 "Waiting on: "
                                                 {waiting_on.with_value(|w| w.iter().enumerate().map(|(i, (name, color))| {
@@ -562,12 +567,11 @@ fn GamePage() -> impl IntoView {
                                     </div>
                                     <GameMeta data=data />
                                 </div>
-                            </MainLayout>
-                        }.into_any()
-                    },
-                    Err(e) => view! { <MainLayout><div class="error">"Error: " {e.to_string()}</div></MainLayout> }.into_any(),
-                })
-            }}
-        </Suspense>
+                            }.into_any()
+                        },
+                    })
+                }}
+            </Suspense>
+        </MainLayout>
     }
 }
