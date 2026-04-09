@@ -48,3 +48,6 @@ logs/
 # Docker volumes (local development)
 postgres_data/
 redis_data/
+
+# memso database
+.memso
