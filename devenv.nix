@@ -1,6 +1,7 @@
 { pkgs, lib, config, inputs, ... }:
 
 {
+  dotenv.enable = true;
   languages.go.enable = true;
   languages.javascript = {
     enable = true;

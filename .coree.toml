@@ -1,3 +1,6 @@
-[backend]
-mode = "replica"
+project_id = "brdgme"
+
+[memory]
+mode = "remote"
+remote_mode = "replica"
 remote_url = "libsql://memory-brdgme-beefsack.aws-ap-northeast-1.turso.io"
