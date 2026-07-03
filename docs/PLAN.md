@@ -300,10 +300,12 @@ review before the `leptos` branch replaces production. (The review document
 - [x] **Token expiry check in `validate_session_token`** (`auth/session.rs`):
       SQL query updated to `AND created_at > NOW() - INTERVAL '30 days'`.
       SQLx offline metadata regenerated.
-- [x] **Email sending** (`auth/server.rs`): `send_login_email` implemented
-      using `lettre 0.11` with `AsyncSmtpTransport` (plain SMTP, no TLS).
-      Reads `SMTP_HOST`, `SMTP_PORT` (default 25), `SMTP_FROM` from env.
-      Logs warning with token if `SMTP_HOST` unset (dev fallback).
+- [x] **Email sending** (`auth/server.rs`): `send_login_email` originally
+      implemented using `lettre 0.11` with `AsyncSmtpTransport` (plain
+      SMTP, no TLS); replaced by Phase 22a with `resend-rs` over the
+      Resend HTTP API. Reads `RESEND_API_KEY`, `EMAIL_FROM` from env.
+      Logs the code instead of sending if `RESEND_API_KEY` unset (dev
+      fallback).
 
 ### Missing endpoints (non-blocking, needed for feature parity)
 
@@ -1994,32 +1996,44 @@ Resend test-mode API key in `.env` - the same pattern the bot uses for
 - [ ] Create the Resend account; verify `brdg.me` as the sending domain:
       add the SPF, DKIM, and DMARC DNS records. Zone-level records belong
       to OpenTofu (Phase 21) once it exists; if 22a runs first, add them
-      manually and note them for import.
-- [ ] Replace `lettre` with `resend-rs` in `rust/web`:
-      `send_login_email` sends via the Resend client (thin reqwest/serde
-      wrapper; hold it in `AppState` alongside the existing shared
-      `reqwest::Client`). Env: `RESEND_API_KEY` (unset = log fallback,
-      replacing the `SMTP_HOST`-unset fallback) and
-      `EMAIL_FROM=login@brdg.me`. Remove `SMTP_HOST`/`SMTP_PORT`/
-      `SMTP_FROM` handling, the `lettre` dependency, and update
-      `.env.example`.
+      manually and note them for import. *(human/infra - not done here)*
+- [x] Replace `lettre` with `resend-rs` in `rust/web`:
+      `send_login_email` sends via the Resend client (`resend_rs::Resend`,
+      held in `AppState` alongside the existing shared `reqwest::Client`).
+      Env: `RESEND_API_KEY` (unset = log fallback, replacing the
+      `SMTP_HOST`-unset fallback) and `EMAIL_FROM` (default
+      `login@brdg.me`). Removed `SMTP_HOST`/`SMTP_PORT`/`SMTP_FROM`
+      handling, the `lettre` dependency, and updated `.env.template`.
 - [ ] Prod config (SealedSecret once Phase 15 lands; plain Secret before):
-      `RESEND_API_KEY`, `EMAIL_FROM`.
-- [ ] Delete `k8s/base/smtp/` from the new-system overlays and the
-      Tiltfile. First check whether the legacy stack (`rust/api`) sends
-      through the in-cluster `smtp` Service; if so it moves to the legacy
-      kustomization and survives until the Phase 16 decommission.
+      `RESEND_API_KEY`, `EMAIL_FROM`. *(human/infra - not done here)*
+- [x] Delete `k8s/base/smtp/` from the new-system overlays and the
+      Tiltfile. Checked whether the legacy stack (`rust/api`) sends
+      through the in-cluster `smtp` Service: it does not (`Mail::Relay`/
+      `Mail::Smtp` in `rust/api/src/config.rs` is constructed but never
+      read - the one call site in `controller/auth.rs` is commented out),
+      so `k8s/base/smtp/` was deleted outright rather than moved to a
+      legacy overlay.
 - [ ] Verify: a prod login email lands in a real Gmail inbox - not spam -
       with SPF, DKIM, and DMARC all passing (inspect the received headers).
-- [ ] Rate-limit the login endpoint (the only email-sending route today)
+      *(human/infra - not done here)*
+- [x] Rate-limit the login endpoint (the only email-sending route today)
       with `tower_governor` per client IP (added 2026-07-03 final pass):
       without it, anyone hammering the login form drains the 100/day Resend
-      quota and locks every player out of logging in. Caveat: verify real
-      client IPs survive the DO LB + Cilium Gateway path
-      (externalTrafficPolicy/PROXY protocol - a known DOKS consideration;
-      fold into Phase 14's LB prerequisite check). If source IPs are not
-      preserved, the limiter keys on the LB address and throttles everyone
-      collectively - configure the LB first.
+      quota and locks every player out of logging in. Implementation note:
+      `Login` is a Leptos server function auto-mounted by `leptos_axum`
+      alongside every other server fn/page route in one opaque `Router`
+      build step, so a `GovernorLayer` can't be scoped to just that route
+      without either rate-limiting the whole app or all of `/api`. Instead
+      `auth/rate_limit.rs` builds the same `governor` rate limiter
+      `tower_governor` uses internally and checks it directly inside the
+      `login()` handler body, keyed by `SmartIpKeyExtractor` (falls back
+      through `X-Forwarded-For`/`X-Real-Ip`/`Forwarded` to the TCP peer
+      address). Burst 5, replenishes 1 every 20s, per IP. Caveat carried
+      forward unresolved: verify real client IPs survive the DO LB +
+      Cilium Gateway path (externalTrafficPolicy/PROXY protocol - a known
+      DOKS consideration; fold into Phase 14's LB prerequisite check). If
+      source IPs are not preserved, the limiter keys on the LB address and
+      throttles everyone collectively - configure the LB first.
 
 Delivers the founding VISION principle: a full game playable from an email
 client. Sequencing: after the Phase 16 cutover (additive feature; fine to

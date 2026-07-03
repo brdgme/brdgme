@@ -51,8 +51,8 @@ alternative on this system.
 
 ## Login Codes in Dev
 
-SMTP is not configured in dev. Login codes are printed directly to the Tilt
-`web` resource log output:
+`RESEND_API_KEY` is not set in dev, so no real email is sent. Login codes
+are printed directly to the Tilt `web` resource log output:
 
 ```
 ==> LOGIN CODE for user@example.com: 123456

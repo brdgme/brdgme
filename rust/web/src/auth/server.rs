@@ -8,8 +8,6 @@ use crate::models::user::{User, UserEmail};
 use leptos::prelude::*;
 #[cfg(feature = "ssr")]
 use leptos_axum::extract;
-#[cfg(feature = "ssr")]
-use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ssr")]
 use sqlx::PgPool;
@@ -20,54 +18,25 @@ use tower_sessions::Session;
 use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
-async fn send_login_email(to_email: &str, token: &str) {
-    let smtp_host = match std::env::var("SMTP_HOST") {
-        Ok(h) => h,
-        Err(_) => {
-            println!("\n==> LOGIN CODE for {}: {}\n", to_email, token);
-            return;
-        }
-    };
-    let smtp_port: u16 = std::env::var("SMTP_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(25);
-    let from_addr = std::env::var("SMTP_FROM").unwrap_or_else(|_| "noreply@brdgme.com".to_string());
-
-    let from_mailbox = match from_addr.parse() {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!("Invalid SMTP_FROM address '{}': {}", from_addr, e);
-            return;
-        }
+async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, token: &str) {
+    let Some(resend) = resend else {
+        // No RESEND_API_KEY configured (dev default): log instead of sending.
+        println!("\n==> LOGIN CODE for {}: {}\n", to_email, token);
+        return;
     };
 
-    let email = match Message::builder()
-        .from(from_mailbox)
-        .to(match to_email.parse() {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::error!("Invalid to address {}: {}", to_email, e);
-                return;
-            }
-        })
-        .subject("Your brdgme login code")
-        .body(format!(
-            "Your login code is: {}\n\nThis code expires in 1 hour.",
-            token
-        )) {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!("Failed to build email: {}", e);
-            return;
-        }
-    };
+    let from_addr = std::env::var("EMAIL_FROM").unwrap_or_else(|_| "login@brdg.me".to_string());
+    let email = resend_rs::types::CreateEmailBaseOptions::new(
+        from_addr,
+        [to_email.to_string()],
+        "Your brdgme login code",
+    )
+    .with_text(&format!(
+        "Your login code is: {}\n\nThis code expires in 1 hour.",
+        token
+    ));
 
-    let mailer = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&smtp_host)
-        .port(smtp_port)
-        .build();
-
-    if let Err(e) = mailer.send(email).await {
+    if let Err(e) = resend.emails.send(email).await {
         tracing::error!("Failed to send login email to {}: {}", to_email, e);
     }
 }
@@ -90,6 +59,16 @@ pub struct AuthUser {
     pub email: String,
 }
 
+#[cfg(feature = "ssr")]
+async fn login_client_ip() -> Option<std::net::IpAddr> {
+    let headers: axum::http::HeaderMap = extract().await.ok()?;
+    let peer_addr = extract::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .await
+        .ok()
+        .map(|ci| ci.0);
+    crate::auth::rate_limit::extract_client_ip(&headers, peer_addr)
+}
+
 #[server(Login, "/api")]
 pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     if email.is_empty() || !email.contains('@') {
@@ -97,6 +76,21 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
             success: false,
             message: "Invalid email address".to_string(),
         });
+    }
+
+    let login_rate_limiter =
+        expect_context::<std::sync::Arc<crate::auth::rate_limit::LoginRateLimiter>>();
+    // Fail open if the client IP can't be determined (e.g. missing ConnectInfo
+    // in a test harness) rather than blocking logins outright.
+    if let Some(ip) = login_client_ip().await {
+        if let Err(wait_secs) =
+            crate::auth::rate_limit::check_login_rate_limit(&login_rate_limiter, ip)
+        {
+            return Ok(LoginResponse {
+                success: false,
+                message: format!("Too many login attempts. Try again in {}s.", wait_secs),
+            });
+        }
     }
 
     let pool = expect_context::<PgPool>();
@@ -160,7 +154,8 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
-    send_login_email(&email, &confirmation_token).await;
+    let resend = expect_context::<Option<resend_rs::Resend>>();
+    send_login_email(resend.as_ref(), &email, &confirmation_token).await;
 
     Ok(LoginResponse {
         success: true,
@@ -289,6 +284,8 @@ mod tests {
         let owner = Owner::new();
         owner.with(|| {
             provide_context(pool.clone());
+            provide_context(None::<resend_rs::Resend>);
+            provide_context(crate::auth::rate_limit::build_login_rate_limiter());
         });
         owner
             .with(|| leptos::reactive::computed::ScopedFuture::new(f()))
@@ -322,6 +319,17 @@ mod tests {
         .unwrap();
         let token = row.login_confirmation.expect("confirmation token set");
         assert_eq!(token.len(), 6);
+    }
+
+    // `with_pool_context` always provides `None::<resend_rs::Resend>`, so
+    // every successful `login()` test above already exercises the
+    // RESEND_API_KEY-unset log-fallback path in `send_login_email` (it
+    // would panic/hang trying to reach the real Resend API otherwise).
+    // This test exercises `send_login_email` directly for that path.
+    #[tokio::test]
+    async fn send_login_email_logs_when_resend_unset() {
+        // Must not panic or attempt any network I/O when `resend` is `None`.
+        send_login_email(None, "someone@example.com", "123456").await;
     }
 
     #[sqlx::test]

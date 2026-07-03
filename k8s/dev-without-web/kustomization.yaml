@@ -4,4 +4,3 @@ resources:
 - ../base/operator
 - ../base/postgres
 - ../base/redis
-- ../base/smtp

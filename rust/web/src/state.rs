@@ -1,7 +1,9 @@
+use crate::auth::rate_limit::LoginRateLimiter;
 use crate::websocket::GameBroadcaster;
 use axum::extract::FromRef;
 use leptos::prelude::LeptosOptions;
 use sqlx::PgPool;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -9,6 +11,10 @@ pub struct AppState {
     pub pool: PgPool,
     pub broadcaster: GameBroadcaster,
     pub http_client: reqwest::Client,
+    /// `None` when `RESEND_API_KEY` is unset, in which case login emails are
+    /// logged instead of sent.
+    pub resend: Option<resend_rs::Resend>,
+    pub login_rate_limiter: Arc<LoginRateLimiter>,
 }
 
 impl FromRef<AppState> for LeptosOptions {
