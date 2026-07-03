@@ -1113,7 +1113,7 @@ should be implemented after 11.2 so it lands with tests.
 
 ---
 
-## Phase 12: ELO Ratings [Pending - blocks prod deploy]
+## Phase 12: ELO Ratings [Complete except backfill decision - 2026-07-03]
 
 **Why blocking:** the legacy `rust/api` updates ratings when a game finishes;
 `rust/web` does not. Both systems share the DB during side-by-side operation,
@@ -1138,7 +1138,13 @@ logic, do not redesign it.
   a's accumulator and subtract from b's.
 - Ratings come from `game_type_users` (create the row with default rating 1500
   if missing - `rust/web` currently only fabricates a default in memory on
-  read; the write path must INSERT).
+  read; the write path must INSERT). Implemented as a bare
+  `INSERT ... ON CONFLICT DO NOTHING` with no explicit rating column, so the
+  actual DB column default (1200, per `game_type_users.rating integer DEFAULT
+  1200`) applies - matching `create_game_with_users`'s existing insert
+  pattern and legacy's own NULL-lets-column-default-apply behavior. The 1500
+  figure here matches only the in-memory fallback in `build_game_type_user`
+  used for display when no row exists yet, not the real column default.
 - Apply accumulated changes to `game_type_users.rating` and store per-player
   `game_players.rating_change`. Skip zero changes.
 - Legacy never updates `peak_rating` (writes only NULL on creation). Optional
@@ -1155,21 +1161,23 @@ only sets `is_finished = true`: conceded games get no `place`, no
 `rating_change`, no rating update. Fix as part of this task.
 
 **Tasks:**
-- [ ] Add rating update to the finish path of `update_game_command_success`
+- [x] Add rating update to the finish path of `update_game_command_success`
       (or a helper it calls) in `rust/web/src/db.rs`, inside the same
       transaction as the placings write.
-- [ ] Fix `db::concede_game` to write `game_players.place` (non-conceder 1,
+- [x] Fix `db::concede_game` to write `game_players.place` (non-conceder 1,
       conceder 2, matching legacy) and run the same rating update helper.
-- [ ] Port `elo_rating_change` + `elo_expected_score` + the
+      (`concede_game` already wrote `place`; only the rating call was
+      missing.)
+- [x] Port `elo_rating_change` + `elo_expected_score` + the
       `elo_rating_change_works` unit test from `rust/api`.
-- [ ] INSERT `game_type_users` row (rating 1500) when missing, ON CONFLICT
-      update nothing.
-- [ ] Skip rating updates entirely when any `game_players.game_bot_id` is
+- [x] INSERT `game_type_users` row when missing, ON CONFLICT DO NOTHING (bare
+      column-list insert, matching the existing `create_game_with_users`
+      pattern - the DB column default is 1200, not 1500; see report).
+- [x] Skip rating updates entirely when any `game_players.game_bot_id` is
       non-null in the game.
-- [ ] Regenerate SQLx offline metadata (`cargo sqlx prepare -- --features ssr`).
-- [ ] Tests (needs Phase 11.1 CI infra; implement after 11.2 if possible):
-      unit tests for the pairwise math (ported `elo_rating_change_works` plus
-      a 3-player pairwise case); `#[sqlx::test]` integration: 2-player and
+- [x] Regenerate SQLx offline metadata (`cargo sqlx prepare -- --features ssr`).
+- [x] Tests: unit tests for the pairwise math (ported `elo_rating_change_works`
+      plus a 3-player pairwise case); `#[sqlx::test]` integration: 2-player and
       3-player games rated correctly on finish; idempotency guard (second
       finish write does not re-rate); game with a bot player not rated;
       `game_type_users` row created on first rated game; concede assigns

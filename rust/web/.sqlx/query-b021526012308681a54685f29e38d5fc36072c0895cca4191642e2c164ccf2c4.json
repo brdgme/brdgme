@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rating, peak_rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rating",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "peak_rating",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b021526012308681a54685f29e38d5fc36072c0895cca4191642e2c164ccf2c4"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE game_type_users\n            SET rating = rating + $1, peak_rating = GREATEST(peak_rating, rating + $1), updated_at = NOW()\n            WHERE game_type_id = $2 AND user_id = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "42ec77a0d084c0ebcf712639ff1dd558589d499fbd9328cf3697794c3b2559c1"
+}

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, position, user_id, game_bot_id, place, rating_change FROM game_players WHERE game_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "game_bot_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "place",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "rating_change",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "681bc71e190db5c35a1f33d6b402ee6e1bc56c90e7747760e81c78df5b983da2"
+}

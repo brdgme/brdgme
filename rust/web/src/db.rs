@@ -817,6 +817,8 @@ pub async fn concede_game(
     .execute(&mut *tx)
     .await?;
 
+    apply_rating_changes(&mut tx, game_id).await?;
+
     tx.commit().await?;
     Ok(())
 }
@@ -939,6 +941,169 @@ pub async fn get_game_logs(
     .map_err(Into::into)
 }
 
+const ELO_K: f32 = 32.0;
+
+#[cfg(feature = "ssr")]
+fn elo_transformed_rating(rating: i32) -> f32 {
+    10f32.powf(rating as f32 / 400.0)
+}
+
+#[cfg(feature = "ssr")]
+fn elo_expected_score(a_rating: i32, b_rating: i32) -> f32 {
+    let a_trans = elo_transformed_rating(a_rating);
+    let b_trans = elo_transformed_rating(b_rating);
+    a_trans / (a_trans + b_trans)
+}
+
+#[cfg(feature = "ssr")]
+fn elo_rating_change(a_rating: i32, b_rating: i32, a_score: f32) -> i32 {
+    let a_expected = elo_expected_score(a_rating, b_rating);
+    (ELO_K * (a_score - a_expected)).round() as i32
+}
+
+/// Applies ELO rating changes for a game that just transitioned to finished
+/// with placings. Must be called within the same transaction as the
+/// placings write. No-op if the idempotency guard trips (any player already
+/// has a rating_change) or if any player is a bot.
+#[cfg(feature = "ssr")]
+async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Result<()> {
+    struct PlayerRow {
+        id: Uuid,
+        position: i32,
+        user_id: Option<Uuid>,
+        game_bot_id: Option<Uuid>,
+        place: Option<i32>,
+        rating_change: Option<i32>,
+    }
+
+    let players = sqlx::query_as!(
+        PlayerRow,
+        "SELECT id, position, user_id, game_bot_id, place, rating_change FROM game_players WHERE game_id = $1",
+        game_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    if players.iter().any(|p| p.rating_change.is_some()) {
+        // Idempotency guard: this game has already been rated.
+        return Ok(());
+    }
+    if players.iter().any(|p| p.game_bot_id.is_some()) {
+        // New rule (post-legacy): games with any bot player are never rated.
+        return Ok(());
+    }
+    if players.iter().all(|p| p.place.is_none()) {
+        return Ok(());
+    }
+
+    let game_type_id = sqlx::query_scalar!(
+        r#"
+        SELECT gv.game_type_id
+        FROM games g
+        JOIN game_versions gv ON gv.id = g.game_version_id
+        WHERE g.id = $1
+        "#,
+        game_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    struct RatedPlayer {
+        position: i32,
+        user_id: Uuid,
+        rating: i32,
+    }
+
+    let mut rated_players = Vec::with_capacity(players.len());
+    for p in &players {
+        let user_id = p.user_id.ok_or_else(|| {
+            anyhow::anyhow!("game_player {}: user_id missing for human player", p.id)
+        })?;
+
+        sqlx::query!(
+            "INSERT INTO game_type_users (game_type_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            game_type_id,
+            user_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        let rating = sqlx::query_scalar!(
+            "SELECT rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2",
+            game_type_id,
+            user_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        rated_players.push(RatedPlayer {
+            position: p.position,
+            user_id,
+            rating,
+        });
+    }
+
+    let places: std::collections::HashMap<i32, i32> = players
+        .iter()
+        .map(|p| (p.position, p.place.unwrap_or(i32::MAX)))
+        .collect();
+
+    let mut rating_changes: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
+    for (a_index, a) in rated_players
+        .iter()
+        .take(rated_players.len().saturating_sub(1))
+        .enumerate()
+    {
+        for b in rated_players.iter().skip(a_index + 1) {
+            let a_place = places.get(&a.position).copied().unwrap_or(i32::MAX);
+            let b_place = places.get(&b.position).copied().unwrap_or(i32::MAX);
+            let a_score: f32 = match a_place.cmp(&b_place) {
+                std::cmp::Ordering::Less => 1.0,
+                std::cmp::Ordering::Equal => 0.5,
+                std::cmp::Ordering::Greater => 0.0,
+            };
+            let change = elo_rating_change(a.rating, b.rating, a_score);
+            *rating_changes.entry(a.position).or_insert(0) += change;
+            *rating_changes.entry(b.position).or_insert(0) -= change;
+        }
+    }
+
+    for p in &rated_players {
+        let change = rating_changes.get(&p.position).copied().unwrap_or(0);
+        if change == 0 {
+            continue;
+        }
+        sqlx::query!(
+            r#"
+            UPDATE game_type_users
+            SET rating = rating + $1, peak_rating = GREATEST(peak_rating, rating + $1), updated_at = NOW()
+            WHERE game_type_id = $2 AND user_id = $3
+            "#,
+            change,
+            game_type_id,
+            p.user_id
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for p in &players {
+        let change = rating_changes.get(&p.position).copied().unwrap_or(0);
+        if change == 0 {
+            continue;
+        }
+        sqlx::query!(
+            "UPDATE game_players SET rating_change = $1 WHERE id = $2",
+            change,
+            p.id
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
 #[cfg(feature = "ssr")]
 pub async fn update_game_command_success(
     pool: &PgPool,
@@ -1010,6 +1175,10 @@ pub async fn update_game_command_success(
         )
         .execute(&mut *tx)
         .await?;
+    }
+
+    if is_finished && !placings.is_empty() {
+        apply_rating_changes(&mut tx, game_id).await?;
     }
 
     tx.commit().await?;
@@ -1718,5 +1887,362 @@ mod tests {
 
         // Nonexistent token id returns false, not an error.
         assert!(!validate_session_token(&pool, Uuid::new_v4()).await.unwrap());
+    }
+
+    // --- 9. ELO rating updates (Phase 12) ---
+
+    #[test]
+    fn elo_rating_change_works() {
+        assert_eq!(elo_rating_change(1184, 1200, 0.0), -15i32);
+        assert_eq!(elo_rating_change(2400, 2000, 0.0), -29i32);
+        assert_eq!(elo_rating_change(2400, 2000, 1.0), 3i32);
+        assert_eq!(elo_rating_change(2400, 2000, 0.5), -13i32);
+    }
+
+    #[test]
+    fn elo_rating_change_three_player_pairwise_sums_to_zero() {
+        // Simulates the pairwise accumulation done in apply_rating_changes for
+        // a 3-player game with placings [1, 2, 3] (position 0 wins, 1 second,
+        // 2 last) and equal starting ratings.
+        let ratings = [1200, 1200, 1200];
+        let places = [1, 2, 3];
+        let mut changes = [0i32; 3];
+        for a in 0..ratings.len() - 1 {
+            for b in (a + 1)..ratings.len() {
+                let a_score: f32 = match places[a].cmp(&places[b]) {
+                    std::cmp::Ordering::Less => 1.0,
+                    std::cmp::Ordering::Equal => 0.5,
+                    std::cmp::Ordering::Greater => 0.0,
+                };
+                let change = elo_rating_change(ratings[a], ratings[b], a_score);
+                changes[a] += change;
+                changes[b] -= change;
+            }
+        }
+        // Zero-sum: total rating points gained equals total lost.
+        assert_eq!(changes.iter().sum::<i32>(), 0);
+        // Winner gains, last place loses.
+        assert!(changes[0] > 0);
+        assert!(changes[2] < 0);
+        assert_eq!(changes, [32, 0, -32]);
+    }
+
+    async fn find_rating_change(pool: &PgPool, game_id: Uuid, position: i32) -> Option<i32> {
+        sqlx::query_scalar!(
+            "SELECT rating_change FROM game_players WHERE game_id = $1 AND position = $2",
+            game_id,
+            position
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn game_type_rating(pool: &PgPool, game_type_id: Uuid, user_id: Uuid) -> (i32, i32) {
+        let row = sqlx::query!(
+            "SELECT rating, peak_rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2",
+            game_type_id,
+            user_id
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        (row.rating, row.peak_rating)
+    }
+
+    /// `create_game_with_users` shuffles slot order before assigning
+    /// positions, so a user's position within a game is not predictable from
+    /// call order. Look it up explicitly rather than assuming position 0/1/2.
+    fn position_of(ge: &GameExtended, user_id: Uuid) -> i32 {
+        ge.game_players
+            .iter()
+            .find(|p| p.user.as_ref().is_some_and(|u| u.id == user_id))
+            .unwrap()
+            .game_player
+            .position
+    }
+
+    #[sqlx::test]
+    async fn finishing_a_two_player_game_rates_both_players(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+        let creator_pos = position_of(&ge, creator.id) as usize;
+        let opponent_pos = position_of(&ge, opponent.id) as usize;
+
+        // creator places 1st (winner), opponent 2nd (loser), by position.
+        let mut placings = vec![0usize; 2];
+        placings[creator_pos] = 1;
+        placings[opponent_pos] = 2;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            true,
+            &[],
+            &[],
+            &placings,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        // Both players started at the DB default rating (1200): winner (place
+        // 1) gains, loser (place 2) loses the same amount.
+        let winner_change = find_rating_change(&pool, game.id, creator_pos as i32).await;
+        let loser_change = find_rating_change(&pool, game.id, opponent_pos as i32).await;
+        assert_eq!(winner_change, Some(16));
+        assert_eq!(loser_change, Some(-16));
+
+        let (winner_rating, winner_peak) = game_type_rating(&pool, game_type_id, creator.id).await;
+        let (loser_rating, loser_peak) = game_type_rating(&pool, game_type_id, opponent.id).await;
+        assert_eq!(winner_rating, 1216);
+        assert_eq!(winner_peak, 1216);
+        assert_eq!(loser_rating, 1184);
+        assert_eq!(loser_peak, 1200);
+    }
+
+    #[sqlx::test]
+    async fn finishing_a_three_player_game_rates_all_pairs(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let p1 = make_user(&pool, "p1").await;
+        let p2 = make_user(&pool, "p2").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[p1.id, p2.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+        let creator_pos = position_of(&ge, creator.id) as usize;
+        let p1_pos = position_of(&ge, p1.id) as usize;
+        let p2_pos = position_of(&ge, p2.id) as usize;
+
+        // creator 1st, p1 2nd, p2 3rd, by position.
+        let mut placings = vec![0usize; 3];
+        placings[creator_pos] = 1;
+        placings[p1_pos] = 2;
+        placings[p2_pos] = 3;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            true,
+            &[],
+            &[],
+            &placings,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let c_creator = find_rating_change(&pool, game.id, creator_pos as i32).await;
+        let c_p1 = find_rating_change(&pool, game.id, p1_pos as i32).await;
+        let c_p2 = find_rating_change(&pool, game.id, p2_pos as i32).await;
+        assert_eq!(c_creator, Some(32));
+        // A net-zero change is skipped entirely (spec: "skip zero changes"),
+        // so rating_change stays NULL rather than being written as 0.
+        assert_eq!(c_p1, None);
+        assert_eq!(c_p2, Some(-32));
+        // Zero-sum across all pairs.
+        assert_eq!(
+            c_creator.unwrap_or(0) + c_p1.unwrap_or(0) + c_p2.unwrap_or(0),
+            0
+        );
+    }
+
+    #[sqlx::test]
+    async fn second_finish_does_not_re_rate(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            true,
+            &[],
+            &[],
+            &[1, 2],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let (rating_after_first, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+
+        // A second "finish" write (e.g. a retry) must not re-rate the game -
+        // the idempotency guard trips because rating_change is already set.
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "final_state",
+            "final_state_2",
+            false,
+            true,
+            &[],
+            &[],
+            &[1, 2],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let (rating_after_second, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        assert_eq!(rating_after_first, rating_after_second);
+    }
+
+    #[sqlx::test]
+    async fn game_with_bot_player_is_not_rated(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 1, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge
+            .game_players
+            .iter()
+            .find(|p| p.user.is_some())
+            .unwrap()
+            .game_player
+            .id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            true,
+            &[],
+            &[],
+            &[1, 2],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.rating_change, None,
+                "no player in a game with a bot should be rated"
+            );
+        }
+    }
+
+    #[sqlx::test]
+    async fn game_type_users_row_created_on_first_rated_game(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+
+        // Explicitly delete the game_type_users rows that create_game_with_users
+        // auto-created, so the finish path must INSERT them itself.
+        sqlx::query!(
+            "DELETE FROM game_type_users WHERE game_type_id = $1",
+            game_type_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+        let creator_pos = position_of(&ge, creator.id) as usize;
+        let opponent_pos = position_of(&ge, opponent.id) as usize;
+
+        let mut placings = vec![0usize; 2];
+        placings[creator_pos] = 1;
+        placings[opponent_pos] = 2;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            true,
+            &[],
+            &[],
+            &placings,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let (winner_rating, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        let (loser_rating, _) = game_type_rating(&pool, game_type_id, opponent.id).await;
+        // DB column default rating is 1200, so the newly-created rows started
+        // there before the change was applied.
+        assert_eq!(winner_rating, 1216);
+        assert_eq!(loser_rating, 1184);
+    }
+
+    #[sqlx::test]
+    async fn concede_game_assigns_places_and_rates(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceding = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let conceding_id = conceding.game_player.id;
+
+        concede_game(&pool, game.id, conceding_id, "creator")
+            .await
+            .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceder = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id == conceding_id)
+            .unwrap();
+        let non_conceder = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id != conceding_id)
+            .unwrap();
+        assert_eq!(conceder.game_player.place, Some(2));
+        assert_eq!(non_conceder.game_player.place, Some(1));
+        assert_eq!(conceder.game_player.rating_change, Some(-16));
+        assert_eq!(non_conceder.game_player.rating_change, Some(16));
+
+        let (non_conceder_rating, _) =
+            game_type_rating(&pool, game_type_id, non_conceder.user.as_ref().unwrap().id).await;
+        assert_eq!(non_conceder_rating, 1216);
     }
 }
