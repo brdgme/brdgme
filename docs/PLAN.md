@@ -1005,17 +1005,27 @@ Implemented as `rust/web/src/game/mod.rs::tests` (8 tests). The last two
 items are deferred pending their respective phases, as originally scoped -
 not omissions.
 
-### 11.4 Handler auth tests (Axum `tower::ServiceExt::oneshot`)
+### 11.4 Handler auth tests (Axum `tower::ServiceExt::oneshot`) [Complete]
 
-- [ ] `POST /api/internal/game/{id}/command`: correct `X-Internal-Key` →
+- [x] `POST /api/internal/game/{id}/command`: correct `X-Internal-Key` →
       executes; wrong key → 401; missing key → 401; `INTERNAL_API_KEY` env
       unset → rejects all.
-- [ ] `GET /api/game/{id}` with no session → 401.
-- [ ] `POST /api/game/{id}/command` with no session → 401; with a session for
-      a non-player → error.
-- [ ] Login flow logic: valid email+code creates a session user; wrong code
-      fails; expired confirmation fails. (Test at the function level -
-      `auth/server.rs` - not through the browser; E2E covers the UI wiring.)
+- [x] `GET /api/game/{id}` with no session → 401.
+- [x] `POST /api/game/{id}/command` with no session → 401; with a session for
+      a non-player → 403.
+- [x] Login flow logic (`auth/server.rs`, function-level): invalid email
+      rejected; valid email creates a user and sets a 6-digit confirmation
+      token; wrong code and expired confirmation are both rejected before the
+      session step. `login`/`confirm_login` invoked directly in a
+      `leptos::reactive::owner::Owner` scope with `PgPool` provided via
+      context (no HTTP layer needed - the `#[server]` macro body is callable
+      as a plain async fn). `confirm_login`'s "creates a session user" path
+      needs a Leptos request-scoped `Parts` context (only available in a real
+      request), so it isn't asserted end-to-end here; E2E covers that.
+
+Implemented as `rust/web/src/game/server.rs::tests` (4 tests) and
+`rust/web/src/auth/server.rs::tests` (4 tests). Added `tower = { features =
+["util"] }` for `oneshot`/`ServiceExt` in tests.
 
 ### 11.5 Game contract regression harness (Rust game crates)
 

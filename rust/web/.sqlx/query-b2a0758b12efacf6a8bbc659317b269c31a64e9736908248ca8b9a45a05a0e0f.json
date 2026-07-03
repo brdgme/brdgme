@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, name, pref_colors, login_confirmation, login_confirmation_at)\n             VALUES ($1, $2, $3, $4, NOW() - INTERVAL '2 hours')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b2a0758b12efacf6a8bbc659317b269c31a64e9736908248ca8b9a45a05a0e0f"
+}

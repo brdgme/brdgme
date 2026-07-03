@@ -275,3 +275,77 @@ pub async fn logout() -> Result<bool, ServerFnError> {
 
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use leptos::reactive::owner::Owner;
+
+    async fn with_pool_context<F, Fut, T>(pool: &PgPool, f: F) -> T
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        let owner = Owner::new();
+        owner.with(|| {
+            provide_context(pool.clone());
+        });
+        owner
+            .with(|| leptos::reactive::computed::ScopedFuture::new(f()))
+            .await
+    }
+
+    #[sqlx::test]
+    async fn login_rejects_invalid_email(pool: PgPool) {
+        let resp = with_pool_context(&pool, || login("not-an-email".to_string()))
+            .await
+            .unwrap();
+        assert!(!resp.success);
+    }
+
+    #[sqlx::test]
+    async fn login_creates_user_and_sets_confirmation_token(pool: PgPool) {
+        let email = "new-user@example.com";
+        let resp = with_pool_context(&pool, || login(email.to_string()))
+            .await
+            .unwrap();
+        assert!(resp.success);
+
+        let row = sqlx::query!(
+            "SELECT u.login_confirmation FROM users u
+             JOIN user_emails ue ON ue.user_id = u.id
+             WHERE ue.email = $1",
+            email
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let token = row.login_confirmation.expect("confirmation token set");
+        assert_eq!(token.len(), 6);
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_rejects_wrong_token(pool: PgPool) {
+        let result = with_pool_context(&pool, || confirm_login("000000".to_string())).await;
+        assert!(result.is_err());
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_rejects_expired_token(pool: PgPool) {
+        let user_id = Uuid::new_v4();
+        sqlx::query!(
+            "INSERT INTO users (id, name, pref_colors, login_confirmation, login_confirmation_at)
+             VALUES ($1, $2, $3, $4, NOW() - INTERVAL '2 hours')",
+            user_id,
+            "expired-user",
+            &Vec::<String>::new(),
+            "123456"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = with_pool_context(&pool, || confirm_login("123456".to_string())).await;
+        assert!(result.is_err());
+    }
+}

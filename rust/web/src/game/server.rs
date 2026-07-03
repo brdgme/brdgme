@@ -661,3 +661,226 @@ pub fn api_routes() -> axum::Router<crate::state::AppState> {
             axum::routing::post(internal_play_command),
         )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use crate::websocket::GameBroadcaster;
+    use axum::body::Body;
+    use axum::http::{header, Request};
+    use tower::ServiceExt;
+
+    async fn make_broadcaster() -> GameBroadcaster {
+        let redis_url =
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+        let client = redis::Client::open(redis_url).unwrap();
+        let conn = client.get_multiplexed_async_connection().await.unwrap();
+        GameBroadcaster::new(conn, client)
+    }
+
+    async fn test_app(pool: PgPool) -> axum::Router {
+        let leptos_options = leptos::config::get_configuration(None)
+            .unwrap()
+            .leptos_options;
+        let session_layer = crate::auth::session::create_session_layer(&pool).await;
+        let state = AppState {
+            leptos_options,
+            pool: pool.clone(),
+            broadcaster: make_broadcaster().await,
+            http_client: reqwest::Client::new(),
+        };
+        axum::Router::new()
+            .nest("/api", api_routes())
+            .layer(session_layer)
+            .with_state(state)
+    }
+
+    #[sqlx::test]
+    async fn internal_command_requires_matching_key(pool: PgPool) {
+        std::env::set_var("INTERNAL_API_KEY", "secret-key");
+        let app = test_app(pool).await;
+        let id = Uuid::new_v4();
+        let body = serde_json::json!({ "player_position": 0, "command": "abc" }).to_string();
+
+        // Correct key: reaches execute_command and fails only because the
+        // game doesn't exist (proves auth passed and the request was
+        // executed, not rejected).
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/internal/game/{}/command", id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("X-Internal-Key", "secret-key")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // Wrong key.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/internal/game/{}/command", id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("X-Internal-Key", "wrong-key")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Missing key.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/internal/game/{}/command", id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // INTERNAL_API_KEY unset: rejects even the "right" key from before.
+        std::env::remove_var("INTERNAL_API_KEY");
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/internal/game/{}/command", id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("X-Internal-Key", "secret-key")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[sqlx::test]
+    async fn get_game_requires_session(pool: PgPool) {
+        let app = test_app(pool).await;
+        let id = Uuid::new_v4();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/game/{}", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn play_command_requires_session(pool: PgPool) {
+        let app = test_app(pool).await;
+        let id = Uuid::new_v4();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/game/{}/command", id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "command": "abc" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[sqlx::test]
+    async fn play_command_forbidden_for_non_player(pool: PgPool) {
+        use crate::auth::session::{set_user_session, SESSION_USER_KEY};
+        use crate::models::user::User;
+
+        let user = sqlx::query_as!(
+            User,
+            "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
+            Uuid::new_v4(),
+            "not-a-player",
+            &Vec::<String>::new()
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let app = test_app(pool.clone()).await;
+        let id = Uuid::new_v4();
+
+        // Log in first via a throwaway route that mints a session cookie by
+        // exercising the same tower_sessions session store the app uses.
+        let session_layer = crate::auth::session::create_session_layer(&pool).await;
+        let login_app = axum::Router::new()
+            .route(
+                "/login",
+                axum::routing::get(move |session: tower_sessions::Session| {
+                    let user = user.clone();
+                    async move {
+                        set_user_session(&session, &user, "test@example.com", Uuid::new_v4())
+                            .await
+                            .unwrap();
+                        // Force the session to be saved so a cookie is issued.
+                        let _ = session
+                            .get::<crate::auth::session::SessionUser>(SESSION_USER_KEY)
+                            .await;
+                        StatusCode::OK
+                    }
+                }),
+            )
+            .layer(session_layer);
+
+        let login_resp = login_app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/login")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let cookie = login_resp
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("session cookie should be set")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/game/{}/command", id))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::from(
+                        serde_json::json!({ "command": "abc" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+}
