@@ -1,4 +1,0 @@
-resources:
-- config-certmanager.yaml
-- config-domain.yaml
-- config-network.yaml

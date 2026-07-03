@@ -1,17 +1,14 @@
 ---
-apiVersion: serving.knative.dev/v1
+apiVersion: v1
 kind: Service
 metadata:
   name: web
+  labels:
+    app: web
 spec:
-  template:
-    metadata:
-      annotations:
-        # Do not scale to zero - the monolith must always be available.
-        autoscaling.knative.dev/minScale: "1"
-    spec:
-      containers:
-        - name: web
-          image: brdgme/web
-          ports:
-            - containerPort: 3000
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+  selector:
+    app: web

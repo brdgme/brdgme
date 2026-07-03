@@ -1,16 +1,14 @@
 ---
-apiVersion: serving.knative.dev/v1
+apiVersion: v1
 kind: Service
 metadata:
   name: web-legacy
+  labels:
+    app: web-legacy
 spec:
-  template:
-    metadata:
-      annotations:
-        autoscaling.knative.dev/minScale: "1"
-    spec:
-      containers:
-        - name: web-legacy
-          image: brdgme/web-legacy
-          ports:
-            - containerPort: 80
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+  selector:
+    app: web-legacy

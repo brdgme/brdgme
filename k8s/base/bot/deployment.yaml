@@ -1,0 +1,30 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot
+  labels:
+    app: bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bot
+  template:
+    metadata:
+      labels:
+        app: bot
+    spec:
+      containers:
+        - name: bot
+          image: brdgme/bot
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: postgres-config
+            - secretRef:
+                name: bot-config
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:4000"

@@ -7,7 +7,8 @@
 - One-time cluster setup: `bash scripts/setup-kind-cluster.sh`
 
 The setup script is idempotent - safe to re-run. Kind cluster config changes
-require delete + recreate (`kind delete cluster` then re-run the script).
+(`ctlptl.yaml`) require delete + recreate (`kind delete cluster` then re-run
+the script).
 
 ## Daily Workflow
 
@@ -22,15 +23,16 @@ server running locally via `cargo leptos watch` on port 3000.
 WEB_IN_CLUSTER=1 tilt up
 ```
 
-Builds and deploys `brdgme/web` as a Knative Service inside Kind. Slow
-iteration - use only for cluster integration testing.
+Builds and deploys `brdgme/web` as a Deployment + ClusterIP Service inside
+Kind. Slow iteration - use only for cluster integration testing.
 
 ```
 LEGACY=1 tilt up
 ```
 
 Also deploys legacy stack. Services are accessible via domain-based routing
-through Kourier on port 8080 (all `*.lvh.me` subdomains resolve to 127.0.0.1):
+through a dev-only Gateway API `Gateway`/`HTTPRoute` set (Cilium), forwarded
+to host port 8080 (all `*.lvh.me` subdomains resolve to 127.0.0.1):
 
 - `http://web-legacy.brdgme.lvh.me:8080` - old React frontend
 - `http://api.brdgme.lvh.me:8080` - old Rocket API
@@ -166,12 +168,14 @@ k8s manifests under `k8s/` reflect how the system runs in production. They are
 not modified for dev convenience. Dev-specific workarounds (port-forwarding,
 local process substitutions) belong in the Tiltfile only.
 
-Knative Services are exposed via Kourier. The Kourier LoadBalancer service is
-patched to NodePort 31080, mapped to host port 8080 via `extraPortMappings` in
-`k8s/kind-config.yaml`. Knative is configured to use `lvh.me` as its base
-domain (`*.lvh.me` resolves to 127.0.0.1 via public DNS), so each service is
-reachable at `{service}.{namespace}.lvh.me:8080` without any `/etc/hosts`
-changes.
+The legacy trio's dev-only Gateway/HTTPRoute set is created by the Tiltfile
+under `LEGACY=1` (not committed to `k8s/`, since it uses plain HTTP and
+`lvh.me` hostnames that only make sense in dev - see the comment above the
+`legacy-gateway` Tilt resource). Cilium provisions a per-Gateway
+LoadBalancer Service that stays `<pending>` in Kind, so the `legacy-gateway`
+Tilt resource `kubectl port-forward`s it to host port 8080 once it exists.
+`*.lvh.me` resolves to 127.0.0.1 via public DNS, so each legacy service is
+reachable at `{service}.brdgme.lvh.me:8080` without any `/etc/hosts` changes.
 
 ## Tilt Resource Notes
 

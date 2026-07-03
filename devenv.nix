@@ -27,6 +27,8 @@
     act
     cargo-binstall
     cargo-leptos
+    cilium-cli
+    ctlptl
     mirrord
     wasm-bindgen-cli
     chromium

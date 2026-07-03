@@ -1309,7 +1309,18 @@ Bot changes:
 
 ---
 
-## Phase 14: Drop Knative - Plain Deployments + Gateway API [Pending]
+## Phase 14: Drop Knative - Plain Deployments + Gateway API [Implemented, verification pending]
+
+**Implementation (2026-07-03):** all delegable items done. Gateway exposure in
+Kind uses the documented fallback (Tilt port-forward via a `legacy-gateway`
+local_resource) rather than NodePort - Cilium creates the per-Gateway
+LoadBalancer Service dynamically, so a setup-script NodePort patch can't
+target it; `k8s/kind-config.yaml` was folded into the new `ctlptl.yaml` and
+deleted. GatewayClass name `cilium` assumed for prod - confirm on DOKS
+(Phase 16 prerequisite). Remaining: Prod prerequisites (operator-verified)
+and the live Kind verification below (no Kind cluster was available at
+implementation time; static validation was `kubectl kustomize` on all
+overlays plus a Knative-reference grep).
 
 **Decision (2026-07-03):** remove Knative Serving and Kourier entirely.
 Knative is healthy as a project (CNCF graduated 2025-09, quarterly releases -
@@ -1364,49 +1375,49 @@ final infrastructure.
 
 ### Manifests
 
-- [ ] `k8s/base/web/`: replace ksvc with a Deployment (target `replicas: 2`
+- [x] `k8s/base/web/`: replace ksvc with a Deployment (target `replicas: 2`
       to match the multi-replica vision; `replicas: 1` acceptable while the
       cluster is small - Redis/NATS fan-out already handles multi-replica)
       plus a ClusterIP Service on port 3000. Preserve the existing env/secret
       wiring.
-- [ ] `k8s/base/bot/`: replace ksvc with a Deployment (`replicas: 1`,
+- [x] `k8s/base/bot/`: replace ksvc with a Deployment (`replicas: 1`,
       always-on) plus a ClusterIP Service on port 4000. Preserve
       `postgres-config`/`bot-config` secret refs and `LISTEN_ADDR`.
-- [ ] Legacy trio (`web-legacy`, `api`, `websocket`): ksvc → Deployment +
+- [x] Legacy trio (`web-legacy`, `api`, `websocket`): ksvc → Deployment +
       Service. Temporary manifests - deleted at Phase 16 decommission - so
       minimal effort, no replicas tuning.
-- [ ] Delete `k8s/base/domain-mapping/`. Create `k8s/base/gateway/`: one
+- [x] Delete `k8s/base/domain-mapping/`. Create `k8s/base/gateway/`: one
       `Gateway` with an HTTPS listener per hostname (`brdg.me`,
       `legacy.brdg.me`, `api.brdg.me`, `ws.brdg.me`) and one `HTTPRoute` per
       hostname routing to the matching Service. Update
       `k8s/prod/app/kustomization.yaml` (currently includes
       `../../base/domain-mapping`).
-- [ ] Delete `k8s/prod/knative-serving/` and remove it from
+- [x] Delete `k8s/prod/knative-serving/` and remove it from
       `k8s/prod/kustomization.yaml`.
-- [ ] cert-manager for Gateway API: enable the Gateway API feature
+- [x] cert-manager for Gateway API: enable the Gateway API feature
       (`config.enableGatewayAPI: true` / `--enable-gateway-api`), annotate the
       `Gateway` with `cert-manager.io/cluster-issuer`, switch the
       ClusterIssuer HTTP01 solver from the Kourier ingress class to
       `gatewayHTTPRoute` solvers referencing the Gateway.
-- [ ] Optional cleanup: game service Services from NodePort → ClusterIP (only
+- [x] Optional cleanup: game service Services from NodePort → ClusterIP (only
       the monolith calls them in-cluster).
 
 ### Dev environment (Kind)
 
-- [ ] `scripts/setup-kind-cluster.sh`: remove the Knative Serving + Kourier
+- [x] `scripts/setup-kind-cluster.sh`: remove the Knative Serving + Kourier
       install blocks, webhook waits, and Kourier NodePort patch. Keep Cilium
       (CNI), the GameVersion CRD, and the Kind cluster/registry logic.
-- [ ] Enable Cilium Gateway API in Kind: install the Gateway API CRDs and set
+- [x] Enable Cilium Gateway API in Kind: install the Gateway API CRDs and set
       `gatewayAPI.enabled=true` in the Cilium install values. Expose the
       Gateway via NodePort 31080 (already mapped to host 8080 in
       `k8s/kind-config.yaml` `extraPortMappings`) to preserve the
       `{service}.brdgme.lvh.me:8080` dev URLs. If Cilium's Gateway NodePort
       exposure proves awkward in Kind, fall back to Tilt port-forwards and
       update DEV.md accordingly - decide during implementation.
-- [ ] `Tiltfile`: remove the `k8s_kind('Service', ...)` registration; update
+- [x] `Tiltfile`: remove the `k8s_kind('Service', ...)` registration; update
       the mode comments; verify `WEB_IN_CLUSTER=1` and `LEGACY=1` modes
       deploy and route correctly.
-- [ ] Local registry: no longer mandatory (the digest-resolution requirement
+- [x] Local registry: no longer mandatory (the digest-resolution requirement
       was Knative's) but kept - it is faster than `kind load`. Replace the
       hand-rolled cluster + registry bootstrap (the docker run / network
       connect / KEP-1755 ConfigMap blocks in `setup-kind-cluster.sh`) with
@@ -1439,11 +1450,11 @@ final infrastructure.
 
 ### Docs
 
-- [ ] Update `docs/DEV.md`: Kourier/Knative references, lvh.me routing
+- [x] Update `docs/DEV.md`: Kourier/Knative references, lvh.me routing
       explanation, setup script description.
-- [ ] `docs/VISION.md` and `docs/ARCHITECTURE.md` already reflect the target
+- [x] `docs/VISION.md` and `docs/ARCHITECTURE.md` already reflect the target
       state (updated 2026-07-03).
-- [ ] Update the operator long-term goal wherever stated: it manages
+- [x] Update the operator long-term goal wherever stated: it manages
       Deployment/Service lifecycle per game version, not Knative Services.
 
 ---

@@ -6,7 +6,7 @@ metadata:
   labels:
     app: no-thanks-1
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
     - port: 80
   selector:

@@ -1,0 +1,24 @@
+---
+apiVersion: ctlptl.dev/v1alpha1
+kind: Registry
+name: kind-registry
+port: 5000
+---
+apiVersion: ctlptl.dev/v1alpha1
+kind: Cluster
+product: kind
+registry: kind-registry
+kindV1Alpha4Cluster:
+  kind: Cluster
+  apiVersion: kind.x-k8s.io/v1alpha4
+  # Default CNI (kindnet) is disabled - Cilium is installed separately by
+  # scripts/setup-kind-cluster.sh so Gateway API support matches production.
+  networking:
+    disableDefaultCNI: true
+  nodes:
+  - role: control-plane
+    image: kindest/node:v1.34.0
+  containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."kind-registry:5000"]
+      endpoint = ["http://kind-registry:5000"]

@@ -1,0 +1,22 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-legacy
+  labels:
+    app: web-legacy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-legacy
+  template:
+    metadata:
+      labels:
+        app: web-legacy
+    spec:
+      containers:
+        - name: web-legacy
+          image: brdgme/web-legacy
+          ports:
+            - containerPort: 80

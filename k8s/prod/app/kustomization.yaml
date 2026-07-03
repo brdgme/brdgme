@@ -1,7 +1,7 @@
 namespace: brdgme
 bases:
 - ../../base/brdgme
-- ../../base/domain-mapping
+- ../../base/gateway
 images:
 - name: brdgme/migrate
   newName: ghcr.io/brdgme/brdgme/migrate

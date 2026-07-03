@@ -5,11 +5,14 @@
 #   to Kind. Runs `cargo leptos watch` locally on port 3000 for fast iteration.
 #
 # Full-cluster mode (WEB_IN_CLUSTER=1):
-#   Also builds brdgme/web and deploys it as a Knative Service in Kind.
+#   Also builds brdgme/web and deploys it as a Deployment + ClusterIP Service
+#   in Kind.
 #
 # Legacy side-by-side mode (LEGACY=1):
-#   Also builds and deploys web-legacy, api, and websocket as Knative Services.
-#   Services are accessible via lvh.me domain routing on port 8080.
+#   Also builds and deploys web-legacy, api, and websocket as Deployments +
+#   ClusterIP Services, plus a dev-only Gateway/HTTPRoute set routing by
+#   *.brdgme.lvh.me hostname. Reachable via `kubectl port-forward` (see the
+#   "legacy-gateway" resource below) on port 8080.
 #
 # Prerequisites: run scripts/setup-kind-cluster.sh once before `tilt up`.
 
@@ -54,12 +57,10 @@ for game in [
 # Push images to the local Kind registry. The host pushes to localhost:5000
 # (port-mapped from the kind-registry container); manifests reference
 # kind-registry:5000 which resolves inside the cluster via Docker network DNS.
-# Required for Knative: it resolves image digests from the registry directly,
-# so kind load docker-image is insufficient.
+# Not strictly required now that everything is a plain Deployment (`kind load
+# docker-image` would work too), but kept - pushing to a registry is faster
+# than `kind load` for repeated iteration.
 default_registry('localhost:5000', host_from_cluster='kind-registry:5000')
-
-# Register Knative Service as a workload type so Tilt can track it.
-k8s_kind('Service', api_version='serving.knative.dev/v1', image_json_path='{.spec.template.spec.containers[0].image}')
 
 # --- Kubernetes resources ---
 
@@ -172,3 +173,82 @@ if LEGACY:
     k8s_resource("web-legacy", links=["http://web-legacy.brdgme.lvh.me:8080"])
     k8s_resource("api", links=["http://api.brdgme.lvh.me:8080"])
     k8s_resource("websocket", links=["http://websocket.brdgme.lvh.me:8080"])
+
+    # Dev-only Gateway/HTTPRoute set routing by *.brdgme.lvh.me hostname.
+    # k8s/base/gateway/ (real hostnames, HTTPS, cert-manager) is prod-only -
+    # this dev equivalent is plain HTTP and lives only in the Tiltfile, per
+    # the "dev workarounds belong in the Tiltfile, not k8s/" convention.
+    #
+    # Cilium provisions a per-Gateway LoadBalancer Service (named
+    # cilium-gateway-<gateway-name>) which stays <pending> in Kind. Rather
+    # than repeat the Kourier NodePort-patch workaround this replaces
+    # (fragile: the Service is created dynamically by the Gateway
+    # controller, not by an applied manifest, so a setup-script patch can't
+    # reliably target it before Tilt creates the Gateway), this uses a Tilt
+    # local_resource that port-forwards it once it exists.
+    k8s_yaml(blob("""
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: brdgme-dev
+  namespace: brdgme
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-legacy
+  namespace: brdgme
+spec:
+  parentRefs:
+    - name: brdgme-dev
+  hostnames:
+    - web-legacy.brdgme.lvh.me
+  rules:
+    - backendRefs:
+        - name: web-legacy
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api
+  namespace: brdgme
+spec:
+  parentRefs:
+    - name: brdgme-dev
+  hostnames:
+    - api.brdgme.lvh.me
+  rules:
+    - backendRefs:
+        - name: api
+          port: 8000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: websocket
+  namespace: brdgme
+spec:
+  parentRefs:
+    - name: brdgme-dev
+  hostnames:
+    - websocket.brdgme.lvh.me
+  rules:
+    - backendRefs:
+        - name: websocket
+          port: 80
+"""))
+    local_resource(
+        "legacy-gateway",
+        serve_cmd="until kubectl get svc -n brdgme cilium-gateway-brdgme-dev >/dev/null 2>&1; do sleep 2; done; kubectl port-forward -n brdgme svc/cilium-gateway-brdgme-dev 8080:80",
+        resource_deps=["web-legacy", "api", "websocket"],
+    )

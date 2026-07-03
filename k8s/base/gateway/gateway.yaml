@@ -1,0 +1,46 @@
+---
+# Single Gateway with one HTTPS listener per hostname. TLS certificates are
+# issued by cert-manager's Gateway API integration (annotation below), which
+# creates one Certificate/Secret per listener automatically.
+#
+# gatewayClassName assumes the DOKS managed Gateway API implementation
+# (Cilium) registers a GatewayClass named "cilium" - this matches the Kind
+# dev setup in scripts/setup-kind-cluster.sh. Confirm the exact class name
+# on the production cluster (Phase 16 prerequisite) before applying there.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: brdgme
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: web
+      hostname: brdg.me
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+          - name: brdg-me-tls
+    - name: web-legacy
+      hostname: legacy.brdg.me
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+          - name: legacy-brdg-me-tls
+    - name: api
+      hostname: api.brdg.me
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+          - name: api-brdg-me-tls
+    - name: websocket
+      hostname: ws.brdg.me
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+          - name: ws-brdg-me-tls

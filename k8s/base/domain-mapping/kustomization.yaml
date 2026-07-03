@@ -1,5 +1,0 @@
-resources:
-- web.yaml
-- web-legacy.yaml
-- api.yaml
-- websocket.yaml
