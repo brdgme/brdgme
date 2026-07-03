@@ -1,14 +1,14 @@
-use leptos::prelude::*;
 use leptos::html;
+use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{
     components::{Route, Router, Routes, A},
     hooks::use_navigate,
-    NavigateOptions, StaticSegment, ParamSegment,
+    NavigateOptions, ParamSegment, StaticSegment,
 };
 use uuid::Uuid;
 
-use crate::auth::server::{login, confirm_login};
+use crate::auth::server::{confirm_login, login};
 use crate::components::MainLayout;
 use crate::websocket::BrdgmeGameUpdate;
 
@@ -36,7 +36,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
-    
+
     let (last_update, set_last_update) = signal(0u64);
     provide_context(crate::websocket_client::WebSocketTrigger {
         last_update,
@@ -109,14 +109,20 @@ fn LoginPage() -> impl IntoView {
 
     let on_email_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
-        let email_value = email_input.get().unwrap().value();
+        let Some(email_value) = email_input.get().map(|el| el.value()) else {
+            leptos::logging::warn!("on_email_submit: email_input not mounted");
+            return;
+        };
         set_email.set(email_value.clone());
         login_action.dispatch(email_value);
     };
 
     let on_code_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
-        let token = code_input.get().unwrap().value();
+        let Some(token) = code_input.get().map(|el| el.value()) else {
+            leptos::logging::warn!("on_code_submit: code_input not mounted");
+            return;
+        };
         confirm_action.dispatch(token);
     };
 
@@ -194,7 +200,7 @@ impl Default for OpponentSlot {
 
 #[component]
 fn GamesPage() -> impl IntoView {
-    use crate::game::server_fns::{get_available_game_types, create_new_game, BotSlot};
+    use crate::game::server_fns::{create_new_game, get_available_game_types, BotSlot};
 
     let game_types = LocalResource::new(|| get_available_game_types());
 
@@ -222,12 +228,22 @@ fn GamesPage() -> impl IntoView {
         set_opponent_slots.update(|v| v.resize_with(n, OpponentSlot::default));
     });
 
-    let create_action = Action::new(|(version_id, emails, bots): &(Uuid, Vec<String>, Vec<BotSlot>)| {
-        let version_id = *version_id;
-        let emails = if emails.is_empty() { None } else { Some(emails.clone()) };
-        let bots = if bots.is_empty() { None } else { Some(bots.clone()) };
-        async move { create_new_game(version_id, emails, bots).await }
-    });
+    let create_action = Action::new(
+        |(version_id, emails, bots): &(Uuid, Vec<String>, Vec<BotSlot>)| {
+            let version_id = *version_id;
+            let emails = if emails.is_empty() {
+                None
+            } else {
+                Some(emails.clone())
+            };
+            let bots = if bots.is_empty() {
+                None
+            } else {
+                Some(bots.clone())
+            };
+            async move { create_new_game(version_id, emails, bots).await }
+        },
+    );
 
     let navigate = use_navigate();
     Effect::new(move |_| {
@@ -245,7 +261,9 @@ fn GamesPage() -> impl IntoView {
             for slot in slots {
                 match slot {
                     OpponentSlot::Human(email) => emails.push(email),
-                    OpponentSlot::Bot { name, difficulty } => bots.push(BotSlot { name, difficulty }),
+                    OpponentSlot::Bot { name, difficulty } => {
+                        bots.push(BotSlot { name, difficulty })
+                    }
                 }
             }
             create_action.dispatch((version_id, emails, bots));
@@ -446,7 +464,7 @@ fn DashboardPage() -> impl IntoView {
         <MainLayout>
             <h1>"Dashboard"</h1>
             <p>"View your active games and statistics."</p>
-            
+
             <div class="dashboard-sections">
                 <section class="active-games">
                     <h2>"Active Games"</h2>
@@ -459,12 +477,18 @@ fn DashboardPage() -> impl IntoView {
 
 #[component]
 fn GamePage() -> impl IntoView {
-    use crate::game::server_fns::{get_game_details, mark_read};
     use crate::components::game::*;
+    use crate::game::server_fns::{get_game_details, mark_read};
     use std::str::FromStr;
 
     let params = leptos_router::hooks::use_params_map();
-    let game_id = move || params.get().get("id").as_deref().and_then(|id| Uuid::from_str(id).ok());
+    let game_id = move || {
+        params
+            .get()
+            .get("id")
+            .as_deref()
+            .and_then(|id| Uuid::from_str(id).ok())
+    };
 
     let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
 
@@ -488,18 +512,22 @@ fn GamePage() -> impl IntoView {
                 Some(id) => get_game_details(id).await,
                 None => Err(ServerFnError::new("Invalid Game ID")),
             }
-        }
+        },
     );
 
     // is_my_turn starts false in hydrate mode (Memo returns false until resource
     // deserializes). This only changes a CSS class — no structural mismatch.
     let is_my_turn = Memo::new(move |_| {
         let current_id = game_id();
-        let from_ws = ws_game.get()
+        let from_ws = ws_game
+            .get()
             .filter(|ws| Some(ws.game_id) == current_id)
             .map(|ws| ws.game_view.is_my_turn);
-        if let Some(v) = from_ws { return v; }
-        game_data.get()
+        if let Some(v) = from_ws {
+            return v;
+        }
+        game_data
+            .get()
             .and_then(|r| r.ok())
             .map(|d| d.is_my_turn)
             .unwrap_or(false)

@@ -1,7 +1,7 @@
 # Monolith Migration Plan
 
 **Current focus (in order):**
-Phase 10 runtime panics → Phase 11 testing foundation → Phase 12 ELO ratings
+Phase 11 testing foundation → Phase 12 ELO ratings
 (blocks prod deploy) → Restart 500 error → 3-player render → Phase 22a
 Resend outbound → Phase 14 drop Knative (incl. ctlptl) → Phase 13 NATS bot
 eventing (JetStream) → Phase 19 CloudNativePG → Phase 15 ArgoCD +
@@ -11,7 +11,7 @@ Phase 22b play-by-email → Phase 17 NATS WS migration → Phase 18 hardening
 value if started before Phase 14's prod prerequisites.
 
 Phases are numbered in assignment order, not execution order - see the focus
-line for execution order. Phases 1-9 are complete; 10+ are pending.
+line for execution order. Phases 1-10 are complete; 11+ are pending.
 (Renumbered 2026-07-02: 5.5→6, 5.6→7, old 6→8, 5.7→10, 6.5→ArgoCD, old
 7→cutover, old 8→NATS WS; ELO and NATS bot eventing split out of Phase 9
 into Phases 12 and 13. 2026-07-03: Phase 14 'Drop Knative' inserted; ArgoCD
@@ -22,7 +22,8 @@ sealed-secrets, and VictoriaLogs decisions folded into Phases 13/14/15/18.
 22b play-by-email; 22a revised same day to the Resend HTTP API - DO blocks
 outbound SMTP - superseding the Mailpit quick win. 2026-07-03 final pass:
 Renovate/cargo-deny/kubeconform quick win, leptos-use in Phase 17,
-tower_governor in 22a, stale root artifacts in the Phase 16 decommission.)
+tower_governor in 22a, stale root artifacts in the Phase 16 decommission.
+2026-07-03: Phase 10 runtime panics completed.)
 
 ## Objective
 
@@ -59,7 +60,6 @@ in their section describing what must be fleshed out first (in a future
 planning session - deliberately not done yet).
 
 **Ready to delegate now:**
-- Phase 10 (runtime panics) - exact locations and fixes specified.
 - Phase 11.1-11.5, 11.7 (testing) - stack decided, cases enumerated.
 - Phase 12 (ELO) - algorithm, reference code, tasks, and tests specified.
 - Phase 14 (drop Knative) - manifest inventory and tasks specified
@@ -843,7 +843,7 @@ and tokio-spawned `tracing::warn!`/`tracing::debug!` on HTTP error/success.
 
 ---
 
-## Phase 10: Eliminate runtime panics in rust/web [Pending]
+## Phase 10: Eliminate runtime panics in rust/web [Complete]
 
 **Goal:** Replace all panic-prone code in `rust/web/src` that could crash the
 server process or the WASM frontend at runtime with proper error handling.
@@ -856,35 +856,26 @@ intentional and excluded.
 
 ### Cases to fix
 
-- [ ] **`db.rs:407` - `games.last_mut().unwrap()`** (`find_active_games_for_user`
-  or similar): called after pushing game rows into a `Vec`. If the `Vec` is
-  empty when a game_player row is encountered (e.g. due to unexpected query
-  ordering or a schema inconsistency), this panics the server. Replace with an
-  explicit check that returns an `Err` with a descriptive message.
+- [x] **`db.rs:407` - `games.last_mut().unwrap()`** (`find_active_games_for_user`):
+  replaced with `.ok_or_else(...)` returning a descriptive `anyhow::Error`
+  instead of panicking.
 
-- [ ] **`db.rs:250-261` and `db.rs:393-404` - co-nullable LEFT JOIN unwraps**:
-  User fields (`u_created_at`, `u_updated_at`, `u_name`, `u_pref_colors`) are
-  unwrapped inside a `p.u_id.map(|id| ...)` closure, and bot fields
-  (`gb_game_id`, `gb_name`, `gb_difficulty`) likewise inside `p.gb_id.map(...)`.
-  These are logically safe (if the id column is non-null, the other columns of
-  the same LEFT JOIN row must be non-null), but they are not enforced by the
-  type system. If the query ever changes or a nullable column is added, this
-  will silently panic. Replace with `ok_or_else(|| ...)` and `?` propagation,
-  returning an `anyhow::Error` or `sqlx::Error`.
+- [x] **`db.rs:250-261` and `db.rs:393-404` - co-nullable LEFT JOIN unwraps**:
+  extracted `build_user_from_row` and `build_game_bot_from_row` helpers
+  (`db.rs`) using `ok_or_else` + `?`; both call sites (`find_game_extended`,
+  `find_active_games_for_user`) now propagate an `anyhow::Error` instead of
+  panicking if a LEFT JOIN row is malformed.
 
-- [ ] **`app.rs:112` and `app.rs:119` - `NodeRef::get().unwrap()` in form
-  submit handlers** (`on_email_submit`, `on_code_submit`): if the DOM node
-  referenced by `email_input` or `code_input` is not yet mounted when the
-  submit event fires, this panics the WASM process and kills the frontend.
-  Replace with `.get().map(|el| el.value()).unwrap_or_default()` or log a
-  warning and return early on `None`.
+- [x] **`app.rs:112` and `app.rs:119` - `NodeRef::get().unwrap()` in form
+  submit handlers**: replaced with `.get().map(|el| el.value())` +
+  `let...else` that logs a warning via `leptos::logging::warn!` and returns
+  early on `None`.
 
-- [ ] **`websocket_client.rs:21-23` - `window()`, `protocol()`, `host()`
-  `.expect()` calls**: these run in WASM only (client-side) so `window()` is
-  guaranteed. However `loc.protocol()` and `loc.host()` are fallible JS APIs
-  returning `Result`. If they ever return `Err` (e.g. in a sandboxed iframe
-  context), the WASM panics. Replace with graceful fallback: default to `ws:`
-  and log an error if protocol/host cannot be read.
+- [x] **`websocket_client.rs:21-23` - `window()`, `protocol()`, `host()`
+  `.expect()` calls**: `window()` kept as `.expect()` (guaranteed in WASM).
+  `protocol()` falls back to `"ws:"` with a logged warning on `Err`; `host()`
+  logs a warning and aborts the connect attempt on `Err` (no valid URL can be
+  built without it).
 
 ### Excluded (intentional)
 

@@ -8,19 +8,40 @@ pub struct WebSocketTrigger {
 
 #[cfg(feature = "hydrate")]
 pub fn use_websocket() {
-    use gloo_net::websocket::futures::WebSocket;
+    use crate::websocket::{BrdgmeGameUpdate, WebSocketMessage};
     use futures_util::StreamExt;
-    use crate::websocket::{WebSocketMessage, BrdgmeGameUpdate};
-    use leptos::task::spawn_local;
+    use gloo_net::websocket::futures::WebSocket;
     use leptos::logging::log;
+    use leptos::task::spawn_local;
 
     let trigger = expect_context::<WebSocketTrigger>();
     let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
 
     spawn_local(async move {
-        let loc = web_sys::window().expect("window should be available").location();
-        let protocol = if loc.protocol().expect("protocol should be available") == "https:" { "wss:" } else { "ws:" };
-        let host = loc.host().expect("host should be available");
+        let loc = web_sys::window()
+            .expect("window should be available")
+            .location();
+        let protocol = match loc.protocol() {
+            Ok(p) if p == "https:" => "wss:",
+            Ok(_) => "ws:",
+            Err(e) => {
+                log!(
+                    "WebSocket: failed to read location.protocol: {:?}, defaulting to ws:",
+                    e
+                );
+                "ws:"
+            }
+        };
+        let host = match loc.host() {
+            Ok(h) => h,
+            Err(e) => {
+                log!(
+                    "WebSocket: failed to read location.host: {:?}, cannot connect",
+                    e
+                );
+                return;
+            }
+        };
         let url = format!("{}//{}/ws", protocol, host);
 
         loop {

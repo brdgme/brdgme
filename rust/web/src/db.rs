@@ -1,13 +1,58 @@
 #[cfg(feature = "ssr")]
-use sqlx::postgres::PgPool;
+use crate::models::user::User;
 #[cfg(feature = "ssr")]
 use anyhow::Result;
 #[cfg(feature = "ssr")]
-use crate::models::user::User;
+use sqlx::postgres::PgPool;
 #[cfg(feature = "ssr")]
 use uuid::Uuid;
 
 pub use crate::game::server_fns::BotSlot;
+
+#[cfg(feature = "ssr")]
+fn build_user_from_row(
+    id: Option<Uuid>,
+    created_at: Option<time::PrimitiveDateTime>,
+    updated_at: Option<time::PrimitiveDateTime>,
+    name: Option<String>,
+    pref_colors: Option<Vec<String>>,
+    login_confirmation: Option<String>,
+    login_confirmation_at: Option<time::PrimitiveDateTime>,
+) -> Result<Option<crate::models::user::User>> {
+    let Some(id) = id else { return Ok(None) };
+    Ok(Some(crate::models::user::User {
+        id,
+        created_at: created_at
+            .ok_or_else(|| anyhow::anyhow!("user {id}: created_at missing from LEFT JOIN row"))?,
+        updated_at: updated_at
+            .ok_or_else(|| anyhow::anyhow!("user {id}: updated_at missing from LEFT JOIN row"))?,
+        name: name.ok_or_else(|| anyhow::anyhow!("user {id}: name missing from LEFT JOIN row"))?,
+        pref_colors: pref_colors
+            .ok_or_else(|| anyhow::anyhow!("user {id}: pref_colors missing from LEFT JOIN row"))?,
+        login_confirmation,
+        login_confirmation_at,
+    }))
+}
+
+#[cfg(feature = "ssr")]
+fn build_game_bot_from_row(
+    id: Option<Uuid>,
+    game_id: Option<Uuid>,
+    name: Option<String>,
+    difficulty: Option<String>,
+) -> Result<Option<crate::models::game::GameBot>> {
+    let Some(id) = id else { return Ok(None) };
+    Ok(Some(crate::models::game::GameBot {
+        id,
+        game_id: game_id
+            .ok_or_else(|| anyhow::anyhow!("game_bot {id}: game_id missing from LEFT JOIN row"))?,
+        name: name
+            .ok_or_else(|| anyhow::anyhow!("game_bot {id}: name missing from LEFT JOIN row"))?,
+        difficulty: difficulty.ok_or_else(|| {
+            anyhow::anyhow!("game_bot {id}: difficulty missing from LEFT JOIN row")
+        })?,
+    }))
+}
 
 #[cfg(feature = "ssr")]
 fn build_game_type_user(
@@ -23,19 +68,33 @@ fn build_game_type_user(
     default_game_type_id: Uuid,
     default_ts: time::PrimitiveDateTime,
 ) -> crate::models::game::GameTypeUser {
-    match (id, created_at, updated_at, game_type_id, user_id, rating, peak_rating) {
-        (Some(id), Some(created_at), Some(updated_at), Some(game_type_id), Some(user_id), Some(rating), Some(peak_rating)) => {
-            crate::models::game::GameTypeUser {
-                id,
-                created_at,
-                updated_at,
-                game_type_id,
-                user_id,
-                last_game_finished_at,
-                rating,
-                peak_rating,
-            }
-        }
+    match (
+        id,
+        created_at,
+        updated_at,
+        game_type_id,
+        user_id,
+        rating,
+        peak_rating,
+    ) {
+        (
+            Some(id),
+            Some(created_at),
+            Some(updated_at),
+            Some(game_type_id),
+            Some(user_id),
+            Some(rating),
+            Some(peak_rating),
+        ) => crate::models::game::GameTypeUser {
+            id,
+            created_at,
+            updated_at,
+            game_type_id,
+            user_id,
+            last_game_finished_at,
+            rating,
+            peak_rating,
+        },
         _ => crate::models::game::GameTypeUser {
             id: Uuid::nil(),
             created_at: default_ts,
@@ -45,14 +104,13 @@ fn build_game_type_user(
             last_game_finished_at: None,
             rating: 1500,
             peak_rating: 1500,
-        }
+        },
     }
 }
 
 #[cfg(feature = "ssr")]
 pub async fn create_pool() -> Result<PgPool> {
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let pool = PgPool::connect(&database_url).await?;
 
@@ -93,7 +151,10 @@ pub async fn get_user(pool: &PgPool, id: Uuid) -> Result<Option<User>> {
 }
 
 #[cfg(feature = "ssr")]
-pub async fn find_game_version(pool: &PgPool, id: Uuid) -> Result<Option<crate::models::game::GameVersion>> {
+pub async fn find_game_version(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<crate::models::game::GameVersion>> {
     sqlx::query_as!(
         crate::models::game::GameVersion,
         r#"
@@ -111,7 +172,12 @@ pub async fn find_game_version(pool: &PgPool, id: Uuid) -> Result<Option<crate::
 #[cfg(feature = "ssr")]
 pub async fn find_available_game_types(
     pool: &PgPool,
-) -> Result<Vec<(crate::models::game::GameType, Vec<crate::models::game::GameVersion>)>> {
+) -> Result<
+    Vec<(
+        crate::models::game::GameType,
+        Vec<crate::models::game::GameVersion>,
+    )>,
+> {
     let types = sqlx::query_as!(
         crate::models::game::GameType,
         "SELECT id, created_at, updated_at, name, player_counts, weight FROM game_types ORDER BY name"
@@ -130,7 +196,11 @@ pub async fn find_available_game_types(
     let result = types
         .into_iter()
         .map(|gt| {
-            let gv: Vec<_> = versions.iter().filter(|v| v.game_type_id == gt.id).cloned().collect();
+            let gv: Vec<_> = versions
+                .iter()
+                .filter(|v| v.game_type_id == gt.id)
+                .cloned()
+                .collect();
             (gt, gv)
         })
         .filter(|(_, gv)| !gv.is_empty())
@@ -194,7 +264,8 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
         None => return Ok(None),
     };
 
-    let game_version = find_game_version(pool, game.game_version_id).await?
+    let game_version = find_game_version(pool, game.game_version_id)
+        .await?
         .ok_or_else(|| anyhow::anyhow!("Game version not found"))?;
 
     let game_type = sqlx::query_as!(
@@ -240,26 +311,28 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
     let mut game_players = Vec::new();
     for p in players_raw {
         let gtu = build_game_type_user(
-            p.gtu_id, p.gtu_created_at, p.gtu_updated_at,
-            p.gtu_game_type_id, p.gtu_user_id, p.gtu_last_game_finished_at,
-            p.gtu_rating, p.gtu_peak_rating,
-            p.u_id, game_version.game_type_id, p.gp_created_at,
+            p.gtu_id,
+            p.gtu_created_at,
+            p.gtu_updated_at,
+            p.gtu_game_type_id,
+            p.gtu_user_id,
+            p.gtu_last_game_finished_at,
+            p.gtu_rating,
+            p.gtu_peak_rating,
+            p.u_id,
+            game_version.game_type_id,
+            p.gp_created_at,
         );
-        let user = p.u_id.map(|id| crate::models::user::User {
-            id,
-            created_at: p.u_created_at.unwrap(),
-            updated_at: p.u_updated_at.unwrap(),
-            name: p.u_name.unwrap(),
-            pref_colors: p.u_pref_colors.unwrap(),
-            login_confirmation: p.u_login_confirmation,
-            login_confirmation_at: p.u_login_confirmation_at,
-        });
-        let game_bot = p.gb_id.map(|id| crate::models::game::GameBot {
-            id,
-            game_id: p.gb_game_id.unwrap(),
-            name: p.gb_name.unwrap(),
-            difficulty: p.gb_difficulty.unwrap(),
-        });
+        let user = build_user_from_row(
+            p.u_id,
+            p.u_created_at,
+            p.u_updated_at,
+            p.u_name,
+            p.u_pref_colors,
+            p.u_login_confirmation,
+            p.u_login_confirmation_at,
+        )?;
+        let game_bot = build_game_bot_from_row(p.gb_id, p.gb_game_id, p.gb_name, p.gb_difficulty)?;
 
         game_players.push(GamePlayerExtended {
             game_player: crate::models::game::GamePlayer {
@@ -296,7 +369,10 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 }
 
 #[cfg(feature = "ssr")]
-pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result<Vec<GameExtended>> {
+pub async fn find_active_games_for_user(
+    user_id: &Uuid,
+    pool: &PgPool,
+) -> Result<Vec<GameExtended>> {
     // Fetch all active games for this user in a single query joining all required tables.
     let rows = sqlx::query!(
         r#"
@@ -383,28 +459,34 @@ pub async fn find_active_games_for_user(user_id: &Uuid, pool: &PgPool) -> Result
         }
 
         let gtu = build_game_type_user(
-            row.gtu_id, row.gtu_created_at, row.gtu_updated_at,
-            row.gtu_game_type_id, row.gtu_user_id, row.gtu_last_game_finished_at,
-            row.gtu_rating, row.gtu_peak_rating,
-            row.u_id, row.game_type_id, row.gp_created_at,
+            row.gtu_id,
+            row.gtu_created_at,
+            row.gtu_updated_at,
+            row.gtu_game_type_id,
+            row.gtu_user_id,
+            row.gtu_last_game_finished_at,
+            row.gtu_rating,
+            row.gtu_peak_rating,
+            row.u_id,
+            row.game_type_id,
+            row.gp_created_at,
         );
-        let user = row.u_id.map(|id| crate::models::user::User {
-            id,
-            created_at: row.u_created_at.unwrap(),
-            updated_at: row.u_updated_at.unwrap(),
-            name: row.u_name.unwrap(),
-            pref_colors: row.u_pref_colors.unwrap(),
-            login_confirmation: row.u_login_confirmation,
-            login_confirmation_at: row.u_login_confirmation_at,
-        });
-        let game_bot = row.gb_id.map(|id| crate::models::game::GameBot {
-            id,
-            game_id: row.gb_game_id.unwrap(),
-            name: row.gb_name.unwrap(),
-            difficulty: row.gb_difficulty.unwrap(),
-        });
+        let user = build_user_from_row(
+            row.u_id,
+            row.u_created_at,
+            row.u_updated_at,
+            row.u_name,
+            row.u_pref_colors,
+            row.u_login_confirmation,
+            row.u_login_confirmation_at,
+        )?;
+        let game_bot =
+            build_game_bot_from_row(row.gb_id, row.gb_game_id, row.gb_name, row.gb_difficulty)?;
 
-        games.last_mut().unwrap().game_players.push(GamePlayerExtended {
+        let game = games.last_mut().ok_or_else(|| {
+            anyhow::anyhow!("game_players row for game {game_id} encountered before its game row")
+        })?;
+        game.game_players.push(GamePlayerExtended {
             game_player: crate::models::game::GamePlayer {
                 id: row.gp_id,
                 created_at: row.gp_created_at,
@@ -525,7 +607,10 @@ pub async fn create_game_with_users(
 
     // Bot slots
     for bot in opts.bot_slots {
-        slots.push(PlayerSlotInternal::Bot { name: bot.name.clone(), difficulty: bot.difficulty.clone() });
+        slots.push(PlayerSlotInternal::Bot {
+            name: bot.name.clone(),
+            difficulty: bot.difficulty.clone(),
+        });
     }
 
     // 2. Randomize player order
@@ -536,7 +621,9 @@ pub async fn create_game_with_users(
     }
 
     // 3. Assign colors
-    let colors = vec!["Green", "Red", "Blue", "Amber", "Purple", "Brown", "BlueGrey"];
+    let colors = vec![
+        "Green", "Red", "Blue", "Amber", "Purple", "Brown", "BlueGrey",
+    ];
 
     // 4. Create Game
     let is_finished = !opts.placings.is_empty();
@@ -556,7 +643,8 @@ pub async fn create_game_with_users(
     .await?;
 
     // 5. Create Players
-    let game_type_id = find_game_version(pool, opts.game_version_id).await?
+    let game_type_id = find_game_version(pool, opts.game_version_id)
+        .await?
         .ok_or_else(|| anyhow::anyhow!("Game version not found"))?
         .game_type_id;
 
@@ -637,7 +725,7 @@ pub async fn create_game_logs(
     logs: Vec<brdgme_cmd::api::CliLog>,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
-    
+
     // Get player IDs by position
     let players = sqlx::query!(
         "SELECT id, position FROM game_players WHERE game_id = $1",
@@ -645,7 +733,7 @@ pub async fn create_game_logs(
     )
     .fetch_all(&mut *tx)
     .await?;
-    
+
     let mut pos_to_id = std::collections::HashMap::new();
     for p in players {
         pos_to_id.insert(p.position as usize, p.id);
@@ -899,7 +987,11 @@ pub async fn update_game_command_success(
         let is_turn_at = if is_turn { now } else { p.is_turn_at };
         let is_played = p.id == played_player_id;
         let last_turn_at = if is_played { now } else { p.last_turn_at };
-        let undo_game_state: Option<&str> = if is_played && can_undo { Some(prev_game_state) } else { None };
+        let undo_game_state: Option<&str> = if is_played && can_undo {
+            Some(prev_game_state)
+        } else {
+            None
+        };
 
         sqlx::query!(
             r#"UPDATE game_players
