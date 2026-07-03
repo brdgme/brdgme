@@ -1,5 +1,5 @@
-use crate::command::{Spec, Suggestion};
 use crate::command::parser::Parser;
+use crate::command::{Spec, Suggestion};
 
 impl Spec {
     pub fn suggest(&self, input: &str, names: &[String]) -> Vec<Suggestion> {
@@ -11,35 +11,48 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
     match spec {
         Spec::Token(token) => {
             if token.to_lowercase().starts_with(&remaining.to_lowercase()) {
-                vec![Suggestion { value: token.clone(), desc: None }]
+                vec![Suggestion {
+                    value: token.clone(),
+                    desc: None,
+                }]
             } else {
                 vec![]
             }
         }
         Spec::Enum { values, .. } => {
             let lower = remaining.to_lowercase();
-            values.iter()
+            values
+                .iter()
                 .filter(|v| v.to_lowercase().starts_with(&lower))
-                .map(|v| Suggestion { value: v.clone(), desc: None })
+                .map(|v| Suggestion {
+                    value: v.clone(),
+                    desc: None,
+                })
                 .collect()
         }
-        Spec::OneOf(specs) => {
-            specs.iter().flat_map(|s| suggest_spec(s, remaining, names)).collect()
-        }
+        Spec::OneOf(specs) => specs
+            .iter()
+            .flat_map(|s| suggest_spec(s, remaining, names))
+            .collect(),
         Spec::Doc { desc, spec, .. } => {
             let suggs = suggest_spec(spec, remaining, names);
             let at_current_pos = suggs.iter().any(|s| {
-                s.value.to_lowercase().starts_with(&remaining.to_lowercase())
+                s.value
+                    .to_lowercase()
+                    .starts_with(&remaining.to_lowercase())
             });
             if !at_current_pos {
                 return suggs;
             }
-            suggs.into_iter().map(|mut s| {
-                if s.desc.is_none() {
-                    s.desc = desc.clone();
-                }
-                s
-            }).collect()
+            suggs
+                .into_iter()
+                .map(|mut s| {
+                    if s.desc.is_none() {
+                        s.desc = desc.clone();
+                    }
+                    s
+                })
+                .collect()
         }
         Spec::Chain(specs) => {
             let mut rem = remaining;
@@ -62,14 +75,21 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
             (start..=end)
                 .map(|i| i.to_string())
                 .filter(|s| s.starts_with(remaining))
-                .map(|v| Suggestion { value: v, desc: None })
+                .map(|v| Suggestion {
+                    value: v,
+                    desc: None,
+                })
                 .collect()
         }
         Spec::Player => {
             let lower = remaining.to_lowercase();
-            names.iter()
+            names
+                .iter()
                 .filter(|n| n.to_lowercase().starts_with(&lower))
-                .map(|n| Suggestion { value: n.clone(), desc: None })
+                .map(|n| Suggestion {
+                    value: n.clone(),
+                    desc: None,
+                })
                 .collect()
         }
         Spec::Opt(spec) => suggest_spec(spec, remaining, names),
@@ -137,28 +157,40 @@ mod tests {
 
     #[test]
     fn enum_empty_input_returns_all_values() {
-        let spec = Spec::Enum { values: vec!["buy".into(), "sell".into(), "play".into()], exact: false };
+        let spec = Spec::Enum {
+            values: vec!["buy".into(), "sell".into(), "play".into()],
+            exact: false,
+        };
         let s = spec.suggest("", &[]);
         assert_eq!(vals(&s), vec!["buy", "sell", "play"]);
     }
 
     #[test]
     fn enum_prefix_filters_values() {
-        let spec = Spec::Enum { values: vec!["buy".into(), "sell".into(), "play".into()], exact: false };
+        let spec = Spec::Enum {
+            values: vec!["buy".into(), "sell".into(), "play".into()],
+            exact: false,
+        };
         let s = spec.suggest("p", &[]);
         assert_eq!(vals(&s), vec!["play"]);
     }
 
     #[test]
     fn enum_no_match_returns_empty() {
-        let spec = Spec::Enum { values: vec!["buy".into(), "sell".into()], exact: false };
+        let spec = Spec::Enum {
+            values: vec!["buy".into(), "sell".into()],
+            exact: false,
+        };
         let s = spec.suggest("x", &[]);
         assert!(s.is_empty());
     }
 
     #[test]
     fn enum_case_insensitive() {
-        let spec = Spec::Enum { values: vec!["Sackson".into(), "Tower".into()], exact: false };
+        let spec = Spec::Enum {
+            values: vec!["Sackson".into(), "Tower".into()],
+            exact: false,
+        };
         let s = spec.suggest("sa", &[]);
         assert_eq!(vals(&s), vec!["Sackson"]);
     }
@@ -166,7 +198,10 @@ mod tests {
     #[test]
     fn enum_exact_same_prefix_behavior() {
         // exact flag affects parsing but not prefix-based suggestion generation
-        let spec = Spec::Enum { values: vec!["one".into(), "other".into()], exact: true };
+        let spec = Spec::Enum {
+            values: vec!["one".into(), "other".into()],
+            exact: true,
+        };
         let s = spec.suggest("o", &[]);
         assert_eq!(vals(&s), vec!["one", "other"]);
     }
@@ -175,30 +210,21 @@ mod tests {
 
     #[test]
     fn one_of_empty_input_returns_all_branches() {
-        let spec = Spec::OneOf(vec![
-            Spec::Token("buy".into()),
-            Spec::Token("sell".into()),
-        ]);
+        let spec = Spec::OneOf(vec![Spec::Token("buy".into()), Spec::Token("sell".into())]);
         let s = spec.suggest("", &[]);
         assert_eq!(vals(&s), vec!["buy", "sell"]);
     }
 
     #[test]
     fn one_of_prefix_filters_to_matching_branch() {
-        let spec = Spec::OneOf(vec![
-            Spec::Token("buy".into()),
-            Spec::Token("sell".into()),
-        ]);
+        let spec = Spec::OneOf(vec![Spec::Token("buy".into()), Spec::Token("sell".into())]);
         let s = spec.suggest("s", &[]);
         assert_eq!(vals(&s), vec!["sell"]);
     }
 
     #[test]
     fn one_of_no_match_returns_empty() {
-        let spec = Spec::OneOf(vec![
-            Spec::Token("buy".into()),
-            Spec::Token("sell".into()),
-        ]);
+        let spec = Spec::OneOf(vec![Spec::Token("buy".into()), Spec::Token("sell".into())]);
         let s = spec.suggest("x", &[]);
         assert!(s.is_empty());
     }
@@ -260,7 +286,10 @@ mod tests {
             spec: Box::new(Spec::Chain(vec![
                 Spec::Token("play".into()),
                 Spec::Space,
-                Spec::Enum { values: vec!["A1".into(), "B2".into()], exact: false },
+                Spec::Enum {
+                    values: vec!["A1".into(), "B2".into()],
+                    exact: false,
+                },
             ])),
         };
         let s = spec.suggest("play ", &[]);
@@ -298,7 +327,10 @@ mod tests {
         let spec = Spec::Chain(vec![
             Spec::Token("play".into()),
             Spec::Space,
-            Spec::Enum { values: vec!["A1".into(), "B2".into()], exact: false },
+            Spec::Enum {
+                values: vec!["A1".into(), "B2".into()],
+                exact: false,
+            },
         ]);
         let s = spec.suggest("play ", &[]);
         assert_eq!(vals(&s), vec!["A1", "B2"]);
@@ -309,7 +341,10 @@ mod tests {
         let spec = Spec::Chain(vec![
             Spec::Token("play".into()),
             Spec::Space,
-            Spec::Enum { values: vec!["A1".into(), "A2".into(), "B1".into()], exact: false },
+            Spec::Enum {
+                values: vec!["A1".into(), "A2".into(), "B1".into()],
+                exact: false,
+            },
         ]);
         let s = spec.suggest("play A", &[]);
         assert_eq!(vals(&s), vec!["A1", "A2"]);
@@ -329,14 +364,20 @@ mod tests {
 
     #[test]
     fn int_empty_input_generates_range() {
-        let spec = Spec::Int { min: Some(1), max: Some(3) };
+        let spec = Spec::Int {
+            min: Some(1),
+            max: Some(3),
+        };
         let s = spec.suggest("", &[]);
         assert_eq!(vals(&s), vec!["1", "2", "3"]);
     }
 
     #[test]
     fn int_caps_range_at_5_values() {
-        let spec = Spec::Int { min: Some(1), max: Some(100) };
+        let spec = Spec::Int {
+            min: Some(1),
+            max: Some(100),
+        };
         let s = spec.suggest("", &[]);
         assert_eq!(s.len(), 5);
         assert_eq!(vals(&s), vec!["1", "2", "3", "4", "5"]);
@@ -344,21 +385,30 @@ mod tests {
 
     #[test]
     fn int_no_min_defaults_to_1() {
-        let spec = Spec::Int { min: None, max: Some(3) };
+        let spec = Spec::Int {
+            min: None,
+            max: Some(3),
+        };
         let s = spec.suggest("", &[]);
         assert_eq!(vals(&s), vec!["1", "2", "3"]);
     }
 
     #[test]
     fn int_prefix_filters_values() {
-        let spec = Spec::Int { min: Some(10), max: Some(19) };
+        let spec = Spec::Int {
+            min: Some(10),
+            max: Some(19),
+        };
         let s = spec.suggest("1", &[]);
         assert!(vals(&s).iter().all(|v| v.starts_with('1')));
     }
 
     #[test]
     fn int_no_prefix_match_returns_empty() {
-        let spec = Spec::Int { min: Some(1), max: Some(5) };
+        let spec = Spec::Int {
+            min: Some(1),
+            max: Some(5),
+        };
         let s = spec.suggest("9", &[]);
         assert!(s.is_empty());
     }
@@ -425,7 +475,10 @@ mod tests {
     #[test]
     fn many_suggests_from_item_spec() {
         let spec = Spec::Many {
-            spec: Box::new(Spec::Enum { values: vec!["1".into(), "2".into(), "3".into()], exact: false }),
+            spec: Box::new(Spec::Enum {
+                values: vec!["1".into(), "2".into(), "3".into()],
+                exact: false,
+            }),
             min: None,
             max: None,
             delim: None,
@@ -439,7 +492,10 @@ mod tests {
         // Known limitation: after typing "1, " the delimiter is not consumed,
         // so prefix "1, " doesn't match any enum value starting with "1, ".
         let spec = Spec::Many {
-            spec: Box::new(Spec::Enum { values: vec!["1".into(), "2".into()], exact: false }),
+            spec: Box::new(Spec::Enum {
+                values: vec!["1".into(), "2".into()],
+                exact: false,
+            }),
             min: None,
             max: None,
             delim: Some(Box::new(Spec::Token(", ".into()))),
@@ -459,7 +515,10 @@ mod tests {
                 spec: Box::new(Spec::Chain(vec![
                     Spec::Token("play".into()),
                     Spec::Space,
-                    Spec::Enum { values: vec!["A1".into(), "A2".into(), "B1".into()], exact: false },
+                    Spec::Enum {
+                        values: vec!["A1".into(), "A2".into(), "B1".into()],
+                        exact: false,
+                    },
                 ])),
             },
             Spec::Doc {
@@ -468,7 +527,10 @@ mod tests {
                 spec: Box::new(Spec::Chain(vec![
                     Spec::Token("buy".into()),
                     Spec::Space,
-                    Spec::Enum { values: vec!["Sackson".into(), "Tower".into()], exact: false },
+                    Spec::Enum {
+                        values: vec!["Sackson".into(), "Tower".into()],
+                        exact: false,
+                    },
                 ])),
             },
         ])
@@ -581,7 +643,10 @@ mod tests {
         let spec = Spec::Chain(vec![
             Spec::Token("play".into()),
             Spec::Space,
-            Spec::Enum { values: vec!["A1".into(), "B2".into()], exact: false },
+            Spec::Enum {
+                values: vec!["A1".into(), "B2".into()],
+                exact: false,
+            },
         ]);
         let s = spec.suggest("play  ", &[]);
         assert_eq!(vals(&s), vec!["A1", "B2"]);
@@ -592,7 +657,10 @@ mod tests {
         let spec = Spec::Chain(vec![
             Spec::Token("play".into()),
             Spec::Space,
-            Spec::Enum { values: vec!["A1".into(), "A2".into(), "B1".into()], exact: false },
+            Spec::Enum {
+                values: vec!["A1".into(), "A2".into(), "B1".into()],
+                exact: false,
+            },
         ]);
         let s = spec.suggest("play  A", &[]);
         assert_eq!(vals(&s), vec!["A1", "A2"]);
@@ -607,7 +675,10 @@ mod tests {
         let spec = Spec::Chain(vec![
             Spec::Token("play".into()),
             Spec::Space,
-            Spec::Enum { values: vec!["A1".into(), "B2".into()], exact: false },
+            Spec::Enum {
+                values: vec!["A1".into(), "B2".into()],
+                exact: false,
+            },
         ]);
         let s = spec.suggest("PLAY ", &[]);
         assert_eq!(vals(&s), vec!["A1", "B2"]);
@@ -618,7 +689,10 @@ mod tests {
         let spec = Spec::Chain(vec![
             Spec::Token("play".into()),
             Spec::Space,
-            Spec::Enum { values: vec!["A1".into(), "A2".into(), "B1".into()], exact: false },
+            Spec::Enum {
+                values: vec!["A1".into(), "A2".into(), "B1".into()],
+                exact: false,
+            },
         ]);
         let s = spec.suggest("Play A", &[]);
         assert_eq!(vals(&s), vec!["A1", "A2"]);
@@ -632,7 +706,10 @@ mod tests {
             spec: Box::new(Spec::Chain(vec![
                 Spec::Token("play".into()),
                 Spec::Space,
-                Spec::Enum { values: vec!["A1".into(), "B2".into()], exact: false },
+                Spec::Enum {
+                    values: vec!["A1".into(), "B2".into()],
+                    exact: false,
+                },
             ])),
         };
         // Uppercase command typed - chain advances, tile suggestions returned without desc
@@ -787,8 +864,12 @@ mod tests {
 
     fn acquire_buy_phase_spec() -> Spec {
         let corps = vec![
-            "Worldwide".into(), "Sackson".into(), "Festival".into(),
-            "Imperial".into(), "American".into(), "Continental".into(),
+            "Worldwide".into(),
+            "Sackson".into(),
+            "Festival".into(),
+            "Imperial".into(),
+            "American".into(),
+            "Continental".into(),
             "Tower".into(),
         ];
         Spec::OneOf(vec![
@@ -803,7 +884,10 @@ mod tests {
                     Spec::Doc {
                         name: "#".into(),
                         desc: Some("number of shares to buy".into()),
-                        spec: Box::new(Spec::Int { min: Some(1), max: Some(3) }),
+                        spec: Box::new(Spec::Int {
+                            min: Some(1),
+                            max: Some(3),
+                        }),
                     },
                 ]),
                 Spec::Chain(vec![
@@ -811,7 +895,10 @@ mod tests {
                     Spec::Doc {
                         name: "corp".into(),
                         desc: Some("the corporation to buy shares in".into()),
-                        spec: Box::new(Spec::Enum { values: corps, exact: false }),
+                        spec: Box::new(Spec::Enum {
+                            values: corps,
+                            exact: false,
+                        }),
                     },
                 ]),
             ]),
@@ -830,7 +917,10 @@ mod tests {
         assert_eq!(s[0].value, "buy");
         assert_eq!(s[0].desc.as_deref(), Some("buy shares"));
         assert_eq!(s[1].value, "done");
-        assert_eq!(s[1].desc.as_deref(), Some("finish buying shares and end your turn"));
+        assert_eq!(
+            s[1].desc.as_deref(),
+            Some("finish buying shares and end your turn")
+        );
     }
 
     #[test]
@@ -848,7 +938,11 @@ mod tests {
         // After "buy " the chain advances through Doc+Space and suggests the Int range.
         let s = acquire_buy_phase_spec().suggest("buy ", &[]);
         assert_eq!(vals(&s), vec!["1", "2", "3"]);
-        assert!(descs(&s).iter().all(|d| *d == Some("number of shares to buy")));
+        assert!(
+            descs(&s)
+                .iter()
+                .all(|d| *d == Some("number of shares to buy"))
+        );
     }
 
     #[test]
@@ -857,9 +951,21 @@ mod tests {
         let s = acquire_buy_phase_spec().suggest("buy 3 ", &[]);
         assert_eq!(
             vals(&s),
-            vec!["Worldwide", "Sackson", "Festival", "Imperial", "American", "Continental", "Tower"]
+            vec![
+                "Worldwide",
+                "Sackson",
+                "Festival",
+                "Imperial",
+                "American",
+                "Continental",
+                "Tower"
+            ]
         );
-        assert!(descs(&s).iter().all(|d| *d == Some("the corporation to buy shares in")));
+        assert!(
+            descs(&s)
+                .iter()
+                .all(|d| *d == Some("the corporation to buy shares in"))
+        );
     }
 
     #[test]

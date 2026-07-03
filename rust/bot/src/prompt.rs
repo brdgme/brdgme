@@ -104,7 +104,10 @@ mod tests {
     #[test]
     fn renders_difficulty() {
         let output = render_prompt(&base_ctx()).unwrap();
-        assert!(output.contains("**medium**"), "difficulty not found in output");
+        assert!(
+            output.contains("**medium**"),
+            "difficulty not found in output"
+        );
     }
 
     #[test]
@@ -129,7 +132,10 @@ mod tests {
     fn marks_self_in_player_list() {
         let output = render_prompt(&base_ctx()).unwrap();
         assert!(output.contains("Alice (you)"), "self marker missing");
-        assert!(!output.contains("Bob (you)"), "Bob incorrectly marked as self");
+        assert!(
+            !output.contains("Bob (you)"),
+            "Bob incorrectly marked as self"
+        );
     }
 
     #[test]
@@ -148,14 +154,20 @@ mod tests {
     #[test]
     fn renders_logs() {
         let output = render_prompt(&base_ctx()).unwrap();
-        assert!(output.contains("Alice placed {{b}}C4{{/b}}"), "log 1 missing");
+        assert!(
+            output.contains("Alice placed {{b}}C4{{/b}}"),
+            "log 1 missing"
+        );
         assert!(output.contains("Bob bought 2 Sackson"), "log 2 missing");
     }
 
     #[test]
     fn renders_game_rules() {
         let output = render_prompt(&base_ctx()).unwrap();
-        assert!(output.contains("Place tiles and buy shares"), "game rules missing");
+        assert!(
+            output.contains("Place tiles and buy shares"),
+            "game rules missing"
+        );
     }
 
     #[test]
@@ -163,7 +175,10 @@ mod tests {
         let mut ctx = base_ctx();
         ctx.game_rules = String::new();
         let output = render_prompt(&ctx).unwrap();
-        assert!(!output.contains("Place tiles"), "rules shown when they should be absent");
+        assert!(
+            !output.contains("Place tiles"),
+            "rules shown when they should be absent"
+        );
     }
 
     #[test]
@@ -195,9 +210,15 @@ mod tests {
             },
         ];
         let output = render_prompt(&ctx).unwrap();
-        assert!(output.contains("previously responded"), "failed commands header missing");
+        assert!(
+            output.contains("previously responded"),
+            "failed commands header missing"
+        );
         assert!(output.contains("buy 5 sackson"), "failed command 1 missing");
-        assert!(output.contains("cannot buy more than 3 shares"), "error 1 missing");
+        assert!(
+            output.contains("cannot buy more than 3 shares"),
+            "error 1 missing"
+        );
         assert!(output.contains("buy 0 tower"), "failed command 2 missing");
         assert!(output.contains("minimum 1 share"), "error 2 missing");
     }
@@ -222,15 +243,30 @@ mod tests {
     fn spec_to_yaml_produces_expected_format() {
         let spec = Spec::OneOf(vec![
             Spec::Token("done".to_string()),
-            Spec::Int { min: Some(1), max: Some(3) },
+            Spec::Int {
+                min: Some(1),
+                max: Some(3),
+            },
         ]);
         let yaml = spec_to_yaml(&spec);
         // Top-level key should be the variant name as a mapping key, not a YAML tag.
-        assert!(yaml.contains("OneOf:"), "OneOf mapping key missing: {}", yaml);
-        assert!(yaml.contains("Token: done"), "Token variant missing: {}", yaml);
+        assert!(
+            yaml.contains("OneOf:"),
+            "OneOf mapping key missing: {}",
+            yaml
+        );
+        assert!(
+            yaml.contains("Token: done"),
+            "Token variant missing: {}",
+            yaml
+        );
         assert!(yaml.contains("min: 1"), "min missing: {}", yaml);
         assert!(yaml.contains("max: 3"), "max missing: {}", yaml);
         // Must NOT use YAML native tags.
-        assert!(!yaml.contains('!'), "YAML tags found - wrong format: {}", yaml);
+        assert!(
+            !yaml.contains('!'),
+            "YAML tags found - wrong format: {}",
+            yaml
+        );
     }
 }

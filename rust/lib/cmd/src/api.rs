@@ -1,6 +1,6 @@
-use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use time::PrimitiveDateTime;
 
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;

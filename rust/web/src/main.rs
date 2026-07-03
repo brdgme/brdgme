@@ -8,8 +8,8 @@ async fn main() {
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use web::app::*;
-    use web::db::create_pool;
     use web::auth::session::create_session_layer;
+    use web::db::create_pool;
     use web::state::AppState;
     use web::websocket::GameBroadcaster;
 
@@ -57,7 +57,7 @@ async fn main() {
             {
                 let leptos_options = state.leptos_options.clone();
                 move || shell(leptos_options.clone())
-            }
+            },
         )
         .nest("/api", web::game::server::api_routes())
         .route("/ws", axum::routing::get(web::websocket::ws_handler))
@@ -81,7 +81,9 @@ async fn shutdown_signal() {
     use tokio::signal;
 
     let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
 
     let terminate = async {

@@ -1,5 +1,5 @@
-use time::{OffsetDateTime, PrimitiveDateTime};
 use serde::{Deserialize, Serialize};
+use time::{OffsetDateTime, PrimitiveDateTime};
 
 use brdgme_markup::Node;
 

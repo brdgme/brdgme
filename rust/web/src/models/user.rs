@@ -1,6 +1,6 @@
-use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use time::PrimitiveDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

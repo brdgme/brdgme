@@ -1,5 +1,5 @@
-pub mod user;
 pub mod game;
+pub mod user;
 
-pub use user::*;
 pub use game::*;
+pub use user::*;

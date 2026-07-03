@@ -1,9 +1,9 @@
+use crate::components::game::PlayerName;
+use crate::game::server_fns::{get_active_games, GameSummary};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_navigate;
 use leptos_router::NavigateOptions;
-use crate::components::game::PlayerName;
-use crate::game::server_fns::{get_active_games, GameSummary};
 
 #[component]
 pub fn MainLayout(
@@ -45,12 +45,11 @@ pub fn SidebarMenu() -> impl IntoView {
     };
 
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
-    let active_games: LocalResource<Result<Vec<GameSummary>, ServerFnError>> = LocalResource::new(
-        move || async move {
+    let active_games: LocalResource<Result<Vec<GameSummary>, ServerFnError>> =
+        LocalResource::new(move || async move {
             let _ = trigger.last_update.get();
             get_active_games().await
-        },
-    );
+        });
 
     view! {
         <div class="menu">

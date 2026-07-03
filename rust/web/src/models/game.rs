@@ -1,6 +1,6 @@
-use time::PrimitiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use time::PrimitiveDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -12,7 +12,6 @@ pub struct GameType {
     pub player_counts: Vec<i32>,
     pub weight: f32,
 }
-
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct GameVersion {
@@ -90,4 +89,3 @@ pub struct GameTypeUser {
     pub rating: i32,
     pub peak_rating: i32,
 }
-

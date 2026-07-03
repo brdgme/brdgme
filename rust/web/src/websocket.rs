@@ -1,6 +1,6 @@
+use crate::game::server_fns::{GameLogEntry, GameViewData};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::game::server_fns::{GameViewData, GameLogEntry};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrdgmeGameUpdate {
@@ -21,7 +21,10 @@ pub use ssr::*;
 mod ssr {
     use super::*;
     use axum::{
-        extract::{ws::{WebSocket, WebSocketUpgrade, Message}, State},
+        extract::{
+            ws::{Message, WebSocket, WebSocketUpgrade},
+            State,
+        },
         response::IntoResponse,
     };
     use brdgme_cmd::api::{PlayerRender, PubRender};
@@ -32,7 +35,7 @@ mod ssr {
 
     use crate::auth::session::get_user_from_session;
     use crate::db::GameExtended;
-    use crate::game::server_fns::{GameViewData, PlayerViewData, GameLogEntry};
+    use crate::game::server_fns::{GameLogEntry, GameViewData, PlayerViewData};
     use crate::models::game::GameLog;
 
     // Legacy-compatible serialization structs matching the format the React frontend expects.
@@ -156,14 +159,18 @@ mod ssr {
     }
 
     fn build_markup_players(game_extended: &GameExtended) -> Vec<brdgme_markup::Player> {
-        game_extended.game_players.iter().map(|p| {
-            use std::str::FromStr;
-            brdgme_markup::Player {
-                name: p.name().to_string(),
-                color: brdgme_color::Color::from_str(&p.game_player.color)
-                    .unwrap_or(brdgme_color::WHITE),
-            }
-        }).collect()
+        game_extended
+            .game_players
+            .iter()
+            .map(|p| {
+                use std::str::FromStr;
+                brdgme_markup::Player {
+                    name: p.name().to_string(),
+                    color: brdgme_color::Color::from_str(&p.game_player.color)
+                        .unwrap_or(brdgme_color::WHITE),
+                }
+            })
+            .collect()
     }
 
     fn render_markup(markup_str: &str, players: &[brdgme_markup::Player]) -> String {
@@ -172,70 +179,76 @@ mod ssr {
     }
 
     fn build_legacy_game_players(game_extended: &GameExtended) -> Vec<LegacyGamePlayerEntry> {
-        game_extended.game_players.iter().map(|p| LegacyGamePlayerEntry {
-            game_player: LegacyGamePlayer {
-                id: p.game_player.id,
-                created_at: p.game_player.created_at,
-                updated_at: p.game_player.updated_at,
-                game_id: p.game_player.game_id,
-                user_id: p.game_player.user_id,
-                position: p.game_player.position,
-                color: p.game_player.color.clone(),
-                has_accepted: p.game_player.has_accepted,
-                is_turn: p.game_player.is_turn,
-                is_turn_at: p.game_player.is_turn_at,
-                last_turn_at: p.game_player.last_turn_at,
-                is_eliminated: p.game_player.is_eliminated,
-                is_read: p.game_player.is_read,
-                points: p.game_player.points,
-                can_undo: p.game_player.undo_game_state.is_some(),
-                place: p.game_player.place,
-                rating_change: p.game_player.rating_change,
-            },
-            user: match &p.user {
-                Some(u) => LegacyUser {
-                    id: u.id,
-                    created_at: u.created_at,
-                    updated_at: u.updated_at,
-                    name: u.name.clone(),
-                    pref_colors: u.pref_colors.clone(),
-                },
-                None => LegacyUser {
-                    id: p.game_bot.as_ref().map(|b| b.id).unwrap_or(Uuid::nil()),
+        game_extended
+            .game_players
+            .iter()
+            .map(|p| LegacyGamePlayerEntry {
+                game_player: LegacyGamePlayer {
+                    id: p.game_player.id,
                     created_at: p.game_player.created_at,
                     updated_at: p.game_player.updated_at,
-                    name: p.name().to_string(),
-                    pref_colors: vec![],
+                    game_id: p.game_player.game_id,
+                    user_id: p.game_player.user_id,
+                    position: p.game_player.position,
+                    color: p.game_player.color.clone(),
+                    has_accepted: p.game_player.has_accepted,
+                    is_turn: p.game_player.is_turn,
+                    is_turn_at: p.game_player.is_turn_at,
+                    last_turn_at: p.game_player.last_turn_at,
+                    is_eliminated: p.game_player.is_eliminated,
+                    is_read: p.game_player.is_read,
+                    points: p.game_player.points,
+                    can_undo: p.game_player.undo_game_state.is_some(),
+                    place: p.game_player.place,
+                    rating_change: p.game_player.rating_change,
                 },
-            },
-            game_type_user: LegacyGameTypeUser {
-                id: p.game_type_user.id,
-                created_at: p.game_type_user.created_at,
-                updated_at: p.game_type_user.updated_at,
-                game_type_id: p.game_type_user.game_type_id,
-                user_id: p.game_type_user.user_id,
-                rating: p.game_type_user.rating,
-                peak_rating: p.game_type_user.peak_rating,
-            },
-        }).collect()
+                user: match &p.user {
+                    Some(u) => LegacyUser {
+                        id: u.id,
+                        created_at: u.created_at,
+                        updated_at: u.updated_at,
+                        name: u.name.clone(),
+                        pref_colors: u.pref_colors.clone(),
+                    },
+                    None => LegacyUser {
+                        id: p.game_bot.as_ref().map(|b| b.id).unwrap_or(Uuid::nil()),
+                        created_at: p.game_player.created_at,
+                        updated_at: p.game_player.updated_at,
+                        name: p.name().to_string(),
+                        pref_colors: vec![],
+                    },
+                },
+                game_type_user: LegacyGameTypeUser {
+                    id: p.game_type_user.id,
+                    created_at: p.game_type_user.created_at,
+                    updated_at: p.game_type_user.updated_at,
+                    game_type_id: p.game_type_user.game_type_id,
+                    user_id: p.game_type_user.user_id,
+                    rating: p.game_type_user.rating,
+                    peak_rating: p.game_type_user.peak_rating,
+                },
+            })
+            .collect()
     }
 
     fn build_legacy_game_logs(
         logs: &[GameLog],
         markup_players: &[brdgme_markup::Player],
     ) -> Vec<LegacyRenderedGameLog> {
-        logs.iter().map(|log| LegacyRenderedGameLog {
-            game_log: LegacyGameLog {
-                id: log.id,
-                created_at: log.created_at,
-                updated_at: log.updated_at,
-                game_id: log.game_id,
-                is_public: log.is_public,
-                logged_at: log.logged_at,
-                body: log.body.clone(),
-            },
-            html: render_markup(&log.body, markup_players),
-        }).collect()
+        logs.iter()
+            .map(|log| LegacyRenderedGameLog {
+                game_log: LegacyGameLog {
+                    id: log.id,
+                    created_at: log.created_at,
+                    updated_at: log.updated_at,
+                    game_id: log.game_id,
+                    is_public: log.is_public,
+                    logged_at: log.logged_at,
+                    body: log.body.clone(),
+                },
+                html: render_markup(&log.body, markup_players),
+            })
+            .collect()
     }
 
     #[derive(Clone)]
@@ -305,32 +318,39 @@ mod ssr {
                 },
                 game_player: None,
                 game_players: legacy_game_players.clone(),
-                game_logs: legacy_logs.iter().filter(|l| l.game_log.is_public).map(|l| LegacyRenderedGameLog {
-                    game_log: LegacyGameLog {
-                        id: l.game_log.id,
-                        created_at: l.game_log.created_at,
-                        updated_at: l.game_log.updated_at,
-                        game_id: l.game_log.game_id,
-                        is_public: l.game_log.is_public,
-                        logged_at: l.game_log.logged_at,
-                        body: l.game_log.body.clone(),
-                    },
-                    html: l.html.clone(),
-                }).collect(),
+                game_logs: legacy_logs
+                    .iter()
+                    .filter(|l| l.game_log.is_public)
+                    .map(|l| LegacyRenderedGameLog {
+                        game_log: LegacyGameLog {
+                            id: l.game_log.id,
+                            created_at: l.game_log.created_at,
+                            updated_at: l.game_log.updated_at,
+                            game_id: l.game_log.game_id,
+                            is_public: l.game_log.is_public,
+                            logged_at: l.game_log.logged_at,
+                            body: l.game_log.body.clone(),
+                        },
+                        html: l.html.clone(),
+                    })
+                    .collect(),
                 pub_state: Some(public_render.pub_state.clone()),
                 html: pub_html,
                 command_spec: None,
                 chat: None,
             };
 
-            let pub_payload = match serde_json::to_string(&LegacyGameUpdateMessage { game_update: public_response }) {
+            let pub_payload = match serde_json::to_string(&LegacyGameUpdateMessage {
+                game_update: public_response,
+            }) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::error!("Failed to serialize public GameUpdate: {}", e);
                     return;
                 }
             };
-            self.publish(&format!("game.{}", game_id), &pub_payload).await;
+            self.publish(&format!("game.{}", game_id), &pub_payload)
+                .await;
 
             // Publish private per-user messages
             for gpe in &game_extended.game_players {
@@ -341,29 +361,38 @@ mod ssr {
 
                 // Use the same filtering as the display path: public logs + logs targeted
                 // to this specific player via game_log_targets.
-                let player_logs = match crate::db::get_game_logs(pool, game_id, gpe.game_player.id).await {
-                    Ok(logs) => logs,
-                    Err(e) => {
-                        tracing::error!("Failed to fetch logs for player {}: {}", gpe.game_player.id, e);
-                        continue;
-                    }
-                };
+                let player_logs =
+                    match crate::db::get_game_logs(pool, game_id, gpe.game_player.id).await {
+                        Ok(logs) => logs,
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to fetch logs for player {}: {}",
+                                gpe.game_player.id,
+                                e
+                            );
+                            continue;
+                        }
+                    };
 
-                let player_legacy_logs: Vec<LegacyRenderedGameLog> = player_logs.iter().map(|log| LegacyRenderedGameLog {
-                    game_log: LegacyGameLog {
-                        id: log.id,
-                        created_at: log.created_at,
-                        updated_at: log.updated_at,
-                        game_id: log.game_id,
-                        is_public: log.is_public,
-                        logged_at: log.logged_at,
-                        body: log.body.clone(),
-                    },
-                    html: render_markup(&log.body, &markup_players),
-                }).collect();
+                let player_legacy_logs: Vec<LegacyRenderedGameLog> = player_logs
+                    .iter()
+                    .map(|log| LegacyRenderedGameLog {
+                        game_log: LegacyGameLog {
+                            id: log.id,
+                            created_at: log.created_at,
+                            updated_at: log.updated_at,
+                            game_id: log.game_id,
+                            is_public: log.is_public,
+                            logged_at: log.logged_at,
+                            body: log.body.clone(),
+                        },
+                        html: render_markup(&log.body, &markup_players),
+                    })
+                    .collect();
 
                 let player_html = render_markup(&player_render.render, &markup_players);
-                let legacy_gp = legacy_game_players.iter()
+                let legacy_gp = legacy_game_players
+                    .iter()
                     .find(|p| p.game_player.id == gpe.game_player.id)
                     .map(|p| p.game_player.clone());
 
@@ -403,7 +432,9 @@ mod ssr {
                     chat: None,
                 };
 
-                let private_payload = match serde_json::to_string(&LegacyGameUpdateMessage { game_update: private_response }) {
+                let private_payload = match serde_json::to_string(&LegacyGameUpdateMessage {
+                    game_update: private_response,
+                }) {
                     Ok(p) => p,
                     Err(e) => {
                         tracing::error!("Failed to serialize private GameUpdate: {}", e);
@@ -415,12 +446,11 @@ mod ssr {
                     let user_id = user.id;
 
                     // Look up auth tokens for this player's user_id
-                    let token_ids = sqlx::query(
-                        "SELECT id FROM user_auth_tokens WHERE user_id = $1"
-                    )
-                    .bind(user_id)
-                    .fetch_all(pool)
-                    .await;
+                    let token_ids =
+                        sqlx::query("SELECT id FROM user_auth_tokens WHERE user_id = $1")
+                            .bind(user_id)
+                            .fetch_all(pool)
+                            .await;
 
                     match token_ids {
                         Ok(rows) => {
@@ -433,23 +463,29 @@ mod ssr {
                                         continue;
                                     }
                                 };
-                                self.publish(&format!("user.{}", token_id), &private_payload).await;
+                                self.publish(&format!("user.{}", token_id), &private_payload)
+                                    .await;
                             }
                         }
                         Err(e) => {
-                            tracing::error!("Failed to fetch auth tokens for user {}: {}", user_id, e);
+                            tracing::error!(
+                                "Failed to fetch auth tokens for user {}: {}",
+                                user_id,
+                                e
+                            );
                         }
                     }
 
                     // Publish Leptos-specific update directly to the user's WS channel.
                     let last_turn_at = gpe.game_player.last_turn_at;
-                    let log_entries: Vec<GameLogEntry> = player_logs.iter().map(|log| {
-                        GameLogEntry {
+                    let log_entries: Vec<GameLogEntry> = player_logs
+                        .iter()
+                        .map(|log| GameLogEntry {
                             body_html: render_markup(&log.body, &markup_players),
                             logged_at: log.logged_at,
                             is_new: log.created_at >= last_turn_at,
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     let game_view = GameViewData {
                         id: game_extended.game.id,
@@ -461,20 +497,24 @@ mod ssr {
                         can_undo: gpe.game_player.undo_game_state.is_some(),
                         restarted_game_id: game_extended.game.restarted_game_id,
                         is_2player: game_extended.game_players.len() == 2,
-                        players: game_extended.game_players.iter().map(|p| {
-                            use std::str::FromStr;
-                            let color = brdgme_color::Color::from_str(&p.game_player.color)
-                                .unwrap_or(brdgme_color::WHITE)
-                                .hex();
-                            PlayerViewData {
-                                name: p.name().to_string(),
-                                color,
-                                rating: p.game_type_user.rating,
-                                points: p.game_player.points.unwrap_or(0.0),
-                                is_turn: p.game_player.is_turn,
-                                is_bot: p.game_bot.is_some(),
-                            }
-                        }).collect(),
+                        players: game_extended
+                            .game_players
+                            .iter()
+                            .map(|p| {
+                                use std::str::FromStr;
+                                let color = brdgme_color::Color::from_str(&p.game_player.color)
+                                    .unwrap_or(brdgme_color::WHITE)
+                                    .hex();
+                                PlayerViewData {
+                                    name: p.name().to_string(),
+                                    color,
+                                    rating: p.game_type_user.rating,
+                                    points: p.game_player.points.unwrap_or(0.0),
+                                    is_turn: p.game_player.is_turn,
+                                    is_bot: p.game_bot.is_some(),
+                                }
+                            })
+                            .collect(),
                         command_spec: player_render.command_spec.clone(),
                     };
 
@@ -484,7 +524,8 @@ mod ssr {
                         logs: log_entries,
                     });
                     if let Ok(brdgme_payload) = serde_json::to_string(&brdgme_msg) {
-                        self.publish(&format!("ws.{}", user_id), &brdgme_payload).await;
+                        self.publish(&format!("ws.{}", user_id), &brdgme_payload)
+                            .await;
                     }
                 }
             }

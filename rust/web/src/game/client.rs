@@ -5,8 +5,8 @@ use brdgme_game::command::Spec as CommandSpec;
 pub async fn request(client: &reqwest::Client, uri: &str, request: &Request) -> Result<Response> {
     let res = client.post(uri).json(&request).send().await?;
     let body = res.text().await.context("error reading response body")?;
-    let resp: Response = serde_json::from_str(&body)
-        .with_context(|| format!("error parsing response: {}", body))?;
+    let resp: Response =
+        serde_json::from_str(&body).with_context(|| format!("error parsing response: {}", body))?;
     match resp {
         Response::SystemError { message } => Err(anyhow!("{}", message)),
         other => Ok(other),
@@ -40,21 +40,35 @@ impl From<PlayerRender> for RenderResponse {
     }
 }
 
-pub async fn render(client: &reqwest::Client, uri: &str, game: String, player: Option<usize>) -> Result<RenderResponse> {
+pub async fn render(
+    client: &reqwest::Client,
+    uri: &str,
+    game: String,
+    player: Option<usize>,
+) -> Result<RenderResponse> {
     match player {
         Some(p) => player_render(client, uri, game, p).await,
         None => pub_render(client, uri, game).await,
     }
 }
 
-pub async fn pub_render(client: &reqwest::Client, uri: &str, game: String) -> Result<RenderResponse> {
+pub async fn pub_render(
+    client: &reqwest::Client,
+    uri: &str,
+    game: String,
+) -> Result<RenderResponse> {
     match request(client, uri, &Request::PubRender { game }).await? {
         Response::PubRender { render } => Ok(render.into()),
         _ => Err(anyhow!("invalid response type")),
     }
 }
 
-pub async fn player_render(client: &reqwest::Client, uri: &str, game: String, player: usize) -> Result<RenderResponse> {
+pub async fn player_render(
+    client: &reqwest::Client,
+    uri: &str,
+    game: String,
+    player: usize,
+) -> Result<RenderResponse> {
     match request(client, uri, &Request::PlayerRender { player, game }).await? {
         Response::PlayerRender { render } => Ok(render.into()),
         _ => Err(anyhow!("invalid response type")),
@@ -64,43 +78,45 @@ pub async fn player_render(client: &reqwest::Client, uri: &str, game: String, pl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{
-        routing::post,
-        Json, Router,
-    };
+    use axum::{routing::post, Json, Router};
     use tokio::net::TcpListener;
 
     #[tokio::test]
     async fn test_game_client_contract() {
         // 1. Setup Mock Server
-        let app = Router::new().route("/", post(|Json(payload): Json<Request>| async move {
-            match payload {
-                Request::New { players } => {
-                    // Mock response for New Game
-                    Json(Response::New {
-                        game: brdgme_cmd::api::GameResponse {
-                            state: format!("mock_state_{}", players),
-                            points: vec![0.0; players],
-                            status: brdgme_game::Status::Active {
-                                whose_turn: vec![0],
-                                eliminated: vec![],
+        let app = Router::new().route(
+            "/",
+            post(|Json(payload): Json<Request>| async move {
+                match payload {
+                    Request::New { players } => {
+                        // Mock response for New Game
+                        Json(Response::New {
+                            game: brdgme_cmd::api::GameResponse {
+                                state: format!("mock_state_{}", players),
+                                points: vec![0.0; players],
+                                status: brdgme_game::Status::Active {
+                                    whose_turn: vec![0],
+                                    eliminated: vec![],
+                                },
                             },
-                        },
-                        logs: vec![],
-                        public_render: PubRender {
-                            pub_state: "pub".to_string(),
-                            render: "render".to_string(),
-                        },
-                        player_renders: vec![],
-                    })
+                            logs: vec![],
+                            public_render: PubRender {
+                                pub_state: "pub".to_string(),
+                                render: "render".to_string(),
+                            },
+                            player_renders: vec![],
+                        })
+                    }
+                    _ => Json(Response::SystemError {
+                        message: "unsupported in mock".to_string(),
+                    }),
                 }
-                _ => Json(Response::SystemError { message: "unsupported in mock".to_string() }),
-            }
-        }));
+            }),
+        );
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        
+
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });

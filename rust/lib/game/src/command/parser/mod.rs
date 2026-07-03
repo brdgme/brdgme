@@ -820,7 +820,11 @@ impl Parser for CommandSpec {
     ) -> Result<Output<'a, Self::T>, GameError> {
         match self {
             CommandSpec::Int { min, max } => {
-                let out = Int { min: *min, max: *max }.parse(input, names)?;
+                let out = Int {
+                    min: *min,
+                    max: *max,
+                }
+                .parse(input, names)?;
                 Ok(Output {
                     value: serde_json::Value::Number(out.value.into()),
                     consumed: out.consumed,
@@ -969,20 +973,18 @@ impl Parser for CommandSpec {
                     remaining,
                 })
             }
-            CommandSpec::Opt(spec) => {
-                Ok(match spec.parse(input, names) {
-                    Ok(out) => Output {
-                        value: out.value,
-                        consumed: out.consumed,
-                        remaining: out.remaining,
-                    },
-                    Err(_) => Output {
-                        value: serde_json::Value::Null,
-                        consumed: &input[..0],
-                        remaining: input,
-                    },
-                })
-            }
+            CommandSpec::Opt(spec) => Ok(match spec.parse(input, names) {
+                Ok(out) => Output {
+                    value: out.value,
+                    consumed: out.consumed,
+                    remaining: out.remaining,
+                },
+                Err(_) => Output {
+                    value: serde_json::Value::Null,
+                    consumed: &input[..0],
+                    remaining: input,
+                },
+            }),
             CommandSpec::Doc { spec, .. } => spec.parse(input, names),
             CommandSpec::Player => {
                 let out = Player {}.parse(input, names)?;
@@ -1005,7 +1007,11 @@ impl Parser for CommandSpec {
 
     fn expected(&self, names: &[String]) -> Vec<String> {
         match self {
-            CommandSpec::Int { min, max } => Int { min: *min, max: *max }.expected(names),
+            CommandSpec::Int { min, max } => Int {
+                min: *min,
+                max: *max,
+            }
+            .expected(names),
             CommandSpec::Token(token) => Token::new(token.clone()).expected(names),
             CommandSpec::Enum { values, exact } => {
                 if *exact {
@@ -1015,7 +1021,9 @@ impl Parser for CommandSpec {
                 }
             }
             CommandSpec::OneOf(specs) => specs.iter().flat_map(|s| s.expected(names)).collect(),
-            CommandSpec::Chain(specs) => specs.get(0).map(|s| s.expected(names)).unwrap_or_default(),
+            CommandSpec::Chain(specs) => {
+                specs.get(0).map(|s| s.expected(names)).unwrap_or_default()
+            }
             CommandSpec::Many { spec, .. } => spec.expected(names),
             CommandSpec::Opt(spec) => spec
                 .expected(names)

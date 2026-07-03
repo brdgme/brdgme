@@ -95,15 +95,26 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
     info!(name, uri, "Upserting game version");
 
     let player_counts = match game_service_request(&ctx.http, &uri, &Request::PlayerCounts).await? {
-        Response::PlayerCounts { player_counts } => {
-            player_counts.into_iter().map(|c| c as i32).collect::<Vec<_>>()
+        Response::PlayerCounts { player_counts } => player_counts
+            .into_iter()
+            .map(|c| c as i32)
+            .collect::<Vec<_>>(),
+        other => {
+            return Err(Error::GameService(format!(
+                "unexpected response to PlayerCounts: {:?}",
+                other
+            )));
         }
-        other => return Err(Error::GameService(format!("unexpected response to PlayerCounts: {:?}", other))),
     };
 
     let rules = match game_service_request(&ctx.http, &uri, &Request::Rules).await? {
         Response::Rules { rules } => rules,
-        other => return Err(Error::GameService(format!("unexpected response to Rules: {:?}", other))),
+        other => {
+            return Err(Error::GameService(format!(
+                "unexpected response to Rules: {:?}",
+                other
+            )));
+        }
     };
 
     upsert_game_type_and_version(

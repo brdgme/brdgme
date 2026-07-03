@@ -1,7 +1,10 @@
+use crate::game::server_fns::{
+    BumpBotTurns, ConcedeGame, GameLogEntry, GameViewData, PlayerViewData, RestartGame,
+    SubmitCommand, UndoGame,
+};
+use crate::websocket::BrdgmeGameUpdate;
 use leptos::prelude::*;
 use leptos_router::{hooks::use_navigate, NavigateOptions};
-use crate::game::server_fns::{GameViewData, PlayerViewData, GameLogEntry, SubmitCommand, UndoGame, ConcedeGame, RestartGame, BumpBotTurns};
-use crate::websocket::BrdgmeGameUpdate;
 use uuid::Uuid;
 
 #[component]
@@ -156,10 +159,20 @@ fn format_log_time(dt: time::PrimitiveDateTime) -> String {
     let hour12 = dt.hour() % 12;
     let hour12 = if hour12 == 0 { 12 } else { hour12 };
     let ampm = if dt.hour() < 12 { "AM" } else { "PM" };
-    format!("{} {}, {}:{:02} {}", month_abbr, dt.day(), hour12, dt.minute(), ampm)
+    format!(
+        "{} {}, {}:{:02} {}",
+        month_abbr,
+        dt.day(),
+        hour12,
+        dt.minute(),
+        ampm
+    )
 }
 
-fn render_log_entries(entries: Vec<crate::game::server_fns::GameLogEntry>, show_timestamp: bool) -> impl IntoView {
+fn render_log_entries(
+    entries: Vec<crate::game::server_fns::GameLogEntry>,
+    show_timestamp: bool,
+) -> impl IntoView {
     // Group into 10-minute windows; show log-time only on first entry of each group.
     let mut windows: Vec<(time::PrimitiveDateTime, Vec<_>)> = vec![];
     for entry in entries {
@@ -172,18 +185,29 @@ fn render_log_entries(entries: Vec<crate::game::server_fns::GameLogEntry>, show_
         }
         windows.push((key, vec![entry]));
     }
-    windows.into_iter().map(move |(window_start, entries)| {
-        let time_label = format_log_time(window_start);
-        entries.into_iter().enumerate().map(move |(i, entry)| {
-            let label = if show_timestamp && i == 0 { Some(format!("- {} -", time_label)) } else { None };
-            view! {
-                <div class="game-log-entry">
-                    {label.map(|l| view! { <div class="log-time">{l}</div> })}
-                    <div inner_html=entry.body_html />
-                </div>
-            }
-        }).collect_view()
-    }).collect_view()
+    windows
+        .into_iter()
+        .map(move |(window_start, entries)| {
+            let time_label = format_log_time(window_start);
+            entries
+                .into_iter()
+                .enumerate()
+                .map(move |(i, entry)| {
+                    let label = if show_timestamp && i == 0 {
+                        Some(format!("- {} -", time_label))
+                    } else {
+                        None
+                    };
+                    view! {
+                        <div class="game-log-entry">
+                            {label.map(|l| view! { <div class="log-time">{l}</div> })}
+                            <div inner_html=entry.body_html />
+                        </div>
+                    }
+                })
+                .collect_view()
+        })
+        .collect_view()
 }
 
 #[component]
@@ -324,13 +348,18 @@ pub fn GameCommandInput(
         ev.prevent_default();
         let cmd = command.get_untracked();
         if !cmd.is_empty() {
-            submit_action.dispatch(SubmitCommand { game_id, command: cmd });
+            submit_action.dispatch(SubmitCommand {
+                game_id,
+                command: cmd,
+            });
         }
     };
 
     let suggestions = Memo::new(move |_| -> Vec<brdgme_game::command::Suggestion> {
         let current_input = command.get();
-        let Some(ref spec) = command_spec else { return vec![] };
+        let Some(ref spec) = command_spec else {
+            return vec![];
+        };
         spec.suggest(&current_input, &player_names)
     });
 

@@ -1,19 +1,19 @@
+use crate::auth::session::get_user_from_session;
+use crate::db::{self, CreateGameOpts};
+use crate::game::client;
+use crate::websocket::GameBroadcaster;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
-use serde::Deserialize;
-use uuid::Uuid;
-use sqlx::PgPool;
-use tower_sessions::Session;
-use crate::auth::session::get_user_from_session;
-use crate::db::{self, CreateGameOpts};
-use crate::game::client;
-use crate::websocket::GameBroadcaster;
 use brdgme_cmd::api::{Request, Response};
 use brdgme_game::Status;
+use serde::Deserialize;
+use sqlx::PgPool;
+use tower_sessions::Session;
+use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct CreateGameRequest {
@@ -46,18 +46,46 @@ pub async fn create_game(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
     };
 
-    let resp = match client::request(&http_client, &game_version.uri, &Request::New { players: player_count }).await {
+    let resp = match client::request(
+        &http_client,
+        &game_version.uri,
+        &Request::New {
+            players: player_count,
+        },
+    )
+    .await
+    {
         Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Game service error: {}", e),
+            )
+                .into_response()
+        }
     };
 
     let (game_info, logs, public_render, player_renders) = match resp {
-        Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
-        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
+        Response::New {
+            game,
+            logs,
+            public_render,
+            player_renders,
+        } => (game, logs, public_render, player_renders),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Unexpected response from game service",
+            )
+                .into_response()
+        }
     };
 
     let (_is_finished, whose_turn, eliminated, placings) = match game_info.status {
-        Status::Active { whose_turn, eliminated } => (false, whose_turn, eliminated, vec![]),
+        Status::Active {
+            whose_turn,
+            eliminated,
+        } => (false, whose_turn, eliminated, vec![]),
         Status::Finished { placings, .. } => (true, vec![], vec![], placings),
     };
 
@@ -76,18 +104,34 @@ pub async fn create_game(
             chat_id: None,
             game_state: &game_info.state,
         },
-    ).await {
+    )
+    .await
+    {
         Ok(g) => g,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create game: {}", e),
+            )
+                .into_response()
+        }
     };
 
     if let Err(e) = db::create_game_logs(&pool, game.id, logs).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create game logs: {}", e),
+        )
+            .into_response();
     }
 
     if let Ok(Some(ge)) = db::find_game_extended(&pool, game.id).await {
-        let all_logs = db::get_all_game_logs(&pool, game.id).await.unwrap_or_default();
-        broadcaster.broadcast_game_update(&pool, &ge, &all_logs, &public_render, &player_renders).await;
+        let all_logs = db::get_all_game_logs(&pool, game.id)
+            .await
+            .unwrap_or_default();
+        broadcaster
+            .broadcast_game_update(&pool, &ge, &all_logs, &public_render, &player_renders)
+            .await;
         super::trigger_bot_turns(&http_client, &ge).await;
     }
 
@@ -134,13 +178,25 @@ pub async fn play_command(
         user.id
     )
     .fetch_optional(&pool)
-    .await {
+    .await
+    {
         Ok(Some(pos)) => pos,
-        Ok(None) => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
+        Ok(None) => {
+            return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response()
+        }
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
     };
 
-    match super::execute_command(&pool, &http_client, &broadcaster, id, position as usize, payload.command).await {
+    match super::execute_command(
+        &pool,
+        &http_client,
+        &broadcaster,
+        id,
+        position as usize,
+        payload.command,
+    )
+    .await
+    {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
@@ -162,7 +218,13 @@ pub async fn internal_play_command(
 ) -> impl IntoResponse {
     let expected_key = match std::env::var("INTERNAL_API_KEY") {
         Ok(k) => k,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_API_KEY not configured").into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_API_KEY not configured",
+            )
+                .into_response()
+        }
     };
     let provided_key = match headers.get("X-Internal-Key").and_then(|v| v.to_str().ok()) {
         Some(k) => k.to_string(),
@@ -172,7 +234,16 @@ pub async fn internal_play_command(
         return (StatusCode::UNAUTHORIZED, "Invalid internal key").into_response();
     }
 
-    match super::execute_command(&pool, &http_client, &broadcaster, id, payload.player_position, payload.command).await {
+    match super::execute_command(
+        &pool,
+        &http_client,
+        &broadcaster,
+        id,
+        payload.player_position,
+        payload.command,
+    )
+    .await
+    {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
@@ -196,9 +267,15 @@ pub async fn undo_game(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
     };
 
-    let player = match game_extended.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id)) {
+    let player = match game_extended
+        .game_players
+        .iter()
+        .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
+    {
         Some(p) => p,
-        None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
+        None => {
+            return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response()
+        }
     };
 
     let undo_state = match &player.game_player.undo_game_state {
@@ -206,28 +283,77 @@ pub async fn undo_game(
         None => return (StatusCode::BAD_REQUEST, "No undo state available").into_response(),
     };
 
-    let resp = match client::request(&http_client, &game_extended.game_version.uri, &brdgme_cmd::api::Request::Status { game: undo_state.clone() }).await {
+    let resp = match client::request(
+        &http_client,
+        &game_extended.game_version.uri,
+        &brdgme_cmd::api::Request::Status {
+            game: undo_state.clone(),
+        },
+    )
+    .await
+    {
         Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Game service error: {}", e),
+            )
+                .into_response()
+        }
     };
 
     let (game_response, public_render, player_renders) = match resp {
-        Response::Status { game, public_render, player_renders } => (game, public_render, player_renders),
-        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
+        Response::Status {
+            game,
+            public_render,
+            player_renders,
+        } => (game, public_render, player_renders),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Unexpected response from game service",
+            )
+                .into_response()
+        }
     };
 
     let (whose_turn, eliminated, placings) = match game_response.status {
-        Status::Active { whose_turn, eliminated } => (whose_turn, eliminated, vec![]),
+        Status::Active {
+            whose_turn,
+            eliminated,
+        } => (whose_turn, eliminated, vec![]),
         Status::Finished { placings, .. } => (vec![], vec![], placings),
     };
 
-    if let Err(e) = db::undo_game(&pool, id, &undo_state, player.game_player.position as usize, &whose_turn, &eliminated, &placings).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to undo game: {}", e)).into_response();
+    if let Err(e) = db::undo_game(
+        &pool,
+        id,
+        &undo_state,
+        player.game_player.position as usize,
+        &whose_turn,
+        &eliminated,
+        &placings,
+    )
+    .await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to undo game: {}", e),
+        )
+            .into_response();
     }
 
     if let Ok(Some(updated_ge)) = db::find_game_extended(&pool, id).await {
         let all_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
-        broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+        broadcaster
+            .broadcast_game_update(
+                &pool,
+                &updated_ge,
+                &all_logs,
+                &public_render,
+                &player_renders,
+            )
+            .await;
         super::trigger_bot_turns(&http_client, &updated_ge).await;
     }
 
@@ -260,27 +386,61 @@ pub async fn restart_game(
         return (StatusCode::BAD_REQUEST, "Game has already been restarted").into_response();
     }
 
-    if !game_extended.game_players.iter().any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id)) {
+    if !game_extended
+        .game_players
+        .iter()
+        .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
+    {
         return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response();
     }
 
     let player_count = game_extended.game_players.len();
-    let resp = match client::request(&http_client, &game_extended.game_version.uri, &Request::New { players: player_count }).await {
+    let resp = match client::request(
+        &http_client,
+        &game_extended.game_version.uri,
+        &Request::New {
+            players: player_count,
+        },
+    )
+    .await
+    {
         Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Game service error: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Game service error: {}", e),
+            )
+                .into_response()
+        }
     };
 
     let (game_info, logs, public_render, player_renders) = match resp {
-        Response::New { game, logs, public_render, player_renders } => (game, logs, public_render, player_renders),
-        _ => return (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response from game service").into_response(),
+        Response::New {
+            game,
+            logs,
+            public_render,
+            player_renders,
+        } => (game, logs, public_render, player_renders),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Unexpected response from game service",
+            )
+                .into_response()
+        }
     };
 
     let (whose_turn, eliminated, placings) = match game_info.status {
-        Status::Active { whose_turn, eliminated } => (whose_turn, eliminated, vec![]),
+        Status::Active {
+            whose_turn,
+            eliminated,
+        } => (whose_turn, eliminated, vec![]),
         Status::Finished { placings, .. } => (vec![], vec![], placings),
     };
 
-    let opponent_ids: Vec<Uuid> = game_extended.game_players.iter()
+    let opponent_ids: Vec<Uuid> = game_extended
+        .game_players
+        .iter()
         .filter_map(|p| p.user.as_ref().filter(|u| u.id != user.id).map(|u| u.id))
         .collect();
 
@@ -299,13 +459,25 @@ pub async fn restart_game(
             chat_id: None,
             game_state: &game_info.state,
         },
-    ).await {
+    )
+    .await
+    {
         Ok(g) => g,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create game: {}", e),
+            )
+                .into_response()
+        }
     };
 
     if let Err(e) = db::create_game_logs(&pool, new_game.id, logs).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create game logs: {}", e)).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create game logs: {}", e),
+        )
+            .into_response();
     }
 
     if let Err(e) = sqlx::query!(
@@ -314,23 +486,40 @@ pub async fn restart_game(
         id
     )
     .execute(&pool)
-    .await {
+    .await
+    {
         tracing::error!("Failed to set restarted_game_id on game {}: {}", id, e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
     }
 
     if let Ok(Some(new_ge)) = db::find_game_extended(&pool, new_game.id).await {
-        let all_logs = db::get_all_game_logs(&pool, new_game.id).await.unwrap_or_default();
-        broadcaster.broadcast_game_update(&pool, &new_ge, &all_logs, &public_render, &player_renders).await;
+        let all_logs = db::get_all_game_logs(&pool, new_game.id)
+            .await
+            .unwrap_or_default();
+        broadcaster
+            .broadcast_game_update(&pool, &new_ge, &all_logs, &public_render, &player_renders)
+            .await;
         super::trigger_bot_turns(&http_client, &new_ge).await;
     }
 
     if let Ok(Some(old_ge)) = db::find_game_extended(&pool, id).await {
-        if let Ok(Response::Status { public_render: old_pub, player_renders: old_pr, .. }) =
-            client::request(&http_client, &old_ge.game_version.uri, &Request::Status { game: old_ge.game.game_state.clone() }).await
+        if let Ok(Response::Status {
+            public_render: old_pub,
+            player_renders: old_pr,
+            ..
+        }) = client::request(
+            &http_client,
+            &old_ge.game_version.uri,
+            &Request::Status {
+                game: old_ge.game.game_state.clone(),
+            },
+        )
+        .await
         {
             let old_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
-            broadcaster.broadcast_game_update(&pool, &old_ge, &old_logs, &old_pub, &old_pr).await;
+            broadcaster
+                .broadcast_game_update(&pool, &old_ge, &old_logs, &old_pub, &old_pr)
+                .await;
         }
     }
 
@@ -360,27 +549,64 @@ pub async fn concede_game(
     }
 
     if game_extended.game_players.len() != 2 {
-        return (StatusCode::BAD_REQUEST, "Concede is only available in 2-player games").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "Concede is only available in 2-player games",
+        )
+            .into_response();
     }
 
-    let player = match game_extended.game_players.iter().find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id)) {
+    let player = match game_extended
+        .game_players
+        .iter()
+        .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
+    {
         Some(p) => p,
-        None => return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response(),
+        None => {
+            return (StatusCode::FORBIDDEN, "You are not a player in this game").into_response()
+        }
     };
 
     if let Err(e) = db::concede_game(&pool, id, player.game_player.id, player.name()).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to concede game: {}", e)).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to concede game: {}", e),
+        )
+            .into_response();
     }
 
     if let Ok(Some(updated_ge)) = db::find_game_extended(&pool, id).await {
         let all_logs = db::get_all_game_logs(&pool, id).await.unwrap_or_default();
-        match client::request(&http_client, &updated_ge.game_version.uri, &Request::Status { game: updated_ge.game.game_state.clone() }).await {
-            Ok(Response::Status { public_render, player_renders, .. }) => {
-                broadcaster.broadcast_game_update(&pool, &updated_ge, &all_logs, &public_render, &player_renders).await;
+        match client::request(
+            &http_client,
+            &updated_ge.game_version.uri,
+            &Request::Status {
+                game: updated_ge.game.game_state.clone(),
+            },
+        )
+        .await
+        {
+            Ok(Response::Status {
+                public_render,
+                player_renders,
+                ..
+            }) => {
+                broadcaster
+                    .broadcast_game_update(
+                        &pool,
+                        &updated_ge,
+                        &all_logs,
+                        &public_render,
+                        &player_renders,
+                    )
+                    .await;
                 super::trigger_bot_turns(&http_client, &updated_ge).await;
             }
             _ => {
-                tracing::error!("Unexpected response from game service on concede status call for game {}", id);
+                tracing::error!(
+                    "Unexpected response from game service on concede status call for game {}",
+                    id
+                );
             }
         }
     }
@@ -430,5 +656,8 @@ pub fn api_routes() -> axum::Router<crate::state::AppState> {
         .route("/game/{id}/mark_read", axum::routing::post(mark_read))
         .route("/game/{id}/concede", axum::routing::post(concede_game))
         .route("/game/{id}/restart", axum::routing::post(restart_game))
-        .route("/internal/game/{id}/command", axum::routing::post(internal_play_command))
+        .route(
+            "/internal/game/{id}/command",
+            axum::routing::post(internal_play_command),
+        )
 }

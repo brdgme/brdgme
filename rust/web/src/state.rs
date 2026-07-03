@@ -1,7 +1,7 @@
+use crate::websocket::GameBroadcaster;
 use axum::extract::FromRef;
 use leptos::prelude::LeptosOptions;
 use sqlx::PgPool;
-use crate::websocket::GameBroadcaster;
 
 #[derive(Clone)]
 pub struct AppState {

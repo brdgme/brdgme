@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
     namespaced,
     status = "GameVersionStatus",
     printcolumn = r#"{"name":"Display Name","type":"string","jsonPath":".spec.typeName"}"#,
-    printcolumn = r#"{"name":"Players","type":"string","jsonPath":".spec.playerCounts"}"#,
+    printcolumn = r#"{"name":"Players","type":"string","jsonPath":".spec.playerCounts"}"#
 )]
 pub struct GameVersionSpec {
     /// Human-readable game type name stored in game_types.name (e.g. "Acquire").

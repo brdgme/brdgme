@@ -1,10 +1,12 @@
 mod prompt;
 
-use anyhow::{anyhow, Context, Result};
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Router};
+use anyhow::{Context, Result, anyhow};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse};
 use brdgme_cmd::api::{Request, Response};
 use brdgme_color::player_color;
-use prompt::{FailedCommand, PlayerInfo, PromptContext, markup_resolve_players, render_prompt, spec_to_yaml};
+use prompt::{
+    FailedCommand, PlayerInfo, PromptContext, markup_resolve_players, render_prompt, spec_to_yaml,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
@@ -81,7 +83,6 @@ async fn trigger(
 }
 
 async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> Result<()> {
-
     // 1. Fetch game data from DB.
     let row = sqlx::query(
         r#"
@@ -114,8 +115,11 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     let game_state: String = row.try_get("game_state").context("game_state")?;
     let game_service_uri: String = row.try_get("uri").context("uri")?;
     let rules: String = row.try_get("rules").unwrap_or_default();
-    let game_name: String = row.try_get("game_name").unwrap_or_else(|_| "unknown".to_string());
-    let bot_name: String = row.try_get::<Option<String>, _>("bot_name")
+    let game_name: String = row
+        .try_get("game_name")
+        .unwrap_or_else(|_| "unknown".to_string());
+    let bot_name: String = row
+        .try_get::<Option<String>, _>("bot_name")
         .unwrap_or(None)
         .unwrap_or_else(|| format!("Bot {}", req.player_position + 1));
 
@@ -141,7 +145,9 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             let user_name: Option<String> = p.try_get("user_name").unwrap_or(None);
             let bot_name: Option<String> = p.try_get("bot_name").unwrap_or(None);
             let position: i32 = p.try_get("position").unwrap_or(0);
-            user_name.or(bot_name).unwrap_or_else(|| format!("Player {}", position + 1))
+            user_name
+                .or(bot_name)
+                .unwrap_or_else(|| format!("Player {}", position + 1))
         })
         .collect();
 
@@ -165,9 +171,14 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         req.player_position,
         game_state,
         &names,
-    ).await.context("Failed to load initial bot context")?;
+    )
+    .await
+    .context("Failed to load initial bot context")?;
 
-    let internal_url = format!("{}/api/internal/game/{}/command", state.monolith_url, req.game_id);
+    let internal_url = format!(
+        "{}/api/internal/game/{}/command",
+        state.monolith_url, req.game_id
+    );
     const MAX_ATTEMPTS: usize = 20;
     let mut failed_commands: Vec<FailedCommand> = Vec::new();
 
@@ -193,9 +204,16 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             "Rendered prompt"
         );
 
-        let raw_response = call_llm(&state.http, &state.llm_url, &state.bot_model, &messages, state.llm_api_key.as_deref(), state.reasoning_effort.clone())
-            .await
-            .with_context(|| format!("Ollama call failed on attempt {}", attempt + 1))?;
+        let raw_response = call_llm(
+            &state.http,
+            &state.llm_url,
+            &state.bot_model,
+            &messages,
+            state.llm_api_key.as_deref(),
+            state.reasoning_effort.clone(),
+        )
+        .await
+        .with_context(|| format!("Ollama call failed on attempt {}", attempt + 1))?;
 
         tracing::info!(
             trace_id = %trace_id,
@@ -232,7 +250,9 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             return Ok(());
         }
 
-        let current_game_state: String = recheck.try_get("game_state").context("game_state recheck")?;
+        let current_game_state: String = recheck
+            .try_get("game_state")
+            .context("game_state recheck")?;
         if current_game_state != bot_ctx.game_state {
             tracing::warn!(
                 trace_id = %trace_id,
@@ -248,7 +268,9 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
                 req.player_position,
                 current_game_state,
                 &names,
-            ).await.context("Failed to refresh bot context")?;
+            )
+            .await
+            .context("Failed to refresh bot context")?;
             failed_commands.clear();
             continue;
         }
@@ -262,7 +284,8 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             "Submitting command to monolith"
         );
 
-        let result = state.http
+        let result = state
+            .http
             .post(&internal_url)
             .header("X-Internal-Key", &state.internal_api_key)
             .json(&InternalCommandRequest {
@@ -292,7 +315,10 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         if attempt + 1 == MAX_ATTEMPTS {
             return Err(anyhow!(
                 "Command rejected after {} attempts. Last command: {:?}. Last error (HTTP {}): {}",
-                MAX_ATTEMPTS, command, status, error_body
+                MAX_ATTEMPTS,
+                command,
+                status,
+                error_body
             ));
         }
 
@@ -335,13 +361,19 @@ async fn load_bot_context(
     let status_resp = call_game_service(
         &state.http,
         game_service_uri,
-        &Request::Status { game: game_state.clone() },
+        &Request::Status {
+            game: game_state.clone(),
+        },
     )
     .await
     .context("Game service Status call failed")?;
 
     let (render_markup, command_spec, points) = match status_resp {
-        Response::Status { game, player_renders, .. } => {
+        Response::Status {
+            game,
+            player_renders,
+            ..
+        } => {
             let pr = player_renders
                 .into_iter()
                 .nth(player_position as usize)
@@ -352,10 +384,7 @@ async fn load_bot_context(
     };
 
     let render = markup_resolve_players(&render_markup, names);
-    let command_spec_yaml = command_spec
-        .as_ref()
-        .map(spec_to_yaml)
-        .unwrap_or_default();
+    let command_spec_yaml = command_spec.as_ref().map(spec_to_yaml).unwrap_or_default();
 
     let log_rows = sqlx::query(
         "SELECT body FROM game_logs WHERE game_id = $1 ORDER BY logged_at DESC LIMIT 20",
@@ -374,16 +403,22 @@ async fn load_bot_context(
         })
         .collect();
 
-    Ok(BotContext { game_state, render, command_spec_yaml, recent_logs, points })
+    Ok(BotContext {
+        game_state,
+        render,
+        command_spec_yaml,
+        recent_logs,
+        points,
+    })
 }
 
-fn build_messages(
-    ctx: &PromptContext,
-) -> Result<Vec<ChatMessage>> {
-    let content = render_prompt(ctx)
-        .context("Failed to render system prompt template")?;
+fn build_messages(ctx: &PromptContext) -> Result<Vec<ChatMessage>> {
+    let content = render_prompt(ctx).context("Failed to render system prompt template")?;
     Ok(vec![
-        ChatMessage { role: "system".to_string(), content },
+        ChatMessage {
+            role: "system".to_string(),
+            content,
+        },
         ChatMessage {
             role: "user".to_string(),
             content: "Please provide your command now.".to_string(),
@@ -409,7 +444,9 @@ async fn call_game_service(
         return Err(anyhow!("Game service returned {}: {}", status, body));
     }
 
-    resp.json::<Response>().await.context("Failed to parse game service response")
+    resp.json::<Response>()
+        .await
+        .context("Failed to parse game service response")
 }
 
 async fn call_llm(
@@ -443,9 +480,13 @@ async fn call_llm(
     }
 
     let chat_resp: ChatResponse = resp.json().await.context("Failed to parse LLM response")?;
-    chat_resp.choices.into_iter().next()
+    chat_resp
+        .choices
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow!("LLM returned no choices"))?
-        .message.content
+        .message
+        .content
         .ok_or_else(|| anyhow!("LLM returned null content (reasoning budget exhausted?)"))
 }
 
@@ -495,23 +536,37 @@ async fn main() -> Result<()> {
     let llm_url = std::env::var("LLM_URL").context("LLM_URL must be set")?;
     let llm_api_key = std::env::var("LLM_API_KEY").ok();
     let bot_model = std::env::var("BOT_MODEL").context("BOT_MODEL must be set")?;
-    let reasoning_effort = Some(std::env::var("REASONING_EFFORT").unwrap_or_else(|_| "low".to_string()));
+    let reasoning_effort =
+        Some(std::env::var("REASONING_EFFORT").unwrap_or_else(|_| "low".to_string()));
     let monolith_url = std::env::var("MONOLITH_URL").context("MONOLITH_URL must be set")?;
-    let internal_api_key = std::env::var("INTERNAL_API_KEY").context("INTERNAL_API_KEY must be set")?;
+    let internal_api_key =
+        std::env::var("INTERNAL_API_KEY").context("INTERNAL_API_KEY must be set")?;
     tracing::info!(llm_url = %llm_url, bot_model = %bot_model, reasoning_effort = ?reasoning_effort, "Bot service starting");
 
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
-    let pool = PgPool::connect(&database_url).await.context("Failed to connect to database")?;
+    let pool = PgPool::connect(&database_url)
+        .await
+        .context("Failed to connect to database")?;
 
     let http = reqwest::Client::new();
-    let state = Arc::new(AppState { pool, http, llm_url, llm_api_key, bot_model, reasoning_effort, monolith_url, internal_api_key });
+    let state = Arc::new(AppState {
+        pool,
+        http,
+        llm_url,
+        llm_api_key,
+        bot_model,
+        reasoning_effort,
+        monolith_url,
+        internal_api_key,
+    });
 
     let app = Router::new()
         .route("/trigger", axum::routing::post(trigger))
         .with_state(state);
 
     let addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:4000".to_string());
-    let listener = tokio::net::TcpListener::bind(&addr).await
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
         .with_context(|| format!("Failed to bind to {}", addr))?;
 
     tracing::info!("Bot service listening on {}", addr);
