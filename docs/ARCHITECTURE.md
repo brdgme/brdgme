@@ -6,9 +6,9 @@ lo-fi ASCII rendering and plain text commands.
 ## System Overview
 
 The platform consists of a small always-on core (the Rust monolith) and
-independently deployed game microservices running as Knative Services
-(scale-to-zero). The monolith is the only component that communicates with
-clients directly.
+independently deployed game microservices running as plain Kubernetes
+Deployments (always on - their idle footprint is negligible). The monolith is
+the only component that communicates with clients directly.
 
 ```mermaid
 graph TD
@@ -16,14 +16,14 @@ graph TD
     Monolith[Axum/Leptos Monolith]
     PG[(PostgreSQL)]
     NATS[NATS Core]
-    Knative[Knative Services\ngame microservices]
+    Games[Game service Deployments]
     Operator[brdgme Operator]
     CRDs[GameVersion CRDs]
 
     Browser -->|HTTP + WebSocket| Monolith
     Monolith <-->|queries| PG
     Monolith <-->|pub/sub fan-out| NATS
-    Monolith -->|game commands| Knative
+    Monolith -->|game commands| Games
     CRDs --> Operator
     Operator -->|upserts game_types + game_versions| PG
 ```
@@ -47,9 +47,14 @@ updates published by any replica reach all connected clients for that game.
 
 ### Game Services
 
-Each game type is a standalone stateless microservice deployed as a Knative
-Service. The monolith communicates with game services via the JSON contract
-defined in this document. Knative handles scale-to-zero automatically.
+Each game type is a standalone stateless microservice deployed as a plain
+Kubernetes Deployment + Service, always on. The monolith communicates with
+game services via the JSON contract defined in this document. (Knative
+scale-to-zero was dropped 2026-07-03 - see `docs/VISION.md` for rationale.)
+
+Game services are polyglot: 17 games are implemented in Go (`brdgme-go/`) and
+4 in Rust (`rust/game/`). The contract is language-agnostic; the Go games are
+kept indefinitely (see `docs/VISION.md`).
 
 ### brdgme Operator (`rust/operator`)
 
@@ -75,7 +80,7 @@ sequenceDiagram
     participant Browser
     participant Monolith
     participant DB as PostgreSQL
-    participant Game as Game Service (Knative)
+    participant Game as Game Service
     participant NATS
 
     Browser->>Monolith: POST /api/game/{id}/command
@@ -92,12 +97,12 @@ sequenceDiagram
 
 See `docs/VISION.md` for infrastructure choices and rationale.
 
-- **Platform**: DigitalOcean Kubernetes (SYD1)
+- **Platform**: DigitalOcean Kubernetes (SYD1), provisioned via OpenTofu
 - **CNI**: Cilium
-- **Serverless**: Knative Serving
-- **Message bus**: NATS Core (in-cluster)
-- **Database**: PostgreSQL
-- **Ingress**: Cilium Gateway API
+- **Message bus**: NATS (in-cluster, JetStream enabled)
+- **Database**: PostgreSQL (CloudNativePG operator)
+- **Ingress**: DOKS managed Gateway API (Cilium)
+- **DNS**: external-dns (DigitalOcean provider)
 
 ## Game Interface Contract
 

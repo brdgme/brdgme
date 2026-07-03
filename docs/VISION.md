@@ -38,14 +38,14 @@ graph TD
     Monolith[Axum/Leptos Monolith]
     PG[(PostgreSQL)]
     NATS[NATS Core]
-    Knative[Knative Services\ngame microservices]
+    Games[Game service Deployments]
     CRDs[GameVersion CRDs]
     Operator[brdgme Operator]
 
     Browser -->|HTTP + WebSocket| Monolith
     Monolith <-->|queries| PG
     Monolith <-->|pub/sub fan-out| NATS
-    Monolith -->|game commands| Knative
+    Monolith -->|game commands| Games
     CRDs --> Operator
     Operator -->|upserts game_types + game_versions| PG
 ```
@@ -64,15 +64,29 @@ replicas is handled by NATS Core pub/sub (in-cluster). NATS Core is sufficient
 here - persistence is not required, as clients reconnect and fetch full state
 on reconnect.
 
-### Serverless Game Services
+### Game Services
 
-Each game type runs as a Knative Service (scale-to-zero). The monolith routes
-commands to the appropriate service via the JSON contract defined in
-`ARCHITECTURE.md`. Game services are stateless: they receive the full game
-state per request and return the new state.
+Each game type runs as a plain Kubernetes Deployment + Service, always on.
+The monolith routes commands to the appropriate service via the JSON contract
+defined in `ARCHITECTURE.md`. Game services are stateless: they receive the
+full game state per request and return the new state.
 
-Scale-to-zero is appropriate because most game types are inactive at any given
-time. The contract is stable and does not change.
+Decided 2026-07-03: no scale-to-zero, no Knative. The idle footprint of ~20
+small Go/Rust services (roughly 5-25Mi RSS each) is lower than the resource
+requests of the Knative Serving control plane that would scale them to zero,
+and turn-based games have no load spikes worth request-based autoscaling.
+Knative remains a healthy project; it was dropped for fit, not health. If a
+genuinely heavy scale-to-zero workload ever appears (e.g. in-cluster LLM
+inference), KEDA with the NATS JetStream scaler is the tool to reach for.
+The contract is stable and does not change.
+
+Game services are polyglot by design: the contract is language-agnostic.
+Currently 17 games are implemented in Go (`brdgme-go/`) and 4 in Rust
+(`rust/game/`, of which `lords-of-vegas-1` is not yet deployed). Decided 2026-07-02: the Go games stay indefinitely - the Rust
+consolidation applies to the platform (API, frontend, WebSocket, operator,
+bot), not to game implementations. New games should be written in Rust to
+benefit from the shared `brdgme_game`/`brdgme_markup` libraries, but porting
+existing Go games has no payoff proportional to the effort.
 
 ### brdgme Kubernetes Operator
 
@@ -85,33 +99,43 @@ application database without the core API having any knowledge of Kubernetes:
 - `is_deprecated: true` on a CR keeps the service running for in-progress games
   but excludes it from new game creation.
 
-Long-term goal: operator also manages the Knative Service lifecycle for each
-game version (currently game services are plain Deployments managed by Tilt).
+Long-term goal: operator also manages the Deployment + Service lifecycle for
+each game version (currently game service manifests are static kustomize
+files).
 
 ## Infrastructure
 
-- **Platform**: DigitalOcean Kubernetes, Sydney region (SYD1).
+- **Platform**: DigitalOcean Kubernetes, Sydney region (SYD1), provisioned
+  via OpenTofu (`infra/` - PLAN Phase 21).
 - **CNI**: Cilium (default on DOKS, no additional setup required).
-- **Serverless runtime**: Knative Serving.
-- **Database**: PostgreSQL.
-- **Message bus**: NATS Core (in-cluster).
-- **Ingress**: Kourier (Knative's networking layer), single DO load balancer.
+- **Database**: PostgreSQL via the CloudNativePG operator; backups + PITR to
+  DO Spaces via the Barman Cloud plugin (PLAN Phase 19).
+- **Message bus**: NATS (in-cluster, JetStream enabled: at-least-once
+  delivery for bot eventing, plain Core pub/sub for WS fan-out).
+- **Ingress**: DOKS managed Gateway API (Cilium, pre-installed on >= 1.33
+  VPC-native clusters), single auto-provisioned DO load balancer.
+- **DNS**: external-dns (DigitalOcean provider) reconciles records from
+  Gateway `HTTPRoute` hostnames (PLAN Phase 20).
+- **Secrets**: sealed-secrets - encrypted `SealedSecret` CRs committed to
+  the config repo (PLAN Phase 15).
+- **Observability**: VictoriaLogs + Vector for log aggregation, vmalert for
+  alerting (PLAN Phase 18).
 
 ### Domain routing
 
-All services are Knative Services. Routing uses Knative `DomainMapping` to
-assign custom hostnames. Kourier routes by hostname; no separate nginx Ingress
-is needed.
+Routing uses a Gateway API `Gateway` with one HTTPS listener per hostname and
+one `HTTPRoute` per hostname to the backing Service.
 
-| Domain | Knative Service | Notes |
+| Domain | Service | Notes |
 |---|---|---|
-| `brdg.me` | `web` | Leptos monolith, always on (minScale: 1) |
+| `brdg.me` | `web` | Leptos monolith Deployment (target 2 replicas) |
 | `legacy.brdg.me` | `web-legacy` | Legacy React frontend, side-by-side only |
 | `api.brdg.me` | `api` | Legacy Rocket API, side-by-side only |
 | `ws.brdg.me` | `websocket` | Legacy Node.js WS, side-by-side only |
 
 Legacy services (`web-legacy`, `api`, `websocket`) are removed after cutover.
-TLS via cert-manager on each `DomainMapping`.
+TLS via cert-manager's Gateway API integration (certificates bound to Gateway
+listeners).
 
 Estimated baseline cost: ~$63/month (3x 2GB nodes + load balancer + PostgreSQL
 storage minimum).
@@ -120,32 +144,43 @@ storage minimum).
 
 The following are removed in sequence:
 
-**After legacy decommission (Phase 7):**
+**In Phase 14 (drop Knative):**
+- Knative Serving + Kourier: replaced by plain Deployments and DOKS managed
+  Gateway API (see Game Services above for rationale).
+
+**After legacy decommission (Phase 16):**
 - `rust/api`: Rocket API server (replaced by `rust/web`).
 - `web`: React/Redux/Webpack frontend (replaced by Leptos in `rust/web`).
 - `websocket`: Node.js WebSocket service (replaced by Redis pub/sub + monolith).
 
-**After NATS migration (Phase 8):**
+**After NATS migration (Phase 17):**
 - Redis: replaced by NATS Core for WebSocket fan-out.
 
 ## Planned Features (Long-Term, Out of Scope for Current Migration)
 
 ### Email
 
-- Outbound: game notifications and invitations via a third-party provider
-  (Mailgun, Postmark, or similar). No self-hosted SMTP.
-- Inbound: play-by-email via provider webhook. The provider receives the reply
-  email and POSTs it to a Knative Service endpoint, which parses the command
-  and submits it to the game.
-- This replaces the legacy Go SMTP service, which had persistent deliverability
-  problems.
+Provider decided 2026-07-03: Resend (PLAN Phase 22). No self-hosted SMTP.
+Chosen for inbound webhooks on the free tier (3,000/mo combined, 100/day),
+an official Rust SDK, and strong hobby/OSS adoption; SES is the fallback
+only if sustained volume ever exceeds ~10k/mo.
+
+- Outbound: Resend HTTP API via `resend-rs` - no SMTP anywhere
+  (DigitalOcean blocks outbound SMTP ports by default). Dev: log fallback
+  when `RESEND_API_KEY` is unset, or a test-mode key in `.env`. Login
+  emails first (Phase 22a), then turn notifications (22b).
+- Inbound: play-by-email via Resend receiving on `play.brdg.me` → signed
+  webhook → monolith parses commands and replies with the updated render.
+  Per-player reply tokens authorise senders; From is never trusted alone.
+- This replaces the legacy Go SMTP service, which had persistent
+  deliverability problems.
 
 ### Bots
 
 - LLM-based. System prompt: brdgme context + game rules + command grammar.
   User prompt: current game state + available command spec from the game
   service.
-- Invoked as a Knative Service (scale-to-zero).
+- Runs as a small always-on Deployment (NATS-triggered; see PLAN Phase 13).
 - Constrained generation (grammar-based output) to ensure bot moves always
   produce valid commands.
 - Initial implementation: external LLM API (Groq or similar) for fast
