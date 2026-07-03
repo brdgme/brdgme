@@ -1027,22 +1027,42 @@ Implemented as `rust/web/src/game/server.rs::tests` (4 tests) and
 `rust/web/src/auth/server.rs::tests` (4 tests). Added `tower = { features =
 ["util"] }` for `oneshot`/`ServiceExt` in tests.
 
-### 11.5 Game contract regression harness (Rust game crates)
+### 11.5 Game contract regression harness (Rust game crates) [Complete]
 
 A generic test helper (in `brdgme_cmd` as a `test-support` feature or a small
 dev-dependency crate) that drives any `Gamer` implementation through the full
 contract, instantiated per game crate:
 
-- [ ] `PlayerCounts` returns non-empty; `New` succeeds for every advertised
+- [x] `PlayerCounts` returns non-empty; `New` succeeds for every advertised
       count and fails for an unadvertised one.
-- [ ] `New` → serialize state → `Status` round-trip: same status, renders
+- [x] `New` → serialize state → `Status` round-trip: same status, renders
       non-empty, `player_renders` length matches player count.
-- [ ] `Play` with garbage input returns `UserError` (never `SystemError`,
+- [x] `Play` with garbage input returns `UserError` (never `SystemError`,
       never a panic).
-- [ ] `Rules` returns non-empty text.
-- [ ] Instantiate for `acquire-1`, `lost-cities-1`, `lost-cities-2`,
+- [x] `Rules` returns non-empty text.
+- [x] Instantiate for `acquire-1`, `lost-cities-1`, `lost-cities-2`,
       `lords-of-vegas-1`. (Go games excluded - covered by their own
       `go-test` CI job and the frozen contract.)
+
+Implemented as `brdgme_cmd::test_support::assert_gamer_contract` (`rust/lib/cmd/src/test_support.rs`),
+gated behind a `test-support` Cargo feature (not compiled into release
+builds) since `brdgme_cmd` is already a normal dependency of every game
+crate - a separate dev-dependency-only crate would have duplicated that
+wiring for no benefit. Instantiated as `tests/contract.rs` in `acquire-1`,
+`lost-cities-1`, `lost-cities-2`, and `lords-of-vegas-1`, all green.
+
+While wiring up `lords-of-vegas-1` the harness caught a real gap:
+`Gamer::rules()` returned `String::new()` (unlike the other three crates,
+this game had no `RULES.md` at compile time). Added
+`rust/game/lords-of-vegas-1/RULES.md` and wired it via
+`include_str!("../RULES.md")` per `docs/CODING.md` "Embed rules at compile
+time". The rules text documents only what the current implementation plays
+out (building casinos on owned lots, boss-tie rerolls, turn passing) - the
+game engine doesn't yet implement sprawl/remodel/reorg/gamble/raise,
+scoring, or an end-of-game trigger (the `Command` parser never wires those
+variants in, and `Game::command`'s match arms for them are `unimplemented!()`
+dead code), so the doc says so explicitly under "Implementation status"
+rather than describing rules the code doesn't play.
 
 ### 11.6 E2E smoke suite (Playwright)
 

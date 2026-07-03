@@ -10,3 +10,5 @@ pub mod cli;
 #[cfg(feature = "http-server")]
 pub mod http;
 pub mod requester;
+#[cfg(feature = "test-support")]
+pub mod test_support;

@@ -208,7 +208,7 @@ impl Gamer for Game {
     }
 
     fn rules() -> String {
-        String::new()
+        include_str!("../RULES.md").to_string()
     }
 }
 

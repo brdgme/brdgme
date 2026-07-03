@@ -14,3 +14,6 @@ thiserror = "2.0.11"
 rand = "0.9.0"
 serde = { version = "1.0.114", features = ["derive"] }
 tokio = { version = "1.43.0", features = ["full"] }
+
+[dev-dependencies]
+brdgme_cmd = { path = "../../lib/cmd", features = ["test-support"] }
