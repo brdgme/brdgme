@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_auth_tokens SET created_at = NOW() - INTERVAL '40 days' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b64a11c1df3a41b020842eb53b0c738ff9ad34694f981f1434b77f995e8a6c0a"
+}

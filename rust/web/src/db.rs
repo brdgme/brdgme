@@ -1018,6 +1018,9 @@ pub async fn update_game_command_success(
 
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
+    use super::*;
+    use crate::game::server_fns::BotSlot;
+
     #[sqlx::test]
     async fn migrations_apply_and_pool_connects(pool: sqlx::PgPool) -> sqlx::Result<()> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
@@ -1025,5 +1028,695 @@ mod tests {
             .await?;
         assert_eq!(count, 0);
         Ok(())
+    }
+
+    // --- Fixture helpers ---
+
+    async fn make_user(pool: &PgPool, name: &str) -> User {
+        sqlx::query_as!(
+            User,
+            "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
+            Uuid::new_v4(),
+            name,
+            &Vec::<String>::new()
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// Creates a game type + a public, non-deprecated game version pointing at a
+    /// dummy URI. None of the db.rs functions under test call out to the game
+    /// service over HTTP, so the URI is never dereferenced.
+    async fn make_game_type_and_version(pool: &PgPool) -> (Uuid, Uuid) {
+        let game_type_id = sqlx::query_scalar!(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+            format!("Test Game {}", Uuid::new_v4()),
+            &vec![2, 3, 4]
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+        let game_version_id = sqlx::query_scalar!(
+            r#"INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+               VALUES ($1, $2, $3, true, false) RETURNING id"#,
+            game_type_id,
+            "1.0.0",
+            "http://localhost:0/mock"
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+        (game_type_id, game_version_id)
+    }
+
+    /// Creates a fixture game with `human_users.len()` human players followed by
+    /// `bot_count` bot players (positions assigned in that order), using
+    /// `create_game_with_users` so the function under test in point 1 doubles as
+    /// the fixture builder for the other tests.
+    async fn make_game_with_players(
+        pool: &PgPool,
+        game_version_id: Uuid,
+        creator_id: Uuid,
+        opponent_ids: &[Uuid],
+        bot_count: usize,
+        whose_turn: &[usize],
+    ) -> crate::models::game::Game {
+        let bot_slots: Vec<BotSlot> = (0..bot_count)
+            .map(|i| BotSlot {
+                name: format!("Bot {}", i),
+                difficulty: "easy".to_string(),
+            })
+            .collect();
+
+        create_game_with_users(
+            pool,
+            CreateGameOpts {
+                game_version_id,
+                whose_turn,
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id,
+                opponent_ids,
+                opponent_emails: &[],
+                bot_slots: &bot_slots,
+                chat_id: None,
+                game_state: "initial_state",
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    // --- 1. create_game_with_users ---
+
+    #[sqlx::test]
+    async fn create_game_with_users_assigns_positions_and_colors(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+
+        let game = make_game_with_players(
+            &pool,
+            game_version_id,
+            creator.id,
+            &[opponent.id],
+            1, // one bot
+            &[0],
+        )
+        .await;
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge.game_players.len(), 3);
+
+        // Positions are sequential 0..n and colors assigned in the same order.
+        let expected_colors = ["Green", "Red", "Blue"];
+        for (i, p) in ge.game_players.iter().enumerate() {
+            assert_eq!(p.game_player.position, i as i32);
+            assert_eq!(p.game_player.color, expected_colors[i]);
+        }
+
+        // Creator + opponent rows exist as users; exactly one bot slot.
+        let human_ids: Vec<Uuid> = ge
+            .game_players
+            .iter()
+            .filter_map(|p| p.user.as_ref().map(|u| u.id))
+            .collect();
+        assert!(human_ids.contains(&creator.id));
+        assert!(human_ids.contains(&opponent.id));
+
+        let bot_players: Vec<_> = ge
+            .game_players
+            .iter()
+            .filter(|p| p.game_bot.is_some())
+            .collect();
+        assert_eq!(bot_players.len(), 1);
+        let bot_player = bot_players[0];
+        assert!(bot_player.game_player.user_id.is_none());
+        assert!(bot_player.game_bot.is_some());
+
+        // XOR constraint holds for every player row (checked at DB level too).
+        for p in &ge.game_players {
+            assert!(p.game_player.user_id.is_some() != p.game_bot.is_some());
+        }
+
+        // Underlying game_bots row has game_bot_id set and user_id NULL directly
+        // via raw query (belt-and-braces check of the XOR constraint columns).
+        let raw = sqlx::query!(
+            "SELECT user_id, game_bot_id FROM game_players WHERE game_id = $1 AND user_id IS NULL",
+            game.id
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(raw.len(), 1);
+        assert!(raw[0].game_bot_id.is_some());
+
+        // Initial is_turn matches whose_turn = [0].
+        assert!(ge.game_players[0].game_player.is_turn);
+        assert!(!ge.game_players[1].game_player.is_turn);
+        assert!(!ge.game_players[2].game_player.is_turn);
+    }
+
+    // --- 2. find_game_extended ---
+
+    #[sqlx::test]
+    async fn find_game_extended_round_trips_mixed_players(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+
+        let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 1, &[0]).await;
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge.game.id, game.id);
+        assert_eq!(ge.game_type.id, game_type_id);
+        assert_eq!(ge.game_version.id, game_version_id);
+        assert_eq!(ge.game_players.len(), 2);
+
+        let human = ge.game_players.iter().find(|p| p.user.is_some()).unwrap();
+        assert_eq!(human.user.as_ref().unwrap().id, creator.id);
+        assert!(human.game_bot.is_none());
+
+        let bot = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_bot.is_some())
+            .unwrap();
+        assert!(bot.user.is_none());
+
+        // create_game_with_users itself inserts a game_type_users row (DB
+        // column default rating 1200), so it's present here.
+        assert_eq!(human.game_type_user.rating, 1200);
+        assert_eq!(human.game_type_user.peak_rating, 1200);
+        assert_eq!(human.game_type_user.user_id, creator.id);
+
+        // Nonexistent game id returns Ok(None), not a panic.
+        let missing = find_game_extended(&pool, Uuid::new_v4()).await.unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[sqlx::test]
+    async fn find_game_extended_missing_game_type_user_defaults_to_1500(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+
+        // Explicitly insert a game_type_users row for a *different* game type to
+        // make sure the LEFT JOIN filter (game_type_id match) is respected, and
+        // that a genuinely missing row still defaults correctly.
+        let (_other_game_type_id, _) = make_game_type_and_version(&pool).await;
+
+        let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 0, &[0]).await;
+
+        // create_game_with_users auto-creates a game_type_users row; delete it
+        // to exercise the genuinely-missing-row default path in
+        // build_game_type_user (rating/peak_rating default to 1500).
+        sqlx::query!(
+            "DELETE FROM game_type_users WHERE user_id = $1 AND game_type_id = $2",
+            creator.id,
+            game_type_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let human = &ge.game_players[0];
+        assert_eq!(human.game_type_user.rating, 1500);
+        assert_eq!(human.game_type_user.peak_rating, 1500);
+        assert_eq!(human.game_type_user.game_type_id, game_type_id);
+    }
+
+    // --- 3. find_active_games_for_user ---
+
+    #[sqlx::test]
+    async fn find_active_games_for_user_groups_and_filters(pool: PgPool) {
+        let user = make_user(&pool, "user").await;
+        let other = make_user(&pool, "other").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+
+        // Game 1: user is player 0 (their turn).
+        let game1 =
+            make_game_with_players(&pool, game_version_id, user.id, &[other.id], 0, &[0]).await;
+        // Game 2: user is player 1 (opponent's turn, not user's).
+        let game2 =
+            make_game_with_players(&pool, game_version_id, other.id, &[user.id], 0, &[0]).await;
+        // Game 3: user in a finished game - must be excluded.
+        let game3 = create_game_with_users(
+            &pool,
+            CreateGameOpts {
+                game_version_id,
+                whose_turn: &[],
+                eliminated: &[],
+                placings: &[0, 1],
+                points: &[1.0, 0.0],
+                creator_id: user.id,
+                opponent_ids: &[other.id],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "finished_state",
+            },
+        )
+        .await
+        .unwrap();
+
+        let games = find_active_games_for_user(&user.id, &pool).await.unwrap();
+        let game_ids: Vec<Uuid> = games.iter().map(|g| g.game.id).collect();
+
+        assert!(game_ids.contains(&game1.id));
+        assert!(game_ids.contains(&game2.id));
+        assert!(
+            !game_ids.contains(&game3.id),
+            "finished games must be excluded"
+        );
+        assert_eq!(games.len(), 2, "no duplicate/mis-grouped rows");
+
+        for g in &games {
+            // Exactly the two players we created for that game, correctly grouped.
+            assert_eq!(g.game_players.len(), 2);
+            let user_player = g
+                .game_players
+                .iter()
+                .find(|p| p.user.as_ref().map(|u| u.id) == Some(user.id))
+                .expect("user's own player row must be present in their grouped game");
+            // Player order is randomized by `create_game_with_users`, so
+            // check turn flags by position rather than assuming creator ==
+            // position 0: `whose_turn: &[0]` marks position 0 active.
+            let expected_turn = user_player.game_player.position == 0;
+            assert_eq!(user_player.game_player.is_turn, expected_turn);
+            assert!(!user_player.game_player.is_read);
+        }
+
+        // A user in no games gets an empty vec, not an error.
+        let lonely = make_user(&pool, "lonely").await;
+        let none = find_active_games_for_user(&lonely.id, &pool).await.unwrap();
+        assert!(none.is_empty());
+    }
+
+    // --- 4. update_game_command_success ---
+
+    #[sqlx::test]
+    async fn update_game_command_success_writes_active_fields(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+
+        let ge_before = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player = ge_before
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let played_player_id = played_player.game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "new_state",
+            true,  // can_undo
+            false, // is_finished -> Active
+            &[1],  // whose_turn moves to position 1
+            &[],
+            &[],
+            &[3.5, 1.5],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge_after.game.game_state, "new_state");
+        assert!(!ge_after.game.is_finished);
+
+        let p0 = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let p1 = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+
+        assert!(!p0.game_player.is_turn);
+        assert!(p1.game_player.is_turn);
+        assert!(!p0.game_player.is_eliminated);
+        assert_eq!(p0.game_player.points, Some(3.5));
+        assert_eq!(p1.game_player.points, Some(1.5));
+        // Only the played player gets undo state stashed.
+        assert_eq!(
+            p0.game_player.undo_game_state,
+            Some("prev_state".to_string())
+        );
+        assert_eq!(p1.game_player.undo_game_state, None);
+        // last_turn_at only bumped for the played player.
+        assert!(p0.game_player.last_turn_at > played_player.game_player.last_turn_at);
+        // is_turn_at bumped for whoever's turn it now is (p1).
+        assert!(p1.game_player.is_turn_at >= played_player.game_player.is_turn_at);
+    }
+
+    #[sqlx::test]
+    async fn update_game_command_success_writes_finished_fields(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            true, // is_finished -> Finished
+            &[],
+            &[],
+            &[1, 2], // placings by position
+            &[10.0, 5.0],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(ge_after.game.is_finished);
+        let first_finished_at = ge_after.game.finished_at.expect("finished_at set");
+
+        let p0 = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let p1 = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+        assert_eq!(p0.game_player.place, Some(1));
+        assert_eq!(p1.game_player.place, Some(2));
+
+        // The COALESCE only guards the case where the finished_at param is NULL
+        // (i.e. is_finished = false): finished_at is preserved rather than
+        // cleared. When is_finished = true it always passes Some(now), so a
+        // second "finished" call actually advances finished_at rather than
+        // preserving it - this differs from the plan's phrasing, see report.
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "final_state",
+            "final_state_2",
+            false,
+            false, // is_finished = false -> finished_at param is None
+            &[0],
+            &[],
+            &[],
+            &[10.0, 5.0],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_2 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(
+            ge_after_2.game.finished_at,
+            Some(first_finished_at),
+            "COALESCE preserves finished_at when the new value is NULL"
+        );
+    }
+
+    // --- 5. undo_game ---
+
+    #[sqlx::test]
+    async fn undo_game_restores_state_and_clears_undo(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[1])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_id = ge.game_players[0].game_player.id;
+
+        // Simulate a played command that stashed undo state for player 0.
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_before_move",
+            "state_after_move",
+            true,
+            false,
+            &[1],
+            &[],
+            &[],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        undo_game(
+            &pool,
+            game.id,
+            "state_before_move",
+            0, // player_position that used the undo
+            &[0],
+            &[],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge_after.game.game_state, "state_before_move");
+        assert!(!ge_after.game.is_finished);
+        assert!(ge_after.game.finished_at.is_none());
+
+        for p in &ge_after.game_players {
+            assert!(p.game_player.undo_game_state.is_none());
+        }
+        let p0 = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let p1 = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+        assert!(p0.game_player.is_turn);
+        assert!(!p1.game_player.is_turn);
+
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        assert!(logs.iter().any(|l| l.body == "{{player 0}} used an undo"));
+    }
+
+    // --- 6. concede_game ---
+
+    #[sqlx::test]
+    async fn concede_game_marks_finished(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceding = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let conceding_id = conceding.game_player.id;
+
+        concede_game(&pool, game.id, conceding_id, "creator")
+            .await
+            .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(ge_after.game.is_finished);
+        assert!(ge_after.game.finished_at.is_some());
+    }
+
+    // --- 7. game logs ---
+
+    #[sqlx::test]
+    async fn game_logs_public_and_private_visibility_and_order(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0 = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let p1 = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+
+        let base = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+            time::Time::MIDNIGHT,
+        );
+
+        let logs = vec![
+            brdgme_cmd::api::CliLog {
+                content: "first public".to_string(),
+                at: base,
+                public: true,
+                to: vec![],
+            },
+            brdgme_cmd::api::CliLog {
+                content: "private to p0".to_string(),
+                at: base + time::Duration::seconds(1),
+                public: false,
+                to: vec![0],
+            },
+            brdgme_cmd::api::CliLog {
+                content: "second public".to_string(),
+                at: base + time::Duration::seconds(2),
+                public: true,
+                to: vec![],
+            },
+        ];
+
+        create_game_logs(&pool, game.id, logs).await.unwrap();
+
+        let all_logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        assert_eq!(all_logs.len(), 3);
+        // Ordered by logged_at ascending.
+        assert_eq!(all_logs[0].body, "first public");
+        assert_eq!(all_logs[1].body, "private to p0");
+        assert_eq!(all_logs[2].body, "second public");
+
+        let p0_logs = get_game_logs(&pool, game.id, p0.game_player.id)
+            .await
+            .unwrap();
+        assert_eq!(p0_logs.len(), 3);
+
+        let p1_logs = get_game_logs(&pool, game.id, p1.game_player.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            p1_logs.len(),
+            2,
+            "p1 must not see the private log targeted at p0"
+        );
+        assert!(p1_logs.iter().all(|l| l.body != "private to p0"));
+    }
+
+    // --- 8. Auth queries ---
+
+    #[sqlx::test]
+    async fn login_confirmation_token_expiry_boundary(pool: PgPool) {
+        // NOTE: production expiry window (auth/server.rs confirm_login) is
+        // 1 hour, not the 29/31 day window described in the plan - see report.
+        let user = make_user(&pool, "auth-user").await;
+        let now = {
+            let t = time::OffsetDateTime::now_utc();
+            time::PrimitiveDateTime::new(t.date(), t.time())
+        };
+
+        sqlx::query!(
+            "UPDATE users SET login_confirmation = $1, login_confirmation_at = $2 WHERE id = $3",
+            "123456",
+            now - time::Duration::minutes(55),
+            user.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let valid = sqlx::query_as!(
+            User,
+            "SELECT * FROM users WHERE login_confirmation = $1 AND login_confirmation_at > NOW() - INTERVAL '1 hour'",
+            "123456"
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(valid.is_some(), "token within the 1 hour window is valid");
+
+        sqlx::query!(
+            "UPDATE users SET login_confirmation_at = $1 WHERE id = $2",
+            now - time::Duration::minutes(65),
+            user.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let expired = sqlx::query_as!(
+            User,
+            "SELECT * FROM users WHERE login_confirmation = $1 AND login_confirmation_at > NOW() - INTERVAL '1 hour'",
+            "123456"
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(
+            expired.is_none(),
+            "token past the 1 hour window is rejected"
+        );
+    }
+
+    #[sqlx::test]
+    async fn session_token_validation(pool: PgPool) {
+        use crate::auth::session::{invalidate_auth_token, validate_session_token};
+
+        let user = make_user(&pool, "session-user").await;
+        let token_id = Uuid::new_v4();
+        sqlx::query!(
+            "INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)",
+            token_id,
+            user.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(validate_session_token(&pool, token_id).await.unwrap());
+
+        // NOTE: validate_session_token performs a pure existence check with no
+        // created_at comparison - the 30-day window described in the plan is
+        // enforced only by the tower_sessions cookie expiry
+        // (Expiry::OnInactivity(Duration::days(30)) in auth/session.rs
+        // create_session_layer), not by this DB query. A token inserted 40 days
+        // ago is still "valid" from the DB's point of view.
+        sqlx::query!(
+            "UPDATE user_auth_tokens SET created_at = NOW() - INTERVAL '40 days' WHERE id = $1",
+            token_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            validate_session_token(&pool, token_id).await.unwrap(),
+            "DB layer has no created_at expiry check - session expiry is cookie-side only"
+        );
+
+        invalidate_auth_token(&pool, token_id).await.unwrap();
+        assert!(!validate_session_token(&pool, token_id).await.unwrap());
+
+        // Nonexistent token id returns false, not an error.
+        assert!(!validate_session_token(&pool, Uuid::new_v4()).await.unwrap());
     }
 }
