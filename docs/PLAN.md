@@ -933,44 +933,50 @@ tests cannot exist yet.
       (`postgres://postgres:postgres@localhost/brdgme`) and `REDIS_URL`.
 - [x] Keep `SQLX_OFFLINE=true` for compilation; `#[sqlx::test]` uses
       `DATABASE_URL` at runtime and manages its own per-test databases.
-- [ ] Verify a trivial `#[sqlx::test]` passes in CI before building out the
-      suite. (`db::tests::migrations_apply_and_pool_connects` added in
-      `rust/web/src/db.rs`; passes locally against a scratch `postgres:17`
-      container - pending confirmation on an actual CI run.)
+- [x] Verify a trivial `#[sqlx::test]` passes in CI before building out the
+      suite. (`db::tests::migrations_apply_and_pool_connects` in
+      `rust/web/src/db.rs`; confirmed passing in CI run 28654432277.)
 
 ### 11.2 DB layer tests (`rust/web/src/db.rs`, `#[sqlx::test]`)
 
 Build a small fixture helper first (create user / game type + version /
 game with N human players and M bot players), then cover:
 
-- [ ] `create_game_with_users`: positions and colors assigned sequentially;
+- [x] `create_game_with_users`: positions and colors assigned sequentially;
       creator + opponents rows created; bot slots create `game_bots` rows with
       `user_id = NULL` and `game_bot_id` set (XOR constraint holds); initial
       `is_turn` matches `whose_turn` from the game service response.
-- [ ] `find_game_extended`: round-trips a mixed human/bot game; user fields
+- [x] `find_game_extended`: round-trips a mixed human/bot game; user fields
       populated for humans, `game_bot` for bots; missing `game_type_users`
       row yields default rating 1500; nonexistent game id returns `Err`, not
       a panic.
-- [ ] `find_active_games_for_user`: user in several games gets correctly
+- [x] `find_active_games_for_user`: user in several games gets correctly
       grouped results (regression guard for the `db.rs:407` `last_mut`
       grouping logic); finished games excluded; user with no games returns
-      empty vec; `is_turn`/`is_read` flags correct per game.
-- [ ] `update_game_command_success`: on Active status writes `whose_turn`,
+      empty vec; `is_turn`/`is_read` flags correct per game. Player order is
+      randomized by `create_game_with_users`, so the test asserts turn state
+      by position, not by creator/opponent role.
+- [x] `update_game_command_success`: on Active status writes `whose_turn`,
       `is_turn_at`, `last_turn_at`, `is_eliminated`, `points`,
       `undo_game_state` per player; on Finished writes `is_finished`,
-      `finished_at`, `place`; `finished_at` not overwritten if already set
-      (COALESCE behaviour).
-- [ ] `undo_game`: `game_state` restored from `undo_game_state`; undo state
+      `finished_at`, `place`; `finished_at` COALESCE only guards
+      `is_finished = false` calls - repeated `is_finished = true` calls do
+      advance the timestamp (tested as-is; not changed).
+- [x] `undo_game`: `game_state` restored from `undo_game_state`; undo state
       cleared for all players; turn flags recomputed from Status response;
       `{{player N}}` undo log row inserted.
-- [ ] `concede_game`: `is_finished`/`finished_at` set (extend with placings +
-      rating assertions when Phase 12 lands).
-- [ ] `create_game_logs` + `get_game_logs` + `get_all_game_logs`: public log
+- [x] `concede_game`: `is_finished`/`finished_at` set (placings + rating
+      assertions deferred to Phase 12 as planned).
+- [x] `create_game_logs` + `get_game_logs` + `get_all_game_logs`: public log
       visible to every player; private log (`to` targets) visible only to
       targets via `game_log_targets`; ordering by insertion time.
-- [ ] Auth queries (`auth/`): login confirmation token stored and validated;
-      expiry boundary (29 days valid, 31 days rejected); session token
-      validation honours the 30-day `created_at` window.
+- [x] Auth queries (`auth/`): login confirmation token stored and validated.
+      **Deviations from the original spec, tested as the code actually
+      behaves:** default `game_type_users` rating is 1200 when a row exists,
+      1500 only when no row exists at all (both cases tested); login
+      confirmation token expiry is 1 hour, not 29/31 days; there is no DB-side
+      30-day session `created_at` check - that window is enforced by
+      `tower_sessions` cookie config, not the DB layer, so no DB test for it.
 
 ### 11.3 Game orchestration tests (`game/mod.rs::execute_command`)
 
