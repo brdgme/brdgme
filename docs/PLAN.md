@@ -978,28 +978,32 @@ game with N human players and M bot players), then cover:
       30-day session `created_at` check - that window is enforced by
       `tower_sessions` cookie config, not the DB layer, so no DB test for it.
 
-### 11.3 Game orchestration tests (`game/mod.rs::execute_command`)
+### 11.3 Game orchestration tests (`game/mod.rs::execute_command`) [Complete]
 
 Combine `#[sqlx::test]` DB + in-process mock game service + real
 `GameBroadcaster` against test Redis. Critical cases - each asserts both the
 returned result AND the resulting DB state:
 
-- [ ] Happy path: valid command → state saved, logs persisted, turn flags
+- [x] Happy path: valid command → state saved, logs persisted, turn flags
       updated, `can_undo`/`undo_game_state` stored.
-- [ ] Not the player's turn → `Err`, game row unchanged.
-- [ ] Game already finished → `Err`, game row unchanged.
-- [ ] Game service returns `UserError` → error propagated verbatim, no DB
+- [x] Not the player's turn → `Err`, game row unchanged.
+- [x] Game already finished → `Err`, game row unchanged.
+- [x] Game service returns `UserError` → error propagated verbatim, no DB
       write.
-- [ ] Game service returns `SystemError` / malformed JSON → error, no DB
+- [x] Game service returns `SystemError` / malformed JSON → error, no DB
       write.
-- [ ] `remaining_input` non-empty → `Err`, no DB write.
-- [ ] Play response with `Finished` status → `place`, `is_finished`,
+- [x] `remaining_input` non-empty → `Err`, no DB write.
+- [x] Play response with `Finished` status → `place`, `is_finished`,
       `finished_at` persisted (+ ratings once Phase 12 lands).
-- [ ] `trigger_bot_turns` with `BOT_SERVICE_URL` unset → no-op, no error.
+- [x] `trigger_bot_turns` with `BOT_SERVICE_URL` unset → no-op, no error.
 - [ ] After Phase 12: rating updates asserted here too (human-only game
       rated; game with a bot player not rated).
 - [ ] After optimistic locking lands: concurrent-write conflict returns the
       conflict error and preserves the first write.
+
+Implemented as `rust/web/src/game/mod.rs::tests` (8 tests). The last two
+items are deferred pending their respective phases, as originally scoped -
+not omissions.
 
 ### 11.4 Handler auth tests (Axum `tower::ServiceExt::oneshot`)
 

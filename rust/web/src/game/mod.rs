@@ -178,3 +178,456 @@ pub async fn trigger_bot_turns(http_client: &reqwest::Client, ge: &crate::db::Ga
         });
     }
 }
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::*;
+    use crate::db::{self, CreateGameOpts};
+    use crate::models::user::User;
+    use axum::{routing::post, Json, Router};
+    use brdgme_cmd::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use tokio::net::TcpListener;
+    use uuid::Uuid;
+
+    fn now() -> time::PrimitiveDateTime {
+        let t = time::OffsetDateTime::now_utc();
+        time::PrimitiveDateTime::new(t.date(), t.time())
+    }
+
+    /// Starts an in-process mock game service that answers every request with
+    /// whatever `handler` returns; mirrors the pattern in `game::client::tests`.
+    async fn spawn_mock_game_service<F>(handler: F) -> String
+    where
+        F: Fn(Request) -> Response + Send + Sync + 'static,
+    {
+        let handler = Arc::new(handler);
+        let app = Router::new().route(
+            "/",
+            post(move |Json(payload): Json<Request>| {
+                let handler = handler.clone();
+                async move { Json(handler(payload)) }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{}", addr)
+    }
+
+    async fn make_user(pool: &PgPool, name: &str) -> User {
+        sqlx::query_as!(
+            User,
+            "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
+            Uuid::new_v4(),
+            name,
+            &Vec::<String>::new()
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn make_game_version(pool: &PgPool, uri: &str) -> Uuid {
+        let game_type_id = sqlx::query_scalar!(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+            format!("Test Game {}", Uuid::new_v4()),
+            &vec![2, 3, 4]
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+        sqlx::query_scalar!(
+            r#"INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+               VALUES ($1, $2, $3, true, false) RETURNING id"#,
+            game_type_id,
+            "1.0.0",
+            uri
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn make_broadcaster() -> crate::websocket::GameBroadcaster {
+        let redis_url =
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+        let client = redis::Client::open(redis_url).unwrap();
+        let conn = client.get_multiplexed_async_connection().await.unwrap();
+        crate::websocket::GameBroadcaster::new(conn, client)
+    }
+
+    /// Two human players (position 0, 1), player 0 on turn, pointed at `uri`.
+    async fn make_two_player_game(pool: &PgPool, uri: &str) -> (Uuid, User, User) {
+        let p0 = make_user(pool, "p0").await;
+        let p1 = make_user(pool, "p1").await;
+        let game_version_id = make_game_version(pool, uri).await;
+        let game = db::create_game_with_users(
+            pool,
+            CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: p0.id,
+                opponent_ids: &[p1.id],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "initial_state",
+            },
+        )
+        .await
+        .unwrap();
+        (game.id, p0, p1)
+    }
+
+    fn play_response(state: &str, whose_turn: Vec<usize>, can_undo: bool) -> Response {
+        Response::Play {
+            game: GameResponse {
+                state: state.to_string(),
+                points: vec![0.0, 0.0],
+                status: brdgme_game::Status::Active {
+                    whose_turn,
+                    eliminated: vec![],
+                },
+            },
+            logs: vec![CliLog {
+                content: "did a thing".to_string(),
+                at: now(),
+                public: true,
+                to: vec![],
+            }],
+            can_undo,
+            remaining_input: String::new(),
+            public_render: PubRender {
+                pub_state: "pub".to_string(),
+                render: "render".to_string(),
+            },
+            player_renders: vec![
+                PlayerRender {
+                    player_state: "p0".to_string(),
+                    render: "p0render".to_string(),
+                    command_spec: None,
+                },
+                PlayerRender {
+                    player_state: "p1".to_string(),
+                    render: "p1render".to_string(),
+                    command_spec: None,
+                },
+            ],
+        }
+    }
+
+    #[sqlx::test]
+    async fn happy_path_saves_state_and_advances_turn(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| play_response("new_state", vec![1], true)).await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ge.game.game_state, "new_state");
+        assert!(!ge.game.is_finished);
+
+        let logs = db::get_all_game_logs(&pool, game_id).await.unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].body, "did a thing");
+
+        let player0 = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let player1 = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+        assert!(!player0.game_player.is_turn);
+        assert!(player1.game_player.is_turn);
+        assert_eq!(
+            player0.game_player.undo_game_state.as_deref(),
+            Some("initial_state")
+        );
+        assert!(player1.game_player.undo_game_state.is_none());
+    }
+
+    #[sqlx::test]
+    async fn not_players_turn_returns_err_and_leaves_game_unchanged(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| play_response("new_state", vec![1], true)).await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        let result = execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            1, // not player 1's turn
+            "abc".to_string(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ge.game.game_state, "initial_state");
+    }
+
+    #[sqlx::test]
+    async fn finished_game_returns_err_and_leaves_game_unchanged(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| play_response("new_state", vec![1], true)).await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        // Force the game to already be finished.
+        sqlx::query!("UPDATE games SET is_finished = true WHERE id = $1", game_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result = execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ge.game.game_state, "initial_state");
+    }
+
+    #[sqlx::test]
+    async fn user_error_propagated_and_no_db_write(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| Response::UserError {
+            message: "invalid command".to_string(),
+        })
+        .await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        let result = execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await;
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("invalid command"));
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ge.game.game_state, "initial_state");
+    }
+
+    #[sqlx::test]
+    async fn system_error_propagated_and_no_db_write(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| Response::SystemError {
+            message: "boom".to_string(),
+        })
+        .await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        let result = execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ge.game.game_state, "initial_state");
+    }
+
+    #[sqlx::test]
+    async fn remaining_input_returns_err_and_no_db_write(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| {
+            let mut resp = play_response("new_state", vec![1], true);
+            if let Response::Play {
+                ref mut remaining_input,
+                ..
+            } = resp
+            {
+                *remaining_input = "extra".to_string();
+            }
+            resp
+        })
+        .await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        let result = execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ge.game.game_state, "initial_state");
+    }
+
+    #[sqlx::test]
+    async fn finished_status_persists_placings(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| Response::Play {
+            game: GameResponse {
+                state: "final_state".to_string(),
+                points: vec![1.0, 0.0],
+                status: brdgme_game::Status::Finished {
+                    placings: vec![0, 1],
+                    stats: vec![],
+                },
+            },
+            logs: vec![],
+            can_undo: false,
+            remaining_input: String::new(),
+            public_render: PubRender {
+                pub_state: "pub".to_string(),
+                render: "render".to_string(),
+            },
+            player_renders: vec![
+                PlayerRender {
+                    player_state: "p0".to_string(),
+                    render: "p0render".to_string(),
+                    command_spec: None,
+                },
+                PlayerRender {
+                    player_state: "p1".to_string(),
+                    render: "p1render".to_string(),
+                    command_spec: None,
+                },
+            ],
+        })
+        .await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(ge.game.is_finished);
+        assert!(ge.game.finished_at.is_some());
+
+        let player0 = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let player1 = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+        assert_eq!(player0.game_player.place, Some(0));
+        assert_eq!(player1.game_player.place, Some(1));
+    }
+
+    #[tokio::test]
+    async fn trigger_bot_turns_noop_when_bot_service_url_unset() {
+        assert!(std::env::var("BOT_SERVICE_URL").is_err());
+
+        let http_client = reqwest::Client::new();
+        let ge = crate::db::GameExtended {
+            game: crate::models::game::Game {
+                id: Uuid::new_v4(),
+                created_at: now(),
+                updated_at: now(),
+                game_version_id: Uuid::new_v4(),
+                is_finished: false,
+                finished_at: None,
+                game_state: "state".to_string(),
+                chat_id: None,
+                restarted_game_id: None,
+            },
+            game_type: crate::models::game::GameType {
+                id: Uuid::new_v4(),
+                created_at: now(),
+                updated_at: now(),
+                name: "Test".to_string(),
+                player_counts: vec![2],
+                weight: 1.0,
+            },
+            game_version: crate::models::game::GameVersion {
+                id: Uuid::new_v4(),
+                created_at: now(),
+                updated_at: now(),
+                game_type_id: Uuid::new_v4(),
+                name: "1.0.0".to_string(),
+                uri: "http://localhost:0".to_string(),
+                is_public: true,
+                is_deprecated: false,
+            },
+            game_players: vec![],
+        };
+
+        // No-op, no panic: nothing to assert beyond "returns".
+        trigger_bot_turns(&http_client, &ge).await;
+    }
+}
