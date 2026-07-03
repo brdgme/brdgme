@@ -1015,3 +1015,15 @@ pub async fn update_game_command_success(
     tx.commit().await?;
     Ok(())
 }
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    #[sqlx::test]
+    async fn migrations_apply_and_pool_connects(pool: sqlx::PgPool) -> sqlx::Result<()> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(count, 0);
+        Ok(())
+    }
+}

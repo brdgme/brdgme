@@ -928,13 +928,15 @@ tests cannot exist yet.
 
 ### 11.1 CI: backing services for integration tests
 
-- [ ] Add `postgres:17` and `redis:7` service containers to the `test-rust`
+- [x] Add `postgres:17` and `redis:7` service containers to the `test-rust`
       job in `.github/workflows/ci.yml`, matching `DATABASE_URL`
       (`postgres://postgres:postgres@localhost/brdgme`) and `REDIS_URL`.
-- [ ] Keep `SQLX_OFFLINE=true` for compilation; `#[sqlx::test]` uses
+- [x] Keep `SQLX_OFFLINE=true` for compilation; `#[sqlx::test]` uses
       `DATABASE_URL` at runtime and manages its own per-test databases.
 - [ ] Verify a trivial `#[sqlx::test]` passes in CI before building out the
-      suite.
+      suite. (`db::tests::migrations_apply_and_pool_connects` added in
+      `rust/web/src/db.rs`; passes locally against a scratch `postgres:17`
+      container - pending confirmation on an actual CI run.)
 
 ### 11.2 DB layer tests (`rust/web/src/db.rs`, `#[sqlx::test]`)
 
