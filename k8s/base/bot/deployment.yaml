@@ -28,3 +28,19 @@ spec:
           env:
             - name: LISTEN_ADDR
               value: "0.0.0.0:4000"
+          readinessProbe:
+            tcpSocket:
+              port: 4000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 128Mi

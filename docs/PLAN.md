@@ -504,7 +504,7 @@ delegable as specified unless noted.
       LLM. Fix: filter public OR targeted to the bot's own `game_players.id`
       (same predicate as `db::get_game_logs`; needs the bot's game_player id
       which the trigger query can join).
-- [ ] **No probes or resource requests on any Deployment** (`k8s/base/**`):
+- [x] **No probes or resource requests on any Deployment** (`k8s/base/**`):
       add readiness + liveness probes to `web` (TCP :3000 or a `/healthz`
       route), `bot` (TCP :4000), and game services (TCP :80); add resource
       requests/limits using the RSS figures quoted in VISION.md. Without
