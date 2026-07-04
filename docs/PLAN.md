@@ -548,10 +548,14 @@ delegable as specified unless noted.
       pubsub stream, a 30s ping interval, and the (previously dropped) WS
       receiver so pongs/close frames are processed; TODO(Phase 17 NATS)
       comment added above the `psubscribe("game.*")` call.
-- [ ] **websocket.rs tests**: zero coverage of legacy payload shape and the
+- [x] **websocket.rs tests**: zero coverage of legacy payload shape and the
       per-player private-log filtering (info-leak surface) that web-legacy
       relies on during Phase 16 side-by-side. `#[sqlx::test]` + Redis
       SUBSCRIBE assertions using the existing test infra.
+      Resolved 2026-07-04: two `#[sqlx::test]` tests in `websocket.rs` assert
+      the legacy `GameUpdate` JSON shape on `game.<id>` and per-player
+      private-log filtering on the `user.<token>` channels via real Redis
+      SUBSCRIBE.
 - [ ] **Swap `dotenv` -> `dotenvy`** (`rust/web/Cargo.toml`): dotenv is
       unmaintained (RUSTSEC-2021-0141). Drop-in replacement.
 - [ ] **CI lint gates** (`.github/workflows/ci.yml`): add
