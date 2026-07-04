@@ -269,3 +269,37 @@ current rules from the running service.
 **Use real renders in RULES.md.** The "Reading the Display" section must
 contain actual brdgme markup output from the game binary, not a hand-crafted
 ASCII approximation. See `docs/RULES.md` for the extraction process.
+
+---
+
+## Testing Conventions
+
+**`db.rs`, `game/mod.rs`, and `auth/` require tests.** These are the files
+agents and reviewers touch most often, and they are also the files where a
+silent regression is most dangerous (money-equivalent state: game outcomes,
+ratings, login). New or changed logic in `rust/web/src/db.rs`,
+`rust/web/src/game/mod.rs`, or `rust/web/src/auth/` must land with tests
+covering the change. A PR touching these files without tests should be
+rejected in review, whether the reviewer is human or an agent.
+
+**Never call the real game service or the LLM in a test.** `rust/web` tests
+mock the game service HTTP layer with an in-process Axum server returning
+canned `Response` JSON - see the pattern in `rust/web/src/game/client.rs`.
+This keeps tests fast and deterministic and avoids depending on a running
+game binary. The LLM is never called in any test; bot-loop behaviour that
+would require a live LLM call is out of scope for the test suite (see
+`docs/PLAN.md` Phase 11 for the current deferral).
+
+**Use `#[sqlx::test]` for anything touching the database.** It gives each
+test its own isolated, migrated database, so tests never share state with
+each other. Do not build ad hoc shared fixtures or rely on test ordering;
+each `#[sqlx::test]` function should set up exactly the rows it needs.
+
+**E2E scenarios are for user-visible flows only, and must stay fast.** The
+Playwright suite exists to catch hydration panics and full-stack wiring
+breaks that unit and integration tests cannot see - it is a smoke suite, not
+a regression suite. Add a scenario only when it exercises something a user
+would actually do end-to-end (load a page, submit a command, see it update).
+Push logic-level coverage down into unit or `#[sqlx::test]` integration
+tests instead of adding another E2E case. Keep the whole suite under its
+time budget (currently < 5 minutes).

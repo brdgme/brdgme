@@ -1210,15 +1210,15 @@ and how CI caches the release build to keep the job under budget.
 - [ ] CI: separate job (needs the release build); run on pull requests if the
       runtime allows, otherwise on master + nightly.
 
-### 11.7 Testing conventions (add to `docs/CODING.md`)
+### 11.7 Testing conventions (add to `docs/CODING.md`) [Complete]
 
-- [ ] New or changed logic in `db.rs`, `game/mod.rs`, and `auth/` must land
+- [x] New or changed logic in `db.rs`, `game/mod.rs`, and `auth/` must land
       with tests. Reviewers/agents reject changes to these files without them.
-- [ ] Game service HTTP is always mocked in `rust/web` tests; the LLM is
+- [x] Game service HTTP is always mocked in `rust/web` tests; the LLM is
       never called in any test.
-- [ ] Use `#[sqlx::test]` for anything touching the DB; never share state
+- [x] Use `#[sqlx::test]` for anything touching the DB; never share state
       between tests.
-- [ ] E2E scenarios are added only for user-visible flows, and the suite must
+- [x] E2E scenarios are added only for user-visible flows, and the suite must
       stay under its time budget.
 
 **Build order for delegation:** 11.1 → 11.2 → 11.3 → 11.4 → 11.5 → 11.6.
