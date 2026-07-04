@@ -426,7 +426,7 @@ review before the `leptos` branch replaces production. (The review document
       **Delegation gap:** no task body. Needs: how to obtain a representative
       3-player game state, the render extraction procedure (per `docs/RULES.md`
       and the game crate conventions), and which RULES.md sections must change.
-- [ ] **Optimistic locking missing in `execute_command`**: two concurrent
+- [x] **Optimistic locking missing in `execute_command`**: two concurrent
       requests (e.g. two players submitting at the same instant, or a bot and a
       player) can both read the same game state, both call the game service, and
       both attempt to write back. The second write silently overwrites the first.
@@ -442,6 +442,10 @@ review before the `leptos` branch replaces production. (The review document
          detection.
       Changes: `execute_command` in `game/mod.rs`; signature and UPDATE query
       in `update_game_command_success` in `db.rs`.
+      Resolved: implemented as specified above; no bot changes needed since
+      the conflict error propagates like any other command error and the bot
+      already retries with fresh state on failure. Conflict test added in
+      11.3 (`concurrent_write_conflict_returns_err_and_preserves_first_write`).
 - [x] **Concede confirmation**: Added `window.confirm("Are you sure you want to
       concede?")` in the click handler before dispatching `ConcedeGame`.
       `"Window"` added to web-sys features.
@@ -1000,11 +1004,11 @@ returned result AND the resulting DB state:
 - [x] `trigger_bot_turns` with `BOT_SERVICE_URL` unset → no-op, no error.
 - [ ] After Phase 12: rating updates asserted here too (human-only game
       rated; game with a bot player not rated).
-- [ ] After optimistic locking lands: concurrent-write conflict returns the
+- [x] After optimistic locking lands: concurrent-write conflict returns the
       conflict error and preserves the first write.
 
-Implemented as `rust/web/src/game/mod.rs::tests` (8 tests). The last two
-items are deferred pending their respective phases, as originally scoped -
+Implemented as `rust/web/src/game/mod.rs::tests` (9 tests). The remaining
+item is deferred pending its respective phase, as originally scoped -
 not omissions.
 
 ### 11.4 Handler auth tests (Axum `tower::ServiceExt::oneshot`) [Complete]

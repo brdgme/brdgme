@@ -98,6 +98,7 @@ pub async fn execute_command(
         &eliminated,
         &placings,
         &game_response.points,
+        ge.game.updated_at,
     )
     .await?;
 
@@ -370,6 +371,64 @@ mod tests {
             Some("initial_state")
         );
         assert!(player1.game_player.undo_game_state.is_none());
+    }
+
+    #[sqlx::test]
+    async fn concurrent_write_conflict_returns_err_and_preserves_first_write(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| play_response("new_state", vec![1], true)).await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        // Simulate two concurrent requests both reading the game before either
+        // writes: capture the stale `updated_at` here, then let the first
+        // request (a normal execute_command) win the race and land its write.
+        let stale_ge = db::find_game_extended(&pool, game_id).await.unwrap().unwrap();
+
+        execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await
+        .unwrap();
+
+        // The second request now tries to write using the state it read
+        // before the first request's write landed - its expected_updated_at
+        // is stale, so it must be rejected as a conflict rather than
+        // silently overwriting the first write.
+        let played_player_id = stale_ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap()
+            .game_player
+            .id;
+        let result = db::update_game_command_success(
+            &pool,
+            game_id,
+            played_player_id,
+            "initial_state",
+            "concurrent_conflict_state",
+            true,
+            false,
+            &[1],
+            &[],
+            &[],
+            &[0.0, 0.0],
+            stale_ge.game.updated_at,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ge.game.game_state, "new_state");
     }
 
     #[sqlx::test]

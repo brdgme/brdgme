@@ -1117,6 +1117,7 @@ pub async fn update_game_command_success(
     eliminated: &[usize],
     placings: &[usize],
     points: &[f32],
+    expected_updated_at: time::PrimitiveDateTime,
 ) -> Result<()> {
     let now = {
         let t = time::OffsetDateTime::now_utc();
@@ -1126,15 +1127,22 @@ pub async fn update_game_command_success(
 
     let mut tx = pool.begin().await?;
 
-    sqlx::query!(
-        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = COALESCE($3, finished_at), updated_at = NOW() WHERE id = $4",
+    let update_result = sqlx::query!(
+        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = COALESCE($3, finished_at), updated_at = NOW() WHERE id = $4 AND updated_at = $5",
         new_game_state,
         is_finished,
         finished_at,
-        game_id
+        game_id,
+        expected_updated_at
     )
     .execute(&mut *tx)
     .await?;
+
+    if update_result.rows_affected() == 0 {
+        return Err(anyhow::anyhow!(
+            "Game was updated by another action, please retry"
+        ));
+    }
 
     let players = sqlx::query!(
         "SELECT id, position, is_turn_at, last_turn_at FROM game_players WHERE game_id = $1",
@@ -1516,6 +1524,7 @@ mod tests {
             &[],
             &[],
             &[3.5, 1.5],
+            ge_before.game.updated_at,
         )
         .await
         .unwrap();
@@ -1575,6 +1584,7 @@ mod tests {
             &[],
             &[1, 2], // placings by position
             &[10.0, 5.0],
+            ge.game.updated_at,
         )
         .await
         .unwrap();
@@ -1613,6 +1623,7 @@ mod tests {
             &[],
             &[],
             &[10.0, 5.0],
+            ge_after.game.updated_at,
         )
         .await
         .unwrap();
@@ -1651,6 +1662,7 @@ mod tests {
             &[],
             &[],
             &[],
+            ge.game.updated_at,
         )
         .await
         .unwrap();
@@ -1992,6 +2004,7 @@ mod tests {
             &[],
             &placings,
             &[],
+            ge.game.updated_at,
         )
         .await
         .unwrap();
@@ -2044,6 +2057,7 @@ mod tests {
             &[],
             &placings,
             &[],
+            ge.game.updated_at,
         )
         .await
         .unwrap();
@@ -2086,11 +2100,13 @@ mod tests {
             &[],
             &[1, 2],
             &[],
+            ge.game.updated_at,
         )
         .await
         .unwrap();
 
         let (rating_after_first, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        let ge_after_first = find_game_extended(&pool, game.id).await.unwrap().unwrap();
 
         // A second "finish" write (e.g. a retry) must not re-rate the game -
         // the idempotency guard trips because rating_change is already set.
@@ -2106,6 +2122,7 @@ mod tests {
             &[],
             &[1, 2],
             &[],
+            ge_after_first.game.updated_at,
         )
         .await
         .unwrap();
@@ -2140,6 +2157,7 @@ mod tests {
             &[],
             &[1, 2],
             &[],
+            ge.game.updated_at,
         )
         .await
         .unwrap();
@@ -2193,6 +2211,7 @@ mod tests {
             &[],
             &placings,
             &[],
+            ge.game.updated_at,
         )
         .await
         .unwrap();
