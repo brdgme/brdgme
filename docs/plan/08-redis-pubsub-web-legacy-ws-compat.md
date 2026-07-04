@@ -1,4 +1,4 @@
-# Phase 8: Redis pub/sub + web-legacy WS compatibility
+# 8: Redis pub/sub + web-legacy WS compatibility
 
 **Status:** Complete
 

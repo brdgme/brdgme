@@ -1,4 +1,4 @@
-# Phase 21: OpenTofu Infrastructure as Code
+# 21: OpenTofu Infrastructure as Code
 
 **Status:** Pending - human-paced
 
@@ -10,10 +10,12 @@ belongs to tofu, records to external-dns), the Spaces bucket for CNPG
 backups, and the Spaces bucket for tofu state. The Gateway-provisioned load
 balancer is NOT managed here - DOKS owns it.
 
-**Sequencing:** independent of all other phases and entirely human-operated
-(account credentials). Highest value before Phase 14's prod prerequisites -
-"cluster >= 1.33, VPC-native" becomes a fact encoded in code instead of a
-checklist item - but blocks nothing.
+**Sequencing (revised 2026-07-04):** entirely human-operated (account
+credentials), and now scheduled **first** among the pre-go-live infra
+phases - Michael wants the account infrastructure described in tofu from
+the start. It encodes the Phase 14 prod prerequisite ("cluster >= 1.33,
+VPC-native"), owns the DNS zone the 22a Resend records (SPF/DKIM/DMARC)
+land in, and creates the Spaces buckets Phase 19 needs.
 
 - [ ] Add `opentofu` to `devenv.nix`.
 - [ ] `infra/` directory: DO provider, S3 backend against a Spaces bucket.

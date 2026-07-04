@@ -1,4 +1,4 @@
-# Phase 19: CloudNativePG
+# 19: CloudNativePG
 
 **Status:** Pending
 

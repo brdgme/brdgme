@@ -1,4 +1,4 @@
-# Phase 2: Database Layer
+# 2: Database Layer
 
 **Status:** Complete
 

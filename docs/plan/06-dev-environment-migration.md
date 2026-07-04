@@ -1,4 +1,4 @@
-# Phase 6: Dev Environment Migration
+# 6: Dev Environment Migration
 
 **Status:** Complete
 

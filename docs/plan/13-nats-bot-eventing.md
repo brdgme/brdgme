@@ -1,4 +1,4 @@
-# Phase 13: NATS Bot Eventing
+# 13: NATS Bot Eventing
 
 **Status:** Pending
 

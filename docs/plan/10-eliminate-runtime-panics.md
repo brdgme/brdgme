@@ -1,4 +1,4 @@
-# Phase 10: Eliminate runtime panics in rust/web
+# 10: Eliminate runtime panics in rust/web
 
 **Status:** Complete
 

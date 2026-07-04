@@ -1,9 +1,14 @@
-# Phase 18: Production Hardening
+# 18: Production Hardening
 
 **Status:** Pending
 
 **Goal:** Ensure errors are visible and diagnosable in production, where
 optimised WASM strips debug info and panics are otherwise silent.
+
+**Resequenced 2026-07-04: pre-go-live.** With the hard-cutover decision
+(Phase 16) this phase moves before cutover so error visibility exists from
+day one of prod traffic - the Phase 16 validation gate explicitly checks
+VictoriaLogs for unexplained 5xx/panics.
 
 **Delegation gap:** every open item here needs a decision or spec first:
 - **`ErrorBoundary`:** which components get boundaries (list them), what each

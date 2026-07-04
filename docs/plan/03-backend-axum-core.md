@@ -1,4 +1,4 @@
-# Phase 3: Backend (Axum Core)
+# 3: Backend (Axum Core)
 
 **Status:** Complete
 

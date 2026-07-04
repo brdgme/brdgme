@@ -1,4 +1,4 @@
-# Phase 23: Rust Game Ports
+# 23: Rust Game Ports
 
 **Status:** Pending
 

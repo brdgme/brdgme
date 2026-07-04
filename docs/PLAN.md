@@ -1,14 +1,22 @@
-# Monolith Migration Plan
+# brdgme Product Backlog
 
-**Current focus (in order):**
-Restart 500 error → 3-player render → Phase 22a Resend outbound remaining
-steps (domain verification, prod secret, live-inbox check) → Phase 14 prod
-prerequisites →
-Phase 13 NATS bot eventing (JetStream) → Phase 19 CloudNativePG → Phase 15
-ArgoCD + sealed-secrets → Phase 20 external-dns → Phase 16 cutover +
-validation → Phase 22b play-by-email → Phase 17 NATS WS migration → Phase 18
-hardening (VictoriaLogs). Phase 21 OpenTofu is human-paced and independent;
-highest value if started before Phase 14's prod prerequisites.
+This file is the backlog index. Each work item lives in `docs/plan/NN-*.md`;
+the number is a **permanent ID in assignment order** - it never changes and
+never implies execution order. Priority lives in the ordered list below
+(historically these items were called "phases"; prose saying "Phase NN"
+means item `NN`).
+
+**Priority order (hard-cutover resequencing 2026-07-04):**
+Restart 500 error → 3-player render → #21 OpenTofu (first: encodes the
+cluster prereqs, DNS zone, buckets) → #22a Resend outbound remaining
+steps (domain verification via tofu, prod secret, live-inbox check) →
+#14 prod prerequisites → #13 NATS bot eventing (JetStream) →
+#17 NATS WS migration (now pre-cutover) → #19 CloudNativePG →
+#15 ArgoCD + sealed-secrets → #20 external-dns → #18
+hardening (VictoriaLogs, now pre-cutover) → #16 hard cutover + 1-week
+validation gate → decommission.
+**Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
+#24 game invites → #23 Rust game ports (ongoing).
 
 ## Objective
 
@@ -39,31 +47,32 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## Status
 
-| Phase/Stream | Title | Status | Link |
+| # | Title | Status | Link |
 |---|---|---|---|
-| Phase 1 | Foundation & Shared Logic | Complete | [phase-01-foundation.md](plan/phase-01-foundation.md) |
-| Phase 2 | Database Layer | Complete | [phase-02-database-layer.md](plan/phase-02-database-layer.md) |
-| Phase 3 | Backend (Axum Core) | Complete | [phase-03-backend-axum-core.md](plan/phase-03-backend-axum-core.md) |
-| Phase 4 | WebSocket Integration | Complete | [phase-04-websocket-integration.md](plan/phase-04-websocket-integration.md) |
-| Phase 5 | Frontend (Leptos UI) | Complete | [phase-05-frontend-leptos-ui.md](plan/phase-05-frontend-leptos-ui.md) |
-| Phase 6 | Dev Environment Migration | Complete | [phase-06-dev-environment-migration.md](plan/phase-06-dev-environment-migration.md) |
-| Phase 7 | Pre-Cutover Fixes | Complete | [phase-07-pre-cutover-fixes.md](plan/phase-07-pre-cutover-fixes.md) |
-| Phase 8 | Redis pub/sub + web-legacy WS compatibility | Complete | [phase-08-redis-pubsub-web-legacy-ws-compat.md](plan/phase-08-redis-pubsub-web-legacy-ws-compat.md) |
-| Phase 9 | LLM Bots | Complete | [phase-09-llm-bots.md](plan/phase-09-llm-bots.md) |
-| Phase 10 | Eliminate runtime panics in rust/web | Complete | [phase-10-eliminate-runtime-panics.md](plan/phase-10-eliminate-runtime-panics.md) |
-| Phase 11 | Testing Foundation | Complete (completed 2026-07-04) | [phase-11-testing-foundation.md](plan/phase-11-testing-foundation.md) |
-| Phase 12 | ELO Ratings | Complete | [phase-12-elo-ratings.md](plan/phase-12-elo-ratings.md) |
-| Phase 13 | NATS Bot Eventing | Pending | [phase-13-nats-bot-eventing.md](plan/phase-13-nats-bot-eventing.md) |
-| Phase 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); prod prerequisites pending | [phase-14-drop-knative-gateway-api.md](plan/phase-14-drop-knative-gateway-api.md) |
-| Phase 15 | Production CD (ArgoCD) | Pending | [phase-15-production-cd-argocd.md](plan/phase-15-production-cd-argocd.md) |
-| Phase 16 | Production Cutover & Side-by-Side Validation | Pending | [phase-16-production-cutover-validation.md](plan/phase-16-production-cutover-validation.md) |
-| Phase 17 | NATS Migration + WS simplification | Pending | [phase-17-nats-migration-ws-simplification.md](plan/phase-17-nats-migration-ws-simplification.md) |
-| Phase 18 | Production Hardening | Pending | [phase-18-production-hardening.md](plan/phase-18-production-hardening.md) |
-| Phase 19 | CloudNativePG | Pending | [phase-19-cloudnativepg.md](plan/phase-19-cloudnativepg.md) |
-| Phase 20 | external-dns | Pending | [phase-20-external-dns.md](plan/phase-20-external-dns.md) |
-| Phase 21 | OpenTofu Infrastructure as Code | Pending - human-paced | [phase-21-opentofu-iac.md](plan/phase-21-opentofu-iac.md) |
-| Phase 22 | Email via Resend | 22a code complete (landed 77a2092); human/infra steps + 22b pending - high priority | [phase-22-email-via-resend.md](plan/phase-22-email-via-resend.md) |
-| Phase 23 | Rust Game Ports | Pending | [phase-23-rust-game-ports.md](plan/phase-23-rust-game-ports.md) |
+| 1 | Foundation & Shared Logic | Complete | [01-foundation.md](plan/01-foundation.md) |
+| 2 | Database Layer | Complete | [02-database-layer.md](plan/02-database-layer.md) |
+| 3 | Backend (Axum Core) | Complete | [03-backend-axum-core.md](plan/03-backend-axum-core.md) |
+| 4 | WebSocket Integration | Complete | [04-websocket-integration.md](plan/04-websocket-integration.md) |
+| 5 | Frontend (Leptos UI) | Complete | [05-frontend-leptos-ui.md](plan/05-frontend-leptos-ui.md) |
+| 6 | Dev Environment Migration | Complete | [06-dev-environment-migration.md](plan/06-dev-environment-migration.md) |
+| 7 | Pre-Cutover Fixes | Complete | [07-pre-cutover-fixes.md](plan/07-pre-cutover-fixes.md) |
+| 8 | Redis pub/sub + web-legacy WS compatibility | Complete | [08-redis-pubsub-web-legacy-ws-compat.md](plan/08-redis-pubsub-web-legacy-ws-compat.md) |
+| 9 | LLM Bots | Complete | [09-llm-bots.md](plan/09-llm-bots.md) |
+| 10 | Eliminate runtime panics in rust/web | Complete | [10-eliminate-runtime-panics.md](plan/10-eliminate-runtime-panics.md) |
+| 11 | Testing Foundation | Complete (completed 2026-07-04) | [11-testing-foundation.md](plan/11-testing-foundation.md) |
+| 12 | ELO Ratings | Complete | [12-elo-ratings.md](plan/12-elo-ratings.md) |
+| 13 | NATS Bot Eventing | Pending | [13-nats-bot-eventing.md](plan/13-nats-bot-eventing.md) |
+| 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); prod prerequisites pending | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
+| 15 | Production CD (ArgoCD) | Pending | [15-production-cd-argocd.md](plan/15-production-cd-argocd.md) |
+| 16 | Production Cutover (hard cutover + break-glass rollback; revised 2026-07-04) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
+| 17 | NATS Migration + WS simplification | Pending - resequenced pre-cutover 2026-07-04 | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
+| 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04 | [18-production-hardening.md](plan/18-production-hardening.md) |
+| 19 | CloudNativePG | Pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
+| 20 | external-dns | Pending | [20-external-dns.md](plan/20-external-dns.md) |
+| 21 | OpenTofu Infrastructure as Code | Pending - human-paced | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
+| 22 | Email via Resend | 22a code complete (landed 77a2092); human/infra steps + 22b-22d pending - high priority; 22c reminders + 22d multi-email added 2026-07-04 | [22-email-via-resend.md](plan/22-email-via-resend.md) |
+| 23 | Rust Game Ports | Pending | [23-rust-game-ports.md](plan/23-rust-game-ports.md) |
+| 24 | Game Invites | Pending - post-go-live, non-blocking | [24-game-invites.md](plan/24-game-invites.md) |
 | Bug fixes | Bug fixes | Partially resolved | [bugs.md](plan/bugs.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | [review-findings-2026-07-04.md](plan/review-findings-2026-07-04.md) |
 | Quick wins | Quick wins (added 2026-07-03) | Complete | [quick-wins.md](plan/quick-wins.md) |
@@ -73,9 +82,11 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## History
 
-Phases are numbered in assignment order, not execution order - see the focus
-line for execution order. Phases 1-12 are complete; Phase 14 is dev-complete
-with prod prerequisites pending; Phase 13 and Phases 15-23 remain pending.
+Items are numbered in assignment order, not execution order - see the
+priority order at the top. Items 1-12 are complete; 14 is dev-complete
+with prod prerequisites pending; 13 and 15-24 remain pending.
+(2026-07-04: files renamed `phase-NN-*.md` → `NN-*.md` and this file
+reframed as the backlog - reprioritising was fighting the "phase" naming.)
 (Renumbered 2026-07-02: 5.5→6, 5.6→7, old 6→8, 5.7→10, 6.5→ArgoCD, old
 7→cutover, old 8→NATS WS; ELO and NATS bot eventing split out of Phase 9
 into Phases 12 and 13. 2026-07-03: Phase 14 'Drop Knative' inserted; ArgoCD
@@ -89,7 +100,13 @@ Renovate/cargo-deny/kubeconform quick win, leptos-use in Phase 17,
 tower_governor in 22a, stale root artifacts in the Phase 16 decommission.
 2026-07-03: Phase 10 runtime panics completed. 2026-07-04: comprehensive
 review completed (docs/REVIEW-2026-07-04.md); findings added as the
-"Review findings 2026-07-04" section - the HIGH items block prod cutover.)
+"Review findings 2026-07-04" section - the HIGH items block prod cutover.
+2026-07-04: Phase 22 expanded with 22c turn reminders and 22d multi-email
+switching; Phase 24 game invites added - all post-go-live, non-blocking.
+2026-07-04 (later): hard-cutover decision - Phase 16 rewritten from
+side-by-side validation to hard cutover with a break-glass rollback overlay
+and a 1-week gate; Phases 17 and 18 resequenced pre-cutover; Phase 21
+moved to the front of the pre-go-live sequence.)
 
 **2026-07-04:** restructured this file into a KEP-style layout: a thin index
 (this file) plus one file per phase/work-stream under `docs/plan/`. The

@@ -1,4 +1,4 @@
-# Phase 12: ELO Ratings
+# 12: ELO Ratings
 
 **Status:** Complete (backfill decided 2026-07-04: no backfill needed)
 

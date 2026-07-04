@@ -1,4 +1,4 @@
-# Phase 14: Drop Knative - Plain Deployments + Gateway API
+# 14: Drop Knative - Plain Deployments + Gateway API
 
 **Status:** Dev complete (landed fc7cb3f); prod prerequisites pending
 
@@ -141,6 +141,11 @@ final infrastructure.
 - [ ] Confirm behaviour of the auto-provisioned DO load balancer for
       WebSockets: long-lived connection support and idle timeout
       configuration (the monolith holds a WS per connected client).
+- [ ] Confirm real client IPs survive the DO LB + Cilium Gateway path
+      (externalTrafficPolicy / PROXY protocol). The 22a login rate limiter
+      keys on client IP via `SmartIpKeyExtractor`; if source IPs are not
+      preserved it keys on the LB address and throttles all users
+      collectively. (Carried in from Phase 22a, 2026-07-03.)
 - [ ] Remove the Knative/net-certmanager one-time `kubectl apply`
       prerequisites from the Phase 16 notes; cert-manager alone remains.
 

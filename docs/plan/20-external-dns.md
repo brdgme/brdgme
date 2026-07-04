@@ -1,4 +1,4 @@
-# Phase 20: external-dns
+# 20: external-dns
 
 **Status:** Pending
 

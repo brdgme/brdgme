@@ -1,4 +1,4 @@
-# Phase 7: Pre-Cutover Fixes
+# 7: Pre-Cutover Fixes
 
 **Status:** Complete
 

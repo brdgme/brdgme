@@ -1,4 +1,4 @@
-# Phase 1: Foundation & Shared Logic
+# 1: Foundation & Shared Logic
 
 **Status:** Complete
 

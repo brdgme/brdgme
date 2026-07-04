@@ -1,4 +1,4 @@
-# Phase 5: Frontend (Leptos UI)
+# 5: Frontend (Leptos UI)
 
 **Status:** Complete
 

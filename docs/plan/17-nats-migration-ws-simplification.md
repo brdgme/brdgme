@@ -1,9 +1,21 @@
-# Phase 17: NATS Migration + WS simplification
+# 17: NATS Migration + WS simplification
 
 **Status:** Pending
 
-**Goal:** Replace Redis pub/sub with NATS Core, remove Redis, and simplify
-the WebSocket broadcast path now that legacy compat is gone.
+**Goal:** Replace Redis pub/sub with NATS Core, drop the monolith's Redis
+dependency, and simplify the WebSocket broadcast path.
+
+**Resequenced 2026-07-04: pre-cutover.** With the Phase 16 hard-cutover
+decision the legacy stack is never deployed to prod, so there are no legacy
+WS clients to serve and the fat-payload compat system (Phase 8) has no
+production consumer. This phase now runs **before** go-live (after Phase 13,
+which installs NATS), so cutover happens on the final skinny-payload
+architecture instead of the compat system. The Phase 8 legacy-compat code
+(`Legacy*` structs, per-player loop, `ws.{user_id}` channel) is deleted
+here. Caveat: `LEGACY=1` dev mode loses cross-system live updates once the
+monolith stops publishing Redis fat payloads - acceptable; the legacy stack
+still self-publishes to Redis for its own clients, which is also why the
+break-glass rollback (Phase 16) stays fully functional.
 
 **Delegation gap:** the target state is clear but the implementation is only
 sketched. Before delegating, specify:
@@ -19,8 +31,9 @@ sketched. Before delegating, specify:
   behaviour when several skinny signals arrive in quick succession.
 - **Test updates:** which Phase 11 tests change (broadcaster swaps from Redis
   to NATS in CI) and what new assertions cover the skinny-signal path.
-- **Sequencing:** explicitly after Phase 16 decommission (legacy channels
-  must be dead) - state this as a hard precondition.
+- **Sequencing:** resolved 2026-07-04 - pre-cutover, after Phase 13 (see
+  above). The old "after Phase 16 decommission" precondition is void: the
+  legacy stack never runs in prod alongside the monolith.
 
 ### WS payload strategy change (fat → skinny)
 
@@ -61,9 +74,11 @@ here are the WS-specific migration:
       connection management. Do this here, not earlier: the current fat
       `BrdgmeUpdate` handling would fight its codec model.
 - [ ] Remove the `redis` dependency from `rust/web/Cargo.toml`.
-- [ ] Remove Redis from `k8s/base/brdgme/kustomization.yaml` and delete
-      `k8s/base/redis/`.
-- [ ] Remove Redis port-forward from the Tiltfile.
+- [ ] Remove Redis from `k8s/base/brdgme/kustomization.yaml` and the
+      default Tiltfile port-forwards, but do **not** delete
+      `k8s/base/redis/`: the legacy stack (dev `LEGACY=1` mode and the
+      Phase 16 break-glass rollback overlay) still needs it. The manifests
+      are deleted in the Phase 16 decommission.
 
 **Note:** JetStream is already enabled from Phase 13 (bot eventing). WS
 fan-out deliberately stays on plain Core pub/sub subjects - ephemeral

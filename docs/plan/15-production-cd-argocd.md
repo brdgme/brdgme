@@ -1,4 +1,4 @@
-# Phase 15: Production CD (ArgoCD)
+# 15: Production CD (ArgoCD)
 
 **Status:** Pending
 
