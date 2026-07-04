@@ -539,11 +539,15 @@ delegable as specified unless noted.
       creation and the `restarted_game_id` UPDATE are separate transactions;
       a failure in between leaves the old game restartable again. Wrap in
       one transaction.
-- [ ] **WS hardening** (`rust/web/src/websocket.rs`): (a) add a periodic
+- [x] **WS hardening** (`rust/web/src/websocket.rs`): (a) add a periodic
       server-side ping (~30s interval) so idle connections survive LB idle
       timeouts - also de-risks the Phase 14 DO LB prerequisite; (b) note for
       the Phase 17 NATS design: subscribe per-game/per-user instead of the
       current `game.*` firehose to every client.
+      Resolved 2026-07-04: `handle_socket` now uses `tokio::select!` over the
+      pubsub stream, a 30s ping interval, and the (previously dropped) WS
+      receiver so pongs/close frames are processed; TODO(Phase 17 NATS)
+      comment added above the `psubscribe("game.*")` call.
 - [ ] **websocket.rs tests**: zero coverage of legacy payload shape and the
       per-player private-log filtering (info-leak surface) that web-legacy
       relies on during Phase 16 side-by-side. `#[sqlx::test]` + Redis

@@ -542,7 +542,7 @@ mod ssr {
     }
 
     async fn handle_socket(socket: WebSocket, broadcaster: GameBroadcaster, user_id: Option<Uuid>) {
-        let (mut sender, _receiver) = socket.split();
+        let (mut sender, mut receiver) = socket.split();
 
         let mut pubsub = match broadcaster.client.get_async_pubsub().await {
             Ok(p) => p,
@@ -552,6 +552,9 @@ mod ssr {
             }
         };
 
+        // TODO(Phase 17 NATS): this subscribes to the `game.*` firehose and forwards every
+        // game's updates to every connected client. The NATS-based redesign should subscribe
+        // per-game/per-user instead, so a client only receives messages relevant to it.
         if let Err(e) = pubsub.psubscribe("game.*").await {
             tracing::error!("Redis PSUBSCRIBE failed: {}", e);
             return;
@@ -565,13 +568,39 @@ mod ssr {
 
         let mut stream = pubsub.into_on_message();
 
-        while let Some(msg) = stream.next().await {
-            let payload: String = match msg.get_payload() {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            if sender.send(Message::Text(payload.into())).await.is_err() {
-                break;
+        // Periodic ping to keep idle connections alive across load-balancer idle timeouts.
+        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        ping_interval.tick().await; // first tick fires immediately, skip it
+
+        loop {
+            tokio::select! {
+                msg = stream.next() => {
+                    let msg = match msg {
+                        Some(m) => m,
+                        None => break,
+                    };
+                    let payload: String = match msg.get_payload() {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    if sender.send(Message::Text(payload.into())).await.is_err() {
+                        break;
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        break;
+                    }
+                }
+                // Drain inbound messages so pongs and close frames are processed; we don't
+                // act on client-sent data here.
+                incoming = receiver.next() => {
+                    match incoming {
+                        Some(Ok(_)) => {}
+                        _ => break,
+                    }
+                }
             }
         }
     }
