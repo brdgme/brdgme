@@ -6,6 +6,6 @@ edition = "2024"
 
 [dependencies]
 brdgme_color = { path = "../color" }
-combine = "4.2.1"
-serde = { version = "1.0.114", features = ["derive"] }
-thiserror = "2.0.11"
+combine = "4.6.7"
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"

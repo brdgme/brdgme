@@ -4,7 +4,7 @@ use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use lazy_static::lazy_static;
 use rand::seq::SliceRandom;
-use rand::{self, Rng};
+use rand::{self, RngExt};
 use serde::Serialize;
 use uuid::Uuid;
 

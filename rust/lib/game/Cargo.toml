@@ -8,10 +8,10 @@ edition = "2024"
 brdgme_color = { path = "../color" }
 brdgme_markup = { path = "../markup" }
 time = { version = "0.3", features = ["serde"] }
-combine = "4.2.1"
-thiserror = "2.0.11"
-log = "0.4.11"
-rand = "0.9.0"
-serde = { version = "1.0.114", features = ["derive"] }
-unicase = "2.6.0"
-serde_json = "1.0.145"
+combine = "4.6.7"
+thiserror = "2.0.18"
+log = "0.4.33"
+rand = "0.10.2"
+serde = { version = "1.0.228", features = ["derive"] }
+unicase = "2.9.0"
+serde_json = "1.0.150"

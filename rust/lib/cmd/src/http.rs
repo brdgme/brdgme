@@ -30,6 +30,10 @@ pub async fn serve<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
             .recv()
             .await;
     };
-    let (_, server) = warp::serve(handler).bind_with_graceful_shutdown(addr.into(), shutdown);
-    server.await
+    warp::serve(handler)
+        .bind(addr.into())
+        .await
+        .graceful(shutdown)
+        .run()
+        .await
 }
