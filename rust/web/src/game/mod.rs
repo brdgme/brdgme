@@ -329,6 +329,35 @@ mod tests {
         (game.id, p0, p1)
     }
 
+    /// One human player (position 0, on turn) plus one bot player (position
+    /// 1), pointed at `uri`.
+    async fn make_game_with_human_and_bot(pool: &PgPool, uri: &str) -> (Uuid, User) {
+        let p0 = make_user(pool, "p0").await;
+        let game_version_id = make_game_version(pool, uri).await;
+        let game = db::create_game_with_users(
+            pool,
+            CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: p0.id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[db::BotSlot {
+                    name: "Bot 0".to_string(),
+                    difficulty: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "initial_state",
+            },
+        )
+        .await
+        .unwrap();
+        (game.id, p0)
+    }
+
     fn play_response(state: &str, whose_turn: Vec<usize>, can_undo: bool) -> Response {
         Response::Play {
             game: GameResponse {
@@ -703,6 +732,104 @@ mod tests {
             .unwrap();
         assert_eq!(player0.game_player.place, Some(0));
         assert_eq!(player1.game_player.place, Some(1));
+
+        // Both players started at the DB default rating (1200), so the
+        // winner (place 0) gains and the loser (place 1) loses the same
+        // amount (K=32, equal ratings => +-16).
+        assert_eq!(player0.game_player.rating_change, Some(16));
+        assert_eq!(player1.game_player.rating_change, Some(-16));
+
+        let winner_rating = sqlx::query_scalar!(
+            "SELECT rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2",
+            ge.game_type.id,
+            player0.user.as_ref().unwrap().id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let loser_rating = sqlx::query_scalar!(
+            "SELECT rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2",
+            ge.game_type.id,
+            player1.user.as_ref().unwrap().id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(winner_rating, 1216);
+        assert_eq!(loser_rating, 1184);
+    }
+
+    #[sqlx::test]
+    async fn finished_game_with_bot_player_is_not_rated(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| Response::Play {
+            game: GameResponse {
+                state: "final_state".to_string(),
+                points: vec![1.0, 0.0],
+                status: brdgme_game::Status::Finished {
+                    placings: vec![0, 1],
+                    stats: vec![],
+                },
+            },
+            logs: vec![],
+            can_undo: false,
+            remaining_input: String::new(),
+            public_render: PubRender {
+                pub_state: "pub".to_string(),
+                render: "render".to_string(),
+            },
+            player_renders: vec![
+                PlayerRender {
+                    player_state: "p0".to_string(),
+                    render: "p0render".to_string(),
+                    command_spec: None,
+                },
+                PlayerRender {
+                    player_state: "bot".to_string(),
+                    render: "botrender".to_string(),
+                    command_spec: None,
+                },
+            ],
+        })
+        .await;
+        let (game_id, p0) = make_game_with_human_and_bot(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+
+        execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(ge.game.is_finished);
+
+        // Games with a bot player are never rated: rating_change must stay
+        // NULL for every player, human and bot alike.
+        for p in &ge.game_players {
+            assert_eq!(p.game_player.rating_change, None);
+        }
+
+        // create_game_with_users eagerly creates a game_type_users row for
+        // every human player at the default rating (1200); a bot game must
+        // leave that rating untouched rather than applying an ELO change.
+        let rating = sqlx::query_scalar!(
+            "SELECT rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2",
+            ge.game_type.id,
+            p0.id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rating, 1200);
     }
 
     #[tokio::test]

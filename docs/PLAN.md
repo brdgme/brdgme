@@ -1157,14 +1157,16 @@ returned result AND the resulting DB state:
 - [x] Play response with `Finished` status → `place`, `is_finished`,
       `finished_at` persisted (+ ratings once Phase 12 lands).
 - [x] `trigger_bot_turns` with `BOT_SERVICE_URL` unset → no-op, no error.
-- [ ] After Phase 12: rating updates asserted here too (human-only game
-      rated; game with a bot player not rated).
+- [x] After Phase 12: rating updates asserted here too (human-only game
+      rated; game with a bot player not rated). Resolved 2026-07-04:
+      rating assertions added to `finished_status_persists_placings`
+      (+16/-16 at K=32 from the 1200 default; game_type_users 1216/1184)
+      and new `finished_game_with_bot_player_is_not_rated` test.
 - [x] After optimistic locking lands: concurrent-write conflict returns the
       conflict error and preserves the first write.
 
-Implemented as `rust/web/src/game/mod.rs::tests` (9 tests). The remaining
-item is deferred pending its respective phase, as originally scoped -
-not omissions.
+Implemented as `rust/web/src/game/mod.rs::tests` (now 11 tests including
+the Phase 12 rating assertions). All items complete.
 
 ### 11.4 Handler auth tests (Axum `tower::ServiceExt::oneshot`) [Complete]
 
