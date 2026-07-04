@@ -13,7 +13,7 @@ async fn main() {
     use web::state::AppState;
     use web::websocket::GameBroadcaster;
 
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
 
     let pool = create_pool().await.expect("Failed to create database pool");

@@ -45,7 +45,7 @@ governor = { version = "0.10", optional = true }
 redis = { version = "0.28.2", features = ["tokio-comp"], optional = true }
 
 # Environment variables
-dotenv = { version = "0.15", optional = true }
+dotenvy = { version = "0.15", optional = true }
 
 # Game engine dependencies from existing API
 brdgme_cmd = { path = "../lib/cmd", default-features = false, optional = true }
@@ -92,7 +92,7 @@ ssr = [
     "dep:brdgme_game",
     "dep:brdgme_color",
     "dep:brdgme_markup",
-    "dep:dotenv",
+    "dep:dotenvy",
     "dep:tower-http",
     "dep:reqwest",
 ]

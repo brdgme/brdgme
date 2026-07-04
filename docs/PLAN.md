@@ -556,8 +556,11 @@ delegable as specified unless noted.
       the legacy `GameUpdate` JSON shape on `game.<id>` and per-player
       private-log filtering on the `user.<token>` channels via real Redis
       SUBSCRIBE.
-- [ ] **Swap `dotenv` -> `dotenvy`** (`rust/web/Cargo.toml`): dotenv is
+- [x] **Swap `dotenv` -> `dotenvy`** (`rust/web/Cargo.toml`): dotenv is
       unmaintained (RUSTSEC-2021-0141). Drop-in replacement.
+      Resolved 2026-07-04: `web/Cargo.toml` dependency and feature flag, and
+      the `dotenv::dotenv()` call in `web/src/main.rs`, switched to
+      `dotenvy`; only crate in the workspace that depended on `dotenv`.
 - [ ] **CI lint gates** (`.github/workflows/ci.yml`): add
       `cargo fmt --check` and `cargo clippy --workspace -- -D warnings` to
       `test-rust`.
