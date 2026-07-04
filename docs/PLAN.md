@@ -588,22 +588,22 @@ delegable as specified unless noted.
       the other sites don't); `concede_game`/old-game rebroadcast left as-is
       (different control flow). fmt/clippy clean, 45/45 web tests pass.
 
-### LOW (batch opportunistically)
+### LOW (batch opportunistically) [Resolved 2026-07-04]
 
-- [ ] sqlx: drop unused `chrono` feature; bump `tower` 0.4 -> 0.5 (test-only
+- [x] sqlx: drop unused `chrono` feature; bump `tower` 0.4 -> 0.5 (test-only
       usage); trim cargo-leptos template comments from `rust/web/Cargo.toml`.
-- [ ] `k8s/prod/kustomization.yaml`: `bases:` -> `resources:` (before
+- [x] `k8s/prod/kustomization.yaml`: `bases:` -> `resources:` (before
       kubeconform lands).
-- [ ] Gateway: add a port-80 HTTP listener with RequestRedirect so
+- [x] Gateway: add a port-80 HTTP listener with RequestRedirect so
       `http://brdg.me` redirects instead of hanging.
-- [ ] Self-host the Source Code Pro font (currently Google Fonts in
+- [x] Self-host the Source Code Pro font (currently Google Fonts in
       `app.rs::shell` - violates the network-hostile-environments
       principle).
-- [ ] Bot: rename "Ollama" log messages to provider-neutral wording.
-- [ ] Operator: scope the deletion-path UPDATE by `(game_type_id, name)` to
+- [x] Bot: rename "Ollama" log messages to provider-neutral wording.
+- [x] Operator: scope the deletion-path UPDATE by `(game_type_id, name)` to
       match the upsert key; CI: single-run triggers + concurrency group.
-- [ ] `concede_game` (db.rs): comment/debug_assert the 2-player assumption.
-- [ ] Tag `websocket.rs` legacy structs with a `DELETE at Phase 16` marker.
+- [x] `concede_game` (db.rs): comment/debug_assert the 2-player assumption.
+- [x] Tag `websocket.rs` legacy structs with a `DELETE at Phase 16` marker.
 
 ---
 

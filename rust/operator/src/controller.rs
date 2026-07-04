@@ -56,9 +56,11 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
     if obj.metadata.deletion_timestamp.is_some() {
         info!(name, "Marking game version unavailable");
         sqlx::query(
-            "UPDATE game_versions SET is_public = false, updated_at = NOW() WHERE name = $1",
+            "UPDATE game_versions SET is_public = false, updated_at = NOW() \
+             WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2)",
         )
         .bind(&name)
+        .bind(&obj.spec.type_name)
         .execute(&ctx.pool)
         .await?;
 

@@ -164,7 +164,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     );
 
     // 3. Load game context (state, render, logs). Extracted into a helper so it can be
-    //    refreshed mid-loop if the game state changes while Ollama is thinking.
+    //    refreshed mid-loop if the game state changes while the LLM is thinking.
     let mut bot_ctx = load_bot_context(
         state,
         &game_service_uri,
@@ -215,19 +215,19 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             state.reasoning_effort.clone(),
         )
         .await
-        .with_context(|| format!("Ollama call failed on attempt {}", attempt + 1))?;
+        .with_context(|| format!("LLM call failed on attempt {}", attempt + 1))?;
 
         tracing::info!(
             trace_id = %trace_id,
             game_id = %req.game_id,
             attempt,
             response = %raw_response,
-            "Ollama response received"
+            "LLM response received"
         );
 
         let command = raw_response.trim().to_string();
 
-        // Re-check DB after Ollama responds: it may have taken a while and the game
+        // Re-check DB after the LLM responds: it may have taken a while and the game
         // state could have changed (e.g., the player hit undo).
         let recheck = sqlx::query(
             "SELECT gp.is_turn, g.game_state FROM games g \
@@ -247,7 +247,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
                 game_id = %req.game_id,
                 player = req.player_position,
                 attempt,
-                "Game state changed while Ollama was thinking, bot turn no longer active"
+                "Game state changed while the LLM was thinking, bot turn no longer active"
             );
             return Ok(());
         }
@@ -261,7 +261,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
                 game_id = %req.game_id,
                 player = req.player_position,
                 attempt,
-                "Game state changed while Ollama was thinking, refreshing context and retrying"
+                "Game state changed while the LLM was thinking, refreshing context and retrying"
             );
             bot_ctx = load_bot_context(
                 state,

@@ -40,6 +40,7 @@ mod ssr {
 
     // Legacy-compatible serialization structs matching the format the React frontend expects.
     // Field names and structure mirror the legacy rust/api ShowResponse.
+    // DELETE at Phase 16 decommission (all structs below, through LegacyGameUpdateMessage).
 
     #[derive(Serialize)]
     struct LegacyGame {

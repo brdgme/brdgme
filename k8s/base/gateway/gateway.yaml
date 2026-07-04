@@ -16,6 +16,10 @@ metadata:
 spec:
   gatewayClassName: cilium
   listeners:
+    - name: web-http
+      hostname: brdg.me
+      port: 80
+      protocol: HTTP
     - name: web
       hostname: brdg.me
       port: 443

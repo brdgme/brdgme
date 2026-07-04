@@ -1,4 +1,23 @@
 ---
+# Redirects plain HTTP to HTTPS so http://brdg.me doesn't hang. cert-manager's
+# HTTP01 solver (if used) creates its own routes independently of this one.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-http-redirect
+spec:
+  parentRefs:
+    - name: brdgme
+      sectionName: web-http
+  hostnames:
+    - brdg.me
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

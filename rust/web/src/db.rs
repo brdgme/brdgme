@@ -864,6 +864,9 @@ pub async fn concede_game(
     .fetch_all(&mut *tx)
     .await?;
 
+    // Assigns place 1 to every non-conceding player and place 2 to the conceder.
+    // Only correct for 2-player games; callers must enforce that constraint.
+    debug_assert!(players.len() == 2, "concede_game assumes exactly 2 players");
     for p in &players {
         let place: i32 = if p.id == conceding_player_id { 2 } else { 1 };
         sqlx::query!(

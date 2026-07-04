@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Source Code Pro';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/source-code-pro-latin.woff2') format('woff2');
+}
+
 html {
   height: 100%;
 }
