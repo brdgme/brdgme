@@ -74,6 +74,6 @@ to Rust as `-2` editions. Consequences applied:
   `GO_GAME_PORTING_PLAN.md`).
 - The Go generic-deck design (`DECK_DESIGN.md`, required a Go 1.22 toolchain
   bump) was dropped as unnecessary - Rust enums + serde cover it.
-- PLAN.md Phase 23 re-pointed at Rust ports.
+- `docs/plan/phase-23-rust-game-ports.md` re-pointed at Rust ports.
 - Rust library prerequisites: cost/permutation module (seven_wonders,
   splendor-2), poker hand evaluation (texas-holdem-2).
