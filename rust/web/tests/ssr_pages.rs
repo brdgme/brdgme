@@ -13,9 +13,10 @@
 //! net effect.
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use axum::{Json, Router, routing::post};
-use brdgme_cmd::api::{PlayerRender, Request as GameRequest, Response as GameResponse};
+use brdgme_cmd::api::{GameResponse as GameStateResponse, PlayerRender, PubRender};
+use brdgme_cmd::api::{Request as GameRequest, Response as GameResponse};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tower::ServiceExt;
@@ -25,7 +26,7 @@ use uuid::Uuid;
 
 use web::auth::session::set_user_session;
 use web::db::{self, CreateGameOpts};
-use web::game::server_fns::BotSlot;
+use web::game::server_fns::{BotSlot, RestartGame};
 use web::models::user::User;
 use web::router::build_router;
 use web::state::AppState;
@@ -300,4 +301,105 @@ async fn game_page_logged_in_player_renders_game(pool: PgPool) {
     // request (auth + DB lookup + game-service render) round-tripped
     // correctly, rather than erroring out as the anonymous case does.
     assert_clean_html_body(status, &content_type, &body, "mock render");
+}
+
+/// Spawns an in-process mock game service answering `New` requests, for
+/// exercising `restart_game` without calling a real game service (per
+/// docs/CODING.md "Testing Conventions").
+async fn spawn_mock_new_game_service() -> String {
+    let app = Router::new().route(
+        "/",
+        post(|Json(payload): Json<GameRequest>| async move {
+            match payload {
+                GameRequest::New { players } => Json(GameResponse::New {
+                    game: GameStateResponse {
+                        state: "mock_state".to_string(),
+                        points: vec![0.0; players],
+                        status: brdgme_game::Status::Active {
+                            whose_turn: vec![0],
+                            eliminated: vec![],
+                        },
+                    },
+                    logs: vec![],
+                    public_render: PubRender {
+                        pub_state: "pub".to_string(),
+                        render: "mock render".to_string(),
+                    },
+                    player_renders: vec![],
+                }),
+                _ => Json(GameResponse::SystemError {
+                    message: "unsupported in mock".to_string(),
+                }),
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{}", addr)
+}
+
+// Regression test for the "restart 500 error" bug: `restart_game` sends its
+// `Request::New` as a leptos server-fn call, which - unlike a hand-rolled
+// `reqwest` request - encodes args as a url-encoded POST body, not JSON. This
+// drives the real router/server-fn dispatch end to end (auth, DB lookup,
+// game-service call, DB write) to prove that path works given a well-formed
+// JSON response from the game service.
+#[sqlx::test]
+async fn restart_game_on_finished_game_succeeds(pool: PgPool) {
+    let uri = spawn_mock_new_game_service().await;
+    let game_version_id = make_game_version(&pool, &uri).await;
+    let user = make_user(&pool, "player-one").await;
+    let email = "player-one@example.com";
+    let game = db::create_game_with_users(
+        &pool,
+        CreateGameOpts {
+            game_version_id,
+            whose_turn: &[],
+            eliminated: &[],
+            placings: &[0, 1],
+            points: &[10.0, 5.0],
+            creator_id: user.id,
+            opponent_ids: &[],
+            opponent_emails: &[],
+            bot_slots: &[BotSlot {
+                name: "Botty".to_string(),
+                difficulty: "easy".to_string(),
+            }],
+            chat_id: None,
+            game_state: "state",
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query!("UPDATE games SET is_finished = true WHERE id = $1", game.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let cookie = login_cookie(&pool, &user, email).await;
+    let app = build_router(make_state(pool).await).await;
+
+    let path = <RestartGame as leptos::server_fn::ServerFn>::PATH;
+    let body = format!("game_id={}", game.id);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header("cookie", cookie)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let resp_text = String::from_utf8_lossy(&resp_body).into_owned();
+    assert_eq!(status, StatusCode::OK, "body: {resp_text}");
 }
