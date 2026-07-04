@@ -352,7 +352,7 @@ fn canvas(els: &[(usize, usize, Vec<Node>)], players: &[Player]) -> Vec<TNode> {
             .iter()
             .map(|l| {
                 let mut sorted_l = l.clone();
-                sorted_l.sort_by(|(a, _), (b, _)| a.cmp(b));
+                sorted_l.sort_by_key(|(a, _)| *a);
                 let mut last_x = 0;
                 sorted_l
                     .iter()
