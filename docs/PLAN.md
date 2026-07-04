@@ -23,7 +23,9 @@ sealed-secrets, and VictoriaLogs decisions folded into Phases 13/14/15/18.
 outbound SMTP - superseding the Mailpit quick win. 2026-07-03 final pass:
 Renovate/cargo-deny/kubeconform quick win, leptos-use in Phase 17,
 tower_governor in 22a, stale root artifacts in the Phase 16 decommission.
-2026-07-03: Phase 10 runtime panics completed.)
+2026-07-03: Phase 10 runtime panics completed. 2026-07-04: comprehensive
+review completed (docs/REVIEW-2026-07-04.md); findings added as the
+"Review findings 2026-07-04" section - the HIGH items block prod cutover.)
 
 ## Objective
 
@@ -475,6 +477,101 @@ review before the `leptos` branch replaces production. (The review document
       WebSocket round-trip for re-fetches. Fixed: increment `trigger.last_update`
       immediately in the client-side `Effect` when any server action returns
       `Ok(())`. WebSocket still fires for other players as before.
+
+---
+
+## Review findings 2026-07-04 [Pending]
+
+Source: docs/REVIEW-2026-07-04.md (full context, rationale, and file/line
+references there). HIGH items block prod cutover (Phase 16). All are
+delegable as specified unless noted.
+
+### HIGH - fix before cutover
+
+- [ ] **`confirm_login` code lookup unscoped + unthrottled**
+      (`rust/web/src/auth/server.rs:171`): the 6-digit code is matched
+      globally (`WHERE login_confirmation = $1`) with no email/user scoping
+      and no rate limit on the confirm step. Fix: change the server fn to
+      `confirm_login(email, token)` scoped to that user's row; rate-limit
+      confirm attempts using the existing `auth/rate_limit.rs` limiter
+      infra; update the Leptos login form (it already collects the email in
+      step 1 - the "I already have a login code" path must also ask for
+      it). Tests: wrong-email + right-code rejected; confirm rate limit
+      trips after burst.
+- [ ] **Bot prompt leaks private logs** (`rust/bot/src/main.rs:389`):
+      `load_bot_context` fetches `game_logs` with no `is_public` /
+      `game_log_targets` filter, so other players' private logs reach the
+      LLM. Fix: filter public OR targeted to the bot's own `game_players.id`
+      (same predicate as `db::get_game_logs`; needs the bot's game_player id
+      which the trigger query can join).
+- [ ] **No probes or resource requests on any Deployment** (`k8s/base/**`):
+      add readiness + liveness probes to `web` (TCP :3000 or a `/healthz`
+      route), `bot` (TCP :4000), and game services (TCP :80); add resource
+      requests/limits using the RSS figures quoted in VISION.md. Without
+      readiness probes, `web` rolling updates (replicas: 2) drop traffic.
+- [ ] **Delete the unused REST game handlers** (`rust/web/src/game/server.rs`):
+      verified 2026-07-04 that nothing calls `/api/game/*` - the Leptos
+      frontend uses server fns, the bot uses only
+      `/api/internal/game/{id}/command`, legacy clients use `rust/api`.
+      Delete `create_game`, `get_game`, `play_command`, `undo_game`,
+      `mark_read`, `concede_game`, `restart_game` and their routes/tests;
+      keep `internal_play_command`. This also resolves the ~500-line
+      duplication with `server_fns.rs` without building an abstraction.
+
+### MED
+
+- [ ] **reqwest timeouts**: `reqwest::Client::new()` has no timeout in
+      `rust/web/src/main.rs` and `rust/bot/src/main.rs`. Web: ~10s (game
+      service calls). Bot: generous overall timeout, or per-request timeout
+      on the LLM call (minutes) with a shorter one for game service/monolith
+      calls.
+- [ ] **Move logs written outside the move transaction**
+      (`game/mod.rs::execute_command`): `create_game_logs` commits after
+      `update_game_command_success` - a crash between them silently loses
+      the move's logs. Fold log insertion into the same transaction.
+- [ ] **Restart flow non-atomic** (`server_fns.rs::restart_game`): new game
+      creation and the `restarted_game_id` UPDATE are separate transactions;
+      a failure in between leaves the old game restartable again. Wrap in
+      one transaction.
+- [ ] **WS hardening** (`rust/web/src/websocket.rs`): (a) add a periodic
+      server-side ping (~30s interval) so idle connections survive LB idle
+      timeouts - also de-risks the Phase 14 DO LB prerequisite; (b) note for
+      the Phase 17 NATS design: subscribe per-game/per-user instead of the
+      current `game.*` firehose to every client.
+- [ ] **websocket.rs tests**: zero coverage of legacy payload shape and the
+      per-player private-log filtering (info-leak surface) that web-legacy
+      relies on during Phase 16 side-by-side. `#[sqlx::test]` + Redis
+      SUBSCRIBE assertions using the existing test infra.
+- [ ] **Swap `dotenv` -> `dotenvy`** (`rust/web/Cargo.toml`): dotenv is
+      unmaintained (RUSTSEC-2021-0141). Drop-in replacement.
+- [ ] **CI lint gates** (`.github/workflows/ci.yml`): add
+      `cargo fmt --check` and `cargo clippy --workspace -- -D warnings` to
+      `test-rust`.
+- [ ] **CI build jobs -> matrix**: `build-web` and `build-rust-games`
+      hand-roll 5 metadata+build-push pairs; convert to the matrix pattern
+      `build-legacy` already uses.
+- [ ] **db.rs row-mapping duplication**: shared helper for the duplicated
+      GamePlayer row->struct blocks in `find_game_extended` /
+      `find_active_games_for_user`; plus small helpers for the repeated
+      Status destructure and the broadcast+trigger epilogue (only if the
+      REST-handler deletion above leaves them still repeated).
+
+### LOW (batch opportunistically)
+
+- [ ] sqlx: drop unused `chrono` feature; bump `tower` 0.4 -> 0.5 (test-only
+      usage); trim cargo-leptos template comments from `rust/web/Cargo.toml`.
+- [ ] `k8s/prod/kustomization.yaml`: `bases:` -> `resources:` (before
+      kubeconform lands).
+- [ ] Gateway: add a port-80 HTTP listener with RequestRedirect so
+      `http://brdg.me` redirects instead of hanging.
+- [ ] Self-host the Source Code Pro font (currently Google Fonts in
+      `app.rs::shell` - violates the network-hostile-environments
+      principle).
+- [ ] Bot: rename "Ollama" log messages to provider-neutral wording.
+- [ ] Operator: scope the deletion-path UPDATE by `(game_type_id, name)` to
+      match the upsert key; CI: single-run triggers + concurrency group.
+- [ ] `concede_game` (db.rs): comment/debug_assert the 2-player assumption.
+- [ ] Tag `websocket.rs` legacy structs with a `DELETE at Phase 16` marker.
 
 ---
 
