@@ -168,14 +168,18 @@ k8s manifests under `k8s/` reflect how the system runs in production. They are
 not modified for dev convenience. Dev-specific workarounds (port-forwarding,
 local process substitutions) belong in the Tiltfile only.
 
-The legacy trio's dev-only Gateway/HTTPRoute set is created by the Tiltfile
-under `LEGACY=1` (not committed to `k8s/`, since it uses plain HTTP and
-`lvh.me` hostnames that only make sense in dev - see the comment above the
-`legacy-gateway` Tilt resource). Cilium provisions a per-Gateway
-LoadBalancer Service that stays `<pending>` in Kind, so the `legacy-gateway`
-Tilt resource `kubectl port-forward`s it to host port 8080 once it exists.
-`*.lvh.me` resolves to 127.0.0.1 via public DNS, so each legacy service is
-reachable at `{service}.brdgme.lvh.me:8080` without any `/etc/hosts` changes.
+The dev-only Gateway/HTTPRoute set is created by the Tiltfile under
+`WEB_IN_CLUSTER=1` and/or `LEGACY=1` (not committed to `k8s/`, since it uses
+plain HTTP and `lvh.me` hostnames that only make sense in dev - see the
+comment above the `gateway-nodeport` Tilt resource). Cilium provisions a
+per-Gateway LoadBalancer Service with no selector (Cilium programs endpoints
+itself, not via backing pods), so `kubectl port-forward` can never work on
+it. Instead, the `gateway-nodeport` Tilt resource waits for the Service to
+exist and patches it to pin its NodePort to 31080, which lines up with the
+`extraPortMappings` entry in `ctlptl.yaml` (hostPort 8080 -> containerPort
+31080). `*.lvh.me` resolves to 127.0.0.1 via public DNS, so each routed
+service is reachable at `{service}.brdgme.lvh.me:8080` without any
+`/etc/hosts` changes.
 
 ## Tilt Resource Notes
 

@@ -1,2 +1,8 @@
-bases:
-- app
+namespace: brdgme
+resources:
+- ../base/bot
+- ../base/game
+- ../base/operator
+- ../base/postgres
+- ../base/redis
+- ../base/web

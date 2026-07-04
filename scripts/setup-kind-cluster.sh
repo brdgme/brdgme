@@ -10,7 +10,12 @@
 #
 # Version pins:
 #   Gateway API CRDs: https://github.com/kubernetes-sigs/gateway-api/releases
-GATEWAY_API_VERSION="1.2.0"
+#   Must be >= what Cilium's cilium-operator vendors (check its go.mod for
+#   sigs.k8s.io/gateway-api). Cilium 1.18.5 vendors ~v1.3.1-dev; installing
+#   older CRDs (e.g. v1.2.0) makes cilium-operator fail with
+#   "no kind is registered for the type v1.Gateway in scheme" and the
+#   Gateway/GatewayClass never leave "Waiting for controller".
+GATEWAY_API_VERSION="1.3.0"
 
 set -euo pipefail
 
@@ -19,6 +24,20 @@ echo "==> Applying ctlptl.yaml (Kind cluster + kind-registry)..."
 ctlptl apply -f ctlptl.yaml
 
 kubectl config use-context kind-kind
+
+# --- Registry access via containerd certs.d (hosts.toml) ---
+# The node image's containerd already sets `config_path`, and containerd
+# rejects config that also sets `registry.mirrors` alongside it - so registry
+# access is configured per kind's local-registry docs instead:
+# https://kind.sigs.k8s.io/docs/user/local-registry/
+echo "==> Configuring containerd registry access for kind-registry:5000..."
+REGISTRY_DIR="/etc/containerd/certs.d/kind-registry:5000"
+for node in $(kind get nodes --name kind); do
+  docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
+  cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"
+[host."http://kind-registry:5000"]
+EOF
+done
 
 # Disable auto-restart so Kind does not start on boot. The cluster should only
 # run when explicitly started for development (via `docker start kind-control-plane`
@@ -33,8 +52,21 @@ echo "==> Installing Gateway API CRDs ${GATEWAY_API_VERSION}..."
 kubectl apply -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/v${GATEWAY_API_VERSION}/standard-install.yaml"
 
 # --- Cilium (CNI + Gateway API) ---
+# nodePort.enabled=true: Cilium's Gateway API controller refuses to reconcile
+# without either kube-proxy-replacement or node-port support enabled ("Gateway
+# API support requires either kube-proxy-replacement or enable-node-port
+# enabled"), and this Kind cluster keeps kube-proxy running rather than doing
+# a full kube-proxy replacement.
+# gatewayAPI.secretsNamespace.sync=false: the Gateway TLS-secret-sync watcher
+# hits the same "no kind is registered for the type v1.Gateway in scheme"
+# failure as the unfixed CRD version above, independent of the CRD/node-port
+# fixes. Dev Gateways here are HTTP-only (no TLS listeners), so secret sync is
+# unused - disable it rather than debug further.
 echo "==> Installing Cilium (CNI + Gateway API)..."
-cilium install --set gatewayAPI.enabled=true
+cilium install \
+  --set gatewayAPI.enabled=true \
+  --set nodePort.enabled=true \
+  --set gatewayAPI.secretsNamespace.sync=false
 
 echo "==> Waiting for Cilium to be ready..."
 cilium status --wait

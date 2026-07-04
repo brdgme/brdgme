@@ -161,7 +161,7 @@ local_resource(
 
 local_resource(
     "operator",
-    serve_cmd="cd rust && DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme RUST_LOG=info cargo run -p brdgme-operator",
+    serve_cmd="for i in $(seq 60); do pg_isready -h localhost -p 5432 >/dev/null 2>&1 && break; sleep 1; done; cd rust && DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme RUST_LOG=info mirrord exec -f operator/.mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo run -p brdgme-operator",
     resource_deps=["postgres", "crd-ready"],
 )
 
@@ -174,33 +174,50 @@ if LEGACY:
     k8s_resource("api", links=["http://api.brdgme.lvh.me:8080"])
     k8s_resource("websocket", links=["http://websocket.brdgme.lvh.me:8080"])
 
-    # Dev-only Gateway/HTTPRoute set routing by *.brdgme.lvh.me hostname.
-    # k8s/base/gateway/ (real hostnames, HTTPS, cert-manager) is prod-only -
-    # this dev equivalent is plain HTTP and lives only in the Tiltfile, per
-    # the "dev workarounds belong in the Tiltfile, not k8s/" convention.
-    #
-    # Cilium provisions a per-Gateway LoadBalancer Service (named
-    # cilium-gateway-<gateway-name>) which stays <pending> in Kind. Rather
-    # than repeat the Kourier NodePort-patch workaround this replaces
-    # (fragile: the Service is created dynamically by the Gateway
-    # controller, not by an applied manifest, so a setup-script patch can't
-    # reliably target it before Tilt creates the Gateway), this uses a Tilt
-    # local_resource that port-forwards it once it exists.
-    k8s_yaml(blob("""
+# Dev-only Gateway/HTTPRoute set routing by *.brdgme.lvh.me hostname.
+# k8s/base/gateway/ (real hostnames, HTTPS, cert-manager) is prod-only -
+# this dev equivalent is plain HTTP and lives only in the Tiltfile, per
+# the "dev workarounds belong in the Tiltfile, not k8s/" convention.
+#
+# Cilium provisions a per-Gateway LoadBalancer Service (named
+# cilium-gateway-<gateway-name>) which stays <pending> in Kind - it has no
+# selector (Cilium programs endpoints itself, not via backing pods), so
+# `kubectl port-forward` on it can never work. Instead, this pins the
+# Service's NodePort to 31080 (Cilium allocates NodePorts on LoadBalancer
+# Services since nodePort.enabled=true is set in setup-kind-cluster.sh),
+# which lines up with the extraPortMappings entry in ctlptl.yaml
+# (hostPort 8080 -> containerPort 31080) to make each service reachable at
+# `{service}.brdgme.lvh.me:8080`. The Service is created dynamically by the
+# Gateway controller, not by an applied manifest, so this can't be a
+# setup-script patch - it has to wait for the Service to exist first.
+#
+# Created whenever a Deployment exists for it to route to: the "web" route
+# under WEB_IN_CLUSTER=1 (in-cluster web), the legacy trio's routes under
+# LEGACY=1.
+if WEB_IN_CLUSTER or LEGACY:
+    gateway_routes = ""
+    gateway_deps = []
+    if WEB_IN_CLUSTER:
+        gateway_routes += """
+---
 apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
+kind: HTTPRoute
 metadata:
-  name: brdgme-dev
+  name: web
   namespace: brdgme
 spec:
-  gatewayClassName: cilium
-  listeners:
-    - name: http
-      port: 80
-      protocol: HTTP
-      allowedRoutes:
-        namespaces:
-          from: Same
+  parentRefs:
+    - name: brdgme-dev
+  hostnames:
+    - web.brdgme.lvh.me
+  rules:
+    - backendRefs:
+        - name: web
+          port: 3000
+"""
+        gateway_deps.append("web")
+    if LEGACY:
+        gateway_routes += """
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -246,9 +263,28 @@ spec:
     - backendRefs:
         - name: websocket
           port: 80
-"""))
+"""
+        gateway_deps += ["web-legacy", "api", "websocket"]
+
+    k8s_yaml(blob("""
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: brdgme-dev
+  namespace: brdgme
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+""" + gateway_routes))
     local_resource(
-        "legacy-gateway",
-        serve_cmd="until kubectl get svc -n brdgme cilium-gateway-brdgme-dev >/dev/null 2>&1; do sleep 2; done; kubectl port-forward -n brdgme svc/cilium-gateway-brdgme-dev 8080:80",
-        resource_deps=["web-legacy", "api", "websocket"],
+        "gateway-nodeport",
+        cmd="for i in $(seq 60); do kubectl get svc -n brdgme cilium-gateway-brdgme-dev >/dev/null 2>&1 && break; sleep 1; done; " +
+            "kubectl patch svc -n brdgme cilium-gateway-brdgme-dev --type=merge -p '{\"spec\":{\"ports\":[{\"name\":\"port-80\",\"port\":80,\"protocol\":\"TCP\",\"targetPort\":80,\"nodePort\":31080}]}}'",
+        resource_deps=gateway_deps,
     )

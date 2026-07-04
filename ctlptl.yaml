@@ -18,7 +18,13 @@ kindV1Alpha4Cluster:
   nodes:
   - role: control-plane
     image: kindest/node:v1.34.0
-  containerdConfigPatches:
-  - |-
-    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."kind-registry:5000"]
-      endpoint = ["http://kind-registry:5000"]
+    extraPortMappings:
+    - containerPort: 31080
+      hostPort: 8080
+  # Registry access for kind-registry:5000 is configured via a
+  # containerd certs.d hosts.toml written onto the node by
+  # scripts/setup-kind-cluster.sh (see kind's local-registry docs), not via
+  # containerdConfigPatches: the node image's containerd already sets
+  # `config_path`, and `registry.mirrors` cannot be set at the same time as
+  # `config_path` (containerd rejects the config: "mirrors cannot be set
+  # when config_path is provided").

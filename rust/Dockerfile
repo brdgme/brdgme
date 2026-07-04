@@ -1,4 +1,9 @@
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+# Pinned to a specific bookworm-based tag (not `latest-rust-1`, which floats
+# onto whatever Debian release cargo-chef currently publishes). The runtime
+# stages below are `debian:bookworm-slim` - builder and runtime must stay on
+# the same Debian release or glibc symbol versions can mismatch (e.g. `web`
+# crashed with `GLIBC_2.38' not found` when the builder drifted to trixie).
+FROM lukemathwalker/cargo-chef:0.1.77-rust-1.94.0-bookworm AS chef
 WORKDIR /app
 # Shared system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

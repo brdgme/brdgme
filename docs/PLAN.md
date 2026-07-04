@@ -1309,18 +1309,32 @@ Bot changes:
 
 ---
 
-## Phase 14: Drop Knative - Plain Deployments + Gateway API [Implemented, verification pending]
+## Phase 14: Drop Knative - Plain Deployments + Gateway API [Implemented and verified in Kind; prod prerequisites pending]
 
 **Implementation (2026-07-03):** all delegable items done. Gateway exposure in
-Kind uses the documented fallback (Tilt port-forward via a `legacy-gateway`
-local_resource) rather than NodePort - Cilium creates the per-Gateway
-LoadBalancer Service dynamically, so a setup-script NodePort patch can't
-target it; `k8s/kind-config.yaml` was folded into the new `ctlptl.yaml` and
-deleted. GatewayClass name `cilium` assumed for prod - confirm on DOKS
-(Phase 16 prerequisite). Remaining: Prod prerequisites (operator-verified)
-and the live Kind verification below (no Kind cluster was available at
-implementation time; static validation was `kubectl kustomize` on all
-overlays plus a Knative-reference grep).
+Kind uses a NodePort pin on Cilium's per-Gateway LoadBalancer Service (see
+the `gateway-nodeport` Tilt resource) plus a `ctlptl.yaml` `extraPortMappings`
+entry (host 8080 -> node 31080) - the originally planned `kubectl
+port-forward` fallback (`legacy-gateway` resource) turned out to be
+unworkable: Cilium's per-Gateway Service has no selector (it programs
+endpoints itself, not via backing pods), so `kubectl port-forward` on it can
+never connect. `k8s/kind-config.yaml` was folded into the new `ctlptl.yaml`
+and deleted. GatewayClass name `cilium` assumed for prod - confirm on DOKS
+(Phase 16 prerequisite).
+
+**Verification (2026-07-04):** live Kind verification completed for all three
+dev modes - hybrid (default), `LEGACY=1`, and `WEB_IN_CLUSTER=1`. See the
+Verification section below for details. Two dev-environment bugs found and
+fixed during verification, both orthogonal to the Gateway/Deployment change
+itself: the `legacy-gateway` port-forward approach described above, and an
+`operator` local_resource startup race against the `postgres` port-forward
+(now retries with `pg_isready` before connecting). A third issue was found
+and fixed to complete the `WEB_IN_CLUSTER=1` checklist item: the `operator`
+local_resource runs as a plain host process and cannot resolve
+`*.svc.cluster.local` names needed to reconcile `GameVersion` HTTP calls to
+game services - it is now wrapped in `mirrord exec` (same pattern as `web`
+and `bot`) via a new `rust/operator/.mirrord/mirrord.json`. Remaining: Prod
+prerequisites (operator-verified, see below).
 
 **Decision (2026-07-03):** remove Knative Serving and Kourier entirely.
 Knative is healthy as a project (CNCF graduated 2025-09, quarterly releases -
@@ -1425,7 +1439,7 @@ final infrastructure.
       declares the Kind cluster (default CNI disabled) and `kind-registry`.
       Add `ctlptl` to `devenv.nix`. The script shrinks to: `ctlptl apply` →
       Cilium install (Gateway API enabled) → GameVersion CRD.
-- [ ] Verify hybrid mode is unaffected (web/bot run as local processes;
+- [x] Verify hybrid mode is unaffected (web/bot run as local processes;
       game services and backing services unchanged).
 
 ### Prod prerequisites
@@ -1441,10 +1455,10 @@ final infrastructure.
 
 ### Verification
 
-- [ ] Kind, full-cluster mode (`WEB_IN_CLUSTER=1`): web reachable through the
+- [x] Kind, full-cluster mode (`WEB_IN_CLUSTER=1`): web reachable through the
       Gateway; login, game creation, command flow, and a WebSocket session
       all work through the Gateway route.
-- [ ] Kind, `LEGACY=1`: legacy trio reachable via their hostnames.
+- [x] Kind, `LEGACY=1`: legacy trio reachable via their hostnames.
 - [ ] Prod TLS issuance (HTTP01 through the Gateway) is verified as part of
       the Phase 16 cutover checklist, not here.
 
