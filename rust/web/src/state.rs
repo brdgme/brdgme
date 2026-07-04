@@ -1,4 +1,4 @@
-use crate::auth::rate_limit::LoginRateLimiter;
+use crate::auth::rate_limit::{ConfirmRateLimiter, LoginRateLimiter};
 use crate::websocket::GameBroadcaster;
 use axum::extract::FromRef;
 use leptos::prelude::LeptosOptions;
@@ -15,6 +15,7 @@ pub struct AppState {
     /// logged instead of sent.
     pub resend: Option<resend_rs::Resend>,
     pub login_rate_limiter: Arc<LoginRateLimiter>,
+    pub confirm_rate_limiter: Arc<ConfirmRateLimiter>,
 }
 
 impl FromRef<AppState> for LeptosOptions {

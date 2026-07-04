@@ -78,6 +78,7 @@ fn LoginPage() -> impl IntoView {
     let (email, set_email) = signal(String::new());
 
     let email_input = NodeRef::<html::Input>::new();
+    let code_email_input = NodeRef::<html::Input>::new();
     let code_input = NodeRef::<html::Input>::new();
 
     let login_action = Action::new(|email: &String| {
@@ -85,9 +86,10 @@ fn LoginPage() -> impl IntoView {
         async move { login(email).await }
     });
 
-    let confirm_action = Action::new(|token: &String| {
+    let confirm_action = Action::new(|(email, token): &(String, String)| {
+        let email = email.clone();
         let token = token.clone();
-        async move { confirm_login(token).await }
+        async move { confirm_login(email, token).await }
     });
 
     // Show code input once server confirms email was sent.
@@ -123,7 +125,20 @@ fn LoginPage() -> impl IntoView {
             leptos::logging::warn!("on_code_submit: code_input not mounted");
             return;
         };
-        confirm_action.dispatch(token);
+        // If the email wasn't already collected (the "I already have a login
+        // code" shortcut skips step 1), read it from the code-step email
+        // field instead.
+        let email_value = if email.get_untracked().is_empty() {
+            let Some(email_value) = code_email_input.get().map(|el| el.value()) else {
+                leptos::logging::warn!("on_code_submit: code_email_input not mounted");
+                return;
+            };
+            set_email.set(email_value.clone());
+            email_value
+        } else {
+            email.get_untracked()
+        };
+        confirm_action.dispatch((email_value, token));
     };
 
     let show_code_link = move |_| {
@@ -166,6 +181,14 @@ fn LoginPage() -> impl IntoView {
                     <div>
                         <div>"A login code has been sent to your email, please enter it here"</div>
                         <form on:submit=on_code_submit>
+                            <Show when=move || email.get().is_empty()>
+                                <input
+                                    type="email"
+                                    node_ref=code_email_input
+                                    placeholder="Email address"
+                                    required
+                                />
+                            </Show>
                             <input
                                 type="tel"
                                 pattern="[0-9]*"

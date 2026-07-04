@@ -383,7 +383,10 @@ mod tests {
         // Simulate two concurrent requests both reading the game before either
         // writes: capture the stale `updated_at` here, then let the first
         // request (a normal execute_command) win the race and land its write.
-        let stale_ge = db::find_game_extended(&pool, game_id).await.unwrap().unwrap();
+        let stale_ge = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
 
         execute_command(
             &pool,

@@ -37,6 +37,37 @@ pub fn build_login_rate_limiter() -> Arc<LoginRateLimiter> {
     Arc::new(RateLimiter::keyed(quota))
 }
 
+/// Confirm-code guard, keyed by client IP like `LoginRateLimiter` but a
+/// distinct type so both can be provided via Leptos `expect_context`
+/// independently. Wraps the same underlying `governor` limiter since a
+/// 6-digit code is a 1M-value space that must not be brute-forceable.
+pub struct ConfirmRateLimiter(LoginRateLimiter);
+
+/// Burst of 10 attempts, replenishing 1 every 10s, per client IP. Tight
+/// enough that brute-forcing the 1M code space is infeasible, loose enough
+/// that a user mistyping their code a few times isn't locked out.
+const CONFIRM_BURST_SIZE: u32 = 10;
+const CONFIRM_REPLENISH_PERIOD: Duration = Duration::from_secs(10);
+
+/// Build the confirm rate limiter. Called once at process startup, mirrors
+/// `build_login_rate_limiter`.
+pub fn build_confirm_rate_limiter() -> Arc<ConfirmRateLimiter> {
+    let quota = Quota::with_period(CONFIRM_REPLENISH_PERIOD)
+        .expect("CONFIRM_REPLENISH_PERIOD is a nonzero duration")
+        .allow_burst(NonZeroU32::new(CONFIRM_BURST_SIZE).expect("CONFIRM_BURST_SIZE is nonzero"));
+    Arc::new(ConfirmRateLimiter(RateLimiter::keyed(quota)))
+}
+
+/// Returns `Ok(())` if the given IP is within its confirm rate limit, or
+/// `Err(wait_seconds)` if it should be rejected.
+pub fn check_confirm_rate_limit(limiter: &ConfirmRateLimiter, ip: IpAddr) -> Result<(), u64> {
+    limiter.0.check_key(&ip).map_err(|negative| {
+        negative
+            .wait_time_from(DefaultClock::default().now())
+            .as_secs()
+    })
+}
+
 /// Extract the client IP from request headers (`X-Forwarded-For`, `X-Real-Ip`,
 /// `Forwarded`) or the socket's peer address, matching
 /// `SmartIpKeyExtractor`'s behaviour.
@@ -56,9 +87,11 @@ pub fn extract_client_ip(
 /// Returns `Ok(())` if the given IP is within its login rate limit, or
 /// `Err(wait_seconds)` if it should be rejected.
 pub fn check_login_rate_limit(limiter: &LoginRateLimiter, ip: IpAddr) -> Result<(), u64> {
-    limiter
-        .check_key(&ip)
-        .map_err(|negative| negative.wait_time_from(DefaultClock::default().now()).as_secs())
+    limiter.check_key(&ip).map_err(|negative| {
+        negative
+            .wait_time_from(DefaultClock::default().now())
+            .as_secs()
+    })
 }
 
 #[cfg(test)]
@@ -113,5 +146,16 @@ mod tests {
     fn returns_none_when_nothing_to_extract_from() {
         let headers = axum::http::HeaderMap::new();
         assert_eq!(extract_client_ip(&headers, None), None);
+    }
+
+    #[test]
+    fn confirm_limiter_allows_up_to_burst_size_then_rejects() {
+        let limiter = build_confirm_rate_limiter();
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        for _ in 0..CONFIRM_BURST_SIZE {
+            assert!(check_confirm_rate_limit(&limiter, ip).is_ok());
+        }
+        assert!(check_confirm_rate_limit(&limiter, ip).is_err());
     }
 }

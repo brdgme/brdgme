@@ -164,13 +164,43 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
 }
 
 #[server(ConfirmLogin, "/api")]
-pub async fn confirm_login(token: String) -> Result<AuthUser, ServerFnError> {
+pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, ServerFnError> {
+    let confirm_rate_limiter =
+        expect_context::<std::sync::Arc<crate::auth::rate_limit::ConfirmRateLimiter>>();
+    // Fail open if the client IP can't be determined (e.g. missing ConnectInfo
+    // in a test harness) rather than blocking confirmation outright.
+    if let Some(ip) = login_client_ip().await {
+        if let Err(wait_secs) =
+            crate::auth::rate_limit::check_confirm_rate_limit(&confirm_rate_limiter, ip)
+        {
+            return Err(ServerFnError::new(format!(
+                "Too many attempts. Try again in {}s.",
+                wait_secs
+            )));
+        }
+    }
+
     let pool = expect_context::<PgPool>();
 
-    // Find user with this confirmation token
+    // Find the user with this email and confirmation token, scoped to that
+    // user's row so a code collision or brute-force attempt against another
+    // pending login can't succeed here.
+    let user_email = sqlx::query_as!(
+        UserEmail,
+        "SELECT * FROM user_emails WHERE email = $1 AND is_primary = true",
+        email
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+    let user_email =
+        user_email.ok_or_else(|| ServerFnError::new("Invalid or expired token".to_string()))?;
+
     let user = sqlx::query_as!(
         User,
-        "SELECT * FROM users WHERE login_confirmation = $1 AND login_confirmation_at > NOW() - INTERVAL '1 hour'",
+        "SELECT * FROM users WHERE id = $1 AND login_confirmation = $2 AND login_confirmation_at > NOW() - INTERVAL '1 hour'",
+        user_email.user_id,
         token
     )
     .fetch_optional(&pool)
@@ -178,16 +208,6 @@ pub async fn confirm_login(token: String) -> Result<AuthUser, ServerFnError> {
     .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
     let user = user.ok_or_else(|| ServerFnError::new("Invalid or expired token".to_string()))?;
-
-    // Get user's primary email
-    let user_email = sqlx::query_as!(
-        UserEmail,
-        "SELECT * FROM user_emails WHERE user_id = $1 AND is_primary = true",
-        user.id
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
     // Create auth token
     let auth_token_id = Uuid::new_v4();
@@ -286,6 +306,7 @@ mod tests {
             provide_context(pool.clone());
             provide_context(None::<resend_rs::Resend>);
             provide_context(crate::auth::rate_limit::build_login_rate_limiter());
+            provide_context(crate::auth::rate_limit::build_confirm_rate_limiter());
         });
         owner
             .with(|| leptos::reactive::computed::ScopedFuture::new(f()))
@@ -334,26 +355,83 @@ mod tests {
 
     #[sqlx::test]
     async fn confirm_login_rejects_wrong_token(pool: PgPool) {
-        let result = with_pool_context(&pool, || confirm_login("000000".to_string())).await;
+        let result = with_pool_context(&pool, || {
+            confirm_login("nobody@example.com".to_string(), "000000".to_string())
+        })
+        .await;
         assert!(result.is_err());
+    }
+
+    async fn insert_user_with_confirmation(
+        pool: &PgPool,
+        name: &str,
+        email: &str,
+        token: &str,
+        confirmation_age: time::Duration,
+    ) -> Uuid {
+        let user_id = Uuid::new_v4();
+        let confirmation_at = {
+            let now = OffsetDateTime::now_utc();
+            time::PrimitiveDateTime::new(now.date(), now.time()) - confirmation_age
+        };
+        sqlx::query!(
+            "INSERT INTO users (id, name, pref_colors, login_confirmation, login_confirmation_at)
+             VALUES ($1, $2, $3, $4, $5)",
+            user_id,
+            name,
+            &Vec::<String>::new(),
+            token,
+            confirmation_at
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
+            user_id,
+            email
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        user_id
     }
 
     #[sqlx::test]
     async fn confirm_login_rejects_expired_token(pool: PgPool) {
-        let user_id = Uuid::new_v4();
-        sqlx::query!(
-            "INSERT INTO users (id, name, pref_colors, login_confirmation, login_confirmation_at)
-             VALUES ($1, $2, $3, $4, NOW() - INTERVAL '2 hours')",
-            user_id,
+        insert_user_with_confirmation(
+            &pool,
             "expired-user",
-            &Vec::<String>::new(),
-            "123456"
+            "expired-user@example.com",
+            "123456",
+            time::Duration::hours(2),
         )
-        .execute(&pool)
-        .await
-        .unwrap();
+        .await;
 
-        let result = with_pool_context(&pool, || confirm_login("123456".to_string())).await;
+        let result = with_pool_context(&pool, || {
+            confirm_login("expired-user@example.com".to_string(), "123456".to_string())
+        })
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_rejects_right_code_wrong_email(pool: PgPool) {
+        insert_user_with_confirmation(
+            &pool,
+            "scoped-user",
+            "scoped-user@example.com",
+            "654321",
+            time::Duration::minutes(1),
+        )
+        .await;
+
+        // Right code, but for a different email than the one the code was
+        // issued to: must not log in as the other user.
+        let result = with_pool_context(&pool, || {
+            confirm_login("someone-else@example.com".to_string(), "654321".to_string())
+        })
+        .await;
         assert!(result.is_err());
     }
 }

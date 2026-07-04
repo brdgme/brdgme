@@ -488,7 +488,7 @@ delegable as specified unless noted.
 
 ### HIGH - fix before cutover
 
-- [ ] **`confirm_login` code lookup unscoped + unthrottled**
+- [x] **`confirm_login` code lookup unscoped + unthrottled**
       (`rust/web/src/auth/server.rs:171`): the 6-digit code is matched
       globally (`WHERE login_confirmation = $1`) with no email/user scoping
       and no rate limit on the confirm step. Fix: change the server fn to

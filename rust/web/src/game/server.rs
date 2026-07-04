@@ -691,6 +691,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             resend: None,
             login_rate_limiter: crate::auth::rate_limit::build_login_rate_limiter(),
+            confirm_rate_limiter: crate::auth::rate_limit::build_confirm_rate_limiter(),
         };
         axum::Router::new()
             .nest("/api", api_routes())
