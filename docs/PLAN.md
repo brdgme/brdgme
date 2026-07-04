@@ -16,7 +16,7 @@ steps (domain verification via tofu, prod secret, live-inbox check) →
 hardening (VictoriaLogs, now pre-cutover) → #16 hard cutover + 1-week
 validation gate → decommission.
 **Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
-#24 game invites → #23 Rust game ports (ongoing).
+#24 game invites → #25 rules rendering → #23 Rust game ports (ongoing).
 
 ## Objective
 
@@ -73,6 +73,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 22 | Email via Resend | 22a code complete (landed 77a2092); human/infra steps + 22b-22d pending - high priority; 22c reminders + 22d multi-email added 2026-07-04 | [22-email-via-resend.md](plan/22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [23-rust-game-ports.md](plan/23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [24-game-invites.md](plan/24-game-invites.md) |
+| 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [25-rules-rendering.md](plan/25-rules-rendering.md) |
 | Bug fixes | Bug fixes | Partially resolved | [bugs.md](plan/bugs.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | [review-findings-2026-07-04.md](plan/review-findings-2026-07-04.md) |
 | Quick wins | Quick wins (added 2026-07-03) | Complete | [quick-wins.md](plan/quick-wins.md) |
@@ -107,6 +108,9 @@ switching; Phase 24 game invites added - all post-go-live, non-blocking.
 side-by-side validation to hard cutover with a break-glass rollback overlay
 and a 1-week gate; Phases 17 and 18 resequenced pre-cutover; Phase 21
 moved to the front of the pre-go-live sequence.)
+
+2026-07-04: Phase 25 rules rendering added (single-source RULES.md,
+render-time specialization; web UI post-go-live, email folded after 22b).
 
 **2026-07-04:** restructured this file into a KEP-style layout: a thin index
 (this file) plus one file per phase/work-stream under `docs/plan/`. The
