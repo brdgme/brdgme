@@ -86,7 +86,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     // 1. Fetch game data from DB.
     let row = sqlx::query(
         r#"
-        SELECT g.game_state, gv.uri, gv.rules, gt.name as game_name, gb.name as bot_name, gp.is_turn
+        SELECT g.game_state, gv.uri, gv.rules, gt.name as game_name, gb.name as bot_name, gp.is_turn, gp.id as game_player_id
         FROM games g
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt ON gt.id = gv.game_type_id
@@ -115,6 +115,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     let game_state: String = row.try_get("game_state").context("game_state")?;
     let game_service_uri: String = row.try_get("uri").context("uri")?;
     let rules: String = row.try_get("rules").unwrap_or_default();
+    let game_player_id: Uuid = row.try_get("game_player_id").context("game_player_id")?;
     let game_name: String = row
         .try_get("game_name")
         .unwrap_or_else(|_| "unknown".to_string());
@@ -169,6 +170,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         &game_service_uri,
         req.game_id,
         req.player_position,
+        game_player_id,
         game_state,
         &names,
     )
@@ -266,6 +268,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
                 &game_service_uri,
                 req.game_id,
                 req.player_position,
+                game_player_id,
                 current_game_state,
                 &names,
             )
@@ -355,6 +358,7 @@ async fn load_bot_context(
     game_service_uri: &str,
     game_id: uuid::Uuid,
     player_position: i32,
+    game_player_id: uuid::Uuid,
     game_state: String,
     names: &[String],
 ) -> Result<BotContext> {
@@ -387,9 +391,15 @@ async fn load_bot_context(
     let command_spec_yaml = command_spec.as_ref().map(spec_to_yaml).unwrap_or_default();
 
     let log_rows = sqlx::query(
-        "SELECT body FROM game_logs WHERE game_id = $1 ORDER BY logged_at DESC LIMIT 20",
+        "SELECT body FROM game_logs \
+         WHERE game_id = $1 \
+           AND (is_public = true OR id IN ( \
+               SELECT game_log_id FROM game_log_targets WHERE game_player_id = $2 \
+           )) \
+         ORDER BY logged_at DESC LIMIT 20",
     )
     .bind(game_id)
+    .bind(game_player_id)
     .fetch_all(&state.pool)
     .await
     .context("Failed to fetch game logs")?;

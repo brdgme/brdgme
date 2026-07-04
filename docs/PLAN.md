@@ -498,7 +498,7 @@ delegable as specified unless noted.
       step 1 - the "I already have a login code" path must also ask for
       it). Tests: wrong-email + right-code rejected; confirm rate limit
       trips after burst.
-- [ ] **Bot prompt leaks private logs** (`rust/bot/src/main.rs:389`):
+- [x] **Bot prompt leaks private logs** (`rust/bot/src/main.rs:389`):
       `load_bot_context` fetches `game_logs` with no `is_public` /
       `game_log_targets` filter, so other players' private logs reach the
       LLM. Fix: filter public OR targeted to the bot's own `game_players.id`
