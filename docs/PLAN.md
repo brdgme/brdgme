@@ -509,7 +509,7 @@ delegable as specified unless noted.
       route), `bot` (TCP :4000), and game services (TCP :80); add resource
       requests/limits using the RSS figures quoted in VISION.md. Without
       readiness probes, `web` rolling updates (replicas: 2) drop traffic.
-- [ ] **Delete the unused REST game handlers** (`rust/web/src/game/server.rs`):
+- [x] **Delete the unused REST game handlers** (`rust/web/src/game/server.rs`):
       verified 2026-07-04 that nothing calls `/api/game/*` - the Leptos
       frontend uses server fns, the bot uses only
       `/api/internal/game/{id}/command`, legacy clients use `rust/api`.
@@ -517,6 +517,12 @@ delegable as specified unless noted.
       `mark_read`, `concede_game`, `restart_game` and their routes/tests;
       keep `internal_play_command`. This also resolves the ~500-line
       duplication with `server_fns.rs` without building an abstraction.
+      Resolved 2026-07-04: deleted the seven unused handlers, their request
+      structs, and the three tests exercising them; kept
+      `internal_play_command`, its route, and its 4-assertion auth test
+      (correct/wrong/missing key, `INTERNAL_API_KEY` unset). `server.rs` is
+      now ~170 lines. `cargo test -p web --features ssr` passes (43 tests,
+      down from 46).
 
 ### MED
 
@@ -1113,9 +1119,11 @@ not omissions.
 - [x] `POST /api/internal/game/{id}/command`: correct `X-Internal-Key` →
       executes; wrong key → 401; missing key → 401; `INTERNAL_API_KEY` env
       unset → rejects all.
-- [x] `GET /api/game/{id}` with no session → 401.
-- [x] `POST /api/game/{id}/command` with no session → 401; with a session for
-      a non-player → 403.
+- [x] ~~`GET /api/game/{id}` with no session → 401.~~ Superseded 2026-07-04:
+      the `/api/game/*` REST handlers were deleted as unused (nothing calls
+      them; the Leptos frontend uses server fns). No longer applicable.
+- [x] ~~`POST /api/game/{id}/command` with no session → 401; with a session
+      for a non-player → 403.~~ Superseded 2026-07-04, same reason.
 - [x] Login flow logic (`auth/server.rs`, function-level): invalid email
       rejected; valid email creates a user and sets a 6-digit confirmation
       token; wrong code and expired confirmation are both rejected before the
@@ -1126,9 +1134,12 @@ not omissions.
       needs a Leptos request-scoped `Parts` context (only available in a real
       request), so it isn't asserted end-to-end here; E2E covers that.
 
-Implemented as `rust/web/src/game/server.rs::tests` (4 tests) and
+Implemented as `rust/web/src/game/server.rs::tests` (1 test) and
 `rust/web/src/auth/server.rs::tests` (4 tests). Added `tower = { features =
-["util"] }` for `oneshot`/`ServiceExt` in tests.
+["util"] }` for `oneshot`/`ServiceExt` in tests. The `game/server.rs` test
+count dropped from 4 to 1 on 2026-07-04 when the unused `/api/game/*` REST
+handlers (and their tests) were deleted; only the
+`internal_play_command` auth test remains.
 
 ### 11.5 Game contract regression harness (Rust game crates) [Complete]
 
