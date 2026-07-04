@@ -604,4 +604,304 @@ mod ssr {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::db::{self, CreateGameOpts};
+        use crate::models::user::User;
+        use brdgme_cmd::api::{CliLog, PlayerRender, PubRender};
+        use sqlx::PgPool;
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        async fn make_broadcaster() -> GameBroadcaster {
+            let redis_url =
+                std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+            let client = redis::Client::open(redis_url).unwrap();
+            let conn = client.get_multiplexed_async_connection().await.unwrap();
+            GameBroadcaster::new(conn, client)
+        }
+
+        async fn make_user(pool: &PgPool, name: &str) -> User {
+            sqlx::query_as!(
+                User,
+                "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
+                Uuid::new_v4(),
+                name,
+                &Vec::<String>::new()
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap()
+        }
+
+        async fn make_auth_token(pool: &PgPool, user_id: Uuid) -> Uuid {
+            let token_id = Uuid::new_v4();
+            sqlx::query!(
+                "INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)",
+                token_id,
+                user_id
+            )
+            .execute(pool)
+            .await
+            .unwrap();
+            token_id
+        }
+
+        /// Two human players, positions 0 and 1, pointed at a dummy (never
+        /// dereferenced) game version URI.
+        async fn make_two_player_game(pool: &PgPool, p0: &User, p1: &User) -> Uuid {
+            let game_type_id = sqlx::query_scalar!(
+                "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+                format!("Test Game {}", Uuid::new_v4()),
+                &vec![2, 3, 4]
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            let game_version_id = sqlx::query_scalar!(
+                r#"INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+                   VALUES ($1, $2, $3, true, false) RETURNING id"#,
+                game_type_id,
+                "1.0.0",
+                "http://localhost:0/mock"
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+
+            let game = db::create_game_with_users(
+                pool,
+                CreateGameOpts {
+                    game_version_id,
+                    whose_turn: &[0],
+                    eliminated: &[],
+                    placings: &[],
+                    points: &[],
+                    creator_id: p0.id,
+                    opponent_ids: &[p1.id],
+                    opponent_emails: &[],
+                    bot_slots: &[],
+                    chat_id: None,
+                    game_state: "initial_state",
+                },
+            )
+            .await
+            .unwrap();
+            game.id
+        }
+
+        fn pub_render() -> PubRender {
+            PubRender {
+                pub_state: "pub_state_value".to_string(),
+                render: "pub render".to_string(),
+            }
+        }
+
+        fn player_renders_for(count: usize) -> Vec<PlayerRender> {
+            (0..count)
+                .map(|i| PlayerRender {
+                    player_state: format!("p{}_state", i),
+                    render: format!("p{}_render", i),
+                    command_spec: None,
+                })
+                .collect()
+        }
+
+        async fn recv_payload(pubsub: &mut redis::aio::PubSub) -> serde_json::Value {
+            let msg = timeout(Duration::from_secs(5), pubsub.on_message().next())
+                .await
+                .expect("timed out waiting for redis pub/sub message")
+                .expect("pub/sub stream ended unexpectedly");
+            let payload: String = msg.get_payload().unwrap();
+            serde_json::from_str(&payload).unwrap()
+        }
+
+        #[sqlx::test]
+        async fn broadcast_publishes_legacy_shaped_public_payload(pool: PgPool) {
+            let p0 = make_user(&pool, "p0").await;
+            let p1 = make_user(&pool, "p1").await;
+            let game_id = make_two_player_game(&pool, &p0, &p1).await;
+
+            let base = time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            );
+            db::create_game_logs(
+                &pool,
+                game_id,
+                vec![CliLog {
+                    content: "public msg".to_string(),
+                    at: base,
+                    public: true,
+                    to: vec![],
+                }],
+            )
+            .await
+            .unwrap();
+
+            let ge = db::find_game_extended(&pool, game_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let all_logs = db::get_all_game_logs(&pool, game_id).await.unwrap();
+
+            let broadcaster = make_broadcaster().await;
+            let client = redis::Client::open(
+                std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+            )
+            .unwrap();
+            let mut pubsub = client.get_async_pubsub().await.unwrap();
+            pubsub.subscribe(format!("game.{}", game_id)).await.unwrap();
+
+            broadcaster
+                .broadcast_game_update(&pool, &ge, &all_logs, &pub_render(), &player_renders_for(2))
+                .await;
+
+            let v = recv_payload(&mut pubsub).await;
+            let update = &v["GameUpdate"];
+
+            // Legacy field names/structure that web-legacy's ShowResponse expects.
+            assert_eq!(update["game"]["id"].as_str().unwrap(), game_id.to_string());
+            assert!(update["game"].get("created_at").is_some());
+            assert!(update["game_type"].get("name").is_some());
+            assert!(update["game_version"].get("name").is_some());
+            // Public payload is not scoped to a viewing player.
+            assert!(update["game_player"].is_null());
+            assert!(update["command_spec"].is_null());
+            assert!(update["chat"].is_null());
+
+            let players = update["game_players"].as_array().unwrap();
+            assert_eq!(players.len(), 2);
+            for p in players {
+                assert!(p.get("game_player").is_some());
+                assert!(p.get("user").is_some());
+                assert!(p.get("game_type_user").is_some());
+            }
+
+            let logs = update["game_logs"].as_array().unwrap();
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0]["game_log"]["body"].as_str().unwrap(), "public msg");
+            assert!(logs[0].get("html").is_some());
+
+            assert_eq!(update["pub_state"].as_str().unwrap(), "pub_state_value");
+            assert!(update["html"].as_str().is_some());
+        }
+
+        #[sqlx::test]
+        async fn broadcast_filters_private_log_to_intended_player_only(pool: PgPool) {
+            let p0 = make_user(&pool, "p0").await;
+            let p1 = make_user(&pool, "p1").await;
+            let game_id = make_two_player_game(&pool, &p0, &p1).await;
+            let token0 = make_auth_token(&pool, p0.id).await;
+            let token1 = make_auth_token(&pool, p1.id).await;
+
+            // create_game_with_users shuffles slot order before assigning
+            // positions, so look up p0's actual position rather than
+            // assuming it landed on 0.
+            let ge_before = db::find_game_extended(&pool, game_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let p0_position = ge_before
+                .game_players
+                .iter()
+                .find(|p| p.user.as_ref().is_some_and(|u| u.id == p0.id))
+                .unwrap()
+                .game_player
+                .position as usize;
+
+            let base = time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            );
+            db::create_game_logs(
+                &pool,
+                game_id,
+                vec![
+                    CliLog {
+                        content: "public msg".to_string(),
+                        at: base,
+                        public: true,
+                        to: vec![],
+                    },
+                    CliLog {
+                        content: "secret to p0".to_string(),
+                        at: base + time::Duration::seconds(1),
+                        public: false,
+                        to: vec![p0_position],
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+
+            let ge = db::find_game_extended(&pool, game_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let all_logs = db::get_all_game_logs(&pool, game_id).await.unwrap();
+
+            let broadcaster = make_broadcaster().await;
+            let client = redis::Client::open(
+                std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+            )
+            .unwrap();
+            let mut pubsub = client.get_async_pubsub().await.unwrap();
+            // The legacy per-user channel ("user.<auth token id>") carries the
+            // same filtered logs (from crate::db::get_game_logs) as the
+            // Leptos-native "ws.<user id>" channel, just serialized
+            // differently - exercising this channel covers the same
+            // filtering logic that guards both.
+            pubsub.subscribe(format!("user.{}", token0)).await.unwrap();
+            pubsub.subscribe(format!("user.{}", token1)).await.unwrap();
+
+            broadcaster
+                .broadcast_game_update(&pool, &ge, &all_logs, &pub_render(), &player_renders_for(2))
+                .await;
+
+            let mut by_channel = std::collections::HashMap::new();
+            for _ in 0..2 {
+                let msg = timeout(Duration::from_secs(5), pubsub.on_message().next())
+                    .await
+                    .expect("timed out waiting for redis pub/sub message")
+                    .expect("pub/sub stream ended unexpectedly");
+                let channel = msg.get_channel_name().to_string();
+                let payload: String = msg.get_payload().unwrap();
+                by_channel.insert(channel, payload);
+            }
+
+            let p0_payload = &by_channel[&format!("user.{}", token0)];
+            let p0_v: serde_json::Value = serde_json::from_str(p0_payload).unwrap();
+            let p0_logs = p0_v["GameUpdate"]["game_logs"].as_array().unwrap();
+            assert_eq!(
+                p0_logs.len(),
+                2,
+                "the intended player must see both the public and the private log"
+            );
+            assert!(p0_logs
+                .iter()
+                .any(|l| l["game_log"]["body"] == "secret to p0"));
+
+            let p1_payload = &by_channel[&format!("user.{}", token1)];
+            let p1_v: serde_json::Value = serde_json::from_str(p1_payload).unwrap();
+            let p1_logs = p1_v["GameUpdate"]["game_logs"].as_array().unwrap();
+            assert_eq!(
+                p1_logs.len(),
+                1,
+                "another player must not receive a log privately targeted at p0"
+            );
+            assert!(
+                p1_logs
+                    .iter()
+                    .all(|l| l["game_log"]["body"] != "secret to p0"),
+                "private log body leaked into another player's payload"
+            );
+            assert!(
+                !p1_payload.contains("secret to p0"),
+                "private log content must not appear anywhere in another player's payload"
+            );
+        }
+    }
 }
