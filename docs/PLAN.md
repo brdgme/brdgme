@@ -526,7 +526,7 @@ delegable as specified unless noted.
 
 ### MED
 
-- [ ] **reqwest timeouts**: `reqwest::Client::new()` has no timeout in
+- [x] **reqwest timeouts**: `reqwest::Client::new()` has no timeout in
       `rust/web/src/main.rs` and `rust/bot/src/main.rs`. Web: ~10s (game
       service calls). Bot: generous overall timeout, or per-request timeout
       on the LLM call (minutes) with a shorter one for game service/monolith
