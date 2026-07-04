@@ -215,6 +215,27 @@ pub async fn find_game_version(
 }
 
 #[cfg(feature = "ssr")]
+pub async fn find_latest_non_deprecated_game_version(
+    pool: &PgPool,
+    game_type_id: Uuid,
+) -> Result<Option<crate::models::game::GameVersion>> {
+    sqlx::query_as!(
+        crate::models::game::GameVersion,
+        r#"
+        SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated
+        FROM game_versions
+        WHERE game_type_id = $1 AND is_deprecated = false
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+        game_type_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
+#[cfg(feature = "ssr")]
 pub async fn find_available_game_types(
     pool: &PgPool,
 ) -> Result<

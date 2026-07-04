@@ -728,10 +728,20 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             return Err(ServerFnError::new("You are not a player in this game"));
         }
 
+        // If a newer, non-deprecated version of this game type exists, restart
+        // onto that version rather than the (possibly deprecated) version the
+        // finished game was played on. Falls back to the original version if
+        // none is found.
+        let restart_game_version =
+            crate::db::find_latest_non_deprecated_game_version(&pool, ge.game_version.game_type_id)
+                .await
+                .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+                .unwrap_or_else(|| ge.game_version.clone());
+
         let player_count = ge.game_players.len();
         let resp = client::request(
             &http_client,
-            &ge.game_version.uri,
+            &restart_game_version.uri,
             &Request::New {
                 players: player_count,
             },
@@ -766,7 +776,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             &pool,
             &mut tx,
             CreateGameOpts {
-                game_version_id: ge.game.game_version_id,
+                game_version_id: restart_game_version.id,
                 whose_turn: &whose_turn,
                 eliminated: &eliminated,
                 placings: &placings,

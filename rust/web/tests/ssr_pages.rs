@@ -137,12 +137,26 @@ async fn make_game_version(pool: &PgPool, uri: &str) -> Uuid {
     .fetch_one(pool)
     .await
     .unwrap();
+    make_game_version_for_type(pool, game_type_id, "1.0.0", uri, false).await
+}
+
+/// Inserts a game version onto an existing game type - used to build up
+/// multiple versions (e.g. a deprecated one plus a newer one) for the same
+/// game type.
+async fn make_game_version_for_type(
+    pool: &PgPool,
+    game_type_id: Uuid,
+    name: &str,
+    uri: &str,
+    is_deprecated: bool,
+) -> Uuid {
     sqlx::query_scalar!(
         "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
-         VALUES ($1, $2, $3, true, false) RETURNING id",
+         VALUES ($1, $2, $3, true, $4) RETURNING id",
         game_type_id,
-        "1.0.0",
-        uri
+        name,
+        uri,
+        is_deprecated
     )
     .fetch_one(pool)
     .await
@@ -341,6 +355,31 @@ async fn spawn_mock_new_game_service() -> String {
     format!("http://{}", addr)
 }
 
+/// POSTs to the real `RestartGame` server-fn route. Args for this server-fn
+/// shape are encoded as a url-encoded POST body, not JSON (unlike a
+/// hand-rolled `reqwest` request to the game service).
+async fn restart_game_via_http(app: Router, game_id: Uuid, cookie: &str) -> (StatusCode, String) {
+    let path = <RestartGame as leptos::server_fn::ServerFn>::PATH;
+    let body = format!("game_id={}", game_id);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header("cookie", cookie)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&resp_body).into_owned())
+}
+
 // Regression test for the "restart 500 error" bug: `restart_game` sends its
 // `Request::New` as a leptos server-fn call, which - unlike a hand-rolled
 // `reqwest` request - encodes args as a url-encoded POST body, not JSON. This
@@ -382,24 +421,80 @@ async fn restart_game_on_finished_game_succeeds(pool: PgPool) {
     let cookie = login_cookie(&pool, &user, email).await;
     let app = build_router(make_state(pool).await).await;
 
-    let path = <RestartGame as leptos::server_fn::ServerFn>::PATH;
-    let body = format!("game_id={}", game.id);
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(path)
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .header("cookie", cookie)
-                .body(Body::from(body))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let status = resp.status();
-    let resp_body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let resp_text = String::from_utf8_lossy(&resp_body).into_owned();
+    let (status, resp_text) = restart_game_via_http(app, game.id, &cookie).await;
     assert_eq!(status, StatusCode::OK, "body: {resp_text}");
+}
+
+// Regression test for the restart-onto-latest-version behaviour: when a
+// newer, non-deprecated game_version exists for the same game type,
+// restarting a finished game (played on an older/deprecated version) should
+// create the new game on the newer version, not the original.
+#[sqlx::test]
+async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: PgPool) {
+    let old_uri = spawn_mock_new_game_service().await;
+    let new_uri = spawn_mock_new_game_service().await;
+
+    let old_game_version_id = make_game_version(&pool, &old_uri).await;
+    let game_type_id = sqlx::query_scalar!(
+        "SELECT game_type_id FROM game_versions WHERE id = $1",
+        old_game_version_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Deprecate the original version and add a newer one pointing at a
+    // different mock service, so we can tell which one restart used.
+    sqlx::query!(
+        "UPDATE game_versions SET is_deprecated = true WHERE id = $1",
+        old_game_version_id
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let new_game_version_id =
+        make_game_version_for_type(&pool, game_type_id, "2.0.0", &new_uri, false).await;
+
+    let user = make_user(&pool, "player-one").await;
+    let email = "player-one@example.com";
+    let game = db::create_game_with_users(
+        &pool,
+        CreateGameOpts {
+            game_version_id: old_game_version_id,
+            whose_turn: &[],
+            eliminated: &[],
+            placings: &[0, 1],
+            points: &[10.0, 5.0],
+            creator_id: user.id,
+            opponent_ids: &[],
+            opponent_emails: &[],
+            bot_slots: &[BotSlot {
+                name: "Botty".to_string(),
+                difficulty: "easy".to_string(),
+            }],
+            chat_id: None,
+            game_state: "state",
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query!("UPDATE games SET is_finished = true WHERE id = $1", game.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let cookie = login_cookie(&pool, &user, email).await;
+    let app = build_router(make_state(pool.clone()).await).await;
+
+    let (status, resp_text) = restart_game_via_http(app, game.id, &cookie).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp_text}");
+
+    let new_game_id: Uuid = serde_json::from_str(&resp_text).unwrap();
+    let new_game_version_id_used = sqlx::query_scalar!(
+        "SELECT game_version_id FROM games WHERE id = $1",
+        new_game_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(new_game_version_id_used, new_game_version_id);
 }
