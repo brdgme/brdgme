@@ -1,0 +1,79 @@
+[graph]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+[advisories]
+ignore = [
+    # diesel 1.4.8 (via r2d2-diesel, only used by legacy rust/api). All 3 are
+    # fixed in diesel >=2.3.8, but rust/api is a not-worth-migrating Diesel
+    # legacy crate slated for decommission once rust/web fully replaces it
+    # (see docs/PLAN.md); bumping diesel here would mean porting rust/api off
+    # 1.x entirely. Revisit when rust/api is decommissioned.
+    { id = "RUSTSEC-2024-0365", reason = "diesel 1.4.8 via legacy rust/api; fixed in diesel >=2.3.8, out of scope for this pass" },
+    { id = "RUSTSEC-2026-0136", reason = "diesel 1.4.8 via legacy rust/api; fixed in diesel >=2.3.8, out of scope for this pass" },
+    { id = "RUSTSEC-2026-0137", reason = "diesel 1.4.8 via legacy rust/api; fixed in diesel >=2.3.8, out of scope for this pass" },
+    # encoding 0.2.33 via `email` crate, only used by legacy rust/api's SMTP
+    # sending. rust/api is legacy (see above); the new email path (Phase 22a,
+    # Resend HTTP API) doesn't use this crate at all.
+    { id = "RUSTSEC-2021-0153", reason = "encoding via email crate, only used by legacy rust/api; no safe upgrade, crate is out of scope for this pass" },
+    # paste 1.0.15, transitive via leptos/either_of (web frontend). Upstream
+    # (leptos) would need to move off paste; no action available here.
+    { id = "RUSTSEC-2024-0436", reason = "transitive via leptos/either_of; unmaintained notice only, no safe upgrade available from us" },
+    # proc-macro-error2 2.0.1, transitive via leptos_macro. Same situation.
+    { id = "RUSTSEC-2026-0173", reason = "transitive via leptos_macro; unmaintained notice only, no safe upgrade available from us" },
+    # term_size 0.3.2, direct dependency of lib/cmd (brdgme_cmd), used across
+    # all game binaries. Replacement is terminal_size; requires a lib/cmd
+    # code change, deferred to a dependency-bump pass.
+    { id = "RUSTSEC-2020-0163", reason = "direct dep of lib/cmd; unmaintained notice only, replacement (terminal_size) needs a code change deferred to a dependency-bump pass" },
+]
+
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+# Everything in this project is open source (see docs/VISION.md), so this
+# allow-list only needs to cover permissive/copyleft-free OSS licenses that
+# actually appear in the dependency tree. Where a crate offers a choice of
+# licenses (an SPDX OR expression), only one side needs to be allow-listed.
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "MIT-0",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+# Workspace crates are internal (publish = false) and never released to
+# crates.io, so they don't need a license expression of their own; this
+# only relaxes the check for us, not for third-party dependencies below.
+ignore = true
+
+# https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow-workspace = false
+skip = []
+skip-tree = []
+
+# https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

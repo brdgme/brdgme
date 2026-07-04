@@ -1,6 +1,7 @@
 [package]
 name = "brdgme_color"
 version = "0.1.0"
+publish = false
 authors = ["Michael Alexander <beefsack@gmail.com>"]
 edition = "2024"
 
