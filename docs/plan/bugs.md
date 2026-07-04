@@ -2,16 +2,12 @@
 
 **Status:** Partially resolved
 
-- [ ] **Restart 500 error**: `restart_game` returns "Game service error: error
-      parsing JSON response". Diagnostics improved: `client::request` now reads
-      response body as text first and includes it in the error message. Root
-      cause still unknown - needs a live restart attempt to capture the raw
-      game service response.
-      **Delegation gap:** this is a diagnosis task with no procedure. Before
-      delegating, write: exact repro steps (game type, state, who restarts),
-      how to capture the raw response (RUST_LOG settings, which Tilt resource
-      logs to read, or a curl replay of the restart request), and what to do
-      with the captured payload (fix criteria vs report back).
+- [x] **Restart 500 error**: `restart_game` returns "Game service error: error
+      parsing JSON response". Closed 2026-07-04 as could-not-reproduce.
+      Diagnostics were improved: `client::request` now includes the raw
+      response body in the error, and games are now restarted onto the latest
+      non-deprecated game version (commit f21a136). If it recurs, the error
+      message will contain the raw payload needed to diagnose it.
 - [ ] **Bot restart limitation**: when a game is restarted, bots from the
       original game are not carried over to the new game. The `restart_game`
       handler (`game/server_fns.rs`) copies players but does not check
@@ -22,11 +18,11 @@
       their positions or are positions reshuffled like humans; behaviour when
       the restarted game has different player-count constraints; and the test
       cases that define done.
-- [ ] **3-player Lost Cities render**: `lost-cities-2/RULES.md` has a
-      placeholder for the 3-player "Reading the Display" section.
-      **Delegation gap:** no task body. Needs: how to obtain a representative
-      3-player game state, the render extraction procedure (per `docs/RULES.md`
-      and the game crate conventions), and which RULES.md sections must change.
+- [x] **3-player Lost Cities render**: Resolved 2026-07-04. Generated a
+      scripted 3-player game via the engine API to a mid-round-2 state (round 1
+      scored) and extracted a real render via `lost_cities_2_cli`; replaced the
+      RULES.md placeholder and corrected the "most recent card" bullet, which
+      had the top/bottom orientation backwards.
 - [x] **Optimistic locking missing in `execute_command`**: two concurrent
       requests (e.g. two players submitting at the same instant, or a bot and a
       player) can both read the same game state, both call the game service, and
