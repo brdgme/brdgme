@@ -56,6 +56,65 @@ jobs:
       - run: cargo test --workspace --exclude web
       - run: cargo test -p web --features ssr
 
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      E2E_DATABASE_URL: "postgres://postgres:postgres@localhost/brdgme_e2e"
+      REDIS_URL: "redis://localhost:6379"
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: brdgme
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-leptos,wasm-bindgen-cli@0.2.121,sqlx-cli
+      - name: Install wasm-opt
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          # PLAYWRIGHT_BROWSERS_PATH is unset here (unlike the devenv
+          # sandbox), so CI downloads its own browser; key on the pinned
+          # @playwright/test version (see end2end/package.json).
+          key: playwright-${{ runner.os }}-1.60.0
+      - working-directory: rust/web/end2end
+        run: npm ci
+      - working-directory: rust/web/end2end
+        run: npx playwright install chromium --with-deps
+      - working-directory: rust/web/end2end
+        run: ./run.sh
+
   test-go:
     runs-on: ubuntu-latest
     steps:

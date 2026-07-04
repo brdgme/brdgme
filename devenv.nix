@@ -25,6 +25,7 @@
 
   packages = with pkgs; [
     act
+    binaryen
     cargo-binstall
     cargo-leptos
     cilium-cli

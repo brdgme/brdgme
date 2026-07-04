@@ -1,0 +1,78 @@
+import { Page } from "@playwright/test";
+import { Client } from "pg";
+
+const DATABASE_URL =
+  process.env.E2E_DATABASE_URL ??
+  "postgres://brdgme_user:brdgme_password@localhost:5432/brdgme_e2e";
+
+let uniqueCounter = 0;
+
+/** A per-run-unique email so tests don't collide with each other's users. */
+export function uniqueEmail(label: string): string {
+  uniqueCounter += 1;
+  return `e2e-${label}-${Date.now()}-${uniqueCounter}@example.com`;
+}
+
+async function fetchLoginConfirmation(email: string): Promise<string> {
+  const client = new Client({ connectionString: DATABASE_URL });
+  await client.connect();
+  try {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const result = await client.query(
+        `SELECT u.login_confirmation FROM users u
+         JOIN user_emails ue ON ue.user_id = u.id
+         WHERE ue.email = $1 AND u.login_confirmation IS NOT NULL`,
+        [email],
+      );
+      const code = result.rows[0]?.login_confirmation as string | undefined;
+      if (code) {
+        return code;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error(`Timed out waiting for login_confirmation for ${email}`);
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Drives the login UI end-to-end for a fresh email: submits the email form,
+ * reads the confirmation code straight out of Postgres (SMTP is unset in the
+ * e2e stack), then submits the code. Leaves the page on /dashboard.
+ */
+export async function login(page: Page, email: string): Promise<void> {
+  await page.goto("/login");
+  await page.getByPlaceholder("Email address").first().fill(email);
+  await page.getByRole("button", { name: "Get code" }).click();
+
+  const code = await fetchLoginConfirmation(email);
+
+  await page.getByPlaceholder("Login code").fill(code);
+  await page.getByRole("button", { name: "Play!" }).click();
+  await page.waitForURL("**/dashboard");
+}
+
+/**
+ * Collects `console.error` messages and uncaught page errors for the
+ * lifetime of the page. Hydration panics surface here via
+ * `console_error_panic_hook`. Call `assertNoErrors()` at the end of a test.
+ */
+export function collectConsoleErrors(page: Page): { assertNoErrors: () => void } {
+  const errors: string[] = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "error") {
+      errors.push(`console.error: ${msg.text()}`);
+    }
+  });
+  page.on("pageerror", (err) => {
+    errors.push(`pageerror: ${err.message}`);
+  });
+  return {
+    assertNoErrors: () => {
+      if (errors.length > 0) {
+        throw new Error(`Unexpected console errors:\n${errors.join("\n")}`);
+      }
+    },
+  };
+}

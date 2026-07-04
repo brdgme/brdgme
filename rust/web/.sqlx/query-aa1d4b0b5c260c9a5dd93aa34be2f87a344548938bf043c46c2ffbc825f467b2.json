@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated)\n             VALUES ($1, $2, $3, $4, true, false)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa1d4b0b5c260c9a5dd93aa34be2f87a344548938bf043c46c2ffbc825f467b2"
+}

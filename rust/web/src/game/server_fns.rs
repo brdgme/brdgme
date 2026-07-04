@@ -70,6 +70,73 @@ pub struct GameLogEntry {
     pub is_new: bool,
 }
 
+/// Builds the active-game summaries for `user`, or an empty list if there is
+/// no logged-in user - anonymous visitors hit pages that render
+/// `SidebarMenu` (e.g. the homepage), and "not logged in" is a normal state
+/// there, not an error.
+#[cfg(feature = "ssr")]
+async fn active_games_summary(
+    user: Option<crate::auth::AuthUser>,
+    pool: &sqlx::PgPool,
+) -> Result<Vec<GameSummary>, ServerFnError> {
+    let Some(user) = user else {
+        return Ok(Vec::new());
+    };
+
+    let mut games = crate::db::find_active_games_for_user(&user.id, pool)
+        .await
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+    games.sort_by(|a, b| {
+        let a_turn = a
+            .game_players
+            .iter()
+            .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
+        let b_turn = b
+            .game_players
+            .iter()
+            .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
+        b_turn
+            .cmp(&a_turn)
+            .then(b.game.updated_at.cmp(&a.game.updated_at))
+    });
+    let summaries: Vec<GameSummary> = games
+        .into_iter()
+        .map(|ge| {
+            let opponents = ge
+                .game_players
+                .iter()
+                .filter(|p| p.user.as_ref().is_none_or(|u| u.id != user.id))
+                .map(|p| {
+                    use std::str::FromStr;
+                    let color = brdgme_color::Color::from_str(&p.game_player.color)
+                        .unwrap_or(brdgme_color::WHITE)
+                        .hex();
+                    OpponentSummary {
+                        name: p.name().to_string(),
+                        color,
+                    }
+                })
+                .collect();
+            let is_turn = ge
+                .game_players
+                .iter()
+                .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
+                .map(|p| p.game_player.is_turn)
+                .unwrap_or(false);
+
+            GameSummary {
+                id: ge.game.id,
+                name: ge.game_version.name,
+                type_name: ge.game_type.name,
+                opponents,
+                is_turn,
+            }
+        })
+        .collect();
+    Ok(summaries)
+}
+
 #[server(GetActiveGames, "/api")]
 pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
     #[cfg(feature = "ssr")]
@@ -80,63 +147,9 @@ pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
 
         let pool =
             use_context::<PgPool>().ok_or_else(|| ServerFnError::new("Database pool not found"))?;
-        let user = get_current_user()
-            .await?
-            .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+        let user = get_current_user().await?;
 
-        let games = crate::db::find_active_games_for_user(&user.id, &pool)
-            .await
-            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-
-        let mut games = games;
-        games.sort_by(|a, b| {
-            let a_turn = a
-                .game_players
-                .iter()
-                .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
-            let b_turn = b
-                .game_players
-                .iter()
-                .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
-            b_turn
-                .cmp(&a_turn)
-                .then(b.game.updated_at.cmp(&a.game.updated_at))
-        });
-        let summaries: Vec<GameSummary> = games
-            .into_iter()
-            .map(|ge| {
-                let opponents = ge
-                    .game_players
-                    .iter()
-                    .filter(|p| p.user.as_ref().is_none_or(|u| u.id != user.id))
-                    .map(|p| {
-                        use std::str::FromStr;
-                        let color = brdgme_color::Color::from_str(&p.game_player.color)
-                            .unwrap_or(brdgme_color::WHITE)
-                            .hex();
-                        OpponentSummary {
-                            name: p.name().to_string(),
-                            color,
-                        }
-                    })
-                    .collect();
-                let is_turn = ge
-                    .game_players
-                    .iter()
-                    .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
-                    .map(|p| p.game_player.is_turn)
-                    .unwrap_or(false);
-
-                GameSummary {
-                    id: ge.game.id,
-                    name: ge.game_version.name,
-                    type_name: ge.game_type.name,
-                    opponents,
-                    is_turn,
-                }
-            })
-            .collect();
-        Ok(summaries)
+        active_games_summary(user, &pool).await
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!()
@@ -862,4 +875,99 @@ pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
     }
     #[cfg(not(feature = "ssr"))]
     unreachable!()
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::*;
+    use sqlx::PgPool;
+
+    async fn make_user(pool: &PgPool, name: &str) -> Uuid {
+        let id = Uuid::new_v4();
+        sqlx::query!(
+            "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)",
+            id,
+            name,
+            &Vec::<String>::new()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn make_game_version(pool: &PgPool) -> Uuid {
+        let game_type_id = Uuid::new_v4();
+        sqlx::query!(
+            "INSERT INTO game_types (id, name, player_counts) VALUES ($1, $2, $3)",
+            game_type_id,
+            "Test Game",
+            &vec![2i32]
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        let game_version_id = Uuid::new_v4();
+        sqlx::query!(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, $2, $3, $4, true, false)",
+            game_version_id,
+            game_type_id,
+            "v1",
+            "http://127.0.0.1:8100"
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        game_version_id
+    }
+
+    // Anonymous visitors hit pages that render SidebarMenu (e.g. the
+    // homepage) before logging in; that must not surface as a 500.
+    #[sqlx::test]
+    async fn active_games_summary_returns_empty_for_anonymous_user(pool: PgPool) {
+        let summaries = active_games_summary(None, &pool).await.unwrap();
+        assert!(summaries.is_empty());
+    }
+
+    // Regression test for a hard-load of a bot game's page: the LEFT JOINed
+    // bot player (NULL user_id) must not trip the summary query/mapping.
+    #[sqlx::test]
+    async fn active_games_summary_includes_bot_opponent(pool: PgPool) {
+        let user_id = make_user(&pool, "human").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: user_id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[BotSlot {
+                    name: "Botty".to_string(),
+                    difficulty: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "state",
+            },
+        )
+        .await
+        .unwrap();
+
+        let user = crate::auth::AuthUser {
+            id: user_id,
+            name: "human".to_string(),
+            email: "human@example.com".to_string(),
+        };
+        let summaries = active_games_summary(Some(user), &pool).await.unwrap();
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, game.id);
+        assert_eq!(summaries[0].opponents.len(), 1);
+        assert_eq!(summaries[0].opponents[0].name, "Botty");
+    }
 }

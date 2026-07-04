@@ -295,11 +295,23 @@ test its own isolated, migrated database, so tests never share state with
 each other. Do not build ad hoc shared fixtures or rely on test ordering;
 each `#[sqlx::test]` function should set up exactly the rows it needs.
 
-**E2E scenarios are for user-visible flows only, and must stay fast.** The
-Playwright suite exists to catch hydration panics and full-stack wiring
-breaks that unit and integration tests cannot see - it is a smoke suite, not
-a regression suite. Add a scenario only when it exercises something a user
-would actually do end-to-end (load a page, submit a command, see it update).
-Push logic-level coverage down into unit or `#[sqlx::test]` integration
-tests instead of adding another E2E case. Keep the whole suite under its
-time budget (currently < 5 minutes).
+**Two-layer frontend/page testing: prefer the in-process layer.** Page-level
+coverage is split into two layers (see `docs/PLAN.md` 11.6):
+
+- **In-process SSR page tests (primary)** - `#[sqlx::test]` +
+  `tower::ServiceExt::oneshot` against the real Axum/Leptos router (see
+  `rust/web/tests/ssr_pages.rs`, built via the shared `web::router::build_router`
+  helper). No browser, no running binary; runs in the existing `test-rust` CI
+  job in milliseconds. Use this layer for route/page coverage: assert 200,
+  `text/html`, a page-specific marker, and no SSR panic. This is where new
+  page or route coverage should be added by default.
+- **Playwright hydration smoke (residue only)** - a single spec,
+  single browser context, chromium only (`rust/web/end2end/tests/page-loads.spec.ts`).
+  The only thing that genuinely requires a real browser is client-side
+  hydration (hydration mismatches and WASM panics only manifest on a hard
+  page load), so this layer is a hard-load smoke test asserting zero console
+  errors/`pageerror`s, not a scenario suite. Do not add multi-context,
+  WebSocket-propagation, or command/undo/concede/restart driving here - that
+  logic is covered by Rust tests (11.2-11.4). Keep this layer under its time
+  budget (currently < 1 minute of Playwright time, excluding the release
+  build).

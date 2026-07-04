@@ -6,6 +6,9 @@ pub mod app;
 pub mod state;
 
 #[cfg(feature = "ssr")]
+pub mod router;
+
+#[cfg(feature = "ssr")]
 pub mod db;
 
 pub mod websocket;

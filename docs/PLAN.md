@@ -1345,16 +1345,25 @@ not rebuilt:
   `server_fns.rs` fix must be rebuilt before an E2E run (no
   `E2E_SKIP_BUILD=1` on the first run).
 
-**Verification status:** NOT yet verified end-to-end after the final
-round of fixes (usage limits interrupted every attempt). The
-`server_fns.rs` change also has NOT been through
-fmt/clippy/`cargo test -p web --features ssr`. Treat all uncommitted work
-as unverified.
+**Verification status (2026-07-04, verified):** all four remaining-work
+items below are done and green. `cargo fmt --all -- --check`,
+`cargo clippy -p web --all-targets --features ssr -- -D warnings`, and
+`cargo test -p web --features ssr` (54 tests, including the 6 new 11.6a
+`tests/ssr_pages.rs` tests) all pass. `rust/web/end2end`: `npm ci`,
+`npx tsc --noEmit`, `bash -n run.sh` all clean. `./run.sh` ran green twice
+(first with a full release build, second with `E2E_SKIP_BUILD=1`);
+Playwright portion ~2s each run, well under the 1-minute budget. The `e2e`
+CI job parses with `yq` and its steps match the local `run.sh` flow
+(same env vars, same version pins). Two stale `lost_cities_2_http`/`web`
+processes left over from an earlier interrupted run were found squatting
+on ports 8100/3010 during verification (caused one run to falsely report
+green via pre-existing listeners) - killed before the runs recorded above;
+not a defect in the harness itself.
 
 **Remaining work (delegable as one task; original scenario checklist
 below is superseded):**
 
-- [ ] Verify + land the current uncommitted work, trimmed to the 11.6b
+- [x] Verify + land the current uncommitted work, trimmed to the 11.6b
       scope: delete `tests/game-flow.spec.ts`; keep/adjust
       `page-loads.spec.ts` (add one hard reload of the game page; ensure
       it stays single-context); run `npm ci`/`npx tsc --noEmit`/
@@ -1362,16 +1371,26 @@ below is superseded):**
       `cargo clippy -p web --features ssr -- -D warnings`,
       `cargo test -p web --features ssr`; full `./run.sh` green twice
       (second with `E2E_SKIP_BUILD=1`), Playwright portion < 1 min.
-- [ ] Implement 11.6a in-process SSR page tests as specified above
+- [x] Implement 11.6a in-process SSR page tests as specified above
       (new test module, e.g. `rust/web/src/ssr_pages.rs` tests or
       `rust/web/tests/`; router-construction helper shared with
-      `main.rs` if extraction is needed).
-- [ ] CI: `e2e` job validated (yq parse + step-by-step sanity check
+      `main.rs` if extraction is needed). Implemented as
+      `rust/web/tests/ssr_pages.rs` plus a `web::router::build_router`
+      helper (`rust/web/src/router.rs`) factored out of `main.rs` so both
+      share the exact same route/session/fallback wiring. Authenticated
+      requests are driven by inserting a `tower-sessions` row directly via
+      the same `PostgresStore` the app uses (documented in the test
+      module doc comment) rather than driving the `Login`/`ConfirmLogin`
+      server fns over HTTP, since their routes carry a compile-time hash
+      suffix that isn't practical to hardcode in a test.
+- [x] CI: `e2e` job validated (yq parse + step-by-step sanity check
       against the local flow); 11.6a tests run in the existing
-      `test-rust` job automatically.
-- [ ] Update `docs/CODING.md` 11.7 conventions if the E2E budget wording
+      `test-rust` job automatically (no CI changes needed - `cargo test -p
+      web --features ssr` already picks up `tests/ssr_pages.rs`).
+- [x] Update `docs/CODING.md` 11.7 conventions if the E2E budget wording
       needs to reflect the new two-layer split (browser layer: hydration
-      smoke only, < 1 min).
+      smoke only, < 1 min). Replaced the old single-suite budget paragraph
+      with a two-layer description (SSR primary, Playwright residue).
 
 **Superseded original design + scenarios (kept for reference; the
 harness bullets below were implemented and remain accurate for run.sh):**
@@ -1428,7 +1447,7 @@ harness bullets below were implemented and remain accurate for run.sh):**
 - [x] Hard-load `/`, `/login`, `/dashboard`, `/games`, and an active
       `/game/{id}` - assert zero browser console errors (hydration panics
       surface via `console_error_panic_hook`). (= 11.6b scope; implemented
-      as `page-loads.spec.ts`, verification pending.)
+      as `page-loads.spec.ts`, verified green via `./run.sh` 2026-07-04.)
 - ~~Full game flow with two browser contexts~~ Superseded 2026-07-04:
   covered by Rust tests (11.3); browser version was implemented, proved
   racy, and is deleted under the redesign.
@@ -1439,10 +1458,11 @@ harness bullets below were implemented and remain accurate for run.sh):**
   restarting player to the new game.~~ Superseded 2026-07-04: covered by
   Rust tests (11.2/11.3).
 - [x] Hard refresh on the game page mid-game - the highest-risk hydration
-      scenario (real async data + Suspense). (Kept in 11.6b;
-      verification pending.)
+      scenario (real async data + Suspense). (Kept in 11.6b; verified
+      green 2026-07-04.)
 - [x] CI: separate job (needs the release build); runs on pull requests +
-      master. (Implemented, uncommitted; validation pending.)
+      master. (Implemented; `yq`-parsed and sanity-checked against the
+      local `run.sh` flow 2026-07-04.)
 
 ### 11.7 Testing conventions (add to `docs/CODING.md`) [Complete]
 

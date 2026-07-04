@@ -3,13 +3,10 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
-    use axum::Router;
     use leptos::logging::log;
     use leptos::prelude::*;
-    use leptos_axum::{LeptosRoutes, generate_route_list};
-    use web::app::*;
-    use web::auth::session::create_session_layer;
     use web::db::create_pool;
+    use web::router::build_router;
     use web::state::AppState;
     use web::websocket::GameBroadcaster;
 
@@ -52,42 +49,7 @@ async fn main() {
         confirm_rate_limiter: confirm_rate_limiter.clone(),
     };
 
-    let routes = generate_route_list(App);
-    let session_layer = create_session_layer(&pool).await;
-
-    let app = Router::new()
-        .leptos_routes_with_context(
-            &state,
-            routes,
-            {
-                let pool = pool.clone();
-                let broadcaster = broadcaster.clone();
-                let http_client = http_client.clone();
-                let resend = resend.clone();
-                let login_rate_limiter = login_rate_limiter.clone();
-                let confirm_rate_limiter = confirm_rate_limiter.clone();
-                move || {
-                    provide_context(pool.clone());
-                    provide_context(broadcaster.clone());
-                    provide_context(http_client.clone());
-                    provide_context(resend.clone());
-                    provide_context(login_rate_limiter.clone());
-                    provide_context(confirm_rate_limiter.clone());
-                }
-            },
-            {
-                let leptos_options = state.leptos_options.clone();
-                move || shell(leptos_options.clone())
-            },
-        )
-        .nest("/api", web::game::server::api_routes())
-        .route("/ws", axum::routing::get(web::websocket::ws_handler))
-        .fallback(leptos_axum::file_and_error_handler::<AppState, _>({
-            let leptos_options = leptos_options.clone();
-            move |_| shell(leptos_options.clone())
-        }))
-        .layer(session_layer)
-        .with_state(state);
+    let app = build_router(state).await;
 
     log!("listening on http://{}", &addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
