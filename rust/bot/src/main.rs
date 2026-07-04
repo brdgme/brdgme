@@ -295,6 +295,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
                 player_position: req.player_position,
                 command: command.clone(),
             })
+            .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
             .context("Failed to POST command to monolith")?;
@@ -444,6 +445,7 @@ async fn call_game_service(
     let resp = http
         .post(uri)
         .json(request)
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .context("HTTP request to game service failed")?;
@@ -558,7 +560,13 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to connect to database")?;
 
-    let http = reqwest::Client::new();
+    // The LLM call can take minutes, so the client's overall timeout is generous;
+    // shorter game-service/monolith calls override it with a per-request timeout.
+    let http = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .context("Failed to build HTTP client")?;
     let state = Arc::new(AppState {
         pool,
         http,

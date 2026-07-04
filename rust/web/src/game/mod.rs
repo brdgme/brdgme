@@ -167,7 +167,16 @@ pub async fn trigger_bot_turns(http_client: &reqwest::Client, ge: &crate::db::Ga
         });
         let client = http_client.clone();
         tokio::spawn(async move {
-            match client.post(&url).json(&body).send().await {
+            // The bot runs the full turn (including the LLM call, which can take
+            // minutes) inline in its /trigger handler, so override the client's
+            // default 10s timeout here. Phase 13 replaces this with NATS.
+            match client
+                .post(&url)
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(300))
+                .send()
+                .await
+            {
                 Err(e) => tracing::warn!(%url, "Failed to trigger bot turn: {}", e),
                 Ok(r) if !r.status().is_success() => {
                     let status = r.status();
