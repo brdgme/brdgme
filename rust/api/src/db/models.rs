@@ -511,7 +511,7 @@ pub struct NewChatUser {
 mod tests {
     use super::*;
     use crate::db::color::Color;
-    use crate::db::{schema, CONN};
+    use crate::db::{CONN, schema};
     use diesel::prelude::*;
     use diesel::{self, Connection};
 

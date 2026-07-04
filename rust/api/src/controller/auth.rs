@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{Context, Error, Result, anyhow};
 use rocket::http::Status;
 use rocket::post;
 use rocket::request::{FromRequest, Outcome, Request};
@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::controller::Cors;
 use crate::db::models::*;
-use crate::db::{query, CONN};
+use crate::db::{CONN, query};
 use crate::errors::ControllerError;
 
 #[derive(Deserialize)]
@@ -74,7 +74,7 @@ impl<'r> FromRequest<'r> for User {
                 return Outcome::Error((
                     Status::Unauthorized,
                     anyhow!("missing Authorization header"),
-                ))
+                ));
             }
         };
         if !auth_header.starts_with("Bearer ") {
@@ -89,7 +89,7 @@ impl<'r> FromRequest<'r> for User {
                 return Outcome::Error((
                     Status::Unauthorized,
                     anyhow!("Authorization password not in valid format"),
-                ))
+                ));
             }
         };
         let conn = &mut *match CONN.r.get() {
@@ -98,7 +98,7 @@ impl<'r> FromRequest<'r> for User {
                 return Outcome::Error((
                     Status::InternalServerError,
                     anyhow!("error getting connection"),
-                ))
+                ));
             }
         };
 

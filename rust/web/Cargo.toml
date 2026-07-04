@@ -1,7 +1,7 @@
 [package]
 name = "web"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -14,7 +14,7 @@ console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.10", optional = true }
 leptos_meta = { version = "0.8.6" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], optional = true }
-wasm-bindgen = { version = "=0.2.108", optional = true }
+wasm-bindgen = { version = "=0.2.121", optional = true }
 
 # Database dependencies
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"], optional = true }
@@ -56,7 +56,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rand = "0.10.2"
 futures-util = "0.3.32"
 gloo-net = { version = "0.6.0", features = ["websocket"] }
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3.77", features = ["Location", "Window"] }
 
 [features]

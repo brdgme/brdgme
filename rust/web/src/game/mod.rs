@@ -193,7 +193,7 @@ mod tests {
     use super::*;
     use crate::db::{self, CreateGameOpts};
     use crate::models::user::User;
-    use axum::{routing::post, Json, Router};
+    use axum::{Json, Router, routing::post};
     use brdgme_cmd::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
     use sqlx::PgPool;
     use std::sync::Arc;

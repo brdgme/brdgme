@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Context, Error};
+use anyhow::{Context, Error, anyhow};
 use chrono::Utc;
-use diesel::pg::PgConnection;
 use diesel::Connection;
+use diesel::pg::PgConnection;
 use rocket::serde::json::Json;
-use rocket::{get, post, State};
+use rocket::{State, get, post};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,8 +14,8 @@ use brdgme_markup as markup;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::mpsc::Sender;
 use std::sync::Mutex;
+use std::sync::mpsc::Sender;
 
 use crate::controller::{Cors, UuidParam};
 use crate::db::CONN;
@@ -305,7 +305,7 @@ pub async fn command(
                 player_renders,
             ),
             cli::Response::UserError { message } => {
-                return Err(ControllerError::bad_request(message))
+                return Err(ControllerError::bad_request(message));
             }
             _ => return Err(anyhow!("invalid response type").into()),
         };

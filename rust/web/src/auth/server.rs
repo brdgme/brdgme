@@ -82,15 +82,14 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         expect_context::<std::sync::Arc<crate::auth::rate_limit::LoginRateLimiter>>();
     // Fail open if the client IP can't be determined (e.g. missing ConnectInfo
     // in a test harness) rather than blocking logins outright.
-    if let Some(ip) = login_client_ip().await {
-        if let Err(wait_secs) =
+    if let Some(ip) = login_client_ip().await
+        && let Err(wait_secs) =
             crate::auth::rate_limit::check_login_rate_limit(&login_rate_limiter, ip)
-        {
-            return Ok(LoginResponse {
-                success: false,
-                message: format!("Too many login attempts. Try again in {}s.", wait_secs),
-            });
-        }
+    {
+        return Ok(LoginResponse {
+            success: false,
+            message: format!("Too many login attempts. Try again in {}s.", wait_secs),
+        });
     }
 
     let pool = expect_context::<PgPool>();
@@ -169,15 +168,14 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
         expect_context::<std::sync::Arc<crate::auth::rate_limit::ConfirmRateLimiter>>();
     // Fail open if the client IP can't be determined (e.g. missing ConnectInfo
     // in a test harness) rather than blocking confirmation outright.
-    if let Some(ip) = login_client_ip().await {
-        if let Err(wait_secs) =
+    if let Some(ip) = login_client_ip().await
+        && let Err(wait_secs) =
             crate::auth::rate_limit::check_confirm_rate_limit(&confirm_rate_limiter, ip)
-        {
-            return Err(ServerFnError::new(format!(
-                "Too many attempts. Try again in {}s.",
-                wait_secs
-            )));
-        }
+    {
+        return Err(ServerFnError::new(format!(
+            "Too many attempts. Try again in {}s.",
+            wait_secs
+        )));
     }
 
     let pool = expect_context::<PgPool>();

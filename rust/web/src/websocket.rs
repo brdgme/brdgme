@@ -22,8 +22,8 @@ mod ssr {
     use super::*;
     use axum::{
         extract::{
-            ws::{Message, WebSocket, WebSocketUpgrade},
             State,
+            ws::{Message, WebSocket, WebSocketUpgrade},
         },
         response::IntoResponse,
     };
@@ -560,10 +560,10 @@ mod ssr {
             return;
         }
 
-        if let Some(uid) = user_id {
-            if let Err(e) = pubsub.subscribe(format!("ws.{}", uid)).await {
-                tracing::error!("Redis SUBSCRIBE failed for ws.{}: {}", uid, e);
-            }
+        if let Some(uid) = user_id
+            && let Err(e) = pubsub.subscribe(format!("ws.{}", uid)).await
+        {
+            tracing::error!("Redis SUBSCRIBE failed for ws.{}: {}", uid, e);
         }
 
         let mut stream = pubsub.into_on_message();
@@ -880,9 +880,11 @@ mod ssr {
                 2,
                 "the intended player must see both the public and the private log"
             );
-            assert!(p0_logs
-                .iter()
-                .any(|l| l["game_log"]["body"] == "secret to p0"));
+            assert!(
+                p0_logs
+                    .iter()
+                    .any(|l| l["game_log"]["body"] == "secret to p0")
+            );
 
             let p1_payload = &by_channel[&format!("user.{}", token1)];
             let p1_v: serde_json::Value = serde_json::from_str(p1_payload).unwrap();

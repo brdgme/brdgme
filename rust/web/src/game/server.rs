@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -29,7 +29,7 @@ pub async fn internal_play_command(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_API_KEY not configured",
             )
-                .into_response()
+                .into_response();
         }
     };
     let provided_key = match headers.get("X-Internal-Key").and_then(|v| v.to_str().ok()) {
@@ -68,7 +68,7 @@ mod tests {
     use crate::state::AppState;
     use crate::websocket::GameBroadcaster;
     use axum::body::Body;
-    use axum::http::{header, Request};
+    use axum::http::{Request, header};
     use tower::ServiceExt;
 
     async fn make_broadcaster() -> GameBroadcaster {
@@ -101,7 +101,9 @@ mod tests {
 
     #[sqlx::test]
     async fn internal_command_requires_matching_key(pool: PgPool) {
-        std::env::set_var("INTERNAL_API_KEY", "secret-key");
+        unsafe {
+            std::env::set_var("INTERNAL_API_KEY", "secret-key");
+        }
         let app = test_app(pool).await;
         let id = Uuid::new_v4();
         let body = serde_json::json!({ "player_position": 0, "command": "abc" }).to_string();
@@ -156,7 +158,9 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
         // INTERNAL_API_KEY unset: rejects even the "right" key from before.
-        std::env::remove_var("INTERNAL_API_KEY");
+        unsafe {
+            std::env::remove_var("INTERNAL_API_KEY");
+        }
         let resp = app
             .oneshot(
                 Request::builder()

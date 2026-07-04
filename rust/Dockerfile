@@ -37,8 +37,8 @@ RUN curl -L https://github.com/sass/dart-sass/releases/download/1.97.3/dart-sass
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-gnu.tgz | tar -xvz \
     && mv cargo-binstall /usr/local/cargo/bin/cargo-binstall
 
-RUN cargo binstall cargo-leptos --version 0.3.5 -y
-RUN cargo binstall wasm-bindgen-cli --version 0.2.108 -y
+RUN cargo binstall cargo-leptos --version 0.3.6 -y
+RUN cargo binstall wasm-bindgen-cli --version 0.2.121 -y
 RUN rustup target add wasm32-unknown-unknown
 
 COPY --from=planner /app/recipe.json recipe.json

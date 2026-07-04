@@ -7,7 +7,7 @@ use uuid::Uuid;
 use brdgme_cmd::api as brdgme_cmd_api;
 use brdgme_markup as markup;
 
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::config::CONFIG;
 use crate::controller::game::ShowResponse;

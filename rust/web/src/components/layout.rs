@@ -1,9 +1,9 @@
 use crate::components::game::PlayerName;
-use crate::game::server_fns::{get_active_games, GameSummary};
+use crate::game::server_fns::{GameSummary, get_active_games};
 use leptos::prelude::*;
+use leptos_router::NavigateOptions;
 use leptos_router::components::A;
 use leptos_router::hooks::use_navigate;
-use leptos_router::NavigateOptions;
 
 #[component]
 pub fn MainLayout(

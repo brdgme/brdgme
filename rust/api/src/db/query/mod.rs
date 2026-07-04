@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{Context, Error, Result, anyhow};
 use chrono::{Duration, Utc};
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
@@ -1324,15 +1324,17 @@ mod tests {
         with_db(|conn| {
             assert_eq!(find_user(&Uuid::new_v4(), conn).unwrap(), None);
             let u = create_user_by_name("beefsack", conn).unwrap();
-            assert!(create_user_email(
-                &NewUserEmail {
-                    user_id: u.id,
-                    email: "beefsack@gmail.com",
-                    is_primary: true,
-                },
-                conn,
-            )
-            .is_ok());
+            assert!(
+                create_user_email(
+                    &NewUserEmail {
+                        user_id: u.id,
+                        email: "beefsack@gmail.com",
+                        is_primary: true,
+                    },
+                    conn,
+                )
+                .is_ok()
+            );
         });
     }
 
@@ -1408,15 +1410,17 @@ mod tests {
                 conn,
             )
             .unwrap();
-            assert!(create_game(
-                &NewGame {
-                    game_version_id: game_version.id,
-                    is_finished: false,
-                    game_state: "blah",
-                },
-                conn,
-            )
-            .is_ok());
+            assert!(
+                create_game(
+                    &NewGame {
+                        game_version_id: game_version.id,
+                        is_finished: false,
+                        game_state: "blah",
+                    },
+                    conn,
+                )
+                .is_ok()
+            );
         });
     }
 

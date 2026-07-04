@@ -1,10 +1,10 @@
 use leptos::html;
 use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
+use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
-    components::{Route, Router, Routes, A},
-    hooks::use_navigate,
     NavigateOptions, ParamSegment, StaticSegment,
+    components::{A, Route, Router, Routes},
+    hooks::use_navigate,
 };
 use uuid::Uuid;
 
@@ -94,10 +94,10 @@ fn LoginPage() -> impl IntoView {
 
     // Show code input once server confirms email was sent.
     Effect::new(move |_| {
-        if let Some(Ok(resp)) = login_action.value().get() {
-            if resp.success {
-                set_show_code_input.set(true);
-            }
+        if let Some(Ok(resp)) = login_action.value().get()
+            && resp.success
+        {
+            set_show_code_input.set(true);
         }
     });
 
@@ -223,7 +223,7 @@ impl Default for OpponentSlot {
 
 #[component]
 fn GamesPage() -> impl IntoView {
-    use crate::game::server_fns::{create_new_game, get_available_game_types, BotSlot};
+    use crate::game::server_fns::{BotSlot, create_new_game, get_available_game_types};
 
     let game_types = LocalResource::new(get_available_game_types);
 
@@ -234,14 +234,13 @@ fn GamesPage() -> impl IntoView {
 
     // Initialize selections when game types first load.
     Effect::new(move |_| {
-        if let Some(Ok(types)) = game_types.get() {
-            if selected_type_id.get_untracked().is_none() {
-                if let Some(first) = types.first() {
-                    set_selected_type_id.set(Some(first.id));
-                    set_selected_version_id.set(first.versions.first().map(|v| v.id));
-                    set_player_count.set(first.player_counts.first().copied().unwrap_or(2));
-                }
-            }
+        if let Some(Ok(types)) = game_types.get()
+            && selected_type_id.get_untracked().is_none()
+            && let Some(first) = types.first()
+        {
+            set_selected_type_id.set(Some(first.id));
+            set_selected_version_id.set(first.versions.first().map(|v| v.id));
+            set_player_count.set(first.player_counts.first().copied().unwrap_or(2));
         }
     });
 
@@ -308,13 +307,12 @@ fn GamesPage() -> impl IntoView {
                                 <div class="form-row">
                                     <label>"Game"</label>
                                     <select on:change=move |ev| {
-                                        if let Ok(id) = event_target_value(&ev).parse::<Uuid>() {
-                                            if let Some(gt) = types.with_value(|t| t.iter().find(|g| g.id == id).cloned()) {
+                                        if let Ok(id) = event_target_value(&ev).parse::<Uuid>()
+                                            && let Some(gt) = types.with_value(|t| t.iter().find(|g| g.id == id).cloned()) {
                                                 set_selected_type_id.set(Some(id));
                                                 set_selected_version_id.set(gt.versions.first().map(|v| v.id));
                                                 set_player_count.set(gt.player_counts.first().copied().unwrap_or(2));
                                             }
-                                        }
                                     }>
                                         {types.with_value(|t| t.iter().map(|gt| {
                                             let id = gt.id.to_string();

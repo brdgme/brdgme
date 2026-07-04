@@ -825,8 +825,8 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
 
         // Broadcast update for the old game with restarted_game_id now set, so
         // the other player's game view updates to show the "Go to new game" link.
-        if let Ok(Some(old_ge)) = crate::db::find_game_extended(&pool, game_id).await {
-            if let Ok(Response::Status {
+        if let Ok(Some(old_ge)) = crate::db::find_game_extended(&pool, game_id).await
+            && let Ok(Response::Status {
                 public_render: old_pub,
                 player_renders: old_pr,
                 ..
@@ -838,14 +838,13 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
                 },
             )
             .await
-            {
-                let old_logs = crate::db::get_all_game_logs(&pool, game_id)
-                    .await
-                    .unwrap_or_default();
-                broadcaster
-                    .broadcast_game_update(&pool, &old_ge, &old_logs, &old_pub, &old_pr)
-                    .await;
-            }
+        {
+            let old_logs = crate::db::get_all_game_logs(&pool, game_id)
+                .await
+                .unwrap_or_default();
+            broadcaster
+                .broadcast_game_update(&pool, &old_ge, &old_logs, &old_pub, &old_pr)
+                .await;
         }
 
         Ok(new_game.id)

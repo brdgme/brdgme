@@ -12,7 +12,7 @@ use std::str::FromStr;
 pub mod auth;
 pub mod game;
 
-use crate::db::{models, query, CONN};
+use crate::db::{CONN, models, query};
 use crate::errors::ControllerError;
 
 pub struct UuidParam(Uuid);

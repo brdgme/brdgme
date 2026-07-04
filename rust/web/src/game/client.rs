@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use brdgme_cmd::api::{PlayerRender, PubRender, Request, Response};
 use brdgme_game::command::Spec as CommandSpec;
 
@@ -78,7 +78,7 @@ pub async fn player_render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{routing::post, Json, Router};
+    use axum::{Json, Router, routing::post};
     use tokio::net::TcpListener;
 
     #[tokio::test]

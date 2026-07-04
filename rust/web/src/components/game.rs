@@ -4,7 +4,7 @@ use crate::game::server_fns::{
 };
 use crate::websocket::BrdgmeGameUpdate;
 use leptos::prelude::*;
-use leptos_router::{hooks::use_navigate, NavigateOptions};
+use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
 
 #[component]
@@ -177,11 +177,11 @@ fn render_log_entries(
     let mut windows: Vec<(time::PrimitiveDateTime, Vec<_>)> = vec![];
     for entry in entries {
         let key = window_key(entry.logged_at);
-        if let Some(last) = windows.last_mut() {
-            if last.0 == key {
-                last.1.push(entry);
-                continue;
-            }
+        if let Some(last) = windows.last_mut()
+            && last.0 == key
+        {
+            last.1.push(entry);
+            continue;
         }
         windows.push((key, vec![entry]));
     }
@@ -218,10 +218,10 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     let logs = LocalResource::new(move || async move { get_game_logs(game_id).await });
 
     let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
-        if let Some(ws) = ws_game.get() {
-            if ws.game_id == game_id {
-                return Some(Ok(ws.logs));
-            }
+        if let Some(ws) = ws_game.get()
+            && ws.game_id == game_id
+        {
+            return Some(Ok(ws.logs));
         }
         logs.get()
     };
@@ -231,10 +231,10 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     Effect::new(move |_| {
         let _ = effective_logs();
         leptos::prelude::request_animation_frame(move || {
-            if let Some(el) = logs_ref.get_untracked() {
-                if let Some(parent) = el.parent_element() {
-                    parent.set_scroll_top(parent.scroll_height());
-                }
+            if let Some(el) = logs_ref.get_untracked()
+                && let Some(parent) = el.parent_element()
+            {
+                parent.set_scroll_top(parent.scroll_height());
             }
         });
     });
@@ -259,10 +259,10 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     let logs = LocalResource::new(move || async move { get_game_logs(game_id).await });
 
     let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
-        if let Some(ws) = ws_game.get() {
-            if ws.game_id == game_id {
-                return Some(Ok(ws.logs));
-            }
+        if let Some(ws) = ws_game.get()
+            && ws.game_id == game_id
+        {
+            return Some(Ok(ws.logs));
         }
         logs.get()
     };
@@ -379,12 +379,11 @@ pub fn GameCommandInput(
                             // Group consecutive suggestions sharing the same desc.
                             let mut groups: Vec<(Option<String>, Vec<String>)> = vec![];
                             for s in suggestions.get() {
-                                if let Some(last) = groups.last_mut() {
-                                    if last.0 == s.desc {
+                                if let Some(last) = groups.last_mut()
+                                    && last.0 == s.desc {
                                         last.1.push(s.value);
                                         continue;
                                     }
-                                }
                                 groups.push((s.desc, vec![s.value]));
                             }
                             groups.into_iter().map(|(desc, values)| {
