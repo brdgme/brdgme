@@ -531,7 +531,7 @@ delegable as specified unless noted.
       service calls). Bot: generous overall timeout, or per-request timeout
       on the LLM call (minutes) with a shorter one for game service/monolith
       calls.
-- [ ] **Move logs written outside the move transaction**
+- [x] **Move logs written outside the move transaction**
       (`game/mod.rs::execute_command`): `create_game_logs` commits after
       `update_game_command_success` - a crash between them silently loses
       the move's logs. Fold log insertion into the same transaction.

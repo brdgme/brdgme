@@ -718,14 +718,15 @@ pub async fn create_game_with_users(
     Ok(game)
 }
 
+/// Inserts game logs within an existing transaction, so callers can commit
+/// them atomically alongside other writes (e.g. the game state update in
+/// `update_game_command_success`).
 #[cfg(feature = "ssr")]
-pub async fn create_game_logs(
-    pool: &PgPool,
+async fn insert_game_logs_tx(
+    tx: &mut sqlx::PgConnection,
     game_id: Uuid,
     logs: Vec<brdgme_cmd::api::CliLog>,
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
-
     // Get player IDs by position
     let players = sqlx::query!(
         "SELECT id, position FROM game_players WHERE game_id = $1",
@@ -768,6 +769,17 @@ pub async fn create_game_logs(
         }
     }
 
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn create_game_logs(
+    pool: &PgPool,
+    game_id: Uuid,
+    logs: Vec<brdgme_cmd::api::CliLog>,
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    insert_game_logs_tx(&mut tx, game_id, logs).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1118,6 +1130,7 @@ pub async fn update_game_command_success(
     placings: &[usize],
     points: &[f32],
     expected_updated_at: time::PrimitiveDateTime,
+    logs: Vec<brdgme_cmd::api::CliLog>,
 ) -> Result<()> {
     let now = {
         let t = time::OffsetDateTime::now_utc();
@@ -1188,6 +1201,8 @@ pub async fn update_game_command_success(
     if is_finished && !placings.is_empty() {
         apply_rating_changes(&mut tx, game_id).await?;
     }
+
+    insert_game_logs_tx(&mut tx, game_id, logs).await?;
 
     tx.commit().await?;
     Ok(())
@@ -1525,6 +1540,7 @@ mod tests {
             &[],
             &[3.5, 1.5],
             ge_before.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -1585,6 +1601,7 @@ mod tests {
             &[1, 2], // placings by position
             &[10.0, 5.0],
             ge.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -1624,6 +1641,7 @@ mod tests {
             &[],
             &[10.0, 5.0],
             ge_after.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -1663,6 +1681,7 @@ mod tests {
             &[],
             &[],
             ge.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -2005,6 +2024,7 @@ mod tests {
             &placings,
             &[],
             ge.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -2058,6 +2078,7 @@ mod tests {
             &placings,
             &[],
             ge.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -2101,6 +2122,7 @@ mod tests {
             &[1, 2],
             &[],
             ge.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -2123,6 +2145,7 @@ mod tests {
             &[1, 2],
             &[],
             ge_after_first.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -2158,6 +2181,7 @@ mod tests {
             &[1, 2],
             &[],
             ge.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -2212,6 +2236,7 @@ mod tests {
             &placings,
             &[],
             ge.game.updated_at,
+            vec![],
         )
         .await
         .unwrap();

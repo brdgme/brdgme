@@ -99,10 +99,9 @@ pub async fn execute_command(
         &placings,
         &game_response.points,
         ge.game.updated_at,
+        logs,
     )
     .await?;
-
-    crate::db::create_game_logs(pool, game_id, logs).await?;
 
     // Fetch updated state for broadcast and bot triggering
     match crate::db::find_game_extended(pool, game_id).await {
@@ -432,6 +431,12 @@ mod tests {
             &[],
             &[0.0, 0.0],
             stale_ge.game.updated_at,
+            vec![CliLog {
+                content: "should never be persisted".to_string(),
+                at: now(),
+                public: true,
+                to: vec![],
+            }],
         )
         .await;
 
@@ -441,6 +446,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(ge.game.game_state, "new_state");
+
+        // The conflicting update's log insert must not have committed
+        // outside the failed transaction: only the first, successful
+        // execute_command's log should be present.
+        let logs = db::get_all_game_logs(&pool, game_id).await.unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].body, "did a thing");
     }
 
     #[sqlx::test]
