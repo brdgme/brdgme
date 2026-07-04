@@ -613,6 +613,32 @@ no SMTP in the app at all, dev needs no SMTP catcher: the existing log
 fallback prints emails when `RESEND_API_KEY` is unset, and `k8s/base/smtp/`
 is deleted in Phase 22a rather than upgraded.
 
+### Update all dependencies to latest (added 2026-07-04, immediate)
+
+Do this before the Renovate rollout below so the first Renovate run isn't a
+wall of PRs. Motivated by the 2026-07-04 lint-gate work: CI's stable clippy
+(1.96) was newer than local toolchains and dependabot reports 63
+vulnerabilities on the default branch.
+
+- [ ] **Rust crates**: bump every version requirement in the `rust/`
+      workspace `Cargo.toml`s (root + member crates) to the latest published
+      release, then `cargo update`. Fix any breaking-change fallout. If any
+      `sqlx::query!` strings change, regenerate `rust/web/.sqlx`
+      (`cargo sqlx prepare -- --features ssr --all-targets` from `rust/web`
+      against a migrated Postgres).
+- [ ] **Rust toolchain**: pin the workspace toolchain (add
+      `rust-toolchain.toml` at `rust/`) to current stable so local, CI, and
+      Docker builds agree; update `rust/Dockerfile` base images to match.
+- [ ] **CI runners/actions** (`.github/workflows/ci.yml`): bump all action
+      versions (`actions/checkout`, `dtolnay/rust-toolchain`,
+      `Swatinem/rust-cache`, `docker/*`) and service images (`postgres`,
+      `redis`) to latest.
+- [ ] Gate: full `test-rust` job green locally (fmt, both clippy
+      invocations, both test invocations) and in CI.
+
+Out of scope: legacy `web/` npm tree (deleted at Phase 16), `brdgme-go`
+modules, `devenv.lock` (manual `devenv update`).
+
 ### Dependency automation + CI hygiene (added 2026-07-03 final pass)
 
 Independent and delegable. Reduces ongoing maintenance cost with off-the-shelf
