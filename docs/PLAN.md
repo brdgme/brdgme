@@ -535,7 +535,7 @@ delegable as specified unless noted.
       (`game/mod.rs::execute_command`): `create_game_logs` commits after
       `update_game_command_success` - a crash between them silently loses
       the move's logs. Fold log insertion into the same transaction.
-- [ ] **Restart flow non-atomic** (`server_fns.rs::restart_game`): new game
+- [x] **Restart flow non-atomic** (`server_fns.rs::restart_game`): new game
       creation and the `restarted_game_id` UPDATE are separate transactions;
       a failure in between leaves the old game restartable again. Wrap in
       one transaction.

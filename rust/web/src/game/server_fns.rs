@@ -770,8 +770,14 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             .filter_map(|p| p.user.as_ref().filter(|u| u.id != user.id).map(|u| u.id))
             .collect();
 
-        let new_game = crate::db::create_game_with_users(
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+        let new_game = crate::db::create_game_with_users_tx(
             &pool,
+            &mut tx,
             CreateGameOpts {
                 game_version_id: ge.game.game_version_id,
                 whose_turn: &whose_turn,
@@ -789,7 +795,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
 
-        crate::db::create_game_logs(&pool, new_game.id, logs)
+        crate::db::insert_game_logs_tx(&mut tx, new_game.id, logs)
             .await
             .map_err(|e| ServerFnError::new(format!("Failed to create game logs: {}", e)))?;
 
@@ -798,9 +804,13 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             new_game.id,
             game_id
         )
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
         // Broadcast update for the new game.
         if let Ok(Some(new_ge)) = crate::db::find_game_extended(&pool, new_game.id).await {

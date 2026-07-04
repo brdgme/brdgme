@@ -542,7 +542,20 @@ pub async fn create_game_with_users(
     opts: CreateGameOpts<'_>,
 ) -> Result<crate::models::game::Game> {
     let mut tx = pool.begin().await?;
+    let game = create_game_with_users_tx(pool, &mut tx, opts).await?;
+    tx.commit().await?;
+    Ok(game)
+}
 
+/// Creates a game and its players within an existing transaction, so callers
+/// can commit them atomically alongside other writes (e.g. the restarted-game
+/// linkage in `restart_game`).
+#[cfg(feature = "ssr")]
+pub async fn create_game_with_users_tx(
+    pool: &PgPool,
+    tx: &mut sqlx::PgConnection,
+    opts: CreateGameOpts<'_>,
+) -> Result<crate::models::game::Game> {
     // 1. Find or create users; collect all slots (users + bots)
     let mut slots: Vec<PlayerSlotInternal> = Vec::new();
 
@@ -714,7 +727,6 @@ pub async fn create_game_with_users(
         }
     }
 
-    tx.commit().await?;
     Ok(game)
 }
 
@@ -722,7 +734,7 @@ pub async fn create_game_with_users(
 /// them atomically alongside other writes (e.g. the game state update in
 /// `update_game_command_success`).
 #[cfg(feature = "ssr")]
-async fn insert_game_logs_tx(
+pub async fn insert_game_logs_tx(
     tx: &mut sqlx::PgConnection,
     game_id: Uuid,
     logs: Vec<brdgme_cmd::api::CliLog>,
