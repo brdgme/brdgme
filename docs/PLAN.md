@@ -1,9 +1,9 @@
 # Monolith Migration Plan
 
 **Current focus (in order):**
-Phase 12 ELO backfill decision (optional, non-blocking) → Restart 500 error →
-3-player render → Phase 22a Resend outbound remaining steps (domain
-verification, prod secret, live-inbox check) → Phase 14 prod prerequisites →
+Restart 500 error → 3-player render → Phase 22a Resend outbound remaining
+steps (domain verification, prod secret, live-inbox check) → Phase 14 prod
+prerequisites →
 Phase 13 NATS bot eventing (JetStream) → Phase 19 CloudNativePG → Phase 15
 ArgoCD + sealed-secrets → Phase 20 external-dns → Phase 16 cutover +
 validation → Phase 22b play-by-email → Phase 17 NATS WS migration → Phase 18
@@ -52,7 +52,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | Phase 9 | LLM Bots | Complete | [phase-09-llm-bots.md](plan/phase-09-llm-bots.md) |
 | Phase 10 | Eliminate runtime panics in rust/web | Complete | [phase-10-eliminate-runtime-panics.md](plan/phase-10-eliminate-runtime-panics.md) |
 | Phase 11 | Testing Foundation | Complete (completed 2026-07-04) | [phase-11-testing-foundation.md](plan/phase-11-testing-foundation.md) |
-| Phase 12 | ELO Ratings | Complete - backfill decision still open | [phase-12-elo-ratings.md](plan/phase-12-elo-ratings.md) |
+| Phase 12 | ELO Ratings | Complete | [phase-12-elo-ratings.md](plan/phase-12-elo-ratings.md) |
 | Phase 13 | NATS Bot Eventing | Pending | [phase-13-nats-bot-eventing.md](plan/phase-13-nats-bot-eventing.md) |
 | Phase 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); prod prerequisites pending | [phase-14-drop-knative-gateway-api.md](plan/phase-14-drop-knative-gateway-api.md) |
 | Phase 15 | Production CD (ArgoCD) | Pending | [phase-15-production-cd-argocd.md](plan/phase-15-production-cd-argocd.md) |
@@ -62,21 +62,20 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | Phase 19 | CloudNativePG | Pending | [phase-19-cloudnativepg.md](plan/phase-19-cloudnativepg.md) |
 | Phase 20 | external-dns | Pending | [phase-20-external-dns.md](plan/phase-20-external-dns.md) |
 | Phase 21 | OpenTofu Infrastructure as Code | Pending - human-paced | [phase-21-opentofu-iac.md](plan/phase-21-opentofu-iac.md) |
-| Phase 22 | Email via Resend | Pending - high priority | [phase-22-email-via-resend.md](plan/phase-22-email-via-resend.md) |
+| Phase 22 | Email via Resend | 22a code complete (landed 77a2092); human/infra steps + 22b pending - high priority | [phase-22-email-via-resend.md](plan/phase-22-email-via-resend.md) |
 | Phase 23 | Rust Game Ports | Pending | [phase-23-rust-game-ports.md](plan/phase-23-rust-game-ports.md) |
 | Bug fixes | Bug fixes | Partially resolved | [bugs.md](plan/bugs.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | [review-findings-2026-07-04.md](plan/review-findings-2026-07-04.md) |
 | Quick wins | Quick wins (added 2026-07-03) | Complete | [quick-wins.md](plan/quick-wins.md) |
-| Development Workflow | Development Workflow | Reference (no phase status; ongoing process doc) | [development-workflow.md](plan/development-workflow.md) |
+| Development Workflow | Development Workflow | Superseded by [DEV.md](DEV.md) | [development-workflow.md](plan/development-workflow.md) |
 
 ---
 
 ## History
 
 Phases are numbered in assignment order, not execution order - see the focus
-line for execution order. Phases 1-11 are complete; Phase 12 is complete
-except one open backfill decision; Phase 14 is dev-complete with prod
-prerequisites pending; Phase 13 and Phases 15-23 remain pending.
+line for execution order. Phases 1-12 are complete; Phase 14 is dev-complete
+with prod prerequisites pending; Phase 13 and Phases 15-23 remain pending.
 (Renumbered 2026-07-02: 5.5→6, 5.6→7, old 6→8, 5.7→10, 6.5→ArgoCD, old
 7→cutover, old 8→NATS WS; ELO and NATS bot eventing split out of Phase 9
 into Phases 12 and 13. 2026-07-03: Phase 14 'Drop Knative' inserted; ArgoCD

@@ -1,6 +1,6 @@
 # Phase 12: ELO Ratings
 
-**Status:** Complete - backfill decision still open
+**Status:** Complete (backfill decided 2026-07-04: no backfill needed)
 
 **Why blocking:** the legacy `rust/api` updates ratings when a game finishes;
 `rust/web` does not. Both systems share the DB during side-by-side operation,
@@ -69,7 +69,9 @@ only sets `is_finished = true`: conceded games get no `place`, no
       finish write does not re-rate); game with a bot player not rated;
       `game_type_users` row created on first rated game; concede assigns
       places and rates.
-- [ ] Decide whether to backfill unrated games finished via `rust/web` before
+- [x] Decide whether to backfill unrated games finished via `rust/web` before
       this change (list: finished games where all `rating_change` are NULL and
       no bot players). Optional - low game volume may not justify it.
+      Decided 2026-07-04: no backfill - `rust/web` has never served production,
+      so only dev databases contain unrated games; prod data is unaffected.
 

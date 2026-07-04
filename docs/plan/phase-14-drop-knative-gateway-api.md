@@ -115,7 +115,7 @@ final infrastructure.
 - [x] Enable Cilium Gateway API in Kind: install the Gateway API CRDs and set
       `gatewayAPI.enabled=true` in the Cilium install values. Expose the
       Gateway via NodePort 31080 (already mapped to host 8080 in
-      `k8s/kind-config.yaml` `extraPortMappings`) to preserve the
+      `ctlptl.yaml` `extraPortMappings`) to preserve the
       `{service}.brdgme.lvh.me:8080` dev URLs. If Cilium's Gateway NodePort
       exposure proves awkward in Kind, fall back to Tilt port-forwards and
       update DEV.md accordingly - decide during implementation.

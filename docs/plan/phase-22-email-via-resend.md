@@ -1,6 +1,6 @@
 # Phase 22: Email via Resend
 
-**Status:** Pending - high priority
+**Status:** 22a code complete (landed 77a2092); human/infra steps + 22b pending - high priority
 
 **Decision (2026-07-03):** all platform email moves to Resend (resend.com).
 Outbound replaces the self-managed SMTP relay path (spam-filter /

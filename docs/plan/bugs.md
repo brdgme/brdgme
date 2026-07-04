@@ -14,7 +14,7 @@
       with the captured payload (fix criteria vs report back).
 - [ ] **Bot restart limitation**: when a game is restarted, bots from the
       original game are not carried over to the new game. The `restart_game`
-      handler (`game/server.rs`) copies players but does not check
+      handler (`game/server_fns.rs`) copies players but does not check
       `game_players.game_bot_id` and create corresponding `game_bots` rows in
       the new game.
       **Delegation gap:** no expected-behaviour spec. Decide and document:

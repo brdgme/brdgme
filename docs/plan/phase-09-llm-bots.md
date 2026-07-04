@@ -45,8 +45,8 @@ outside the cluster.
   fail, the bot caller logs the failure and does nothing - the turn remains
   with the bot.
 - **Bot triggering**: v1 uses direct HTTP (monolith POSTs trigger to bot
-  caller). Replacing with NATS eventing is the next planned task (see NATS
-  bot eventing section below).
+  caller). Replacing with NATS eventing is the next planned task (see
+  [Phase 13](phase-13-nats-bot-eventing.md)).
 - **Rendered state**: the bot receives `player_renders[n].render` in raw brdgme
   markup format. `{{player N}}` references are resolved to player names;
   all other markup tags pass through unchanged. The markup is more compact and
