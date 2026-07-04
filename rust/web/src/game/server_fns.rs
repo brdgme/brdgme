@@ -327,7 +327,6 @@ pub async fn create_new_game(
         use crate::game::client;
         use crate::websocket::GameBroadcaster;
         use brdgme_cmd::api::{Request, Response};
-        use brdgme_game::Status;
         use leptos::prelude::*;
         use sqlx::PgPool;
 
@@ -370,13 +369,7 @@ pub async fn create_new_game(
             _ => return Err(ServerFnError::new("Unexpected response from game service")),
         };
 
-        let (whose_turn, eliminated, placings) = match game_info.status {
-            Status::Active {
-                whose_turn,
-                eliminated,
-            } => (whose_turn, eliminated, vec![]),
-            Status::Finished { placings, .. } => (vec![], vec![], placings),
-        };
+        let (_, whose_turn, eliminated, placings) = crate::game::status_fields(game_info.status);
 
         let game = crate::db::create_game_with_users(
             &pool,
@@ -401,15 +394,15 @@ pub async fn create_new_game(
             .await
             .map_err(|e| ServerFnError::new(format!("Failed to create logs: {}", e)))?;
 
-        if let Ok(Some(ge)) = crate::db::find_game_extended(&pool, game.id).await {
-            let all_logs = crate::db::get_all_game_logs(&pool, game.id)
-                .await
-                .unwrap_or_default();
-            broadcaster
-                .broadcast_game_update(&pool, &ge, &all_logs, &public_render, &player_renders)
-                .await;
-            crate::game::trigger_bot_turns(&http_client, &ge).await;
-        }
+        crate::game::broadcast_and_trigger(
+            &pool,
+            &broadcaster,
+            &http_client,
+            game.id,
+            &public_render,
+            &player_renders,
+        )
+        .await;
 
         Ok(game.id)
     }
@@ -514,7 +507,6 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         use crate::game::client;
         use crate::websocket::GameBroadcaster;
         use brdgme_cmd::api::{Request, Response};
-        use brdgme_game::Status;
         use leptos::prelude::*;
         use sqlx::PgPool;
 
@@ -564,13 +556,8 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
             _ => return Err(ServerFnError::new("Unexpected response from game service")),
         };
 
-        let (whose_turn, eliminated, placings) = match game_response.status {
-            Status::Active {
-                whose_turn,
-                eliminated,
-            } => (whose_turn, eliminated, vec![]),
-            Status::Finished { placings, .. } => (vec![], vec![], placings),
-        };
+        let (_, whose_turn, eliminated, placings) =
+            crate::game::status_fields(game_response.status);
 
         crate::db::undo_game(
             &pool,
@@ -584,21 +571,15 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Failed to undo game: {}", e)))?;
 
-        if let Ok(Some(updated_ge)) = crate::db::find_game_extended(&pool, game_id).await {
-            let all_logs = crate::db::get_all_game_logs(&pool, game_id)
-                .await
-                .unwrap_or_default();
-            broadcaster
-                .broadcast_game_update(
-                    &pool,
-                    &updated_ge,
-                    &all_logs,
-                    &public_render,
-                    &player_renders,
-                )
-                .await;
-            crate::game::trigger_bot_turns(&http_client, &updated_ge).await;
-        }
+        crate::game::broadcast_and_trigger(
+            &pool,
+            &broadcaster,
+            &http_client,
+            game_id,
+            &public_render,
+            &player_renders,
+        )
+        .await;
         Ok(())
     }
     #[cfg(not(feature = "ssr"))]
@@ -702,7 +683,6 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         use crate::game::client;
         use crate::websocket::GameBroadcaster;
         use brdgme_cmd::api::{Request, Response};
-        use brdgme_game::Status;
         use leptos::prelude::*;
         use sqlx::PgPool;
 
@@ -756,13 +736,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             _ => return Err(ServerFnError::new("Unexpected response from game service")),
         };
 
-        let (whose_turn, eliminated, placings) = match game_info.status {
-            Status::Active {
-                whose_turn,
-                eliminated,
-            } => (whose_turn, eliminated, vec![]),
-            Status::Finished { placings, .. } => (vec![], vec![], placings),
-        };
+        let (_, whose_turn, eliminated, placings) = crate::game::status_fields(game_info.status);
 
         let opponent_ids: Vec<Uuid> = ge
             .game_players
@@ -813,15 +787,15 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
         // Broadcast update for the new game.
-        if let Ok(Some(new_ge)) = crate::db::find_game_extended(&pool, new_game.id).await {
-            let all_logs = crate::db::get_all_game_logs(&pool, new_game.id)
-                .await
-                .unwrap_or_default();
-            broadcaster
-                .broadcast_game_update(&pool, &new_ge, &all_logs, &public_render, &player_renders)
-                .await;
-            crate::game::trigger_bot_turns(&http_client, &new_ge).await;
-        }
+        crate::game::broadcast_and_trigger(
+            &pool,
+            &broadcaster,
+            &http_client,
+            new_game.id,
+            &public_render,
+            &player_renders,
+        )
+        .await;
 
         // Broadcast update for the old game with restarted_game_id now set, so
         // the other player's game view updates to show the "Go to new game" link.

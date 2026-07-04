@@ -577,11 +577,16 @@ delegable as specified unless noted.
       Resolved 2026-07-04: both jobs converted to `strategy.matrix.include`
       (image/target pairs, `file: rust/Dockerfile` constant); kept as two
       jobs to preserve job names/history. No behaviour change.
-- [ ] **db.rs row-mapping duplication**: shared helper for the duplicated
+- [x] **db.rs row-mapping duplication**: shared helper for the duplicated
       GamePlayer row->struct blocks in `find_game_extended` /
       `find_active_games_for_user`; plus small helpers for the repeated
       Status destructure and the broadcast+trigger epilogue (only if the
       REST-handler deletion above leaves them still repeated).
+      Resolved 2026-07-04: added `build_game_player_from_row` (db.rs),
+      `status_fields` and `broadcast_and_trigger` (game/mod.rs).
+      `execute_command`'s epilogue kept inline (it warns on reload failure,
+      the other sites don't); `concede_game`/old-game rebroadcast left as-is
+      (different control flow). fmt/clippy clean, 45/45 web tests pass.
 
 ### LOW (batch opportunistically)
 

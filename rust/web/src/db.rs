@@ -111,6 +111,49 @@ fn build_game_type_user(
 }
 
 #[cfg(feature = "ssr")]
+// Splitting these into a params struct would be a larger refactor than warranted here.
+#[allow(clippy::too_many_arguments)]
+fn build_game_player_from_row(
+    id: Uuid,
+    created_at: time::PrimitiveDateTime,
+    updated_at: time::PrimitiveDateTime,
+    game_id: Uuid,
+    user_id: Option<Uuid>,
+    position: i32,
+    color: String,
+    has_accepted: bool,
+    is_turn: bool,
+    is_turn_at: time::PrimitiveDateTime,
+    place: Option<i32>,
+    last_turn_at: time::PrimitiveDateTime,
+    is_eliminated: bool,
+    is_read: bool,
+    points: Option<f32>,
+    undo_game_state: Option<String>,
+    rating_change: Option<i32>,
+) -> crate::models::game::GamePlayer {
+    crate::models::game::GamePlayer {
+        id,
+        created_at,
+        updated_at,
+        game_id,
+        user_id,
+        position,
+        color,
+        has_accepted,
+        is_turn,
+        is_turn_at,
+        place,
+        last_turn_at,
+        is_eliminated,
+        is_read,
+        points,
+        undo_game_state,
+        rating_change,
+    }
+}
+
+#[cfg(feature = "ssr")]
 pub async fn create_pool() -> Result<PgPool> {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
@@ -337,25 +380,25 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
         let game_bot = build_game_bot_from_row(p.gb_id, p.gb_game_id, p.gb_name, p.gb_difficulty)?;
 
         game_players.push(GamePlayerExtended {
-            game_player: crate::models::game::GamePlayer {
-                id: p.gp_id,
-                created_at: p.gp_created_at,
-                updated_at: p.gp_updated_at,
-                game_id: p.gp_game_id,
-                user_id: p.gp_user_id,
-                position: p.gp_position,
-                color: p.gp_color,
-                has_accepted: p.gp_has_accepted,
-                is_turn: p.gp_is_turn,
-                is_turn_at: p.gp_is_turn_at,
-                place: p.gp_place,
-                last_turn_at: p.gp_last_turn_at,
-                is_eliminated: p.gp_is_eliminated,
-                is_read: p.gp_is_read,
-                points: p.gp_points,
-                undo_game_state: p.gp_undo_game_state,
-                rating_change: p.gp_rating_change,
-            },
+            game_player: build_game_player_from_row(
+                p.gp_id,
+                p.gp_created_at,
+                p.gp_updated_at,
+                p.gp_game_id,
+                p.gp_user_id,
+                p.gp_position,
+                p.gp_color,
+                p.gp_has_accepted,
+                p.gp_is_turn,
+                p.gp_is_turn_at,
+                p.gp_place,
+                p.gp_last_turn_at,
+                p.gp_is_eliminated,
+                p.gp_is_read,
+                p.gp_points,
+                p.gp_undo_game_state,
+                p.gp_rating_change,
+            ),
             user,
             game_bot,
             game_type_user: gtu,
@@ -489,25 +532,25 @@ pub async fn find_active_games_for_user(
             anyhow::anyhow!("game_players row for game {game_id} encountered before its game row")
         })?;
         game.game_players.push(GamePlayerExtended {
-            game_player: crate::models::game::GamePlayer {
-                id: row.gp_id,
-                created_at: row.gp_created_at,
-                updated_at: row.gp_updated_at,
-                game_id: row.gp_game_id,
-                user_id: row.gp_user_id,
-                position: row.gp_position,
-                color: row.gp_color,
-                has_accepted: row.gp_has_accepted,
-                is_turn: row.gp_is_turn,
-                is_turn_at: row.gp_is_turn_at,
-                place: row.gp_place,
-                last_turn_at: row.gp_last_turn_at,
-                is_eliminated: row.gp_is_eliminated,
-                is_read: row.gp_is_read,
-                points: row.gp_points,
-                undo_game_state: row.gp_undo_game_state,
-                rating_change: row.gp_rating_change,
-            },
+            game_player: build_game_player_from_row(
+                row.gp_id,
+                row.gp_created_at,
+                row.gp_updated_at,
+                row.gp_game_id,
+                row.gp_user_id,
+                row.gp_position,
+                row.gp_color,
+                row.gp_has_accepted,
+                row.gp_is_turn,
+                row.gp_is_turn_at,
+                row.gp_place,
+                row.gp_last_turn_at,
+                row.gp_is_eliminated,
+                row.gp_is_read,
+                row.gp_points,
+                row.gp_undo_game_state,
+                row.gp_rating_change,
+            ),
             user,
             game_bot,
             game_type_user: gtu,

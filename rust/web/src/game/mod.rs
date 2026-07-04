@@ -4,6 +4,46 @@ pub mod client;
 pub mod server;
 pub mod server_fns;
 
+/// Splits a game service `Status` into the `(is_finished, whose_turn,
+/// eliminated, placings)` fields used to update `game_players`/`games` rows.
+/// Shared by every command flow that calls the game service and then writes
+/// the resulting status back to the DB.
+#[cfg(feature = "ssr")]
+pub fn status_fields(status: brdgme_game::Status) -> (bool, Vec<usize>, Vec<usize>, Vec<usize>) {
+    use brdgme_game::Status;
+    match status {
+        Status::Active {
+            whose_turn,
+            eliminated,
+        } => (false, whose_turn, eliminated, vec![]),
+        Status::Finished { placings, .. } => (true, vec![], vec![], placings),
+    }
+}
+
+/// Re-fetches the game, loads its logs, broadcasts the update, and triggers
+/// any bots whose turn it now is. No-op if the game can't be re-fetched.
+/// Shared epilogue for every command flow that mutates a game and then needs
+/// to notify watchers/bots.
+#[cfg(feature = "ssr")]
+pub async fn broadcast_and_trigger(
+    pool: &sqlx::PgPool,
+    broadcaster: &crate::websocket::GameBroadcaster,
+    http_client: &reqwest::Client,
+    game_id: uuid::Uuid,
+    public_render: &brdgme_cmd::api::PubRender,
+    player_renders: &[brdgme_cmd::api::PlayerRender],
+) {
+    if let Ok(Some(ge)) = crate::db::find_game_extended(pool, game_id).await {
+        let all_logs = crate::db::get_all_game_logs(pool, game_id)
+            .await
+            .unwrap_or_default();
+        broadcaster
+            .broadcast_game_update(pool, &ge, &all_logs, public_render, player_renders)
+            .await;
+        trigger_bot_turns(http_client, &ge).await;
+    }
+}
+
 #[cfg(feature = "ssr")]
 pub async fn execute_command(
     pool: &sqlx::PgPool,
@@ -14,7 +54,6 @@ pub async fn execute_command(
     command: String,
 ) -> anyhow::Result<()> {
     use brdgme_cmd::api::{Request, Response};
-    use brdgme_game::Status;
 
     let ge = crate::db::find_game_extended(pool, game_id)
         .await?
@@ -78,13 +117,7 @@ pub async fn execute_command(
     }
 
     let prev_game_state = ge.game.game_state.clone();
-    let (is_finished, whose_turn, eliminated, placings) = match game_response.status {
-        Status::Active {
-            whose_turn,
-            eliminated,
-        } => (false, whose_turn, eliminated, vec![]),
-        Status::Finished { placings, .. } => (true, vec![], vec![], placings),
-    };
+    let (is_finished, whose_turn, eliminated, placings) = status_fields(game_response.status);
 
     crate::db::update_game_command_success(
         pool,
