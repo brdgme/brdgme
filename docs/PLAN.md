@@ -571,9 +571,12 @@ delegable as specified unless noted.
       workspace. Also regenerated the stale `rust/web/.sqlx` offline query
       cache (4 files with whitespace-drifted query text) which had CI red on
       `cargo test -p web --features ssr` since before this change.
-- [ ] **CI build jobs -> matrix**: `build-web` and `build-rust-games`
+- [x] **CI build jobs -> matrix**: `build-web` and `build-rust-games`
       hand-roll 5 metadata+build-push pairs; convert to the matrix pattern
       `build-legacy` already uses.
+      Resolved 2026-07-04: both jobs converted to `strategy.matrix.include`
+      (image/target pairs, `file: rust/Dockerfile` constant); kept as two
+      jobs to preserve job names/history. No behaviour change.
 - [ ] **db.rs row-mapping duplication**: shared helper for the duplicated
       GamePlayer row->struct blocks in `find_game_extended` /
       `find_active_games_for_user`; plus small helpers for the repeated

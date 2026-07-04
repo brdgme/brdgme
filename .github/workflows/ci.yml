@@ -71,6 +71,13 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - image: web
+            target: web
+          - image: migrate
+            target: migrate
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -83,7 +90,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/web
+          images: ghcr.io/${{ github.repository_owner }}/brdgme/${{ matrix.image }}
           tags: |
             type=sha
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
@@ -91,27 +98,10 @@ jobs:
         with:
           context: .
           file: rust/Dockerfile
-          target: web
+          target: ${{ matrix.target }}
           push: ${{ github.ref == 'refs/heads/master' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - uses: docker/metadata-action@v5
-        id: meta-migrate
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/migrate
-          tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: rust/Dockerfile
-          target: migrate
-          push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta-migrate.outputs.tags }}
-          labels: ${{ steps.meta-migrate.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -121,6 +111,15 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - image: acquire-1
+            target: acquire-1
+          - image: lost-cities-1
+            target: lost-cities-1
+          - image: lost-cities-2
+            target: lost-cities-2
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -131,9 +130,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
-        id: meta-acquire-1
+        id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/acquire-1
+          images: ghcr.io/${{ github.repository_owner }}/brdgme/${{ matrix.image }}
           tags: |
             type=sha
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
@@ -141,44 +140,10 @@ jobs:
         with:
           context: .
           file: rust/Dockerfile
-          target: acquire-1
+          target: ${{ matrix.target }}
           push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta-acquire-1.outputs.tags }}
-          labels: ${{ steps.meta-acquire-1.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - uses: docker/metadata-action@v5
-        id: meta-lost-cities-1
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/lost-cities-1
-          tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: rust/Dockerfile
-          target: lost-cities-1
-          push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta-lost-cities-1.outputs.tags }}
-          labels: ${{ steps.meta-lost-cities-1.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - uses: docker/metadata-action@v5
-        id: meta-lost-cities-2
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/lost-cities-2
-          tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: rust/Dockerfile
-          target: lost-cities-2
-          push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta-lost-cities-2.outputs.tags }}
-          labels: ${{ steps.meta-lost-cities-2.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
