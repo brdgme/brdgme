@@ -907,11 +907,12 @@ pub fn create_game_logs_from_cli(
                     game_id: *game_id,
                     body: &l.content,
                     is_public: l.public,
-                    logged_at: chrono::NaiveDateTime::from_timestamp_opt(
+                    logged_at: chrono::DateTime::from_timestamp(
                         l.at.assume_utc().unix_timestamp(),
                         l.at.nanosecond(),
                     )
-                    .unwrap_or_default(),
+                    .unwrap_or_default()
+                    .naive_utc(),
                 },
                 &player_to,
                 conn,

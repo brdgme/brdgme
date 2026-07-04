@@ -71,10 +71,10 @@ pub fn spec_to_command(
             let n = bounded_i32(rng.random(), min, max);
             let mut parts: Vec<String> = vec![];
             for i in 0..n {
-                if i != 0 {
-                    if let Some(d) = delim {
-                        parts.extend(spec_to_command(d, ctx, players, rng));
-                    }
+                if i != 0
+                    && let Some(d) = delim
+                {
+                    parts.extend(spec_to_command(d, ctx, players, rng));
                 }
                 parts.extend(spec_to_command(spec, ctx, players, rng));
             }

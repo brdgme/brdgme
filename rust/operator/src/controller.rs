@@ -132,6 +132,8 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
     Ok(Action::requeue(Duration::from_secs(3600)))
 }
 
+// Splitting these into a params struct would be a larger refactor than warranted here.
+#[allow(clippy::too_many_arguments)]
 async fn upsert_game_type_and_version(
     pool: &PgPool,
     type_name: &str,

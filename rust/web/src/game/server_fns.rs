@@ -108,7 +108,7 @@ pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
                 let opponents = ge
                     .game_players
                     .iter()
-                    .filter(|p| !p.user.as_ref().is_some_and(|u| u.id == user.id))
+                    .filter(|p| p.user.as_ref().is_none_or(|u| u.id != user.id))
                     .map(|p| {
                         use std::str::FromStr;
                         let color = brdgme_color::Color::from_str(&p.game_player.color)

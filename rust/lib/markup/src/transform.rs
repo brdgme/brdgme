@@ -133,7 +133,7 @@ fn align(a: &Align, width: usize, children: &[TNode]) -> Vec<TNode> {
             }
             Align::Center => {
                 let before = diff / 2;
-                let after = (diff + 1) / 2;
+                let after = diff.div_ceil(2);
                 if before > 0 {
                     aligned.push(TNode::Text(" ".repeat(before)));
                 }
@@ -227,7 +227,7 @@ fn slice(nodes: &[TNode], range: &Range<usize>) -> Vec<TNode> {
     let mut start = range.start;
     let mut end = range.end;
     for n in nodes {
-        let n_len = TNode::len(&[n.clone()]);
+        let n_len = TNode::len(std::slice::from_ref(n));
         if n_len < start {
             start -= n_len;
             end -= n_len;
@@ -242,7 +242,7 @@ fn slice(nodes: &[TNode], range: &Range<usize>) -> Vec<TNode> {
             }
         };
 
-        let n_s_len = TNode::len(&[n_s.clone()]);
+        let n_s_len = TNode::len(std::slice::from_ref(&n_s));
         s.push(n_s);
         end -= cmp::min(start + n_s_len, end);
         if end == 0 {
@@ -288,7 +288,7 @@ fn canvas(els: &[(usize, usize, Vec<Node>)], players: &[Player]) -> Vec<TNode> {
         let node_lines = to_lines(&transform(nodes, players));
         let node_lines_len = node_lines.len();
         if y + node_lines_len > lines_len {
-            lines.extend(iter::repeat(vec![]).take(y + node_lines_len - lines_len));
+            lines.extend(iter::repeat_n(vec![], y + node_lines_len - lines_len));
         }
         for (n_i, orig_n_line) in node_lines.iter().enumerate() {
             let n_line_y = y + n_i;

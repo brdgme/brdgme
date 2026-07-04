@@ -1,5 +1,4 @@
 use std::cmp;
-use std::iter::repeat;
 
 use brdgme_color::GREY;
 use brdgme_game::Renderer;
@@ -83,7 +82,7 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
                             .get(p)
                             .and_then(|s| s.get(r))
                             .map(|rs| format!("{}", rs))
-                            .unwrap_or_else(|| "".to_string()),
+                            .unwrap_or_default(),
                     )],
                 ),
             ]);
@@ -166,7 +165,7 @@ impl PubState {
                             let height = opp_tableau.len();
                             if height < tallest {
                                 let mut new_tableau: Vec<Row> =
-                                    repeat(vec![]).take(tallest - height).collect();
+                                    std::iter::repeat_n(vec![], tallest - height).collect();
                                 new_tableau.extend(opp_tableau);
                                 opp_tableau = new_tableau;
                             }

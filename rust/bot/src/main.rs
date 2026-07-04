@@ -166,7 +166,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     // 3. Load game context (state, render, logs). Extracted into a helper so it can be
     //    refreshed mid-loop if the game state changes while Ollama is thinking.
     let mut bot_ctx = load_bot_context(
-        &state,
+        state,
         &game_service_uri,
         req.game_id,
         req.player_position,
@@ -264,7 +264,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
                 "Game state changed while Ollama was thinking, refreshing context and retrying"
             );
             bot_ctx = load_bot_context(
-                &state,
+                state,
                 &game_service_uri,
                 req.game_id,
                 req.player_position,

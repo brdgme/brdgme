@@ -1025,7 +1025,7 @@ impl Game {
                 message: "you must specify an amount to trade greater than 0".to_string(),
             });
         }
-        if n % 2 != 0 {
+        if !n.is_multiple_of(2) {
             return Err(GameError::InvalidInput {
                 message: "you can only trade multiples of 2, trades are 2-for-1".to_string(),
             });

@@ -105,7 +105,7 @@ impl Loc {
         if self.lot % BLOCK_WIDTH != 1 {
             n.push((self.block, self.lot - 1).into());
         }
-        if self.lot % BLOCK_WIDTH != 0 {
+        if !self.lot.is_multiple_of(BLOCK_WIDTH) {
             n.push((self.block, self.lot + 1).into());
         }
         if self.lot <= self.block.max_lot() - BLOCK_WIDTH {

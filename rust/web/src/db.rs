@@ -55,6 +55,8 @@ fn build_game_bot_from_row(
 }
 
 #[cfg(feature = "ssr")]
+// Splitting these into a params struct would be a larger refactor than warranted here.
+#[allow(clippy::too_many_arguments)]
 fn build_game_type_user(
     id: Option<Uuid>,
     created_at: Option<time::PrimitiveDateTime>,
@@ -634,7 +636,7 @@ pub async fn create_game_with_users_tx(
     }
 
     // 3. Assign colors
-    let colors = vec![
+    let colors = [
         "Green", "Red", "Blue", "Amber", "Purple", "Brown", "BlueGrey",
     ];
 
@@ -1129,6 +1131,8 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
 }
 
 #[cfg(feature = "ssr")]
+// Splitting these into a params struct would be a larger refactor than warranted here.
+#[allow(clippy::too_many_arguments)]
 pub async fn update_game_command_success(
     pool: &PgPool,
     game_id: Uuid,

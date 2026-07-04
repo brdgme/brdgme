@@ -148,23 +148,23 @@ impl Parser for Int {
             expected: self.expected(names),
             offset: 0,
         })?;
-        if let Some(min) = self.min {
-            if value < min {
-                return Err(GameError::Parse {
-                    message: Some(format!("{} is too low", value)),
-                    expected: self.expected(names),
-                    offset: 0,
-                });
-            }
+        if let Some(min) = self.min
+            && value < min
+        {
+            return Err(GameError::Parse {
+                message: Some(format!("{} is too low", value)),
+                expected: self.expected(names),
+                offset: 0,
+            });
         }
-        if let Some(max) = self.max {
-            if value > max {
-                return Err(GameError::Parse {
-                    message: Some(format!("{} is too high", value)),
-                    expected: self.expected(names),
-                    offset: 0,
-                });
-            }
+        if let Some(max) = self.max
+            && value > max
+        {
+            return Err(GameError::Parse {
+                message: Some(format!("{} is too high", value)),
+                expected: self.expected(names),
+                offset: 0,
+            });
         }
         Ok(Output {
             value,
@@ -339,14 +339,14 @@ where
         names: &[String],
     ) -> Result<Output<'a, Self::T>, GameError> {
         let mut parsed: Self::T = vec![];
-        if let Some(max) = self.max {
-            if max == 0 || max < self.min.unwrap_or(0) {
-                return Ok(Output {
-                    value: parsed,
-                    consumed: &input[..0],
-                    remaining: input,
-                });
-            }
+        if let Some(max) = self.max
+            && (max == 0 || max < self.min.unwrap_or(0))
+        {
+            return Ok(Output {
+                value: parsed,
+                consumed: &input[..0],
+                remaining: input,
+            });
         }
         let mut first = true;
         let mut offset = 0;
@@ -368,10 +368,10 @@ where
                 }) => {
                     parsed.push(value);
                     offset = inner_offset + consumed.len();
-                    if let Some(max) = self.max {
-                        if parsed.len() == max {
-                            break 'outer;
-                        }
+                    if let Some(max) = self.max
+                        && parsed.len() == max
+                    {
+                        break 'outer;
                     }
                 }
                 Err(_) => {
@@ -379,18 +379,18 @@ where
                 }
             };
         }
-        if let Some(min) = self.min {
-            if parsed.len() < min {
-                return Err(GameError::Parse {
-                    message: Some(format!(
-                        "expected at least {} items but could only parse {}",
-                        min,
-                        parsed.len()
-                    )),
-                    expected: vec![],
-                    offset: 0,
-                });
-            }
+        if let Some(min) = self.min
+            && parsed.len() < min
+        {
+            return Err(GameError::Parse {
+                message: Some(format!(
+                    "expected at least {} items but could only parse {}",
+                    min,
+                    parsed.len()
+                )),
+                expected: vec![],
+                offset: 0,
+            });
         }
         Ok(Output {
             value: parsed,
@@ -674,7 +674,7 @@ where
 
     fn to_spec(&self) -> CommandSpec {
         CommandSpec::Enum {
-            values: self.values.iter().cloned().map(|v| v.to_string()).collect(),
+            values: self.values.iter().map(|v| v.to_string()).collect(),
             exact: self.exact,
         }
     }
@@ -926,22 +926,20 @@ impl Parser for CommandSpec {
                 let mut remaining = input;
                 let mut first = true;
                 loop {
-                    if let Some(max_val) = max {
-                        if values.len() >= *max_val {
-                            break;
-                        }
+                    if let Some(max_val) = max
+                        && values.len() >= *max_val
+                    {
+                        break;
                     }
                     let mut inner_remaining = remaining;
                     let mut delim_len = 0;
-                    if !first {
-                        if let Some(d) = delim {
-                            match d.parse(remaining, names) {
-                                Ok(out) => {
-                                    inner_remaining = out.remaining;
-                                    delim_len = out.consumed.len();
-                                }
-                                Err(_) => break,
+                    if !first && let Some(d) = delim {
+                        match d.parse(remaining, names) {
+                            Ok(out) => {
+                                inner_remaining = out.remaining;
+                                delim_len = out.consumed.len();
                             }
+                            Err(_) => break,
                         }
                     }
                     match spec.parse(inner_remaining, names) {
@@ -954,18 +952,18 @@ impl Parser for CommandSpec {
                         Err(_) => break,
                     }
                 }
-                if let Some(min_val) = min {
-                    if values.len() < *min_val {
-                        return Err(GameError::Parse {
-                            message: Some(format!(
-                                "expected at least {} items but could only parse {}",
-                                min_val,
-                                values.len()
-                            )),
-                            expected: vec![],
-                            offset: 0,
-                        });
-                    }
+                if let Some(min_val) = min
+                    && values.len() < *min_val
+                {
+                    return Err(GameError::Parse {
+                        message: Some(format!(
+                            "expected at least {} items but could only parse {}",
+                            min_val,
+                            values.len()
+                        )),
+                        expected: vec![],
+                        offset: 0,
+                    });
                 }
                 Ok(Output {
                     value: serde_json::Value::Array(values),
@@ -1022,7 +1020,7 @@ impl Parser for CommandSpec {
             }
             CommandSpec::OneOf(specs) => specs.iter().flat_map(|s| s.expected(names)).collect(),
             CommandSpec::Chain(specs) => {
-                specs.get(0).map(|s| s.expected(names)).unwrap_or_default()
+                specs.first().map(|s| s.expected(names)).unwrap_or_default()
             }
             CommandSpec::Many { spec, .. } => spec.expected(names),
             CommandSpec::Opt(spec) => spec

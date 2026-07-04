@@ -225,7 +225,7 @@ impl Default for OpponentSlot {
 fn GamesPage() -> impl IntoView {
     use crate::game::server_fns::{create_new_game, get_available_game_types, BotSlot};
 
-    let game_types = LocalResource::new(|| get_available_game_types());
+    let game_types = LocalResource::new(get_available_game_types);
 
     let (selected_type_id, set_selected_type_id) = signal(None::<Uuid>);
     let (selected_version_id, set_selected_version_id) = signal(None::<Uuid>);
@@ -343,7 +343,7 @@ fn GamesPage() -> impl IntoView {
                                                 </div>
                                             }.into_any()
                                         } else {
-                                            view! {}.into_any()
+                                            ().into_any()
                                         };
 
                                         let count_row = if gt.player_counts.len() > 1 {
@@ -363,7 +363,7 @@ fn GamesPage() -> impl IntoView {
                                                 </div>
                                             }.into_any()
                                         } else {
-                                            view! {}.into_any()
+                                            ().into_any()
                                         };
 
                                         view! {
@@ -394,7 +394,7 @@ fn GamesPage() -> impl IntoView {
                                                     });
                                                 }>
                                                     <option value="human" selected=move || !is_bot()>"Human"</option>
-                                                    <option value="bot" selected=move || is_bot()>"Bot"</option>
+                                                    <option value="bot" selected=is_bot>"Bot"</option>
                                                 </select>
                                             </div>
                                             <Show when=move || !is_bot()>
@@ -427,10 +427,8 @@ fn GamesPage() -> impl IntoView {
                                                         on:input=move |ev| {
                                                             let val = event_target_value(&ev);
                                                             set_opponent_slots.update(|v| {
-                                                                if let Some(s) = v.get_mut(i) {
-                                                                    if let OpponentSlot::Bot { name, .. } = s {
-                                                                        *name = val;
-                                                                    }
+                                                                if let Some(OpponentSlot::Bot { name, .. }) = v.get_mut(i) {
+                                                                    *name = val;
                                                                 }
                                                             });
                                                         }
@@ -528,15 +526,12 @@ fn GamePage() -> impl IntoView {
     // Blocking so SSR waits for data and serialises it to the client, avoiding
     // a second fetch on hydration and preventing the stuck-loading state on
     // hard refresh.
-    let game_data = Resource::new_blocking(
-        move || game_id(),
-        |id| async move {
-            match id {
-                Some(id) => get_game_details(id).await,
-                None => Err(ServerFnError::new("Invalid Game ID")),
-            }
-        },
-    );
+    let game_data = Resource::new_blocking(game_id, |id| async move {
+        match id {
+            Some(id) => get_game_details(id).await,
+            None => Err(ServerFnError::new("Invalid Game ID")),
+        }
+    });
 
     // is_my_turn starts false in hydrate mode (Memo returns false until resource
     // deserializes). This only changes a CSS class — no structural mismatch.

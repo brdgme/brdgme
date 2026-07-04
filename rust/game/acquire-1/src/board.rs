@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fmt;
-use std::iter::{self, FromIterator};
+use std::iter::FromIterator;
 use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,7 @@ impl Board {
         let at_u = at.into();
         if len <= at_u {
             self.0
-                .extend(iter::repeat(Tile::default()).take(at_u - len + 1))
+                .extend(std::iter::repeat_n(Tile::default(), at_u - len + 1))
         }
         self.0[at_u] = t;
     }
@@ -202,7 +202,7 @@ impl<'a> From<&'a str> for Board {
 
 impl Default for Board {
     fn default() -> Self {
-        Board(iter::repeat(Tile::default()).take(SIZE).collect())
+        Board(std::iter::repeat_n(Tile::default(), SIZE).collect())
     }
 }
 

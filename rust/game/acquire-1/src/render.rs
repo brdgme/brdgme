@@ -1,5 +1,3 @@
-use std::iter::repeat;
-
 use brdgme_color::*;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, row_pad};
@@ -168,8 +166,7 @@ fn tile_background(c: Color) -> N {
     N::Bg(
         c.into(),
         vec![N::text(
-            repeat(" ".repeat(TILE_WIDTH))
-                .take(TILE_HEIGHT)
+            std::iter::repeat_n(" ".repeat(TILE_WIDTH), TILE_HEIGHT)
                 .collect::<Vec<String>>()
                 .join("\n"),
         )],
@@ -177,7 +174,7 @@ fn tile_background(c: Color) -> N {
 }
 
 fn empty_color(l: Loc) -> Color {
-    if (l.row + l.col) % 2 == 0 {
+    if (l.row + l.col).is_multiple_of(2) {
         EMPTY_COLOR_EVEN
     } else {
         EMPTY_COLOR_ODD

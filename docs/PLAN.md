@@ -561,9 +561,16 @@ delegable as specified unless noted.
       Resolved 2026-07-04: `web/Cargo.toml` dependency and feature flag, and
       the `dotenv::dotenv()` call in `web/src/main.rs`, switched to
       `dotenvy`; only crate in the workspace that depended on `dotenv`.
-- [ ] **CI lint gates** (`.github/workflows/ci.yml`): add
+- [x] **CI lint gates** (`.github/workflows/ci.yml`): add
       `cargo fmt --check` and `cargo clippy --workspace -- -D warnings` to
       `test-rust`.
+      Resolved 2026-07-04: added `cargo fmt --all -- --check` plus clippy
+      split as `--workspace --exclude web` / `-p web --features ssr`
+      (mirroring the existing test split); toolchain step installs
+      rustfmt/clippy. Fixed the mechanical clippy findings across the
+      workspace. Also regenerated the stale `rust/web/.sqlx` offline query
+      cache (4 files with whitespace-drifted query text) which had CI red on
+      `cargo test -p web --features ssr` since before this change.
 - [ ] **CI build jobs -> matrix**: `build-web` and `build-rust-games`
       hand-roll 5 metadata+build-push pairs; convert to the matrix pattern
       `build-legacy` already uses.
