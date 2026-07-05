@@ -51,3 +51,9 @@ redis_data/
 
 # memso database
 .memso
+
+# OpenTofu local state/plugin cache (infra/.terraform.lock.hcl is committed)
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/*.tfplan

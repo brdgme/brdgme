@@ -17,12 +17,12 @@ the start. It encodes the Phase 14 prod prerequisite ("cluster >= 1.33,
 VPC-native"), owns the DNS zone the 22a Resend records (SPF/DKIM/DMARC)
 land in, and creates the Spaces buckets Phase 19 needs.
 
-- [ ] Add `opentofu` to `devenv.nix`.
-- [ ] `infra/` directory: DO provider, S3 backend against a Spaces bucket.
+- [x] Add `opentofu` to `devenv.nix`.
+- [x] `infra/` directory: DO provider, S3 backend against a Spaces bucket.
 - [ ] `tofu import` the existing resources (cluster, VPC, domain) - do not
       recreate. `tofu plan` must show no changes after import before
       anything else is done.
-- [ ] Encode the Phase 14 prerequisite: cluster version >= 1.33 with
+- [x] Encode the Phase 14 prerequisite: cluster version >= 1.33 with
       VPC-native networking.
 - [ ] Create new resources (CNPG backup bucket for Phase 19, state bucket)
       via tofu from the start.

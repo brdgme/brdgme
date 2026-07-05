@@ -31,6 +31,7 @@
     cilium-cli
     ctlptl
     mirrord
+    opentofu
     wasm-bindgen-cli
     chromium
     dart-sass
