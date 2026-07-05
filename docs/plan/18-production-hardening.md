@@ -53,6 +53,22 @@ VictoriaLogs for unexplained 5xx/panics.
       HTTP 5xx rate from the monolith, via vmalert evaluating LogsQL queries
       against VictoriaLogs. Alert destination still undecided.
 
+### Production readiness: probes & observability (added 2026-07-05)
+
+- [ ] **k8s probe audit for all workloads**: the bot Deployment lost its
+      HTTP port in Phase 13 (no more `/trigger` endpoint), so it now has no
+      liveness/readiness probe - decide whether to add an exec probe (e.g.
+      checking the process is alive / NATS connection is healthy) or another
+      approach. Also review probe coverage for web, the game services, NATS,
+      Redis, and Postgres to confirm each has an appropriate probe given the
+      hard-cutover, no-extended-validation-period posture.
+
+- [ ] **Basic metrics collection**: single-node VictoriaMetrics plus scrape
+      configs for the monolith, game services, and bot, pairing with the
+      existing vmalert/VictoriaLogs decisions above. Include a minimal
+      dashboard/troubleshooting story sufficient for go-live, given there is
+      no extended validation period to catch gaps after the fact.
+
 ### Not planned
 
 - Client-side error reporting services (Sentry etc.) have immature WASM

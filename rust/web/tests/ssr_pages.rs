@@ -42,6 +42,13 @@ async fn make_state(pool: PgPool) -> AppState {
         .expect("redis connection");
     let broadcaster = GameBroadcaster::new(redis_conn, redis_client);
 
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let jetstream = web::nats::connect(&nats_url).await.expect("nats connect");
+    web::nats::ensure_stream_and_consumers(&jetstream)
+        .await
+        .expect("nats stream/consumers");
+
     AppState {
         leptos_options: leptos::config::LeptosOptions::builder()
             .output_name("web")
@@ -52,6 +59,7 @@ async fn make_state(pool: PgPool) -> AppState {
         resend: None,
         login_rate_limiter: web::auth::rate_limit::build_login_rate_limiter(),
         confirm_rate_limiter: web::auth::rate_limit::build_confirm_rate_limiter(),
+        jetstream,
     }
 }
 

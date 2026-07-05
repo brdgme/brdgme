@@ -11,6 +11,9 @@ pub mod router;
 #[cfg(feature = "ssr")]
 pub mod db;
 
+#[cfg(feature = "ssr")]
+pub mod nats;
+
 pub mod websocket;
 
 #[cfg(feature = "ssr")]

@@ -19,10 +19,6 @@
 WEB_IN_CLUSTER = os.getenv("WEB_IN_CLUSTER", "") == "1"
 LEGACY = os.getenv("LEGACY", "") == "1"
 
-# Fixed dev-only values (not sensitive in a local Kind cluster).
-INTERNAL_API_KEY_DEV = "dev-internal-key"
-BOT_SERVICE_URL_DEV = "http://localhost:4000"
-
 # Dev environment only - credentials are not sensitive here.
 secret_settings(disable_scrub=True)
 
@@ -109,13 +105,10 @@ metadata:
   name: bot-config
   namespace: brdgme
 stringData:
-  INTERNAL_API_KEY: {internal_key}
-  MONOLITH_URL: http://web.brdgme.svc.cluster.local
   LLM_URL: {llm_url}
   LLM_API_KEY: {llm_api_key}
   BOT_MODEL: {bot_model}
 """.format(
-        internal_key=INTERNAL_API_KEY_DEV,
         llm_url=os.getenv("LLM_URL", "http://localhost:11434"),
         llm_api_key=os.getenv("LLM_API_KEY", ""),
         bot_model=os.getenv("BOT_MODEL", "qwen3:4b"),
@@ -124,23 +117,19 @@ else:
     k8s_yaml(kustomize("k8s/dev-without-web"))
     local_resource(
         "web",
-        serve_cmd="cd rust/web && SQLX_OFFLINE=true BOT_SERVICE_URL={bot_url} INTERNAL_API_KEY={key} mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch".format(
-            bot_url=BOT_SERVICE_URL_DEV,
-            key=INTERNAL_API_KEY_DEV,
-        ),
+        serve_cmd="cd rust/web && SQLX_OFFLINE=true NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch",
         links=["http://localhost:3000"],
-        resource_deps=["postgres"],
+        resource_deps=["postgres", "nats"],
     )
     local_resource(
         "bot",
-        serve_cmd="set -a && [ -f .env ] && . ./.env; set +a && cd rust/bot && RUST_LOG=${{RUST_LOG:-info}} INTERNAL_API_KEY={key} MONOLITH_URL=http://localhost:3000 mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo run".format(
-            key=INTERNAL_API_KEY_DEV,
-        ),
-        resource_deps=["postgres"],
+        serve_cmd="set -a && [ -f .env ] && . ./.env; set +a && cd rust/bot && RUST_LOG=${RUST_LOG:-info} NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo run",
+        resource_deps=["postgres", "nats"],
     )
 
 k8s_resource("postgres", port_forwards=["5432:5432"])
 k8s_resource("redis", port_forwards=["6379:6379"])
+k8s_resource("nats", port_forwards=["4222:4222"])
 
 # Run migrations manually. Trigger from the Tilt UI or via:
 #   cd rust/web && sqlx migrate run

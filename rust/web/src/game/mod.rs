@@ -1,7 +1,5 @@
 #[cfg(feature = "ssr")]
 pub mod client;
-#[cfg(feature = "ssr")]
-pub mod server;
 pub mod server_fns;
 
 /// Splits a game service `Status` into the `(is_finished, whose_turn,
@@ -28,7 +26,7 @@ pub fn status_fields(status: brdgme_game::Status) -> (bool, Vec<usize>, Vec<usiz
 pub async fn broadcast_and_trigger(
     pool: &sqlx::PgPool,
     broadcaster: &crate::websocket::GameBroadcaster,
-    http_client: &reqwest::Client,
+    jetstream: &async_nats::jetstream::Context,
     game_id: uuid::Uuid,
     public_render: &brdgme_cmd::api::PubRender,
     player_renders: &[brdgme_cmd::api::PlayerRender],
@@ -40,8 +38,21 @@ pub async fn broadcast_and_trigger(
         broadcaster
             .broadcast_game_update(pool, &ge, &all_logs, public_render, player_renders)
             .await;
-        trigger_bot_turns(http_client, &ge).await;
+        trigger_bot_turns(jetstream, &ge).await;
     }
+}
+
+/// Distinguishes a stale-state conflict (the game changed under the bot
+/// between validation and commit - the caller should re-publish `bot.turn`
+/// with an incremented attempt counter) from every other failure (the
+/// caller should give up and log).
+#[cfg(feature = "ssr")]
+#[derive(Debug, thiserror::Error)]
+pub enum ExecuteCommandError {
+    #[error("stale state conflict")]
+    Conflict,
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 #[cfg(feature = "ssr")]
@@ -49,10 +60,11 @@ pub async fn execute_command(
     pool: &sqlx::PgPool,
     http_client: &reqwest::Client,
     broadcaster: &crate::websocket::GameBroadcaster,
+    jetstream: &async_nats::jetstream::Context,
     game_id: uuid::Uuid,
     player_position: usize,
     command: String,
-) -> anyhow::Result<()> {
+) -> Result<(), ExecuteCommandError> {
     use brdgme_cmd::api::{Request, Response};
 
     let ge = crate::db::find_game_extended(pool, game_id)
@@ -60,7 +72,7 @@ pub async fn execute_command(
         .ok_or_else(|| anyhow::anyhow!("Game not found"))?;
 
     if ge.game.is_finished {
-        return Err(anyhow::anyhow!("Game is already finished"));
+        return Err(anyhow::anyhow!("Game is already finished").into());
     }
 
     let player = ge
@@ -70,7 +82,7 @@ pub async fn execute_command(
         .ok_or_else(|| anyhow::anyhow!("Invalid player position"))?;
 
     if !player.game_player.is_turn {
-        return Err(anyhow::anyhow!("Not your turn"));
+        return Err(anyhow::anyhow!("Not your turn").into());
     }
 
     let names: Vec<String> = ge
@@ -108,18 +120,18 @@ pub async fn execute_command(
             public_render,
             player_renders,
         ),
-        Response::UserError { message } => return Err(anyhow::anyhow!("{}", message)),
-        _ => return Err(anyhow::anyhow!("Unexpected response from game service")),
+        Response::UserError { message } => return Err(anyhow::anyhow!("{}", message).into()),
+        _ => return Err(anyhow::anyhow!("Unexpected response from game service").into()),
     };
 
     if !remaining_input.trim().is_empty() {
-        return Err(anyhow::anyhow!("Unexpected input: {}", remaining_input));
+        return Err(anyhow::anyhow!("Unexpected input: {}", remaining_input).into());
     }
 
     let prev_game_state = ge.game.game_state.clone();
     let (is_finished, whose_turn, eliminated, placings) = status_fields(game_response.status);
 
-    crate::db::update_game_command_success(
+    if let Err(e) = crate::db::update_game_command_success(
         pool,
         game_id,
         player.game_player.id,
@@ -134,7 +146,13 @@ pub async fn execute_command(
         ge.game.updated_at,
         logs,
     )
-    .await?;
+    .await
+    {
+        if e.downcast_ref::<crate::db::StaleStateConflict>().is_some() {
+            return Err(ExecuteCommandError::Conflict);
+        }
+        return Err(e.into());
+    }
 
     // Fetch updated state for broadcast and bot triggering
     match crate::db::find_game_extended(pool, game_id).await {
@@ -151,7 +169,7 @@ pub async fn execute_command(
                     &player_renders,
                 )
                 .await;
-            trigger_bot_turns(http_client, &updated_ge).await;
+            trigger_bot_turns(jetstream, &updated_ge).await;
         }
         Ok(None) => tracing::warn!(%game_id, "Game not found after command execution"),
         Err(e) => tracing::warn!(%game_id, "Failed to reload game after command execution: {}", e),
@@ -159,16 +177,26 @@ pub async fn execute_command(
     Ok(())
 }
 
+/// Publishes a `bot.turn` event (attempt 0) for every bot player whose turn
+/// it currently is. The bot picks these up from the `bot-turn` durable
+/// consumer; the monolith never talks to the bot directly.
 #[cfg(feature = "ssr")]
-pub async fn trigger_bot_turns(http_client: &reqwest::Client, ge: &crate::db::GameExtended) {
-    let bot_service_url = match std::env::var("BOT_SERVICE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            tracing::warn!(game_id = %ge.game.id, "BOT_SERVICE_URL not set, skipping bot triggers");
-            return;
-        }
-    };
+pub async fn trigger_bot_turns(
+    jetstream: &async_nats::jetstream::Context,
+    ge: &crate::db::GameExtended,
+) {
+    publish_bot_turns(jetstream, ge, 0).await;
+}
 
+/// Shared by `trigger_bot_turns` (attempt 0, fresh turns) and the
+/// `bot.command` consumer (attempt N, re-publish after a stale-state
+/// conflict).
+#[cfg(feature = "ssr")]
+async fn publish_bot_turns(
+    jetstream: &async_nats::jetstream::Context,
+    ge: &crate::db::GameExtended,
+    attempt: i32,
+) {
     for player in &ge.game_players {
         tracing::debug!(
             game_id = %ge.game.id,
@@ -184,40 +212,181 @@ pub async fn trigger_bot_turns(http_client: &reqwest::Client, ge: &crate::db::Ga
             Some(b) => b,
             None => continue,
         };
-        let url = format!("{}/trigger", bot_service_url);
         tracing::info!(
             game_id = %ge.game.id,
             position = player.game_player.position,
             difficulty = %bot.difficulty,
-            %url,
-            "Triggering bot turn"
+            attempt,
+            "Publishing bot.turn"
         );
-        let body = serde_json::json!({
-            "game_id": ge.game.id,
-            "player_position": player.game_player.position,
-            "difficulty": bot.difficulty,
-        });
-        let client = http_client.clone();
-        tokio::spawn(async move {
-            // The bot runs the full turn (including the LLM call, which can take
-            // minutes) inline in its /trigger handler, so override the client's
-            // default 10s timeout here. Phase 13 replaces this with NATS.
-            match client
-                .post(&url)
-                .json(&body)
-                .timeout(std::time::Duration::from_secs(300))
-                .send()
-                .await
-            {
-                Err(e) => tracing::warn!(%url, "Failed to trigger bot turn: {}", e),
-                Ok(r) if !r.status().is_success() => {
-                    let status = r.status();
-                    let body = r.text().await.unwrap_or_default();
-                    tracing::warn!(%url, %status, "Bot trigger returned error: {}", body);
-                }
-                Ok(_) => tracing::debug!(%url, "Bot turn triggered successfully"),
+        let event = crate::nats::BotTurnEvent {
+            game_id: ge.game.id,
+            player_position: player.game_player.position,
+            difficulty: bot.difficulty.clone(),
+            attempt,
+        };
+        let payload = match serde_json::to_vec(&event) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!(game_id = %ge.game.id, "Failed to serialize bot.turn event: {}", e);
+                continue;
             }
-        });
+        };
+        match jetstream
+            .publish(crate::nats::SUBJECT_TURN, payload.into())
+            .await
+        {
+            // The outer `.await` only confirms the message was sent; the
+            // inner one waits for JetStream's persistence ack so a publish
+            // that returns `Ok` is actually durable in the stream.
+            Ok(ack) => {
+                if let Err(e) = ack.await {
+                    tracing::warn!(game_id = %ge.game.id, "bot.turn publish not acked: {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(game_id = %ge.game.id, "Failed to publish bot.turn: {}", e);
+            }
+        }
+    }
+}
+
+/// Pulls `bot.command` events one at a time from the durable `bot-command`
+/// consumer and applies them via `execute_command`. Runs for the lifetime of
+/// the process; multiple monolith replicas can run this concurrently since
+/// JetStream hands each message to exactly one fetcher.
+#[cfg(feature = "ssr")]
+pub async fn run_bot_command_consumer(
+    pool: sqlx::PgPool,
+    http_client: reqwest::Client,
+    broadcaster: crate::websocket::GameBroadcaster,
+    jetstream: async_nats::jetstream::Context,
+) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+
+    let consumer: async_nats::jetstream::consumer::PullConsumer = jetstream
+        .get_consumer_from_stream(crate::nats::CONSUMER_COMMAND, crate::nats::STREAM_NAME)
+        .await?;
+    let mut messages = consumer.messages().await?;
+
+    while let Some(message) = messages.next().await {
+        let message = match message {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("Failed to pull bot.command message: {}", e);
+                continue;
+            }
+        };
+        let event: crate::nats::BotCommandEvent = match serde_json::from_slice(&message.payload) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::error!("Failed to parse bot.command payload: {}", e);
+                if let Err(e) = message.ack().await {
+                    tracing::warn!("Failed to ack unparseable bot.command message: {}", e);
+                }
+                continue;
+            }
+        };
+
+        let outcome =
+            handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &event).await;
+
+        match outcome {
+            // `handle_bot_command_event` never actually returns
+            // `Conflict` (it resolves conflicts internally by re-publishing
+            // `bot.turn` or, on exhaustion, giving up), but ack it too if it
+            // ever did - nothing more is going to happen with this message.
+            Ok(()) | Err(ExecuteCommandError::Conflict) => {
+                if let Err(e) = message.ack().await {
+                    tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
+                }
+            }
+            Err(ExecuteCommandError::Other(_)) => {
+                tracing::warn!(
+                    game_id = %event.game_id,
+                    "Leaving bot.command message unacked for redelivery after transient failure"
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Applies a single `bot.command` event: run `execute_command`, and on a
+/// stale-state conflict re-publish `bot.turn` with the attempt counter
+/// incremented (up to `MAX_TURN_ATTEMPTS` re-publishes total - `event.attempt`
+/// echoes the `bot.turn` event's own counter, so this survives across the
+/// bot round-trip rather than resetting to 0 every time). Split out from
+/// `run_bot_command_consumer` so it can be exercised directly in tests
+/// without needing to drive the full pull loop.
+#[cfg(feature = "ssr")]
+pub async fn handle_bot_command_event(
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    broadcaster: &crate::websocket::GameBroadcaster,
+    jetstream: &async_nats::jetstream::Context,
+    event: &crate::nats::BotCommandEvent,
+) -> Result<(), ExecuteCommandError> {
+    let attempt = event.attempt;
+    let result = execute_command(
+        pool,
+        http_client,
+        broadcaster,
+        jetstream,
+        event.game_id,
+        event.player_position as usize,
+        event.command.clone(),
+    )
+    .await;
+
+    match result {
+        Ok(()) => {
+            tracing::info!(game_id = %event.game_id, position = event.player_position, "Bot command applied");
+            Ok(())
+        }
+        Err(ExecuteCommandError::Conflict) => {
+            if attempt >= crate::nats::MAX_TURN_ATTEMPTS {
+                tracing::error!(
+                    game_id = %event.game_id,
+                    position = event.player_position,
+                    attempt,
+                    "Bot turn exhausted state-conflict retries, giving up"
+                );
+                // Nothing more will happen for this game/attempt, so treat
+                // exhaustion as a successful outcome for acking purposes.
+                return Ok(());
+            }
+            tracing::warn!(
+                game_id = %event.game_id,
+                position = event.player_position,
+                attempt,
+                "Stale state conflict applying bot command, re-publishing bot.turn"
+            );
+            match crate::db::find_game_extended(pool, event.game_id).await {
+                Ok(Some(ge)) => {
+                    publish_bot_turns(jetstream, &ge, attempt + 1).await;
+                }
+                Ok(None) => {
+                    tracing::warn!(game_id = %event.game_id, "Game not found while re-publishing bot.turn")
+                }
+                Err(e) => {
+                    tracing::warn!(game_id = %event.game_id, "Failed to reload game while re-publishing bot.turn: {}", e)
+                }
+            }
+            // Conflict is re-published as a fresh bot.turn; the original
+            // bot.command message is done, so ack it.
+            Ok(())
+        }
+        Err(ExecuteCommandError::Other(e)) => {
+            tracing::warn!(
+                game_id = %event.game_id,
+                position = event.player_position,
+                "Bot command rejected: {}",
+                e
+            );
+            Err(ExecuteCommandError::Other(e))
+        }
     }
 }
 
@@ -301,6 +470,17 @@ mod tests {
         let client = redis::Client::open(redis_url).unwrap();
         let conn = client.get_multiplexed_async_connection().await.unwrap();
         crate::websocket::GameBroadcaster::new(conn, client)
+    }
+
+    /// Connects to a real NATS server with the `BOT` stream/consumers ensured,
+    /// mirroring the Postgres/Redis convention of pointing tests at a real
+    /// service via an env var (defaults to the local dev NATS).
+    pub(crate) async fn make_jetstream() -> async_nats::jetstream::Context {
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let js = crate::nats::connect(&nats_url).await.unwrap();
+        crate::nats::ensure_stream_and_consumers(&js).await.unwrap();
+        js
     }
 
     /// Two human players (position 0, 1), player 0 on turn, pointed at `uri`.
@@ -401,11 +581,13 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         execute_command(
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -449,6 +631,7 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         // Simulate two concurrent requests both reading the game before either
         // writes: capture the stale `updated_at` here, then let the first
@@ -462,6 +645,7 @@ mod tests {
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -523,11 +707,13 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         let result = execute_command(
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             1, // not player 1's turn
             "abc".to_string(),
@@ -548,6 +734,7 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         // Force the game to already be finished.
         sqlx::query!("UPDATE games SET is_finished = true WHERE id = $1", game_id)
@@ -559,6 +746,7 @@ mod tests {
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -582,11 +770,13 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         let result = execute_command(
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -611,11 +801,13 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         let result = execute_command(
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -647,11 +839,13 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         let result = execute_command(
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -701,11 +895,13 @@ mod tests {
         let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         execute_command(
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -794,11 +990,13 @@ mod tests {
         let (game_id, p0) = make_game_with_human_and_bot(&pool, &uri).await;
         let broadcaster = make_broadcaster().await;
         let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
 
         execute_command(
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             0,
             "abc".to_string(),
@@ -833,10 +1031,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trigger_bot_turns_noop_when_bot_service_url_unset() {
-        assert!(std::env::var("BOT_SERVICE_URL").is_err());
-
-        let http_client = reqwest::Client::new();
+    async fn trigger_bot_turns_noop_when_no_bot_players() {
+        let jetstream = make_jetstream().await;
         let ge = crate::db::GameExtended {
             game: crate::models::game::Game {
                 id: Uuid::new_v4(),
@@ -871,6 +1067,6 @@ mod tests {
         };
 
         // No-op, no panic: nothing to assert beyond "returns".
-        trigger_bot_turns(&http_client, &ge).await;
+        trigger_bot_turns(&jetstream, &ge).await;
     }
 }

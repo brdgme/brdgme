@@ -2,6 +2,7 @@ namespace: brdgme
 resources:
 - ../base/bot
 - ../base/game
+- ../base/nats
 - ../base/operator
 - ../base/postgres
 - ../base/redis

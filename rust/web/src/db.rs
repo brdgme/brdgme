@@ -1197,6 +1197,14 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
     Ok(())
 }
 
+/// Distinguishable error so callers (the `bot.command` consumer) can tell a
+/// stale-state conflict apart from other failures and react by re-publishing
+/// `bot.turn` rather than giving up.
+#[cfg(feature = "ssr")]
+#[derive(Debug, thiserror::Error)]
+#[error("Game was updated by another action, please retry")]
+pub struct StaleStateConflict;
+
 #[cfg(feature = "ssr")]
 // Splitting these into a params struct would be a larger refactor than warranted here.
 #[allow(clippy::too_many_arguments)]
@@ -1235,9 +1243,7 @@ pub async fn update_game_command_success(
     .await?;
 
     if update_result.rows_affected() == 0 {
-        return Err(anyhow::anyhow!(
-            "Game was updated by another action, please retry"
-        ));
+        return Err(StaleStateConflict.into());
     }
 
     let players = sqlx::query!(

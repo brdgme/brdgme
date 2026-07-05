@@ -2,13 +2,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: bot
+  name: nats
   labels:
-    app: bot
+    app: nats
 spec:
   type: ClusterIP
   ports:
-    - port: 4000
-      targetPort: 4000
+    - port: 4222
   selector:
-    app: bot
+    app: nats

@@ -1,6 +1,6 @@
 # 13: NATS Bot Eventing
 
-**Status:** Pending
+**Status:** Complete (2026-07-05)
 
 v1 bot triggering uses direct HTTP (monolith POSTs to bot service, bot POSTs
 command back to monolith). This creates bi-directional HTTP coupling: the bot
@@ -36,11 +36,13 @@ that decision (2026-07-03).
   re-publishes on state conflict (`attempt` field); re-publish immediately,
   no delay (conflicts are rare and the LLM loop itself is slow).
 
-**Delegation gap (remaining):**
-- **Rollout sequencing:** big-bang swap or both paths behind an env flag
-  during transition; ordering relative to Phase 16 cutover.
-- **Test plan:** how the new flow is tested (NATS service container in CI,
-  mocked LLM, assertions for the conflict/re-publish path).
+**Resolved 2026-07-05:**
+- **Rollout sequencing:** big-bang swap - no dual path. The HTTP
+  trigger/callback flow is removed outright rather than kept behind a flag.
+- **Test plan:** integration tests run against a real NATS/JetStream server
+  (docker-compose service) with the LLM mocked out, covering the happy path,
+  the stale-state-conflict re-publish, attempt-limit exhaustion, and
+  exactly-once delivery across two fetchers.
 
 **Design:**
 
@@ -77,7 +79,9 @@ Key design decisions:
 
 **NATS subjects:**
 - `bot.turn` — payload: `{game_id, player_position, difficulty, attempt}`
-- `bot.command` — payload: `{game_id, player_position, command}`
+- `bot.command` — payload: `{game_id, player_position, command, attempt}`
+  (`attempt` echoes the originating `bot.turn` event's counter, so the
+  turn-level retry cap survives the round-trip through the bot)
 
 **Exactly-one-instance delivery (required for correctness):** each message
 must be processed by exactly one subscriber instance - the monolith runs
@@ -91,29 +95,38 @@ triggers redelivery.
 
 Infrastructure (pulled forward from Phase 17 - NATS is needed here regardless
 of when the WS migration happens):
-- [ ] Add NATS (JetStream enabled) to the Kind cluster: `k8s/base/nats/`
+- [x] Add NATS (JetStream enabled) to the Kind cluster: `k8s/base/nats/`
       manifests per the resolved design above.
-- [ ] Add NATS to `k8s/base/brdgme/kustomization.yaml`.
-- [ ] Add NATS to Tiltfile (deploy + port-forward).
-- [ ] Add `async-nats` to `rust/web/Cargo.toml` and `rust/bot/Cargo.toml`.
-- [ ] Add `NATS_URL` env var to monolith and bot (Tiltfile + k8s secrets).
+- [x] Add NATS to `k8s/base/brdgme/kustomization.yaml`.
+- [x] Add NATS to Tiltfile (deploy + port-forward).
+- [x] Add `async-nats` to `rust/web/Cargo.toml` and `rust/bot/Cargo.toml`.
+- [x] Add `NATS_URL` env var to monolith and bot (Tiltfile + k8s secrets).
 
 Monolith changes:
-- [ ] Replace `trigger_bot_turns` HTTP POST with NATS publish to `bot.turn`.
-- [ ] Remove `BOT_SERVICE_URL` env var.
-- [ ] Subscribe to `bot.command` on startup; handler calls `execute_command`
+- [x] Replace `trigger_bot_turns` HTTP POST with NATS publish to `bot.turn`.
+- [x] Remove `BOT_SERVICE_URL` env var.
+- [x] Subscribe to `bot.command` on startup; handler calls `execute_command`
       and saves to DB. On stale state conflict: re-publish `bot.turn` with
       `attempt` incremented. Enforce overall attempt limit (e.g. 3 turn-level
       retries before giving up).
-- [ ] Remove `POST /api/internal/game/{id}/command` endpoint and
+- [x] Remove `POST /api/internal/game/{id}/command` endpoint and
       `INTERNAL_API_KEY` (no longer needed for bot auth).
 
 Bot changes:
-- [ ] Remove Axum HTTP server (`/trigger` endpoint, port 4000).
-- [ ] Subscribe to `bot.turn` on startup; process each message as a turn.
-- [ ] Replace game service `Status` + LLM + monolith POST retry loop with:
+- [x] Remove Axum HTTP server (`/trigger` endpoint, port 4000).
+- [x] Subscribe to `bot.turn` on startup; process each message as a turn.
+- [x] Replace game service `Status` + LLM + monolith POST retry loop with:
       Status → LLM → game service `Play` (validate) → retry LLM on
       invalid → publish `bot.command` when valid.
-- [ ] Remove `MONOLITH_URL` and `INTERNAL_API_KEY` from `AppState` and env.
-- [ ] Update k8s `bot-config` secret to remove those vars, add `NATS_URL`.
+- [x] Remove `MONOLITH_URL` and `INTERNAL_API_KEY` from `AppState` and env.
+- [x] Update k8s `bot-config` secret to remove those vars, add `NATS_URL`.
+
+**Implementation notes:** the monolith acks a `bot.command` message only on
+success or a stale-state conflict (the conflict is resolved by re-publishing
+`bot.turn`, so the original message is done); a transient
+(`ExecuteCommandError::Other`) failure is left unacked so JetStream
+redelivers it (`ack_wait` 5m, `max_deliver: 3` backstop). Symmetrically, the
+bot leaves a failed `bot.turn` unacked rather than acking and swallowing the
+error. One side effect: the bot Deployment now has no HTTP port, so it has no
+health probe - tracked as a follow-up in Phase 18.
 

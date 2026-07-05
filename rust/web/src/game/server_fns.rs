@@ -260,6 +260,8 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
             .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
         let http_client = use_context::<reqwest::Client>()
             .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
+        let jetstream = use_context::<async_nats::jetstream::Context>()
+            .ok_or_else(|| ServerFnError::new("JetStream not found"))?;
         let user = get_current_user()
             .await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -278,6 +280,7 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
             &pool,
             &http_client,
             &broadcaster,
+            &jetstream,
             game_id,
             position as usize,
             command,
@@ -349,6 +352,8 @@ pub async fn create_new_game(
             .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
         let http_client = use_context::<reqwest::Client>()
             .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
+        let jetstream = use_context::<async_nats::jetstream::Context>()
+            .ok_or_else(|| ServerFnError::new("JetStream not found"))?;
         let user = get_current_user()
             .await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -410,7 +415,7 @@ pub async fn create_new_game(
         crate::game::broadcast_and_trigger(
             &pool,
             &broadcaster,
-            &http_client,
+            &jetstream,
             game.id,
             &public_render,
             &player_renders,
@@ -529,6 +534,8 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
             .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
         let http_client = use_context::<reqwest::Client>()
             .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
+        let jetstream = use_context::<async_nats::jetstream::Context>()
+            .ok_or_else(|| ServerFnError::new("JetStream not found"))?;
         let user = get_current_user()
             .await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -587,7 +594,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         crate::game::broadcast_and_trigger(
             &pool,
             &broadcaster,
-            &http_client,
+            &jetstream,
             game_id,
             &public_render,
             &player_renders,
@@ -616,6 +623,8 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
             .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
         let http_client = use_context::<reqwest::Client>()
             .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
+        let jetstream = use_context::<async_nats::jetstream::Context>()
+            .ok_or_else(|| ServerFnError::new("JetStream not found"))?;
         let user = get_current_user()
             .await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -671,7 +680,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
                             &player_renders,
                         )
                         .await;
-                    crate::game::trigger_bot_turns(&http_client, &updated_ge).await;
+                    crate::game::trigger_bot_turns(&jetstream, &updated_ge).await;
                 }
                 _ => {
                     tracing::error!(
@@ -705,6 +714,8 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
         let http_client = use_context::<reqwest::Client>()
             .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
+        let jetstream = use_context::<async_nats::jetstream::Context>()
+            .ok_or_else(|| ServerFnError::new("JetStream not found"))?;
         let user = get_current_user()
             .await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -813,7 +824,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         crate::game::broadcast_and_trigger(
             &pool,
             &broadcaster,
-            &http_client,
+            &jetstream,
             new_game.id,
             &public_render,
             &player_renders,
@@ -860,8 +871,8 @@ pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
 
         let pool =
             use_context::<PgPool>().ok_or_else(|| ServerFnError::new("Database pool not found"))?;
-        let http_client = use_context::<reqwest::Client>()
-            .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
+        let jetstream = use_context::<async_nats::jetstream::Context>()
+            .ok_or_else(|| ServerFnError::new("JetStream not found"))?;
         let user = get_current_user()
             .await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -880,7 +891,7 @@ pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
             return Err(ServerFnError::new("You are not a player in this game"));
         }
 
-        crate::game::trigger_bot_turns(&http_client, &ge).await;
+        crate::game::trigger_bot_turns(&jetstream, &ge).await;
         Ok(())
     }
     #[cfg(not(feature = "ssr"))]

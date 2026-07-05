@@ -18,26 +18,14 @@ spec:
       containers:
         - name: bot
           image: brdgme/bot
-          ports:
-            - containerPort: 4000
           envFrom:
             - secretRef:
                 name: postgres-config
             - secretRef:
                 name: bot-config
           env:
-            - name: LISTEN_ADDR
-              value: "0.0.0.0:4000"
-          readinessProbe:
-            tcpSocket:
-              port: 4000
-            initialDelaySeconds: 2
-            periodSeconds: 5
-          livenessProbe:
-            tcpSocket:
-              port: 4000
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            - name: NATS_URL
+              value: nats://nats:4222
           resources:
             requests:
               cpu: 20m

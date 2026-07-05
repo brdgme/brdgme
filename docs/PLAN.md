@@ -62,12 +62,12 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 10 | Eliminate runtime panics in rust/web | Complete | [10-eliminate-runtime-panics.md](plan/10-eliminate-runtime-panics.md) |
 | 11 | Testing Foundation | Complete (completed 2026-07-04) | [11-testing-foundation.md](plan/11-testing-foundation.md) |
 | 12 | ELO Ratings | Complete | [12-elo-ratings.md](plan/12-elo-ratings.md) |
-| 13 | NATS Bot Eventing | Pending | [13-nats-bot-eventing.md](plan/13-nats-bot-eventing.md) |
+| 13 | NATS Bot Eventing | Complete (2026-07-05) | [13-nats-bot-eventing.md](plan/13-nats-bot-eventing.md) |
 | 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); prod prerequisites pending | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
 | 15 | Production CD (ArgoCD) | Pending | [15-production-cd-argocd.md](plan/15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; revised 2026-07-04) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
 | 17 | NATS Migration + WS simplification | Pending - resequenced pre-cutover 2026-07-04 | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
-| 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04 | [18-production-hardening.md](plan/18-production-hardening.md) |
+| 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04; probes & observability section added 2026-07-05 | [18-production-hardening.md](plan/18-production-hardening.md) |
 | 19 | CloudNativePG | Pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
 | 20 | external-dns | Pending | [20-external-dns.md](plan/20-external-dns.md) |
 | 21 | OpenTofu Infrastructure as Code | Pending - human-paced | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |

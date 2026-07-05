@@ -16,6 +16,7 @@ pub struct AppState {
     pub resend: Option<resend_rs::Resend>,
     pub login_rate_limiter: Arc<LoginRateLimiter>,
     pub confirm_rate_limiter: Arc<ConfirmRateLimiter>,
+    pub jetstream: async_nats::jetstream::Context,
 }
 
 impl FromRef<AppState> for LeptosOptions {
@@ -39,5 +40,11 @@ impl FromRef<AppState> for GameBroadcaster {
 impl FromRef<AppState> for reqwest::Client {
     fn from_ref(app_state: &AppState) -> reqwest::Client {
         app_state.http_client.clone()
+    }
+}
+
+impl FromRef<AppState> for async_nats::jetstream::Context {
+    fn from_ref(app_state: &AppState) -> async_nats::jetstream::Context {
+        app_state.jetstream.clone()
     }
 }

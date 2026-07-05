@@ -3,6 +3,7 @@ bases:
 - ../game
 - ../legacy
 - ../migrate
+- ../nats
 - ../postgres
 - ../redis
 - ../web

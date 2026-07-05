@@ -24,13 +24,8 @@ spec:
             - secretRef:
                 name: postgres-config
           env:
-            - name: BOT_SERVICE_URL
-              value: http://bot:4000
-            - name: INTERNAL_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: bot-config
-                  key: INTERNAL_API_KEY
+            - name: NATS_URL
+              value: nats://nats:4222
           readinessProbe:
             tcpSocket:
               port: 3000

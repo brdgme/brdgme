@@ -1,15 +1,16 @@
+mod nats;
 mod prompt;
 
 use anyhow::{Context, Result, anyhow};
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse};
 use brdgme_cmd::api::{Request, Response};
 use brdgme_color::player_color;
+use futures_util::StreamExt;
+use nats::{BotCommandEvent, BotTurnEvent};
 use prompt::{
     FailedCommand, PlayerInfo, PromptContext, markup_resolve_players, render_prompt, spec_to_yaml,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -20,15 +21,7 @@ struct AppState {
     llm_api_key: Option<String>,
     bot_model: String,
     reasoning_effort: Option<String>,
-    monolith_url: String,
-    internal_api_key: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct TriggerRequest {
-    game_id: Uuid,
-    player_position: i32,
-    difficulty: String,
+    jetstream: async_nats::jetstream::Context,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,27 +55,10 @@ struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
-#[derive(Serialize)]
-struct InternalCommandRequest {
-    player_position: i32,
-    command: String,
-}
-
-async fn trigger(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<TriggerRequest>,
-) -> impl IntoResponse {
-    let trace_id = Uuid::new_v4();
-    match run_bot_turn(&state, payload, trace_id).await {
-        Ok(()) => StatusCode::OK.into_response(),
-        Err(e) => {
-            tracing::error!(trace_id = %trace_id, error = ?e, "Bot turn hard failed - game is stuck waiting for bot");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
-
-async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> Result<()> {
+/// Handles one `bot.turn` event: Status -> LLM -> game service `Play`
+/// (stateless validate) -> retry LLM on invalid -> publish `bot.command` when
+/// valid. The monolith owns the actual DB commit; this only validates.
+async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Result<()> {
     // 1. Fetch game data from DB.
     let row = sqlx::query(
         r#"
@@ -159,6 +135,7 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
         player = req.player_position,
         player_name = %bot_name,
         difficulty = %req.difficulty,
+        attempt = req.attempt,
         players = ?names,
         "Bot turn triggered"
     );
@@ -177,10 +154,6 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     .await
     .context("Failed to load initial bot context")?;
 
-    let internal_url = format!(
-        "{}/api/internal/game/{}/command",
-        state.monolith_url, req.game_id
-    );
     const MAX_ATTEMPTS: usize = 20;
     let mut failed_commands: Vec<FailedCommand> = Vec::new();
 
@@ -278,50 +251,51 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             continue;
         }
 
-        tracing::info!(
-            trace_id = %trace_id,
-            game_id = %req.game_id,
-            player = req.player_position,
-            attempt,
-            command = %command,
-            "Submitting command to monolith"
-        );
-
-        let result = state
-            .http
-            .post(&internal_url)
-            .header("X-Internal-Key", &state.internal_api_key)
-            .json(&InternalCommandRequest {
-                player_position: req.player_position,
+        // Validate the command against the game service directly. `Play` is
+        // stateless (returns the new state but doesn't persist), so this
+        // retry loop never round-trips through the monolith.
+        let validate_result = call_game_service(
+            &state.http,
+            &game_service_uri,
+            &Request::Play {
+                player: req.player_position as usize,
+                game: bot_ctx.game_state.clone(),
                 command: command.clone(),
-            })
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-            .context("Failed to POST command to monolith")?;
+                names: names.clone(),
+            },
+        )
+        .await;
 
-        let status = result.status();
-
-        if status.is_success() {
-            tracing::info!(
-                trace_id = %trace_id,
-                game_id = %req.game_id,
-                player = req.player_position,
-                attempt,
-                command = %command,
-                "Bot command accepted"
-            );
-            return Ok(());
-        }
-
-        let error_body = result.text().await.unwrap_or_default();
+        let error_body = match validate_result {
+            Ok(Response::Play { .. }) => {
+                tracing::info!(
+                    trace_id = %trace_id,
+                    game_id = %req.game_id,
+                    player = req.player_position,
+                    attempt,
+                    command = %command,
+                    "Command validated, publishing bot.command"
+                );
+                publish_bot_command(
+                    state,
+                    req.game_id,
+                    req.player_position,
+                    command,
+                    req.attempt,
+                )
+                .await?;
+                return Ok(());
+            }
+            Ok(Response::UserError { message }) => message,
+            Ok(_) => "Unexpected response from game service".to_string(),
+            Err(e) => e.to_string(),
+        };
 
         if attempt + 1 == MAX_ATTEMPTS {
             return Err(anyhow!(
-                "Command rejected after {} attempts. Last command: {:?}. Last error (HTTP {}): {}",
+                "Command rejected after {} attempts. Last command: {:?}. Last error: {}",
                 MAX_ATTEMPTS,
                 command,
-                status,
                 error_body
             ));
         }
@@ -332,9 +306,8 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
             player = req.player_position,
             attempt,
             command = %command,
-            http_status = %status,
             error = %error_body,
-            "Bot command rejected, retrying"
+            "Bot command rejected by game service validation, retrying"
         );
 
         failed_commands.push(FailedCommand {
@@ -344,6 +317,30 @@ async fn run_bot_turn(state: &AppState, req: TriggerRequest, trace_id: Uuid) -> 
     }
 
     unreachable!()
+}
+
+async fn publish_bot_command(
+    state: &AppState,
+    game_id: Uuid,
+    player_position: i32,
+    command: String,
+    attempt: i32,
+) -> Result<()> {
+    let event = BotCommandEvent {
+        game_id,
+        player_position,
+        command,
+        attempt,
+    };
+    let payload = serde_json::to_vec(&event).context("Failed to serialize bot.command event")?;
+    state
+        .jetstream
+        .publish(nats::SUBJECT_COMMAND, payload.into())
+        .await
+        .context("Failed to publish bot.command")?
+        .await
+        .context("Failed waiting for bot.command publish ack")?;
+    Ok(())
 }
 
 struct BotContext {
@@ -541,6 +538,26 @@ fn build_prompt_context(
     }
 }
 
+/// Waits for the monolith to have created the `BOT` stream and `bot-turn`
+/// consumer (it does so idempotently on its own startup), retrying with a
+/// short backoff since the bot and monolith can start in either order.
+async fn wait_for_turn_consumer(
+    jetstream: &async_nats::jetstream::Context,
+) -> Result<async_nats::jetstream::consumer::PullConsumer> {
+    loop {
+        match jetstream
+            .get_consumer_from_stream(nats::CONSUMER_TURN, nats::STREAM_NAME)
+            .await
+        {
+            Ok(consumer) => return Ok(consumer),
+            Err(e) => {
+                tracing::warn!("bot-turn consumer not ready yet ({}), retrying in 2s", e);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -550,9 +567,6 @@ async fn main() -> Result<()> {
     let bot_model = std::env::var("BOT_MODEL").context("BOT_MODEL must be set")?;
     let reasoning_effort =
         Some(std::env::var("REASONING_EFFORT").unwrap_or_else(|_| "low".to_string()));
-    let monolith_url = std::env::var("MONOLITH_URL").context("MONOLITH_URL must be set")?;
-    let internal_api_key =
-        std::env::var("INTERNAL_API_KEY").context("INTERNAL_API_KEY must be set")?;
     tracing::info!(llm_url = %llm_url, bot_model = %bot_model, reasoning_effort = ?reasoning_effort, "Bot service starting");
 
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
@@ -560,41 +574,69 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to connect to database")?;
 
+    let nats_url = std::env::var("NATS_URL").context("NATS_URL must be set")?;
+    let jetstream = nats::connect(&nats_url)
+        .await
+        .context("Failed to connect to NATS")?;
+
     // The LLM call can take minutes, so the client's overall timeout is generous;
-    // shorter game-service/monolith calls override it with a per-request timeout.
+    // shorter game-service calls override it with a per-request timeout.
     let http = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .context("Failed to build HTTP client")?;
-    let state = Arc::new(AppState {
+    let state = AppState {
         pool,
         http,
         llm_url,
         llm_api_key,
         bot_model,
         reasoning_effort,
-        monolith_url,
-        internal_api_key,
-    });
+        jetstream: jetstream.clone(),
+    };
 
-    let app = Router::new()
-        .route("/trigger", axum::routing::post(trigger))
-        .with_state(state);
+    let consumer = wait_for_turn_consumer(&jetstream).await?;
+    let mut messages = consumer.messages().await?;
 
-    let addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:4000".to_string());
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .with_context(|| format!("Failed to bind to {}", addr))?;
+    tracing::info!("Bot subscribed to bot.turn, waiting for messages");
 
-    tracing::info!("Bot service listening on {}", addr);
+    while let Some(message) = messages.next().await {
+        let message = match message {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("Failed to pull bot.turn message: {}", e);
+                continue;
+            }
+        };
+        let event: BotTurnEvent = match serde_json::from_slice(&message.payload) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::error!("Failed to parse bot.turn payload: {}", e);
+                if let Err(e) = message.ack().await {
+                    tracing::warn!("Failed to ack unparseable bot.turn message: {}", e);
+                }
+                continue;
+            }
+        };
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.ok();
-        })
-        .await
-        .context("Server error")?;
+        let state = state.clone();
+        tokio::spawn(async move {
+            let trace_id = Uuid::new_v4();
+            match run_bot_turn(&state, event, trace_id).await {
+                Ok(()) => {
+                    if let Err(e) = message.ack().await {
+                        tracing::warn!(trace_id = %trace_id, "Failed to ack bot.turn message: {}", e);
+                    }
+                }
+                Err(e) => {
+                    // Leave unacked: JetStream redelivers after ack_wait, bounded by
+                    // max_deliver as a poison-message backstop.
+                    tracing::error!(trace_id = %trace_id, error = ?e, "Bot turn hard failed - game is stuck waiting for bot (will be redelivered)");
+                }
+            }
+        });
+    }
 
     Ok(())
 }

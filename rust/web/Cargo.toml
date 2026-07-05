@@ -59,6 +59,7 @@ futures-util = "0.3.32"
 gloo-net = { version = "0.6.0", features = ["websocket"] }
 gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3.77", features = ["Location", "Window"] }
+async-nats = { version = "0.49.1", optional = true }
 
 [features]
 hydrate = [
@@ -96,6 +97,7 @@ ssr = [
     "dep:dotenvy",
     "dep:tower-http",
     "dep:reqwest",
+    "dep:async-nats",
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode
@@ -105,6 +107,9 @@ opt-level = 'z'
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[dev-dependencies]
+serial_test = "3.5.0"
 
 [package.metadata.leptos]
 output-name = "web"

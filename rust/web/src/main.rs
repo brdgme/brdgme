@@ -26,6 +26,28 @@ async fn main() {
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("Failed to build HTTP client");
+
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://nats:4222".to_string());
+    let jetstream = web::nats::connect(&nats_url)
+        .await
+        .expect("Failed to connect to NATS");
+    web::nats::ensure_stream_and_consumers(&jetstream)
+        .await
+        .expect("Failed to create/get BOT stream and consumers");
+
+    tokio::spawn({
+        let pool = pool.clone();
+        let http_client = http_client.clone();
+        let broadcaster = broadcaster.clone();
+        let jetstream = jetstream.clone();
+        async move {
+            if let Err(e) =
+                web::game::run_bot_command_consumer(pool, http_client, broadcaster, jetstream).await
+            {
+                tracing::error!("bot.command consumer exited: {}", e);
+            }
+        }
+    });
     let resend = std::env::var("RESEND_API_KEY")
         .ok()
         .map(|key| resend_rs::Resend::new(&key));
@@ -47,6 +69,7 @@ async fn main() {
         resend: resend.clone(),
         login_rate_limiter: login_rate_limiter.clone(),
         confirm_rate_limiter: confirm_rate_limiter.clone(),
+        jetstream: jetstream.clone(),
     };
 
     let app = build_router(state).await;
