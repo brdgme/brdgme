@@ -49,6 +49,15 @@
     poppler-utils
   ];
 
+  # The tofu S3 state backend only reads AWS_* credentials; alias the Spaces
+  # key pair from .env so it only has to be defined once.
+  enterShell = ''
+    if [ -n "''${SPACES_ACCESS_KEY_ID:-}" ]; then
+      export AWS_ACCESS_KEY_ID="$SPACES_ACCESS_KEY_ID"
+      export AWS_SECRET_ACCESS_KEY="$SPACES_SECRET_ACCESS_KEY"
+    fi
+  '';
+
   env.DATABASE_URL = "postgres://brdgme_user:brdgme_password@localhost:5432/brdgme";
   env.PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
   env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";

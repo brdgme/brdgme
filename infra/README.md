@@ -19,7 +19,11 @@ balancer is **not** managed here - DOKS owns it.
   `DIGITALOCEAN_TOKEN`.
 - A Spaces access key/secret pair (generated separately from the API token,
   under "API > Spaces Keys" in the DO control panel), exported as
-  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` for the S3-compatible backend.
+  `SPACES_ACCESS_KEY_ID` / `SPACES_SECRET_ACCESS_KEY` for the digitalocean
+  provider's `digitalocean_spaces_bucket` resources. The S3-compatible state
+  backend only reads the `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` names;
+  `devenv.nix` exports those as aliases of the `SPACES_*` pair on shell entry,
+  so only the `SPACES_*` pair needs to be set (see `.env.example`).
 
 ## Bootstrapping the state bucket
 
