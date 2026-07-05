@@ -37,9 +37,19 @@ tofu config must preserve:
 
 - [x] Add `opentofu` to `devenv.nix`.
 - [x] `infra/` directory: DO provider, S3 backend against a Spaces bucket.
-- [ ] `tofu import` the existing resources (cluster, VPC, domain) - do not
-      recreate. `tofu plan` must show no changes after import before
-      anything else is done.
+- [x] ~~`tofu import` the existing resources~~ Revised 2026-07-05: the DO
+      account was confirmed **empty** (current prod is Linode + Route53
+      DNS), so everything is created by tofu, not imported. `infra/`
+      rewritten accordingly; the only import is the bootstrapped state
+      bucket. Legacy DNS records (apex A, `mail` A, apex SPF TXT →
+      Linode) are carried in `infra/dns.tf` so prod survives the
+      Route53 → DO nameserver switch; see `infra/README.md`.
+- [ ] Bootstrap `brdgme-tofu-state` Spaces bucket (console), set Spaces
+      keys, `tofu init` + import the bucket, stage-1 apply (VPC, zone +
+      legacy records, CNPG bucket), verify records against Route53, switch
+      nameservers at the registrar (required before 22a Resend records).
+- [ ] Stage-2 apply (the DOKS cluster) when ready to deploy - billing
+      starts at creation.
 - [x] Encode the Phase 14 prerequisite: cluster version >= 1.33 with
       VPC-native networking.
 - [ ] Create new resources (CNPG backup bucket for Phase 19, state bucket)

@@ -30,6 +30,7 @@
     cargo-leptos
     cilium-cli
     ctlptl
+    doctl
     mirrord
     opentofu
     wasm-bindgen-cli
@@ -40,7 +41,7 @@
     kind
     kubectl
     retry
-playwright-driver.browsers
+    playwright-driver.browsers
     postgresql
     sqlx-cli
     tilt
