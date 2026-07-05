@@ -87,12 +87,19 @@ from `brdgme_color::Color::from_str(&p.game_player.color)`.
 
 For a rules page there is no game, so build a synthetic list instead:
 `Player { name: format!("Player {}", i + 1), color: <palette[i]> }` for
-`i in 0..max_player_count` (the highest count in the game type's
-`player_counts`, or a fixed cap - see Open decisions). Use the same 7-colour
-palette `rust/web/src/db.rs` assigns real games at creation time (line
-703-705: `["Green", "Red", "Blue", "Amber", "Purple", "Brown", "BlueGrey"]`,
-parsed via `brdgme_color::Color::from_str`) so a rules render's colours match
-what players will actually see in a real game.
+`i in 0..max_player_count`, where `max_player_count` is `max()` of the game
+type's `player_counts` (a **set** of supported counts, e.g. `{2, 4}`, not a
+min/max range - decided 2026-07-05: always size to the largest supported
+count). A `{{player N}}` token in a fence that falls outside that range is
+treated as an authoring error, not something the renderer needs to tolerate
+- `docs/RULES.md`'s process step 5 already requires verifying command/render
+content against source, so an out-of-range player reference should fail
+loudly (render error or panic-free `Result` error surfaced to the page) and
+get caught in review, not silently degrade. Use the same 7-colour palette
+`rust/web/src/db.rs` assigns real games at creation time (line 703-705:
+`["Green", "Red", "Blue", "Amber", "Purple", "Brown", "BlueGrey"]`, parsed via
+`brdgme_color::Color::from_str`) so a rules render's colours match what
+players will actually see in a real game.
 
 ### Server fn shape
 
@@ -101,11 +108,12 @@ alongside the existing ones in `rust/web/src/game/server_fns.rs`. Input is
 just the version id (rules are keyed 1:1 to `game_versions`, per
 `rust/web/src/db.rs`'s `find_game_version`/`find_latest_non_deprecated_game_version`,
 lines 199-236 - note neither currently `SELECT`s the `rules` column, only
-`id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated`;
-this phase needs a query that also selects `rules`, either by adding the
-column to `GameVersion`'s `sqlx::query_as!` or a small dedicated
-`find_game_version_rules(pool, id) -> Option<String>` query - see Open
-decisions). Output is a single sanitized HTML string, consistent with how
+`id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated`).
+Decided 2026-07-05: add a narrow dedicated query,
+`find_game_version_rules(pool, id) -> Option<String>`, rather than widening
+`GameVersion`'s `sqlx::query_as!` - keeps the (potentially large) rules text
+out of every other call site that fetches a `GameVersion` today. Output is a
+single sanitized HTML string, consistent with how
 `get_game_details` delivers `html` for game boards - the Leptos component
 consuming it can use the same `GameBoard`-style raw-HTML injection point
 already in `rust/web/src/components/game.rs` (referenced from `app.rs`'s
@@ -129,8 +137,11 @@ existing "browse game types" page - `GamesPage` is the create-game form,
 fetching `GameTypeInfo`/`GameVersionInfo` via `get_available_game_types`
 (server_fns.rs ~line 293) which already carries `game_version.id` client-side.
 
-Proposed: a new route `("rules", ParamSegment("version_id"))` → `RulesPage`,
-linked from two places that already have a `game_version_id` in scope:
+Decided 2026-07-05: a standalone `("rules", ParamSegment("version_id"))` →
+`RulesPage` route, linked from two places that already have a
+`game_version_id` in scope (no inline collapsible panel on `GamePage` - a
+separate routed page is simpler, works before a game exists, and is
+shareable/linkable, which an in-game-only panel would not be):
 - The new-game form (`GamesPage` in `app.rs`) - a "View rules" link next to
   the version selector, using `selected_version_id`.
 - The in-game view (`GamePage`) - a "Rules" link in the game meta/sidebar
@@ -156,20 +167,21 @@ straightforward follow-up - not needed for v1.
 
 ### Email integration (after 22b)
 
-Small, explicitly deferred until 22b's `email_render` module exists. Two
-integration points to consider once it does:
-- **Invite/notification emails** (22, `docs/plan/24-game-invites.md`) could
-  include a "View rules" link back to the web `/rules/{version_id}` page
-  rather than inlining full rules content in every mail - keeps mail size
-  down and reuses the same rendered page.
+Small, explicitly deferred until 22b's `email_render` module exists. Decided
+2026-07-05, both now committed scope for this phase (not optional):
+- **Invite/notification emails** (22, `docs/plan/24-game-invites.md`) get a
+  "View rules" link back to the web `/rules/{version_id}` page - link-only,
+  not full rules content inlined in every mail, keeping mail size down and
+  reusing the same rendered page.
 - **A `rules` reply command** (alongside 22b's other server commands -
-  `concede`, `undo`, `restart`, `unsubscribe`/`subscribe`) that replies with
-  the rendered rules text/HTML via `email_render`, for players who want them
-  inbox-side without leaving their email client - consistent with 22b's "full
-  interface" goal.
+  `concede`, `undo`, `restart`, `unsubscribe`/`subscribe`) replies with the
+  full rendered rules (text + HTML) via `email_render`, for players who want
+  them inbox-side without leaving their email client - consistent with 22b's
+  "full interface" goal.
 
-Both are optional extensions once 22b lands; neither blocks the web UI half
-of this phase, and the web UI half doesn't block them.
+Neither blocks the web UI half of this phase, and the web UI half doesn't
+block them - both simply cannot start until 22b's `email_render` module
+exists.
 
 ### Future escape hatch (documented, not built)
 
@@ -186,9 +198,9 @@ requires this today; it's a documented option only.
 - [ ] Add `pulldown-cmark` as an SSR-only dependency of `rust/web` (verify
       workspace dependency conventions in `rust/web/Cargo.toml` first - other
       SSR-only deps are feature-gated the same way `resend-rs`/`sqlx` are).
-- [ ] DB: query to fetch `game_versions.rules` by id (either extend
-      `find_game_version`'s `sqlx::query_as!` to select `rules`, or add a
-      narrow `find_game_version_rules`) in `rust/web/src/db.rs`.
+- [ ] DB: `find_game_version_rules(pool, id) -> Option<String>` narrow
+      dedicated query in `rust/web/src/db.rs` (decided 2026-07-05: do not
+      widen `GameVersion`'s existing `sqlx::query_as!`).
 - [ ] `brdgme`-fence scanner + markdown renderer (small module, e.g.
       `rust/web/src/game/rules_render.rs`): split source on fences, render
       non-fence chunks with `pulldown-cmark`, render fence contents through
@@ -213,44 +225,44 @@ requires this today; it's a documented option only.
       well-formed; a `{{player N}}` resolution test against the synthetic
       player list; an SSR page test for the new route following the 11.6a
       pattern in `rust/web/tests/ssr_pages.rs`.
-- [ ] Email tasks (after 22b, small): rules link in invite/notification
-      mail; optional `rules` reply command via `email_render`.
+- [ ] Email tasks (after 22b, small, both committed scope): rules link in
+      invite/notification mail; `rules` reply command via `email_render`.
 
-## Open decisions (resolve before delegating)
+## Decisions (resolved 2026-07-05)
 
-- Whether `get_rendered_rules` reads `rules` via an extended
-  `find_game_version` query (adds the column to the existing struct/query,
-  touching two call sites in `db.rs`) or a narrow dedicated query - a
-  narrow query avoids widening `GameVersion`'s payload everywhere it's
-  currently fetched, but adds a second lookup function. Lean narrow query;
-  confirm.
-- How many synthetic players to render (`{{player N}}` slots) when a rules
-  page isn't tied to an actual game - the game type's max `player_counts`
-  entry (varies by game, requires threading `game_type_id`/`player_counts`
-  into the rules fn) vs. a fixed cap (e.g. always render up to 6, covering
-  the current colour palette) that's simpler but may show unused player
-  slots for games with lower max counts.
-- Full standalone rules page vs. a collapsible panel/section directly on
-  the game screen (`GamePage`) - the design above assumes a separate routed
-  page (`/rules/{version_id}`) linked from both the new-game form and the
-  game screen; an inline collapsible panel on `GamePage` would avoid
-  navigation away from an in-progress game but duplicates rendering cost per
-  game view and doesn't help players deciding what to play before a game
-  exists (new-game form).
-- Email: full rules inline in invite emails vs. a link-only reference (the
-  design above defaults to link-only for mail-size reasons) - confirm before
-  building the 22b-dependent email tasks.
+- **Query shape:** narrow dedicated query, `find_game_version_rules(pool,
+  id) -> Option<String>`. Does not widen `GameVersion`'s existing
+  `sqlx::query_as!` - keeps rules text out of every other call site that
+  fetches a `GameVersion` today.
+- **Synthetic player count:** size the list to `max()` of the game type's
+  `player_counts` set (e.g. `{2, 4}` → 4 synthetic players), not a fixed cap.
+  A `{{player N}}` reference outside that range is an intentional authoring
+  error signal - it should fail loudly rather than be tolerated, matching
+  `docs/RULES.md`'s existing source-verification discipline.
+- **UI placement:** standalone `/rules/{version_id}` page, linked from the
+  new-game form and the in-game view. No inline collapsible panel on
+  `GamePage`.
+- **Email:** link-only rules reference in invite/notification mail (no full
+  rules inlined), plus the `rules` reply command is committed scope for this
+  phase (not optional) - replies with the full rendered rules via
+  `email_render`.
 
 ## Verified-against-source notes
 
 - `GameVersion`'s existing `sqlx::query_as!` calls in `rust/web/src/db.rs`
   (`find_game_version` lines 199-215, `find_latest_non_deprecated_game_version`
   lines 218-236) do **not** currently select `rules` - confirmed by reading
-  both queries. Any implementation must add a query path that does, per the
-  Open decision above.
+  both queries. The new `find_game_version_rules` query (decided above) adds
+  the needed path without touching these.
 - `pulldown-cmark` is confirmed absent from the workspace today (searched all
   `Cargo.toml` and `*.rs` under `rust/`).
 - The bot's rules consumption (`rust/bot/src/main.rs` line 89 SQL, line 117
   `try_get("rules")`, `prompt.rs::PromptContext.game_rules`) needs no changes
   for this phase - included here only as the "unchanged" leg of the
   render-time-specialization design.
+- No operator change is needed to populate `rules`: `rust/operator/src/
+  controller.rs` lines 112-120 already calls `Request::Rules` against the
+  game service during reconcile, and lines 122-187
+  (`upsert_game_type_and_version`) already upserts the result into
+  `game_versions.rules` with `rules = EXCLUDED.rules` on conflict (line 174).
+  This phase only adds readers, not writers.
