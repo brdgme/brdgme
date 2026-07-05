@@ -14,4 +14,10 @@ resource "digitalocean_spaces_bucket" "cnpg_backups" {
 resource "digitalocean_spaces_bucket" "tofu_state" {
   name   = var.tofu_state_bucket_name
   region = var.region
+
+  # Old state versions recoverable via the Spaces API if the state file is
+  # ever corrupted or clobbered.
+  versioning {
+    enabled = true
+  }
 }

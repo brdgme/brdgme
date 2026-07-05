@@ -6,14 +6,14 @@ never implies execution order. Priority lives in the ordered list below
 (historically these items were called "phases"; prose saying "Phase NN"
 means item `NN`).
 
-**Priority order (hard-cutover resequencing 2026-07-04):**
-Restart 500 error → 3-player render → #21 OpenTofu (first: encodes the
-cluster prereqs, DNS zone, buckets) → #22a Resend outbound remaining
-steps (domain verification via tofu, prod secret, live-inbox check) →
-#14 prod prerequisites → #13 NATS bot eventing (JetStream) →
-#17 NATS WS migration (now pre-cutover) → #19 CloudNativePG →
-#15 ArgoCD + sealed-secrets → #18
-hardening (VictoriaLogs, now pre-cutover) → #16 hard cutover + 1-week
+**Priority order (updated 2026-07-05; hard-cutover resequencing
+2026-07-04):** done so far: restart-500 + 3-player-render bugs, #21
+OpenTofu (complete 2026-07-06), #22a Resend
+outbound, #14 dev + prod prereqs (client-IP flip deferred to #16 beta),
+#13 NATS bot eventing, #17 NATS WS migration. **Remaining pre-go-live:**
+#19 CloudNativePG (prod) → #15 ArgoCD + sealed-secrets → #18 hardening
+(Grafana Cloud observability + APM, decided 2026-07-05, superseding
+VictoriaLogs) → #16 beta period (isolated DB) → hard cutover + 1-week
 validation gate → decommission. (#20 external-dns retired 2026-07-05 -
 no viable DO provider; see 20-external-dns.md.)
 **Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
@@ -65,18 +65,19 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 12 | ELO Ratings | Complete | [12-elo-ratings.md](plan/12-elo-ratings.md) |
 | 13 | NATS Bot Eventing | Complete (2026-07-05) | [13-nats-bot-eventing.md](plan/13-nats-bot-eventing.md) |
 | 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); all prod prereqs resolved 2026-07-05 except client-IP/PROXY-protocol, intentionally deferred live to Phase 16 (needs a DOKS-managed ConfigMap flip with no dry-run value pre-Gateway) | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
-| 15 | Production CD (ArgoCD) | Pending | [15-production-cd-argocd.md](plan/15-production-cd-argocd.md) |
-| 16 | Production Cutover (hard cutover + break-glass rollback; revised 2026-07-04) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
+| 15 | Production CD (ArgoCD) | Pending - fully specced 2026-07-05 (config-repo layout, deploy job, port-forward-only exposure, PreSync verification) | [15-production-cd-argocd.md](plan/15-production-cd-argocd.md) |
+| 16 | Production Cutover (hard cutover + break-glass rollback; beta period on isolated DB + freeze/TTL runbook added 2026-07-05) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
 | 17 | NATS Migration + WS simplification | Complete (2026-07-05) | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
-| 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04; probes & observability section added 2026-07-05 | [18-production-hardening.md](plan/18-production-hardening.md) |
-| 19 | CloudNativePG | Dev complete (Kind); prod pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
+| 18 | Production Hardening | Pending - fully specced 2026-07-05: all-in Grafana Cloud (logs/metrics/traces/alerting, supersedes VictoriaLogs), APM via OTLP, probes, external uptime monitor, capacity check | [18-production-hardening.md](plan/18-production-hardening.md) |
+| 19 | CloudNativePG | Dev complete (Kind); prod pending - import revised 2026-07-05 to workstation pg_dump/restore from Linode | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
 | 20 | external-dns | Superseded 2026-07-05 - folded into Phases 16/21 | [20-external-dns.md](plan/20-external-dns.md) |
-| 21 | OpenTofu Infrastructure as Code | Stage 1 and stage-2 (DOKS cluster) both applied 2026-07-05; Route53 zone deletion pending (~2026-07-12) | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
+| 21 | OpenTofu Infrastructure as Code | Complete 2026-07-06 (stages applied 2026-07-05; state-bucket versioning + Route53 zone deletion 2026-07-06) | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
 | 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending | [22-email-via-resend.md](plan/22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [23-rust-game-ports.md](plan/23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [24-game-invites.md](plan/24-game-invites.md) |
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [25-rules-rendering.md](plan/25-rules-rendering.md) |
 | 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [26-theming.md](plan/26-theming.md) |
+| 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [27-web-simplification.md](plan/27-web-simplification.md) |
 | Bug fixes | Bug fixes | Partially resolved | [bugs.md](plan/bugs.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | [review-findings-2026-07-04.md](plan/review-findings-2026-07-04.md) |
 | Quick wins | Quick wins (added 2026-07-03) | Complete | [quick-wins.md](plan/quick-wins.md) |
@@ -84,11 +85,46 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ---
 
+## Human tasks (operator-only, in rough execution order)
+
+Everything below needs Michael (accounts, credentials, production access);
+tasks are also marked *(human)* inline in their phase files. Added
+2026-07-05.
+
+1. **#21:** ~~done in full~~ (state-bucket versioning + Route53 zone
+   deletion completed 2026-07-06).
+2. **#15:** create the `brdgme-config` GitHub repo (agent authors
+   contents); provision the deploy key; install sealed-secrets + ArgoCD
+   on the cluster per the bootstrap runbook (seal secrets, back up the
+   sealing key, rotate the admin password).
+3. **#18:** create the Grafana Cloud free stack (capture endpoints +
+   token, seal the `grafana-cloud` secret); configure the alert rules and
+   email contact point in the Grafana UI; set up the external uptime
+   monitor account.
+4. **#16 beta:** flip the cilium PROXY-protocol ConfigMap + restart the
+   DaemonSet; `tofu apply` the `beta.brdg.me` record; drive the beta
+   checklist (test games, Grafana verification).
+5. **#19 (during beta):** test import - `pg_dump` live Linode prod,
+   restore into a scratch CNPG database, record timings/fixes; verify a
+   PITR restore from the Spaces backups.
+6. **#16 cutover:** lower TTLs (`tofu apply`); announce downtime; stop
+   the Linode stack; real `pg_dump`/restore + migrations; repoint apex
+   DNS (`tofu apply`); smoke test; flip the uptime monitor to apex.
+   (The `postgres-config`/`postgres-rw` host is handled at Phase 15
+   sealing time, not cutover - revised 2026-07-06.)
+7. **#16 decommission (after the validation week):** decommission the
+   Linode server (archive a final dump); the source/manifest deletion
+   itself is agent-delegable.
+
+---
+
 ## History
 
 Items are numbered in assignment order, not execution order - see the
-priority order at the top. Items 1-12 are complete; 14 is dev-complete
-with prod prerequisites pending; 13 and 15-24 remain pending.
+priority order at the top. Items 1-13 and 17 are complete; 14 is
+dev-complete with the client-IP flip deferred to item 16; 21 and 22a are
+done bar small trailing steps; 15, 16, 18, 19-prod, and the post-go-live
+items (22b-d, 23-27) remain pending.
 (2026-07-04: files renamed `phase-NN-*.md` → `NN-*.md` and this file
 reframed as the backlog - reprioritising was fighting the "phase" naming.)
 (Renumbered 2026-07-02: 5.5→6, 5.6→7, old 6→8, 5.7→10, 6.5→ArgoCD, old
@@ -126,3 +162,17 @@ external-dns provider was removed upstream (v0.21.0); the only replacement
 is an unreviewed third-party webhook. DNS record management for the
 cutover hostnames folds into Phase 21's infra/dns.tf and the Phase 16
 cutover runbook instead.
+
+2026-07-05 (plan review): all remaining "not ready" items fully specced
+for delegation. Decisions: observability goes all-in on the Grafana Cloud
+free tier (logs/metrics/traces/alerting + email delivery; supersedes the
+VictoriaLogs/vmalert decisions; single Alloy agent in-cluster; APM via
+OTLP traces from the monolith - wanted for cutover week); no in-cluster
+alert evaluation (Resend not used for alerts; monolith webhook bridge
+documented as fallback only); ArgoCD is port-forward-only with a
+remote-base `brdgme-config` repo (no manifest copying); Phase 19 prod
+import is workstation pg_dump/restore from Linode (no live cross-provider
+link); Phase 16 gains a beta period on an isolated database, a freeze +
+TTL-lowering cutover runbook, and a corrected two-path rollback story;
+tofu state bucket gets versioning; bot-restart bug specced (bot_slots
+pass-through).

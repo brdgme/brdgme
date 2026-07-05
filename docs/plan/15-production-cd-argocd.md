@@ -7,26 +7,64 @@ continuous delivery. GitHub Actions handles CI (build + push to GHCR). ArgoCD
 handles CD (sync cluster state to Git). Database migrations run as an ArgoCD
 PreSync hook so a failed migration halts the sync before any pods are replaced.
 
-**Delegation gap:** most of this phase needs production cluster credentials
-and judgement calls - treat it as human-operated with agent assistance, not
-delegable. Before delegating even the assistable parts, specify:
-- **`brdgme-config` repo layout:** exact directory structure, what is copied
-  from `k8s/prod`, and how per-service image tags are pinned/edited.
-- **GitHub Actions deploy step:** the workflow changes (job YAML), which
-  secrets/deploy keys exist and how they are provisioned.
-- **ArgoCD exposure:** LoadBalancer vs Ingress vs port-forward-only admin
-  access, domain, and TLS.
-- **PreSync verification procedure:** concrete steps to prove a failing
-  migration halts the sync (e.g. a deliberately broken migration in a
-  throwaway branch) - "verify" currently has no procedure.
+**Delegation gaps resolved 2026-07-05** - the four open decisions (config
+repo layout, Actions deploy step, exposure, PreSync verification) are now
+specified inline below. Cluster-touching steps still need production
+credentials and are marked *(human)*; everything else is delegable.
 
-### ArgoCD installation (production cluster)
+### `brdgme-config` repo layout (decided 2026-07-05)
 
-- [ ] Install ArgoCD into the production cluster via the official manifest:
-      `kubectl apply -n argocd -f
-      https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml`
-- [ ] Expose the ArgoCD API server (LoadBalancer or Ingress).
-- [ ] Store the initial admin password securely and rotate it.
+A new private GitHub repo `brdgme-config`. **Manifests are NOT copied** -
+`prod/kustomization.yaml` uses a kustomize **remote base** pinned to a
+source-repo commit, and holds only the deploy-time state (ref + image
+tags + sealed secrets). This avoids the copy's drift problem: manifest
+changes keep living in the source repo; a deploy is a one-commit bump of
+`ref` + image tags in `brdgme-config`.
+
+```
+brdgme-config/
+├── README.md          # bootstrap runbook (below) + rollback one-liner
+├── argocd/
+│   ├── kustomization.yaml   # remote base: ArgoCD official install
+│   │                        #   manifest, pinned to a release tag
+│   └── brdgme-app.yaml      # the Application (moved from source-repo
+│                            #   k8s/argocd/ - delete it there)
+├── sealed-secrets/
+│   ├── kustomization.yaml   # remote base: sealed-secrets controller
+│   │                        #   manifest, pinned to a release tag
+│   └── secrets/             # SealedSecret CRs: postgres-config,
+│                            #   postgres-user, bot-config, email-config,
+│                            #   internal-api-key, grafana-cloud
+└── prod/
+    └── kustomization.yaml   # resources:
+                             #   - https://github.com/<owner>/brdgme//k8s/prod?ref=<sha>
+                             # images: [ghcr.io tag overrides per image]
+                             # also references ../sealed-secrets/secrets
+```
+
+Scope split: the single ArgoCD `Application` manages `prod/` only.
+`argocd/` and `sealed-secrets/` (the controllers themselves) are applied
+manually with `kubectl apply -k` from this repo - controller upgrades are
+rare, deliberate events for a solo operator; self-managing ArgoCD via
+app-of-apps is overkill at this scale (reaffirming the earlier decision).
+
+### ArgoCD installation (production cluster) *(human)*
+
+- [ ] `kubectl create ns argocd && kubectl apply -k argocd/` from
+      `brdgme-config` (official install manifest via the pinned remote
+      base).
+- [ ] **Exposure (decided 2026-07-05): port-forward only.** No
+      LoadBalancer (a second LB is $12/mo), no public hostname/HTTPRoute
+      (a public admin panel to keep patched, for zero benefit to a solo
+      operator). Access: `kubectl -n argocd port-forward svc/argocd-server
+      8443:443`, UI at `https://localhost:8443`, CLI via
+      `argocd login localhost:8443 --grpc-web`. Document in
+      `brdgme-config/README.md`.
+- [ ] Retrieve the initial admin password
+      (`argocd admin initial-password -n argocd`), rotate it
+      (`argocd account update-password`), store the new one in the same
+      offline store as the cluster credentials, and delete the
+      `argocd-initial-admin-secret` Secret.
 
 ### ArgoCD Application manifest
 
@@ -36,6 +74,12 @@ delegable. Before delegating even the assistable parts, specify:
 - [x] Commit the `Application` manifest to the repo so ArgoCD manages itself
       (app-of-apps pattern is not needed at this scale - a single Application
       is sufficient).
+- [ ] Move `brdgme-app.yaml` into `brdgme-config/argocd/` (per the layout
+      above), retargeting `repoURL` to `brdgme-config` and `path` to
+      `prod/`; delete `k8s/argocd/` from the source repo. If
+      `brdgme-config` is private, register it in ArgoCD with a read-only
+      deploy key (`argocd repo add` or a `repository` Secret committed as a
+      SealedSecret).
 
 ### Database migration PreSync hook
 
@@ -47,14 +91,27 @@ delegable. Before delegating even the assistable parts, specify:
       - `argocd.argoproj.io/hook-delete-policy: BeforeHookCreation`
 - [x] Add `k8s/base/migrate/` to `k8s/base/brdgme/kustomization.yaml`.
 - [ ] Verify: a failed migration halts the ArgoCD sync and leaves the running
-      pods untouched.
+      pods untouched. **Procedure (specced 2026-07-05), run once during the
+      Phase 16 beta period before any real data exists:**
+      1. Record the current web pod name/hash (`kubectl get pods -n brdgme`).
+      2. In a `brdgme-config` commit, patch the migrate Job's command to
+         `["sh", "-c", "exit 1"]` (kustomize `patches` entry on the Job)
+         and simultaneously bump any image tag so the sync has app changes
+         to (not) apply.
+      3. Observe: the PreSync Job runs and fails, the Application reports
+         `Sync Failed`/`Degraded`, and the web pods from step 1 are
+         untouched (same pod names, old image).
+      4. Revert the commit; confirm the sync completes and pods roll.
+      This proves the hook mechanics (halt + no partial rollout). A real
+      `sqlx migrate run` failure exits non-zero and takes the identical
+      path.
 
 ### Secrets management: sealed-secrets (added 2026-07-03)
 
 GitOps makes the config repo the source of truth, but the app secrets
-(`postgres-config`, `bot-config`, `INTERNAL_API_KEY`, and later the
-external-dns DO token) currently exist only as manually created cluster
-Secrets - previously unaddressed. Decision: bitnami-labs/sealed-secrets.
+(`postgres-config`, `postgres-user`, `bot-config`, `email-config`,
+`internal-api-key`, `grafana-cloud` - Phase 18) currently exist only as
+manually created cluster Secrets - previously unaddressed. Decision: bitnami-labs/sealed-secrets.
 Asymmetric encryption; `SealedSecret` CRs are safe to commit; no external
 store. (External Secrets Operator rejected - no external secret store
 exists to back it; SOPS+age rejected - key distribution and editor
@@ -84,16 +141,36 @@ should be evaluated then. (Evaluated 2026-07-03: ArgoCD Image Updater remains
 argoproj-labs, v1.1.x, explicitly not recommended for critical production
 workloads, and not merged into core - the custom Actions step stands.)
 
-- [ ] Create a `brdgme-config` repository containing the `k8s/prod` kustomize
-      manifests (copy from this repo). This becomes the single source of truth
-      for what is running in production.
+- [ ] Create the `brdgme-config` repository per the layout section above
+      *(human: create the GitHub repo itself; an agent can author its
+      contents)*. Steps: `gh repo create <owner>/brdgme-config --private
+      --clone`, then hand to an agent to populate per the layout section.
+      (remote-base `prod/kustomization.yaml` pinned to the current source
+      ref, image tags matching what CI last built). This becomes the single
+      source of truth for what is running in production.
 - [ ] Update the ArgoCD `Application` to point to `brdgme-config` instead of
-      this repo.
-- [ ] Add a GitHub Actions deploy step: after pushing images to GHCR, clone
-      `brdgme-config`, run `kustomize edit set image` for each updated image,
-      commit, and push. ArgoCD auto-sync picks up the change.
-- [ ] Grant the GitHub Actions bot write access to `brdgme-config` via a
-      deploy key or fine-grained PAT scoped to that repo only.
+      this repo (covered by the "Move brdgme-app.yaml" task above).
+- [ ] **GitHub Actions deploy job (specced 2026-07-05):** append a `deploy`
+      job to `.github/workflows/ci.yml`, `needs:` the image-push job,
+      running only on `master` pushes:
+      1. `actions/checkout` of `brdgme-config` using a deploy key held in
+         the source repo's Actions secret `CONFIG_REPO_DEPLOY_KEY`.
+      2. In `prod/`: update the remote-base `?ref=` to `${GITHUB_SHA}`
+         (`sed -i` on the kustomization - one line, no yq needed), then
+         `kustomize edit set image ghcr.io/<owner>/<img>=ghcr.io/<owner>/<img>:${GITHUB_SHA}`
+         for each image the workflow built (image tags are the git SHA -
+         align the build job's tagging if it differs).
+      3. Commit as `deploy: <source repo short-sha>` and push. Add
+         `concurrency: { group: deploy, cancel-in-progress: false }` so
+         parallel runs cannot race the push.
+      ArgoCD auto-sync picks up the commit.
+- [ ] Provision the deploy key *(human)*. Steps:
+      1. `ssh-keygen -t ed25519 -f deploy-key -N "" -C brdgme-ci-deploy`
+      2. `gh repo deploy-key add deploy-key.pub -R <owner>/brdgme-config
+         --allow-write --title ci-deploy`
+      3. `gh secret set CONFIG_REPO_DEPLOY_KEY -R <owner>/brdgme <
+         deploy-key`
+      4. `shred -u deploy-key deploy-key.pub`
 - [ ] Verify GHCR package visibility is **public** for every image the
       cluster pulls (GHCR packages default to private even when the source
       repo is public). Public packages mean no imagePullSecret anywhere; if
@@ -102,6 +179,46 @@ workloads, and not merged into core - the custom Actions step stands.)
       platform, not the deployment platform, and free for public packages).
 - [ ] To roll back: revert the relevant commit in `brdgme-config`. ArgoCD
       syncs to the previous tag. No tooling changes required.
+
+### Bootstrap order (one-time, human; record in brdgme-config/README.md)
+
+All commands against the prod cluster (`kubectl config use-context
+do-syd1-brdgme` or equivalent), from a `brdgme-config` checkout.
+
+1. Install sealed-secrets: `kubectl apply -k sealed-secrets/`, wait for
+   `kubectl -n kube-system rollout status deploy/sealed-secrets-controller`.
+2. **Back up the sealing key pair immediately** (losing it means
+   re-sealing everything):
+   `kubectl -n kube-system get secret -l
+   sealedsecrets.bitnami.com/sealed-secrets-key -o yaml >
+   sealed-secrets-key-backup.yaml` → store in the same offline store as
+   the cluster credentials; do NOT commit it; delete the local copy.
+3. Seal each secret (postgres-config, postgres-user, bot-config,
+   email-config, internal-api-key, grafana-cloud). Pattern:
+   `kubectl create secret generic email-config -n brdgme
+   --from-literal=RESEND_API_KEY=... --from-literal=EMAIL_FROM=login@brdg.me
+   --dry-run=client -o yaml | kubeseal --format yaml >
+   sealed-secrets/secrets/email-config.yaml` - commit the sealed files.
+   For secrets that already exist in the cluster (created manually in
+   Phase 21/22a), seal from the live values
+   (`kubectl get secret <name> -n brdgme -o yaml` to read them), then
+   delete the manual Secret AFTER confirming the controller recreated it:
+   `kubectl apply -k sealed-secrets/` → check
+   `kubectl get secret <name> -n brdgme` shows a fresh creation timestamp.
+4. Install ArgoCD: `kubectl create ns argocd && kubectl apply -k argocd/`,
+   wait for `kubectl -n argocd rollout status deploy/argocd-server`.
+5. Rotate the admin password:
+   `kubectl -n argocd port-forward svc/argocd-server 8443:443 &`;
+   initial password: `argocd admin initial-password -n argocd`;
+   `argocd login localhost:8443 --username admin --grpc-web` (accept the
+   self-signed cert); `argocd account update-password`; store the new
+   password offline; `kubectl -n argocd delete secret
+   argocd-initial-admin-secret`.
+6. `kubectl apply -f argocd/brdgme-app.yaml` → watch the first sync in
+   the UI (`https://localhost:8443`): PreSync migrate Job runs first,
+   then the app resources.
+7. Run the PreSync failure verification (procedure above) while the
+   database is still disposable (Phase 16 beta).
 
 ### Notes
 

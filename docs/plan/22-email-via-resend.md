@@ -1,6 +1,9 @@
 # 22: Email via Resend
 
-**Status:** 22a code complete (landed 77a2092); human/infra steps + 22b pending - high priority
+**Status:** 22a complete 2026-07-05 (code landed 77a2092; DNS records
+applied, domain verified, prod secret created, live-inbox
+SPF/DKIM/DMARC check passed; only the in-app send check remains, on the
+Phase 16 beta checklist). 22b-22d pending, post-cutover.
 
 **Decision (2026-07-03):** all platform email moves to Resend (resend.com).
 Outbound replaces the self-managed SMTP relay path (spam-filter /
@@ -44,8 +47,8 @@ Resend test-mode API key in `.env` - the same pattern the bot uses for
       `play.brdg.me` - all inbound `@brdg.me` mail now routes to Resend,
       superseding the legacy Linode server's A-record-fallback receipt
       (legacy play-by-email replies stop working; no webhook until 22b).
-      Remaining: run the targeted `tofu apply` for the records and confirm
-      the domain shows verified in the Resend dashboard.
+      Records applied and domain verified (the 2026-07-05 live-inbox check
+      passing DKIM `d=brdg.me` proves both).
 - [x] Replace `lettre` with `resend-rs` in `rust/web`:
       `send_login_email` sends via the Resend client (`resend_rs::Resend`,
       held in `AppState` alongside the existing shared `reqwest::Client`).
@@ -245,8 +248,9 @@ build during the validation window). Depends on 22a.
       duplicate-event idempotency; server-command handling (`concede`,
       `unsubscribe`); opt-out suppresses notifications but never command
       responses.
-- [ ] Quota guard: count outbound sends; alert via Phase 18 vmalert as
-      volume approaches 100/day or 3k/mo. Note 22b/22c multiply volume:
+- [ ] Quota guard: count outbound sends (extend the Phase 18 send-counter
+      metric); alert via a Grafana Cloud rule as volume approaches 100/day
+      or 3k/mo. Note 22b/22c multiply volume:
       each turn in an N-player game can trigger several mails - revisit
       the Pro-tier decision when enabling.
 

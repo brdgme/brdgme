@@ -13,11 +13,27 @@
       handler (`game/server_fns.rs`) copies players but does not check
       `game_players.game_bot_id` and create corresponding `game_bots` rows in
       the new game.
-      **Delegation gap:** no expected-behaviour spec. Decide and document:
-      are new `game_bots` rows created copying name + difficulty; do bots keep
-      their positions or are positions reshuffled like humans; behaviour when
-      the restarted game has different player-count constraints; and the test
-      cases that define done.
+      **Spec (decided 2026-07-05):** `create_game_with_users_tx` already
+      accepts `bot_slots: &[BotSlot]` (`{ name, difficulty }`) and creates
+      `game_bots` rows from it - `restart_game` just passes `&[]`. Fix:
+      alongside the existing `opponent_ids` collection, collect
+      `Vec<BotSlot>` from the original `ge.game_players` rows that have a
+      `game_bot_id`, copying the bot's `name` and `difficulty` (join
+      `game_bots` - add a small `db` lookup if `GameExtended` doesn't carry
+      them), and pass it as `bot_slots`. Expected behaviour: new `game_bots`
+      rows (fresh ids) with the original name + difficulty; positions are
+      assigned by the existing slot logic exactly as for humans (reshuffled
+      - same treatment as human players, no seat pinning); player-count
+      constraints cannot differ (the roster is copied 1:1, `player_count`
+      already includes bot seats). After creation the existing
+      `broadcast_and_trigger` call already publishes bot turns, so a bot
+      that opens the new game acts without a manual bump.
+      **Tests (define done):** restart of a finished 1-human + 1-bot game →
+      the new game has one `game_bots` row with the original name and
+      difficulty and a `game_players` row referencing it; a `bot.turn`
+      event is published when the bot is on turn (extend the
+      `nats_bot_eventing.rs` pattern); restart of an all-human game is
+      unchanged (existing tests still pass).
 - [x] **3-player Lost Cities render**: Resolved 2026-07-04. Generated a
       scripted 3-player game via the engine API to a mid-round-2 state (round 1
       scored) and extracted a real render via `lost_cities_2_cli`; replaced the

@@ -19,7 +19,15 @@ passes.
 Phase 22a human steps (Resend domain), Phase 14 prod prerequisites,
 Phase 13 (NATS bot eventing), Phase 17 (NATS WS + skinny payloads),
 Phase 19 (CNPG), Phase 15 (ArgoCD + sealed-secrets), Phase 18
-(VictoriaLogs + alerting).
+(Grafana Cloud observability + alerting + external uptime monitor).
+
+**Data model of the cutover (clarified 2026-07-05):** old prod (Linode) and
+the new stack (DOKS) never run against a shared database and never serve
+users simultaneously. The sequence is: beta period on an isolated throwaway
+database → stop legacy → dump/restore prod data into CNPG (Phase 19
+procedure) → point DNS at the new stack. Anything written to the old system
+after the dump is lost by design; the freeze step below exists to make that
+window zero.
 
 **Delegation note:** operator-driven by nature (production deploys, DNS,
 live verification) - not agent-delegable. The agent-delegable subtask is the
@@ -66,25 +74,82 @@ included in the prod kustomization and get no prod hostnames or DNS records
       items previously listed here - DomainMappings, config-domain, Kourier
       TLS - were already superseded by Phase 14.)
 
+### Beta period (added 2026-07-05: isolated database, pre-cutover)
+
+Michael wants a short beta on the production cluster before real traffic,
+against a **completely isolated database** - the fresh CNPG database the
+cluster boots with, wiped at cutover by the Phase 19 import. No legacy
+data, no shared state with old prod, which keeps serving users untouched.
+
+- [ ] Before creating the Gateway: enable PROXY protocol on the Cilium
+      side FIRST *(human)*. Wrong order (DO-LB annotation before the
+      Cilium flip) sends PROXY-protocol bytes to an Envoy not yet
+      expecting them and breaks all traffic. See
+      docs/plan/14-drop-knative-gateway-api.md prod-prerequisites section.
+      (Moved here from the cutover steps - the Gateway is now created at
+      beta start, so beta gets to verify the login rate limiter sees real
+      client IPs.) Steps:
+      1. Backup: `kubectl -n kube-system get configmap cilium-config -o
+         yaml > cilium-config-backup.yaml` (keep locally, don't commit).
+      2. `kubectl -n kube-system patch configmap cilium-config --type
+         merge -p '{"data":{"enable-gateway-api-proxy-protocol":"true"}}'`
+      3. `kubectl -n kube-system rollout restart daemonset/cilium &&
+         kubectl -n kube-system rollout status daemonset/cilium`
+      4. Confirm the value stuck: re-read the ConfigMap now, ~15 minutes
+         later, and again the next day (watching for DOKS's reconciler
+         reverting it). If it reverts, STOP - do not proceed to the
+         annotation - and open a DO support ticket.
+      5. Only then uncomment
+         `do-loadbalancer-enable-proxy-protocol: "true"` in
+         `k8s/base/gateway/gateway.yaml` (commit; ArgoCD syncs it).
+- [ ] Deploy the full new stack via ArgoCD (Phase 15) onto CNPG (Phase 19,
+      fresh database), NATS (13/17), Gateway API (14).
+- [ ] Beta hostname: add a `beta.brdg.me` HTTPS listener + HTTPRoute to the
+      Gateway manifests (agent-delegable), then *(human)*:
+      1. Get the LB IP once the Gateway is programmed:
+         `kubectl get gateway brdgme -n brdgme -o
+         jsonpath='{.status.addresses[0].value}'` (or the DO console →
+         Networking → Load Balancers).
+      2. Add `digitalocean_record` "beta" A record with that IP to
+         `infra/dns.tf`; `tofu plan` (expect exactly 1 add) → `tofu apply`.
+      3. Verify TLS issuance: `kubectl get certificate -n brdgme` reaches
+         `Ready`, and `curl -v https://beta.brdg.me/` serves with a valid
+         Let's Encrypt cert - this also proves the issuance path apex will
+         use.
+- [ ] Point the external uptime monitor (Phase 18) at `beta.brdg.me`.
+- [ ] Exercise during beta: login via Resend (in-app path - closes the 22a
+      remaining check), a full game vs a bot, a two-account human game with
+      live WS, restart/undo/concede; confirm logs, metrics, and traces all
+      arrive in Grafana Cloud and the rate limiter keys on distinct client
+      IPs (check the peer address the login handler logs).
+- [ ] Run the Phase 15 PreSync failure verification and the Phase 19
+      dump/restore rehearsal + PITR restore verification while the database
+      is still disposable.
+
 ### Cutover steps
 
-- [ ] Before creating the Gateway: flip `kube-system/cilium-config`'s
-      `enable-gateway-api-proxy-protocol` to `"true"` on the prod cluster,
-      restart the `cilium` DaemonSet, and confirm DOKS's reconciler doesn't
-      revert it. Only then uncomment
-      `do-loadbalancer-enable-proxy-protocol: "true"` in
-      `k8s/base/gateway/gateway.yaml` - wrong order sends PROXY-protocol
-      bytes to an Envoy not yet expecting them and breaks all traffic. See
-      docs/plan/14-drop-knative-gateway-api.md prod-prerequisites section.
-- [ ] Deploy the full new stack to prod via ArgoCD (Phase 15) onto CNPG
-      (Phase 19), NATS (13/17), Gateway API (14).
-- [ ] Verify TLS issuance (HTTP01 through the Gateway) for `brdg.me`.
-- [ ] Get the Gateway's DO Load Balancer IP (`kubectl get gateway brdgme -n
-      brdgme -o jsonpath='{.status.addresses}'` or the DO console), add/update
-      A records for `brdg.me`, `api.brdg.me`, `ws.brdg.me` in `infra/dns.tf`
-      (see docs/plan/20-external-dns.md), `tofu apply`.
-- [ ] Smoke-test immediately (see validation criteria) with VictoriaLogs
-      (Phase 18) open.
+- [ ] Days ahead: lower TTLs on the legacy apex/`mail` records in
+      `infra/dns.tf` from 3600 to 300, `tofu apply` (bounds the split-DNS
+      window at the flip to ~5 minutes).
+- [ ] Announce the maintenance window to players (email via Resend or a
+      notice on the old site - operator's choice).
+- [ ] **Freeze:** stop the legacy stack on Linode (downtime begins; users
+      see the old site down, not a stale copy taking doomed writes). The
+      exact stop commands depend on how the Linode box runs the services
+      (systemd units / docker / k8s) - **write them down during the Phase
+      19 test-import session** (you'll be on that server anyway) and
+      record them here so cutover day is copy-paste. Do NOT stop Postgres
+      itself - the dump needs it.
+- [ ] Run the Phase 19 dump/restore import into CNPG (drops the beta data),
+      apply migrations, verify counts + login.
+- [ ] Repoint apex: update the `brdg.me` A record in `infra/dns.tf` to the
+      Gateway LB IP, `tofu apply`. Verify apex TLS issuance (the `brdg.me`
+      listener's HTTP01 solve can only complete once DNS points here).
+- [ ] Smoke-test immediately (see validation criteria) with Grafana Cloud
+      (Phase 18) open; flip the external uptime monitor from
+      `beta.brdg.me` to `https://brdg.me/`.
+- [ ] Post-cutover tidy: remove the `beta.brdg.me` listener/route/record;
+      restore TTLs to 3600 once stable.
 
 ### Validation criteria (gate for decommission)
 
@@ -100,8 +165,13 @@ the side-by-side plan; shortened 2026-07-04 with the hard-cutover decision).
       completion via the new UI.
 - [ ] Ratings update correctly on game finish and concede.
 - [ ] No unexplained monolith 5xx responses or WASM client panics in the
-      window (checked via VictoriaLogs; restart 500 bug must be fixed or
-      explained first).
+      window (checked via Grafana Cloud logs + the 5xx alert rule; the
+      restart 500 bug was closed could-not-reproduce 2026-07-04 with
+      diagnostics improved - if it recurs the error now carries the raw
+      payload).
+- [ ] Traces arriving for every request class (page load, server fn,
+      game-service call) and at least one slow-request trace inspected -
+      the APM story works before it is needed in anger.
 - [ ] Bots complete turns reliably in production (no stuck bot turns needing
       manual bumps; JetStream redelivery observed working on at least one
       induced failure or verified via consumer metrics).
@@ -113,17 +183,25 @@ the side-by-side plan; shortened 2026-07-04 with the hard-cutover decision).
 
 ### Rollback procedure (break-glass)
 
-Both systems share the database; rollback is redeploy + routing, no data
-migration. Sessions differ (cookie vs Bearer token) so users re-login.
+Two distinct paths, depending on when things go wrong (premise updated
+2026-07-05 - the old "both systems share the database" line was only true
+of the retired side-by-side plan):
 
-- Apply `k8s/prod-rollback/` (legacy trio + Redis + routes), verify the
-  legacy stack is serving, then point apex at it (update `infra/dns.tf` to
-  the rollback LB IP, `tofu apply`). Minutes, not seconds - acceptable for
-  this project.
-- Games created or finished via the new system remain valid for legacy
-  (same schema); no cleanup needed.
-- Note: ELO ratings columns and other new-system-only writes are ignored by
-  legacy; safe.
+**First hours after cutover - revert to Linode.** Restart the legacy stack
+on Linode and point apex DNS back (TTL is still 300). Caveat: anything
+written to the new system since cutover is lost unless it is dumped back
+(reverse of the Phase 19 procedure) - acceptable for this project's user
+base if invoked within hours, and the reason the freeze + immediate
+smoke-test above exist. This path dies when the Linode server is
+decommissioned.
+
+**During the validation week - legacy-in-DOKS overlay.** Apply
+`k8s/prod-rollback/` (legacy trio + Redis + routes), verify the legacy
+stack serves against CNPG (both systems read the same schema; sessions
+differ - cookie vs Bearer token - so users re-login), then point apex at
+it. Minutes, not seconds - acceptable. No data loss: the data stays in
+CNPG. ELO columns and other new-system-only writes are ignored by legacy;
+safe.
 
 ### Decommission (once the validation gate passes)
 
@@ -134,6 +212,18 @@ migration. Sessions differ (cookie vs Bearer token) so users re-login.
       update DEV.md.
 - [ ] Delete `k8s/base/redis/` (kept until now only for break-glass -
       the monolith stopped using Redis in Phase 17).
+- [ ] Decommission the Linode server *(human)*. Steps:
+      1. Take a final `pg_dump -Fc` from the Linode Postgres and store it
+         in the offline archive (belt-and-braces; CNPG backups are now
+         the live safety net).
+      2. Remove the legacy records from `infra/dns.tf`: the `mail` A
+         record and the old apex SPF TXT (the apex A was already
+         repointed at cutover). `tofu plan` (expect exactly 2 destroys) →
+         `tofu apply`.
+      3. Delete the Linode instance in the Linode console (and any
+         attached volumes/backups billing).
+      4. This also kills the first-hours rollback path - only do it after
+         the validation gate passes (which is when this list runs).
 - [ ] Delete stale root build artifacts: `WORKSPACE` (Bazel era),
       `build.sh`/`test.sh` (docker builds of legacy targets),
       `docker-compose.yml` (pre-Kind dev environment). Verify nothing
