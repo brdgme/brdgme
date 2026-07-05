@@ -44,9 +44,15 @@ The local web server cannot resolve `*.brdgme.svc.cluster.local`. mirrord is
 installed via devenv and wraps `cargo leptos watch` in the Tiltfile, giving
 the local process transparent access to cluster DNS and services.
 
-Target pod: `postgres-0` (stable StatefulSet pod, always running).
+Target pod: `nats-0` (stable StatefulSet pod, always running in both dev
+modes). Postgres is CloudNativePG-managed (see below) - its pods
+(`postgres-1`, ...) are not stable across recreations, so mirrord targets
+`nats` instead. `DATABASE_URL` is passed explicitly in the Tiltfile serve
+commands (`postgres-rw` via the `kubectl port-forward` on localhost:5432)
+rather than relying on mirrord's env stealing from the target pod.
 
-If mirrord behaves unexpectedly, check that postgres is healthy first.
+If mirrord behaves unexpectedly, check that postgres and nats are healthy
+first.
 
 On NixOS `/etc/hosts` is managed and read-only - kubefwd is not a viable
 alternative on this system.
@@ -106,12 +112,21 @@ The operator does not run migrations.
 In production, migrations run as a pre-sync ArgoCD Job (`k8s/base/web/migrate-job.yaml`)
 before the new web deployment rolls out.
 
+Postgres runs as a CloudNativePG `Cluster` CR (`postgres`); the operator
+creates and names instance pods itself (`postgres-1`, ...), and the name is
+not stable across recreations. Find the current primary pod first:
+```bash
+kubectl get pods -n brdgme -l cnpg.io/cluster=postgres
+```
+The commands below use `$POD` for that pod name.
+
 **Backup** (writes to a file inside the pod, then copies it out to avoid kubectl
 streaming issues with large dumps):
 ```bash
-kubectl exec -n brdgme postgres-0 -- pg_dump -U brdgme_user -Fc -f /tmp/backup.dump brdgme
-kubectl cp brdgme/postgres-0:/tmp/backup.dump backup.dump
-kubectl exec -n brdgme postgres-0 -- rm /tmp/backup.dump
+POD=$(kubectl get pods -n brdgme -l cnpg.io/cluster=postgres -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n brdgme "$POD" -- pg_dump -U brdgme_user -Fc -f /tmp/backup.dump brdgme
+kubectl cp "brdgme/$POD:/tmp/backup.dump" backup.dump
+kubectl exec -n brdgme "$POD" -- rm /tmp/backup.dump
 ```
 
 Verify the dump is complete:
@@ -121,7 +136,7 @@ pg_restore --list backup.dump
 
 **Drop and recreate the database** (useful when restoring a backup):
 ```bash
-kubectl exec -n brdgme postgres-0 -- psql -U brdgme_user -d postgres \
+kubectl exec -n brdgme "$POD" -- psql -U brdgme_user -d postgres \
   -c "DROP DATABASE IF EXISTS brdgme WITH (FORCE);" \
   -c "CREATE DATABASE brdgme OWNER brdgme_user;"
 ```
@@ -129,10 +144,10 @@ kubectl exec -n brdgme postgres-0 -- psql -U brdgme_user -d postgres \
 **Restore from backup** (copy the file into the pod first - piping binary data
 through `kubectl exec -i` is unreliable and produces "end of file" errors):
 ```bash
-kubectl cp backup.dump brdgme/postgres-0:/tmp/restore.dump
-kubectl exec -n brdgme postgres-0 -- pg_restore --no-owner --no-acl \
+kubectl cp backup.dump "brdgme/$POD:/tmp/restore.dump"
+kubectl exec -n brdgme "$POD" -- pg_restore --no-owner --no-acl \
   -U brdgme_user -d brdgme /tmp/restore.dump
-kubectl exec -n brdgme postgres-0 -- rm /tmp/restore.dump
+kubectl exec -n brdgme "$POD" -- rm /tmp/restore.dump
 ```
 
 After restore, run migrations before starting the web server:

@@ -80,8 +80,26 @@ stringData:
   POSTGRES_USER: brdgme_user
   POSTGRES_PASSWORD: brdgme_password
   POSTGRES_DB: brdgme
-  DATABASE_URL: postgres://brdgme_user:brdgme_password@postgres/brdgme
+  DATABASE_URL: postgres://brdgme_user:brdgme_password@postgres-rw/brdgme
 """))
+
+# CNPG's bootstrap.initdb.secret requires a kubernetes.io/basic-auth secret
+# (username/password keys) - postgres-config above doesn't qualify, so this
+# is a separate secret referenced by the Cluster CR (k8s/base/postgres).
+k8s_yaml(blob("""
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-user
+  namespace: brdgme
+type: kubernetes.io/basic-auth
+stringData:
+  username: brdgme_user
+  password: brdgme_password
+"""))
+
+# Track the CNPG Cluster CR as a Tilt resource (the operator creates its pods).
+k8s_kind('Cluster', api_version='postgresql.cnpg.io/v1', pod_readiness='wait')
 
 if WEB_IN_CLUSTER:
     docker_build(
@@ -117,13 +135,13 @@ else:
     k8s_yaml(kustomize("k8s/dev-without-web"))
     local_resource(
         "web",
-        serve_cmd="cd rust/web && SQLX_OFFLINE=true NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo leptos watch",
+        serve_cmd="cd rust/web && SQLX_OFFLINE=true DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/nats-0 --target-namespace brdgme -- cargo leptos watch",
         links=["http://localhost:3000"],
         resource_deps=["postgres", "nats"],
     )
     local_resource(
         "bot",
-        serve_cmd="set -a && [ -f .env ] && . ./.env; set +a && cd rust/bot && RUST_LOG=${RUST_LOG:-info} NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo run",
+        serve_cmd="set -a && [ -f .env ] && . ./.env; set +a && cd rust/bot && RUST_LOG=${RUST_LOG:-info} DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/nats-0 --target-namespace brdgme -- cargo run",
         resource_deps=["postgres", "nats"],
     )
 
@@ -149,8 +167,8 @@ local_resource(
 
 local_resource(
     "operator",
-    serve_cmd="for i in $(seq 60); do pg_isready -h localhost -p 5432 >/dev/null 2>&1 && break; sleep 1; done; cd rust && DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme RUST_LOG=info mirrord exec -f operator/.mirrord/mirrord.json --target pod/postgres-0 --target-namespace brdgme -- cargo run -p brdgme-operator",
-    resource_deps=["postgres", "crd-ready"],
+    serve_cmd="for i in $(seq 60); do pg_isready -h localhost -p 5432 >/dev/null 2>&1 && break; sleep 1; done; cd rust && DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme RUST_LOG=info mirrord exec -f operator/.mirrord/mirrord.json --target pod/nats-0 --target-namespace brdgme -- cargo run -p brdgme-operator",
+    resource_deps=["postgres", "nats", "crd-ready"],
 )
 
 if LEGACY:

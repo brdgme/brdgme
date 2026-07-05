@@ -1,0 +1,16 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
+  bootstrap:
+    initdb:
+      database: brdgme
+      owner: brdgme_user
+      secret:
+        name: postgres-user
+  storage:
+    size: 2Gi

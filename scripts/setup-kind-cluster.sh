@@ -16,6 +16,8 @@
 #   "no kind is registered for the type v1.Gateway in scheme" and the
 #   Gateway/GatewayClass never leave "Waiting for controller".
 GATEWAY_API_VERSION="1.3.0"
+#   CloudNativePG operator: https://github.com/cloudnative-pg/cloudnative-pg/releases
+CNPG_VERSION="1.30.0"
 
 set -euo pipefail
 
@@ -70,6 +72,16 @@ cilium install \
 
 echo "==> Waiting for Cilium to be ready..."
 cilium status --wait
+
+# --- CloudNativePG operator ---
+# Installed here (rather than left to Tilt) for the same reason as the
+# Gateway API CRDs: the operator's webhook must be up before Tilt applies the
+# Cluster CR, or the apply fails validation.
+echo "==> Installing CloudNativePG operator ${CNPG_VERSION}..."
+kubectl apply --server-side -f "https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-${CNPG_VERSION%.*}/releases/cnpg-${CNPG_VERSION}.yaml"
+
+echo "==> Waiting for CloudNativePG operator to be available..."
+kubectl wait --for=condition=Available --timeout=120s -n cnpg-system deployment/cnpg-controller-manager
 
 # --- brdgme CRD ---
 # Installed here rather than managed by Tilt to avoid a deadlock: Tilt would

@@ -68,7 +68,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 16 | Production Cutover (hard cutover + break-glass rollback; revised 2026-07-04) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
 | 17 | NATS Migration + WS simplification | Complete (2026-07-05) | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
 | 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04; probes & observability section added 2026-07-05 | [18-production-hardening.md](plan/18-production-hardening.md) |
-| 19 | CloudNativePG | Pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
+| 19 | CloudNativePG | Dev complete (Kind); prod pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
 | 20 | external-dns | Pending | [20-external-dns.md](plan/20-external-dns.md) |
 | 21 | OpenTofu Infrastructure as Code | Pending - human-paced | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
 | 22 | Email via Resend | 22a code complete (landed 77a2092); human/infra steps + 22b-22d pending - high priority; 22c reminders + 22d multi-email added 2026-07-04 | [22-email-via-resend.md](plan/22-email-via-resend.md) |
