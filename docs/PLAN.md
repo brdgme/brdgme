@@ -16,7 +16,8 @@ steps (domain verification via tofu, prod secret, live-inbox check) →
 hardening (VictoriaLogs, now pre-cutover) → #16 hard cutover + 1-week
 validation gate → decommission.
 **Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
-#24 game invites → #25 rules rendering → #23 Rust game ports (ongoing).
+#24 game invites → #25 rules rendering → #26 theming/dark mode →
+#23 Rust game ports (ongoing).
 
 ## Objective
 
@@ -74,6 +75,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 23 | Rust Game Ports | Pending | [23-rust-game-ports.md](plan/23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [24-game-invites.md](plan/24-game-invites.md) |
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [25-rules-rendering.md](plan/25-rules-rendering.md) |
+| 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [26-theming.md](plan/26-theming.md) |
 | Bug fixes | Bug fixes | Partially resolved | [bugs.md](plan/bugs.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | [review-findings-2026-07-04.md](plan/review-findings-2026-07-04.md) |
 | Quick wins | Quick wins (added 2026-07-03) | Complete | [quick-wins.md](plan/quick-wins.md) |
