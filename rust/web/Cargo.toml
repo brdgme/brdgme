@@ -42,9 +42,6 @@ resend-rs = { version = "0.27", default-features = false, features = ["rustls-tl
 tower_governor = { version = "0.8", optional = true }
 governor = { version = "0.10", optional = true }
 
-# Redis for pub/sub
-redis = { version = "1.3.0", features = ["tokio-comp"], optional = true }
-
 # Environment variables
 dotenvy = { version = "0.15", optional = true }
 
@@ -60,6 +57,8 @@ gloo-net = { version = "0.6.0", features = ["websocket"] }
 gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3.77", features = ["Location", "Window"] }
 async-nats = { version = "0.49.1", optional = true }
+leptos-use = { version = "0.19", default-features = false, features = ["use_websocket"] }
+codee = { version = "0.3.5", default-features = false }
 
 [features]
 hydrate = [
@@ -89,7 +88,6 @@ ssr = [
     "dep:resend-rs",
     "dep:tower_governor",
     "dep:governor",
-    "dep:redis",
     "dep:brdgme_cmd",
     "dep:brdgme_game",
     "dep:brdgme_color",
@@ -98,6 +96,7 @@ ssr = [
     "dep:tower-http",
     "dep:reqwest",
     "dep:async-nats",
+    "leptos-use/ssr",
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode

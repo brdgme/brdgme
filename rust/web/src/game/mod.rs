@@ -28,16 +28,9 @@ pub async fn broadcast_and_trigger(
     broadcaster: &crate::websocket::GameBroadcaster,
     jetstream: &async_nats::jetstream::Context,
     game_id: uuid::Uuid,
-    public_render: &brdgme_cmd::api::PubRender,
-    player_renders: &[brdgme_cmd::api::PlayerRender],
 ) {
     if let Ok(Some(ge)) = crate::db::find_game_extended(pool, game_id).await {
-        let all_logs = crate::db::get_all_game_logs(pool, game_id)
-            .await
-            .unwrap_or_default();
-        broadcaster
-            .broadcast_game_update(pool, &ge, &all_logs, public_render, player_renders)
-            .await;
+        broadcaster.broadcast_game_update(game_id).await;
         trigger_bot_turns(jetstream, &ge).await;
     }
 }
@@ -103,23 +96,14 @@ pub async fn execute_command(
     )
     .await?;
 
-    let (game_response, logs, can_undo, remaining_input, public_render, player_renders) = match resp
-    {
+    let (game_response, logs, can_undo, remaining_input) = match resp {
         Response::Play {
             game,
             logs,
             can_undo,
             remaining_input,
-            public_render,
-            player_renders,
-        } => (
-            game,
-            logs,
-            can_undo,
-            remaining_input,
-            public_render,
-            player_renders,
-        ),
+            ..
+        } => (game, logs, can_undo, remaining_input),
         Response::UserError { message } => return Err(anyhow::anyhow!("{}", message).into()),
         _ => return Err(anyhow::anyhow!("Unexpected response from game service").into()),
     };
@@ -157,18 +141,7 @@ pub async fn execute_command(
     // Fetch updated state for broadcast and bot triggering
     match crate::db::find_game_extended(pool, game_id).await {
         Ok(Some(updated_ge)) => {
-            let all_logs = crate::db::get_all_game_logs(pool, game_id)
-                .await
-                .unwrap_or_default();
-            broadcaster
-                .broadcast_game_update(
-                    pool,
-                    &updated_ge,
-                    &all_logs,
-                    &public_render,
-                    &player_renders,
-                )
-                .await;
+            broadcaster.broadcast_game_update(game_id).await;
             trigger_bot_turns(jetstream, &updated_ge).await;
         }
         Ok(None) => tracing::warn!(%game_id, "Game not found after command execution"),
@@ -465,11 +438,10 @@ mod tests {
     }
 
     async fn make_broadcaster() -> crate::websocket::GameBroadcaster {
-        let redis_url =
-            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
-        let client = redis::Client::open(redis_url).unwrap();
-        let conn = client.get_multiplexed_async_connection().await.unwrap();
-        crate::websocket::GameBroadcaster::new(conn, client)
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let client = async_nats::connect(&nats_url).await.unwrap();
+        crate::websocket::GameBroadcaster::new(client)
     }
 
     /// Connects to a real NATS server with the `BOT` stream/consumers ensured,

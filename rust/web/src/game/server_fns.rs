@@ -377,13 +377,8 @@ pub async fn create_new_game(
         .await
         .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
 
-        let (game_info, logs, public_render, player_renders) = match resp {
-            Response::New {
-                game,
-                logs,
-                public_render,
-                player_renders,
-            } => (game, logs, public_render, player_renders),
+        let (game_info, logs) = match resp {
+            Response::New { game, logs, .. } => (game, logs),
             _ => return Err(ServerFnError::new("Unexpected response from game service")),
         };
 
@@ -412,15 +407,7 @@ pub async fn create_new_game(
             .await
             .map_err(|e| ServerFnError::new(format!("Failed to create logs: {}", e)))?;
 
-        crate::game::broadcast_and_trigger(
-            &pool,
-            &broadcaster,
-            &jetstream,
-            game.id,
-            &public_render,
-            &player_renders,
-        )
-        .await;
+        crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game.id).await;
 
         Ok(game.id)
     }
@@ -567,12 +554,8 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
 
-        let (game_response, public_render, player_renders) = match resp {
-            Response::Status {
-                game,
-                public_render,
-                player_renders,
-            } => (game, public_render, player_renders),
+        let game_response = match resp {
+            Response::Status { game, .. } => game,
             _ => return Err(ServerFnError::new("Unexpected response from game service")),
         };
 
@@ -591,15 +574,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Failed to undo game: {}", e)))?;
 
-        crate::game::broadcast_and_trigger(
-            &pool,
-            &broadcaster,
-            &jetstream,
-            game_id,
-            &public_render,
-            &player_renders,
-        )
-        .await;
+        crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
         Ok(())
     }
     #[cfg(not(feature = "ssr"))]
@@ -611,9 +586,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
     #[cfg(feature = "ssr")]
     {
         use crate::auth::server::get_current_user;
-        use crate::game::client;
         use crate::websocket::GameBroadcaster;
-        use brdgme_cmd::api::{Request, Response};
         use leptos::prelude::*;
         use sqlx::PgPool;
 
@@ -621,10 +594,6 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
             use_context::<PgPool>().ok_or_else(|| ServerFnError::new("Database pool not found"))?;
         let broadcaster = use_context::<GameBroadcaster>()
             .ok_or_else(|| ServerFnError::new("Broadcaster not found"))?;
-        let http_client = use_context::<reqwest::Client>()
-            .ok_or_else(|| ServerFnError::new("HTTP client not found"))?;
-        let jetstream = use_context::<async_nats::jetstream::Context>()
-            .ok_or_else(|| ServerFnError::new("JetStream not found"))?;
         let user = get_current_user()
             .await?
             .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -653,43 +622,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
             .await
             .map_err(|e| ServerFnError::new(format!("Failed to concede game: {}", e)))?;
 
-        if let Ok(Some(updated_ge)) = crate::db::find_game_extended(&pool, game_id).await {
-            let all_logs = crate::db::get_all_game_logs(&pool, game_id)
-                .await
-                .unwrap_or_default();
-            match client::request(
-                &http_client,
-                &updated_ge.game_version.uri,
-                &Request::Status {
-                    game: updated_ge.game.game_state.clone(),
-                },
-            )
-            .await
-            {
-                Ok(Response::Status {
-                    public_render,
-                    player_renders,
-                    ..
-                }) => {
-                    broadcaster
-                        .broadcast_game_update(
-                            &pool,
-                            &updated_ge,
-                            &all_logs,
-                            &public_render,
-                            &player_renders,
-                        )
-                        .await;
-                    crate::game::trigger_bot_turns(&jetstream, &updated_ge).await;
-                }
-                _ => {
-                    tracing::error!(
-                        "Unexpected response from game service on concede status call for game {}",
-                        game_id
-                    );
-                }
-            }
-        }
+        broadcaster.broadcast_game_update(game_id).await;
         Ok(())
     }
     #[cfg(not(feature = "ssr"))]
@@ -760,13 +693,8 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
 
-        let (game_info, logs, public_render, player_renders) = match resp {
-            Response::New {
-                game,
-                logs,
-                public_render,
-                player_renders,
-            } => (game, logs, public_render, player_renders),
+        let (game_info, logs) = match resp {
+            Response::New { game, logs, .. } => (game, logs),
             _ => return Err(ServerFnError::new("Unexpected response from game service")),
         };
 
@@ -821,39 +749,11 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
         // Broadcast update for the new game.
-        crate::game::broadcast_and_trigger(
-            &pool,
-            &broadcaster,
-            &jetstream,
-            new_game.id,
-            &public_render,
-            &player_renders,
-        )
-        .await;
+        crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, new_game.id).await;
 
         // Broadcast update for the old game with restarted_game_id now set, so
         // the other player's game view updates to show the "Go to new game" link.
-        if let Ok(Some(old_ge)) = crate::db::find_game_extended(&pool, game_id).await
-            && let Ok(Response::Status {
-                public_render: old_pub,
-                player_renders: old_pr,
-                ..
-            }) = client::request(
-                &http_client,
-                &old_ge.game_version.uri,
-                &Request::Status {
-                    game: old_ge.game.game_state.clone(),
-                },
-            )
-            .await
-        {
-            let old_logs = crate::db::get_all_game_logs(&pool, game_id)
-                .await
-                .unwrap_or_default();
-            broadcaster
-                .broadcast_game_update(&pool, &old_ge, &old_logs, &old_pub, &old_pr)
-                .await;
-        }
+        broadcaster.broadcast_game_update(game_id).await;
 
         Ok(new_game.id)
     }

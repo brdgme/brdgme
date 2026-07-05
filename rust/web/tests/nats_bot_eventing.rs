@@ -47,11 +47,10 @@ async fn make_jetstream() -> async_nats::jetstream::Context {
 }
 
 async fn make_broadcaster() -> GameBroadcaster {
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    let client = redis::Client::open(redis_url).unwrap();
-    let conn = client.get_multiplexed_async_connection().await.unwrap();
-    GameBroadcaster::new(conn, client)
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let client = async_nats::connect(&nats_url).await.unwrap();
+    GameBroadcaster::new(client)
 }
 
 /// Async variant of the mock game service (the in-tree unit tests only need

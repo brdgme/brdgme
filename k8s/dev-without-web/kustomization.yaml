@@ -4,4 +4,3 @@ resources:
 - ../base/nats
 - ../base/operator
 - ../base/postgres
-- ../base/redis

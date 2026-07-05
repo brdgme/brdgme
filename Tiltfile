@@ -128,7 +128,6 @@ else:
     )
 
 k8s_resource("postgres", port_forwards=["5432:5432"])
-k8s_resource("redis", port_forwards=["6379:6379"])
 k8s_resource("nats", port_forwards=["4222:4222"])
 
 # Run migrations manually. Trigger from the Tilt UI or via:
@@ -162,6 +161,7 @@ if LEGACY:
     k8s_resource("web-legacy", links=["http://web-legacy.brdgme.lvh.me:8080"])
     k8s_resource("api", links=["http://api.brdgme.lvh.me:8080"])
     k8s_resource("websocket", links=["http://websocket.brdgme.lvh.me:8080"])
+    k8s_resource("redis", port_forwards=["6379:6379"])
 
 # Dev-only Gateway/HTTPRoute set routing by *.brdgme.lvh.me hostname.
 # k8s/base/gateway/ (real hostnames, HTTPS, cert-manager) is prod-only -

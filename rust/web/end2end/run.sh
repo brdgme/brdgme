@@ -2,8 +2,8 @@
 # E2E smoke suite entry point. Boots Postgres schema, the game service, and
 # the release web binary, then runs the Playwright suite against them.
 #
-# Assumes Postgres and Redis are already running (devenv/Tilt locally, a
-# service container in CI) - this script does not start them.
+# Assumes Postgres is already running (devenv/Tilt locally, a service
+# container in CI) - this script does not start it.
 #
 # This script never runs `playwright install`: locally, devenv's
 # PLAYWRIGHT_BROWSERS_PATH points at a Nix-provided Chromium build matching
@@ -17,7 +17,7 @@ WEB_DIR="$(dirname "$END2END_DIR")"
 RUST_DIR="$(dirname "$WEB_DIR")"
 
 export E2E_DATABASE_URL="${E2E_DATABASE_URL:-postgres://brdgme_user:brdgme_password@localhost:5432/brdgme_e2e}"
-export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
+export NATS_URL="${NATS_URL:-nats://localhost:4222}"
 
 GAME_ADDR="127.0.0.1:8100"
 WEB_ADDR="127.0.0.1:3010"
@@ -59,7 +59,6 @@ echo "==> Starting web on $WEB_ADDR"
     unset RESEND_API_KEY
     unset BOT_SERVICE_URL
     export DATABASE_URL="$E2E_DATABASE_URL"
-    export REDIS_URL
     export LEPTOS_OUTPUT_NAME="web"
     export LEPTOS_SITE_ADDR="$WEB_ADDR"
     export LEPTOS_SITE_ROOT="$RUST_DIR/target/site"

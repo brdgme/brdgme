@@ -1,8 +1,6 @@
 use crate::game::server_fns::{
-    BumpBotTurns, ConcedeGame, GameLogEntry, GameViewData, PlayerViewData, RestartGame,
-    SubmitCommand, UndoGame,
+    BumpBotTurns, ConcedeGame, GameViewData, PlayerViewData, RestartGame, SubmitCommand, UndoGame,
 };
-use crate::websocket::BrdgmeGameUpdate;
 use leptos::prelude::*;
 use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
@@ -26,20 +24,25 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let has_bot_waiting = data.players.iter().any(|p| p.is_bot && p.is_turn);
 
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
     let undo_action = ServerAction::<UndoGame>::new();
     let concede_action = ServerAction::<ConcedeGame>::new();
     let restart_action = ServerAction::<RestartGame>::new();
     let bump_bot_action = ServerAction::<BumpBotTurns>::new();
 
-    // Trigger re-fetch after undo/concede.
+    // Trigger re-fetch after undo/concede. Local bump makes the own action
+    // refetch even if the WS is down; the trigger bump is still needed for
+    // the layout header.
     Effect::new(move |_| {
         if let Some(Ok(())) = undo_action.value().get() {
             trigger.set_last_update.update(|n| *n += 1);
+            crate::websocket_client::bump_game_update(game_update, game_id);
         }
     });
     Effect::new(move |_| {
         if let Some(Ok(())) = concede_action.value().get() {
             trigger.set_last_update.update(|n| *n += 1);
+            crate::websocket_client::bump_game_update(game_update, game_id);
         }
     });
 
@@ -214,22 +217,21 @@ fn render_log_entries(
 pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
-    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
-    let logs = LocalResource::new(move || async move { get_game_logs(game_id).await });
-
-    let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
-        if let Some(ws) = ws_game.get()
-            && ws.game_id == game_id
-        {
-            return Some(Ok(ws.logs));
-        }
-        logs.get()
-    };
+    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
+    let seq_for_this_game = Memo::new(move |_| {
+        game_update
+            .get()
+            .and_then(|(id, seq)| (id == game_id).then_some(seq))
+    });
+    let logs = LocalResource::new(move || async move {
+        let _ = seq_for_this_game.get();
+        get_game_logs(game_id).await
+    });
 
     let logs_ref = NodeRef::<leptos::html::Div>::new();
 
     Effect::new(move |_| {
-        let _ = effective_logs();
+        let _ = logs.get();
         leptos::prelude::request_animation_frame(move || {
             if let Some(el) = logs_ref.get_untracked()
                 && let Some(parent) = el.parent_element()
@@ -240,7 +242,7 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
     });
 
     view! {
-        {move || effective_logs().map(|result| match result {
+        {move || logs.get().map(|result| match result {
             Err(_) => view! { <div>"Failed to load logs."</div> }.into_any(),
             Ok(entries) => view! {
                 <div class="game-logs" node_ref=logs_ref>
@@ -255,22 +257,21 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
 pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
-    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
-    let logs = LocalResource::new(move || async move { get_game_logs(game_id).await });
-
-    let effective_logs = move || -> Option<Result<Vec<GameLogEntry>, _>> {
-        if let Some(ws) = ws_game.get()
-            && ws.game_id == game_id
-        {
-            return Some(Ok(ws.logs));
-        }
-        logs.get()
-    };
+    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
+    let seq_for_this_game = Memo::new(move |_| {
+        game_update
+            .get()
+            .and_then(|(id, seq)| (id == game_id).then_some(seq))
+    });
+    let logs = LocalResource::new(move || async move {
+        let _ = seq_for_this_game.get();
+        get_game_logs(game_id).await
+    });
 
     let recent_ref = NodeRef::<leptos::html::Div>::new();
 
     Effect::new(move |_| {
-        let _ = effective_logs();
+        let _ = logs.get();
         leptos::prelude::request_animation_frame(move || {
             if let Some(el) = recent_ref.get_untracked() {
                 el.set_scroll_top(el.scroll_height());
@@ -279,7 +280,7 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     });
 
     view! {
-        {move || effective_logs().map(|result| match result {
+        {move || logs.get().map(|result| match result {
             Err(_) => None,
             Ok(entries) => {
                 let recent: Vec<_> = entries.into_iter().filter(|e| e.is_new).collect();
@@ -322,6 +323,7 @@ pub fn GameCommandInput(
 ) -> impl IntoView {
     let (command, set_command) = signal(String::new());
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
     let input_ref = NodeRef::<leptos::html::Input>::new();
 
     let submit_action = ServerAction::<SubmitCommand>::new();
@@ -334,10 +336,13 @@ pub fn GameCommandInput(
     });
 
     // Clear command, refocus input, and trigger re-fetch on successful submit.
+    // Local bump makes the own action refetch even if the WS is down; the
+    // trigger bump is still needed for the layout header.
     Effect::new(move |_| {
         if let Some(Ok(_)) = submit_action.value().get() {
             set_command.set(String::new());
             trigger.set_last_update.update(|n| *n += 1);
+            crate::websocket_client::bump_game_update(game_update, game_id);
             if let Some(el) = input_ref.get() {
                 let _ = el.focus();
             }

@@ -10,7 +10,6 @@ use uuid::Uuid;
 
 use crate::auth::server::{confirm_login, login};
 use crate::components::MainLayout;
-use crate::websocket::BrdgmeGameUpdate;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -41,7 +40,7 @@ pub fn App() -> impl IntoView {
         last_update,
         set_last_update,
     });
-    provide_context(RwSignal::<Option<BrdgmeGameUpdate>>::new(None));
+    provide_context(RwSignal::<Option<(Uuid, u64)>>::new(None));
     crate::websocket_client::use_websocket();
 
     view! {
@@ -508,7 +507,16 @@ fn GamePage() -> impl IntoView {
             .and_then(|id| Uuid::from_str(id).ok())
     };
 
-    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
+    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
+
+    // Per-game sequence number, isolated from other games' WS updates so this
+    // page's resources don't refetch when a different game changes.
+    let seq_for_this_game = Memo::new(move |_| {
+        let current_id = game_id();
+        game_update
+            .get()
+            .and_then(|(id, seq)| (Some(id) == current_id).then_some(seq))
+    });
 
     // Call mark_read on mount and whenever the game ID changes.
     Effect::new(move |_| {
@@ -519,28 +527,23 @@ fn GamePage() -> impl IntoView {
         }
     });
 
-    // Initial load only - WS signal handles subsequent updates.
     // Blocking so SSR waits for data and serialises it to the client, avoiding
     // a second fetch on hydration and preventing the stuck-loading state on
-    // hard refresh.
-    let game_data = Resource::new_blocking(game_id, |id| async move {
-        match id {
-            Some(id) => get_game_details(id).await,
-            None => Err(ServerFnError::new("Invalid Game ID")),
-        }
-    });
+    // hard refresh. Re-keyed on the per-game WS sequence memo, which isolates
+    // this page's refetches to this game's WS signals.
+    let game_data = Resource::new_blocking(
+        move || (game_id(), seq_for_this_game.get()),
+        |(id, _)| async move {
+            match id {
+                Some(id) => get_game_details(id).await,
+                None => Err(ServerFnError::new("Invalid Game ID")),
+            }
+        },
+    );
 
     // is_my_turn starts false in hydrate mode (Memo returns false until resource
     // deserializes). This only changes a CSS class — no structural mismatch.
     let is_my_turn = Memo::new(move |_| {
-        let current_id = game_id();
-        let from_ws = ws_game
-            .get()
-            .filter(|ws| Some(ws.game_id) == current_id)
-            .map(|ws| ws.game_view.is_my_turn);
-        if let Some(v) = from_ws {
-            return v;
-        }
         game_data
             .get()
             .and_then(|r| r.ok())
@@ -559,13 +562,8 @@ fn GamePage() -> impl IntoView {
         >
             <Suspense fallback=|| view! { <div></div> }>
                 {move || {
-                    let base = game_data.get(); // read first so Suspense tracks it
-                    let current_id = game_id();
-                    let effective = ws_game.get()
-                        .filter(|ws| Some(ws.game_id) == current_id)
-                        .map(|ws| Ok(ws.game_view))
-                        .or(base);
-                    effective.map(|res| match res {
+                    let base = game_data.get();
+                    base.map(|res| match res {
                         Err(e) => view! { <div class="error">"Error: " {e.to_string()}</div> }.into_any(),
                         Ok(data) => {
                             let is_turn = data.is_my_turn;

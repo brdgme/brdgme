@@ -14,13 +14,6 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let pool = create_pool().await.expect("Failed to create database pool");
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://redis".to_string());
-    let redis_client = redis::Client::open(redis_url).expect("Failed to create Redis client");
-    let redis_conn = redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .expect("Failed to connect to Redis");
-    let broadcaster = GameBroadcaster::new(redis_conn, redis_client);
     let http_client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(10))
@@ -28,12 +21,14 @@ async fn main() {
         .expect("Failed to build HTTP client");
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://nats:4222".to_string());
-    let jetstream = web::nats::connect(&nats_url)
+    let nats_client = async_nats::connect(&nats_url)
         .await
         .expect("Failed to connect to NATS");
+    let jetstream = async_nats::jetstream::new(nats_client.clone());
     web::nats::ensure_stream_and_consumers(&jetstream)
         .await
         .expect("Failed to create/get BOT stream and consumers");
+    let broadcaster = GameBroadcaster::new(nats_client);
 
     tokio::spawn({
         let pool = pool.clone();

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE game_versions SET is_deprecated = true WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "adc89190f3ddb4c0fd5efbbbdd7a81163a95cbb22c648a3d6a1273c186146644"
+}

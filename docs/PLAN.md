@@ -66,7 +66,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); prod prerequisites pending | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
 | 15 | Production CD (ArgoCD) | Pending | [15-production-cd-argocd.md](plan/15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; revised 2026-07-04) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
-| 17 | NATS Migration + WS simplification | Pending - resequenced pre-cutover 2026-07-04 | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
+| 17 | NATS Migration + WS simplification | Complete (2026-07-05) | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
 | 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04; probes & observability section added 2026-07-05 | [18-production-hardening.md](plan/18-production-hardening.md) |
 | 19 | CloudNativePG | Pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
 | 20 | external-dns | Pending | [20-external-dns.md](plan/20-external-dns.md) |

@@ -769,11 +769,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
- "futures-core",
  "memchr",
- "pin-project-lite",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -1005,6 +1001,16 @@ dependencies = [
 
 [[package]]
 name = "darling"
+version = "0.20.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
+dependencies = [
+ "darling_core 0.20.11",
+ "darling_macro 0.20.11",
+]
+
+[[package]]
+name = "darling"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
@@ -1021,6 +1027,20 @@ checksum = "25ae13da2f202d56bd7f91c25fba009e7717a1e4a1cc98a76d844b65ae912e9d"
 dependencies = [
  "darling_core 0.23.0",
  "darling_macro 0.23.0",
+]
+
+[[package]]
+name = "darling_core"
+version = "0.20.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -1047,6 +1067,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.20.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
+dependencies = [
+ "darling_core 0.20.11",
+ "quote",
  "syn 2.0.118",
 ]
 
@@ -1091,6 +1122,18 @@ name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
+
+[[package]]
+name = "default-struct-builder"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0df63c21a4383f94bd5388564829423f35c316aed85dc4f8427aded372c7c0d"
+dependencies = [
+ "darling 0.20.11",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
 
 [[package]]
 name = "defmt"
@@ -2905,6 +2948,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "leptos-use"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc07f2657dcc366ef2d80045354143f6e0a86919763a1a5753cd3871f8f95e2d"
+dependencies = [
+ "cfg-if",
+ "codee",
+ "default-struct-builder",
+ "js-sys",
+ "lazy_static",
+ "leptos",
+ "paste",
+ "send_wrapper",
+ "thiserror 2.0.18",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "leptos_axum"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4194,20 +4257,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fa6f8e4b491d7a8ef3a9550a4d71969bd0064f46e32b8dbbcc7fc60dad94fed"
 dependencies = [
  "arcstr",
- "async-lock",
- "bytes",
- "cfg-if",
  "combine",
- "futures-util",
  "itoa",
  "num-bigint",
  "percent-encoding",
- "pin-project-lite",
  "ryu",
  "sha1_smol",
  "socket2 0.6.4",
- "tokio",
- "tokio-util",
  "url",
  "xxhash-rust",
 ]
@@ -6625,6 +6681,7 @@ dependencies = [
  "brdgme_color",
  "brdgme_game",
  "brdgme_markup",
+ "codee",
  "console_error_panic_hook",
  "dotenvy",
  "futures-util",
@@ -6633,11 +6690,11 @@ dependencies = [
  "gloo-timers 0.4.0",
  "governor",
  "leptos",
+ "leptos-use",
  "leptos_axum",
  "leptos_meta",
  "leptos_router",
  "rand 0.10.2",
- "redis",
  "reqwest",
  "resend-rs",
  "serde",

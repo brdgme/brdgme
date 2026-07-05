@@ -18,7 +18,6 @@ jobs:
     env:
       SQLX_OFFLINE: "true"
       DATABASE_URL: "postgres://postgres:postgres@localhost/brdgme"
-      REDIS_URL: "redis://localhost:6379"
       NATS_URL: "nats://localhost:4222"
     services:
       postgres:
@@ -31,15 +30,6 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:8
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -114,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       E2E_DATABASE_URL: "postgres://postgres:postgres@localhost/brdgme_e2e"
-      REDIS_URL: "redis://localhost:6379"
+      NATS_URL: "nats://localhost:4222"
     services:
       postgres:
         image: postgres:18
@@ -129,17 +119,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:8
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v7
+      # GitHub Actions `services:` containers can't take extra CLI args (no
+      # way to append `-js` to the image's default command), so NATS is
+      # started as a plain step instead - JetStream needs that flag.
+      - name: Start NATS (JetStream)
+        run: |
+          docker run -d --name nats -p 4222:4222 -p 8222:8222 \
+            nats:2.11-alpine -js -sd /data -m 8222
+          for i in $(seq 30); do
+            curl -sf http://localhost:8222/healthz && break
+            sleep 1
+          done
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown

@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug)]
 pub struct WebSocketTrigger {
@@ -6,75 +7,41 @@ pub struct WebSocketTrigger {
     pub set_last_update: WriteSignal<u64>,
 }
 
+/// Bumps the game-changed context to a fresh (game_id, seq) pair, deriving
+/// seq from the current context value (prev + 1) rather than a separate
+/// counter - a second independent counter could reproduce a seq already seen
+/// for that game, and the PartialEq-deduping memos would silently drop the
+/// refetch. Used both by the WS message handler and by post-action success
+/// effects so an own action refetches even if the WS is down.
+pub fn bump_game_update(game_update: RwSignal<Option<(Uuid, u64)>>, game_id: Uuid) {
+    game_update.update(|v| {
+        let next = v.map(|(_, s)| s + 1).unwrap_or(1);
+        *v = Some((game_id, next));
+    });
+}
+
 #[cfg(feature = "hydrate")]
 pub fn use_websocket() {
-    use crate::websocket::{BrdgmeGameUpdate, WebSocketMessage};
-    use futures_util::StreamExt;
-    use gloo_net::websocket::futures::WebSocket;
-    use leptos::logging::log;
-    use leptos::task::spawn_local;
+    use crate::websocket::GameUpdateSignal;
+    use codee::string::FromToStringCodec;
+    use leptos_use::{
+        DummyEncoder, ReconnectLimit, UseWebSocketOptions, use_websocket_with_options,
+    };
 
     let trigger = expect_context::<WebSocketTrigger>();
-    let ws_game = expect_context::<RwSignal<Option<BrdgmeGameUpdate>>>();
+    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
 
-    spawn_local(async move {
-        let loc = web_sys::window()
-            .expect("window should be available")
-            .location();
-        let protocol = match loc.protocol() {
-            Ok(p) if p == "https:" => "wss:",
-            Ok(_) => "ws:",
-            Err(e) => {
-                log!(
-                    "WebSocket: failed to read location.protocol: {:?}, defaulting to ws:",
-                    e
-                );
-                "ws:"
-            }
-        };
-        let host = match loc.host() {
-            Ok(h) => h,
-            Err(e) => {
-                log!(
-                    "WebSocket: failed to read location.host: {:?}, cannot connect",
-                    e
-                );
-                return;
-            }
-        };
-        let url = format!("{}//{}/ws", protocol, host);
-
-        loop {
-            match WebSocket::open(&url) {
-                Ok(mut ws) => {
-                    while let Some(msg) = ws.next().await {
-                        match msg {
-                            Ok(gloo_net::websocket::Message::Text(text)) => {
-                                if let Ok(WebSocketMessage::BrdgmeUpdate(update)) =
-                                    serde_json::from_str::<WebSocketMessage>(&text)
-                                {
-                                    ws_game.set(Some(update));
-                                    trigger.set_last_update.update(|n| *n += 1);
-                                }
-                            }
-                            Err(e) => {
-                                log!("WebSocket error: {:?}", e);
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                    log!("WebSocket disconnected, reconnecting...");
+    let _ = use_websocket_with_options::<String, String, FromToStringCodec, (), DummyEncoder>(
+        "/ws",
+        UseWebSocketOptions::default()
+            .reconnect_limit(ReconnectLimit::Infinite)
+            .on_message_raw(move |text: &str| {
+                if let Ok(signal) = serde_json::from_str::<GameUpdateSignal>(text) {
+                    trigger.set_last_update.update(|n| *n += 1);
+                    bump_game_update(game_update, signal.game_id);
                 }
-                Err(e) => {
-                    log!("WebSocket connect failed: {:?}", e);
-                }
-            }
-
-            // Brief pause before reconnect to avoid tight loop on persistent failures.
-            gloo_timers::future::TimeoutFuture::new(2_000).await;
-        }
-    });
+            }),
+    );
 }
 
 #[cfg(not(feature = "hydrate"))]

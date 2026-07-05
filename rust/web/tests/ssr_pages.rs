@@ -33,21 +33,14 @@ use web::state::AppState;
 use web::websocket::GameBroadcaster;
 
 async fn make_state(pool: PgPool) -> AppState {
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    let redis_client = redis::Client::open(redis_url).expect("redis client");
-    let redis_conn = redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .expect("redis connection");
-    let broadcaster = GameBroadcaster::new(redis_conn, redis_client);
-
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-    let jetstream = web::nats::connect(&nats_url).await.expect("nats connect");
+    let nats_client = async_nats::connect(&nats_url).await.expect("nats connect");
+    let jetstream = async_nats::jetstream::new(nats_client.clone());
     web::nats::ensure_stream_and_consumers(&jetstream)
         .await
         .expect("nats stream/consumers");
+    let broadcaster = GameBroadcaster::new(nats_client);
 
     AppState {
         leptos_options: leptos::config::LeptosOptions::builder()
