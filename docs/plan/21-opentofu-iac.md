@@ -1,8 +1,7 @@
 # 21: OpenTofu Infrastructure as Code
 
-**Status:** Stage 1 applied, Route53 records verified, NS switched to DO
-(all 2026-07-05); remaining: Route53 zone deletion (~2026-07-12), then
-stage-2 apply (cluster) when ready to spend - human-paced
+**Status:** Stage 1 and stage-2 (DOKS cluster) both applied 2026-07-05;
+remaining: Route53 zone deletion (~2026-07-12)
 
 **Decision (2026-07-03 tech review):** describe the DigitalOcean account
 infrastructure in OpenTofu (Linux Foundation Terraform fork; open source,
@@ -25,7 +24,12 @@ minimise spend without hacks; prefer managed where free/cheap. Target floor
 ($12) + Spaces flat subscription ($5, covers ALL buckets). Constraints the
 tofu config must preserve:
 
-- No HA control plane (`ha` stays unset/false - HA is $40/mo).
+- No HA control plane (`ha = false` explicit in `cluster.tf` - HA is
+  $40/mo. Must be explicit, not just unset: since DOKS 1.36.0 (May 2026)
+  DO enables HA by default when the field is left unset, and HA cannot be
+  disabled after creation - discovered 2026-07-05 when the first stage-2
+  apply landed with `ha: true`, requiring a destroy/recreate of the
+  cluster to fix).
 - Single node pool, basic (shared CPU) tier, no cluster autoscaling. Node
   scaling is a **manual human decision** - `ignore_changes = [node_pool]`
   on the cluster resource is deliberate and must stay.
@@ -65,10 +69,14 @@ tofu config must preserve:
       Done 2026-07-05.
 - [ ] Delete the Route53 zone after ~a week (kept as fallback until
       ~2026-07-12) to stop its charge.
-- [ ] Stage-2 apply (the DOKS cluster) when ready to deploy - billing
-      starts at creation.
+- [x] Stage-2 apply (the DOKS cluster). Done 2026-07-05: `brdgme` cluster
+      created in `syd1`, version `1.36.0-do.2`, `s-2vcpu-4gb` single node,
+      `ha=false`, VPC-native. Recreated once after the first apply landed
+      with `ha=true` (DOKS 1.36.0 default-flip, see cost posture note
+      above) - `tofu plan` now shows no changes.
 - [x] Encode the Phase 14 prerequisite: cluster version >= 1.33 with
-      VPC-native networking.
+      VPC-native networking. Verified live: see
+      `docs/plan/14-drop-knative-gateway-api.md`.
 - [x] Create new resources (CNPG backup bucket for Phase 19, state bucket)
       via tofu from the start. Both exist and are in state.
 

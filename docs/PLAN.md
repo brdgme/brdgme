@@ -63,15 +63,15 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 11 | Testing Foundation | Complete (completed 2026-07-04) | [11-testing-foundation.md](plan/11-testing-foundation.md) |
 | 12 | ELO Ratings | Complete | [12-elo-ratings.md](plan/12-elo-ratings.md) |
 | 13 | NATS Bot Eventing | Complete (2026-07-05) | [13-nats-bot-eventing.md](plan/13-nats-bot-eventing.md) |
-| 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); prod prerequisites pending | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
+| 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); cluster version/VPC-native/GatewayClass prereq verified 2026-07-05, other prod prereqs pending | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
 | 15 | Production CD (ArgoCD) | Pending | [15-production-cd-argocd.md](plan/15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; revised 2026-07-04) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
 | 17 | NATS Migration + WS simplification | Complete (2026-07-05) | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
 | 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04; probes & observability section added 2026-07-05 | [18-production-hardening.md](plan/18-production-hardening.md) |
 | 19 | CloudNativePG | Dev complete (Kind); prod pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
 | 20 | external-dns | Pending | [20-external-dns.md](plan/20-external-dns.md) |
-| 21 | OpenTofu Infrastructure as Code | Stage 1 applied, NS switched to DO 2026-07-05; stage-2 (cluster) pending - human-paced | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
-| 22 | Email via Resend | 22a code complete (landed 77a2092); Resend account + DNS records in tofu 2026-07-05; prod secret + live-inbox check + 22b-22d pending | [22-email-via-resend.md](plan/22-email-via-resend.md) |
+| 21 | OpenTofu Infrastructure as Code | Stage 1 and stage-2 (DOKS cluster) both applied 2026-07-05; Route53 zone deletion pending (~2026-07-12) | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
+| 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending | [22-email-via-resend.md](plan/22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [23-rust-game-ports.md](plan/23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [24-game-invites.md](plan/24-game-invites.md) |
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [25-rules-rendering.md](plan/25-rules-rendering.md) |

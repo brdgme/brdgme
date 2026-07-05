@@ -3,13 +3,15 @@
 # required for the managed Gateway API (GatewayClass) DOKS provides on
 # Cilium.
 #
-# Cost posture (docs/plan/21-opentofu-iac.md): `ha` deliberately left at its
-# default (false) - the HA control plane is $40/mo. Single basic node pool,
-# no autoscaling.
+# Cost posture (docs/plan/21-opentofu-iac.md): `ha = false` must be explicit -
+# the HA control plane is $40/mo, and since DOKS 1.36.0 (May 2026) DO enables
+# HA by default when the field is unset. HA cannot be disabled after creation,
+# only avoided at create time. Single basic node pool, no autoscaling.
 resource "digitalocean_kubernetes_cluster" "brdgme" {
   name     = var.cluster_name
   region   = var.region
   vpc_uuid = digitalocean_vpc.brdgme.id
+  ha       = false
 
   version = var.cluster_version
 

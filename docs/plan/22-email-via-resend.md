@@ -53,8 +53,11 @@ Resend test-mode API key in `.env` - the same pattern the bot uses for
       `SMTP_HOST`-unset fallback) and `EMAIL_FROM` (default
       `login@brdg.me`). Removed `SMTP_HOST`/`SMTP_PORT`/`SMTP_FROM`
       handling, the `lettre` dependency, and updated `.env.template`.
-- [ ] Prod config (SealedSecret once Phase 15 lands; plain Secret before):
-      `RESEND_API_KEY`, `EMAIL_FROM`. *(human/infra - not done here)*
+- [x] Prod config (SealedSecret once Phase 15 lands; plain Secret before):
+      `RESEND_API_KEY`, `EMAIL_FROM`. Done 2026-07-05: `email-config`
+      Secret created in the `brdgme` namespace on the new DOKS cluster
+      (item 21 stage-2). Not yet referenced by any Deployment - the app
+      isn't deployed to this cluster until items 15/16.
 - [x] Delete `k8s/base/smtp/` from the new-system overlays and the
       Tiltfile. Checked whether the legacy stack (`rust/api`) sends
       through the in-cluster `smtp` Service: it does not (`Mail::Relay`/
@@ -62,9 +65,15 @@ Resend test-mode API key in `.env` - the same pattern the bot uses for
       read - the one call site in `controller/auth.rs` is commented out),
       so `k8s/base/smtp/` was deleted outright rather than moved to a
       legacy overlay.
-- [ ] Verify: a prod login email lands in a real Gmail inbox - not spam -
+- [x] Verify: a prod login email lands in a real Gmail inbox - not spam -
       with SPF, DKIM, and DMARC all passing (inspect the received headers).
-      *(human/infra - not done here)*
+      Done 2026-07-05, ahead of app deployment: sent directly via the
+      Resend HTTP API (`login@brdg.me` -> Gmail) since the app isn't on
+      the new cluster yet. Landed in inbox; headers show
+      `spf=pass`, `dkim=pass` (both `d=brdg.me s=resend` and
+      `d=amazonses.com`), `dmarc=pass`. The full in-app login-email check
+      (via `resend-rs` in the running web service) stays on the item 16
+      cutover checklist.
 - [x] Rate-limit the login endpoint (the only email-sending route today)
       with `tower_governor` per client IP (added 2026-07-03 final pass):
       without it, anyone hammering the login form drains the 100/day Resend

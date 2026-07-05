@@ -1,6 +1,9 @@
 # 14: Drop Knative - Plain Deployments + Gateway API
 
-**Status:** Dev complete (landed fc7cb3f); prod prerequisites pending
+**Status:** Dev complete (landed fc7cb3f); cluster version/VPC-native/
+GatewayClass prerequisite verified 2026-07-05 (item 21 stage-2); LB
+WebSocket behavior, client-IP preservation, and Knative-cleanup
+prerequisites still pending
 
 **Implementation (2026-07-03):** all delegable items done. Gateway exposure in
 Kind uses a NodePort pin on Cilium's per-Gateway LoadBalancer Service (see
@@ -135,9 +138,15 @@ final infrastructure.
 
 ### Prod prerequisites
 
-- [ ] Verify the DOKS cluster is >= Kubernetes 1.33 with VPC-native
+- [x] Verify the DOKS cluster is >= Kubernetes 1.33 with VPC-native
       networking so the managed Gateway API (GatewayClass) is available;
-      plan a cluster upgrade if not.
+      plan a cluster upgrade if not. Confirmed 2026-07-05 on the `brdgme`
+      cluster (stage-2 tofu apply, item 21): version `1.36.0-do.2`,
+      `cluster_subnet`/`service_subnet` set and `vpc_uuid` bound
+      (VPC-native), `GatewayClass/cilium` present with
+      `controller: io.cilium/gateway-controller`, `ACCEPTED: True`. No
+      Gateway resource created yet - deferred to Phase 16 (each Gateway
+      provisions a $12/mo DO LB; the cluster must only ever have one).
 - [ ] Confirm behaviour of the auto-provisioned DO load balancer for
       WebSockets: long-lived connection support and idle timeout
       configuration (the monolith holds a WS per connected client).
