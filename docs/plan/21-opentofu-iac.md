@@ -6,10 +6,10 @@ remaining: Route53 zone deletion (~2026-07-12)
 **Decision (2026-07-03 tech review):** describe the DigitalOcean account
 infrastructure in OpenTofu (Linux Foundation Terraform fork; open source,
 matching project principles). Scope is only what Kubernetes cannot
-self-describe: the DOKS cluster, the VPC, the `brdg.me` DNS zone (the zone
-belongs to tofu, records to external-dns), the Spaces bucket for CNPG
-backups, and the Spaces bucket for tofu state. The Gateway-provisioned load
-balancer is NOT managed here - DOKS owns it.
+self-describe: the DOKS cluster, the VPC, the `brdg.me` DNS zone and its
+records (all managed directly in `infra/dns.tf`), the Spaces bucket for
+CNPG backups, and the Spaces bucket for tofu state. The Gateway-provisioned
+load balancer is NOT managed here - DOKS owns it.
 
 **Sequencing (revised 2026-07-04):** entirely human-operated (account
 credentials), and now scheduled **first** among the pre-go-live infra
@@ -79,4 +79,10 @@ tofu config must preserve:
       `docs/plan/14-drop-knative-gateway-api.md`.
 - [x] Create new resources (CNPG backup bucket for Phase 19, state bucket)
       via tofu from the start. Both exist and are in state.
+- [ ] Cutover hostname records (added 2026-07-05, supersedes Phase 20's
+      external-dns controller plan, see docs/plan/20-external-dns.md):
+      once the Gateway (Phase 14) is live in prod and its LB IP is known,
+      add A records for `brdg.me`, `legacy.brdg.me` (break-glass rollback
+      only), `api.brdg.me`, `ws.brdg.me` to `infra/dns.tf`. Human-operated
+      (needs the live LB IP), part of the Phase 16 cutover runbook.
 

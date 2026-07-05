@@ -11,15 +11,19 @@ day one of prod traffic - the Phase 16 validation gate explicitly checks
 VictoriaLogs for unexplained 5xx/panics.
 
 **Delegation gap:** every open item here needs a decision or spec first:
-- **`ErrorBoundary`:** which components get boundaries (list them), what each
-  fallback renders, and whether recovery (retry/reload) is offered.
-- **WASM source maps:** currently an investigation ("check the option") - do
-  the research, then write the resulting config task.
 - **Log aggregation:** decided 2026-07-03 - VictoriaLogs (see the task
   below). Remaining spec work: exact manifests, retention figure, and which
   structured fields become stream fields.
 - **Alerting:** thresholds, alert destinations (email? something else?), and
   what tool evaluates the rules.
+
+**Note (2026-07-05):** client-side error *telemetry* - getting production
+users' WASM panics to reach the operator at all - remains a known gap. It is
+intentionally deferred as a separate future decision (Sentry, a
+panic-reporting endpoint, etc. are all out of scope here). The WASM source
+maps item below is a local debugging aid only: it makes a panic already
+visible in someone's browser console (or reported by a user) resolve to a
+real Rust file:line, not a mechanism for getting that panic to the operator.
 
 ### WASM client
 
@@ -27,16 +31,61 @@ VictoriaLogs for unexplained 5xx/panics.
       Panics write the message and location to the browser console before
       aborting, even in release builds.
 
-- [ ] **`ErrorBoundary`**: wrap key page sections (`GamePage`, `DashboardPage`)
-      in Leptos `<ErrorBoundary>` components so a component error renders a
-      fallback instead of silently breaking the UI. Without this, a panic or
-      unhandled error in the game view leaves the user with a blank or frozen
-      component and no indication of what happened.
+- [x] **ErrorBoundary**: investigated 2026-07-05 — Leptos's `<ErrorBoundary>`
+      only catches `Result::Err` rendered in the view, not Rust panics.
+      Audited every resource fetch in `rust/web` (GamePage, GameLogs,
+      SidebarMenu, DashboardPage) — each already hand-rolls an
+      `Err(...) => <fallback>` match arm. `RecentGameLogs` deliberately
+      swallows errors since `GameLogs`'s sidebar shows the authoritative
+      failure message for the same data. No gap to fill; nothing added.
 
-- [ ] **WASM source maps**: configure `cargo-leptos` to emit source maps in
-      release builds. This makes browser console stack traces show Rust source
-      locations rather than raw WASM offsets. Check `Cargo.toml`
-      `[package.metadata.leptos]` for the `source-map` option when evaluating.
+- [ ] **WASM source maps**: investigated and prototyped end-to-end
+      2026-07-05 - **blocked on a toolchain crash, not implemented.**
+      Local debugging aid only (see note above), not telemetry.
+
+      Recipe researched and confirmed correct in principle: (1) set
+      `debug = true` on the `wasm-release` profile so `rustc` emits DWARF
+      into the `wasm32-unknown-unknown` output; (2) `cargo-leptos` 0.3.6
+      already has a native `--wasm-debug` flag ("Include debug information
+      in Wasm output. Includes source maps and DWARF debug info") that
+      passes `--keep-debug`/`--debug` to `wasm-bindgen` so the DWARF
+      survives bindgen's walrus-based rewrite (the earlier premise that
+      cargo-leptos has no native option was wrong - it does, just not
+      documented in the book); (3) a `.wasm.map` would then be produced
+      from the DWARF via `llvm-dwarfdump` + a vendored copy of
+      Emscripten's `tools/wasm-sourcemap.py` (binaryen does not ship this
+      script despite being the more commonly cited source - confirmed by
+      inspecting the nixpkgs `binaryen` derivation, which only installs
+      compiled tools, no Python scripts; `llvm-dwarfdump` isn't in
+      `devenv.nix` yet either, but nixpkgs `llvm` provides it).
+
+      **What actually blocks it:** `cargo-leptos` always runs `wasm-opt`
+      on release builds (no supported way to skip it - only
+      `wasm-opt-features` to change its flags, not disable it), and the
+      pinned toolchain's `wasm-opt` (binaryen 129 via `devenv.nix`, the
+      current nixpkgs version) **segfaults/aborts unconditionally on any
+      `wasm-bindgen --keep-debug` output that contains a DWARF
+      `.debug_info` section** - reproduced twice: once in an isolated
+      throwaway crate, once against the real `rust/web` build via
+      `cargo leptos build --release --wasm-debug --frontend-only`. The
+      crash happens even with zero optimization passes (a plain
+      parse-and-rewrite), so no flag combination avoids it - this is a
+      hard incompatibility between this rustc's DWARF output and this
+      binaryen version, not a tuning problem. Separately, even if the
+      crash weren't there, skipping `wasm-opt` entirely to keep DWARF
+      inflates the shipped `web.wasm` from ~1.2MB to ~92MB (measured) -
+      unacceptable for a render-blocking asset, and cargo-leptos has no
+      option to run `wasm-opt` post-strip while keeping DWARF around only
+      long enough to snapshot a source map first.
+
+      **What would unblock it:** a `binaryen`/`wasm-opt` release that
+      doesn't crash on this DWARF shape (untested - nixpkgs' 129 is
+      already close to current), or a `cargo-leptos` release that adopts
+      the emscripten pattern of skipping `wasm-opt` specifically for
+      debug builds and running it separately on a DWARF-stripped copy
+      before the sourcemap snapshot is taken. Revisit if either upstream
+      changes; no repo changes were made (Cargo.toml profile edits made
+      during the prototype were reverted).
 
 ### Server (SSR / Axum)
 

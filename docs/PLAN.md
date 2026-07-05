@@ -12,9 +12,10 @@ cluster prereqs, DNS zone, buckets) → #22a Resend outbound remaining
 steps (domain verification via tofu, prod secret, live-inbox check) →
 #14 prod prerequisites → #13 NATS bot eventing (JetStream) →
 #17 NATS WS migration (now pre-cutover) → #19 CloudNativePG →
-#15 ArgoCD + sealed-secrets → #20 external-dns → #18
+#15 ArgoCD + sealed-secrets → #18
 hardening (VictoriaLogs, now pre-cutover) → #16 hard cutover + 1-week
-validation gate → decommission.
+validation gate → decommission. (#20 external-dns retired 2026-07-05 -
+no viable DO provider; see 20-external-dns.md.)
 **Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
 #24 game invites → #25 rules rendering → #26 theming/dark mode →
 #23 Rust game ports (ongoing).
@@ -69,7 +70,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 17 | NATS Migration + WS simplification | Complete (2026-07-05) | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |
 | 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04; probes & observability section added 2026-07-05 | [18-production-hardening.md](plan/18-production-hardening.md) |
 | 19 | CloudNativePG | Dev complete (Kind); prod pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
-| 20 | external-dns | Pending | [20-external-dns.md](plan/20-external-dns.md) |
+| 20 | external-dns | Superseded 2026-07-05 - folded into Phases 16/21 | [20-external-dns.md](plan/20-external-dns.md) |
 | 21 | OpenTofu Infrastructure as Code | Stage 1 and stage-2 (DOKS cluster) both applied 2026-07-05; Route53 zone deletion pending (~2026-07-12) | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
 | 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending | [22-email-via-resend.md](plan/22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [23-rust-game-ports.md](plan/23-rust-game-ports.md) |
@@ -119,3 +120,9 @@ render-time specialization; web UI post-go-live, email folded after 22b).
 "Delegation Readiness (assessed 2026-07-02)" section was deleted rather than
 moved - it was stale, and every delegation-gap note it referenced already
 exists inline in the relevant phase file.
+
+2026-07-05: Phase 20 (external-dns) retired - DigitalOcean's in-tree
+external-dns provider was removed upstream (v0.21.0); the only replacement
+is an unreviewed third-party webhook. DNS record management for the
+cutover hostnames folds into Phase 21's infra/dns.tf and the Phase 16
+cutover runbook instead.

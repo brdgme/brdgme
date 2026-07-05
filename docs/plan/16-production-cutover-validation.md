@@ -18,8 +18,8 @@ passes.
 **Preconditions (the go-live stack, all pre-cutover):** Phase 21 (OpenTofu),
 Phase 22a human steps (Resend domain), Phase 14 prod prerequisites,
 Phase 13 (NATS bot eventing), Phase 17 (NATS WS + skinny payloads),
-Phase 19 (CNPG), Phase 15 (ArgoCD + sealed-secrets), Phase 20
-(external-dns), Phase 18 (VictoriaLogs + alerting).
+Phase 19 (CNPG), Phase 15 (ArgoCD + sealed-secrets), Phase 18
+(VictoriaLogs + alerting).
 
 **Delegation note:** operator-driven by nature (production deploys, DNS,
 live verification) - not agent-delegable. The agent-delegable subtask is the
@@ -39,8 +39,8 @@ The legacy manifests and image builds below were completed for the original
 side-by-side plan. They are retained, but their role changes: `LEGACY=1` dev
 mode in Kind, and the break-glass rollback bundle for prod. They are **not**
 included in the prod kustomization and get no prod hostnames or DNS records
-(`legacy.brdg.me`/`api.brdg.me`/`ws.brdg.me` are not created; external-dns
-has nothing to manage for them).
+(`legacy.brdg.me`/`api.brdg.me`/`ws.brdg.me` are not created in
+`infra/dns.tf`).
 
 - [x] New Leptos app: `rust/Dockerfile` `web` target → `brdgme/web`. k8s
       manifests in `k8s/base/web/` unchanged.
@@ -77,11 +77,12 @@ has nothing to manage for them).
       bytes to an Envoy not yet expecting them and breaks all traffic. See
       docs/plan/14-drop-knative-gateway-api.md prod-prerequisites section.
 - [ ] Deploy the full new stack to prod via ArgoCD (Phase 15) onto CNPG
-      (Phase 19), NATS (13/17), Gateway API (14), with external-dns (20)
-      managing `brdg.me` from the HTTPRoute.
+      (Phase 19), NATS (13/17), Gateway API (14).
 - [ ] Verify TLS issuance (HTTP01 through the Gateway) for `brdg.me`.
-- [ ] Point `brdg.me` at the new system (external-dns/HTTPRoute - a git
-      operation after Phase 20).
+- [ ] Get the Gateway's DO Load Balancer IP (`kubectl get gateway brdgme -n
+      brdgme -o jsonpath='{.status.addresses}'` or the DO console), add/update
+      A records for `brdg.me`, `api.brdg.me`, `ws.brdg.me` in `infra/dns.tf`
+      (see docs/plan/20-external-dns.md), `tofu apply`.
 - [ ] Smoke-test immediately (see validation criteria) with VictoriaLogs
       (Phase 18) open.
 
@@ -116,8 +117,9 @@ Both systems share the database; rollback is redeploy + routing, no data
 migration. Sessions differ (cookie vs Bearer token) so users re-login.
 
 - Apply `k8s/prod-rollback/` (legacy trio + Redis + routes), verify the
-  legacy stack is serving, then point apex at it (HTTPRoute/external-dns
-  git operation). Minutes, not seconds - acceptable for this project.
+  legacy stack is serving, then point apex at it (update `infra/dns.tf` to
+  the rollback LB IP, `tofu apply`). Minutes, not seconds - acceptable for
+  this project.
 - Games created or finished via the new system remain valid for legacy
   (same schema); no cleanup needed.
 - Note: ELO ratings columns and other new-system-only writes are ignored by
