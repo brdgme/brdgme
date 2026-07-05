@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: liars-dice-1
+  name: no-thanks-2
   namespace: brdgme
 spec:
-  typeName: Liar's Dice
+  typeName: No Thanks
   weight: 1.0
-  isDeprecated: true

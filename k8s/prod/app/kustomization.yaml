@@ -51,6 +51,9 @@ images:
 - name: brdgme/liars-dice-1
   newName: ghcr.io/brdgme/brdgme/liars-dice-1
   newTag: latest
+- name: brdgme/liars-dice-2
+  newName: ghcr.io/brdgme/brdgme/liars-dice-2
+  newTag: latest
 - name: brdgme/love-letter-1
   newName: ghcr.io/brdgme/brdgme/love-letter-1
   newTag: latest
@@ -59,6 +62,9 @@ images:
   newTag: latest
 - name: brdgme/no-thanks-1
   newName: ghcr.io/brdgme/brdgme/no-thanks-1
+  newTag: latest
+- name: brdgme/no-thanks-2
+  newName: ghcr.io/brdgme/brdgme/no-thanks-2
   newTag: latest
 - name: brdgme/roll-through-the-ages-1
   newName: ghcr.io/brdgme/brdgme/roll-through-the-ages-1

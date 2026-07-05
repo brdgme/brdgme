@@ -174,8 +174,26 @@ Sizes are non-test Go lines (tests in parentheses):
 
 ~17.6k lines of game code total. Suggested approach: start with a small dice
 game (liars_dice or greed) to establish the translation rhythm, then order by
-value/usage rather than size. splendor-2 and texas-holdem-2 wait for their
+value/usage rather than by size. splendor-2 and texas-holdem-2 wait for their
 library prerequisites.
+
+**Done (Track B POC, 2026-07):** liars-dice-2 completed against the
+lost-cities-1 template. 3 Go tests ported 1:1, `assert_gamer_contract` green,
+clippy clean, fuzzed ~66k games with no panic. Reg wired: rust workspace,
+Dockerfile, Tiltfile, k8s base/prod manifests; liars-dice-1 GameVersion marked
+`isDeprecated: true`. Use it as a second reference alongside lost-cities-1,
+especially for `Vec<Vec<u8>>` dice state, re-rolling round resets, and the
+PubState-vs-render gap documented in GAME_PORTING.md step 6.
+
+**Done (Track B, 2026-07):** no-thanks-2 ported. All 13 Go tests ported 1:1;
+`test_winners` assertion adapted from `[1,1,2]` to `[1,1,3]` because the Rust
+`gen_placings` helper uses standard-competition tie ranking (1224) while Go
+`brdgme.GenPlacings` uses compact-ordinal (1223) - documented as a tracked
+deviation per GAME_PORTING.md step 8. `assert_gamer_contract` green, clippy
+clean, fuzzed ~33k games with no panic. Reg wired: workspace, Dockerfile,
+Tiltfile, k8s base/prod manifests; no-thanks-1 GameVersion marked
+`isDeprecated: true`. Track B progression offset by the placings-tie
+gotcha documented for future -1/-2 ports.
 
 Priority between tracks: Track A games are net-new content; Track B removes
 the Go stack. Interleave as desired - both use the same method and any Track B

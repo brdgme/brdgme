@@ -103,10 +103,38 @@ rust/game/<name>-1/
    for both in `render.rs` using `brdgme_markup` (`Node`, `Row`, `Align`,
    table helpers) - this replaces the old `render.Table`/`Centred` string
    layout. Colors come from `brdgme_color` constants.
+
+   **Port the rendered output, not the Go state struct field-for-field.** In
+   `brdgme-go` the `Render(player *int)` method typically reads `Game`
+   fields directly, while `PubState()` and `PlayerState()` are
+   serialization-only and may be incomplete or buggy relative to what is
+   actually rendered. In Rust `PubState`/`PlayerState` *drive* the
+   `Renderer`, so they must capture what the user sees on screen. If a Go
+   state struct omits or mis-computes a field that `Render` sources from
+   `Game`, port the rendered behaviour, not the buggy/missing field.
+   liars_dice-1 is the example: its `PlayerState.Dice` is always empty due
+   to an inverted bounds guard (`len(g.PlayerDice) < player`), yet render
+   still shows dice correctly because it reads `g.PlayerDice` directly.
+   Copying that state struct literally would have hidden every player's
+   dice in the Rust port.
 7. **status/points.** `Status::Finished { placings: gen_placings(&metrics),
    stats }` - build per-player metric vectors (score, then tiebreakers)
    exactly like the old `Winners()` logic implied. `points()` returns the
    running score.
+
+   **Placings tie semantics differ across versions.** Go
+   `brdgme.GenPlacings` ranks ties compact-ordinal (two tied at top ->
+   `[1, 1, 2]`; `curPlace++` per unique group). Rust
+   `brdgme_game::game::gen_placings` ranks standard-competition (same tie ->
+   `[1, 1, 3]`; `cur_place += group_size`). The Rust `gen_placings_works`
+   tests don't cover ties, so neither semantic is pinned by the suite - the
+   divergence appears inadvertent. **Decision (2026-07): keep Rust
+   standard-competition; when porting Go games whose placings tests assert
+   compact-ordinal results, adapt the expected assertion to Rust output and
+   note the deviation in the port's PR description (per step 8).** Affects
+   both tracks; for example `no_thanks-1` `TestWinners` asserts `[]int{1, 1,
+   2}` and becomes `vec![1, 1, 3]` in `no-thanks-2`. Audit each Go suite's
+   `Placings`/`Winners` test for tie cases before porting it verbatim.
 8. **Tests - 1:1 porting is required.** The Go tests are the executable spec
    of each game's rules; they are how we know functionality survived the port.
    - Port **every** existing Go test case, keeping the original test names
@@ -160,3 +188,27 @@ rust/game/<name>-1/
   serialized shapes simple (Vecs) for state.
 - Ordering of returned logs matters (action log, then consequences, then
   next-turn logs) - preserve the old message order; tests often assert on it.
+- **Borrow order in `command()`.** `command_parser(&self, player)` returns
+  `Option<Box<dyn Parser<T = Command> + '_>>` borrowing `&self`. If you
+  bind the returned parser to a `let`, that immutable borrow lives until
+  end-of-scope and blocks the `&mut self` call to the action method
+  (`self.pass(player)`, `self.take(player)`, ...) with E0502. Inline the
+  `parse` call in the same expression so the borrow ends before the
+  mutation:
+
+  ```rust
+  let output = match self.command_parser(player) {
+      Some(cp) => cp,
+      None => return Err(GameError::invalid_input("not expecting any commands at the moment")),
+  }
+  .parse(input, players);
+  match output {
+      Ok(ParseOutput { remaining, value: Command::Pass, .. }) => {
+          let logs = self.pass(player)?;
+          Ok(CommandResponse { logs, can_undo: false, remaining_input: remaining.to_string() })
+      }
+      // ...
+  }
+  ```
+
+  The `liars-dice-2` and `no-thanks-2` crates both follow this pattern.

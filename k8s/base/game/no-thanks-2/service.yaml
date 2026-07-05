@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: no-thanks-2
+  labels:
+    app: no-thanks-2
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+  selector:
+    app: no-thanks-2

@@ -6,3 +6,4 @@ metadata:
 spec:
   typeName: No Thanks
   weight: 1.0
+  isDeprecated: true

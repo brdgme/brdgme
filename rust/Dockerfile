@@ -95,3 +95,11 @@ CMD ["./lost_cities_1_http"]
 FROM debian:bookworm-slim AS lost-cities-2
 COPY --from=builder /app/target/release/lost_cities_2_http .
 CMD ["./lost_cities_2_http"]
+
+FROM debian:bookworm-slim AS liars-dice-2
+COPY --from=builder /app/target/release/liars_dice_2_http .
+CMD ["./liars_dice_2_http"]
+
+FROM debian:bookworm-slim AS no-thanks-2
+COPY --from=builder /app/target/release/no_thanks_2_http .
+CMD ["./no_thanks_2_http"]
