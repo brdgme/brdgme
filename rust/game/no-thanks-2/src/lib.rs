@@ -47,6 +47,7 @@ pub struct PubState {
 pub struct PlayerState {
     pub public: PubState,
     pub player: usize,
+    pub chips: i32,
 }
 
 impl Game {
@@ -179,9 +180,8 @@ impl Game {
     }
 
     fn placings(&self) -> Vec<usize> {
-        let metrics: Vec<Vec<i32>> = (0..self.players)
-            .map(|p| vec![-self.points_int()[p]])
-            .collect();
+        let points = self.points_int();
+        let metrics: Vec<Vec<i32>> = (0..self.players).map(|p| vec![-points[p]]).collect();
         gen_placings(&metrics)
     }
 }
@@ -236,7 +236,11 @@ impl Gamer for Game {
             remaining_after: self.remaining_cards.len().saturating_sub(1),
             centre_chips: self.centre_chips,
             hands: self.player_hands.clone(),
-            chips: self.player_chips.clone(),
+            chips: if finished {
+                self.player_chips.clone()
+            } else {
+                vec![]
+            },
             final_scores: if finished {
                 (0..self.players)
                     .map(|p| self.final_player_score(p))
@@ -251,6 +255,7 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
+            chips: self.player_chips[player],
         }
     }
 
@@ -468,6 +473,17 @@ mod test {
         g.player_chips[STEVE] = 11;
         g.remaining_cards = vec![];
         assert_eq!(vec![1, 1, 3], g.placings());
+    }
+
+    #[test]
+    fn test_pub_state_chips_hidden_until_finished() {
+        let (mut g, _) = Game::start(3).unwrap();
+        assert!(!g.pub_state().finished);
+        assert!(g.pub_state().chips.is_empty());
+        g.remaining_cards = vec![];
+        let ps = g.pub_state();
+        assert!(ps.finished);
+        assert_eq!(g.player_chips, ps.chips);
     }
 
     #[test]

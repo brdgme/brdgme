@@ -12,7 +12,11 @@ pub struct WebSocketTrigger {
 /// counter - a second independent counter could reproduce a seq already seen
 /// for that game, and the PartialEq-deduping memos would silently drop the
 /// refetch. Used both by the WS message handler and by post-action success
-/// effects so an own action refetches even if the WS is down.
+/// effects so an own action refetches even if the WS is down. When the WS is
+/// up this deliberately causes one redundant refetch (local bump + server
+/// signal) - accepted on purpose, since gating the local bump on WS
+/// ready_state would re-open a half-open-socket window where a player's own
+/// move doesn't render.
 pub fn bump_game_update(game_update: RwSignal<Option<(Uuid, u64)>>, game_id: Uuid) {
     game_update.update(|v| {
         let next = v.map(|(_, s)| s + 1).unwrap_or(1);

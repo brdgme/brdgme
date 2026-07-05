@@ -68,10 +68,88 @@ impl Renderer for PlayerState {
 pub fn render_bid(quantity: i32, value: i32) -> N {
     let suffix = if quantity > 1 { "s" } else { "" };
     N::Group(vec![
-        N::text(format!("{} ", quantity)),
+        N::text(format!("{} ", number_str(quantity))),
         render_die(value),
         N::text(suffix.to_string()),
     ])
+}
+
+// Port of NumberStr from brdgme-go/brdgme/strings.go, covering the range of
+// bid quantities possible in this game (0..999). Falls back to digits for
+// anything outside that range, and for negative numbers.
+fn number_str(n: i32) -> String {
+    if !(0..1000).contains(&n) {
+        return n.to_string();
+    }
+    if n == 0 {
+        return "zero".to_string();
+    }
+    let mut parts: Vec<&str> = vec![];
+    let mut n = n;
+    if n >= 100 {
+        let h = n / 100;
+        n -= h * 100;
+        parts.push(ones_str(h));
+        parts.push("hundred");
+        if n > 0 {
+            parts.push("and");
+        }
+    }
+    if n >= 20 {
+        let t = n / 10;
+        n -= t * 10;
+        parts.push(match t {
+            2 => "twenty",
+            3 => "thirty",
+            4 => "fourty",
+            5 => "fifty",
+            6 => "sixty",
+            7 => "seventy",
+            8 => "eighty",
+            9 => "ninety",
+            _ => unreachable!(),
+        });
+    }
+    if n > 0 {
+        parts.push(match n {
+            1 => "one",
+            2 => "two",
+            3 => "three",
+            4 => "four",
+            5 => "five",
+            6 => "six",
+            7 => "seven",
+            8 => "eight",
+            9 => "nine",
+            10 => "ten",
+            11 => "eleven",
+            12 => "twelve",
+            13 => "thirteen",
+            14 => "fourteen",
+            15 => "fifteen",
+            16 => "sixteen",
+            17 => "seventeen",
+            18 => "eighteen",
+            19 => "nineteen",
+            _ => unreachable!(),
+        });
+    }
+    parts.join(" ")
+}
+
+fn ones_str(n: i32) -> &'static str {
+    match n {
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        4 => "four",
+        5 => "five",
+        6 => "six",
+        7 => "seven",
+        8 => "eight",
+        9 => "nine",
+        _ => unreachable!(),
+    }
 }
 
 pub fn render_die(value: i32) -> N {
@@ -99,4 +177,17 @@ pub fn reveal_table(player_dice: &[Vec<u8>], active: &[usize], bid_value: i32) -
         ]);
     }
     N::Table(rows)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_number_str() {
+        assert_eq!("two", number_str(2));
+        assert_eq!("twenty five", number_str(25));
+        assert_eq!("one hundred and five", number_str(105));
+        assert_eq!("1000", number_str(1000));
+    }
 }

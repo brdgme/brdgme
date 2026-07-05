@@ -68,7 +68,7 @@ fn render_cards(hand: &[i32], relevant: Option<i32>) -> N {
     N::Group(group_nodes)
 }
 
-fn render(pub_state: &PubState, player: Option<usize>) -> Vec<N> {
+fn render(pub_state: &PubState, player: Option<usize>, own_chips: Option<i32>) -> Vec<N> {
     let mut out: Vec<N> = vec![];
 
     if !pub_state.finished {
@@ -96,7 +96,7 @@ fn render(pub_state: &PubState, player: Option<usize>) -> Vec<N> {
             out.push(N::text("\n"));
             out.push(N::Bold(vec![
                 N::text("Your chips: "),
-                render_chips(pub_state.chips[p]),
+                render_chips(own_chips.unwrap_or_default()),
             ]));
             out.push(N::text("\n\n"));
         }
@@ -140,12 +140,12 @@ fn render(pub_state: &PubState, player: Option<usize>) -> Vec<N> {
 
 impl Renderer for PubState {
     fn render(&self) -> Vec<N> {
-        render(self, None)
+        render(self, None, None)
     }
 }
 
 impl Renderer for PlayerState {
     fn render(&self) -> Vec<N> {
-        render(&self.public, Some(self.player))
+        render(&self.public, Some(self.player), Some(self.chips))
     }
 }
