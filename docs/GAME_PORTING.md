@@ -133,14 +133,19 @@ rust/game/<name>-1/
 2. `rust/Dockerfile`: add final stage (`FROM debian:bookworm-slim AS <name>-1`,
    copy `target/release/<name>_1_http`, `CMD`). The workspace build stage
    picks the crate up automatically.
-3. `Tiltfile`: add `"<name>-1"` to the Rust games list.
-4. `k8s/base/game/<name>-1/`: `deployment.yaml`, `service.yaml` (port 80),
+3. `.github/workflows/ci.yml`: add an `image`/`target` entry to the
+   `build-rust-games` job matrix. Without this the image is never built or
+   pushed to GHCR, so the prod override in step 6 points at an image that
+   doesn't exist (this was missed for liars-dice-2/no-thanks-2 and only
+   caught in review).
+4. `Tiltfile`: add `"<name>-1"` to the Rust games list.
+5. `k8s/base/game/<name>-1/`: `deployment.yaml`, `service.yaml` (port 80),
    `game-version.yaml` (`kind: GameVersion`, `spec.typeName` display name,
    `weight`), `kustomization.yaml`; add the dir to
    `k8s/base/game/kustomization.yaml`.
-5. `k8s/prod/app/kustomization.yaml`: add the `ghcr.io/brdgme/brdgme/<name>-1`
+6. `k8s/prod/app/kustomization.yaml`: add the `ghcr.io/brdgme/brdgme/<name>-1`
    image override.
-6. Verify: `cargo build && cargo test` in `rust/`, then a Tilt/Kind run.
+7. Verify: `cargo build && cargo test` in `rust/`, then a Tilt/Kind run.
 
 ## Gotchas
 

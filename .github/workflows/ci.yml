@@ -234,10 +234,14 @@ jobs:
         include:
           - image: acquire-1
             target: acquire-1
+          - image: liars-dice-2
+            target: liars-dice-2
           - image: lost-cities-1
             target: lost-cities-1
           - image: lost-cities-2
             target: lost-cities-2
+          - image: no-thanks-2
+            target: no-thanks-2
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
