@@ -1,6 +1,8 @@
 # 21: OpenTofu Infrastructure as Code
 
-**Status:** Pending - human-paced
+**Status:** Stage 1 applied, Route53 records verified, NS switched to DO
+(all 2026-07-05); remaining: Route53 zone deletion (~2026-07-12), then
+stage-2 apply (cluster) when ready to spend - human-paced
 
 **Decision (2026-07-03 tech review):** describe the DigitalOcean account
 infrastructure in OpenTofu (Linux Foundation Terraform fork; open source,
@@ -44,14 +46,29 @@ tofu config must preserve:
       bucket. Legacy DNS records (apex A, `mail` A, apex SPF TXT →
       Linode) are carried in `infra/dns.tf` so prod survives the
       Route53 → DO nameserver switch; see `infra/README.md`.
-- [ ] Bootstrap `brdgme-tofu-state` Spaces bucket (console), set Spaces
+- [x] Bootstrap `brdgme-tofu-state` Spaces bucket (console), set Spaces
       keys, `tofu init` + import the bucket, stage-1 apply (VPC, zone +
-      legacy records, CNPG bucket), verify records against Route53, switch
-      nameservers at the registrar (required before 22a Resend records).
+      legacy records, CNPG bucket). Done 2026-07-05; the `brdgme` DO
+      project was also created manually and imported. State confirmed:
+      VPC, project, domain, 3 legacy records, both buckets. `tofu plan`
+      shows only the expected stage-2 adds (cluster, project-resource
+      assignment) plus a trivial in-place `acl: private` on the imported
+      state bucket.
+- [x] Verify records against Route53. Done 2026-07-05 via a console
+      export of the zone: it contains only apex A (172.105.164.158),
+      `mail` A (172.105.164.158), and the apex SPF TXT, plus NS/SOA
+      (zone-internal, never migrated) - `infra/dns.tf` carries all of
+      them with identical values. Only difference: Route53 TTLs are 300s
+      vs 3600s in tofu - cosmetic (slower propagation of future edits),
+      not a correctness issue.
+- [x] Switch nameservers at the registrar to `ns1-3.digitalocean.com`.
+      Done 2026-07-05.
+- [ ] Delete the Route53 zone after ~a week (kept as fallback until
+      ~2026-07-12) to stop its charge.
 - [ ] Stage-2 apply (the DOKS cluster) when ready to deploy - billing
       starts at creation.
 - [x] Encode the Phase 14 prerequisite: cluster version >= 1.33 with
       VPC-native networking.
-- [ ] Create new resources (CNPG backup bucket for Phase 19, state bucket)
-      via tofu from the start.
+- [x] Create new resources (CNPG backup bucket for Phase 19, state bucket)
+      via tofu from the start. Both exist and are in state.
 

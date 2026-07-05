@@ -70,8 +70,8 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 18 | Production Hardening | Pending - resequenced pre-cutover 2026-07-04; probes & observability section added 2026-07-05 | [18-production-hardening.md](plan/18-production-hardening.md) |
 | 19 | CloudNativePG | Dev complete (Kind); prod pending | [19-cloudnativepg.md](plan/19-cloudnativepg.md) |
 | 20 | external-dns | Pending | [20-external-dns.md](plan/20-external-dns.md) |
-| 21 | OpenTofu Infrastructure as Code | Pending - human-paced | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
-| 22 | Email via Resend | 22a code complete (landed 77a2092); human/infra steps + 22b-22d pending - high priority; 22c reminders + 22d multi-email added 2026-07-04 | [22-email-via-resend.md](plan/22-email-via-resend.md) |
+| 21 | OpenTofu Infrastructure as Code | Stage 1 applied, NS switched to DO 2026-07-05; stage-2 (cluster) pending - human-paced | [21-opentofu-iac.md](plan/21-opentofu-iac.md) |
+| 22 | Email via Resend | 22a code complete (landed 77a2092); Resend account + DNS records in tofu 2026-07-05; prod secret + live-inbox check + 22b-22d pending | [22-email-via-resend.md](plan/22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [23-rust-game-ports.md](plan/23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [24-game-invites.md](plan/24-game-invites.md) |
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [25-rules-rendering.md](plan/25-rules-rendering.md) |

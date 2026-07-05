@@ -36,10 +36,16 @@ are read in dev). For work on real email content (22b templates), set a
 Resend test-mode API key in `.env` - the same pattern the bot uses for
 `LLM_API_KEY`.
 
-- [ ] Create the Resend account; verify `brdg.me` as the sending domain:
-      add the SPF, DKIM, and DMARC DNS records. Zone-level records belong
-      to OpenTofu (Phase 21) once it exists; if 22a runs first, add them
-      manually and note them for import. *(human/infra - not done here)*
+- [x] Create the Resend account; verify `brdg.me` as the sending domain:
+      add the SPF, DKIM, and DMARC DNS records. Done 2026-07-05: account
+      created, all five records (DKIM, `send` MX + SPF, DMARC, apex
+      receiving MX) added to `infra/dns.tf`. **Decision 2026-07-05:** the
+      apex receiving MX was added now despite 22b planning inbound on
+      `play.brdg.me` - all inbound `@brdg.me` mail now routes to Resend,
+      superseding the legacy Linode server's A-record-fallback receipt
+      (legacy play-by-email replies stop working; no webhook until 22b).
+      Remaining: run the targeted `tofu apply` for the records and confirm
+      the domain shows verified in the Resend dashboard.
 - [x] Replace `lettre` with `resend-rs` in `rust/web`:
       `send_login_email` sends via the Resend client (`resend_rs::Resend`,
       held in `AppState` alongside the existing shared `reqwest::Client`).
