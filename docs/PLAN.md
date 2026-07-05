@@ -63,7 +63,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 11 | Testing Foundation | Complete (completed 2026-07-04) | [11-testing-foundation.md](plan/11-testing-foundation.md) |
 | 12 | ELO Ratings | Complete | [12-elo-ratings.md](plan/12-elo-ratings.md) |
 | 13 | NATS Bot Eventing | Complete (2026-07-05) | [13-nats-bot-eventing.md](plan/13-nats-bot-eventing.md) |
-| 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); cluster version/VPC-native/GatewayClass prereq verified 2026-07-05, other prod prereqs pending | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
+| 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); all prod prereqs resolved 2026-07-05 except client-IP/PROXY-protocol, intentionally deferred live to Phase 16 (needs a DOKS-managed ConfigMap flip with no dry-run value pre-Gateway) | [14-drop-knative-gateway-api.md](plan/14-drop-knative-gateway-api.md) |
 | 15 | Production CD (ArgoCD) | Pending | [15-production-cd-argocd.md](plan/15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; revised 2026-07-04) | Pending | [16-production-cutover-validation.md](plan/16-production-cutover-validation.md) |
 | 17 | NATS Migration + WS simplification | Complete (2026-07-05) | [17-nats-migration-ws-simplification.md](plan/17-nats-migration-ws-simplification.md) |

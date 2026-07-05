@@ -1,9 +1,12 @@
 # 14: Drop Knative - Plain Deployments + Gateway API
 
 **Status:** Dev complete (landed fc7cb3f); cluster version/VPC-native/
-GatewayClass prerequisite verified 2026-07-05 (item 21 stage-2); LB
-WebSocket behavior, client-IP preservation, and Knative-cleanup
-prerequisites still pending
+GatewayClass prerequisite verified 2026-07-05 (item 21 stage-2); WS
+idle-timeout and Knative-cleanup-notes prerequisites resolved 2026-07-05;
+client-IP/PROXY-protocol prerequisite researched 2026-07-05 but intentionally
+deferred - it needs a live edit to a DOKS-managed ConfigMap with no dry-run
+value before a Gateway exists to use it, so it's done at Phase 16 cutover
+instead (see prerequisites section below)
 
 **Implementation (2026-07-03):** all delegable items done. Gateway exposure in
 Kind uses a NodePort pin on Cilium's per-Gateway LoadBalancer Service (see
@@ -147,16 +150,54 @@ final infrastructure.
       `controller: io.cilium/gateway-controller`, `ACCEPTED: True`. No
       Gateway resource created yet - deferred to Phase 16 (each Gateway
       provisions a $12/mo DO LB; the cluster must only ever have one).
-- [ ] Confirm behaviour of the auto-provisioned DO load balancer for
+- [x] Confirm behaviour of the auto-provisioned DO load balancer for
       WebSockets: long-lived connection support and idle timeout
       configuration (the monolith holds a WS per connected client).
+      Resolved 2026-07-05 (research, no live Gateway exists yet to test
+      against): since the Gateway terminates TLS in-cluster (Envoy), the DO
+      LB sits in TCP-passthrough mode ahead of it - DO's documented
+      "WebSocket gets a 1-hour idle timeout automatically" behaviour is
+      specific to their HTTP/HTTPS LB mode and does not apply here. The only
+      tunable is `service.beta.kubernetes.io/do-loadbalancer-http-idle-timeout-seconds`
+      (default 60s, range 30-600s), which DO's docs describe as governing
+      the LB's general idle timeout regardless of mode. `rust/web` already
+      sends a server-side WS ping every 30s specifically to defeat LB idle
+      timeouts (`rust/web/src/websocket.rs:74-77`) and the client reconnects
+      with `ReconnectLimit::Infinite` (`websocket_client.rs:37`), so this was
+      already handled by existing code. Set the annotation explicitly to
+      120s (margin above the 30s ping) in `k8s/base/gateway/gateway.yaml`
+      rather than relying on the 60s default.
 - [ ] Confirm real client IPs survive the DO LB + Cilium Gateway path
       (externalTrafficPolicy / PROXY protocol). The 22a login rate limiter
       keys on client IP via `SmartIpKeyExtractor`; if source IPs are not
       preserved it keys on the LB address and throttles all users
       collectively. (Carried in from Phase 22a, 2026-07-03.)
-- [ ] Remove the Knative/net-certmanager one-time `kubectl apply`
+      **Researched, not resolved (2026-07-05):** confirmed via live
+      `kubectl get configmap -n kube-system cilium-config` on the `brdgme`
+      prod cluster that `enable-gateway-api-proxy-protocol: "false"` is the
+      real, currently-disabled control (Cilium requires PROXY protocol on
+      the Envoy gateway listener to see the real client IP through a TCP-
+      passthrough LB; DO's LB SNATs by default and only adds
+      `X-Forwarded-For` in its HTTP/HTTPS mode, which Gateway API doesn't
+      use). There is no `doctl`/DO-API-level knob for this flag - it would
+      require directly editing the DOKS-managed `cilium-config` ConfigMap
+      and restarting the `cilium` DaemonSet, which touches a live
+      DO-managed add-on. Decided 2026-07-05: do not test this against the
+      live prod cluster now (no Gateway exists yet to actually need it, and
+      an unrequested edit to a managed add-on's config is exactly the kind
+      of shared-infrastructure change to avoid without a concrete need).
+      Deferred to Phase 16: flip the flag, restart `cilium`, confirm it
+      isn't reverted by DOKS's reconciler, then set
+      `do-loadbalancer-enable-proxy-protocol: "true"` on the Gateway (see
+      commented-out annotation in `gateway.yaml`) - in that order, since
+      enabling the DO-side annotation first would have the LB send PROXY
+      headers to an Envoy not yet expecting them and break all traffic.
+- [x] Remove the Knative/net-certmanager one-time `kubectl apply`
       prerequisites from the Phase 16 notes; cert-manager alone remains.
+      Already done: Phase 16's "Superseded, do not do" bullet documents the
+      Knative-era items (DomainMappings, config-domain, Kourier TLS) as
+      superseded by this phase; no `net-certmanager` references remain
+      anywhere in `docs/`.
 
 ### Verification
 

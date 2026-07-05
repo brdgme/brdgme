@@ -68,6 +68,14 @@ has nothing to manage for them).
 
 ### Cutover steps
 
+- [ ] Before creating the Gateway: flip `kube-system/cilium-config`'s
+      `enable-gateway-api-proxy-protocol` to `"true"` on the prod cluster,
+      restart the `cilium` DaemonSet, and confirm DOKS's reconciler doesn't
+      revert it. Only then uncomment
+      `do-loadbalancer-enable-proxy-protocol: "true"` in
+      `k8s/base/gateway/gateway.yaml` - wrong order sends PROXY-protocol
+      bytes to an Envoy not yet expecting them and breaks all traffic. See
+      docs/plan/14-drop-knative-gateway-api.md prod-prerequisites section.
 - [ ] Deploy the full new stack to prod via ArgoCD (Phase 15) onto CNPG
       (Phase 19), NATS (13/17), Gateway API (14), with external-dns (20)
       managing `brdg.me` from the HTTPRoute.
