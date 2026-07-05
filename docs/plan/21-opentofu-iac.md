@@ -17,6 +17,24 @@ the start. It encodes the Phase 14 prod prerequisite ("cluster >= 1.33,
 VPC-native"), owns the DNS zone the 22a Resend records (SPF/DKIM/DMARC)
 land in, and creates the Spaces buckets Phase 19 needs.
 
+**Cost posture (decided 2026-07-05):** side project, no income stream -
+minimise spend without hacks; prefer managed where free/cheap. Target floor
+~$41/mo: one basic node (s-2vcpu-4gb, $24) + one Gateway-provisioned LB
+($12) + Spaces flat subscription ($5, covers ALL buckets). Constraints the
+tofu config must preserve:
+
+- No HA control plane (`ha` stays unset/false - HA is $40/mo).
+- Single node pool, basic (shared CPU) tier, no cluster autoscaling. Node
+  scaling is a **manual human decision** - `ignore_changes = [node_pool]`
+  on the cluster resource is deliberate and must stay.
+- Exactly ONE Gateway in the cluster - each Gateway provisions its own DO
+  LB at $12/mo, so a second Gateway silently doubles LB cost.
+- Container images live on GHCR (free, public packages), not DOCR - no
+  registry resources belong in this config.
+- In-cluster state over managed services where backup discipline covers
+  the risk: CNPG instead of DO Managed Postgres ($15+/mo) - revisit only
+  if Phase 19 restore verification proves shaky.
+
 - [x] Add `opentofu` to `devenv.nix`.
 - [x] `infra/` directory: DO provider, S3 backend against a Spaces bucket.
 - [ ] `tofu import` the existing resources (cluster, VPC, domain) - do not

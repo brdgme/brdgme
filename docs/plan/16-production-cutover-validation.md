@@ -96,6 +96,11 @@ the side-by-side plan; shortened 2026-07-04 with the hard-cutover decision).
 - [ ] Bots complete turns reliably in production (no stuck bot turns needing
       manual bumps; JetStream redelivery observed working on at least one
       induced failure or verified via consumer metrics).
+- [ ] Backups healthy in production (added 2026-07-05 - closes the
+      no-backup gap in current prod): daily CNPG base backups and WAL
+      archiving observed landing in the Spaces bucket during the window,
+      and the Phase 19 PITR restore into a scratch `Cluster` has been
+      verified against production data (not just dev).
 
 ### Rollback procedure (break-glass)
 

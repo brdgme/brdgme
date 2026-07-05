@@ -94,6 +94,12 @@ workloads, and not merged into core - the custom Actions step stands.)
       commit, and push. ArgoCD auto-sync picks up the change.
 - [ ] Grant the GitHub Actions bot write access to `brdgme-config` via a
       deploy key or fine-grained PAT scoped to that repo only.
+- [ ] Verify GHCR package visibility is **public** for every image the
+      cluster pulls (GHCR packages default to private even when the source
+      repo is public). Public packages mean no imagePullSecret anywhere; if
+      any package must stay private, a `ghcr.io` pull secret is required in
+      prod (decided 2026-07-05: images live on GHCR - tied to the build
+      platform, not the deployment platform, and free for public packages).
 - [ ] To roll back: revert the relevant commit in `brdgme-config`. ArgoCD
       syncs to the previous tag. No tooling changes required.
 
