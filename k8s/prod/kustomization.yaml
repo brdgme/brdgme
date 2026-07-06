@@ -1,3 +1,4 @@
 resources:
 - app
 - ../base/cert-manager
+- ../base/operator
