@@ -416,7 +416,7 @@ bot have none**; NATS/CNPG covered as below.
 | alloy | 1 | 100m / 100m | 128Mi / 128Mi | `k8s/prod/alloy/deployment.yaml` |
 | Game services (24 identical) | 24 | 10m / 240m | 32Mi / 768Mi | acquire-1, age-of-war-1, battleship-1, category-5-1, cathedral-1, farkle-1, farkle-2, for-sale-1, greed-1, greed-2, liars-dice-1, liars-dice-2, lost-cities-1, lost-cities-2, love-letter-1, modern-art-1, no-thanks-1, no-thanks-2, roll-through-the-ages-1, splendor-1, sushi-go-1, sushizock-1, texas-holdem-1, zombie-dice-1 |
 | CNPG Postgres | 1 | not set | not set | `k8s/base/postgres/cluster.yaml` has no `.spec.resources` stanza - falls back to whatever the CNPG operator/container defaults are |
-| CNPG operator + Barman Cloud plugin | unknown | unknown | unknown | `k8s/cnpg-operator/` installs unmodified upstream release manifests in `cnpg-system`; this repo does not pin/patch their requests and there's no live cluster to read actual values from |
+| CNPG operator + Barman Cloud plugin | unknown | unknown | unknown | `brdgme-config`'s `cnpg-operator/` installs unmodified upstream release manifests in `cnpg-system`; this repo does not pin/patch their requests and there's no live cluster to read actual values from |
 | ArgoCD controller | not installed | - | ~1GB (estimate) | Controller (`argocd-server`/`repo-server`/`application-controller`/`redis`/`dex-server`) is not yet installed by anything in this repo - `k8s/argocd/brdgme-app.yaml` is only the `Application` CR. The ~1GB figure is upstream ArgoCD's stated default requests total, unverified against this cluster |
 
 **Sum (measured workloads only - web, bot, nats, alloy, game services):**

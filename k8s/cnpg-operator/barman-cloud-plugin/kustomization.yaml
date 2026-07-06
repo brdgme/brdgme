@@ -1,9 +1,0 @@
-# Barman Cloud CNPG-I plugin - provides the .spec.plugins backup/WAL-archiving
-# integration used by the prod Cluster (CNPG 1.30 deprecated the in-tree
-# .spec.backup.barmanObjectStore field in favour of this plugin). Must be
-# installed in the same namespace as the CNPG operator (cnpg-system) and
-# requires cert-manager already running in the cluster. Applied manually -
-# see ../README.md.
-namespace: cnpg-system
-resources:
-- https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.13.0/manifest.yaml

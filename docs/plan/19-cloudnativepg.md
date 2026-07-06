@@ -63,8 +63,9 @@ for it) rather than relied on implicitly - mirroring the pattern the
 
 ### Prod (DOKS)
 
-- [x] Install the CNPG operator via kustomize (ArgoCD-managed once Phase 15
-      lands).
+- [x] Install the CNPG operator via kustomize, applied manually from
+      `brdgme-config` - not ArgoCD-managed (controller upgrades are rare,
+      deliberate events for a solo operator).
 - [x] `Cluster` CR: `instances: 1` initially (matches today's posture;
       `instances: 2` + automated failover is a later config change), storage
       on DO block storage.
@@ -83,14 +84,11 @@ namespace as the CNPG operator (`cnpg-system`) and requiring cert-manager
 (no Helm-only path), so it fits the same kustomize-remote-base pattern as
 the CNPG operator itself.
 
-Operator install (CNPG + the Barman Cloud plugin) lives in this repo under
-`k8s/cnpg-operator/` (`kustomization.yaml` + `barman-cloud-plugin/`) rather
-than in `brdgme-config` per the Phase 15 pattern, since that repo doesn't
-exist yet - it's a manually-applied unit (`kubectl apply -k
-k8s/cnpg-operator/`), same as `k8s/argocd/brdgme-app.yaml`, not referenced
-by `k8s/prod/kustomization.yaml` or managed by the app's ArgoCD
-`Application`. Move it into `brdgme-config` alongside `argocd/` and
-`sealed-secrets/` once that repo is created.
+Operator install (CNPG + the Barman Cloud plugin) lives in `brdgme-config`
+under `cnpg-operator/` (`kustomization.yaml` + `barman-cloud-plugin/`),
+alongside `argocd/` and `sealed-secrets/` - it's a manually-applied unit
+(`kubectl apply -k cnpg-operator/`), not referenced by `prod/kustomization.yaml`
+or managed by the app's ArgoCD `Application`.
 
 The prod-only `Cluster` overrides (storage) and the new backup resources
 (`ObjectStore`, `ScheduledBackup`) live under `k8s/prod/app/`
