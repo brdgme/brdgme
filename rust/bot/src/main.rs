@@ -620,8 +620,7 @@ async fn main() -> Result<()> {
         jetstream: jetstream.clone(),
     };
 
-    let listen_addr =
-        std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:4000".to_string());
+    let listen_addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:4000".to_string());
     let health_state = state.clone();
     tokio::spawn(async move {
         if let Err(e) = serve_health(health_state, listen_addr).await {
