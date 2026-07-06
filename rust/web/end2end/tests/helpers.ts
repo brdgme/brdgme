@@ -43,6 +43,11 @@ async function fetchLoginConfirmation(email: string): Promise<string> {
  */
 export async function login(page: Page, email: string): Promise<void> {
   await page.goto("/login");
+  // Wait for WASM hydration to finish attaching event listeners before
+  // interacting with the form. If we click too early, the submit falls back
+  // to a native (unhandled) form submission that just reloads the page
+  // instead of invoking the login server function.
+  await page.waitForLoadState("networkidle");
   await page.getByPlaceholder("Email address").first().fill(email);
   await page.getByRole("button", { name: "Get code" }).click();
 
