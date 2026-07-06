@@ -207,6 +207,14 @@ async fn get(app: Router, path: &str, cookie: Option<&str>) -> (StatusCode, Stri
 }
 
 #[sqlx::test]
+async fn healthz_returns_200(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, _content_type, body) = get(app, "/healthz", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, "OK");
+}
+
+#[sqlx::test]
 async fn home_page_anonymous(pool: PgPool) {
     let app = build_router(make_state(pool).await).await;
     let (status, content_type, body) = get(app, "/", None).await;

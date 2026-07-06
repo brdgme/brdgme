@@ -14,12 +14,22 @@ spec:
     metadata:
       labels:
         app: web
+      annotations:
+        # In-cluster Alloy scraping only (port 9090 has no Service/HTTPRoute,
+        # so it's unreachable except via direct pod-network access) - not a
+        # public route.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: web
           image: brdgme/web
           ports:
             - containerPort: 3000
+            # Metrics only - deliberately no matching Service port or
+            # HTTPRoute; see the annotation comment above.
+            - containerPort: 9090
           envFrom:
             - secretRef:
                 name: postgres-config
@@ -27,12 +37,14 @@ spec:
             - name: NATS_URL
               value: nats://nats:4222
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 3000
-            initialDelaySeconds: 2
-            periodSeconds: 5
+            initialDelaySeconds: 5
+            periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 10

@@ -25,6 +25,10 @@ async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, to
         return;
     };
 
+    // Counts actual Resend API calls only (feeds the Resend quota alert), not
+    // the dev-mode logging fallback above which never touches Resend at all.
+    axum_prometheus::metrics::counter!("login_emails_sent_total").increment(1);
+
     let from_addr = std::env::var("EMAIL_FROM").unwrap_or_else(|_| "login@brdg.me".to_string());
     let email = resend_rs::types::CreateEmailBaseOptions::new(
         from_addr,

@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use brdgme_cmd::api::{PlayerRender, PubRender, Request, Response};
 use brdgme_game::command::Spec as CommandSpec;
 
+#[tracing::instrument(name = "game_service_request", skip(client, request), fields(game.uri = %uri))]
 pub async fn request(client: &reqwest::Client, uri: &str, request: &Request) -> Result<Response> {
     let res = client.post(uri).json(&request).send().await?;
     let body = res.text().await.context("error reading response body")?;

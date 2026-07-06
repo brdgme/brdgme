@@ -18,6 +18,10 @@ spec:
       containers:
         - name: bot
           image: brdgme/bot
+          # Port is for the liveness probe only - no readiness probe (bot
+          # takes no Service traffic to gate) and no Service is defined.
+          ports:
+            - containerPort: 4000
           envFrom:
             - secretRef:
                 name: postgres-config
@@ -26,6 +30,14 @@ spec:
           env:
             - name: NATS_URL
               value: nats://nats:4222
+            - name: LISTEN_ADDR
+              value: 0.0.0.0:4000
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             requests:
               cpu: 20m

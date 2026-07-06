@@ -1,0 +1,206 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+data:
+  config.alloy: |
+    // Grafana Alloy config: ships logs -> Loki, metrics -> Prometheus,
+    // traces -> Tempo, all on Grafana Cloud. Credentials come from the
+    // `grafana-cloud` Secret (see docs/plan/18-production-hardening.md),
+    // injected as env vars on the container and read here via env().
+
+    // ---- Job 1: pod log tailing -> Loki -----------------------------------
+    // Discovers all pods cluster-wide; label set is deliberately limited to
+    // namespace/pod/container/app (low cardinality) - structured fields the
+    // app already emits (trace_id, game_id, etc.) stay in the log body and
+    // are queried via LogQL JSON parsing, not promoted to labels.
+
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.pod_logs.output
+      forward_to = [loki.write.grafana_cloud.receiver]
+    }
+
+    loki.write "grafana_cloud" {
+      endpoint {
+        url = env("LOKI_URL")
+        basic_auth {
+          username = env("LOKI_USER")
+          password = env("GC_TOKEN")
+        }
+      }
+    }
+
+    // ---- Job 2: metrics -> Prometheus --------------------------------------
+
+    // 2a. Annotation-discovered pods: matches k8s/base/web/deployment.yaml's
+    // `prometheus.io/scrape`/`port`/`path` annotations (port 9090, /metrics).
+    // This is generic, not web-specific: any pod carrying the same three
+    // annotations is picked up automatically. CNPG instance pods are
+    // expected to be onboarded this way once Phase 19 lands - see the
+    // "CNPG scrape discovery" note in docs/plan/18-production-hardening.md
+    // for the assumption this relies on (CNPG's Cluster CR setting these
+    // annotations via `.spec.metadata.annotations`, port 9187).
+    discovery.relabel "annotated_scrape" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+        regex         = "true"
+        action        = "keep"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+        regex         = "(.+)"
+        target_label  = "__metrics_path__"
+      }
+      rule {
+        source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+        regex         = "([^:]+)(?::\\d+)?;(\\d+)"
+        replacement   = "$1:$2"
+        target_label  = "__address__"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+    }
+
+    prometheus.scrape "annotated_pods" {
+      targets    = discovery.relabel.annotated_scrape.output
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+    }
+
+    // 2b. NATS: the monitoring port (8222, see k8s/base/nats's `-m 8222` arg)
+    // serves varz/connz/healthz JSON, not Prometheus text format, and there's
+    // no `prometheus-nats-exporter` sidecar in this repo. Use Alloy's native
+    // `prometheus.exporter.nats` component (wraps prometheus-nats-exporter
+    // in-process) pointed at the monitoring endpoint instead of adding a
+    // sidecar - one fewer container to run per NATS pod.
+    prometheus.exporter.nats "nats" {
+      server = "http://nats:8222"
+    }
+
+    prometheus.scrape "nats" {
+      targets    = prometheus.exporter.nats.nats.targets
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+    }
+
+    // 2c. Kubelet + cAdvisor (node metrics, for the "Node pressure" alert).
+    // Scraped by proxying through the API server, same pattern
+    // kube-prometheus-stack uses, since kubelets aren't otherwise routable
+    // from in-cluster pods without node network access.
+    discovery.kubernetes "nodes" {
+      role = "node"
+    }
+
+    discovery.relabel "nodes_cadvisor" {
+      targets = discovery.kubernetes.nodes.targets
+
+      rule {
+        target_label = "__address__"
+        replacement  = "kubernetes.default.svc:443"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        regex         = "(.+)"
+        target_label  = "__metrics_path__"
+        replacement   = "/api/v1/nodes/$1/proxy/metrics/cadvisor"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    prometheus.scrape "cadvisor" {
+      targets    = discovery.relabel.nodes_cadvisor.output
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+      scheme            = "https"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+      tls_config {
+        ca_file     = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        server_name = "kubernetes"
+      }
+    }
+
+    // 2d. Alloy self-monitoring: `up`/`alloy_build_info` feed the heartbeat
+    // / no-data alert (docs/plan/18-production-hardening.md).
+    prometheus.scrape "alloy_self" {
+      targets = [{"__address__" = "localhost:12345"}]
+
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+    }
+
+    prometheus.remote_write "grafana_cloud" {
+      endpoint {
+        url = env("PROM_URL")
+        basic_auth {
+          username = env("PROM_USER")
+          password = env("GC_TOKEN")
+        }
+      }
+    }
+
+    // ---- Job 3: OTLP traces -> Tempo ---------------------------------------
+    // rust/web's OTEL_EXPORTER_OTLP_ENDPOINT will eventually point here at
+    // http://alloy.brdgme.svc:4317 (see service.yaml).
+
+    otelcol.receiver.otlp "default" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+      http {
+        endpoint = "0.0.0.0:4318"
+      }
+
+      output {
+        traces = [otelcol.exporter.otlp.grafana_cloud.input]
+      }
+    }
+
+    otelcol.auth.basic "grafana_cloud" {
+      username = env("TEMPO_USER")
+      password = env("GC_TOKEN")
+    }
+
+    otelcol.exporter.otlp "grafana_cloud" {
+      client {
+        endpoint = env("TEMPO_URL")
+        auth     = otelcol.auth.basic.grafana_cloud.handler
+      }
+    }

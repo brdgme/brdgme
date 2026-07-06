@@ -3,6 +3,7 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
+    use axum_prometheus::PrometheusMetricLayer;
     use leptos::logging::log;
     use leptos::prelude::*;
     use web::db::create_pool;
@@ -11,7 +12,7 @@ async fn main() {
     use web::websocket::GameBroadcaster;
 
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt::init();
+    let _tracer_provider = init_tracing();
 
     let pool = create_pool().await.expect("Failed to create database pool");
     let http_client = reqwest::Client::builder()
@@ -67,7 +68,13 @@ async fn main() {
         jetstream: jetstream.clone(),
     };
 
-    let app = build_router(state).await;
+    // Wrapped around the already-built router (not inside `build_router`, which is
+    // shared with the in-process SSR page tests) so `metrics::set_global_recorder`
+    // is only ever called once per process, not once per test.
+    let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
+    let app = build_router(state).await.layer(prometheus_layer);
+
+    tokio::spawn(serve_metrics(metric_handle));
 
     log!("listening on http://{}", &addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
@@ -78,6 +85,128 @@ async fn main() {
     .with_graceful_shutdown(shutdown_signal())
     .await
     .unwrap();
+}
+
+/// Sets up the `tracing_subscriber` registry: JSON logs to stdout always, plus an
+/// OTLP trace export layer when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (dev needs no
+/// collector running - the layer is simply not installed if the env var is unset).
+/// `with_current_span(true)` is required so the `trace_id` field recorded on the
+/// root span (see `router.rs`'s `TraceLayer`) is copied onto every log line's JSON
+/// output while that span is active, giving Grafana a logs<->traces join key.
+/// Returns the `SdkTracerProvider` so `main` can keep it alive for the process
+/// lifetime (dropping it would trigger the SDK's shutdown/flush early).
+#[cfg(feature = "ssr")]
+fn init_tracing() -> Option<opentelemetry_sdk::trace::SdkTracerProvider> {
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_otlp::WithExportConfig;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
+
+    let mut bad_sampler_arg = None;
+    let ratio = std::env::var("OTEL_TRACES_SAMPLER_ARG")
+        .ok()
+        .and_then(|v| {
+            v.parse::<f64>().ok().or_else(|| {
+                bad_sampler_arg = Some(v);
+                None
+            })
+        })
+        .unwrap_or(1.0);
+
+    let mut exporter_error = None;
+    let (otel_layer, provider) = match &endpoint {
+        Some(endpoint) => {
+            let service_name =
+                std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "web".to_string());
+            match opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .with_endpoint(endpoint)
+                .build()
+            {
+                Ok(exporter) => {
+                    let resource = opentelemetry_sdk::Resource::builder()
+                        .with_service_name(service_name)
+                        .build();
+                    let sampler = opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(
+                        opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(ratio),
+                    ));
+                    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+                        .with_batch_exporter(exporter)
+                        .with_sampler(sampler)
+                        .with_resource(resource)
+                        .build();
+                    let tracer = provider.tracer("web");
+                    (
+                        Some(tracing_opentelemetry::layer().with_tracer(tracer)),
+                        Some(provider),
+                    )
+                }
+                Err(e) => {
+                    exporter_error = Some(e.to_string());
+                    (None, None)
+                }
+            }
+        }
+        None => (None, None),
+    };
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_current_span(true)
+        .with_span_list(false);
+
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(otel_layer)
+        .init();
+
+    if let Some(bad_value) = bad_sampler_arg {
+        tracing::warn!(
+            value = %bad_value,
+            "invalid OTEL_TRACES_SAMPLER_ARG; falling back to sample ratio 1.0"
+        );
+    }
+    if let Some(e) = exporter_error {
+        tracing::warn!(
+            error = %e,
+            "failed to build OTLP span exporter; trace export disabled"
+        );
+    }
+
+    provider
+}
+
+/// Serves `/metrics` in Prometheus text format on a private port, separate from
+/// the main site port (which is reachable via the public Gateway). Not exposed
+/// via any k8s Service or HTTPRoute - only reachable by something with direct
+/// pod-network access, e.g. an in-cluster Prometheus/Alloy scrape.
+#[cfg(feature = "ssr")]
+async fn serve_metrics(handle: axum_prometheus::metrics_exporter_prometheus::PrometheusHandle) {
+    async fn render(
+        axum::extract::State(handle): axum::extract::State<
+            axum_prometheus::metrics_exporter_prometheus::PrometheusHandle,
+        >,
+    ) -> String {
+        handle.render()
+    }
+
+    let metrics_addr = std::env::var("METRICS_ADDR").unwrap_or_else(|_| "0.0.0.0:9090".to_string());
+    let app = axum::Router::new()
+        .route("/metrics", axum::routing::get(render))
+        .with_state(handle);
+    let listener = match tokio::net::TcpListener::bind(&metrics_addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Failed to bind metrics listener on {}: {}", metrics_addr, e);
+            return;
+        }
+    };
+    tracing::info!(metrics_addr = %metrics_addr, "Metrics endpoint listening");
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!("Metrics server failed: {}", e);
+    }
 }
 
 #[cfg(feature = "ssr")]

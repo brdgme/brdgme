@@ -60,7 +60,27 @@ mod ssr {
         ws.on_upgrade(move |socket| handle_socket(socket, broadcaster))
     }
 
+    /// Decrements the `ws_connections` gauge on drop, so every exit path out of
+    /// `handle_socket` (the `select!` loop has several `break`s, plus the early
+    /// return on subscribe failure) decrements exactly once without scattering
+    /// manual decrements across each exit point.
+    struct WsConnectionGuard;
+
+    impl WsConnectionGuard {
+        fn new() -> Self {
+            axum_prometheus::metrics::gauge!("ws_connections").increment(1.0);
+            Self
+        }
+    }
+
+    impl Drop for WsConnectionGuard {
+        fn drop(&mut self) {
+            axum_prometheus::metrics::gauge!("ws_connections").decrement(1.0);
+        }
+    }
+
     async fn handle_socket(socket: WebSocket, broadcaster: GameBroadcaster) {
+        let _ws_guard = WsConnectionGuard::new();
         let (mut sender, mut receiver) = socket.split();
 
         let mut subscriber = match broadcaster.client.subscribe("game.>").await {

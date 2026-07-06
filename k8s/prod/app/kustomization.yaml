@@ -2,6 +2,7 @@ namespace: brdgme
 bases:
 - ../../base/brdgme
 - ../../base/gateway
+- ../alloy
 images:
 - name: brdgme/migrate
   newName: ghcr.io/brdgme/brdgme/migrate

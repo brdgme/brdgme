@@ -2,6 +2,7 @@ mod nats;
 mod prompt;
 
 use anyhow::{Context, Result, anyhow};
+use axum::{Router, extract::State as AxumState, http::StatusCode, routing::get};
 use brdgme_cmd::api::{Request, Response};
 use brdgme_color::player_color;
 use futures_util::StreamExt;
@@ -538,6 +539,29 @@ fn build_prompt_context(
     }
 }
 
+async fn healthz(AxumState(state): AxumState<AppState>) -> StatusCode {
+    match state.jetstream.client().connection_state() {
+        async_nats::connection::State::Connected => StatusCode::OK,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+/// Serves `/healthz` on `LISTEN_ADDR`, reporting NATS connection health.
+/// Spawned alongside the bot.turn consumer loop; the loop is not expected to
+/// exit in normal operation, so this runs for the lifetime of the process.
+async fn serve_health(state: AppState, listen_addr: String) -> Result<()> {
+    let app = Router::new()
+        .route("/healthz", get(healthz))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind(&listen_addr)
+        .await
+        .with_context(|| format!("Failed to bind LISTEN_ADDR {}", listen_addr))?;
+    tracing::info!(listen_addr = %listen_addr, "Bot health endpoint listening");
+    axum::serve(listener, app)
+        .await
+        .context("Health server failed")
+}
+
 /// Waits for the monolith to have created the `BOT` stream and `bot-turn`
 /// consumer (it does so idempotently on its own startup), retrying with a
 /// short backoff since the bot and monolith can start in either order.
@@ -595,6 +619,15 @@ async fn main() -> Result<()> {
         reasoning_effort,
         jetstream: jetstream.clone(),
     };
+
+    let listen_addr =
+        std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:4000".to_string());
+    let health_state = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = serve_health(health_state, listen_addr).await {
+            tracing::error!("Bot health endpoint failed: {}", e);
+        }
+    });
 
     let consumer = wait_for_turn_consumer(&jetstream).await?;
     let mut messages = consumer.messages().await?;
