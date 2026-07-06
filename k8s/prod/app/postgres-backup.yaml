@@ -6,6 +6,11 @@ apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:
   name: postgres-backup
+  annotations:
+    # ArgoCD sync-wave: must exist before Cluster/postgres's pre-reconcile
+    # plugin hook runs (sync-wave -1 in postgres-patch.yaml), otherwise the
+    # hook returns stopReconciliation and the Cluster never bootstraps.
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   configuration:
     destinationPath: s3://brdgme-cnpg-backups
