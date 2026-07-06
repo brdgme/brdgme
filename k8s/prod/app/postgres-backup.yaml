@@ -1,0 +1,33 @@
+# Prod-only: Barman Cloud plugin backup target + schedule for the CNPG
+# `postgres` Cluster. Requires the barman-cloud-plugin operator
+# (k8s/cnpg-operator/barman-cloud-plugin/) installed in cnpg-system.
+# See "Implementation notes" in docs/plan/19-cloudnativepg.md.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres-backup
+spec:
+  configuration:
+    destinationPath: s3://brdgme-cnpg-backups
+    endpointURL: https://syd1.digitaloceanspaces.com
+    s3Credentials:
+      accessKeyId:
+        # SealedSecret once Phase 15/18's sealed-secrets controller lands -
+        # not committed with real values here.
+        name: barman-cloud-creds
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: barman-cloud-creds
+        key: ACCESS_SECRET_KEY
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: postgres-daily
+spec:
+  schedule: "0 0 3 * * *"
+  cluster:
+    name: postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

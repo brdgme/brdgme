@@ -1,0 +1,6 @@
+# CloudNativePG operator install, pinned to the same version as dev
+# (CNPG_VERSION in scripts/setup-kind-cluster.sh). Applied manually - see
+# README.md - not part of k8s/prod or the ArgoCD-managed app tree.
+namespace: cnpg-system
+resources:
+- https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.30/releases/cnpg-1.30.0.yaml

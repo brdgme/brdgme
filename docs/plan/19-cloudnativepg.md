@@ -63,14 +63,59 @@ for it) rather than relied on implicitly - mirroring the pattern the
 
 ### Prod (DOKS)
 
-- [ ] Install the CNPG operator via kustomize (ArgoCD-managed once Phase 15
+- [x] Install the CNPG operator via kustomize (ArgoCD-managed once Phase 15
       lands).
-- [ ] `Cluster` CR: `instances: 1` initially (matches today's posture;
+- [x] `Cluster` CR: `instances: 1` initially (matches today's posture;
       `instances: 2` + automated failover is a later config change), storage
       on DO block storage.
-- [ ] Backups: Barman Cloud plugin → DO Spaces bucket (endpoint
+- [x] Backups: Barman Cloud plugin → DO Spaces bucket (endpoint
       `https://syd1.digitaloceanspaces.com`), daily scheduled base backup +
       continuous WAL archiving (manifests agent-delegable).
+
+**Implementation notes (2026-07-06):** CNPG 1.30 deprecated the in-tree
+`.spec.backup.barmanObjectStore` field in favour of the Barman Cloud CNPG-I
+plugin (`plugin-barman-cloud`, verified against its v0.13.0 release manifest
+and docs at `cloudnative-pg.github.io/plugin-barman-cloud`) - a separate
+plugin operator/sidecar with its own CRD, `objectstores.barmancloud.cnpg.io`
+(kind `ObjectStore`, group `barmancloud.cnpg.io`), installed into the same
+namespace as the CNPG operator (`cnpg-system`) and requiring cert-manager
+(already a prod prerequisite since Phase 14). It ships as a plain manifest
+(no Helm-only path), so it fits the same kustomize-remote-base pattern as
+the CNPG operator itself.
+
+Operator install (CNPG + the Barman Cloud plugin) lives in this repo under
+`k8s/cnpg-operator/` (`kustomization.yaml` + `barman-cloud-plugin/`) rather
+than in `brdgme-config` per the Phase 15 pattern, since that repo doesn't
+exist yet - it's a manually-applied unit (`kubectl apply -k
+k8s/cnpg-operator/`), same as `k8s/argocd/brdgme-app.yaml`, not referenced
+by `k8s/prod/kustomization.yaml` or managed by the app's ArgoCD
+`Application`. Move it into `brdgme-config` alongside `argocd/` and
+`sealed-secrets/` once that repo is created.
+
+The prod-only `Cluster` overrides (storage) and the new backup resources
+(`ObjectStore`, `ScheduledBackup`) live under `k8s/prod/app/`
+(`postgres-patch.yaml`, `postgres-backup.yaml`), wired in via `resources:`/
+`patches:` in `k8s/prod/app/kustomization.yaml` - not in
+`k8s/base/postgres/`, which stays dev/prod-shared and untouched (2Gi, no
+storage class). `k8s/prod/app` is the layer where `namespace: brdgme` and
+image tags are already set for the concrete prod resources, so it's the
+right layer to patch rather than `k8s/prod/kustomization.yaml`.
+
+Storage: `storageClass: do-block-storage` (DigitalOcean's standard block
+storage class on DOKS) at `10Gi`, up from the base's `2Gi`. There's no real
+traffic yet pre-cutover (Phase 16 hasn't happened), so 10Gi is a
+comfortably-sized guess rather than a measured figure - CNPG supports
+online PVC resizing later if needed, so this isn't a one-way door.
+
+The `ObjectStore` (`postgres-backup`) points at the DO Spaces bucket
+`brdgme-cnpg-backups` (created via `infra/spaces.tf` in Phase 21) at
+`https://syd1.digitaloceanspaces.com`, and references a `barman-cloud-creds`
+`Secret` (`ACCESS_KEY_ID`/`ACCESS_SECRET_KEY` keys) that isn't committed
+with real values - it becomes a `SealedSecret` once Phase 15/18's
+sealed-secrets controller is bootstrapped, same as the other prod secrets.
+The `Cluster`'s `.spec.plugins` references this store with
+`isWALArchiver: true` for continuous WAL archiving, and a `ScheduledBackup`
+(`postgres-daily`, `method: plugin`) runs a daily base backup at 03:00 UTC.
 - [ ] Verify a PITR restore into a scratch `Cluster` before relying on the
       backups *(human - runs during the Phase 16 beta window)*. Steps:
       1. Confirm at least one base backup exists:

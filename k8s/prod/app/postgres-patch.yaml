@@ -1,0 +1,17 @@
+# Prod-only overrides for the shared k8s/base/postgres/cluster.yaml Cluster
+# CR (dev keeps the base as-is: no storageClass, 2Gi). See "Implementation
+# notes" in docs/plan/19-cloudnativepg.md for the storage size/class
+# reasoning and the plugins wiring.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  storage:
+    size: 10Gi
+    storageClass: do-block-storage
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: postgres-backup
