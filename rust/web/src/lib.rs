@@ -33,4 +33,14 @@ pub fn hydrate() {
     use crate::app::*;
     console_error_panic_hook::set_once();
     leptos::mount::hydrate_body(App);
+    // Flag hydration as complete so e2e tests can wait for a definitive
+    // signal instead of guessing from network activity (`networkidle` fires
+    // as soon as the WASM module finishes downloading, which can be before
+    // it has finished instantiating and attaching event listeners).
+    if let Some(body) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.body())
+    {
+        let _ = body.dataset().set("hydrated", "true");
+    }
 }

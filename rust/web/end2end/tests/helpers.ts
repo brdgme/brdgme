@@ -44,10 +44,14 @@ async function fetchLoginConfirmation(email: string): Promise<string> {
 export async function login(page: Page, email: string): Promise<void> {
   await page.goto("/login");
   // Wait for WASM hydration to finish attaching event listeners before
-  // interacting with the form. If we click too early, the submit falls back
-  // to a native (unhandled) form submission that just reloads the page
-  // instead of invoking the login server function.
-  await page.waitForLoadState("networkidle");
+  // interacting with the form. `networkidle` isn't reliable here: it only
+  // guarantees network requests have settled, not that the WASM module has
+  // finished instantiating and running `hydrate()`. If we click too early,
+  // the submit falls back to a native (unhandled) form submission that just
+  // reloads the page instead of invoking the login server function. The
+  // `hydrate()` fn sets `document.body.dataset.hydrated` once it's done, so
+  // wait on that definitive signal instead.
+  await page.waitForFunction(() => document.body.dataset.hydrated === "true");
   await page.getByPlaceholder("Email address").first().fill(email);
   await page.getByRole("button", { name: "Get code" }).click();
 
