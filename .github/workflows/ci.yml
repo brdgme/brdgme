@@ -240,6 +240,8 @@ jobs:
         include:
           - image: acquire-1
             target: acquire-1
+          - image: bot
+            target: bot
           - image: farkle-2
             target: farkle-2
           - image: greed-2
