@@ -422,7 +422,7 @@ where
     }
 }
 
-struct Space {}
+pub struct Space {}
 
 impl Parser for Space {
     type T = String;

@@ -25,7 +25,7 @@ secret_settings(disable_scrub=True)
 # --- Game image builds ---
 
 # Rust games
-for game in ["acquire-1", "liars-dice-2", "lost-cities-1", "lost-cities-2", "no-thanks-2"]:
+for game in ["acquire-1", "farkle-2", "greed-2", "liars-dice-2", "lost-cities-1", "lost-cities-2", "no-thanks-2"]:
     docker_build("brdgme/" + game, ".", dockerfile="rust/Dockerfile", target=game, only=["rust/"])
 
 # Go games

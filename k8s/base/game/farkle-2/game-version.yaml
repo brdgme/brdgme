@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: farkle-1
+  name: farkle-2
   namespace: brdgme
 spec:
   typeName: Farkle
   weight: 1.0
-  isDeprecated: true

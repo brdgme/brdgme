@@ -42,11 +42,17 @@ images:
 - name: brdgme/farkle-1
   newName: ghcr.io/brdgme/brdgme/farkle-1
   newTag: latest
+- name: brdgme/farkle-2
+  newName: ghcr.io/brdgme/brdgme/farkle-2
+  newTag: latest
 - name: brdgme/for-sale-1
   newName: ghcr.io/brdgme/brdgme/for-sale-1
   newTag: latest
 - name: brdgme/greed-1
   newName: ghcr.io/brdgme/brdgme/greed-1
+  newTag: latest
+- name: brdgme/greed-2
+  newName: ghcr.io/brdgme/brdgme/greed-2
   newTag: latest
 - name: brdgme/liars-dice-1
   newName: ghcr.io/brdgme/brdgme/liars-dice-1

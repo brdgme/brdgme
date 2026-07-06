@@ -103,3 +103,11 @@ CMD ["./liars_dice_2_http"]
 FROM debian:bookworm-slim AS no-thanks-2
 COPY --from=builder /app/target/release/no_thanks_2_http .
 CMD ["./no_thanks_2_http"]
+
+FROM debian:bookworm-slim AS greed-2
+COPY --from=builder /app/target/release/greed_2_http .
+CMD ["./greed_2_http"]
+
+FROM debian:bookworm-slim AS farkle-2
+COPY --from=builder /app/target/release/farkle_2_http .
+CMD ["./farkle_2_http"]

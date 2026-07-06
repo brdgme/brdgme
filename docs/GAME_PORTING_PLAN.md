@@ -195,6 +195,62 @@ Tiltfile, k8s base/prod manifests; no-thanks-1 GameVersion marked
 `isDeprecated: true`. Track B progression offset by the placings-tie
 gotcha documented for future -1/-2 ports.
 
+**Done (Track B, 2026-07):** greed-2 ported. Both Go tests ported 1:1
+(`TestGame`, `TestDoneTakesRemainingScoringDice`); the greed Go suite has no
+placings/winners test so no tie assertion to adapt (baseline placings tests
+added use Rust standard-competition semantics). `assert_gamer_contract` green,
+clippy clean, fuzzed ~80k games / ~9.6M commands with no panic. Reg wired:
+workspace, Dockerfile, CI matrix, Tiltfile, k8s base/prod manifests; greed-1
+GameVersion marked `isDeprecated: true`. `libdie` inlined per the plan
+(`dice_in_dice`/`dice_equals`/`available_scores` in `src/lib.rs`) - no shared
+die lib needed. Note for future dice-game ports: `Token` parsing is
+case-insensitive (UniCase), so Go faces that differ only by case (`E` vs `e`
+in greed's E1/E2) collide in the `OneOf`; preserved 1:1 by keeping `Scores()`
+priority order so the first-listed face wins, matching Go.
+
+**Done (Track B, 2026-07):** farkle-2 ported. The Go farkle suite has only
+`TestGame` (1 case, 16 lines) - it is ported 1:1 as `test_game`, and baseline
+command/scoring/can_* /placings tests were added per step 8's thin-suite rule.
+The farkle Go suite has no `Placings`/`Winners` test, so there is no tie
+assertion to adapt; the added `test_finished_and_placings` pins Rust
+standard-competition semantics (`[1, 1, 3]` for a two-way tie at the top).
+`assert_gamer_contract` green, clippy clean, fuzzed ~1.1k games / ~12.5M
+commands with no panic. Reg wired: workspace, Dockerfile, CI matrix, Tiltfile,
+k8s base/prod manifests; farkle-1 GameVersion marked `isDeprecated: true`.
+
+Farkle-specific port notes (vs greed-2):
+- Dice are plain `u8` values 1..=6 (not named enum faces - farkle dice are
+  genuinely numeric); per-face colours are a `match` on `u8` (1 cyan, 2 green,
+  3 red, 4 blue, 5 yellow, 6 purple). `libdie` inlined (`dice_in_dice`/
+  `dice_equals`/`available_scores` in `src/lib.rs`) - no shared die lib needed,
+  same as greed-2.
+- `score <dice>` parser is the faithful port: `Token("score")` + `AfterSpace` +
+  `Many::some_spaced(Int::bounded(1, 6))` mapped to `Vec<u8>` - the selection
+  is validated against the score table at action time (single 1=100, single
+  5=50, three 1s=1000, three 2s=200, ... three 6s=600). This differs from
+  greed-2's per-combo token sub-parsers because farkle dice are numbers, not
+  named tokens.
+- `done` does NOT auto-score leftover dice (unlike greed-2) - it only banks
+  the accumulated `turn_score`. `can_done` requires `taken_this_roll` (you
+  must have scored at least once this roll before banking), matching Go farkle.
+
+farkle-2 and greed-2 duplicate the dice-multiset helpers (`dice_in_dice`/
+`dice_equals`/`available_scores`) and the turn-engine structure
+(`start_turn`/`bust`/`score`/`player_roll`/`done`/`placings`) almost verbatim,
+differing mainly in `Die`'s representation (`u8` vs a named enum). This is the
+accepted "inline per game or a tiny shared fn" tradeoff from the prereq
+library guidance above, not an oversight. If a third dice-based game is
+ported, revisit this: a shared module/crate generic over a die-index trait
+should be considered at that point rather than pasting a third copy.
+
+Library fix: `brdgme_game::command::parser::Space` was `struct Space {}`
+(private), which made `Many::some_spaced`/`any_spaced`/`bounded_spaced` unusable
+outside the `parser` module - their return type `Many<TP, Space>` contained a
+private type parameter and could not cross crate boundaries. Made `Space`
+`pub` (one-word change in `rust/lib/game/src/command/parser/mod.rs`). This
+unblocks the documented `Many` combinator for all future ports (Track A red7's
+chained play+discard turns depend on it).
+
 Priority between tracks: Track A games are net-new content; Track B removes
 the Go stack. Interleave as desired - both use the same method and any Track B
 game is a low-risk filler task.

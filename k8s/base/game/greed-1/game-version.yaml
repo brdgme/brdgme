@@ -6,3 +6,4 @@ metadata:
 spec:
   typeName: Greed
   weight: 1.0
+  isDeprecated: true
