@@ -143,6 +143,17 @@ jobs:
           tool: cargo-leptos,wasm-bindgen-cli@0.2.121,sqlx-cli
       - name: Install wasm-opt
         run: sudo apt-get update && sudo apt-get install -y binaryen
+      # cargo-leptos's own dart-sass auto-download has been seen to fetch an
+      # incomplete archive on this runner image (wrapper script present, but
+      # the bundled `dart` binary it execs missing), so install dart-sass
+      # explicitly onto PATH the same way rust/Dockerfile's web-builder stage
+      # does, bypassing cargo-leptos's installer entirely.
+      - name: Install dart-sass
+        run: |
+          curl -L https://github.com/sass/dart-sass/releases/download/1.97.3/dart-sass-1.97.3-linux-x64.tar.gz | tar -xz
+          sudo mv dart-sass /usr/local/lib/dart-sass
+          sudo ln -s /usr/local/lib/dart-sass/sass /usr/local/bin/sass
+          sudo chmod +x /usr/local/bin/sass
       - uses: actions/setup-node@v5
         with:
           node-version: 22
