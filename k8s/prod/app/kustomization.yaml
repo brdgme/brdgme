@@ -23,6 +23,9 @@ images:
 - name: brdgme/api
   newName: ghcr.io/brdgme/brdgme/api
   newTag: latest
+- name: brdgme/bot
+  newName: ghcr.io/brdgme/brdgme/bot
+  newTag: latest
 - name: brdgme/acquire-1
   newName: ghcr.io/brdgme/brdgme/acquire-1
   newTag: latest
