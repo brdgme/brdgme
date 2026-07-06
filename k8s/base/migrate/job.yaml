@@ -4,10 +4,12 @@ kind: Job
 metadata:
   name: migrate
   annotations:
-    # ArgoCD pre-sync hook: runs migrations before any other resources are synced.
+    # ArgoCD sync hook: runs migrations after the postgres Cluster is ready
+    # (sync-wave 1, after Cluster/postgres's sync-wave -1).
     # BeforeHookCreation deletes any previous Job before creating a new one.
-    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 3600

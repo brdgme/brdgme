@@ -6,6 +6,10 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: postgres
+  annotations:
+    # ArgoCD sync-wave: must be Ready before the migrate Sync-phase hook
+    # (sync-wave 1 in k8s/base/migrate/job.yaml) runs.
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   storage:
     size: 10Gi

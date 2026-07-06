@@ -81,14 +81,20 @@ app-of-apps is overkill at this scale (reaffirming the earlier decision).
       deploy key (`argocd repo add` or a `repository` Secret committed as a
       SealedSecret).
 
-### Database migration PreSync hook
+### Database migration Sync hook
 
 - [x] Create `k8s/base/migrate/job.yaml`: a `Job` that runs
       `sqlx migrate run` using the `brdgme/migrate` image (dedicated
       Dockerfile target in `rust/Dockerfile`) and the `postgres-config` secret.
       Annotate with:
-      - `argocd.argoproj.io/hook: PreSync`
+      - `argocd.argoproj.io/hook: Sync`
       - `argocd.argoproj.io/hook-delete-policy: BeforeHookCreation`
+      - `argocd.argoproj.io/sync-wave: "1"` (`Cluster/postgres` carries
+        `sync-wave: "-1"` so it's Ready before this hook runs; hook phase
+        always beats sync-wave, so PreSync would run before the Cluster
+        exists at all)
+      - Note: ArgoCD >= v3.1 has a built-in CNPG Cluster health check, so no
+        argocd-cm customization is needed for wave progression to wait on it.
 - [x] Add `k8s/base/migrate/` to `k8s/base/brdgme/kustomization.yaml`.
 - [ ] Verify: a failed migration halts the ArgoCD sync and leaves the running
       pods untouched. **Procedure (specced 2026-07-05), run once during the
@@ -98,7 +104,7 @@ app-of-apps is overkill at this scale (reaffirming the earlier decision).
          `["sh", "-c", "exit 1"]` (kustomize `patches` entry on the Job)
          and simultaneously bump any image tag so the sync has app changes
          to (not) apply.
-      3. Observe: the PreSync Job runs and fails, the Application reports
+      3. Observe: the Sync-phase Job runs and fails, the Application reports
          `Sync Failed`/`Degraded`, and the web pods from step 1 are
          untouched (same pod names, old image).
       4. Revert the commit; confirm the sync completes and pods roll.
