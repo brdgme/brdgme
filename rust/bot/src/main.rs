@@ -22,6 +22,7 @@ struct AppState {
     llm_api_key: Option<String>,
     bot_model: String,
     reasoning_effort: Option<String>,
+    llm_extra_body: Option<serde_json::Value>,
     jetstream: async_nats::jetstream::Context,
 }
 
@@ -187,6 +188,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             &messages,
             state.llm_api_key.as_deref(),
             state.reasoning_effort.clone(),
+            state.llm_extra_body.as_ref(),
         )
         .await
         .with_context(|| format!("LLM call failed on attempt {}", attempt + 1))?;
@@ -459,6 +461,36 @@ async fn call_game_service(
         .context("Failed to parse game service response")
 }
 
+/// Applies a JSON Merge Patch (RFC 7396) to `target` in place: keys set to
+/// `null` in `patch` are removed from `target`, other keys are set/overwritten,
+/// recursing when both sides hold an object at the same key.
+fn merge_json_patch(target: &mut serde_json::Value, patch: &serde_json::Value) {
+    let Some(patch_map) = patch.as_object() else {
+        *target = patch.clone();
+        return;
+    };
+    if !target.is_object() {
+        *target = serde_json::Value::Object(serde_json::Map::new());
+    }
+    let target_map = target
+        .as_object_mut()
+        .expect("just ensured target is an object");
+    for (key, patch_value) in patch_map {
+        if patch_value.is_null() {
+            target_map.remove(key);
+            continue;
+        }
+        let target_entry = target_map
+            .entry(key.clone())
+            .or_insert(serde_json::Value::Null);
+        if patch_value.is_object() && target_entry.is_object() {
+            merge_json_patch(target_entry, patch_value);
+        } else {
+            *target_entry = patch_value.clone();
+        }
+    }
+}
+
 async fn call_llm(
     http: &reqwest::Client,
     llm_url: &str,
@@ -466,6 +498,7 @@ async fn call_llm(
     messages: &[ChatMessage],
     api_key: Option<&str>,
     reasoning_effort: Option<String>,
+    extra_body: Option<&serde_json::Value>,
 ) -> Result<String> {
     let url = format!("{}/v1/chat/completions", llm_url);
     let body = ChatRequest {
@@ -476,7 +509,15 @@ async fn call_llm(
         reasoning_effort,
     };
 
-    let mut req = http.post(&url).json(&body);
+    let mut req = match extra_body {
+        Some(patch) => {
+            let mut value =
+                serde_json::to_value(&body).context("Failed to serialize LLM request body")?;
+            merge_json_patch(&mut value, patch);
+            http.post(&url).json(&value)
+        }
+        None => http.post(&url).json(&body),
+    };
     if let Some(key) = api_key {
         req = req.header("Authorization", format!("Bearer {}", key));
     }
@@ -589,9 +630,19 @@ async fn main() -> Result<()> {
     let llm_url = std::env::var("LLM_URL").context("LLM_URL must be set")?;
     let llm_api_key = std::env::var("LLM_API_KEY").ok();
     let bot_model = std::env::var("BOT_MODEL").context("BOT_MODEL must be set")?;
-    let reasoning_effort =
-        Some(std::env::var("REASONING_EFFORT").unwrap_or_else(|_| "low".to_string()));
-    tracing::info!(llm_url = %llm_url, bot_model = %bot_model, reasoning_effort = ?reasoning_effort, "Bot service starting");
+    let reasoning_effort = std::env::var("REASONING_EFFORT").ok();
+    let llm_extra_body = std::env::var("LLM_EXTRA_BODY")
+        .ok()
+        .map(|raw| -> Result<serde_json::Value> {
+            let value: serde_json::Value =
+                serde_json::from_str(&raw).context("LLM_EXTRA_BODY must be valid JSON")?;
+            if !value.is_object() {
+                return Err(anyhow!("LLM_EXTRA_BODY must be a JSON object"));
+            }
+            Ok(value)
+        })
+        .transpose()?;
+    tracing::info!(llm_url = %llm_url, bot_model = %bot_model, reasoning_effort = ?reasoning_effort, llm_extra_body = ?llm_extra_body, "Bot service starting");
 
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
     let pool = PgPool::connect(&database_url)
@@ -617,6 +668,7 @@ async fn main() -> Result<()> {
         llm_api_key,
         bot_model,
         reasoning_effort,
+        llm_extra_body,
         jetstream: jetstream.clone(),
     };
 
@@ -671,4 +723,54 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn merge_json_patch_empty_patch_is_noop() {
+        let mut target = json!({"model": "gpt", "temperature": 0.2});
+        let original = target.clone();
+        merge_json_patch(&mut target, &json!({}));
+        assert_eq!(target, original);
+    }
+
+    #[test]
+    fn merge_json_patch_overwrites_key() {
+        let mut target = json!({"model": "gpt", "temperature": 0.2});
+        merge_json_patch(&mut target, &json!({"temperature": 0.5}));
+        assert_eq!(target, json!({"model": "gpt", "temperature": 0.5}));
+    }
+
+    #[test]
+    fn merge_json_patch_null_deletes_key() {
+        let mut target = json!({"model": "gpt", "reasoning_effort": "low"});
+        merge_json_patch(&mut target, &json!({"reasoning_effort": null}));
+        assert_eq!(target, json!({"model": "gpt"}));
+    }
+
+    #[test]
+    fn merge_json_patch_reasoning_effort_and_thinking() {
+        let mut target = json!({
+            "model": "deepseek-v4-flash",
+            "reasoning_effort": "low",
+        });
+        merge_json_patch(
+            &mut target,
+            &json!({
+                "reasoning_effort": null,
+                "thinking": {"type": "disabled"},
+            }),
+        );
+        assert_eq!(
+            target,
+            json!({
+                "model": "deepseek-v4-flash",
+                "thinking": {"type": "disabled"},
+            })
+        );
+    }
 }
