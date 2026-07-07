@@ -2,26 +2,46 @@
 pub mod client;
 pub mod server_fns;
 
-/// Splits a game service `Status` into the `(is_finished, whose_turn,
-/// eliminated, placings)` fields used to update `game_players`/`games` rows.
-/// Shared by every command flow that calls the game service and then writes
-/// the resulting status back to the DB.
+/// The fields of a game service `Status` used to update
+/// `game_players`/`games` rows, split out by `status_fields`.
 #[cfg(feature = "ssr")]
-pub fn status_fields(status: brdgme_game::Status) -> (bool, Vec<usize>, Vec<usize>, Vec<usize>) {
+pub struct StatusUpdate {
+    pub is_finished: bool,
+    pub whose_turn: Vec<usize>,
+    pub eliminated: Vec<usize>,
+    pub placings: Vec<usize>,
+}
+
+/// Splits a game service `Status` into the `StatusUpdate` fields used to
+/// update `game_players`/`games` rows. Shared by every command flow that
+/// calls the game service and then writes the resulting status back to the
+/// DB.
+#[cfg(feature = "ssr")]
+pub fn status_fields(status: brdgme_game::Status) -> StatusUpdate {
     use brdgme_game::Status;
     match status {
         Status::Active {
             whose_turn,
             eliminated,
-        } => (false, whose_turn, eliminated, vec![]),
-        Status::Finished { placings, .. } => (true, vec![], vec![], placings),
+        } => StatusUpdate {
+            is_finished: false,
+            whose_turn,
+            eliminated,
+            placings: vec![],
+        },
+        Status::Finished { placings, .. } => StatusUpdate {
+            is_finished: true,
+            whose_turn: vec![],
+            eliminated: vec![],
+            placings,
+        },
     }
 }
 
-/// Re-fetches the game, loads its logs, broadcasts the update, and triggers
-/// any bots whose turn it now is. No-op if the game can't be re-fetched.
-/// Shared epilogue for every command flow that mutates a game and then needs
-/// to notify watchers/bots.
+/// Broadcasts the skinny game-update signal and triggers any bots whose turn
+/// it now is. Shared epilogue for every command flow that mutates a game and
+/// then needs to notify watchers/bots. The broadcast is unconditional; only
+/// the bot trigger depends on a DB read.
 #[cfg(feature = "ssr")]
 pub async fn broadcast_and_trigger(
     pool: &sqlx::PgPool,
@@ -29,10 +49,8 @@ pub async fn broadcast_and_trigger(
     jetstream: &async_nats::jetstream::Context,
     game_id: uuid::Uuid,
 ) {
-    if let Ok(Some(ge)) = crate::db::find_game_extended(pool, game_id).await {
-        broadcaster.broadcast_game_update(game_id).await;
-        trigger_bot_turns(jetstream, &ge).await;
-    }
+    broadcaster.broadcast_game_update(game_id).await;
+    trigger_bot_turns(pool, jetstream, game_id).await;
 }
 
 /// Distinguishes a stale-state conflict (the game changed under the bot
@@ -113,7 +131,7 @@ pub async fn execute_command(
     }
 
     let prev_game_state = ge.game.game_state.clone();
-    let (is_finished, whose_turn, eliminated, placings) = status_fields(game_response.status);
+    let status = status_fields(game_response.status);
 
     if let Err(e) = crate::db::update_game_command_success(
         pool,
@@ -122,10 +140,7 @@ pub async fn execute_command(
         &prev_game_state,
         &game_response.state,
         can_undo,
-        is_finished,
-        &whose_turn,
-        &eliminated,
-        &placings,
+        &status,
         &game_response.points,
         ge.game.updated_at,
         logs,
@@ -138,27 +153,24 @@ pub async fn execute_command(
         return Err(e.into());
     }
 
-    // Fetch updated state for broadcast and bot triggering
-    match crate::db::find_game_extended(pool, game_id).await {
-        Ok(Some(updated_ge)) => {
-            broadcaster.broadcast_game_update(game_id).await;
-            trigger_bot_turns(jetstream, &updated_ge).await;
-        }
-        Ok(None) => tracing::warn!(%game_id, "Game not found after command execution"),
-        Err(e) => tracing::warn!(%game_id, "Failed to reload game after command execution: {}", e),
-    }
+    broadcast_and_trigger(pool, broadcaster, jetstream, game_id).await;
     Ok(())
 }
 
 /// Publishes a `bot.turn` event (attempt 0) for every bot player whose turn
 /// it currently is. The bot picks these up from the `bot-turn` durable
-/// consumer; the monolith never talks to the bot directly.
+/// consumer; the monolith never talks to the bot directly. Gives up with a
+/// warn log if the bot-turn query fails.
 #[cfg(feature = "ssr")]
 pub async fn trigger_bot_turns(
+    pool: &sqlx::PgPool,
     jetstream: &async_nats::jetstream::Context,
-    ge: &crate::db::GameExtended,
+    game_id: uuid::Uuid,
 ) {
-    publish_bot_turns(jetstream, ge, 0).await;
+    match crate::db::find_bot_turns(pool, game_id).await {
+        Ok(turns) => publish_bot_turns(jetstream, game_id, &turns, 0).await,
+        Err(e) => tracing::warn!(%game_id, "Failed to query bot turns: {}", e),
+    }
 }
 
 /// Shared by `trigger_bot_turns` (attempt 0, fresh turns) and the
@@ -167,41 +179,28 @@ pub async fn trigger_bot_turns(
 #[cfg(feature = "ssr")]
 async fn publish_bot_turns(
     jetstream: &async_nats::jetstream::Context,
-    ge: &crate::db::GameExtended,
+    game_id: uuid::Uuid,
+    turns: &[crate::db::BotTurn],
     attempt: i32,
 ) {
-    for player in &ge.game_players {
-        tracing::debug!(
-            game_id = %ge.game.id,
-            position = player.game_player.position,
-            is_turn = player.game_player.is_turn,
-            is_bot = player.game_bot.is_some(),
-            "Checking player for bot trigger"
-        );
-        if !player.game_player.is_turn {
-            continue;
-        }
-        let bot = match &player.game_bot {
-            Some(b) => b,
-            None => continue,
-        };
+    for turn in turns {
         tracing::info!(
-            game_id = %ge.game.id,
-            position = player.game_player.position,
-            difficulty = %bot.difficulty,
+            %game_id,
+            position = turn.position,
+            difficulty = %turn.difficulty,
             attempt,
             "Publishing bot.turn"
         );
         let event = crate::nats::BotTurnEvent {
-            game_id: ge.game.id,
-            player_position: player.game_player.position,
-            difficulty: bot.difficulty.clone(),
+            game_id,
+            player_position: turn.position,
+            difficulty: turn.difficulty.clone(),
             attempt,
         };
         let payload = match serde_json::to_vec(&event) {
             Ok(p) => p,
             Err(e) => {
-                tracing::error!(game_id = %ge.game.id, "Failed to serialize bot.turn event: {}", e);
+                tracing::error!(%game_id, "Failed to serialize bot.turn event: {}", e);
                 continue;
             }
         };
@@ -214,11 +213,11 @@ async fn publish_bot_turns(
             // that returns `Ok` is actually durable in the stream.
             Ok(ack) => {
                 if let Err(e) = ack.await {
-                    tracing::warn!(game_id = %ge.game.id, "bot.turn publish not acked: {}", e);
+                    tracing::warn!(%game_id, "bot.turn publish not acked: {}", e);
                 }
             }
             Err(e) => {
-                tracing::warn!(game_id = %ge.game.id, "Failed to publish bot.turn: {}", e);
+                tracing::warn!(%game_id, "Failed to publish bot.turn: {}", e);
             }
         }
     }
@@ -336,15 +335,12 @@ pub async fn handle_bot_command_event(
                 attempt,
                 "Stale state conflict applying bot command, re-publishing bot.turn"
             );
-            match crate::db::find_game_extended(pool, event.game_id).await {
-                Ok(Some(ge)) => {
-                    publish_bot_turns(jetstream, &ge, attempt + 1).await;
-                }
-                Ok(None) => {
-                    tracing::warn!(game_id = %event.game_id, "Game not found while re-publishing bot.turn")
+            match crate::db::find_bot_turns(pool, event.game_id).await {
+                Ok(turns) => {
+                    publish_bot_turns(jetstream, event.game_id, &turns, attempt + 1).await;
                 }
                 Err(e) => {
-                    tracing::warn!(game_id = %event.game_id, "Failed to reload game while re-publishing bot.turn: {}", e)
+                    tracing::warn!(game_id = %event.game_id, "Failed to query bot turns while re-publishing bot.turn: {}", e)
                 }
             }
             // Conflict is re-published as a fresh bot.turn; the original
@@ -382,7 +378,7 @@ mod tests {
 
     /// Starts an in-process mock game service that answers every request with
     /// whatever `handler` returns; mirrors the pattern in `game::client::tests`.
-    async fn spawn_mock_game_service<F>(handler: F) -> String
+    pub(crate) async fn spawn_mock_game_service<F>(handler: F) -> String
     where
         F: Fn(Request) -> Response + Send + Sync + 'static,
     {
@@ -643,10 +639,12 @@ mod tests {
             "initial_state",
             "concurrent_conflict_state",
             true,
-            false,
-            &[1],
-            &[],
-            &[],
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![1],
+                eliminated: vec![],
+                placings: vec![],
+            },
             &[0.0, 0.0],
             stale_ge.game.updated_at,
             vec![CliLog {
@@ -1002,43 +1000,38 @@ mod tests {
         assert_eq!(rating, 1200);
     }
 
-    #[tokio::test]
-    async fn trigger_bot_turns_noop_when_no_bot_players() {
+    #[sqlx::test]
+    async fn trigger_bot_turns_noop_when_no_bot_players(pool: PgPool) {
         let jetstream = make_jetstream().await;
-        let ge = crate::db::GameExtended {
-            game: crate::models::game::Game {
-                id: Uuid::new_v4(),
-                created_at: now(),
-                updated_at: now(),
-                game_version_id: Uuid::new_v4(),
-                is_finished: false,
-                finished_at: None,
-                game_state: "state".to_string(),
-                chat_id: None,
-                restarted_game_id: None,
-            },
-            game_type: crate::models::game::GameType {
-                id: Uuid::new_v4(),
-                created_at: now(),
-                updated_at: now(),
-                name: "Test".to_string(),
-                player_counts: vec![2],
-                weight: 1.0,
-            },
-            game_version: crate::models::game::GameVersion {
-                id: Uuid::new_v4(),
-                created_at: now(),
-                updated_at: now(),
-                game_type_id: Uuid::new_v4(),
-                name: "1.0.0".to_string(),
-                uri: "http://localhost:0".to_string(),
-                is_public: true,
-                is_deprecated: false,
-            },
-            game_players: vec![],
-        };
+        let uri = spawn_mock_game_service(|_req| play_response("s", vec![0], true)).await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
 
         // No-op, no panic: nothing to assert beyond "returns".
-        trigger_bot_turns(&jetstream, &ge).await;
+        trigger_bot_turns(&pool, &jetstream, game_id).await;
+    }
+
+    #[sqlx::test]
+    async fn broadcast_and_trigger_publishes_signal_for_missing_game(pool: PgPool) {
+        use futures_util::StreamExt;
+
+        let broadcaster = make_broadcaster().await;
+        let jetstream = make_jetstream().await;
+        let game_id = Uuid::new_v4();
+
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let client = async_nats::connect(&nats_url).await.unwrap();
+        let mut game_sub = client.subscribe(format!("game.{}", game_id)).await.unwrap();
+        client.flush().await.unwrap();
+
+        // The game id doesn't exist in the DB: the skinny signal must still
+        // publish unconditionally, with only the bot trigger no-oping.
+        broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), game_sub.next())
+            .await
+            .expect("timed out waiting for game.{id} message")
+            .expect("game.{id} subscription ended unexpectedly");
+        assert_eq!(msg.subject.as_str(), format!("game.{}", game_id));
     }
 }

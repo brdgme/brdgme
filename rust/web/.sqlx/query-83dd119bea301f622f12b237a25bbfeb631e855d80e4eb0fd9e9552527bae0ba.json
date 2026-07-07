@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT gp.position, gb.difficulty\n        FROM game_players gp\n        JOIN game_bots gb ON gp.game_bot_id = gb.id\n        WHERE gp.game_id = $1 AND gp.is_turn = true\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "difficulty",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "83dd119bea301f622f12b237a25bbfeb631e855d80e4eb0fd9e9552527bae0ba"
+}
