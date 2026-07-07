@@ -550,10 +550,12 @@ pub async fn find_active_game_summaries(
             let summary = summaries.last_mut().ok_or_else(|| {
                 anyhow::anyhow!("opponent row for game {} has no summary", row.game_id)
             })?;
-            summary.opponents.push(crate::game::server_fns::OpponentSummary {
-                name: row.opp_name,
-                color,
-            });
+            summary
+                .opponents
+                .push(crate::game::server_fns::OpponentSummary {
+                    name: row.opp_name,
+                    color,
+                });
         }
     }
 
@@ -1202,11 +1204,8 @@ pub async fn update_game_command_success(
         let t = time::OffsetDateTime::now_utc();
         time::PrimitiveDateTime::new(t.date(), t.time())
     };
-    let finished_at: Option<time::PrimitiveDateTime> = if status.is_finished {
-        Some(now)
-    } else {
-        None
-    };
+    let finished_at: Option<time::PrimitiveDateTime> =
+        if status.is_finished { Some(now) } else { None };
 
     let mut tx = pool.begin().await?;
 

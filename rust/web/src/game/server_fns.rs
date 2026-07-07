@@ -388,10 +388,8 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
     let entries = logs
         .into_iter()
         .map(|log| {
-            let (nodes, _) =
-                brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
-            let body_html =
-                brdgme_markup::html(&brdgme_markup::transform(&nodes, &markup_players));
+            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
+            let body_html = brdgme_markup::html(&brdgme_markup::transform(&nodes, &markup_players));
             let is_new = log.created_at >= last_turn_at;
             GameLogEntry {
                 body_html,
