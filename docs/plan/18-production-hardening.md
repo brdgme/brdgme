@@ -169,14 +169,26 @@ real Rust file:line, not a mechanism for getting that panic to the operator.
       against a real `alloy run` / `alloy fmt` - re-check the config with a
       live binary before first apply.
 
-      - **NATS exporter decision:** used Alloy's native
-        `prometheus.exporter.nats` component (`server = "http://nats:8222"`,
-        NATS's existing monitoring port from `k8s/base/nats/stateful-set.yaml`'s
-        `-m 8222` arg) rather than adding a `prometheus-nats-exporter`
-        sidecar - one fewer container per NATS pod, and Alloy documents this
-        as the native equivalent (it wraps the same exporter code
-        in-process). Its `prometheus.scrape` output feeds the same
-        `prometheus.remote_write` as everything else.
+      - **NATS exporter decision (reverted 2026-07-07):** originally used
+        Alloy's native `prometheus.exporter.nats` component
+        (`server = "http://nats:8222"`, NATS's existing monitoring port from
+        `k8s/base/nats/stateful-set.yaml`'s `-m 8222` arg) rather than adding
+        a `prometheus-nats-exporter` sidecar, on the assumption that Alloy
+        documents this as the native in-process equivalent. That assumption
+        was wrong: the component does not exist in the deployed
+        `grafana/alloy:v1.4.3` binary, and the Alloy pod crash-looped with
+        "cannot find the definition of component name
+        prometheus.exporter.nats". The whole NATS block
+        (`prometheus.exporter.nats "nats"` + `prometheus.scrape "nats"`) was
+        removed from `k8s/prod/alloy/configmap.yaml` on 2026-07-07 to stop
+        the crash-loop and unblock the rest of the telemetry pipeline. NATS
+        metrics are currently unmonitored.
+        - **Future work:** NATS metrics still need a real solution - either
+          add a `prometheus-nats-exporter` sidecar to the NATS pod (the
+          alternative rejected above), or re-check what component set the
+          Alloy version actually in use offers (may require a newer tag than
+          `v1.4.3`, or a different scrape approach entirely) before
+          re-attempting native in-process scraping.
       - **CNPG scrape discovery assumption:** rather than a CNPG-specific
         job, the same annotation-based `discovery.relabel` used for the web
         pod's `prometheus.io/scrape`/`port`/`path` annotations (9090) is

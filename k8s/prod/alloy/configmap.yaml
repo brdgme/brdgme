@@ -103,21 +103,6 @@ data:
       forward_to = [prometheus.remote_write.grafana_cloud.receiver]
     }
 
-    // 2b. NATS: the monitoring port (8222, see k8s/base/nats's `-m 8222` arg)
-    // serves varz/connz/healthz JSON, not Prometheus text format, and there's
-    // no `prometheus-nats-exporter` sidecar in this repo. Use Alloy's native
-    // `prometheus.exporter.nats` component (wraps prometheus-nats-exporter
-    // in-process) pointed at the monitoring endpoint instead of adding a
-    // sidecar - one fewer container to run per NATS pod.
-    prometheus.exporter.nats "nats" {
-      server = "http://nats:8222"
-    }
-
-    prometheus.scrape "nats" {
-      targets    = prometheus.exporter.nats.nats.targets
-      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
-    }
-
     // 2c. Kubelet + cAdvisor (node metrics, for the "Node pressure" alert).
     // Scraped by proxying through the API server, same pattern
     // kube-prometheus-stack uses, since kubelets aren't otherwise routable
