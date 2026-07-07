@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE game_players SET is_turn = (user_id IS NOT NULL) WHERE game_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e544b521107f28488a5bce06463e488c4447aa1faf2dafc6ddc9afa6a7fb7c7"
+}

@@ -653,21 +653,15 @@ pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    let ge = crate::db::find_game_extended(&pool, game_id)
-        .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
-        .ok_or_else(|| ServerFnError::new("Game not found"))?;
-
     // Only players in the game can bump bots.
-    let is_player = ge
-        .game_players
-        .iter()
-        .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
+    let is_player = crate::db::is_player_in_game(&pool, game_id, user.id)
+        .await
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
     if !is_player {
         return Err(ServerFnError::new("You are not a player in this game"));
     }
 
-    crate::game::trigger_bot_turns(&jetstream, &ge).await;
+    crate::game::trigger_bot_turns(&pool, &jetstream, game_id).await;
     Ok(())
 }
 

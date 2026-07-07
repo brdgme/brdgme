@@ -453,6 +453,45 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 }
 
 #[cfg(feature = "ssr")]
+#[derive(Debug)]
+pub struct BotTurn {
+    pub position: i32,
+    pub difficulty: String,
+}
+
+/// Returns the position/difficulty of every bot player whose turn it
+/// currently is. Empty for games with no bots or no bot on turn (including
+/// nonexistent games) - that's a normal outcome, not an error.
+#[cfg(feature = "ssr")]
+pub async fn find_bot_turns(pool: &PgPool, game_id: Uuid) -> Result<Vec<BotTurn>> {
+    sqlx::query_as!(
+        BotTurn,
+        r#"
+        SELECT gp.position, gb.difficulty
+        FROM game_players gp
+        JOIN game_bots gb ON gp.game_bot_id = gb.id
+        WHERE gp.game_id = $1 AND gp.is_turn = true
+        "#,
+        game_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn is_player_in_game(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> Result<bool> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS(SELECT 1 FROM game_players WHERE game_id = $1 AND user_id = $2) AS "exists!""#,
+        game_id,
+        user_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(Into::into)
+}
+
+#[cfg(feature = "ssr")]
 pub async fn find_active_games_for_user(
     user_id: &Uuid,
     pool: &PgPool,
@@ -1515,6 +1554,67 @@ mod tests {
         // Nonexistent game id returns Ok(None), not a panic.
         let missing = find_game_extended(&pool, Uuid::new_v4()).await.unwrap();
         assert!(missing.is_none());
+    }
+
+    // --- find_bot_turns ---
+
+    #[sqlx::test]
+    async fn find_bot_turns_returns_only_on_turn_bots(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 1, &[0]).await;
+
+        // Human on turn, bot off turn: no bot turns.
+        sqlx::query!(
+            "UPDATE game_players SET is_turn = (user_id IS NOT NULL) WHERE game_id = $1",
+            game.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let turns = find_bot_turns(&pool, game.id).await.unwrap();
+        assert!(turns.is_empty());
+
+        // Bot on turn: exactly one row with the bot's position and difficulty.
+        sqlx::query!(
+            "UPDATE game_players SET is_turn = (game_bot_id IS NOT NULL) WHERE game_id = $1",
+            game.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let bot_position = sqlx::query_scalar!(
+            "SELECT position FROM game_players WHERE game_id = $1 AND game_bot_id IS NOT NULL",
+            game.id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let turns = find_bot_turns(&pool, game.id).await.unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].position, bot_position);
+        assert_eq!(turns[0].difficulty, "easy");
+
+        // Nonexistent game id is an empty vec, not an error.
+        let missing = find_bot_turns(&pool, Uuid::new_v4()).await.unwrap();
+        assert!(missing.is_empty());
+    }
+
+    // --- is_player_in_game ---
+
+    #[sqlx::test]
+    async fn is_player_in_game_checks_membership(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let outsider = make_user(&pool, "outsider").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 1, &[0]).await;
+
+        assert!(is_player_in_game(&pool, game.id, creator.id).await.unwrap());
+        assert!(
+            !is_player_in_game(&pool, game.id, outsider.id)
+                .await
+                .unwrap()
+        );
     }
 
     #[sqlx::test]

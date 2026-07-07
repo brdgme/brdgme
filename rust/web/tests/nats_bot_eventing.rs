@@ -276,11 +276,7 @@ async fn bot_turn_published_on_turn_change(pool: PgPool) {
     .await
     .unwrap();
 
-    let ge = db::find_game_extended(&pool, game_id)
-        .await
-        .unwrap()
-        .unwrap();
-    trigger_bot_turns(&jetstream, &ge).await;
+    trigger_bot_turns(&pool, &jetstream, game_id).await;
 
     let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
     let consumer = stream
