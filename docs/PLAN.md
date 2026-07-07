@@ -78,6 +78,9 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [25-rules-rendering.md](plan/25-rules-rendering.md) |
 | 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [26-theming.md](plan/26-theming.md) |
 | 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [27-web-simplification.md](plan/27-web-simplification.md) |
+| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | Decided 2026-07-08, ready to implement (WP1-3 pre-cutover app work, WP4 Cloudflare post-cutover) | [28-abuse-protection.md](plan/28-abuse-protection.md) |
+| 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [29-stats-reports.md](plan/29-stats-reports.md) |
+| 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [30-friends.md](plan/30-friends.md) |
 | Bug fixes | Bug fixes | Partially resolved | [bugs.md](plan/bugs.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | [review-findings-2026-07-04.md](plan/review-findings-2026-07-04.md) |
 | Quick wins | Quick wins (added 2026-07-03) | Complete | [quick-wins.md](plan/quick-wins.md) |

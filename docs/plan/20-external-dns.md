@@ -15,7 +15,12 @@ the production DNS-write path. Moving the zone off DigitalOcean to a
 provider with official in-tree support (Cloudflare, Route53, etc.) was
 considered and rejected: the zone only just moved from Route53 to DO
 nameservers this week (Phase 21), and a second nameserver cutover for this
-alone isn't worth it.
+alone isn't worth it. (Update 2026-07-08: item 28 decided to move the
+zone to Cloudflare anyway, post-cutover, for the free WAF/DoS/CDN edge -
+a materially better return on the same NS-move cost than external-dns
+convenience. See docs/plan/28-abuse-protection.md WP4. That incidentally
+restores an in-tree external-dns provider option, should it ever be
+wanted.)
 
 Separately: every DNS record in this project (the Linode-migration legacy
 records, the Resend records) is already managed directly as
