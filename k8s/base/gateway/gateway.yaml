@@ -67,3 +67,14 @@ spec:
       tls:
         certificateRefs:
           - name: ws-brdg-me-tls
+    - name: web-beta-http
+      hostname: beta.brdg.me
+      port: 80
+      protocol: HTTP
+    - name: web-beta
+      hostname: beta.brdg.me
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+          - name: beta-brdg-me-tls

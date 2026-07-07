@@ -77,3 +77,35 @@ spec:
     - backendRefs:
         - name: websocket
           port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-beta-http-redirect
+spec:
+  parentRefs:
+    - name: brdgme
+      sectionName: web-beta-http
+  hostnames:
+    - beta.brdg.me
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-beta
+spec:
+  parentRefs:
+    - name: brdgme
+      sectionName: web-beta
+  hostnames:
+    - beta.brdg.me
+  rules:
+    - backendRefs:
+        - name: web
+          port: 3000

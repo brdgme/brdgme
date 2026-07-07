@@ -1,9 +1,11 @@
 # 21: OpenTofu Infrastructure as Code
 
 **Status:** Complete 2026-07-06 (stage 1 + stage-2 applied 2026-07-05;
-state-bucket versioning applied and Route53 zone deleted 2026-07-06).
-Remaining DNS work (beta/apex records) is part of the Phase 16 runbook,
-not this item.
+state-bucket versioning applied and Route53 zone deleted 2026-07-06). The
+`beta` record has since been added (`digitalocean_record.beta_a` in
+`infra/dns.tf`); apex repoint remains part of the Phase 16 runbook, not
+this item. See docs/plan/16-production-cutover-validation.md "Beta
+period".
 
 **Decision (2026-07-03 tech review):** describe the DigitalOcean account
 infrastructure in OpenTofu (Linux Foundation Terraform fork; open source,

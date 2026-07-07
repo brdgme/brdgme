@@ -104,15 +104,15 @@ data, no shared state with old prod, which keeps serving users untouched.
          `k8s/base/gateway/gateway.yaml` (commit; ArgoCD syncs it).
 - [ ] Deploy the full new stack via ArgoCD (Phase 15) onto CNPG (Phase 19,
       fresh database), NATS (13/17), Gateway API (14).
-- [ ] Beta hostname: add a `beta.brdg.me` HTTPS listener + HTTPRoute to the
-      Gateway manifests (agent-delegable), then *(human)*:
-      1. Get the LB IP once the Gateway is programmed:
-         `kubectl get gateway brdgme -n brdgme -o
-         jsonpath='{.status.addresses[0].value}'` (or the DO console →
-         Networking → Load Balancers).
-      2. Add `digitalocean_record` "beta" A record with that IP to
-         `infra/dns.tf`; `tofu plan` (expect exactly 1 add) → `tofu apply`.
-      3. Verify TLS issuance: `kubectl get certificate -n brdgme` reaches
+- [ ] Beta hostname: validates the new cluster end-to-end pre-cutover (DNS,
+      Gateway, cert-manager, the app itself) against the new Gateway LB,
+      while the `brdg.me` apex stays pointed at the legacy Linode host
+      until the cutover steps below run. `beta.brdg.me` HTTP(S) listeners
+      + HTTPRoutes added to the Gateway manifests, and the `beta_a`
+      `digitalocean_record` added to `infra/dns.tf` pointing at the
+      Gateway LB IP (agent-delegable, done). Remaining, *(human)*:
+      1. `tofu plan` (expect exactly 1 add) → `tofu apply`.
+      2. Verify TLS issuance: `kubectl get certificate -n brdgme` reaches
          `Ready`, and `curl -v https://beta.brdg.me/` serves with a valid
          Let's Encrypt cert - this also proves the issuance path apex will
          use.

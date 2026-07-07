@@ -81,3 +81,14 @@ resource "digitalocean_record" "resend_inbound_mx" {
   priority = 10
   ttl      = 3600
 }
+
+# Pre-cutover validation subdomain (item 16 beta period). Points at the new
+# DOKS cluster's Gateway LB so DNS + Gateway + cert-manager can be verified
+# end-to-end before the brdg.me apex cutover. Remove post-cutover tidy.
+resource "digitalocean_record" "beta_a" {
+  domain = digitalocean_domain.brdgme.id
+  type   = "A"
+  name   = "beta"
+  value  = "170.64.251.15"
+  ttl    = 3600
+}
