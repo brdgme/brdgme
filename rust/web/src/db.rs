@@ -104,8 +104,8 @@ fn build_game_type_user(
             game_type_id: default_game_type_id,
             user_id: default_user_id.unwrap_or(Uuid::nil()),
             last_game_finished_at: None,
-            rating: 1500,
-            peak_rating: 1500,
+            rating: 1200,
+            peak_rating: 1200,
         },
     }
 }
@@ -491,151 +491,71 @@ pub async fn is_player_in_game(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> R
     .map_err(Into::into)
 }
 
+/// Skinny projection for the sidebar: one row per (game, opponent), already
+/// sorted my-turn-first then most recently updated. Opponent rows are LEFT
+/// JOINed so games with no opponents still appear; exclusion of the
+/// requesting user's own seat is by player-row id, not user id.
 #[cfg(feature = "ssr")]
-pub async fn find_active_games_for_user(
-    user_id: &Uuid,
+pub async fn find_active_game_summaries(
     pool: &PgPool,
-) -> Result<Vec<GameExtended>> {
-    // Fetch all active games for this user in a single query joining all required tables.
+    user_id: Uuid,
+) -> Result<Vec<crate::game::server_fns::GameSummary>> {
+    use std::str::FromStr;
+
     let rows = sqlx::query!(
         r#"
         SELECT
-            g.id as g_id, g.created_at as g_created_at, g.updated_at as g_updated_at,
-            g.game_version_id, g.is_finished, g.finished_at, g.game_state,
-            g.chat_id, g.restarted_game_id,
-            gv.id as gv_id, gv.created_at as gv_created_at, gv.updated_at as gv_updated_at,
-            gv.game_type_id, gv.name as gv_name, gv.uri, gv.is_public, gv.is_deprecated,
-            gt.id as gt_id, gt.created_at as gt_created_at, gt.updated_at as gt_updated_at,
-            gt.name as gt_name, gt.player_counts, gt.weight,
-            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,
-            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,
-            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,
-            gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,
-            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,
-            gp.is_read as gp_is_read, gp.points as gp_points,
-            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
-            u.id as "u_id?", u.created_at as "u_created_at?", u.updated_at as "u_updated_at?",
-            u.name as "u_name?", u.pref_colors as "u_pref_colors?",
-            u.login_confirmation as "u_login_confirmation?",
-            u.login_confirmation_at as "u_login_confirmation_at?",
-            gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?",
-            gtu.updated_at as "gtu_updated_at?", gtu.game_type_id as "gtu_game_type_id?",
-            gtu.user_id as "gtu_user_id?", gtu.last_game_finished_at as "gtu_last_game_finished_at?",
-            gtu.rating as "gtu_rating?", gtu.peak_rating as "gtu_peak_rating?",
-            gb.id as "gb_id?", gb.game_id as "gb_game_id?", gb.name as "gb_name?",
-            gb.difficulty as "gb_difficulty?"
+            g.id as game_id,
+            gv.name as version_name,
+            gt.name as type_name,
+            me.is_turn as my_is_turn,
+            opp.id as "opp_id?",
+            COALESCE(u.name, gb.name, 'Bot') as "opp_name!",
+            opp.color as "opp_color?"
         FROM games g
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt ON gt.id = gv.game_type_id
-        JOIN game_players gp ON gp.game_id = g.id
-        LEFT JOIN users u ON u.id = gp.user_id
-        LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = gv.game_type_id
-        LEFT JOIN game_bots gb ON gp.game_bot_id = gb.id
+        JOIN game_players me ON me.game_id = g.id AND me.user_id = $1
+        LEFT JOIN game_players opp ON opp.game_id = g.id AND opp.id <> me.id
+        LEFT JOIN users u ON u.id = opp.user_id
+        LEFT JOIN game_bots gb ON gb.id = opp.game_bot_id
         WHERE g.is_finished = false
-          AND g.id IN (
-              SELECT game_id FROM game_players WHERE user_id = $1
-          )
-        ORDER BY g.id, gp.position
+        ORDER BY me.is_turn DESC, g.updated_at DESC, g.id, opp.position
         "#,
         user_id
     )
     .fetch_all(pool)
     .await?;
 
-    // Group rows by game_id, building GameExtended structs.
-    let mut games: Vec<GameExtended> = Vec::new();
+    let mut summaries: Vec<crate::game::server_fns::GameSummary> = Vec::new();
     for row in rows {
-        let game_id = row.g_id;
-        if games.last().map(|g| g.game.id) != Some(game_id) {
-            games.push(GameExtended {
-                game: crate::models::game::Game {
-                    id: row.g_id,
-                    created_at: row.g_created_at,
-                    updated_at: row.g_updated_at,
-                    game_version_id: row.game_version_id,
-                    is_finished: row.is_finished,
-                    finished_at: row.finished_at,
-                    game_state: row.game_state.clone(),
-                    chat_id: row.chat_id,
-                    restarted_game_id: row.restarted_game_id,
-                },
-                game_type: crate::models::game::GameType {
-                    id: row.gt_id,
-                    created_at: row.gt_created_at,
-                    updated_at: row.gt_updated_at,
-                    name: row.gt_name.clone(),
-                    player_counts: row.player_counts.clone(),
-                    weight: row.weight,
-                },
-                game_version: crate::models::game::GameVersion {
-                    id: row.gv_id,
-                    created_at: row.gv_created_at,
-                    updated_at: row.gv_updated_at,
-                    game_type_id: row.game_type_id,
-                    name: row.gv_name.clone(),
-                    uri: row.uri.clone(),
-                    is_public: row.is_public,
-                    is_deprecated: row.is_deprecated,
-                },
-                game_players: Vec::new(),
+        if summaries.last().map(|s| s.id) != Some(row.game_id) {
+            summaries.push(crate::game::server_fns::GameSummary {
+                id: row.game_id,
+                name: row.version_name,
+                type_name: row.type_name,
+                opponents: Vec::new(),
+                is_turn: row.my_is_turn,
             });
         }
-
-        let gtu = build_game_type_user(
-            row.gtu_id,
-            row.gtu_created_at,
-            row.gtu_updated_at,
-            row.gtu_game_type_id,
-            row.gtu_user_id,
-            row.gtu_last_game_finished_at,
-            row.gtu_rating,
-            row.gtu_peak_rating,
-            row.u_id,
-            row.game_type_id,
-            row.gp_created_at,
-        );
-        let user = build_user_from_row(
-            row.u_id,
-            row.u_created_at,
-            row.u_updated_at,
-            row.u_name,
-            row.u_pref_colors,
-            row.u_login_confirmation,
-            row.u_login_confirmation_at,
-        )?;
-        let game_bot =
-            build_game_bot_from_row(row.gb_id, row.gb_game_id, row.gb_name, row.gb_difficulty)?;
-
-        let game = games.last_mut().ok_or_else(|| {
-            anyhow::anyhow!("game_players row for game {game_id} encountered before its game row")
-        })?;
-        game.game_players.push(GamePlayerExtended {
-            game_player: build_game_player_from_row(
-                row.gp_id,
-                row.gp_created_at,
-                row.gp_updated_at,
-                row.gp_game_id,
-                row.gp_user_id,
-                row.gp_position,
-                row.gp_color,
-                row.gp_has_accepted,
-                row.gp_is_turn,
-                row.gp_is_turn_at,
-                row.gp_place,
-                row.gp_last_turn_at,
-                row.gp_is_eliminated,
-                row.gp_is_read,
-                row.gp_points,
-                row.gp_undo_game_state,
-                row.gp_rating_change,
-            ),
-            user,
-            game_bot,
-            game_type_user: gtu,
-        });
+        if row.opp_id.is_some() {
+            let color = row
+                .opp_color
+                .as_deref()
+                .and_then(|c| brdgme_color::Color::from_str(c).ok())
+                .unwrap_or(brdgme_color::WHITE)
+                .hex();
+            let summary = summaries.last_mut().ok_or_else(|| {
+                anyhow::anyhow!("opponent row for game {} has no summary", row.game_id)
+            })?;
+            summary.opponents.push(crate::game::server_fns::OpponentSummary {
+                name: row.opp_name,
+                color,
+            });
+        }
     }
 
-    Ok(games)
+    Ok(summaries)
 }
 
 #[cfg(feature = "ssr")]
@@ -1618,7 +1538,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn find_game_extended_missing_game_type_user_defaults_to_1500(pool: PgPool) {
+    async fn find_game_extended_missing_game_type_user_defaults_to_1200(pool: PgPool) {
         let creator = make_user(&pool, "creator").await;
         let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
 
@@ -1631,7 +1551,8 @@ mod tests {
 
         // create_game_with_users auto-creates a game_type_users row; delete it
         // to exercise the genuinely-missing-row default path in
-        // build_game_type_user (rating/peak_rating default to 1500).
+        // build_game_type_user (rating/peak_rating default to 1200, matching
+        // the DB column default).
         sqlx::query!(
             "DELETE FROM game_type_users WHERE user_id = $1 AND game_type_id = $2",
             creator.id,
@@ -1643,15 +1564,15 @@ mod tests {
 
         let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         let human = &ge.game_players[0];
-        assert_eq!(human.game_type_user.rating, 1500);
-        assert_eq!(human.game_type_user.peak_rating, 1500);
+        assert_eq!(human.game_type_user.rating, 1200);
+        assert_eq!(human.game_type_user.peak_rating, 1200);
         assert_eq!(human.game_type_user.game_type_id, game_type_id);
     }
 
-    // --- 3. find_active_games_for_user ---
+    // --- 3. find_active_game_summaries ---
 
     #[sqlx::test]
-    async fn find_active_games_for_user_groups_and_filters(pool: PgPool) {
+    async fn find_active_game_summaries_groups_and_filters(pool: PgPool) {
         let user = make_user(&pool, "user").await;
         let other = make_user(&pool, "other").await;
         let (_, game_version_id) = make_game_type_and_version(&pool).await;
@@ -1682,8 +1603,8 @@ mod tests {
         .await
         .unwrap();
 
-        let games = find_active_games_for_user(&user.id, &pool).await.unwrap();
-        let game_ids: Vec<Uuid> = games.iter().map(|g| g.game.id).collect();
+        let summaries = find_active_game_summaries(&pool, user.id).await.unwrap();
+        let game_ids: Vec<Uuid> = summaries.iter().map(|s| s.id).collect();
 
         assert!(game_ids.contains(&game1.id));
         assert!(game_ids.contains(&game2.id));
@@ -1691,27 +1612,17 @@ mod tests {
             !game_ids.contains(&game3.id),
             "finished games must be excluded"
         );
-        assert_eq!(games.len(), 2, "no duplicate/mis-grouped rows");
+        assert_eq!(summaries.len(), 2, "no duplicate/mis-grouped rows");
 
-        for g in &games {
-            // Exactly the two players we created for that game, correctly grouped.
-            assert_eq!(g.game_players.len(), 2);
-            let user_player = g
-                .game_players
-                .iter()
-                .find(|p| p.user.as_ref().map(|u| u.id) == Some(user.id))
-                .expect("user's own player row must be present in their grouped game");
-            // Player order is randomized by `create_game_with_users`, so
-            // check turn flags by position rather than assuming creator ==
-            // position 0: `whose_turn: &[0]` marks position 0 active.
-            let expected_turn = user_player.game_player.position == 0;
-            assert_eq!(user_player.game_player.is_turn, expected_turn);
-            assert!(!user_player.game_player.is_read);
+        for s in &summaries {
+            // The other human is the only opponent; the user never appears.
+            assert_eq!(s.opponents.len(), 1);
+            assert_eq!(s.opponents[0].name, "other");
         }
 
         // A user in no games gets an empty vec, not an error.
         let lonely = make_user(&pool, "lonely").await;
-        let none = find_active_games_for_user(&lonely.id, &pool).await.unwrap();
+        let none = find_active_game_summaries(&pool, lonely.id).await.unwrap();
         assert!(none.is_empty());
     }
 

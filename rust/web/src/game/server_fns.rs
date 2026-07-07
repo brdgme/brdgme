@@ -83,52 +83,9 @@ async fn active_games_summary(
         return Ok(Vec::new());
     };
 
-    let mut games = crate::db::find_active_games_for_user(&user.id, pool)
+    crate::db::find_active_game_summaries(pool, user.id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
-
-    games.sort_by(|a, b| {
-        let a_turn = a
-            .game_players
-            .iter()
-            .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
-        let b_turn = b
-            .game_players
-            .iter()
-            .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.is_turn);
-        b_turn
-            .cmp(&a_turn)
-            .then(b.game.updated_at.cmp(&a.game.updated_at))
-    });
-    let summaries: Vec<GameSummary> = games
-        .into_iter()
-        .map(|ge| {
-            let opponents = ge
-                .game_players
-                .iter()
-                .filter(|p| p.user.as_ref().is_none_or(|u| u.id != user.id))
-                .map(|p| OpponentSummary {
-                    name: p.name().to_string(),
-                    color: p.color().hex(),
-                })
-                .collect();
-            let is_turn = ge
-                .game_players
-                .iter()
-                .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
-                .map(|p| p.game_player.is_turn)
-                .unwrap_or(false);
-
-            GameSummary {
-                id: ge.game.id,
-                name: ge.game_version.name,
-                type_name: ge.game_type.name,
-                opponents,
-                is_turn,
-            }
-        })
-        .collect();
-    Ok(summaries)
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))
 }
 
 #[server(GetActiveGames, "/api")]
