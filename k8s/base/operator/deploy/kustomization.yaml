@@ -1,0 +1,7 @@
+# In-cluster operator Deployment, separate from ../ (CRD + RBAC) because dev
+# includes ../ but runs the operator locally via Tilt + mirrord instead.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- deployment.yaml

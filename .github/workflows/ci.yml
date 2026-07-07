@@ -260,10 +260,12 @@ jobs:
             target: lost-cities-2
           - image: no-thanks-2
             target: no-thanks-2
-          - image: sushizock-2
-            target: sushizock-2
+          - image: operator
+            target: operator
           - image: sushi-go-2
             target: sushi-go-2
+          - image: sushizock-2
+            target: sushizock-2
           - image: zombie-dice-2
             target: zombie-dice-2
     steps:

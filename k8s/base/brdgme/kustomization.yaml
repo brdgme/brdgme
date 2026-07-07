@@ -4,5 +4,6 @@ bases:
 - ../legacy
 - ../migrate
 - ../nats
+- ../operator/deploy
 - ../postgres
 - ../web

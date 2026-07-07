@@ -26,6 +26,9 @@ images:
 - name: brdgme/bot
   newName: ghcr.io/brdgme/brdgme/bot
   newTag: latest
+- name: brdgme/operator
+  newName: ghcr.io/brdgme/brdgme/operator
+  newTag: latest
 - name: brdgme/acquire-1
   newName: ghcr.io/brdgme/brdgme/acquire-1
   newTag: latest

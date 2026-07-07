@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operator
+  labels:
+    app: operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: operator
+  template:
+    metadata:
+      labels:
+        app: operator
+    spec:
+      serviceAccountName: brdgme-operator
+      containers:
+        - name: operator
+          image: brdgme/operator
+          # No probes: the operator exposes no HTTP server; the process
+          # exits on fatal startup errors and otherwise requeues failed
+          # reconciles internally.
+          envFrom:
+            - secretRef:
+                name: postgres-config
+          env:
+            - name: RUST_LOG
+              value: info
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
