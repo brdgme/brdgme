@@ -758,4 +758,120 @@ mod tests {
         assert_eq!(summaries[0].opponents.len(), 1);
         assert_eq!(summaries[0].opponents[0].name, "Botty");
     }
+
+    // Pins the sidebar sort order: my-turn games first, then most recently
+    // updated. Single-player games so whose_turn position 0 is always the
+    // creator (player order is shuffled in multi-slot games).
+    #[sqlx::test]
+    async fn active_games_summary_sorts_my_turn_first_then_updated_at_desc(pool: PgPool) {
+        let user_id = make_user(&pool, "human").await;
+        let game_version_id = make_game_version(&pool).await;
+
+        let make_game = |whose_turn: &'static [usize]| {
+            crate::db::create_game_with_users(
+                &pool,
+                crate::db::CreateGameOpts {
+                    game_version_id,
+                    whose_turn,
+                    eliminated: &[],
+                    placings: &[],
+                    points: &[],
+                    creator_id: user_id,
+                    opponent_ids: &[],
+                    opponent_emails: &[],
+                    bot_slots: &[],
+                    chat_id: None,
+                    game_state: "state",
+                },
+            )
+        };
+
+        // (a) not their turn, updated recently
+        let game_a = make_game(&[]).await.unwrap();
+        // (b) their turn, updated long ago
+        let game_b = make_game(&[0]).await.unwrap();
+        // (c) their turn, updated recently (creation timestamp left as-is)
+        let game_c = make_game(&[0]).await.unwrap();
+
+        // The update_games_updated_at trigger overwrites updated_at on every
+        // UPDATE; disable it so the backdated values stick.
+        sqlx::raw_sql("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query!(
+            "UPDATE games SET updated_at = timezone('utc', now()) - interval '1 hour' WHERE id = $1",
+            game_a.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "UPDATE games SET updated_at = timezone('utc', now()) - interval '10 days' WHERE id = $1",
+            game_b.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let user = crate::auth::AuthUser {
+            id: user_id,
+            name: "human".to_string(),
+            email: "human@example.com".to_string(),
+        };
+        let summaries = active_games_summary(Some(user), &pool).await.unwrap();
+
+        let ids: Vec<Uuid> = summaries.iter().map(|s| s.id).collect();
+        assert_eq!(ids, vec![game_c.id, game_b.id, game_a.id]);
+        assert!(summaries[0].is_turn);
+        assert!(summaries[1].is_turn);
+        assert!(!summaries[2].is_turn);
+    }
+
+    // The requesting user must never be listed among their own opponents;
+    // every other human and bot must be, with the bot named from
+    // game_bots.name.
+    #[sqlx::test]
+    async fn active_games_summary_excludes_self_from_opponents(pool: PgPool) {
+        let user_id = make_user(&pool, "alice").await;
+        let opponent_id = make_user(&pool, "bob").await;
+        let game_version_id = make_game_version(&pool).await;
+        crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: user_id,
+                opponent_ids: &[opponent_id],
+                opponent_emails: &[],
+                bot_slots: &[BotSlot {
+                    name: "Botty".to_string(),
+                    difficulty: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "state",
+            },
+        )
+        .await
+        .unwrap();
+
+        let user = crate::auth::AuthUser {
+            id: user_id,
+            name: "alice".to_string(),
+            email: "alice@example.com".to_string(),
+        };
+        let summaries = active_games_summary(Some(user), &pool).await.unwrap();
+
+        assert_eq!(summaries.len(), 1);
+        let mut opponent_names: Vec<&str> = summaries[0]
+            .opponents
+            .iter()
+            .map(|o| o.name.as_str())
+            .collect();
+        opponent_names.sort();
+        assert_eq!(opponent_names, vec!["Botty", "bob"]);
+    }
 }
