@@ -189,111 +189,40 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  build-web:
+  # All images from rust/Dockerfile (web, migrate, games) are built in one
+  # bake invocation so the shared cargo-chef/builder stages compile once,
+  # instead of once per image as the old per-image matrix did. Layer cache
+  # lives in ghcr (type=registry) rather than the GHA cache backend: the
+  # rust layers blow straight through the 10GB GHA cache quota, which
+  # caused constant eviction and cold builds.
+  build-rust:
     needs: [test-rust]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - image: web
-            target: web
-          - image: migrate
-            target: migrate
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
+      # Unconditional (unlike the push) so PR builds can pull the layer
+      # cache from ghcr.
       - uses: docker/login-action@v4
-        if: github.ref == 'refs/heads/master'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v6
-        id: meta
+      - name: Set bake variables
+        run: |
+          echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+      - uses: docker/bake-action@v6
         with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/${{ matrix.image }}
-          tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: rust/Dockerfile
-          target: ${{ matrix.target }}
+          source: .
+          files: docker-bake.hcl
           push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-rust-games:
-    needs: [test-rust]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        include:
-          - image: acquire-1
-            target: acquire-1
-          - image: battleship-2
-            target: battleship-2
-          - image: bot
-            target: bot
-          - image: category-5-2
-            target: category-5-2
-          - image: farkle-2
-            target: farkle-2
-          - image: for-sale-2
-            target: for-sale-2
-          - image: greed-2
-            target: greed-2
-          - image: liars-dice-2
-            target: liars-dice-2
-          - image: lost-cities-1
-            target: lost-cities-1
-          - image: lost-cities-2
-            target: lost-cities-2
-          - image: no-thanks-2
-            target: no-thanks-2
-          - image: operator
-            target: operator
-          - image: sushi-go-2
-            target: sushi-go-2
-          - image: sushizock-2
-            target: sushizock-2
-          - image: zombie-dice-2
-            target: zombie-dice-2
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
-        if: github.ref == 'refs/heads/master'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v6
-        id: meta
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/brdgme/${{ matrix.image }}
-          tags: |
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: rust/Dockerfile
-          target: ${{ matrix.target }}
-          push: ${{ github.ref == 'refs/heads/master' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        env:
+          PUSH_LATEST: ${{ github.ref == 'refs/heads/master' }}
+          WRITE_CACHE: ${{ github.ref == 'refs/heads/master' }}
 
   build-legacy:
     runs-on: ubuntu-latest
