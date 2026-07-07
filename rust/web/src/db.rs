@@ -1,4 +1,6 @@
 #[cfg(feature = "ssr")]
+use crate::game::StatusUpdate;
+#[cfg(feature = "ssr")]
 use crate::models::user::User;
 #[cfg(feature = "ssr")]
 use anyhow::Result;
@@ -585,7 +587,7 @@ pub async fn create_game_with_users(
     opts: CreateGameOpts<'_>,
 ) -> Result<crate::models::game::Game> {
     let mut tx = pool.begin().await?;
-    let game = create_game_with_users_tx(pool, &mut tx, opts).await?;
+    let game = create_game_with_users_tx(&mut tx, opts).await?;
     tx.commit().await?;
     Ok(game)
 }
@@ -595,7 +597,6 @@ pub async fn create_game_with_users(
 /// linkage in `restart_game`).
 #[cfg(feature = "ssr")]
 pub async fn create_game_with_users_tx(
-    pool: &PgPool,
     tx: &mut sqlx::PgConnection,
     opts: CreateGameOpts<'_>,
 ) -> Result<crate::models::game::Game> {
@@ -699,10 +700,13 @@ pub async fn create_game_with_users_tx(
     .await?;
 
     // 5. Create Players
-    let game_type_id = find_game_version(pool, opts.game_version_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Game version not found"))?
-        .game_type_id;
+    let game_type_id = sqlx::query_scalar!(
+        "SELECT game_type_id FROM game_versions WHERE id = $1",
+        opts.game_version_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("Game version not found"))?;
 
     for (pos, slot) in slots.iter().enumerate() {
         let color = colors.get(pos).unwrap_or(&"BlueGrey").to_string();
@@ -911,17 +915,14 @@ pub async fn undo_game(
     game_id: Uuid,
     undo_state: &str,
     player_position: usize,
-    whose_turn: &[usize],
-    eliminated: &[usize],
-    placings: &[usize],
+    status: &StatusUpdate,
 ) -> Result<()> {
-    let is_finished = !placings.is_empty();
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
         "UPDATE games SET game_state = $1, is_finished = $2, finished_at = NULL, updated_at = NOW() WHERE id = $3",
         undo_state,
-        is_finished,
+        status.is_finished,
         game_id
     )
     .execute(&mut *tx)
@@ -936,9 +937,9 @@ pub async fn undo_game(
 
     for p in players {
         let pos = p.position as usize;
-        let is_turn = whose_turn.contains(&pos);
-        let is_eliminated = eliminated.contains(&pos);
-        let place: Option<i32> = placings.get(pos).map(|&pl| pl as i32);
+        let is_turn = status.whose_turn.contains(&pos);
+        let is_eliminated = status.eliminated.contains(&pos);
+        let place: Option<i32> = status.placings.get(pos).map(|&pl| pl as i32);
 
         sqlx::query!(
             r#"UPDATE game_players
@@ -1192,10 +1193,7 @@ pub async fn update_game_command_success(
     prev_game_state: &str,
     new_game_state: &str,
     can_undo: bool,
-    is_finished: bool,
-    whose_turn: &[usize],
-    eliminated: &[usize],
-    placings: &[usize],
+    status: &StatusUpdate,
     points: &[f32],
     expected_updated_at: time::PrimitiveDateTime,
     logs: Vec<brdgme_cmd::api::CliLog>,
@@ -1204,14 +1202,18 @@ pub async fn update_game_command_success(
         let t = time::OffsetDateTime::now_utc();
         time::PrimitiveDateTime::new(t.date(), t.time())
     };
-    let finished_at: Option<time::PrimitiveDateTime> = if is_finished { Some(now) } else { None };
+    let finished_at: Option<time::PrimitiveDateTime> = if status.is_finished {
+        Some(now)
+    } else {
+        None
+    };
 
     let mut tx = pool.begin().await?;
 
     let update_result = sqlx::query!(
         "UPDATE games SET game_state = $1, is_finished = $2, finished_at = COALESCE($3, finished_at), updated_at = NOW() WHERE id = $4 AND updated_at = $5",
         new_game_state,
-        is_finished,
+        status.is_finished,
         finished_at,
         game_id,
         expected_updated_at
@@ -1232,9 +1234,9 @@ pub async fn update_game_command_success(
 
     for p in players {
         let pos = p.position as usize;
-        let is_turn = whose_turn.contains(&pos);
-        let place = placings.get(pos).map(|&pl| pl as i32);
-        let is_eliminated = eliminated.contains(&pos);
+        let is_turn = status.whose_turn.contains(&pos);
+        let place = status.placings.get(pos).map(|&pl| pl as i32);
+        let is_eliminated = status.eliminated.contains(&pos);
         let player_points = points.get(pos).copied();
         let is_turn_at = if is_turn { now } else { p.is_turn_at };
         let is_played = p.id == played_player_id;
@@ -1264,7 +1266,7 @@ pub async fn update_game_command_success(
         .await?;
     }
 
-    if is_finished && !placings.is_empty() {
+    if status.is_finished && !status.placings.is_empty() {
         apply_rating_changes(&mut tx, game_id).await?;
     }
 
@@ -1651,11 +1653,13 @@ mod tests {
             played_player_id,
             "prev_state",
             "new_state",
-            true,  // can_undo
-            false, // is_finished -> Active
-            &[1],  // whose_turn moves to position 1
-            &[],
-            &[],
+            true, // can_undo
+            &StatusUpdate {
+                is_finished: false,  // -> Active
+                whose_turn: vec![1], // whose_turn moves to position 1
+                eliminated: vec![0], // position 0 is eliminated
+                placings: vec![],
+            },
             &[3.5, 1.5],
             ge_before.game.updated_at,
             vec![],
@@ -1680,7 +1684,11 @@ mod tests {
 
         assert!(!p0.game_player.is_turn);
         assert!(p1.game_player.is_turn);
-        assert!(!p0.game_player.is_eliminated);
+        // eliminated = [0] must land on position 0's is_eliminated flag only,
+        // and must not bleed into place (same-typed placings slice).
+        assert!(p0.game_player.is_eliminated);
+        assert!(!p1.game_player.is_eliminated);
+        assert_eq!(p0.game_player.place, None);
         assert_eq!(p0.game_player.points, Some(3.5));
         assert_eq!(p1.game_player.points, Some(1.5));
         // Only the played player gets undo state stashed.
@@ -1713,10 +1721,12 @@ mod tests {
             "prev_state",
             "final_state",
             false,
-            true, // is_finished -> Finished
-            &[],
-            &[],
-            &[1, 2], // placings by position
+            &StatusUpdate {
+                is_finished: true, // -> Finished
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings: vec![1, 2], // placings by position
+            },
             &[10.0, 5.0],
             ge.game.updated_at,
             vec![],
@@ -1753,10 +1763,13 @@ mod tests {
             "final_state",
             "final_state_2",
             false,
-            false, // is_finished = false -> finished_at param is None
-            &[0],
-            &[],
-            &[],
+            // is_finished = false -> finished_at param is None
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
             &[10.0, 5.0],
             ge_after.game.updated_at,
             vec![],
@@ -1793,10 +1806,12 @@ mod tests {
             "state_before_move",
             "state_after_move",
             true,
-            false,
-            &[1],
-            &[],
-            &[],
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![1],
+                eliminated: vec![],
+                placings: vec![],
+            },
             &[],
             ge.game.updated_at,
             vec![],
@@ -1809,9 +1824,12 @@ mod tests {
             game.id,
             "state_before_move",
             0, // player_position that used the undo
-            &[0],
-            &[],
-            &[],
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
         )
         .await
         .unwrap();
@@ -2136,10 +2154,12 @@ mod tests {
             "prev_state",
             "final_state",
             false,
-            true,
-            &[],
-            &[],
-            &placings,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
             &[],
             ge.game.updated_at,
             vec![],
@@ -2190,10 +2210,12 @@ mod tests {
             "prev_state",
             "final_state",
             false,
-            true,
-            &[],
-            &[],
-            &placings,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
             &[],
             ge.game.updated_at,
             vec![],
@@ -2234,10 +2256,12 @@ mod tests {
             "prev_state",
             "final_state",
             false,
-            true,
-            &[],
-            &[],
-            &[1, 2],
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings: vec![1, 2],
+            },
             &[],
             ge.game.updated_at,
             vec![],
@@ -2257,10 +2281,12 @@ mod tests {
             "final_state",
             "final_state_2",
             false,
-            true,
-            &[],
-            &[],
-            &[1, 2],
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings: vec![1, 2],
+            },
             &[],
             ge_after_first.game.updated_at,
             vec![],
@@ -2293,10 +2319,12 @@ mod tests {
             "prev_state",
             "final_state",
             false,
-            true,
-            &[],
-            &[],
-            &[1, 2],
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings: vec![1, 2],
+            },
             &[],
             ge.game.updated_at,
             vec![],
@@ -2348,10 +2376,12 @@ mod tests {
             "prev_state",
             "final_state",
             false,
-            true,
-            &[],
-            &[],
-            &placings,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
             &[],
             ge.game.updated_at,
             vec![],

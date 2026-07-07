@@ -2,19 +2,39 @@
 pub mod client;
 pub mod server_fns;
 
-/// Splits a game service `Status` into the `(is_finished, whose_turn,
-/// eliminated, placings)` fields used to update `game_players`/`games` rows.
-/// Shared by every command flow that calls the game service and then writes
-/// the resulting status back to the DB.
+/// The fields of a game service `Status` used to update
+/// `game_players`/`games` rows, split out by `status_fields`.
 #[cfg(feature = "ssr")]
-pub fn status_fields(status: brdgme_game::Status) -> (bool, Vec<usize>, Vec<usize>, Vec<usize>) {
+pub struct StatusUpdate {
+    pub is_finished: bool,
+    pub whose_turn: Vec<usize>,
+    pub eliminated: Vec<usize>,
+    pub placings: Vec<usize>,
+}
+
+/// Splits a game service `Status` into the `StatusUpdate` fields used to
+/// update `game_players`/`games` rows. Shared by every command flow that
+/// calls the game service and then writes the resulting status back to the
+/// DB.
+#[cfg(feature = "ssr")]
+pub fn status_fields(status: brdgme_game::Status) -> StatusUpdate {
     use brdgme_game::Status;
     match status {
         Status::Active {
             whose_turn,
             eliminated,
-        } => (false, whose_turn, eliminated, vec![]),
-        Status::Finished { placings, .. } => (true, vec![], vec![], placings),
+        } => StatusUpdate {
+            is_finished: false,
+            whose_turn,
+            eliminated,
+            placings: vec![],
+        },
+        Status::Finished { placings, .. } => StatusUpdate {
+            is_finished: true,
+            whose_turn: vec![],
+            eliminated: vec![],
+            placings,
+        },
     }
 }
 
@@ -111,7 +131,7 @@ pub async fn execute_command(
     }
 
     let prev_game_state = ge.game.game_state.clone();
-    let (is_finished, whose_turn, eliminated, placings) = status_fields(game_response.status);
+    let status = status_fields(game_response.status);
 
     if let Err(e) = crate::db::update_game_command_success(
         pool,
@@ -120,10 +140,7 @@ pub async fn execute_command(
         &prev_game_state,
         &game_response.state,
         can_undo,
-        is_finished,
-        &whose_turn,
-        &eliminated,
-        &placings,
+        &status,
         &game_response.points,
         ge.game.updated_at,
         logs,
@@ -361,7 +378,7 @@ mod tests {
 
     /// Starts an in-process mock game service that answers every request with
     /// whatever `handler` returns; mirrors the pattern in `game::client::tests`.
-    async fn spawn_mock_game_service<F>(handler: F) -> String
+    pub(crate) async fn spawn_mock_game_service<F>(handler: F) -> String
     where
         F: Fn(Request) -> Response + Send + Sync + 'static,
     {
@@ -622,10 +639,12 @@ mod tests {
             "initial_state",
             "concurrent_conflict_state",
             true,
-            false,
-            &[1],
-            &[],
-            &[],
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![1],
+                eliminated: vec![],
+                placings: vec![],
+            },
             &[0.0, 0.0],
             stale_ge.game.updated_at,
             vec![CliLog {

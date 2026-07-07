@@ -232,6 +232,74 @@ pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnErr
         .collect())
 }
 
+#[cfg(feature = "ssr")]
+struct CreateGameSeed<'a> {
+    player_count: usize,
+    creator_id: Uuid,
+    opponent_ids: &'a [Uuid],
+    opponent_emails: &'a [String],
+    bot_slots: &'a [BotSlot],
+}
+
+/// Requests a fresh game from the game service and creates it (game row,
+/// players, logs) within the caller's transaction. Deliberately neither
+/// begins/commits the transaction nor broadcasts: `restart_game` must keep
+/// the new game atomic with its `restarted_game_id` write, so callers own
+/// the commit and the post-commit notifications.
+#[cfg(feature = "ssr")]
+async fn create_game_from_service(
+    tx: &mut sqlx::PgConnection,
+    http_client: &reqwest::Client,
+    game_version: &crate::models::game::GameVersion,
+    seed: CreateGameSeed<'_>,
+) -> Result<crate::models::game::Game, ServerFnError> {
+    use crate::db::CreateGameOpts;
+    use crate::game::client;
+    use brdgme_cmd::api::{Request, Response};
+
+    let resp = client::request(
+        http_client,
+        &game_version.uri,
+        &Request::New {
+            players: seed.player_count,
+        },
+    )
+    .await
+    .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
+
+    let (game_info, logs) = match resp {
+        Response::New { game, logs, .. } => (game, logs),
+        _ => return Err(ServerFnError::new("Unexpected response from game service")),
+    };
+
+    let status = crate::game::status_fields(game_info.status);
+
+    let game = crate::db::create_game_with_users_tx(
+        &mut *tx,
+        CreateGameOpts {
+            game_version_id: game_version.id,
+            whose_turn: &status.whose_turn,
+            eliminated: &status.eliminated,
+            placings: &status.placings,
+            points: &game_info.points,
+            creator_id: seed.creator_id,
+            opponent_ids: seed.opponent_ids,
+            opponent_emails: seed.opponent_emails,
+            bot_slots: seed.bot_slots,
+            chat_id: None,
+            game_state: &game_info.state,
+        },
+    )
+    .await
+    .map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
+
+    crate::db::insert_game_logs_tx(&mut *tx, game.id, logs)
+        .await
+        .map_err(|e| ServerFnError::new(format!("Failed to create game logs: {}", e)))?;
+
+    Ok(game)
+}
+
 #[server(CreateNewGame, "/api")]
 pub async fn create_new_game(
     game_version_id: Uuid,
@@ -239,10 +307,7 @@ pub async fn create_new_game(
     bot_slots: Option<Vec<BotSlot>>,
 ) -> Result<Uuid, ServerFnError> {
     use crate::auth::server::get_current_user;
-    use crate::db::CreateGameOpts;
-    use crate::game::client;
     use crate::websocket::GameBroadcaster;
-    use brdgme_cmd::api::{Request, Response};
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
@@ -262,45 +327,28 @@ pub async fn create_new_game(
         .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
         .ok_or_else(|| ServerFnError::new("Game version not found"))?;
 
-    let resp = client::request(
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+
+    let game = create_game_from_service(
+        &mut tx,
         &http_client,
-        &game_version.uri,
-        &Request::New {
-            players: player_count,
-        },
-    )
-    .await
-    .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
-
-    let (game_info, logs) = match resp {
-        Response::New { game, logs, .. } => (game, logs),
-        _ => return Err(ServerFnError::new("Unexpected response from game service")),
-    };
-
-    let (_, whose_turn, eliminated, placings) = crate::game::status_fields(game_info.status);
-
-    let game = crate::db::create_game_with_users(
-        &pool,
-        CreateGameOpts {
-            game_version_id,
-            whose_turn: &whose_turn,
-            eliminated: &eliminated,
-            placings: &placings,
-            points: &game_info.points,
+        &game_version,
+        CreateGameSeed {
+            player_count,
             creator_id: user.id,
             opponent_ids: &[],
             opponent_emails: &opponent_emails,
             bot_slots: &bot_slots,
-            chat_id: None,
-            game_state: &game_info.state,
         },
     )
-    .await
-    .map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
+    .await?;
 
-    crate::db::create_game_logs(&pool, game.id, logs)
+    tx.commit()
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to create logs: {}", e)))?;
+        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game.id).await;
 
@@ -419,16 +467,14 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         _ => return Err(ServerFnError::new("Unexpected response from game service")),
     };
 
-    let (_, whose_turn, eliminated, placings) = crate::game::status_fields(game_response.status);
+    let status = crate::game::status_fields(game_response.status);
 
     crate::db::undo_game(
         &pool,
         game_id,
         &undo_state,
         player.game_player.position as usize,
-        &whose_turn,
-        &eliminated,
-        &placings,
+        &status,
     )
     .await
     .map_err(|e| ServerFnError::new(format!("Failed to undo game: {}", e)))?;
@@ -477,24 +523,18 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
     Ok(())
 }
 
-#[server(RestartGame, "/api")]
-pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
-    use crate::auth::server::get_current_user;
-    use crate::db::CreateGameOpts;
-    use crate::game::client;
-    use crate::websocket::GameBroadcaster;
-    use brdgme_cmd::api::{Request, Response};
-    use sqlx::PgPool;
-
-    let pool = expect_context::<PgPool>();
-    let broadcaster = expect_context::<GameBroadcaster>();
-    let http_client = expect_context::<reqwest::Client>();
-    let jetstream = expect_context::<async_nats::jetstream::Context>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-
-    let ge = crate::db::find_game_extended(&pool, game_id)
+/// The restart flow minus the leptos context plumbing and post-commit
+/// broadcasts, so tests can drive it against a mock game service. The
+/// "already restarted" guard, the new game and the `restarted_game_id`
+/// write commit atomically.
+#[cfg(feature = "ssr")]
+async fn restart_game_impl(
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    user_id: Uuid,
+    game_id: Uuid,
+) -> Result<Uuid, ServerFnError> {
+    let ge = crate::db::find_game_extended(pool, game_id)
         .await
         .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
@@ -508,7 +548,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
     if !ge
         .game_players
         .iter()
-        .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
+        .any(|p| p.user.as_ref().is_some_and(|u| u.id == user_id))
     {
         return Err(ServerFnError::new("You are not a player in this game"));
     }
@@ -518,33 +558,15 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
     // finished game was played on. Falls back to the original version if
     // none is found.
     let restart_game_version =
-        crate::db::find_latest_non_deprecated_game_version(&pool, ge.game_version.game_type_id)
+        crate::db::find_latest_non_deprecated_game_version(pool, ge.game_version.game_type_id)
             .await
             .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
             .unwrap_or_else(|| ge.game_version.clone());
 
-    let player_count = ge.game_players.len();
-    let resp = client::request(
-        &http_client,
-        &restart_game_version.uri,
-        &Request::New {
-            players: player_count,
-        },
-    )
-    .await
-    .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
-
-    let (game_info, logs) = match resp {
-        Response::New { game, logs, .. } => (game, logs),
-        _ => return Err(ServerFnError::new("Unexpected response from game service")),
-    };
-
-    let (_, whose_turn, eliminated, placings) = crate::game::status_fields(game_info.status);
-
     let opponent_ids: Vec<Uuid> = ge
         .game_players
         .iter()
-        .filter_map(|p| p.user.as_ref().filter(|u| u.id != user.id).map(|u| u.id))
+        .filter_map(|p| p.user.as_ref().filter(|u| u.id != user_id).map(|u| u.id))
         .collect();
 
     let mut tx = pool
@@ -552,29 +574,19 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
-    let new_game = crate::db::create_game_with_users_tx(
-        &pool,
+    let new_game = create_game_from_service(
         &mut tx,
-        CreateGameOpts {
-            game_version_id: restart_game_version.id,
-            whose_turn: &whose_turn,
-            eliminated: &eliminated,
-            placings: &placings,
-            points: &game_info.points,
-            creator_id: user.id,
+        http_client,
+        &restart_game_version,
+        CreateGameSeed {
+            player_count: ge.game_players.len(),
+            creator_id: user_id,
             opponent_ids: &opponent_ids,
             opponent_emails: &[],
             bot_slots: &[],
-            chat_id: None,
-            game_state: &game_info.state,
         },
     )
-    .await
-    .map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
-
-    crate::db::insert_game_logs_tx(&mut tx, new_game.id, logs)
-        .await
-        .map_err(|e| ServerFnError::new(format!("Failed to create game logs: {}", e)))?;
+    .await?;
 
     sqlx::query!(
         "UPDATE games SET restarted_game_id = $1, updated_at = NOW() WHERE id = $2",
@@ -589,14 +601,33 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         .await
         .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
 
+    Ok(new_game.id)
+}
+
+#[server(RestartGame, "/api")]
+pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
+    use crate::auth::server::get_current_user;
+    use crate::websocket::GameBroadcaster;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let broadcaster = expect_context::<GameBroadcaster>();
+    let http_client = expect_context::<reqwest::Client>();
+    let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    let new_game_id = restart_game_impl(&pool, &http_client, user.id, game_id).await?;
+
     // Broadcast update for the new game.
-    crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, new_game.id).await;
+    crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, new_game_id).await;
 
     // Broadcast update for the old game with restarted_game_id now set, so
     // the other player's game view updates to show the "Go to new game" link.
     broadcaster.broadcast_game_update(game_id).await;
 
-    Ok(new_game.id)
+    Ok(new_game_id)
 }
 
 #[server(BumpBotTurns, "/api")]
@@ -642,6 +673,10 @@ mod tests {
     }
 
     async fn make_game_version(pool: &PgPool) -> Uuid {
+        make_game_version_at(pool, "http://127.0.0.1:8100").await
+    }
+
+    async fn make_game_version_at(pool: &PgPool, uri: &str) -> Uuid {
         let game_type_id = Uuid::new_v4();
         sqlx::query!(
             "INSERT INTO game_types (id, name, player_counts) VALUES ($1, $2, $3)",
@@ -659,12 +694,39 @@ mod tests {
             game_version_id,
             game_type_id,
             "v1",
-            "http://127.0.0.1:8100"
+            uri
         )
         .execute(pool)
         .await
         .unwrap();
         game_version_id
+    }
+
+    /// A finished two-player game (placings set, `restarted_game_id` NULL)
+    /// whose game version points at `uri`. Returns `(game_id, creator_id)`.
+    async fn make_finished_two_player_game(pool: &PgPool, uri: &str) -> (Uuid, Uuid) {
+        let creator = make_user(pool, "creator").await;
+        let opponent = make_user(pool, "opponent").await;
+        let game_version_id = make_game_version_at(pool, uri).await;
+        let game = crate::db::create_game_with_users(
+            pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[],
+                eliminated: &[],
+                placings: &[1, 2],
+                points: &[1.0, 0.0],
+                creator_id: creator,
+                opponent_ids: &[opponent],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "final_state",
+            },
+        )
+        .await
+        .unwrap();
+        (game.id, creator)
     }
 
     // Anonymous visitors hit pages that render SidebarMenu (e.g. the
@@ -830,5 +892,79 @@ mod tests {
             .collect();
         opponent_names.sort();
         assert_eq!(opponent_names, vec!["Botty", "bob"]);
+    }
+
+    // A successful restart must commit the new game and the old game's
+    // restarted_game_id link together.
+    #[sqlx::test]
+    async fn restart_game_sets_restarted_game_id_and_creates_new_game(pool: PgPool) {
+        use brdgme_cmd::api::{GameResponse, PubRender, Response};
+
+        let uri = crate::game::tests::spawn_mock_game_service(|_req| Response::New {
+            game: GameResponse {
+                state: "restarted_state".to_string(),
+                points: vec![0.0, 0.0],
+                status: brdgme_game::Status::Active {
+                    whose_turn: vec![0],
+                    eliminated: vec![],
+                },
+            },
+            logs: vec![],
+            public_render: PubRender {
+                pub_state: "pub".to_string(),
+                render: "render".to_string(),
+            },
+            player_renders: vec![],
+        })
+        .await;
+        let (game_id, creator_id) = make_finished_two_player_game(&pool, &uri).await;
+        let http_client = reqwest::Client::new();
+
+        let new_game_id = restart_game_impl(&pool, &http_client, creator_id, game_id)
+            .await
+            .unwrap();
+
+        let old_ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(old_ge.game.restarted_game_id, Some(new_game_id));
+
+        let new_ge = crate::db::find_game_extended(&pool, new_game_id)
+            .await
+            .unwrap()
+            .expect("new game row exists");
+        assert_eq!(new_ge.game.game_state, "restarted_state");
+        assert!(!new_ge.game.is_finished);
+        assert_eq!(new_ge.game_players.len(), 2);
+    }
+
+    // A failed game service call must leave no orphan game row and keep the
+    // old game restartable (restarted_game_id NULL).
+    #[sqlx::test]
+    async fn restart_game_failed_service_call_leaves_no_new_game(pool: PgPool) {
+        use brdgme_cmd::api::Response;
+
+        let uri = crate::game::tests::spawn_mock_game_service(|_req| Response::UserError {
+            message: "nope".to_string(),
+        })
+        .await;
+        let (game_id, creator_id) = make_finished_two_player_game(&pool, &uri).await;
+        let http_client = reqwest::Client::new();
+
+        let result = restart_game_impl(&pool, &http_client, creator_id, game_id).await;
+        assert!(result.is_err());
+
+        let games_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(games_count, 1);
+
+        let old_ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(old_ge.game.restarted_game_id, None);
     }
 }
