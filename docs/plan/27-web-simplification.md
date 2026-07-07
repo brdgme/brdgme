@@ -1,6 +1,25 @@
 # 27: rust/web simplification (skinny queries, dedup, client plumbing)
 
-**Status:** Pending
+**Status:** Paused 2026-07-07. WP4, WP1, WP2 (incl. 2a pinning tests), WP5
+done, gated and committed (bc72a1f, cada5d7, c019c3a, 8ab1c33, 2fdd2a7).
+Remaining work deferred - see "Deferred work" below.
+
+## Deferred work (as of 2026-07-07)
+
+1. **WP3 (client WS merge + single logs fetch)** - not started. Server-side
+   WPs did not touch it; the full spec below remains valid. Requires the
+   Tilt dev env and the manual two-browser verification checklist (no
+   automated coverage).
+2. **Harden flaky test
+   `broadcast_and_trigger_publishes_signal_for_missing_game`**
+   (`rust/web/src/game/mod.rs`, added in WP1). NATS timing-sensitive; it
+   occasionally times out waiting for the `game.{id}` signal. Passed on
+   first try in the final WP5 gate run, but harden (longer/adaptive wait or
+   subscription-before-publish ordering) before it erodes trust in the
+   suite.
+3. **WP2 manual dev-app sidebar check** (from WP2 acceptance: sidebar
+   renders games with bot opponents; my-turn games sort to top). Fold into
+   the same Tilt session as WP3's manual checklist.
 
 **Goal:** Continue the Phase 17 skinny-payload direction inside `rust/web`:
 replace fat `GameExtended` fetches with purpose-built queries where callers
