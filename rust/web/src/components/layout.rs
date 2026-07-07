@@ -51,12 +51,29 @@ pub fn SidebarMenu() -> impl IntoView {
             get_active_games().await
         });
 
+    // None until the fetch resolves; treat that as logged-out so anonymous
+    // visitors never see "Logout". Re-fetches after a logout dispatch.
+    let current_user: LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>> =
+        LocalResource::new(move || async move {
+            let _ = logout_action.version().get();
+            crate::auth::get_current_user().await
+        });
+    let logged_in = move || matches!(current_user.get(), Some(Ok(Some(_))));
+
     view! {
         <div class="menu">
             <h1><A href="/">"brdg.me"</A></h1>
             <div class="subheading"><A href="/">"Lo-fi board games"</A></div>
             <div>
-                <div><a on:click=on_logout style="cursor:pointer">"Logout"</a></div>
+                // Same element type in both states to avoid a structural
+                // hydration mismatch; LocalResource is always None during
+                // SSR/hydration so both render the "Login" branch there.
+                <div hidden=move || !logged_in()>
+                    <a on:click=on_logout style="cursor:pointer">"Logout"</a>
+                </div>
+                <div hidden=logged_in>
+                    <A href="/login">"Login"</A>
+                </div>
             </div>
             <div><A href="/games">"New game"</A></div>
             <div>
