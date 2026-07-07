@@ -4,6 +4,8 @@ use crate::auth::session::{
     validate_session_token,
 };
 #[cfg(feature = "ssr")]
+use crate::error::internal;
+#[cfg(feature = "ssr")]
 use crate::models::user::{User, UserEmail};
 use leptos::prelude::*;
 #[cfg(feature = "ssr")]
@@ -100,7 +102,7 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("login: begin transaction"))?;
 
     let user_email = sqlx::query_as!(
         UserEmail,
@@ -109,7 +111,7 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     )
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+    .map_err(internal("login: look up user email"))?;
 
     let user_id = if let Some(user_email) = user_email {
         user_email.user_id
@@ -125,7 +127,7 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to create user: {}", e)))?;
+        .map_err(internal("login: create user"))?;
 
         sqlx::query!(
             "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
@@ -134,7 +136,7 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to create user email: {}", e)))?;
+        .map_err(internal("login: create user email"))?;
 
         new_user_id
     };
@@ -151,11 +153,11 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| ServerFnError::new(format!("Failed to update user: {}", e)))?;
+    .map_err(internal("login: set confirmation token"))?;
 
     tx.commit()
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("login: commit transaction"))?;
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
     send_login_email(resend.as_ref(), &email, &confirmation_token).await;
@@ -194,7 +196,7 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
     )
     .fetch_optional(&pool)
     .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+    .map_err(internal("confirm_login: look up user email"))?;
 
     let user_email =
         user_email.ok_or_else(|| ServerFnError::new("Invalid or expired token".to_string()))?;
@@ -207,7 +209,7 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
     )
     .fetch_optional(&pool)
     .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+    .map_err(internal("confirm_login: look up user by token"))?;
 
     let user = user.ok_or_else(|| ServerFnError::new("Invalid or expired token".to_string()))?;
 
@@ -220,7 +222,7 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
     )
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(format!("Failed to create auth token: {}", e)))?;
+    .map_err(internal("confirm_login: create auth token"))?;
 
     // Clear login confirmation
     sqlx::query!(
@@ -229,15 +231,15 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
     )
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(format!("Failed to clear confirmation: {}", e)))?;
+    .map_err(internal("confirm_login: clear confirmation"))?;
 
     // Set session
     let session: Session = extract()
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to extract session: {}", e)))?;
+        .map_err(internal("confirm_login: extract session"))?;
     set_user_session(&session, &user, &user_email.email, auth_token_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to set session: {}", e)))?;
+        .map_err(internal("confirm_login: set session"))?;
 
     Ok(AuthUser {
         id: user.id,
@@ -250,7 +252,7 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
 pub async fn get_current_user() -> Result<Option<AuthUser>, ServerFnError> {
     let session: Session = extract()
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to extract session: {}", e)))?;
+        .map_err(internal("get_current_user: extract session"))?;
     let session_user = get_user_from_session(&session).await;
 
     if let Some(user) = session_user {
@@ -278,7 +280,7 @@ pub async fn get_current_user() -> Result<Option<AuthUser>, ServerFnError> {
 pub async fn logout() -> Result<bool, ServerFnError> {
     let session: Session = extract()
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to extract session: {}", e)))?;
+        .map_err(internal("logout: extract session"))?;
 
     // Get user to check for auth token to invalidate
     if let Some(user) = get_user_from_session(&session).await {
@@ -288,7 +290,7 @@ pub async fn logout() -> Result<bool, ServerFnError> {
 
     clear_user_session(&session)
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to clear session: {}", e)))?;
+        .map_err(internal("logout: clear session"))?;
 
     Ok(true)
 }

@@ -12,6 +12,9 @@ pub mod router;
 pub mod db;
 
 #[cfg(feature = "ssr")]
+pub mod error;
+
+#[cfg(feature = "ssr")]
 pub mod nats;
 
 pub mod websocket;

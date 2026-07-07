@@ -1,3 +1,5 @@
+#[cfg(feature = "ssr")]
+use crate::error::internal;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
@@ -85,7 +87,7 @@ async fn active_games_summary(
 
     crate::db::find_active_game_summaries(pool, user.id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))
+        .map_err(internal("get_active_games: find active games"))
 }
 
 #[server(GetActiveGames, "/api")]
@@ -113,7 +115,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
 
     let ge = crate::db::find_game_extended(&pool, game_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+        .map_err(internal("get_game_details: find game"))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
     let player = ge
@@ -128,11 +130,11 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         player.map(|p| p.game_player.position as usize),
     )
     .await
-    .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
+    .map_err(internal("get_game_details: render game"))?;
 
     // Convert markup to HTML
     let (nodes, _) = brdgme_markup::from_string(&render_resp.render)
-        .map_err(|e| ServerFnError::new(format!("Markup error: {}", e)))?;
+        .map_err(internal("get_game_details: parse markup"))?;
 
     let html = brdgme_markup::html(&brdgme_markup::transform(&nodes, &ge.markup_players()));
 
@@ -185,7 +187,7 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
     )
     .fetch_optional(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?
+    .map_err(internal("submit_command: find player position"))?
     .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
     super::execute_command(
@@ -213,7 +215,7 @@ pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnErr
 
     let game_types = crate::db::find_available_game_types(&pool)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("get_available_game_types: find game types"))?;
 
     Ok(game_types
         .into_iter()
@@ -265,7 +267,7 @@ async fn create_game_from_service(
         },
     )
     .await
-    .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
+    .map_err(internal("create_game_from_service: request new game"))?;
 
     let (game_info, logs) = match resp {
         Response::New { game, logs, .. } => (game, logs),
@@ -291,11 +293,11 @@ async fn create_game_from_service(
         },
     )
     .await
-    .map_err(|e| ServerFnError::new(format!("Failed to create game: {}", e)))?;
+    .map_err(internal("create_game_from_service: create game"))?;
 
     crate::db::insert_game_logs_tx(&mut *tx, game.id, logs)
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to create game logs: {}", e)))?;
+        .map_err(internal("create_game_from_service: create game logs"))?;
 
     Ok(game)
 }
@@ -324,13 +326,13 @@ pub async fn create_new_game(
 
     let game_version = crate::db::find_game_version(&pool, game_version_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+        .map_err(internal("create_new_game: find game version"))?
         .ok_or_else(|| ServerFnError::new("Game version not found"))?;
 
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("create_new_game: begin transaction"))?;
 
     let game = create_game_from_service(
         &mut tx,
@@ -348,7 +350,7 @@ pub async fn create_new_game(
 
     tx.commit()
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("create_new_game: commit transaction"))?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game.id).await;
 
@@ -367,7 +369,7 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
 
     let ge = crate::db::find_game_extended(&pool, game_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+        .map_err(internal("get_game_logs: find game"))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
     let player = ge
@@ -381,7 +383,7 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
 
     let logs = crate::db::get_game_logs(&pool, game_id, game_player_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("get_game_logs: load logs"))?;
 
     let markup_players = ge.markup_players();
 
@@ -414,7 +416,7 @@ pub async fn mark_read(game_id: Uuid) -> Result<(), ServerFnError> {
 
     crate::db::mark_game_read(&pool, game_id, user.id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))
+        .map_err(internal("mark_read: mark game read"))
 }
 
 #[server(UndoGame, "/api")]
@@ -435,7 +437,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
 
     let ge = crate::db::find_game_extended(&pool, game_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+        .map_err(internal("undo_game: find game"))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
     let player = ge
@@ -458,7 +460,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         },
     )
     .await
-    .map_err(|e| ServerFnError::new(format!("Game service error: {}", e)))?;
+    .map_err(internal("undo_game: fetch status from game service"))?;
 
     let game_response = match resp {
         Response::Status { game, .. } => game,
@@ -475,7 +477,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         &status,
     )
     .await
-    .map_err(|e| ServerFnError::new(format!("Failed to undo game: {}", e)))?;
+    .map_err(internal("undo_game: apply undo"))?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
     Ok(())
@@ -495,7 +497,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
 
     let ge = crate::db::find_game_extended(&pool, game_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+        .map_err(internal("concede_game: find game"))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
     if ge.game.is_finished {
@@ -515,7 +517,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
 
     crate::db::concede_game(&pool, game_id, player.game_player.id, player.name())
         .await
-        .map_err(|e| ServerFnError::new(format!("Failed to concede game: {}", e)))?;
+        .map_err(internal("concede_game: concede"))?;
 
     broadcaster.broadcast_game_update(game_id).await;
     Ok(())
@@ -534,7 +536,7 @@ async fn restart_game_impl(
 ) -> Result<Uuid, ServerFnError> {
     let ge = crate::db::find_game_extended(pool, game_id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+        .map_err(internal("restart_game: find game"))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
 
     if !ge.game.is_finished {
@@ -558,7 +560,7 @@ async fn restart_game_impl(
     let restart_game_version =
         crate::db::find_latest_non_deprecated_game_version(pool, ge.game_version.game_type_id)
             .await
-            .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?
+            .map_err(internal("restart_game: find latest game version"))?
             .unwrap_or_else(|| ge.game_version.clone());
 
     let opponent_ids: Vec<Uuid> = ge
@@ -570,7 +572,7 @@ async fn restart_game_impl(
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("restart_game: begin transaction"))?;
 
     let new_game = create_game_from_service(
         &mut tx,
@@ -593,11 +595,11 @@ async fn restart_game_impl(
     )
     .execute(&mut *tx)
     .await
-    .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+    .map_err(internal("restart_game: link restarted game"))?;
 
     tx.commit()
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("restart_game: commit transaction"))?;
 
     Ok(new_game.id)
 }
@@ -642,7 +644,7 @@ pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
     // Only players in the game can bump bots.
     let is_player = crate::db::is_player_in_game(&pool, game_id, user.id)
         .await
-        .map_err(|e| ServerFnError::new(format!("Database error: {}", e)))?;
+        .map_err(internal("bump_bot_turns: check player"))?;
     if !is_player {
         return Err(ServerFnError::new("You are not a player in this game"));
     }
