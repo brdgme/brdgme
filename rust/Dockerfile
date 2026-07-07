@@ -84,9 +84,17 @@ COPY --from=builder /app/target/release/bot .
 EXPOSE 4000
 CMD ["./bot"]
 
+FROM debian:bookworm-slim AS battleship-2
+COPY --from=builder /app/target/release/battleship_2_http .
+CMD ["./battleship_2_http"]
+
 FROM debian:bookworm-slim AS acquire-1
 COPY --from=builder /app/target/release/acquire_1_http .
 CMD ["./acquire_1_http"]
+
+FROM debian:bookworm-slim AS category-5-2
+COPY --from=builder /app/target/release/category_5_2_http .
+CMD ["./category_5_2_http"]
 
 FROM debian:bookworm-slim AS lost-cities-1
 COPY --from=builder /app/target/release/lost_cities_1_http .
@@ -111,3 +119,7 @@ CMD ["./greed_2_http"]
 FROM debian:bookworm-slim AS farkle-2
 COPY --from=builder /app/target/release/farkle_2_http .
 CMD ["./farkle_2_http"]
+
+FROM debian:bookworm-slim AS zombie-dice-2
+COPY --from=builder /app/target/release/zombie_dice_2_http .
+CMD ["./zombie_dice_2_http"]

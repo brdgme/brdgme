@@ -6,3 +6,4 @@ metadata:
 spec:
   typeName: Zombie Dice
   weight: 1.0
+  isDeprecated: true

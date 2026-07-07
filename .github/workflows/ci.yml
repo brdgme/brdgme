@@ -240,8 +240,12 @@ jobs:
         include:
           - image: acquire-1
             target: acquire-1
+          - image: battleship-2
+            target: battleship-2
           - image: bot
             target: bot
+          - image: category-5-2
+            target: category-5-2
           - image: farkle-2
             target: farkle-2
           - image: greed-2
@@ -254,6 +258,8 @@ jobs:
             target: lost-cities-2
           - image: no-thanks-2
             target: no-thanks-2
+          - image: zombie-dice-2
+            target: zombie-dice-2
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4

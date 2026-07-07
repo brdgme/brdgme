@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: battleship-1
+  name: battleship-2
   namespace: brdgme
 spec:
   typeName: Battleship
   weight: 1.0
-  isDeprecated: true

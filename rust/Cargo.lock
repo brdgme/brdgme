@@ -456,6 +456,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "battleship-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "binascii"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -685,6 +699,20 @@ name = "camino"
 version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f2d30e4173c4026932d51d31d6b0613b1fd3014bf3f9f8943d4ba139c437ba0"
+
+[[package]]
+name = "category-5-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "tokio",
+]
 
 [[package]]
 name = "cc"
@@ -7581,3 +7609,17 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zombie-dice-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "tokio",
+]

@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: battleship-2
+  labels:
+    app: battleship-2
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+  selector:
+    app: battleship-2

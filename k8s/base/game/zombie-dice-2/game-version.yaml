@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: battleship-1
+  name: zombie-dice-2
   namespace: brdgme
 spec:
-  typeName: Battleship
+  typeName: Zombie Dice
   weight: 1.0
-  isDeprecated: true

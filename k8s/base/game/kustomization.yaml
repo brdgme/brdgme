@@ -2,7 +2,9 @@ bases:
 - acquire-1
 - age-of-war-1
 - battleship-1
+- battleship-2
 - category-5-1
+- category-5-2
 - cathedral-1
 - farkle-1
 - farkle-2
@@ -23,3 +25,4 @@ bases:
 - sushizock-1
 - texas-holdem-1
 - zombie-dice-1
+- zombie-dice-2

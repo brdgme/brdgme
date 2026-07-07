@@ -218,6 +218,114 @@ standard-competition semantics (`[1, 1, 3]` for a two-way tie at the top).
 commands with no panic. Reg wired: workspace, Dockerfile, CI matrix, Tiltfile,
 k8s base/prod manifests; farkle-1 GameVersion marked `isDeprecated: true`.
 
+**Done (Track B, 2026-07):** zombie-dice-2 ported. The Go zombie_dice suite
+has zero tests (0 lines), so per step 8's absent-suite rule a full baseline
+suite was written: player_counts, start state, dice/face counts,
+take_dice/basic+refill+zero, roll distribution, keep banking+advancing,
+can_roll/can_keep guards, leaders, finished-threshold (unique + below),
+rolloff start/skip/resolve, placings (standard-competition ties incl.
+three-way), command roll/keep/wrong-player/unknown/after-finished,
+cup refill, pub_state field capture, plus `assert_gamer_contract`. clippy
+clean, fuzzed ~10k games / ~500k commands with no panic. Reg wired:
+workspace, Dockerfile, CI matrix, Tiltfile, k8s base/prod manifests;
+zombie-dice-1 GameVersion marked `isDeprecated: true`.
+
+**Done (Track B, 2026-07):** category-5-2 ported (6 nimmt!). All 3 Go tests
+ported 1:1 (`TestGame_DrawCards` -> `test_game_draw_cards`,
+`TestAutoPlayLastCard` -> `test_auto_play_last_card`,
+`TestSortCards` -> `test_sort_cards`); the category_5 Go suite has no
+placings/winners test so no tie assertion to adapt (baseline placings tests
+added use Rust standard-competition semantics, with the lowest-score-wins
+expectations category_5 requires - fewest bullheads places first). Per step
+8's thin-suite rule baseline command/scoring/can_*/placings/pub_state tests
+were added. `assert_gamer_contract` green, clippy clean, fuzzed ~2.5k games /
+~530k commands with no panic. Reg wired: workspace, Dockerfile, CI matrix,
+Tiltfile, k8s base/prod manifests; category-5-1 GameVersion marked
+`isDeprecated: true`.
+
+**Done (Track B, 2026-07):** battleship-2 ported. The Go battleship suite
+has 1 test (`TestGame`, 53 lines) - ported 1:1 as `test_game`; per step 8's
+thin-suite rule a full baseline suite was added (player_counts,
+start_initial_state, ship_sizes, loc_display, can_place/can_shoot,
+place removes/marks/logs/off-board/overlapping/already-placed/wrong-player,
+shoot miss/hit/sunk/already-shot/wrong-player/before-placing/after-finished,
+player_hits_remaining, player_ship_hits_remaining, finished conditions,
+placings incl. standard-competition ties + three-way, points,
+command unknown/after-finished, pub_state redacts ships + shows when
+finished + captures fields, player_state includes own board + has ships,
+alternating turns). `assert_gamer_contract` green, clippy clean, fuzzed
+~246 games / ~137k commands with no panic. Reg wired: workspace, Dockerfile,
+CI matrix, Tiltfile, k8s base/prod manifests; battleship-1 GameVersion marked
+`isDeprecated: true`.
+
+battleship-2-specific port notes (vs the card/dice-game Track B ports):
+- Board is `[[Cell; 10]; 10]` indexed `[y][x]` where y=0..=9 (A..J), x=0..=9
+  (1..=10); `Cell` enum has Empty/Carrier/Battleship/Cruiser/Submarine/Destroyer/Hit/Miss
+  with `#[serde(rename_all = "lowercase")]`. Ship and Cruiser are both size 3
+  (Go `shipSizes` has SHIP_SUBMARINE: 3, SHIP_CRUISER: 3).
+- Structural redaction per GAME_PORTING.md gotcha: `PubState.boards` maps ship
+  cells to `Cell::Empty` via `redact_board()` (not at render time) so the
+  serialized state cannot leak ship positions; when finished the boards are
+  not redacted (reveal at game end, matching Go's `tileOutputsSelf` switch).
+  `PlayerState.board` carries the player's own full board (with ships).
+- `Loc { y, x }` with `Display` -> `"B3"` etc; `Enum::exact(all_locations())`
+  for the 100 locations (exact matching prevents "b1" matching "b10");
+  `Enum::partial` for ships (prefix matching, "sub" -> Submarine) and
+  directions ("r" -> Right). Go's `ParseShip` requires >= 3 chars but Rust
+  `Enum::partial` accepts any unambiguous prefix - slightly more permissive,
+  not a regression (all Go test commands still pass).
+- Placings metric is `[player_hits_remaining(p)]` (higher = better, more ship
+  cells remaining = you lost fewer ships); winner has the most remaining.
+  Go suite has no placings test so no tie assertion to adapt; baseline
+  placings tests use Rust standard-competition semantics.
+- `can_undo: false` for both `place` and `shoot` (matches Go; placing is
+  deterministic but Go returns false so the port preserves that).
+- Placing phase is simultaneous: `whose_turn` returns all players with
+  `left_to_place[p]` non-empty; shooting phase returns `[current_player]`.
+
+category-5-2-specific port notes (vs the dice-game Track B ports):
+- Cards are a `Card(u8)` newtype over the Go `Card int` (1..=104); `heads()`
+  ports the Go precedence chain verbatim (`==55 -> 7`, `%11 == 0 -> 5`,
+  `%10 == 0 -> 3`, `%5 == 0 -> 2`, else `1`). Note `%10` is checked before
+  `%5`, so multiples of 10 (10, 50, 100) score 3, not 2. Colours map by
+  heads value: 7 purple, 5 red, 3 yellow, 2 cyan, else grey.
+- 4 rows (`[Vec<Card>; 4]`), each capped at 5 cards; a 6th append takes the
+  row. `plays: Vec<Option<Card>>` replaces Go's `map[int]Card` with 0
+  sentinel. `choose_player` + `resolving` gate the `choose <row>` command
+  when a played card is below every row's last card.
+- Simultaneous-play: `whose_turn` returns every player with `plays[p] ==
+  None`; once all have played, `resolve_plays` resolves lowest-first,
+  recursing through auto-play (hands len 1) and end_round/start_round
+  (hands len 0) - faithful to Go's `ResolvePlays` switch.
+- `can_undo: false` for both `play` (reveals chosen card) and `choose`
+  (reveals row choice), matching Go. Hidden info: hands are private
+  (`PlayerState.hand`), board/taken/points are public (`PubState`).
+- Placings metric is `[-player_points[p]]` (lowest score wins); tie
+  semantics use Rust standard-competition (`[2, 2, 1]` for two players
+  tied at the higher score with a third lower).
+
+zombie-dice-2-specific port notes (vs farkle-2/greed-2):
+- Dice are not numeric values but a `Colour` enum (Green/Yellow/Red) with
+  static `faces()` returning `&'static [Face]`. `Dice` serializes only the
+  colour (faces are deterministic); `Dice::roll()` picks a random face. No
+  `libdie` multiset helpers needed - this is the first Track B dice game
+  where dice are not numeric values 1..=6.
+- 13-dice cup composition (6 green / 4 yellow / 3 red) reconstructed as
+  `all_dice()`. `take_dice` refills from `kept` (brains+shotguns) when the
+  cup is short, matching Go `TakeDice`.
+- Win threshold is 13 brains (not 5000 points like farkle-2). Rolloff logic:
+  when `current_turn` wraps to 0 with multiple leaders at >=13, those
+  leaders enter `roll_off_players: Vec<usize>` (empty = no rolloff, faithful
+  to Go's `map[int]bool` nil check); non-rolloff players are skipped via
+  recursive `next_player` until the rolloff resolves (unique leader on
+  wrap-to-0).
+- No random first-player selection: player 0 always starts, matching Go
+  (`CurrentTurn` zero-value). This differs from farkle-2's randomized
+  first-player but is the faithful port.
+- `can_undo` is `false` for both `roll` (rng) and `keep` (advances turn),
+  matching Go. There is no `done` command (Go zombie_dice has only
+  roll/keep).
+
 Farkle-specific port notes (vs greed-2):
 - Dice are plain `u8` values 1..=6 (not named enum faces - farkle dice are
   genuinely numeric); per-face colours are a `match` on `u8` (1 cyan, 2 green,

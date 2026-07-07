@@ -6,3 +6,4 @@ metadata:
 spec:
   typeName: Category 5
   weight: 1.0
+  isDeprecated: true
