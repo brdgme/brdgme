@@ -600,10 +600,17 @@ mod test {
         assert!(g.can_roll(current));
         // done banks 1000 (farkle does NOT auto-score remaining dice).
         let before = g.scores[current];
-        g.command(current, "done", &p).unwrap();
+        let resp = g.command(current, "done", &p).unwrap();
         assert_eq!(before + 1000, g.scores[current]);
-        // Turn passed to the other player.
-        assert_ne!(current, g.current_player);
+        // Turn passed to the other player. Asserted via the logs instead of
+        // current_player: the other player's automatic opening roll can bust,
+        // cascading the turn straight back to the original player.
+        let other = 1 - current;
+        assert!(
+            resp.logs
+                .iter()
+                .any(|l| l.content.contains(&N::Player(other)))
+        );
     }
 
     #[test]
