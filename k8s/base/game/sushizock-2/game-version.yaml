@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: for-sale-1
+  name: sushizock-2
   namespace: brdgme
 spec:
-  typeName: For Sale
+  typeName: Sushizock im Gockelwok
   weight: 1.0
-  isDeprecated: true

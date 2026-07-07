@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: for-sale-1
+  name: sushi-go-2
   namespace: brdgme
 spec:
-  typeName: For Sale
+  typeName: Sushi Go
   weight: 1.0
-  isDeprecated: true

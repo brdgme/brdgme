@@ -123,3 +123,15 @@ CMD ["./farkle_2_http"]
 FROM debian:bookworm-slim AS zombie-dice-2
 COPY --from=builder /app/target/release/zombie_dice_2_http .
 CMD ["./zombie_dice_2_http"]
+
+FROM debian:bookworm-slim AS for-sale-2
+COPY --from=builder /app/target/release/for_sale_2_http .
+CMD ["./for_sale_2_http"]
+
+FROM debian:bookworm-slim AS sushizock-2
+COPY --from=builder /app/target/release/sushizock_2_http .
+CMD ["./sushizock_2_http"]
+
+FROM debian:bookworm-slim AS sushi-go-2
+COPY --from=builder /app/target/release/sushi_go_2_http .
+CMD ["./sushi_go_2_http"]

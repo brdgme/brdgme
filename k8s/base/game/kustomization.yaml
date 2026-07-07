@@ -9,6 +9,7 @@ bases:
 - farkle-1
 - farkle-2
 - for-sale-1
+- for-sale-2
 - greed-1
 - greed-2
 - liars-dice-1
@@ -22,7 +23,9 @@ bases:
 - roll-through-the-ages-1
 - splendor-1
 - sushi-go-1
+- sushi-go-2
 - sushizock-1
+- sushizock-2
 - texas-holdem-1
 - zombie-dice-1
 - zombie-dice-2

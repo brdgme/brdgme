@@ -1,0 +1,19 @@
+[package]
+name = "sushi-go-2"
+version = "0.1.0"
+publish = false
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+edition = "2024"
+
+[dependencies]
+brdgme_cmd = { path = "../../lib/cmd" }
+brdgme_fuzz = { path = "../../tools/fuzz" }
+brdgme_color = { path = "../../lib/color" }
+brdgme_game = { path = "../../lib/game" }
+brdgme_markup = { path = "../../lib/markup" }
+rand = "0.10.2"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["full"] }
+
+[dev-dependencies]
+brdgme_cmd = { path = "../../lib/cmd", features = ["test-support"] }

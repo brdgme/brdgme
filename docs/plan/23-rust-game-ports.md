@@ -36,9 +36,8 @@ source already matches platform architecture; mark the `-1` GameVersion
 `isDeprecated: true` like lost-cities-1; retiring all 17 removes the Go
 stack entirely). Small dice game first to set the rhythm, then by value:
 
-- [x] liars-dice-2, greed-2, farkle-2, zombie-dice-2, no-thanks-2, category-5-2, battleship-2 (small)
-- [ ] for-sale-2, sushizock-2 (small-medium)
-- [ ] texas-holdem-2 (needs poker module), sushi-go-2, age-of-war-2,
+- [x] liars-dice-2, greed-2, farkle-2, zombie-dice-2, no-thanks-2, category-5-2, battleship-2, for-sale-2, sushizock-2, sushi-go-2 (small/small-medium)
+- [ ] texas-holdem-2 (needs poker module), age-of-war-2,
       modern-art-2, love-letter-2, cathedral-2 (medium)
 - [ ] splendor-2 (needs cost module), roll-through-the-ages-2 (large)
 - [ ] Retire brdgme-go stack once no active `-1` games remain (Dockerfile,

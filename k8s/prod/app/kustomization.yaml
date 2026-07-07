@@ -62,6 +62,9 @@ images:
 - name: brdgme/for-sale-1
   newName: ghcr.io/brdgme/brdgme/for-sale-1
   newTag: latest
+- name: brdgme/for-sale-2
+  newName: ghcr.io/brdgme/brdgme/for-sale-2
+  newTag: latest
 - name: brdgme/greed-1
   newName: ghcr.io/brdgme/brdgme/greed-1
   newTag: latest
@@ -95,8 +98,14 @@ images:
 - name: brdgme/sushi-go-1
   newName: ghcr.io/brdgme/brdgme/sushi-go-1
   newTag: latest
+- name: brdgme/sushi-go-2
+  newName: ghcr.io/brdgme/brdgme/sushi-go-2
+  newTag: latest
 - name: brdgme/sushizock-1
   newName: ghcr.io/brdgme/brdgme/sushizock-1
+  newTag: latest
+- name: brdgme/sushizock-2
+  newName: ghcr.io/brdgme/brdgme/sushizock-2
   newTag: latest
 - name: brdgme/texas-holdem-1
   newName: ghcr.io/brdgme/brdgme/texas-holdem-1

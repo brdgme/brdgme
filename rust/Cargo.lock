@@ -1809,6 +1809,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
+name = "for-sale-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5942,6 +5956,34 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "sushi-go-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "sushizock-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "tokio",
+]
 
 [[package]]
 name = "syn"

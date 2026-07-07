@@ -258,6 +258,64 @@ alternating turns). `assert_gamer_contract` green, clippy clean, fuzzed
 CI matrix, Tiltfile, k8s base/prod manifests; battleship-1 GameVersion marked
 `isDeprecated: true`.
 
+**Done (Track B, 2026-07):** for-sale-2 ported. The Go for_sale suite has 1
+test (`TestFullGame`, 109 lines) - ported 1:1 as `test_full_game` (it has no
+placings/winners tie assertion - it only checks `Placings()[0] == 1` and the
+points are distinct, so no compact-ordinal -> standard-competition adaptation
+was needed). Per step 8's thin-suite rule a baseline suite was added
+(player_counts, decks, start_state, can_bid/can_pass/can_play guards,
+bid errors incl. parser max-chips rejection, pass takes lowest + pays
+floor(bid/2), last bidder pays full + takes highest, play resolves cheques
+lowest-building->lowest-cheque, play wrong-card/after-finished,
+command after finished, placings + standard-competition tie, points zero
+until finished, pub_state redacts hands/cheques + final_scores only when
+finished, player_state carries own hand/cheques/chips). `assert_gamer_contract`
+green, clippy clean, fuzzed ~18k games / ~775k commands with no panic. Reg
+wired: workspace, Dockerfile, CI matrix, Tiltfile, k8s base/prod manifests;
+for-sale-1 GameVersion marked `isDeprecated: true`.
+
+for-sale-2-specific port notes (vs the dice-game Track B ports):
+- Cards are plain `i32` ranks (buildings 1..=20, cheques `[0, 0, 3, 4, ..=20]`
+  - the Go `ChequeDeck()` zeroes ranks 1 and 2, so the two lowest cheques are
+  0, then 3..=20). No `libcard`/suit-rank struct needed: the Go `card.Card` is
+  used with only `Rank` set (`Suit` is 0 throughout for_sale, except the
+  selling-resolve trick where it stuffs the building into `Suit` and player
+  into `Rank` to sort by building - the Rust port uses `Vec<(i32, usize)>`
+  tuples instead, avoiding the overloaded-struct trick).
+- **Deck direction is load-bearing.** Go `libcard.PopN(n)` returns the LAST n
+  cards (top of deck) and leaves the front; `Shift()` returns the FRONT
+  (bottom). "Draw" = pop from end (`Vec::split_off(len-n)` keeps front,
+  returns back); "take first open card" = `remove(0)` (front). Open cards are
+  kept sorted ascending, so the front is always the lowest. The 1:1 test
+  (`test_full_game`) fixes sorted decks and asserts exact card numbers, which
+  only works with this direction - getting it backwards produces
+  `[0,0,3]`-vs-`[4,5,6]` style failures.
+- The `bids: Vec<i32>` field is **overloaded across phases** (matching Go's
+  single `Bids` map): during buying it holds bid amounts, during selling it
+  holds the building each player played. `clear_bids()` (called by
+  `start_buying_round`/`start_selling_round`) zeros it between rounds. The
+  selling resolve reads `bids` to build the played-cards list, then
+  `start_round` -> `clear_bids` resets it.
+- **Autoplay cascade in `start_selling_round`.** When `hands[0].len() == 1`
+  (final sell round), each player's last card is auto-played; the last play
+  triggers resolve -> `start_round` -> either another `start_selling_round`
+  (hands now empty, no recursion) or Finished. Tests that drive the selling
+  phase manually must give players >= 2 cards OR set `open_cards` directly
+  without calling `start_round`, else the autoplay fires immediately and
+  resolves the round before the test can issue `play` commands (this caused
+  `play_parser` to get an empty hand -> "expected " parse error in the
+  baseline suite until fixed).
+- `can_undo`: `true` for `bid` (deterministic, bids are public), `false` for
+  `pass` and `play` (reveal choices) - ported verbatim from Go's
+  `BidCommand`/`PassCommand`/`PlayCommand`.
+- Phase is **computed** (`current_phase()` from deck lengths, matching Go's
+  `CurrentPhase()`), not stored. The `>= 18` cheque-deck threshold in the
+  buying guard is the "cheques not yet drawn" sentinel (3p starts at 18, 4-5p
+  at 20; the first sell draw drops below 18) - ported verbatim.
+- Placings metric is `[player_points, chips]` where `player_points =
+  deck_value(cheques) + chips` (so the chips tiebreaker is somewhat redundant
+  but matches Go exactly). Higher-better; ties use Rust standard-competition.
+
 battleship-2-specific port notes (vs the card/dice-game Track B ports):
 - Board is `[[Cell; 10]; 10]` indexed `[y][x]` where y=0..=9 (A..J), x=0..=9
   (1..=10); `Cell` enum has Empty/Carrier/Battleship/Cruiser/Submarine/Destroyer/Hit/Miss
@@ -358,6 +416,124 @@ private type parameter and could not cross crate boundaries. Made `Space`
 `pub` (one-word change in `rust/lib/game/src/command/parser/mod.rs`). This
 unblocks the documented `Many` combinator for all future ports (Track A red7's
 chained play+discard turns depend on it).
+
+**Done (Track B, 2026-07):** sushizock-2 ported. All 11 Go tests ported 1:1
+(`TestNew` -> `test_new`, `TestRoll` -> `test_roll`, `TestTakeBlue` ->
+`test_take_blue`, `TestTakeRed` -> `test_take_red`,
+`TestForceTakeMostNegativeRed` -> `test_force_take_most_negative_red`,
+`TestForceTakeLowestBlue` -> `test_force_take_lowest_blue`, `TestStealBlue` ->
+`test_steal_blue`, `TestStealRed` -> `test_steal_red`, `TestStealRedNNotAllowed`
+-> `test_steal_red_n_not_allowed`, `TestStealBlueN` -> `test_steal_blue_n`,
+`TestStealRedN` -> `test_steal_red_n` from `sushizock_test.go`; `TestTiles_Remove`
+-> `test_tiles_remove` from `tile_test.go`); the sushizock Go suite has no
+placings/winners test so no tie assertion to adapt (baseline placings tests
+added use Rust standard-competition semantics). Per step 8's thin-suite rule a
+baseline suite was added (player_counts, start_state, tile_decks, scoring,
+dice_counts, can_roll/can_take/can_steal guards, roll_must_keep_one/
+invalid_die/wrong_player, command_after_finished/unknown, steal_from_self/
+from_empty, take/steal_advances_turn, placings + standard-competition tie,
+points_always_current, finished_placings, pub_state_no_hidden_info,
+finished_pub_state_has_scores, take_worst_red_picks_minimum/
+take_worst_blue_when_no_red). `assert_gamer_contract` green, clippy clean,
+fuzzed ~8.3k games / ~449k commands with no panic. Reg wired: workspace,
+Dockerfile, CI matrix, Tiltfile, k8s base/prod manifests; sushizock-1
+GameVersion marked `isDeprecated: true`.
+
+sushizock-2-specific port notes (vs the dice-game Track B ports):
+- Dice are a `DieFace` enum (Sushi/BlueChopsticks/Bones/RedChopsticks) not
+  numeric values; 6-face die with 2 sushi, 2 bones, 1 blue chopsticks, 1 red
+  chopsticks. `DiceCounts` struct (sushi/blue_chopsticks/bones/red_chopsticks)
+  replaces Go's `map[int]int`. No `libdie` needed - roll helpers inlined.
+- Tile scoring is the core rule: `score(blue, red) = sum(red values) + sum of
+  first len(red) blue values`. Extra blue tiles beyond red count don't score.
+  This is unlike any other Track B port - the red tile count gates blue tile
+  scoring, making red tiles (negative) a prerequisite for blue tiles
+  (positive) to count.
+- **No hidden info** (Go `PubState()`/`PlayerState()` both return nil;
+  `PlayerRender == PubRender`). PubState carries all tiles publicly;
+  PlayerState wraps PubState + player index. This is the first Track B port
+  with zero hidden information - structurally simpler redaction than
+  for-sale-2/battleship-2/love-letter.
+- **Tile selection by die count**: `take blue` with N sushi takes the Nth
+  tile from the left (0-indexed N-1); `take red` with N bones takes the Nth
+  red tile. The render bolds the selectable tile position. This "die count
+  selects position" mechanic is unique to sushizock.
+- **Steal n-from-top semantics**: `steal <player> <color> [n]` with n=1 (top,
+  default, requires 3 chopsticks) or n>1 (hidden tile, requires 4 chopsticks).
+  Index = `len - n` (n=1 -> last element, n=2 -> second from end, etc).
+  StealBlue/StealRed (n=1) and StealBlueN/StealRedN (n>1) are unified into
+  single `steal_blue`/`steal_red` methods with `Option<i32>` num parameter,
+  matching Go's separate StealBlue/StealBlueN dispatch.
+- **TakeWorst forced bust**: after final roll consolidation
+  (`remaining_rolls == 0 || rolled_dice.len() == 1`), if `!can_take &&
+  !can_steal`, `take_worst()` takes the minimum-value red tile (or if no red,
+  minimum-value blue). Uses `<` comparison (first minimum wins on ties),
+  matching Go. This auto-bust is inside `roll_dice_cmd`, not a separate
+  command.
+- `can_undo: false` for all three commands (roll/take/steal), matching Go.
+  Roll involves RNG; take/steal are deterministic but Go sets false so the
+  port preserves that.
+- `points()` returns current scores always (not zero-until-finished like
+  for-sale-2), matching Go's `Points()` which computes `PlayerScore` per
+  player on every call.
+
+**Done (Track B, 2026-07):** sushi-go-2 ported. All 14 Go tests ported 1:1
+(`TestGame_Start` -> `test_game_start`, `TestGame_Score_maki` ->
+`test_game_score_maki`, `TestGame_Score_pudding` -> `test_game_score_pudding`,
+`TestGame_Score_nigiri` -> `test_game_score_nigiri`, `TestGame_Score_tempura`
+-> `test_game_score_tempura`, `TestGame_Score_sashimi` ->
+`test_game_score_sashimi`, `TestGame_Score_dumpling` ->
+`test_game_score_dumpling` from `game_test.go`; `TestDeck` -> `test_deck`,
+`TestSort` -> `test_sort`, `TestShuffle` -> `test_shuffle` from
+`deck_test.go`; `TestPlayCommand_Call` -> `test_play_command_call`,
+`TestPlayCommand_Call_chopsticks` -> `test_play_command_call_chopsticks`,
+`TestPlayCommand_Call_dummyPlayTwo` -> `test_play_command_call_dummy_play_two`
+from `play_command_test.go`; `TestDummyCommand_Call` ->
+`test_dummy_command_call` from `dummy_command_test.go`); the sushi_go Go
+suite has no placings/winners test so no tie assertion to adapt (baseline
+placings tests added use Rust standard-competition semantics). Per step 8's
+thin-suite rule a baseline suite was added (player_counts, start_state,
+start_state_2p, deck_composition, draw_counts, can_play/can_dummy guards,
+play_errors incl. same-card-twice/after-finished/unknown, dummy
+wrong-player/in-non-2p, chopsticks_returned_to_hand, hand_passing_left,
+passing_direction, placings + standard-competition tie + pudding
+tiebreaker, points_current, pub_state redacts hands, player_state carries
+own hand + 2p dummy_playing, finished_pub_state_has_scores,
+full_game_3p/2p_completes). `assert_gamer_contract` green, clippy clean,
+fuzzed ~2.2k games / ~380k commands with no panic. Reg wired: workspace,
+Dockerfile, CI matrix, Tiltfile, k8s base/prod manifests; sushi-go-1
+GameVersion marked `isDeprecated: true`.
+
+sushi-go-2-specific port notes (vs other Track B ports):
+- Card enum has 13 variants (Played + 12 real cards); `Played` is the
+  sentinel for "card slot already used this hand" (Go's `CardPlayed`).
+  Cards are sorted by enum discriminant order which matches Go's iota
+  order, so `sort_cards` = `Vec::sort()` on Card (derives Ord).
+- 2-player variant uses a DUMMY player at index 2 (`all_players = players
+  + 1`). Controller alternates each hand (`(controller + 1) % players`).
+  `start_hand` draws a random card from dummy's hand for the controller
+  (private log to controller only). `can_dummy` gates the `dummy <card>`
+  command to the current controller only.
+- Simultaneous play: `whose_turn` returns all real players (0..players,
+  not 0..all_players) where `playing[p].is_none()` OR can_dummy. `end_hand`
+  fires when all `all_players` slots have `playing` set (including dummy).
+- Chopsticks: playing 2 cards requires `played[p].contains(Chopsticks)`;
+  after playing 2, chopsticks returns to hand and is removed from played.
+  2p extra guard: can't play 2 cards if dummy hasn't played and hand len
+  would hit 2 (must save 1 for dummy).
+- Hand passing: round 1+3 pass left (`rotate_left(1)`), round 2 passes
+  right (`rotate_right(1)`). 2p just swaps hands 0 and 1.
+- Scoring: maki (most=6 split, second=3 split if single first-place),
+  puddings (round 3 only: most=6 split, least=-6 split but NOT in 2p),
+  nigiri (egg 1/salmon 2/squid 3, wasabi triples NEXT nigiri played after
+  it - order matters), tempura (x2=5), sashimi (x3=10), dumpling
+  (1,3,6,10,15 capped).
+- Placings metric: `[player_points, pudding_cards]` (pudding count as
+  tiebreaker, higher better). Rust standard-competition ties.
+- `can_undo: false` for both play and dummy (matches Go).
+- Hidden info: hands are private (PlayerState.hand), played/points are
+  public (PubState). PlayerState also carries own `playing` and, if
+  controller in 2p, `dummy_playing`.
 
 Priority between tracks: Track A games are net-new content; Track B removes
 the Go stack. Interleave as desired - both use the same method and any Track B

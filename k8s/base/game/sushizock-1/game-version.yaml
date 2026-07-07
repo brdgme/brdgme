@@ -6,3 +6,4 @@ metadata:
 spec:
   typeName: Sushizock im Gockelwok
   weight: 1.0
+  isDeprecated: true
