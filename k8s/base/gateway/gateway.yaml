@@ -22,6 +22,13 @@ metadata:
   name: brdgme
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
+    # Pre-cutover: DNS for brdg.me/legacy/api/ws still points at the old
+    # server, so their HTTP01 challenges can't complete and the Gateway
+    # reports Degraded (InvalidCertificateRef), which aborts ArgoCD syncs
+    # before the wave-1 migrate hook runs. Ignore Gateway health until the
+    # DNS cutover, then REMOVE this annotation so cert/listener breakage
+    # degrades the app again.
+    argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   gatewayClassName: cilium
   infrastructure:
