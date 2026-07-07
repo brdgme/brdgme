@@ -311,6 +311,11 @@ impl GamePlayerExtended {
             "Bot"
         }
     }
+
+    pub fn color(&self) -> brdgme_color::Color {
+        use std::str::FromStr;
+        brdgme_color::Color::from_str(&self.game_player.color).unwrap_or(brdgme_color::WHITE)
+    }
 }
 
 #[cfg(feature = "ssr")]
@@ -320,6 +325,19 @@ pub struct GameExtended {
     pub game_type: crate::models::game::GameType,
     pub game_version: crate::models::game::GameVersion,
     pub game_players: Vec<GamePlayerExtended>,
+}
+
+#[cfg(feature = "ssr")]
+impl GameExtended {
+    pub fn markup_players(&self) -> Vec<brdgme_markup::Player> {
+        self.game_players
+            .iter()
+            .map(|p| brdgme_markup::Player {
+                name: p.name().to_string(),
+                color: p.color(),
+            })
+            .collect()
+    }
 }
 
 #[cfg(feature = "ssr")]
