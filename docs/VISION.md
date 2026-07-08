@@ -80,13 +80,16 @@ genuinely heavy scale-to-zero workload ever appears (e.g. in-cluster LLM
 inference), KEDA with the NATS JetStream scaler is the tool to reach for.
 The contract is stable and does not change.
 
-Game services are polyglot by design: the contract is language-agnostic.
-Currently 17 games are implemented in Go (`brdgme-go/`) and 4 in Rust
-(`rust/game/`, of which `lords-of-vegas-1` is not yet deployed). Decided 2026-07-02: the Go games stay indefinitely - the Rust
-consolidation applies to the platform (API, frontend, WebSocket, operator,
-bot), not to game implementations. New games should be written in Rust to
-benefit from the shared `brdgme_game`/`brdgme_markup` libraries, but porting
-existing Go games has no payoff proportional to the effort.
+Game services are polyglot by necessity, not by design: the contract is
+language-agnostic, and 17 games are currently implemented in Go
+(`brdgme-go/`) alongside the Rust ones (`rust/game/`, of which
+`lords-of-vegas-1` is not yet deployed). Decided 2026-07-08 (superseding
+the 2026-07-02 "Go stays indefinitely" call): the goal is a 100% Rust
+project as soon as possible - every Go game is being rewritten as a Rust
+`-2` edition (plan #23), after which `brdgme-go/` and the legacy
+web/websocket services are deleted (plan #31). Until then Go code gets
+light-touch maintenance only. All new games are written in Rust against
+the shared `brdgme_game`/`brdgme_markup` libraries.
 
 ### brdgme Kubernetes Operator
 

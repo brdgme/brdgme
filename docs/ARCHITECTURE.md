@@ -52,9 +52,10 @@ Kubernetes Deployment + Service, always on. The monolith communicates with
 game services via the JSON contract defined in this document. (Knative
 scale-to-zero was dropped 2026-07-03 - see `docs/VISION.md` for rationale.)
 
-Game services are polyglot: 17 games are implemented in Go (`brdgme-go/`) and
-4 in Rust (`rust/game/`). The contract is language-agnostic; the Go games are
-kept indefinitely (see `docs/VISION.md`).
+Game services are polyglot for now: 17 games are implemented in Go
+(`brdgme-go/`) and the rest in Rust (`rust/game/`). The contract is
+language-agnostic, but the Go games are being rewritten in Rust and the Go
+stack removed once conversions finish (see `docs/VISION.md` and plan #31).
 
 ### brdgme Operator (`rust/operator`)
 
@@ -204,6 +205,16 @@ Get valid player counts for the game type.
 
 - **Request:** `"PlayerCounts"`
 - **Response:** `{"PlayerCounts": {"player_counts": [2, 3, 4]}}`
+
+#### Rules
+
+Get the game's rules text (markdown; empty string if the game provides
+none). Sent by the operator on every reconcile, so all game services must
+answer it. Note the serde encoding: unit requests like this and
+`PlayerCounts` are bare JSON strings, not objects.
+
+- **Request:** `"Rules"`
+- **Response:** `{"Rules": {"rules": "..."}}`
 
 ## Database Schema
 

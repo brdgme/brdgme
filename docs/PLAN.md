@@ -18,7 +18,9 @@ validation gate → decommission. (#20 external-dns retired 2026-07-05 -
 no viable DO provider; see 20-external-dns.md.)
 **Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
 #24 game invites → #25 rules rendering → #26 theming/dark mode →
-#23 Rust game ports (ongoing).
+#23 Rust game ports (ongoing). #31 (Rust-only repo) spans both: WP1
+legacy-stack deletion can run pre-cutover (unblocked 2026-07-08 by the
+no-rollback decision; it simplifies #16); the rest follows #23.
 
 ## Objective
 
@@ -33,10 +35,11 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## Out of Scope (decided 2026-07-02)
 
-- **Go game services**: the 17 Go games under `brdgme-go/` remain in production
-  indefinitely behind the stable game HTTP contract. They are not part of this
-  migration and there is no plan to port them to Rust. The contract is
-  language-agnostic; Go and Rust games are built and deployed identically.
+- **Go game services**: not part of the *cutover* migration - they keep
+  running behind the stable, language-agnostic game HTTP contract
+  throughout. (The 2026-07-02 "never ported" call was superseded 2026-07-04
+  and 2026-07-08: all 17 are being converted to Rust `-2` editions under
+  #23, and the Go stack is removed once conversions finish - see #31.)
 - **Chat**: legacy chat tables/queries (`rust/api` chat queries, `games.chat_id`)
   are not ported. Future work, not scheduled.
 - **lords-of-vegas-1**: implemented in `rust/game/` but intentionally not
@@ -81,6 +84,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | Decided 2026-07-08, ready to implement (WP1-3 pre-cutover app work, WP4 Cloudflare post-cutover) | [28-abuse-protection.md](plan/28-abuse-protection.md) |
 | 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [29-stats-reports.md](plan/29-stats-reports.md) |
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [30-friends.md](plan/30-friends.md) |
+| 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [31-rust-only-repo.md](plan/31-rust-only-repo.md) |
 | Bug fixes | Bug fixes | Partially resolved | [bugs.md](plan/bugs.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | [review-findings-2026-07-04.md](plan/review-findings-2026-07-04.md) |
 | Quick wins | Quick wins (added 2026-07-03) | Complete | [quick-wins.md](plan/quick-wins.md) |

@@ -60,7 +60,12 @@ included in the prod kustomization and get no prod hostnames or DNS records
       and `websocket` as the legacy stack.
 - [x] Legacy React frontend API URL derivation confirmed: `http.ts` replaces
       the first subdomain with `api` (`legacy.brdg.me` → `api.brdg.me`).
-- [ ] Break-glass overlay: a `k8s/prod-rollback/` kustomization that deploys
+- [ ] **Superseded 2026-07-08 (do not do):** the break-glass overlay below.
+      Decided in #31: no simultaneous deployments, no rollback support -
+      the legacy stack is deleted pre-cutover (LEGACY=1 dev mode included),
+      and the decommission source-deletion items below move to #31 WP1.
+      See [31-rust-only-repo.md](31-rust-only-repo.md).
+- [ ] ~~Break-glass overlay~~: a `k8s/prod-rollback/` kustomization that deploys
       the legacy trio + Redis + an HTTPRoute set serving the legacy frontend
       from apex `brdg.me` with `api.brdg.me`/`ws.brdg.me` routes (the
       `http.ts` subdomain derivation means apex serving must produce
@@ -142,6 +147,13 @@ data, no shared state with old prod, which keeps serving users untouched.
       itself - the dump needs it.
 - [ ] Run the Phase 19 dump/restore import into CNPG (drops the beta data),
       apply migrations, verify counts + login.
+- [ ] Re-add the apex `brdg.me` listeners (HTTP redirect + HTTPS) and the
+      `web` HTTPRoutes to `k8s/base/gateway/` - they were removed 2026-07-08
+      (commit 3186371) because their HTTP01 challenges could never complete
+      pre-cutover, leaving certs permanently pending. Only apex comes back:
+      `legacy`/`api`/`ws` are gone for good (#31). No ClusterIssuer change
+      needed - its single solver has no `sectionName` and covers any
+      hostname. Commit; ArgoCD syncs it.
 - [ ] Repoint apex: update the `brdg.me` A record in `infra/dns.tf` to the
       Gateway LB IP, `tofu apply`. Verify apex TLS issuance (the `brdg.me`
       listener's HTTP01 solve can only complete once DNS points here).
@@ -181,27 +193,18 @@ the side-by-side plan; shortened 2026-07-04 with the hard-cutover decision).
       and the Phase 19 PITR restore into a scratch `Cluster` has been
       verified against production data (not just dev).
 
-### Rollback procedure (break-glass)
+### Rollback procedure
 
-Two distinct paths, depending on when things go wrong (premise updated
-2026-07-05 - the old "both systems share the database" line was only true
-of the retired side-by-side plan):
-
-**First hours after cutover - revert to Linode.** Restart the legacy stack
-on Linode and point apex DNS back (TTL is still 300). Caveat: anything
-written to the new system since cutover is lost unless it is dumped back
-(reverse of the Phase 19 procedure) - acceptable for this project's user
-base if invoked within hours, and the reason the freeze + immediate
-smoke-test above exist. This path dies when the Linode server is
-decommissioned.
-
-**During the validation week - legacy-in-DOKS overlay.** Apply
-`k8s/prod-rollback/` (legacy trio + Redis + routes), verify the legacy
-stack serves against CNPG (both systems read the same schema; sessions
-differ - cookie vs Bearer token - so users re-login), then point apex at
-it. Minutes, not seconds - acceptable. No data loss: the data stays in
-CNPG. ELO columns and other new-system-only writes are ignored by legacy;
-safe.
+**None (decided 2026-07-08, recorded in #31):** no simultaneous
+deployments and no supported rollback paths. Solo side project,
+friends-only user base - downtime is acceptable and operator effort is
+the scarce resource. If cutover goes badly, fix forward. Incidentally,
+the Linode box still exists until its decommission and could be revived
+by hand (apex DNS TTL is 300 at cutover), but this is not a maintained
+or tested procedure; anything written to the new system since cutover
+would be lost. (The previous two-path break-glass design - Linode revert
++ a `k8s/prod-rollback/` legacy-in-DOKS overlay - is superseded; the
+overlay was never built.)
 
 ### Decommission (once the validation gate passes)
 
