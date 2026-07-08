@@ -57,3 +57,5 @@ infra/.terraform/
 infra/*.tfstate
 infra/*.tfstate.backup
 infra/*.tfplan
+
+.superpowers
