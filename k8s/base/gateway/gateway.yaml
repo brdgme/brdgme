@@ -9,13 +9,14 @@
 # `brdgme` prod cluster (GatewayClass/cilium, controller
 # io.cilium/gateway-controller, ACCEPTED: True).
 #
-# Before applying this Gateway in prod (Phase 16), flip
-# kube-system/cilium-config's `enable-gateway-api-proxy-protocol` to "true"
-# and restart the cilium DaemonSet - otherwise real client IPs are lost
-# behind the DO LB (it SNATs; Gateway API's TLS terminates in-cluster so the
-# LB never sees HTTP to add X-Forwarded-For itself). The 22a login rate
-# limiter keys on client IP and fails open (throttles everyone collectively)
-# if this is skipped. See docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md.
+# kube-system/cilium-config's `enable-gateway-api-proxy-protocol` was
+# flipped to "true" and the cilium DaemonSet restarted on 2026-07-08. That,
+# together with the do-loadbalancer-enable-proxy-protocol annotation below,
+# is what preserves real client IPs through the DO LB (it SNATs; Gateway
+# API's TLS terminates in-cluster so the LB never sees HTTP to add
+# X-Forwarded-For itself). The 22a login rate limiter keys on client IP and
+# fails open (throttles everyone collectively) if this is broken. See
+# docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -30,10 +31,10 @@ spec:
       # (rust/web/src/websocket.rs) to keep long-lived WS connections alive
       # across LB idle timeouts - this just adds margin.
       service.beta.kubernetes.io/do-loadbalancer-http-idle-timeout-seconds: "120"
-      # Must not be set until the cilium-config flag above is flipped -
-      # otherwise the DO LB speaks PROXY protocol to an Envoy that isn't
-      # expecting it and breaks all traffic.
-      # service.beta.kubernetes.io/do-loadbalancer-enable-proxy-protocol: "true"
+      # Requires the cilium-config flag above to already be "true" - wrong
+      # order breaks all traffic (DO LB speaks PROXY protocol to an Envoy
+      # that isn't expecting it).
+      service.beta.kubernetes.io/do-loadbalancer-enable-proxy-protocol: "true"
   # Only beta.brdg.me is served from this cluster for now. The legacy
   # brdg.me hostnames (apex, legacy, api, ws) stay on the old server; their
   # listeners were removed because their HTTP01 challenges can never
