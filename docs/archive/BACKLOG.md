@@ -30,3 +30,4 @@ existing rows.**
 | Quick wins | Quick wins (added 2026-07-03) | Done | - | - | [plan](../superpowers/plans/2026-07-04-quick-wins.md) |
 | Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved | 2026-07-04 | - | [plan](../superpowers/plans/2026-07-04-review-findings-2026-07-04.md) |
 | Development Workflow | Development Workflow | Superseded | - | - | [DEV.md](../DEV.md) |
+| 14 | Drop Knative - Plain Deployments + Gateway API | Fully done 2026-07-08 - dev landed fc7cb3f; final open item (client-IP/PROXY protocol) attempted and dropped 2026-07-08 (DOKS reconciler owns cilium-config and reverts the flag; superseded by #28's IP-independent caps + Cloudflare edge) | 2026-07-08 | [spec](../superpowers/specs/2026-07-05-14-drop-knative-gateway-api-design.md) | [plan](../superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md) |

@@ -60,10 +60,23 @@ validation gate passes).
 
 ## Beta period (isolated database, pre-cutover)
 
-- [ ] Before creating the Gateway: enable PROXY protocol on the Cilium
-      side FIRST *(human)*. Wrong order (DO-LB annotation before the
-      Cilium flip) sends PROXY-protocol bytes to an Envoy not yet
-      expecting them and breaks all traffic. See
+- [ ] **Superseded 2026-07-08 (do not do):** the Cilium PROXY-protocol flip
+      below. Attempted live 2026-07-08: the flag was patched to `"true"`
+      and the cilium DaemonSet restarted successfully, but DOKS's managed
+      addon reconciler reverted the ConfigMap back to `"false"` at
+      13:09:20Z, ~15 minutes later - DOKS owns `cilium-config` and the
+      flag cannot be set persistently by the cluster operator. The
+      matching DO-LB annotation deploy was reverted the same hour
+      (`brdgme` f31be4b, `brdgme-config` 8333793); prod is back to the
+      pre-flip state. Decision (Michael): drop the client-IP/PROXY-protocol
+      work entirely - no retry, no DO support ticket. See
+      docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md
+      (prod-prerequisites section) for full detail, and
+      docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md for
+      the resulting D6 decision.
+- [ ] ~~Enable PROXY protocol on the Cilium side FIRST~~ *(human)*. Wrong
+      order (DO-LB annotation before the Cilium flip) sends PROXY-protocol
+      bytes to an Envoy not yet expecting them and breaks all traffic. See
       docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md prod-prerequisites section.
       (Moved here from the cutover steps - the Gateway is now created at
       beta start, so beta gets to verify the login rate limiter sees real
@@ -81,26 +94,32 @@ validation gate passes).
       5. Only then uncomment
          `do-loadbalancer-enable-proxy-protocol: "true"` in
          `k8s/base/gateway/gateway.yaml` (commit; ArgoCD syncs it).
-- [ ] Deploy the full new stack via ArgoCD (Phase 15) onto CNPG (Phase 19,
-      fresh database), NATS (13/17), Gateway API (14).
-- [ ] Beta hostname: validates the new cluster end-to-end pre-cutover (DNS,
+- [x] Deploy the full new stack via ArgoCD (Phase 15) onto CNPG (Phase 19,
+      fresh database), NATS (13/17), Gateway API (14). Live 2026-07-08 -
+      the Gateway went live with the ArgoCD first sync.
+- [x] Beta hostname: validates the new cluster end-to-end pre-cutover (DNS,
       Gateway, cert-manager, the app itself) against the new Gateway LB,
       while the `brdg.me` apex stays pointed at the legacy Linode host
       until the cutover steps below run. `beta.brdg.me` HTTP(S) listeners
       + HTTPRoutes added to the Gateway manifests, and the `beta_a`
       `digitalocean_record` added to `infra/dns.tf` pointing at the
       Gateway LB IP (agent-delegable, done). Remaining, *(human)*:
-      1. `tofu plan` (expect exactly 1 add) → `tofu apply`.
+      1. `tofu plan` (expect exactly 1 add) → `tofu apply` - done
+         2026-07-08: the `beta_a` record is applied and resolving.
       2. Verify TLS issuance: `kubectl get certificate -n brdgme` reaches
          `Ready`, and `curl -v https://beta.brdg.me/` serves with a valid
          Let's Encrypt cert - this also proves the issuance path apex will
-         use.
+         use. Done 2026-07-08: certificate `Ready`, curl verified.
 - [ ] Point the external uptime monitor (Phase 18) at `beta.brdg.me`.
 - [ ] Exercise during beta: login via Resend (in-app path - closes the 22a
       remaining check), a full game vs a bot, a two-account human game with
       live WS, restart/undo/concede; confirm logs, metrics, and traces all
-      arrive in Grafana Cloud and the rate limiter keys on distinct client
-      IPs (check the peer address the login handler logs).
+      arrive in Grafana Cloud. (Updated 2026-07-08: real client IPs are not
+      available - the PROXY-protocol flip was dropped, see the beta-period
+      note above - so this no longer checks the rate limiter keying on
+      distinct client IPs; instead exercise #28 WP1's DB-backed send/attempt
+      caps and confirm they behave correctly against the shared collective
+      IP bucket.)
 - [ ] Run the Phase 15 PreSync failure verification and the Phase 19
       dump/restore rehearsal + PITR restore verification while the database
       is still disposable.

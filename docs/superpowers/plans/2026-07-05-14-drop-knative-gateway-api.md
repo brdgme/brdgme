@@ -3,14 +3,21 @@
 > Extracted 2026-07-08 from `docs/plan/14-drop-knative-gateway-api.md`. This
 > work is complete/closed (remaining unchecked items are intentionally
 > deferred to Phase 16); retained as an execution record.
+>
+> **Update 2026-07-08 (later):** the deferred item (client-IP/PROXY
+> protocol) was attempted and dropped the same day - see the prod
+> prerequisites section below. All items are now closed; nothing remains
+> deferred.
 
-**Status:** Dev complete (landed fc7cb3f); cluster version/VPC-native/
-GatewayClass prerequisite verified 2026-07-05 (item 21 stage-2); WS
-idle-timeout and Knative-cleanup-notes prerequisites resolved 2026-07-05;
-client-IP/PROXY-protocol prerequisite researched 2026-07-05 but intentionally
-deferred - it needs a live edit to a DOKS-managed ConfigMap with no dry-run
-value before a Gateway exists to use it, so it's done at Phase 16 cutover
-instead (see prerequisites section below)
+**Status:** Fully done 2026-07-08. Dev complete (landed fc7cb3f); cluster
+version/VPC-native/GatewayClass prerequisite verified 2026-07-05 (item 21
+stage-2); WS idle-timeout and Knative-cleanup-notes prerequisites resolved
+2026-07-05; client-IP/PROXY-protocol prerequisite attempted live 2026-07-08
+and dropped - DOKS's managed reconciler owns `cilium-config` and reverts
+the flag, so it cannot be set persistently (see prerequisites section
+below for detail; decision recorded in `docs/BACKLOG.md` History
+2026-07-08). No remaining work; superseded by #28's IP-independent caps +
+Cloudflare edge.
 
 **Spec:** `docs/superpowers/specs/2026-07-05-14-drop-knative-gateway-api-design.md`
 
@@ -122,7 +129,7 @@ prerequisites (operator-verified, see below).
       already handled by existing code. Set the annotation explicitly to
       120s (margin above the 30s ping) in `k8s/base/gateway/gateway.yaml`
       rather than relying on the 60s default.
-- [ ] Confirm real client IPs survive the DO LB + Cilium Gateway path
+- [x] Confirm real client IPs survive the DO LB + Cilium Gateway path
       (externalTrafficPolicy / PROXY protocol). The 22a login rate limiter
       keys on client IP via `SmartIpKeyExtractor`; if source IPs are not
       preserved it keys on the LB address and throttles all users
@@ -147,6 +154,31 @@ prerequisites (operator-verified, see below).
       commented-out annotation in `gateway.yaml`) - in that order, since
       enabling the DO-side annotation first would have the LB send PROXY
       headers to an Envoy not yet expecting them and break all traffic.
+
+      **Resolved 2026-07-08 - attempted and dropped.** Ran the deferred
+      steps live on the `brdgme` prod cluster: patched
+      `enable-gateway-api-proxy-protocol` to `"true"` in
+      `kube-system/cilium-config`, restarted the `cilium` DaemonSet
+      successfully, confirmed the flag read back `"true"`. DOKS's managed
+      addon reconciler (fieldManager `manager`) rewrote the ConfigMap back
+      to `"false"` at 13:09:20Z, ~15 minutes later - confirming DOKS owns
+      `cilium-config` and the flag cannot be set persistently by the
+      cluster operator, exactly the risk flagged above. The matching
+      `do-loadbalancer-enable-proxy-protocol` annotation had briefly
+      deployed via ArgoCD in the same window and was reverted the same
+      hour (`brdgme` f31be4b, `brdgme-config` 8333793); prod is back to
+      the pre-flip state and `beta.brdg.me` stayed up throughout. Decision
+      (Michael, 2026-07-08): drop the client-IP/PROXY-protocol work
+      entirely rather than open a DO support ticket or retry - real client
+      IPs are simply not available to the app on this platform. Per-IP
+      app-level limits are therefore a collective bucket (keyed on the LB
+      SNAT address) and XFF-spoofable, permanently. The effective
+      protections going forward are #28's IP-independent D2 caps
+      (DB-backed send caps + per-code attempt caps, promoted to
+      pre-go-live priority the same day) and, post-cutover, Cloudflare
+      edge per-IP limiting (Cloudflare sees real client IPs). This item
+      has no remaining work; see `docs/BACKLOG.md` (#14 archived) and
+      `docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md`.
 - [x] Remove the Knative/net-certmanager one-time `kubectl apply`
       prerequisites from the Phase 16 notes; cert-manager alone remains.
       Already done: Phase 16's "Superseded, do not do" bullet documents the

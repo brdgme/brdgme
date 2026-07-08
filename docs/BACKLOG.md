@@ -16,15 +16,17 @@ keeps this one from filling up with closed work.
 **Priority order (updated 2026-07-08; hard-cutover resequencing
 2026-07-04):** done so far: restart-500 + 3-player-render bugs, #21
 OpenTofu (complete 2026-07-06), #22a Resend
-outbound, #14 dev + prod prereqs (client-IP flip deferred to #16 beta),
+outbound, #14 dev + prod prereqs (fully done - client-IP/PROXY-protocol
+attempted and dropped 2026-07-08),
 #13 NATS bot eventing, #17 NATS WS migration, #19 prod provisioning +
 #15 ArgoCD + sealed-secrets (live, first fully-green sync 2026-07-08;
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain). **Remaining pre-go-live:** #18 hardening
 (Grafana Cloud observability + APM, decided 2026-07-05, superseding
-VictoriaLogs) → #16 beta period (isolated DB) → hard cutover + 1-week
-validation gate → decommission. (#20 external-dns retired 2026-07-05 -
-no viable DO provider; see 20-external-dns.md.)
+VictoriaLogs) → #28 WP1-3 app hardening (promoted 2026-07-08) → #16 beta
+period (isolated DB) → hard cutover + 1-week validation gate →
+decommission. (#20 external-dns retired 2026-07-05 - no viable DO
+provider; see 20-external-dns.md.)
 **Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
 #24 game invites → #25 rules rendering → #26 theming/dark mode →
 #23 Rust game ports (ongoing). #31 (Rust-only repo) spans both: WP1
@@ -61,13 +63,12 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## Status
 
-Fully done/resolved/superseded items (1-13, 17, 21, Quick wins, Review
+Fully done/resolved/superseded items (1-14, 17, 21, Quick wins, Review
 findings 2026-07-04, Development Workflow) have been moved to
 [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 
 | # | Title | Status | Spec | Plan |
 |---|---|---|---|---|
-| 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); all prod prereqs resolved 2026-07-05 except client-IP/PROXY-protocol, intentionally deferred live to Phase 16 (needs a DOKS-managed ConfigMap flip with no dry-run value pre-Gateway) | [spec](superpowers/specs/2026-07-05-14-drop-knative-gateway-api-design.md) | [plan](superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md) |
 | 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation, sync-failure drill (#16 beta) | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; beta period on isolated DB + freeze/TTL runbook added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-08-16-production-cutover-validation-design.md) | [plan](superpowers/plans/2026-07-08-16-production-cutover-validation.md) |
 | 18 | Production Hardening | Pending - fully specced 2026-07-05: all-in Grafana Cloud (logs/metrics/traces/alerting, supersedes VictoriaLogs), APM via OTLP, probes, external uptime monitor, capacity check | [spec](superpowers/specs/2026-07-07-18-production-hardening-design.md) | [plan](superpowers/plans/2026-07-07-18-production-hardening.md) |
@@ -79,7 +80,7 @@ findings 2026-07-04, Development Workflow) have been moved to
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-25-rules-rendering-design.md) | [plan](superpowers/plans/2026-07-05-25-rules-rendering.md) |
 | 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-26-theming-design.md) | [plan](superpowers/plans/2026-07-05-26-theming.md) |
 | 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
-| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | Decided 2026-07-08, ready to implement (WP1-3 pre-cutover app work, WP4 Cloudflare post-cutover) | [spec](superpowers/specs/2026-07-08-28-abuse-protection-design.md) | [plan](superpowers/plans/2026-07-08-28-abuse-protection.md) |
+| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | WP1-3 promoted to pre-go-live priority 2026-07-08 (WP4 Cloudflare stays post-cutover); client-IP/PROXY-protocol dropped the same day - per-IP app limits are collective/spoofable, D2's IP-independent caps + Cloudflare edge carry the protection | [spec](superpowers/specs/2026-07-08-28-abuse-protection-design.md) | [plan](superpowers/plans/2026-07-08-28-abuse-protection.md) |
 | 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [spec](superpowers/specs/2026-07-08-29-stats-reports-design.md) | [plan](superpowers/plans/2026-07-08-29-stats-reports.md) |
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
@@ -106,9 +107,10 @@ tasks are also marked *(human)* inline in their phase files. Added
    #18 can be called shipping. Outstanding: reduce telemetry volume;
    configure the alert rules and email contact point in the Grafana UI;
    set up the external uptime monitor account.
-3. **#16 beta:** flip the cilium PROXY-protocol ConfigMap + restart the
-   DaemonSet; `tofu apply` the `beta.brdg.me` record; drive the beta
-   checklist (test games, Grafana verification).
+3. **#16 beta:** drive the beta checklist (test games, Grafana
+   verification). (The cilium PROXY-protocol ConfigMap flip is dropped -
+   see History 2026-07-08; the `beta.brdg.me` record is already applied
+   and resolving.)
 4. **#19 (during beta):** test import - `pg_dump` live Linode prod,
    restore into a scratch CNPG database, record timings/fixes; verify a
    PITR restore from the Spaces backups.
@@ -193,3 +195,27 @@ Status table into the new append-only `docs/archive/BACKLOG.md`, so the
 table only tracks work still in flight; also dropped the now-stale
 "#21: done in full" line from Human tasks. Going forward, close items by
 appending to the archive rather than deleting rows outright.
+
+2026-07-08 (later): the #14/#16 client-IP/PROXY-protocol flip was
+attempted live on the `brdgme` prod cluster - `enable-gateway-api-proxy-protocol`
+patched to `"true"` in `kube-system/cilium-config` and the cilium
+DaemonSet restarted successfully, but DOKS's managed addon reconciler
+(fieldManager `manager`) rewrote the ConfigMap back to `"false"` at
+13:09:20Z, ~15 minutes later - it owns `cilium-config` and the flag
+cannot be set persistently by the cluster operator. The matching DO-LB
+annotation commit briefly deployed via ArgoCD and was reverted the same
+hour (`brdgme` f31be4b, `brdgme-config` 8333793); prod is back to the
+pre-flip state and `beta.brdg.me` stayed up throughout. Decision
+(Michael): drop the client-IP/PROXY-protocol work entirely - no DO
+support ticket, no retry planned; real client IPs are simply not
+available to the app on this platform, so per-IP app-level limits stay
+one collective bucket (keyed on the LB SNAT address) and XFF-spoofable
+permanently. With this dropped, #14 has no remaining work and moves to
+the archive as fully done. #28 WP1-3 (app-level hardening: DB-backed
+send caps + per-code attempt caps, IP-independent) is promoted to
+pre-go-live priority as the effective protection in place of the flip;
+WP4 (Cloudflare edge, which sees real client IPs) stays post-cutover.
+See `docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md`,
+`docs/superpowers/plans/2026-07-08-16-production-cutover-validation.md`,
+and `docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md`
+for detail.

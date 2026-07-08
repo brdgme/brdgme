@@ -107,6 +107,13 @@ websocket survives > 30s idle-with-pings in dev.
 
 ## WP3: client-IP trust fix (pre-cutover, app; pairs with the #16 flip)
 
+> **Update 2026-07-08:** the #16 Cilium PROXY-protocol flip referenced
+> throughout this section was attempted live and dropped the same day -
+> DOKS's managed reconciler owns `cilium-config` and reverts the flag, so
+> it can never be set persistently. The "after the flip" bullet below will
+> not happen; the "today (pre-PROXY-flip)" state is the permanent state.
+> See D6 in `docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md`.
+
 Replace the `SmartIpKeyExtractor` header-preference in
 `rust/web/src/auth/rate_limit.rs::extract_client_ip` with: **use the
 socket peer address only; ignore client-supplied forwarding headers**
@@ -160,7 +167,13 @@ port records that still need to exist.
 6. **App client-IP carve-out:** extend WP3's extractor to prefer
    `CF-Connecting-IP` (safe because either the LB only accepts CF
    ranges, or - without lockdown - only when the PROXY-protocol peer
-   is within CF ranges).
+   is within CF ranges). **Update 2026-07-08:** the PROXY-protocol
+   fallback in this parenthetical will never apply - the flip was
+   attempted and dropped permanently (see WP3 note above and D6 in the
+   design spec). Safety here rests solely on the origin-lockdown
+   `loadBalancerSourceRanges`/CF-IP-range restriction in step 4 (or, if
+   that never works cleanly, on accepting the direct-to-LB bypass risk
+   with WP1's caps as the backstop, as already noted in step 4).
 7. Update `docs/superpowers/specs/2026-07-08-20-external-dns-design.md` note: its "no second NS
    cutover" rationale is superseded by this decision; Cloudflare also
    restores an in-tree external-dns provider should that ever be
