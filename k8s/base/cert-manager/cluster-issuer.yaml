@@ -20,40 +20,11 @@ spec:
     privateKeySecretRef:
       name: letsencrypt-account-key
     solvers:
+    # No sectionName: the solver HTTPRoute attaches to whichever listeners
+    # match the challenge hostname, so new hostnames need no new solver.
     - http01:
         gatewayHTTPRoute:
           parentRefs:
             - name: brdgme
               namespace: brdgme
               kind: Gateway
-              sectionName: web
-    - selector:
-        dnsNames:
-        - legacy.brdg.me
-      http01:
-        gatewayHTTPRoute:
-          parentRefs:
-            - name: brdgme
-              namespace: brdgme
-              kind: Gateway
-              sectionName: web-legacy
-    - selector:
-        dnsNames:
-        - api.brdg.me
-      http01:
-        gatewayHTTPRoute:
-          parentRefs:
-            - name: brdgme
-              namespace: brdgme
-              kind: Gateway
-              sectionName: api
-    - selector:
-        dnsNames:
-        - ws.brdg.me
-      http01:
-        gatewayHTTPRoute:
-          parentRefs:
-            - name: brdgme
-              namespace: brdgme
-              kind: Gateway
-              sectionName: websocket
