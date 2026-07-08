@@ -309,7 +309,49 @@ defaults flip to `aws-lc-rs` (kube and async-nats both already expose the
 feature), at which point the migration becomes one-line feature swaps plus a
 `ring` entry in the `deny.toml` `[bans]` deny list.
 
+**`rust/rust-toolchain.toml` and `devenv.nix`'s Rust channel must be kept in
+sync.** `rust-toolchain.toml` pins an explicit rustc channel; CI's
+`dtolnay/rust-toolchain@stable` step is overridden by this file the moment
+`cargo` runs inside `rust/`, so the toolchain file - not the CI action - is
+the real source of truth for `rustfmt`/`rustc` version. If it drifts from
+what `devenv.nix` (`languages.rust.channel = "stable"`) actually resolves to
+locally, `cargo fmt --all -- --check` can flip-flop between passing locally
+and failing in CI (different rustfmt versions format some constructs
+differently). When either file's version changes, update the other to match
+in the same change.
+
+**Docker builder and runtime stages must be on the same Debian release.**
+`rust/Dockerfile`'s builder stage pins an explicit `cargo-chef` tag
+(`lukemathwalker/cargo-chef:X-rust-Y-bookworm`) rather than a floating tag
+like `latest-rust-1`. A floating tag drifted to Debian 13/trixie while the
+runtime stages are `debian:bookworm-slim` (Debian 12); the resulting binary
+linked `GLIBC_2.38` symbols the runtime image didn't have, and `web`
+crash-looped in production while other binaries in the same image happened
+not to trip it. If a pod shows a GLIBC version error, check builder/runtime
+Debian alignment first.
+
+**`async-nats` buffers publishes.** The background flush task can delay
+delivery under load, which is invisible in local testing but shows up as
+flaky "did the subscriber see this yet" tests and slow WS delivery in prod.
+Always call `.flush().await` after `.publish()` when timely delivery matters
+(see `GameBroadcaster::broadcast_game_update` in `rust/web/src/websocket.rs`)
+- log flush errors, don't propagate them.
+
 ---
+
+## Database
+
+**`games.updated_at` is trigger-maintained, not application-maintained.** A
+`BEFORE UPDATE` trigger (`update_games_updated_at`, defined via
+`CREATE OR REPLACE TRIGGER` in `rust/web/migrations/001_initial_schema.sql` -
+easy to miss when grepping for `CREATE TRIGGER`) overwrites `updated_at =
+now()` on every `UPDATE`, regardless of the `SET` clause. Consequences:
+
+- Any code path that `UPDATE`s a `games` row bumps `updated_at` implicitly -
+  relevant wherever recency ordering depends on it (e.g. sidebar sorting).
+- Tests that need to backdate `updated_at` must first run
+  `ALTER TABLE games DISABLE TRIGGER update_games_updated_at` (safe inside a
+  `#[sqlx::test]` per-test database).
 
 ## Game Services
 
@@ -375,3 +417,11 @@ coverage is split into two layers (see
   logic is covered by Rust tests (11.2-11.4). Keep this layer under its time
   budget (currently < 1 minute of Playwright time, excluding the release
   build).
+
+**Don't assert turn order by comparing player-index equality in games where a
+turn can cascade back to the same player** (e.g. a bust auto-advances to the
+next player, who can also immediately bust). `assert_ne!(current,
+g.current_player)` is inherently flaky in that shape - a same-player
+bounce-back is a legal outcome, not a bug. Assert on the emitted log content
+instead (e.g. that a "it is now X's turn" log names the *other* player),
+which holds regardless of how many players the turn cascades through.

@@ -85,6 +85,26 @@ SQLX_OFFLINE=true cargo check --features ssr
 The `.sqlx/` directory is committed. The `operator` crate uses dynamic queries
 (`sqlx::query(...)` not macros) and has no `.sqlx/` metadata requirement.
 
+**If the long-lived local dev database's migration checksum has drifted**
+(`sqlx migrate run` fails with "migration N was previously applied but has
+been modified"), do not fight it - regenerate `.sqlx` via a disposable scratch
+database instead of migrating the real one:
+
+```bash
+createdb -h localhost -U brdgme_user brdgme_sqlx_prepare
+DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme_sqlx_prepare \
+  sqlx migrate run --source rust/web/migrations
+cd rust/web && DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme_sqlx_prepare \
+  cargo sqlx prepare -- --tests --features ssr --all-targets
+dropdb -h localhost -U brdgme_user brdgme_sqlx_prepare
+```
+
+Use `--tests --features ssr --all-targets` - omitting `--tests` misses
+integration-test queries and `SQLX_OFFLINE=true cargo check --all-targets`
+will fail even though `cargo check --features ssr` passes. If the dev DB
+itself is unusable, `cargo sqlx database reset -y --source web/migrations`
+recreates it from scratch.
+
 ## Rust Conventions
 
 - Edition: `2024` for all crates
@@ -171,6 +191,10 @@ REASONING_EFFORT=medium
 
 `LLM_API_KEY` is not committed. Set it in `.env` locally.
 
+`RUST_LOG` is deliberately not kept in `.env` - set it ad hoc in the shell
+when extra detail is needed (e.g. `RUST_LOG=info,bot=trace`). Keeping it in
+`.env` adds noise to normal runs.
+
 ## Game Types in Dev
 
 Game types are populated by the operator reconciling `GameVersion` CRs. If the
@@ -204,6 +228,37 @@ service is reachable at `{service}.brdgme.lvh.me:8080` without any
 - The `gameversions.brdgme.com` CRD is installed by `setup-kind-cluster.sh`, not by Tilt.
   Tilt must never own the CRD: it cannot delete it safely while GameVersion CRs have operator
   finalizers and the operator isn't yet running.
+
+## Troubleshooting
+
+**Certificates stuck `False`/pending on cert-manager + Gateway API: check DNS
+before assuming a config bug.** cert-manager's HTTP-01 self-check hits
+whatever the hostname currently resolves to. If a challenge fails with a
+plain wrong-status-code error (e.g. 404) or "no such host", the ClusterIssuer,
+Gateway listeners, HTTPRoutes, and solver pods are very likely all correctly
+configured already - verify DNS actually points at the new load balancer
+before debugging Gateway/cert-manager manifests.
+
+Related: with cert-manager's Gateway API integration
+(`cert-manager.io/cluster-issuer` annotation on the `Gateway`), adding an
+HTTPS listener with `tls.certificateRefs: [name: X]` is enough - cert-manager
+auto-creates the `Certificate`/`Secret` X and solves HTTP-01 via a temporary
+`cm-acme-http-solver-*` `HTTPRoute` it manages itself. Each hostname needs its
+own HTTP (port 80) listener on the `Gateway` for that solver route to attach
+to, alongside the HTTPS (443) listener.
+
+**sealed-secrets: annotating a `SealedSecret`'s metadata does not trigger
+reconcile.** The controller only re-reconciles on spec changes; if a Secret
+was manually adopted (`sealedsecrets.bitnami.com/managed=true`) but the
+`SealedSecret` still reports a stale `Synced=False`, restart the controller
+(`kubectl rollout restart deployment sealed-secrets-controller -n
+kube-system`) to force a full resync. ArgoCD has a built-in health check for
+`bitnami.com/SealedSecret` that reads this `Synced` condition.
+
+**Stale e2e processes on ports 8100/3010 can make `run.sh` report a false
+green.** Its readiness polling connects to whatever is already listening on
+those ports, including leftover binaries from an earlier interrupted run.
+Kill any listeners on 8100/3010 before trusting a run.
 
 ## Recovery: CRD stuck in terminating state
 

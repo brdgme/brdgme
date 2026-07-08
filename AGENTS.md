@@ -23,3 +23,33 @@ These are the only files directly under `docs/`. Everything else lives in a
 subdirectory (`docs/decisions/`, `docs/porting/`, `docs/authoring/`,
 `docs/superpowers/`) and is out of scope for this bootstrap step - read those
 on demand when the task at hand references them.
+
+## Reference facts agents get wrong
+
+- GitHub org is `brdgme`, not `beefsack` (that's the developer's personal
+  account). Use `ghcr.io/brdgme/brdgme/<image>` and
+  `https://github.com/brdgme/brdgme.git`, never `beefsack`.
+- Never type or infer a git commit SHA by extending a shortened form seen
+  earlier in output (e.g. completing a 7-char prefix into 40 hex chars from
+  memory). Fetch the exact value with `git rev-parse` immediately before
+  writing it into a file (kustomize refs, pinned images) or a commit, and
+  verify the written content afterward.
+- If the user's `tilt up` is already running on a non-default port, all
+  `tilt` CLI invocations need the matching `--port=<N>` or they fail with
+  "No tilt apiserver found". Never block on unbounded/streaming tilt or
+  kubectl output (`tilt logs -f`, foreground `port-forward`,
+  `kubectl wait` without `--timeout`); poll bounded snapshots instead.
+
+## Working style
+
+- Never install packages on the host machine - all tooling comes from the
+  `devenv`/nix shell. If something's missing, report it rather than
+  installing around it.
+- Keep local verification light: `fmt` and a quick lint pass. Push and let CI
+  run the full test/clippy suites rather than burning time re-running them
+  locally.
+- Do not background-poll CI runs waiting for completion - the user watches
+  CI himself.
+- Do not run commands that would print secret material (sealed-secrets
+  sealing keys, decrypted Secrets, tokens) into the session transcript;
+  ask the user to run those directly in their own terminal instead.
