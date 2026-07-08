@@ -9,9 +9,12 @@ type request struct {
 	Play         *requestPlay         `json:",omitempty"`
 	PubRender    *requestPubRender    `json:",omitempty"`
 	PlayerRender *requestPlayerRender `json:",omitempty"`
+	Rules        *requestRules        `json:",omitempty"`
 }
 
 type requestPlayerCounts struct{}
+
+type requestRules struct{}
 
 type requestNew struct {
 	Players int `json:"players"`
@@ -44,8 +47,13 @@ type response struct {
 	Play         *responsePlay         `json:",omitempty"`
 	PubRender    *responsePubRender    `json:",omitempty"`
 	PlayerRender *responsePlayerRender `json:",omitempty"`
+	Rules        *responseRules        `json:",omitempty"`
 	UserError    *responseUserError    `json:",omitempty"`
 	SystemError  *responseSystemError  `json:",omitempty"`
+}
+
+type responseRules struct {
+	Rules string `json:"rules"`
 }
 
 type responsePlayerCounts struct {

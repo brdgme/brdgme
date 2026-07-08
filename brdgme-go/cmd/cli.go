@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,31 +10,41 @@ import (
 	"github.com/brdgme/brdgme/brdgme-go/brdgme"
 )
 
-const PlayerCountsRequest = "\"PlayerCounts\""
-
 // Cli creates a CLI interface to a game.
 func Cli(game brdgme.Gamer, in io.Reader, out io.Writer) {
 	var request request
 	encoder := json.NewEncoder(out)
 
-	// Custom handler for PlayerCounts because it's a string
-	bufIn := bufio.NewReader(in)
-	peeked, err := bufIn.Peek(len(PlayerCountsRequest))
-	if err == nil && string(peeked) == PlayerCountsRequest {
-		request.PlayerCounts = &requestPlayerCounts{}
-	} else {
-		decoder := json.NewDecoder(bufIn)
-		if err := decoder.Decode(&request); err != nil {
-			_ = encoder.Encode(response{
-				SystemError: &responseSystemError{
-					Message: fmt.Sprintf("Unable to decode request: %v", err),
-				}})
-			return
+	var raw json.RawMessage
+	if err := json.NewDecoder(in).Decode(&raw); err != nil {
+		_ = encoder.Encode(response{
+			SystemError: &responseSystemError{
+				Message: fmt.Sprintf("Unable to decode request: %v", err),
+			}})
+		return
+	}
+	// serde encodes unit enum variants as bare JSON strings rather than
+	// objects, so those requests can't decode into the request struct.
+	var unitVariant string
+	if json.Unmarshal(raw, &unitVariant) == nil {
+		switch unitVariant {
+		case "PlayerCounts":
+			request.PlayerCounts = &requestPlayerCounts{}
+		case "Rules":
+			request.Rules = &requestRules{}
 		}
+	} else if err := json.Unmarshal(raw, &request); err != nil {
+		_ = encoder.Encode(response{
+			SystemError: &responseSystemError{
+				Message: fmt.Sprintf("Unable to decode request: %v", err),
+			}})
+		return
 	}
 	switch {
 	case request.PlayerCounts != nil:
 		handlePlayerCounts(game, *request.PlayerCounts, encoder)
+	case request.Rules != nil:
+		handleRules(game, *request.Rules, encoder)
 	case request.New != nil:
 		handleNew(game, *request.New, encoder)
 	case request.Status != nil:
@@ -116,6 +125,16 @@ func handlePlayerCounts(game brdgme.Gamer, request requestPlayerCounts, out *jso
 	_ = out.Encode(response{
 		PlayerCounts: &responsePlayerCounts{
 			PlayerCounts: game.PlayerCounts(),
+		},
+	})
+}
+
+// Go games don't provide rules text, matching the default in the Rust Gamer
+// trait which is also an empty string.
+func handleRules(game brdgme.Gamer, request requestRules, out *json.Encoder) {
+	_ = out.Encode(response{
+		Rules: &responseRules{
+			Rules: "",
 		},
 	})
 }
