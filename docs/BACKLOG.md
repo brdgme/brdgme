@@ -8,6 +8,11 @@ order** - it never changes and never implies execution order. Priority lives
 in the ordered list below (historically these items were called "phases";
 prose saying "Phase NN" means item `NN`).
 
+When an item is fully done/cancelled/superseded, move its row out of the
+Status table below into [`docs/archive/BACKLOG.md`](archive/BACKLOG.md),
+adding a Resolution and the date resolved - that file is append-only and
+keeps this one from filling up with closed work.
+
 **Priority order (updated 2026-07-08; hard-cutover resequencing
 2026-07-04):** done so far: restart-500 + 3-player-render bugs, #21
 OpenTofu (complete 2026-07-06), #22a Resend
@@ -56,29 +61,18 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## Status
 
+Fully done/resolved/superseded items (1-13, 17, 21, Quick wins, Review
+findings 2026-07-04, Development Workflow) have been moved to
+[`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
+
 | # | Title | Status | Spec | Plan |
 |---|---|---|---|---|
-| 1 | Foundation & Shared Logic | Complete | - | [plan](superpowers/plans/2026-07-08-01-foundation.md) |
-| 2 | Database Layer | Complete | - | [plan](superpowers/plans/2026-07-08-02-database-layer.md) |
-| 3 | Backend (Axum Core) | Complete | - | [plan](superpowers/plans/2026-07-08-03-backend-axum-core.md) |
-| 4 | WebSocket Integration | Complete | - | [plan](superpowers/plans/2026-07-08-04-websocket-integration.md) |
-| 5 | Frontend (Leptos UI) | Complete | - | [plan](superpowers/plans/2026-07-08-05-frontend-leptos-ui.md) |
-| 6 | Dev Environment Migration | Complete | - | [plan](superpowers/plans/2026-07-08-06-dev-environment-migration.md) |
-| 7 | Pre-Cutover Fixes | Complete | - | [plan](superpowers/plans/2026-07-02-07-pre-cutover-fixes.md) |
-| 8 | Redis pub/sub + web-legacy WS compatibility | Complete | [spec](superpowers/specs/2026-07-08-08-redis-pubsub-web-legacy-ws-compat-design.md) | [plan](superpowers/plans/2026-07-08-08-redis-pubsub-web-legacy-ws-compat.md) |
-| 9 | LLM Bots | Complete | [spec](superpowers/specs/2026-07-08-09-llm-bots-design.md) | [plan](superpowers/plans/2026-07-08-09-llm-bots.md) |
-| 10 | Eliminate runtime panics in rust/web | Complete | [spec](superpowers/specs/2026-07-08-10-eliminate-runtime-panics-design.md) | [plan](superpowers/plans/2026-07-08-10-eliminate-runtime-panics.md) |
-| 11 | Testing Foundation | Complete (completed 2026-07-04) | [spec](superpowers/specs/2026-07-04-11-testing-foundation-design.md) | [plan](superpowers/plans/2026-07-04-11-testing-foundation.md) |
-| 12 | ELO Ratings | Complete | [spec](superpowers/specs/2026-07-04-12-elo-ratings-design.md) | [plan](superpowers/plans/2026-07-04-12-elo-ratings.md) |
-| 13 | NATS Bot Eventing | Complete (2026-07-05) | [spec](superpowers/specs/2026-07-05-13-nats-bot-eventing-design.md) | [plan](superpowers/plans/2026-07-05-13-nats-bot-eventing.md) |
 | 14 | Drop Knative - Plain Deployments + Gateway API | Dev complete (landed fc7cb3f); all prod prereqs resolved 2026-07-05 except client-IP/PROXY-protocol, intentionally deferred live to Phase 16 (needs a DOKS-managed ConfigMap flip with no dry-run value pre-Gateway) | [spec](superpowers/specs/2026-07-05-14-drop-knative-gateway-api-design.md) | [plan](superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md) |
 | 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation, sync-failure drill (#16 beta) | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; beta period on isolated DB + freeze/TTL runbook added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-08-16-production-cutover-validation-design.md) | [plan](superpowers/plans/2026-07-08-16-production-cutover-validation.md) |
-| 17 | NATS Migration + WS simplification | Complete (2026-07-05) | [spec](superpowers/specs/2026-07-05-17-nats-migration-ws-simplification-design.md) | [plan](superpowers/plans/2026-07-05-17-nats-migration-ws-simplification.md) |
 | 18 | Production Hardening | Pending - fully specced 2026-07-05: all-in Grafana Cloud (logs/metrics/traces/alerting, supersedes VictoriaLogs), APM via OTLP, probes, external uptime monitor, capacity check | [spec](superpowers/specs/2026-07-07-18-production-hardening-design.md) | [plan](superpowers/plans/2026-07-07-18-production-hardening.md) |
 | 19 | CloudNativePG | Dev complete; prod Cluster + Barman Cloud backups running under ArgoCD (green 2026-07-08); remaining: PITR verify + import rehearsal (#16 beta), real import at cutover | [spec](superpowers/specs/2026-07-08-19-cloudnativepg-design.md) | [plan](superpowers/plans/2026-07-08-19-cloudnativepg.md) |
 | 20 | external-dns | Superseded 2026-07-05 - folded into Phases 16/21 | [spec](superpowers/specs/2026-07-08-20-external-dns-design.md) | - |
-| 21 | OpenTofu Infrastructure as Code | Complete 2026-07-06 (stages applied 2026-07-05; state-bucket versioning + Route53 zone deletion 2026-07-06) | [spec](superpowers/specs/2026-07-06-21-opentofu-iac-design.md) | [plan](superpowers/plans/2026-07-06-21-opentofu-iac.md) |
 | 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending | [spec](superpowers/specs/2026-07-05-22-email-via-resend-design.md) | [plan](superpowers/plans/2026-07-05-22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [spec](superpowers/specs/2026-07-04-23-rust-game-ports-design.md) | [plan](superpowers/plans/2026-07-04-23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-04-24-game-invites-design.md) | [plan](superpowers/plans/2026-07-04-24-game-invites.md) |
@@ -90,9 +84,6 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
-| Review findings 2026-07-04 | Review findings 2026-07-04 | Resolved 2026-07-04 | - | [plan](superpowers/plans/2026-07-04-review-findings-2026-07-04.md) |
-| Quick wins | Quick wins (added 2026-07-03) | Complete | - | [plan](superpowers/plans/2026-07-04-quick-wins.md) |
-| Development Workflow | Development Workflow | Superseded by [DEV.md](DEV.md) | - | - |
 
 ---
 
@@ -102,14 +93,12 @@ Everything below needs Michael (accounts, credentials, production access);
 tasks are also marked *(human)* inline in their phase files. Added
 2026-07-05.
 
-1. **#21:** ~~done in full~~ (state-bucket versioning + Route53 zone
-   deletion completed 2026-07-06).
-2. **#15:** ~~mostly done 2026-07-06/08~~ - repo created, deploy key
+1. **#15:** ~~mostly done 2026-07-06/08~~ - repo created, deploy key
    provisioned, sealed-secrets + ArgoCD installed, secrets sealed, fully
    green. Outstanding: rotate the admin password + delete
    `argocd-initial-admin-secret` (still present 2026-07-08); confirm the
    sealing-key pair is backed up offline.
-3. **#18:** ~~stack created + `grafana-cloud` sealed~~ (secret live in the
+2. **#18:** ~~stack created + `grafana-cloud` sealed~~ (secret live in the
    cluster; Alloy deployed 2026-07-07). Known issue 2026-07-08: telemetry
    volume exhausted the Grafana Cloud free-tier quota within hours, so
    remote_write is rejected and Alloy OOM-loops buffering the backlog -
@@ -117,18 +106,18 @@ tasks are also marked *(human)* inline in their phase files. Added
    #18 can be called shipping. Outstanding: reduce telemetry volume;
    configure the alert rules and email contact point in the Grafana UI;
    set up the external uptime monitor account.
-4. **#16 beta:** flip the cilium PROXY-protocol ConfigMap + restart the
+3. **#16 beta:** flip the cilium PROXY-protocol ConfigMap + restart the
    DaemonSet; `tofu apply` the `beta.brdg.me` record; drive the beta
    checklist (test games, Grafana verification).
-5. **#19 (during beta):** test import - `pg_dump` live Linode prod,
+4. **#19 (during beta):** test import - `pg_dump` live Linode prod,
    restore into a scratch CNPG database, record timings/fixes; verify a
    PITR restore from the Spaces backups.
-6. **#16 cutover:** lower TTLs (`tofu apply`); announce downtime; stop
+5. **#16 cutover:** lower TTLs (`tofu apply`); announce downtime; stop
    the Linode stack; real `pg_dump`/restore + migrations; repoint apex
    DNS (`tofu apply`); smoke test; flip the uptime monitor to apex.
    (The `postgres-config`/`postgres-rw` host is handled at Phase 15
    sealing time, not cutover - revised 2026-07-06.)
-7. **#16 decommission (after the validation week):** decommission the
+6. **#16 decommission (after the validation week):** decommission the
    Linode server (archive a final dump); the source/manifest deletion
    itself is agent-delegable.
 
@@ -197,3 +186,10 @@ pass-through).
 each item's design/decisions moved to `docs/superpowers/specs/`, its
 tasks/runbook to `docs/superpowers/plans/` (point-in-time records, not
 living documents).
+
+2026-07-08: moved fully done/resolved/superseded items (1-13, 17, 21,
+Quick wins, Review findings 2026-07-04, Development Workflow) out of the
+Status table into the new append-only `docs/archive/BACKLOG.md`, so the
+table only tracks work still in flight; also dropped the now-stale
+"#21: done in full" line from Human tasks. Going forward, close items by
+appending to the archive rather than deleting rows outright.
