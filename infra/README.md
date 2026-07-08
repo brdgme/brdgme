@@ -4,8 +4,8 @@ Describes the DigitalOcean account infrastructure that Kubernetes cannot
 self-describe: the DOKS cluster, the VPC, the `brdg.me` DNS zone (plus
 legacy records until cutover), the Spaces bucket for CloudNativePG
 (Phase 19) backups, and the Spaces bucket for this configuration's own
-state. See `docs/plan/21-opentofu-iac.md` for the decision record and cost
-posture.
+state. See `docs/superpowers/specs/2026-07-06-21-opentofu-iac-design.md` for
+the decision record and cost posture.
 
 The DO account was confirmed empty on 2026-07-05 (current prod runs on
 Linode with Route53 DNS), so everything here is **created** by tofu; the

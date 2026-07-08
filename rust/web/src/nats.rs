@@ -1,5 +1,5 @@
 //! JetStream setup shared by the monolith's publish (`bot.turn`) and consume
-//! (`bot.command`) sides. See docs/plan/13-nats-bot-eventing.md for the
+//! (`bot.command`) sides. See docs/superpowers/plans/2026-07-05-13-nats-bot-eventing.md for the
 //! resolved stream/consumer design.
 
 use anyhow::{Context, Result};

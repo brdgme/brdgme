@@ -1,7 +1,7 @@
 //! Minimal NATS/JetStream constants and event types mirroring
 //! `rust/web/src/nats.rs`. The bot only ever consumes `bot.turn` and
 //! publishes `bot.command`; the monolith owns creating the stream and both
-//! durable consumers on its own startup (see docs/plan/13-nats-bot-eventing.md).
+//! durable consumers on its own startup (see docs/superpowers/plans/2026-07-05-13-nats-bot-eventing.md).
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

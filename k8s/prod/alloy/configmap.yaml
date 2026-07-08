@@ -6,7 +6,7 @@ data:
   config.alloy: |
     // Grafana Alloy config: ships logs -> Loki, metrics -> Prometheus,
     // traces -> Tempo, all on Grafana Cloud. Credentials come from the
-    // `grafana-cloud` Secret (see docs/plan/18-production-hardening.md),
+    // `grafana-cloud` Secret (see docs/superpowers/plans/2026-07-07-18-production-hardening.md),
     // injected as env vars on the container and read here via env().
 
     // ---- Job 1: pod log tailing -> Loki -----------------------------------
@@ -62,7 +62,7 @@ data:
     // This is generic, not web-specific: any pod carrying the same three
     // annotations is picked up automatically. CNPG instance pods are
     // expected to be onboarded this way once Phase 19 lands - see the
-    // "CNPG scrape discovery" note in docs/plan/18-production-hardening.md
+    // "CNPG scrape discovery" note in docs/superpowers/plans/2026-07-07-18-production-hardening.md
     // for the assumption this relies on (CNPG's Cluster CR setting these
     // annotations via `.spec.metadata.annotations`, port 9187).
     discovery.relabel "annotated_scrape" {
@@ -144,7 +144,7 @@ data:
     }
 
     // 2d. Alloy self-monitoring: `up`/`alloy_build_info` feed the heartbeat
-    // / no-data alert (docs/plan/18-production-hardening.md).
+    // / no-data alert (docs/superpowers/plans/2026-07-07-18-production-hardening.md).
     prometheus.scrape "alloy_self" {
       targets = [{"__address__" = "localhost:12345"}]
 

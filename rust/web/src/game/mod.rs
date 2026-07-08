@@ -1011,7 +1011,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    #[ignore = "flaky NATS timing; see docs/plan/27-web-simplification.md deferred item 2"]
+    #[ignore = "flaky NATS timing; see docs/superpowers/plans/2026-07-07-27-web-simplification.md deferred item 2"]
     async fn broadcast_and_trigger_publishes_signal_for_missing_game(pool: PgPool) {
         use futures_util::StreamExt;
 

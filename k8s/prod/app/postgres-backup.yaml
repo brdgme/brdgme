@@ -1,7 +1,7 @@
 # Prod-only: Barman Cloud plugin backup target + schedule for the CNPG
 # `postgres` Cluster. Requires the barman-cloud-plugin operator
 # (brdgme-config's cnpg-operator/barman-cloud-plugin/) installed in cnpg-system.
-# See "Implementation notes" in docs/plan/19-cloudnativepg.md.
+# See "Implementation notes" in docs/superpowers/specs/2026-07-08-19-cloudnativepg-design.md.
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:

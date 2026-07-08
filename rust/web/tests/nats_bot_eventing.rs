@@ -1,5 +1,5 @@
 //! Phase 13: integration tests for the NATS/JetStream bot eventing flow,
-//! against a real NATS server with JetStream (see docs/plan/13-nats-bot-eventing.md).
+//! against a real NATS server with JetStream (see docs/superpowers/plans/2026-07-05-13-nats-bot-eventing.md).
 //! The LLM is out of scope here (the bot process owns that call) - these
 //! tests exercise the monolith side: publishing `bot.turn`, consuming
 //! `bot.command` -> `execute_command` -> DB commit, the stale-state-conflict
