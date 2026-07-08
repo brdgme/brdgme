@@ -356,8 +356,8 @@ beta/validation window:
 
 ### Probes (fleshed out 2026-07-05)
 
-Audited: game services and legacy `api` already have HTTP probes; **web and
-bot have none**; NATS/CNPG covered as below.
+Audited: game services and legacy `api` already have HTTP probes; **web,
+bot, and the brdgme operator have none**; NATS/CNPG covered as below.
 
 - [x] **web**: add readiness + liveness HTTP probes hitting a new `/healthz`
       route in `router.rs` that returns a plain 200 without touching the
@@ -373,6 +373,14 @@ bot have none**; NATS/CNPG covered as below.
       directly without a Service.
 - [x] **NATS**: confirm `k8s/base/nats` probes the monitoring port
       (`/healthz` on 8222 is the official pattern); add if missing.
+- [ ] **brdgme operator** (`rust/operator`, not CNPG): missed by the
+      original audit above - flagged in the 2026-07-04 review and not
+      re-captured until this pass. It runs no HTTP server today, so it has
+      neither a probe nor `/metrics`. Add a minimal axum `/healthz` (same
+      pattern as bot: 200 once the `kube::Client`/DB pool are established)
+      plus a liveness probe on it; `/metrics` optional v1 (reconcile
+      counts/errors are low-cardinality, cheap to add via
+      `axum-prometheus` like web).
 - [ ] **CNPG / migrate Job**: operator-managed and Job respectively - no
       action, listed so the audit is complete.
 

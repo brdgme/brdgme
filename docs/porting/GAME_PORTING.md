@@ -14,7 +14,7 @@ How to port a game to a Rust game crate in this project. Two source kinds:
   conversion preserves behaviour. Deployment-wise the `-2` gets its own
   manifests and the `-1` `GameVersion` is marked `isDeprecated: true`.
 
-Decision to target Rust rather than Go: `docs/GO_VS_RUST_PORTING.md`.
+Decision to target Rust rather than Go: `docs/decisions/GO_VS_RUST_PORTING.md`.
 Reference ports: `rust/game/lost-cities-1` (small, clean, recent idioms -
 primary template) and `rust/game/acquire-1` (large).
 

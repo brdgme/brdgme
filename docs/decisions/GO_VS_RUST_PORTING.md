@@ -67,10 +67,10 @@ remaining games). Card/deck handling needs no library at all in Rust.
 Decision adopted, and extended to converting the 17 in-repo `brdgme-go` games
 to Rust as `-2` editions. Consequences applied:
 
-- Porting guide rewritten for Rust: `docs/GAME_PORTING.md` (replaced
+- Porting guide rewritten for Rust: `docs/porting/GAME_PORTING.md` (replaced
   `GO_GAME_PORTING.md`).
 - Per-game plan re-targeted at Rust with two tracks (old-project ports +
-  `-2` conversions): `docs/GAME_PORTING_PLAN.md` (replaced
+  `-2` conversions): `docs/porting/GAME_PORTING_PLAN.md` (replaced
   `GO_GAME_PORTING_PLAN.md`).
 - The Go generic-deck design (`DECK_DESIGN.md`, required a Go 1.22 toolchain
   bump) was dropped as unnecessary - Rust enums + serde cover it.

@@ -4,8 +4,9 @@ Analysis of `stash@{0}` ("On leptos: wip-go-hive-chess-port: libgrid+hex libs,
 chess_1 WIP port"), created 2026-07-04. 23 new untracked files, ~1,000 lines,
 all under `brdgme-go/`. Documented so the stash can be dropped without losing
 the design learnings; the code targets the Go stack, which is being retired
-(see GO_VS_RUST_PORTING.md), and GAME_PORTING_PLAN.md defers hive/chess as new
-development rather than ports.
+(see `docs/decisions/GO_VS_RUST_PORTING.md`), and
+`docs/porting/GAME_PORTING_PLAN.md` defers hive/chess as new development
+rather than ports.
 
 ## Contents
 

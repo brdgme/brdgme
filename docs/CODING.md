@@ -6,6 +6,33 @@ to, and document the exception when you deviate.
 
 ---
 
+## General Principles
+
+**Quality over shortcuts.** Fix the root cause, not the symptom, even if it
+takes longer. A quick patch that leaves the underlying problem in place
+creates more work later.
+
+**No non-Rust dependencies.** Do not add new services, tools, or libraries in
+Go, Node, Python, or any language other than Rust to solve a problem. (The
+existing Go game services and `brdgme-go` are legacy, being retired under #31
+- see `docs/decisions/GO_VS_RUST_PORTING.md` - not a precedent for new
+non-Rust work.)
+
+**No bespoke code.** Prefer an existing, well-maintained crate over a
+hand-rolled implementation of a solved problem (parsing, hashing, retries,
+etc.) - see Dependency Management below for crates already in use.
+
+**No clever code.** Prefer the boring, obvious implementation over a clever
+one. Code is read far more often than it is written - optimize for the next
+reader, not for showing off.
+
+**Comment discipline.** Default to no comments. Only add one when the *why*
+is non-obvious - a hidden constraint, a workaround for a specific bug, or
+behavior that would surprise a reader. Never comment on *what* the code does
+when identifiers already say it.
+
+---
+
 ## Rust: Error Handling
 
 **No panicking code in runtime paths.** `.unwrap()`, `.expect()`, `panic!()`,
@@ -298,7 +325,8 @@ current rules from the running service.
 
 **Use real renders in RULES.md.** The "Reading the Display" section must
 contain actual brdgme markup output from the game binary, not a hand-crafted
-ASCII approximation. See `docs/RULES.md` for the extraction process.
+ASCII approximation. See `docs/authoring/RULES_AUTHORING.md` for the
+extraction process.
 
 ---
 

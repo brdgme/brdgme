@@ -1,7 +1,8 @@
 # Game Porting Plan (targets Rust)
 
-All porting targets Rust game crates - see `docs/GAME_PORTING.md` for the
-method and `docs/GO_VS_RUST_PORTING.md` for the Go-vs-Rust decision. Two
+All porting targets Rust game crates - see `docs/porting/GAME_PORTING.md` for
+the method and `docs/decisions/GO_VS_RUST_PORTING.md` for the Go-vs-Rust
+decision. Two
 tracks:
 
 - **Track A - new ports** from the old project (`~/Development/brdg.me/game/`):
