@@ -16,6 +16,12 @@ schemars = "1"
 serde = { version = "1", features = ["derive"] }
 brdgme_cmd = { path = "../lib/cmd", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+# The workspace enables both rustls backends (reqwest -> aws-lc-rs, sqlx/kube
+# defaults -> ring), so rustls can't auto-select a process-level provider.
+# kube builds its TLS config from the process default, so main() must install
+# one before creating the kube client or it panics at startup.
+# See docs/CODING.md "Dependency Management".
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
 serde_json = "1"
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid"] }
 thiserror = "2"
