@@ -117,12 +117,13 @@ files).
   delivery for bot eventing, plain Core pub/sub for WS fan-out).
 - **Ingress**: DOKS managed Gateway API (Cilium, pre-installed on >= 1.33
   VPC-native clusters), single auto-provisioned DO load balancer.
-- **DNS**: external-dns (DigitalOcean provider) reconciles records from
-  Gateway `HTTPRoute` hostnames (PLAN Phase 20).
+- **DNS**: OpenTofu-managed records (`infra/dns.tf`); external-dns (Phase
+  20) retired 2026-07-05 - no viable DigitalOcean provider.
 - **Secrets**: sealed-secrets - encrypted `SealedSecret` CRs committed to
   the config repo (PLAN Phase 15).
-- **Observability**: VictoriaLogs + Vector for log aggregation, vmalert for
-  alerting (PLAN Phase 18).
+- **Observability**: Grafana Cloud (logs/metrics/traces/alerting) via a
+  single in-cluster Alloy agent, plus OTLP-based APM (PLAN Phase 18);
+  decided 2026-07-05, superseding VictoriaLogs/vmalert.
 
 ### Domain routing
 
