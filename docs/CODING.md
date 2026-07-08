@@ -252,6 +252,36 @@ require coordinated updates. Run `cargo update --verbose` periodically to check
 for patch-level updates; ignore "Unchanged" lines where a newer major version
 exists but the Cargo.toml constraint intentionally excludes it.
 
+**rustls crypto backends: the workspace enables both, and any binary relying
+on the process default provider must install one in `main`.** `reqwest`'s
+`rustls` feature enables rustls' `aws-lc-rs` backend, while the defaults of
+`sqlx` (`tls-rustls`), `kube`, and `async-nats` enable `ring`. With both
+backend features enabled, rustls 0.23 cannot auto-select a process-level
+`CryptoProvider` and panics at the first use of it. This is invisible to CI
+(dual backends are legal feature unification and no test opens a TLS
+connection) and to dev (the dev Postgres connection is plaintext); it first
+surfaced as the operator CrashLooping in prod (2026-07-08). Whether a crate
+is affected depends on how it builds its rustls config: `sqlx` selects its
+backend explicitly and `reqwest` falls back to its own default, so both are
+immune; `kube` uses the bare process default and panics. The rule:
+
+- Any binary using a crate that reads the process default provider (today:
+  `kube` in the operator) must call
+  `rustls::crypto::aws_lc_rs::default_provider().install_default()` at the
+  top of `main` (see `rust/operator/src/main.rs`). When adding a new
+  TLS-using dependency, check how it obtains its provider; when in doubt,
+  install the default - it is always safe.
+
+Full consolidation on `aws-lc-rs` (banning `ring` in `deny.toml`) was
+implemented and then deliberately reverted on 2026-07-08: it required
+`default-features = false` plus hand-copied default-feature lists on `kube`
+and `async-nats`, which silently drop new upstream default features on every
+upgrade. That maintenance cost outweighs the marginal benefit while
+`install_default()` already eliminates the panic. Revisit if upstream
+defaults flip to `aws-lc-rs` (kube and async-nats both already expose the
+feature), at which point the migration becomes one-line feature swaps plus a
+`ring` entry in the `deny.toml` `[bans]` deny list.
+
 ---
 
 ## Game Services
