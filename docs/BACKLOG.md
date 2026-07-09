@@ -22,7 +22,8 @@ attempted and dropped 2026-07-08),
 #15 ArgoCD + sealed-secrets (live, first fully-green sync 2026-07-08;
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain). **Remaining pre-go-live:** #28 WP1-3 app
-hardening (promoted 2026-07-08) → #16 beta
+hardening (promoted 2026-07-08), #32 Alloy/Grafana Cloud OTLP export
+failure investigation (added 2026-07-09) → #16 beta
 period (isolated DB) → hard cutover + 1-week validation gate →
 decommission. (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
@@ -81,6 +82,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [spec](superpowers/specs/2026-07-08-29-stats-reports-design.md) | [plan](superpowers/plans/2026-07-08-29-stats-reports.md) |
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
+| 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - promoted to pre-go-live priority 2026-07-09: investigate before go-live. Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -220,3 +222,8 @@ separately. #20 (external-dns, superseded 2026-07-05) also moved to the
 archive - no remaining work was ever tracked against it. Dropped the
 now-stale '#18' line from Human tasks, same as the '#21' line was
 dropped 2026-07-08.
+
+2026-07-09: #32 added - Alloy's OTLP exporter to Grafana Cloud (Tempo
+traces) observed stuck in a retry loop with `resolver error: produced
+zero addresses` in prod alloy pod logs; no traces are being exported.
+Promoted to pre-go-live priority - needs investigation before go-live.
