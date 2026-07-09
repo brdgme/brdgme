@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
@@ -142,6 +143,10 @@ pub struct Game {
     pub shares: HashMap<Corp, usize>,
     pub last_turn: bool,
     pub finished: bool,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 impl Default for Game {
@@ -154,6 +159,7 @@ impl Default for Game {
             shares: corp_hash_map(STARTING_SHARES),
             last_turn: false,
             finished: false,
+            rng: GameRng::default(),
         }
     }
 }
@@ -162,8 +168,11 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
-        let mut g = Game::default();
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
+        let mut g = Game {
+            rng: GameRng::seed_from_u64(seed),
+            ..Game::default()
+        };
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -174,7 +183,7 @@ impl Gamer for Game {
 
         // Shuffle up the draw tiles.
         let mut tiles = Loc::all();
-        tiles.as_mut_slice().shuffle(&mut rand::rng());
+        tiles.as_mut_slice().shuffle(&mut g.rng);
         g.draw_tiles = tiles;
 
         // Place initial tiles onto the board.
@@ -191,7 +200,7 @@ impl Gamer for Game {
         }
 
         // Set the start player.
-        let start_player = (rand::rng().next_u32() as usize) % players;
+        let start_player = g.rng.random_range(0..players);
         g.phase = Phase::Play(start_player);
 
         let mut logs: Vec<Log> = vec![];
@@ -855,12 +864,12 @@ impl Game {
         Log::public(content)
     }
 
-    fn bonus_players(&self, corp: Corp) -> BonusPlayers {
+    fn bonus_players(&mut self, corp: Corp) -> BonusPlayers {
         let mut major: Vec<usize> = vec![];
         let mut major_count: usize = 0;
         let mut dummy_shares: usize = 0;
         if self.players.len() == 2 {
-            dummy_shares = rand::random_range(1..=5);
+            dummy_shares = self.rng.random_range(1..=5);
             major.push(DUMMY_PLAYER_OFFSET);
             major_count = dummy_shares;
         }
@@ -1234,7 +1243,7 @@ impl<'a> From<&'a str> for Game {
                 }
             }
         }
-        let mut g = Game::start(players.len()).expect("expected new game").0;
+        let mut g = Game::start(players.len(), 1).expect("expected new game").0;
         g.phase = Phase::Play(0);
         g.players = players;
         g.board = s.into();

@@ -89,7 +89,7 @@ mod tests {
             "/",
             post(|Json(payload): Json<Request>| async move {
                 match payload {
-                    Request::New { players } => {
+                    Request::New { players, .. } => {
                         // Mock response for New Game
                         Json(Response::New {
                             game: brdgme_cmd::api::GameResponse {
@@ -106,6 +106,7 @@ mod tests {
                                 render: "render".to_string(),
                             },
                             player_renders: vec![],
+                            seed: 0,
                         })
                     }
                     _ => Json(Response::SystemError {
@@ -124,7 +125,10 @@ mod tests {
 
         // 2. Execute Client Request
         let uri = format!("http://{}", addr);
-        let req = Request::New { players: 2 };
+        let req = Request::New {
+            players: 2,
+            seed: None,
+        };
         let client = reqwest::Client::new();
         let resp = request(&client, &uri, &req).await.expect("request failed");
 

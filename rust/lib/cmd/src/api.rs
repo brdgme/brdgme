@@ -11,6 +11,8 @@ pub enum Request {
     PlayerCounts,
     New {
         players: usize,
+        #[serde(default)]
+        seed: Option<u64>,
     },
     Status {
         game: String,
@@ -84,6 +86,7 @@ pub enum Response {
         logs: Vec<CliLog>,
         public_render: PubRender,
         player_renders: Vec<PlayerRender>,
+        seed: u64,
     },
     Status {
         game: GameResponse,

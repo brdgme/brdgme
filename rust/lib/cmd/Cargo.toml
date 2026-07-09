@@ -17,6 +17,7 @@ term_size = "0.3.2"
 warp = { version = "0.4.3", features = ["server"], optional = true }
 tokio = { version = "1", features = ["signal"], optional = true }
 env_logger = "0.11.11"
+rand = "0.10.2"
 
 [features]
 default = ["http-server"]

@@ -18,6 +18,8 @@ Decision to target Rust rather than Go: `docs/decisions/GO_VS_RUST_PORTING.md`.
 Reference ports: `rust/game/lost-cities-1` (small, clean, recent idioms -
 primary template) and `rust/game/acquire-1` (large).
 
+General best practices: `docs/authoring/GAME_DEVELOPMENT.md`.
+
 ## Big picture
 
 The old project was a monolithic Go server: games implemented `game.Playable`,
@@ -74,7 +76,8 @@ rust/game/<name>-1/
    interfaces) become a single `enum Card { ... }` with variant data - serde
    handles tagged serialization natively. Static card data (costs, names,
    effect parameters) goes in `impl` methods or const tables keyed by variant.
-   Decks/hands are `Vec<Card>`; shuffle with `rand::seq::SliceRandom`.
+   Decks/hands are `Vec<Card>`; shuffle with the game's `rng` field - see
+   `docs/authoring/GAME_DEVELOPMENT.md` (Randomness).
 2. **Game state.** Translate the old `Game` struct: `Players []string` ->
    player count only; `map[int]X` keyed by player -> `Vec<X>`; phases ->
    `enum Phase`. Everything `#[derive(Default, Clone, Serialize, Deserialize)]`.

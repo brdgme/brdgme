@@ -334,7 +334,7 @@ async fn spawn_mock_new_game_service() -> String {
         "/",
         post(|Json(payload): Json<GameRequest>| async move {
             match payload {
-                GameRequest::New { players } => Json(GameResponse::New {
+                GameRequest::New { players, .. } => Json(GameResponse::New {
                     game: GameStateResponse {
                         state: "mock_state".to_string(),
                         points: vec![0.0; players],
@@ -349,6 +349,7 @@ async fn spawn_mock_new_game_service() -> String {
                         render: "mock render".to_string(),
                     },
                     player_renders: vec![],
+                    seed: 0,
                 }),
                 _ => Json(GameResponse::SystemError {
                     message: "unsupported in mock".to_string(),

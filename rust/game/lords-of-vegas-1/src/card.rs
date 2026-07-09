@@ -3,6 +3,7 @@ use std::fmt;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use brdgme_game::rng::GameRng;
 use brdgme_markup::Node as N;
 
 use crate::STARTING_CARDS;
@@ -16,14 +17,13 @@ pub enum Card {
     GameEnd,
 }
 
-pub fn shuffled_deck(players: usize) -> Vec<Card> {
-    let mut rng = rand::rng();
+pub fn shuffled_deck(players: usize, rng: &mut GameRng) -> Vec<Card> {
     let mut cards: Vec<Card> = TILES
         .keys()
         .cloned()
         .map(|t| Card::Loc { loc: t })
         .collect();
-    cards.as_mut_slice().shuffle(&mut rng);
+    cards.as_mut_slice().shuffle(rng);
     // Insert the game end card in the last quarter of the deck, taking into account the cards which
     // will be drawn by the players as adding the end card happens after players draw.
     let player_draw_count = players * STARTING_CARDS;

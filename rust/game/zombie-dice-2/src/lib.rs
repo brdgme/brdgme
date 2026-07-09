@@ -8,6 +8,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
@@ -74,9 +75,9 @@ impl Dice {
         }
     }
 
-    pub fn roll(self) -> Face {
+    pub fn roll(self, rng: &mut GameRng) -> Face {
         let faces = self.faces();
-        let i = rand::rng().random_range(0..faces.len());
+        let i = rng.random_range(0..faces.len());
         faces[i]
     }
 }
@@ -150,11 +151,11 @@ pub fn all_dice() -> Vec<Dice> {
     ]
 }
 
-pub fn roll_dice(dice: &[Dice]) -> DiceResultList {
+pub fn roll_dice(dice: &[Dice], rng: &mut GameRng) -> DiceResultList {
     dice.iter()
         .map(|d| DiceResult {
             dice: *d,
-            face: d.roll(),
+            face: d.roll(rng),
         })
         .collect()
 }
@@ -175,6 +176,10 @@ pub struct Game {
     pub kept: DiceResultList,
     pub round_brains: i32,
     pub round_shotguns: i32,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -213,7 +218,7 @@ impl Game {
     }
 
     pub fn shake_cup(&mut self) {
-        self.cup.shuffle(&mut rand::rng());
+        self.cup.shuffle(&mut self.rng);
     }
 
     /// Faithful port of Go `TakeDice`. If the cup has fewer than `n` dice,
@@ -295,7 +300,7 @@ impl Game {
             logs.extend(take_logs);
             dice.extend(taken);
         }
-        let drl = roll_dice(&dice);
+        let drl = roll_dice(&dice, &mut self.rng);
         logs.push(Log::public(vec![
             N::Player(self.current_turn),
             N::text(" rolled "),
@@ -387,7 +392,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -398,6 +403,7 @@ impl Gamer for Game {
         let mut g = Game {
             players,
             scores: vec![0; players],
+            rng: GameRng::seed_from_u64(seed),
             ..Game::default()
         };
         let logs = g.start_turn();
@@ -512,18 +518,31 @@ impl Gamer for Game {
 mod test {
     use super::*;
 
+    /// Find a seed whose subsequent action (as exercised by `pred`) satisfies
+    /// the given property, so tests can pin down a specific, deterministic
+    /// outcome from an otherwise-random cascade (e.g. no shotgun bust).
+    fn seed_where(g: &Game, pred: impl Fn(&Game) -> bool) -> u64 {
+        (0..10_000)
+            .find(|&s| {
+                let mut probe = g.clone();
+                probe.rng = GameRng::seed_from_u64(s);
+                pred(&probe)
+            })
+            .expect("no suitable seed in 10k")
+    }
+
     #[test]
     fn test_player_counts() {
         assert_eq!(vec![2, 3, 4, 5, 6, 7, 8], Game::player_counts());
-        assert!(Game::start(1).is_err());
-        assert!(Game::start(9).is_err());
-        assert!(Game::start(2).is_ok());
-        assert!(Game::start(8).is_ok());
+        assert!(Game::start(1, 1).is_err());
+        assert!(Game::start(9, 1).is_err());
+        assert!(Game::start(2, 1).is_ok());
+        assert!(Game::start(8, 1).is_ok());
     }
 
     #[test]
     fn test_start_initial_state() {
-        let (g, logs) = Game::start(2).unwrap();
+        let (g, logs) = Game::start(2, 1).unwrap();
         assert_eq!(0, g.current_turn);
         assert!(!g.finished);
         assert!(g.round_shotguns < BUST_SHOTGUN_COUNT);
@@ -575,7 +594,7 @@ mod test {
 
     #[test]
     fn test_take_dice_basic() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.cup = all_dice();
         let (taken, logs) = g.take_dice(3);
         assert_eq!(3, taken.len());
@@ -585,7 +604,7 @@ mod test {
 
     #[test]
     fn test_take_dice_refills_from_kept_when_cup_low() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.cup = vec![];
         g.kept = vec![
             DiceResult {
@@ -611,7 +630,7 @@ mod test {
 
     #[test]
     fn test_take_dice_zero_returns_empty() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.cup = all_dice();
         let (taken, logs) = g.take_dice(0);
         assert!(taken.is_empty());
@@ -621,7 +640,7 @@ mod test {
 
     #[test]
     fn test_roll_distributes_faces() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.cup = all_dice();
         g.kept = vec![];
         g.current_roll = vec![];
@@ -634,7 +653,7 @@ mod test {
 
     #[test]
     fn test_keep_banks_brains_and_advances() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.current_turn = 0;
         g.round_brains = 4;
         g.scores = vec![0, 0];
@@ -655,14 +674,14 @@ mod test {
 
     #[test]
     fn test_keep_wrong_player_errors() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.current_turn = 0;
         assert!(g.keep(1).is_err());
     }
 
     #[test]
     fn test_can_roll_and_can_keep() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.current_turn = 0;
         g.finished = false;
         assert!(g.can_roll(0));
@@ -676,7 +695,7 @@ mod test {
 
     #[test]
     fn test_leaders() {
-        let mut g = Game::start(3).unwrap().0;
+        let mut g = Game::start(3, 1).unwrap().0;
         g.scores = vec![5, 7, 7];
         let (score, leaders) = g.leaders();
         assert_eq!(7, score);
@@ -694,7 +713,7 @@ mod test {
 
     #[test]
     fn test_finished_unique_leader_at_threshold() {
-        let mut g = Game::start(3).unwrap().0;
+        let mut g = Game::start(3, 1).unwrap().0;
         g.scores = vec![WIN_SCORE, 5, 5];
         g.current_turn = 2; // advancing will wrap to 0.
         g.next_player();
@@ -703,7 +722,7 @@ mod test {
 
     #[test]
     fn test_finished_not_triggered_below_threshold() {
-        let mut g = Game::start(3).unwrap().0;
+        let mut g = Game::start(3, 1).unwrap().0;
         g.scores = vec![WIN_SCORE - 1, 5, 5];
         g.current_turn = 2;
         g.next_player();
@@ -712,7 +731,7 @@ mod test {
 
     #[test]
     fn test_rolloff_starts_on_tie_at_threshold() {
-        let mut g = Game::start(3).unwrap().0;
+        let mut g = Game::start(3, 1).unwrap().0;
         g.scores = vec![WIN_SCORE, WIN_SCORE, 5];
         g.current_turn = 2;
         let logs = g.next_player();
@@ -730,14 +749,41 @@ mod test {
 
     #[test]
     fn test_rolloff_skips_non_rolloff_players() {
-        let mut g = Game::start(4).unwrap().0;
+        let mut g = Game::start(4, 1).unwrap().0;
         g.scores = vec![WIN_SCORE, 5, WIN_SCORE, 5];
         g.current_turn = 3;
+        // Seed searched for: next_player's auto-roll for player 0 shows no
+        // shotguns, so the rolloff starts with [0, 2] and stays on player
+        // 0's turn instead of bust-cascading past it.
+        const SKIP_SEED_1: u64 = 0;
+        assert_eq!(
+            SKIP_SEED_1,
+            seed_where(&g, |probe| {
+                let mut probe = probe.clone();
+                let _ = probe.next_player();
+                probe.roll_off_players == vec![0, 2] && probe.current_turn == 0
+            })
+        );
+        g.rng = GameRng::seed_from_u64(SKIP_SEED_1);
         // After next_player: wraps to 0, sees tie, starts rolloff with [0, 2].
         let _ = g.next_player();
         assert_eq!(vec![0, 2], g.roll_off_players);
+        assert_eq!(0, g.current_turn);
         // Player 0's turn now (rolloff participant). Keep some brains.
         g.round_brains = 1;
+        // Seed searched for: keep(0)'s auto-roll for player 2 (after
+        // skipping non-rolloff player 1) shows no shotguns, so play lands
+        // exactly on player 2 instead of bust-cascading further.
+        const SKIP_SEED_2: u64 = 0;
+        assert_eq!(
+            SKIP_SEED_2,
+            seed_where(&g, |probe| {
+                let mut probe = probe.clone();
+                let _ = probe.keep(0);
+                probe.current_turn == 2 && !probe.finished
+            })
+        );
+        g.rng = GameRng::seed_from_u64(SKIP_SEED_2);
         let _ = g.keep(0).unwrap();
         // After player 0 keeps, next_player skips 1 (not in rolloff) and starts
         // player 2's turn.
@@ -747,17 +793,33 @@ mod test {
 
     #[test]
     fn test_rolloff_resolves_when_unique_leader() {
-        let mut g = Game::start(3).unwrap().0;
+        let mut g = Game::start(3, 1).unwrap().0;
         g.scores = vec![WIN_SCORE, WIN_SCORE, 5];
         g.roll_off_players = vec![0, 1];
-        // Player 0 keeps 1 brain, player 1 keeps 0 brains, then wrap to 0:
-        // 0 has WIN_SCORE+1, 1 has WIN_SCORE -> unique leader, finished.
         g.current_turn = 0;
         g.round_brains = 1;
+        // Seed searched for: keep(0)'s auto-roll for player 1 shows no
+        // shotguns, so play lands exactly on player 1 instead of
+        // bust-cascading further.
+        const RESOLVE_SEED: u64 = 0;
+        assert_eq!(
+            RESOLVE_SEED,
+            seed_where(&g, |probe| {
+                let mut probe = probe.clone();
+                let _ = probe.keep(0);
+                probe.current_turn == 1 && !probe.finished
+            })
+        );
+        g.rng = GameRng::seed_from_u64(RESOLVE_SEED);
+        // Player 0 keeps 1 brain, player 1 keeps 0 brains, then wrap to 0:
+        // 0 has WIN_SCORE+1, 1 has WIN_SCORE -> unique leader, finished.
         let _ = g.keep(0).unwrap();
         // Now player 1's turn.
         assert_eq!(1, g.current_turn);
         g.round_brains = 0;
+        // No seed needed here: wrapping to 0 with a unique leader finishes
+        // the game before any further roll happens, so this leg of the
+        // cascade is deterministic regardless of RNG state.
         let _ = g.keep(1).unwrap();
         // Wrap to 0 -> check leaders -> 0 leads alone -> finished.
         assert!(g.finished);
@@ -765,7 +827,7 @@ mod test {
 
     #[test]
     fn test_placings_standard_competition_ties() {
-        let mut g = Game::start(3).unwrap().0;
+        let mut g = Game::start(3, 1).unwrap().0;
         g.scores = vec![10, 10, 5];
         assert_eq!(vec![1, 1, 3], g.placings());
         g.scores = vec![10, 5, 10];
@@ -780,7 +842,7 @@ mod test {
 
     #[test]
     fn test_command_roll_and_keep() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let p = vec![];
         let current = g.current_turn;
         // `roll` should work for the current player and stay on their turn
@@ -810,7 +872,7 @@ mod test {
 
     #[test]
     fn test_command_wrong_player_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let p = vec![];
         let current = g.current_turn;
         let other = 1 - current;
@@ -820,7 +882,7 @@ mod test {
 
     #[test]
     fn test_command_unknown_input_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let p = vec![];
         let current = g.current_turn;
         assert!(g.command(current, "fly", &p).is_err());
@@ -828,7 +890,7 @@ mod test {
 
     #[test]
     fn test_command_after_finished_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.finished = true;
         let p = vec![];
         assert!(g.command(0, "roll", &p).is_err());
@@ -837,7 +899,7 @@ mod test {
 
     #[test]
     fn test_cup_refill_returns_kept_to_cup() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         // Empty cup with some kept dice; rolling should trigger a refill.
         g.cup = vec![];
         g.kept = vec![
@@ -877,7 +939,7 @@ mod test {
 
     #[test]
     fn test_pub_state_captures_rendered_fields() {
-        let g = Game::start(2).unwrap().0;
+        let g = Game::start(2, 1).unwrap().0;
         let ps = g.pub_state();
         assert_eq!(g.players, ps.players);
         assert_eq!(g.current_turn, ps.current_turn);

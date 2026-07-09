@@ -1,8 +1,10 @@
+use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
@@ -66,17 +68,21 @@ pub struct Game {
     pub played: Vec<Card>,
     pub board: Board,
     pub finished: bool,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
-pub fn roll() -> usize {
-    rand::random_range(DIE_MIN..=DIE_MAX)
+pub fn roll(rng: &mut GameRng) -> usize {
+    rng.random_range(DIE_MIN..=DIE_MAX)
 }
 
 impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(2..=6).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: 2,
@@ -84,11 +90,12 @@ impl Gamer for Game {
                 given: players,
             });
         }
+        let mut rng = GameRng::seed_from_u64(seed);
         let mut logs: Vec<Log> = vec![];
         let mut board = Board::default();
-        let mut deck = shuffled_deck(players);
+        let mut deck = shuffled_deck(players, &mut rng);
         let mut played: Vec<Card> = vec![];
-        let current_player = rand::random_range(0..players);
+        let current_player = rng.random_range(0..players);
         let players: Vec<Player> = (0..players)
             .map(|p| {
                 let cards: Vec<Card> = deck.drain(..STARTING_CARDS).collect();
@@ -126,6 +133,7 @@ impl Gamer for Game {
                 deck,
                 played,
                 finished: false,
+                rng,
             },
             logs,
         ))
@@ -274,7 +282,7 @@ impl Game {
         let mut can_undo = true;
 
         // Building can trigger boss ties.
-        if let Some(resolve_logs) = self.board.resolve_boss_ties() {
+        if let Some(resolve_logs) = self.board.resolve_boss_ties(&mut self.rng) {
             logs.extend(resolve_logs);
             can_undo = false;
         }
@@ -313,7 +321,7 @@ mod tests {
 
     #[test]
     fn json_works() {
-        let game = Game::start(3)
+        let game = Game::start(3, 1)
             .expect("could not create game with 3 players")
             .0;
         serde_json::to_string(&game).expect("could not serialise game to JSON");

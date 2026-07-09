@@ -264,6 +264,7 @@ async fn create_game_from_service(
         &game_version.uri,
         &Request::New {
             players: seed.player_count,
+            seed: None,
         },
     )
     .await
@@ -915,6 +916,7 @@ mod tests {
                 render: "render".to_string(),
             },
             player_renders: vec![],
+            seed: 0,
         })
         .await;
         let (game_id, creator_id) = make_finished_two_player_game(&pool, &uri).await;

@@ -38,6 +38,7 @@ where
     let (mut game, logs, mut public_render, mut player_renders) = match client
         .request(&Request::New {
             players: players.len(),
+            seed: None,
         })
         .unwrap()
     {
@@ -46,6 +47,7 @@ where
             logs,
             public_render,
             player_renders,
+            ..
         } => (game, logs, public_render, player_renders),
         Response::UserError { message } | Response::SystemError { message } => {
             panic!("{}", message)

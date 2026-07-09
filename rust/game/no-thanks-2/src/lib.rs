@@ -7,6 +7,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
@@ -29,6 +30,10 @@ pub struct Game {
     pub centre_chips: i32,
     pub remaining_cards: Vec<i32>,
     pub currently_moving: usize,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -57,7 +62,7 @@ impl Game {
 
     pub fn init_cards(&mut self) {
         let mut pool: Vec<i32> = Self::all_cards();
-        pool.shuffle(&mut rand::rng());
+        pool.shuffle(&mut self.rng);
         self.remaining_cards = pool[..DECK_SIZE].to_vec();
     }
 
@@ -190,7 +195,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -201,11 +206,12 @@ impl Gamer for Game {
         let mut g = Game {
             players,
             player_hands: vec![vec![]; players],
+            rng: GameRng::seed_from_u64(seed),
             ..Game::default()
         };
         g.init_cards();
         g.init_player_chips();
-        g.currently_moving = rand::rng().random_range(0..players);
+        g.currently_moving = g.rng.random_range(0..players);
         Ok((g, vec![]))
     }
 
@@ -365,7 +371,7 @@ mod test {
 
     #[test]
     fn test_assert_turn() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.currently_moving = STEVE;
         assert!(!g.can_take(MICK));
         assert!(g.can_take(STEVE));
@@ -375,7 +381,7 @@ mod test {
 
     #[test]
     fn test_is_finished() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         assert!(!g.is_finished());
         g.remaining_cards = vec![];
         assert!(g.is_finished());
@@ -383,7 +389,7 @@ mod test {
 
     #[test]
     fn test_pass() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let initial_player = g.currently_moving;
         let initial_card_count = g.remaining_cards.len();
         let initial_centre_chips = g.centre_chips;
@@ -397,7 +403,7 @@ mod test {
 
     #[test]
     fn test_take() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let initial_player = g.currently_moving;
         let initial_card_count = g.remaining_cards.len();
         g.centre_chips = 5;
@@ -418,7 +424,7 @@ mod test {
 
     #[test]
     fn test_player_hand_sorted() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_hands[MICK] = vec![5, 3, 6, 4, 87];
         let sorted = g.player_hand_sorted(MICK);
         assert!(sorted.windows(2).all(|w| w[0] <= w[1]));
@@ -426,7 +432,7 @@ mod test {
 
     #[test]
     fn test_player_hand_grouped() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_hands[MICK] = vec![5, 8, 3, 10, 9, 15, 6, 16];
         let grouping = g.player_hand_grouped(MICK);
         assert_eq!(4, grouping.len());
@@ -438,7 +444,7 @@ mod test {
 
     #[test]
     fn test_player_hand_score() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_hands[MICK] = vec![5, 8, 3, 10, 9, 15, 6, 16];
         g.player_chips[MICK] = 10;
         let expected = 3 + 5 + 8 + 15;
@@ -447,7 +453,7 @@ mod test {
 
     #[test]
     fn test_final_player_score() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_hands[MICK] = vec![5, 8, 3, 10, 9, 15, 6, 16];
         g.player_chips[MICK] = 10;
         let expected = 3 + 5 + 8 + 15 - 10;
@@ -456,7 +462,7 @@ mod test {
 
     #[test]
     fn test_whose_turn() {
-        let (g, _) = Game::start(3).unwrap();
+        let (g, _) = Game::start(3, 1).unwrap();
         let wt = g.whose_turn();
         assert_eq!(1, wt.len());
         assert_eq!(g.currently_moving, wt[0]);
@@ -464,7 +470,7 @@ mod test {
 
     #[test]
     fn test_winners() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_hands[BJ] = vec![5, 8, 3, 10, 9, 15, 6, 16];
         g.player_chips[BJ] = 3;
         g.player_hands[MICK] = vec![5, 8, 3, 10, 9, 15, 6, 16];
@@ -477,7 +483,7 @@ mod test {
 
     #[test]
     fn test_pub_state_chips_hidden_until_finished() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         assert!(!g.pub_state().finished);
         assert!(g.pub_state().chips.is_empty());
         g.remaining_cards = vec![];
@@ -488,7 +494,7 @@ mod test {
 
     #[test]
     fn test_player_actions() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         g.currently_moving = STEVE;
         let top_card = g.peek_top_card();

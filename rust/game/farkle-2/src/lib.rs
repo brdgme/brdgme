@@ -8,6 +8,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
@@ -138,6 +139,10 @@ pub struct Game {
     pub turn_score: i32,
     pub remaining_dice: Vec<Die>,
     pub taken_this_roll: bool,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -178,8 +183,8 @@ impl Game {
         self.current_player == self.first_player && self.scores.iter().any(|&s| s >= WIN_SCORE)
     }
 
-    fn random_dice(n: usize) -> Vec<Die> {
-        let mut dice: Vec<Die> = (0..n).map(|_| rand::rng().random_range(1..=6u8)).collect();
+    fn random_dice(rng: &mut GameRng, n: usize) -> Vec<Die> {
+        let mut dice: Vec<Die> = (0..n).map(|_| rng.random_range(1..=6u8)).collect();
         dice.sort_unstable();
         dice
     }
@@ -210,7 +215,7 @@ impl Game {
             ]));
             self.turn_score = 0;
             self.taken_this_roll = false;
-            self.remaining_dice = Self::random_dice(DICE_COUNT);
+            self.remaining_dice = Self::random_dice(&mut self.rng, DICE_COUNT);
             logs.push(Log::public(vec![
                 N::Player(self.current_player),
                 N::text(" rolled "),
@@ -265,7 +270,7 @@ impl Game {
             self.remaining_dice.len()
         };
         let mut logs: Vec<Log> = vec![];
-        self.remaining_dice = Self::random_dice(n);
+        self.remaining_dice = Self::random_dice(&mut self.rng, n);
         logs.push(Log::public(vec![
             N::Player(self.current_player),
             N::text(" rolled "),
@@ -312,7 +317,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -320,12 +325,14 @@ impl Gamer for Game {
                 given: players,
             });
         }
-        let current_player = rand::rng().random_range(0..players);
+        let mut rng = GameRng::seed_from_u64(seed);
+        let current_player = rng.random_range(0..players);
         let mut g = Game {
             players,
             first_player: current_player,
             current_player,
             scores: vec![0; players],
+            rng,
             ..Game::default()
         };
         let logs = g.start_turn();
@@ -457,7 +464,7 @@ mod test {
     // 1:1 port of Go `TestGame`.
     #[test]
     fn test_game() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.remaining_dice = vec![1, 2, 3, 4, 5, 6];
         let p = vec![];
         g.command(g.current_player, "score 1", &p).unwrap();
@@ -466,10 +473,10 @@ mod test {
     #[test]
     fn test_player_counts() {
         assert_eq!(vec![2, 3, 4, 5, 6], Game::player_counts());
-        assert!(Game::start(1).is_err());
-        assert!(Game::start(7).is_err());
-        assert!(Game::start(2).is_ok());
-        assert!(Game::start(6).is_ok());
+        assert!(Game::start(1, 1).is_err());
+        assert!(Game::start(7, 1).is_err());
+        assert!(Game::start(2, 1).is_ok());
+        assert!(Game::start(6, 1).is_ok());
     }
 
     #[test]
@@ -513,7 +520,7 @@ mod test {
 
     #[test]
     fn test_score_accumulates() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let current = g.current_player;
         g.remaining_dice = vec![1, 5, 5, 5, 2, 3];
         g.score(current, &[5, 5, 5]).unwrap();
@@ -524,7 +531,7 @@ mod test {
 
     #[test]
     fn test_score_no_score_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.remaining_dice = vec![1, 2];
         let err = g.score(g.current_player, &[2, 1]).unwrap_err();
         assert!(format!("{err}").contains("doesn't score any points"));
@@ -532,7 +539,7 @@ mod test {
 
     #[test]
     fn test_score_not_in_dice_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.remaining_dice = vec![1, 2];
         let err = g.score(g.current_player, &[5, 5, 5]).unwrap_err();
         assert!(format!("{err}").contains("don't have those dice"));
@@ -540,7 +547,7 @@ mod test {
 
     #[test]
     fn test_can_commands() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let current = g.current_player;
         let other = 1 - current;
         // No scoring dice -> can_score false, done false (no taken), roll false.
@@ -565,7 +572,7 @@ mod test {
 
     #[test]
     fn test_finished_and_placings() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Round only closes when play returns to first player with a score >= 5000.
         g.scores = vec![5000, 3000, 1000];
         g.current_player = g.first_player + 1;
@@ -580,7 +587,7 @@ mod test {
 
     #[test]
     fn test_start_rolls_and_logs() {
-        let (g, logs) = Game::start(2).unwrap();
+        let (g, logs) = Game::start(2, 1).unwrap();
         assert!(!g.remaining_dice.is_empty());
         assert_eq!(DICE_COUNT, g.remaining_dice.len());
         // At least the "It is now X's turn" and "X rolled ..." logs.
@@ -589,7 +596,7 @@ mod test {
 
     #[test]
     fn test_full_turn_flow() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let current = g.current_player;
         let p = players(2);
         // Score three 1s (1000); leftover 2,3,4 has no scoring combo.
@@ -618,7 +625,7 @@ mod test {
         // Farkle-specific: done only banks the accumulated turn score; it does
         // NOT auto-score leftover dice (unlike greed-2). A single 5 left over
         // after scoring three 1s stays unscored.
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let current = g.current_player;
         let p = vec![];
         g.remaining_dice = vec![1, 1, 1, 5, 2, 3];

@@ -9,6 +9,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
@@ -73,6 +74,10 @@ pub struct Game {
     pub rolled_dice: Vec<DieFace>,
     pub kept_dice: Vec<DieFace>,
     pub remaining_rolls: i32,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
@@ -129,11 +134,8 @@ fn all_dice(rolled: &[DieFace], kept: &[DieFace]) -> Vec<DieFace> {
     d
 }
 
-fn roll_dice(n: usize) -> Vec<DieFace> {
-    let mut rng = rand::rng();
-    (0..n)
-        .map(|_| *DIE_FACES.choose(&mut rng).unwrap())
-        .collect()
+fn roll_dice(rng: &mut GameRng, n: usize) -> Vec<DieFace> {
+    (0..n).map(|_| *DIE_FACES.choose(rng).unwrap()).collect()
 }
 
 fn blue_tiles() -> Vec<Tile> {
@@ -337,7 +339,7 @@ impl Game {
     }
 
     pub fn start_turn(&mut self) -> Vec<Log> {
-        self.rolled_dice = roll_dice(START_DICE);
+        self.rolled_dice = roll_dice(&mut self.rng, START_DICE);
         self.kept_dice = vec![];
         self.remaining_rolls = START_ROLLS;
         vec![Log::public(vec![
@@ -586,7 +588,7 @@ impl Game {
             }
         }
         self.kept_dice.extend(kept);
-        self.rolled_dice = roll_dice(roll_set.len());
+        self.rolled_dice = roll_dice(&mut self.rng, roll_set.len());
         self.remaining_rolls -= 1;
         let mut logs = vec![Log::public(vec![
             N::Player(player),
@@ -616,7 +618,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -630,10 +632,11 @@ impl Gamer for Game {
             red_tiles: red_tiles(),
             player_blue_tiles: vec![vec![]; players],
             player_red_tiles: vec![vec![]; players],
+            rng: GameRng::seed_from_u64(seed),
             ..Game::default()
         };
-        g.blue_tiles.shuffle(&mut rand::rng());
-        g.red_tiles.shuffle(&mut rand::rng());
+        g.blue_tiles.shuffle(&mut g.rng);
+        g.red_tiles.shuffle(&mut g.rng);
         let logs = g.start_turn();
         Ok((g, logs))
     }
@@ -781,13 +784,13 @@ mod test {
 
     #[test]
     fn test_new() {
-        let g = Game::start(2);
+        let g = Game::start(2, 1);
         assert!(g.is_ok());
     }
 
     #[test]
     fn test_roll() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.command(MICK, "roll 1 2 5", &n).unwrap();
         g.command(MICK, "roll 2 3", &n).unwrap();
@@ -796,7 +799,7 @@ mod test {
 
     #[test]
     fn test_take_blue() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.rolled_dice = vec![
             DieFace::Sushi,
@@ -812,7 +815,7 @@ mod test {
 
     #[test]
     fn test_take_red() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.rolled_dice = vec![
             DieFace::Sushi,
@@ -828,7 +831,7 @@ mod test {
 
     #[test]
     fn test_force_take_most_negative_red() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.rolled_dice = vec![
             DieFace::Bones,
@@ -859,7 +862,7 @@ mod test {
 
     #[test]
     fn test_force_take_lowest_blue() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.rolled_dice = vec![
             DieFace::Sushi,
@@ -890,7 +893,7 @@ mod test {
 
     #[test]
     fn test_steal_blue() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.player_blue_tiles[BJ] = vec![
             Tile {
@@ -934,7 +937,7 @@ mod test {
 
     #[test]
     fn test_steal_red() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.player_red_tiles[STEVE] = vec![
             Tile {
@@ -978,7 +981,7 @@ mod test {
 
     #[test]
     fn test_steal_red_n_not_allowed() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.player_red_tiles[STEVE] = vec![
             Tile {
@@ -1007,7 +1010,7 @@ mod test {
 
     #[test]
     fn test_steal_blue_n() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.player_blue_tiles[BJ] = vec![
             Tile {
@@ -1051,7 +1054,7 @@ mod test {
 
     #[test]
     fn test_steal_red_n() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.player_red_tiles[STEVE] = vec![
             Tile {
@@ -1152,15 +1155,15 @@ mod test {
     #[test]
     fn test_player_counts() {
         assert_eq!(vec![2, 3, 4, 5], Game::player_counts());
-        assert!(Game::start(1).is_err());
-        assert!(Game::start(6).is_err());
-        assert!(Game::start(2).is_ok());
-        assert!(Game::start(5).is_ok());
+        assert!(Game::start(1, 1).is_err());
+        assert!(Game::start(6, 1).is_err());
+        assert!(Game::start(2, 1).is_ok());
+        assert!(Game::start(5, 1).is_ok());
     }
 
     #[test]
     fn test_start_state() {
-        let (g, logs) = Game::start(3).unwrap();
+        let (g, logs) = Game::start(3, 1).unwrap();
         assert!(!logs.is_empty());
         assert_eq!(3, g.players);
         assert_eq!(12, g.blue_tiles.len());
@@ -1275,7 +1278,7 @@ mod test {
 
     #[test]
     fn test_can_roll() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         assert!(g.can_roll(0));
         assert!(!g.can_roll(1));
         // Can't roll with 1 die
@@ -1289,7 +1292,7 @@ mod test {
 
     #[test]
     fn test_can_take_guards() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         // 2 sushi, 3 bones, full tiles -> can take both
         g.rolled_dice = vec![
             DieFace::Sushi,
@@ -1345,7 +1348,7 @@ mod test {
 
     #[test]
     fn test_can_steal_guards() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // No one has tiles -> can't steal even with chopsticks
         g.kept_dice = vec![
             DieFace::BlueChopsticks,
@@ -1379,7 +1382,7 @@ mod test {
 
     #[test]
     fn test_roll_must_keep_one() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
         // Rolling all 5 dice is not allowed
         assert!(g.command(0, "roll 1 2 3 4 5", &n).is_err());
@@ -1387,7 +1390,7 @@ mod test {
 
     #[test]
     fn test_roll_invalid_die_number() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
         assert!(g.command(0, "roll 6", &n).is_err());
         assert!(g.command(0, "roll 0", &n).is_err());
@@ -1395,14 +1398,14 @@ mod test {
 
     #[test]
     fn test_roll_wrong_player() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
         assert!(g.command(1, "roll 1", &n).is_err());
     }
 
     #[test]
     fn test_command_after_finished() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
         g.blue_tiles = vec![];
         g.red_tiles = vec![];
@@ -1414,14 +1417,14 @@ mod test {
 
     #[test]
     fn test_command_unknown() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
         assert!(g.command(0, "frobnicate", &n).is_err());
     }
 
     #[test]
     fn test_steal_from_self() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.player_blue_tiles[MICK] = vec![Tile {
             kind: TileType::Blue,
@@ -1441,7 +1444,7 @@ mod test {
 
     #[test]
     fn test_steal_from_empty_player() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         // Steve has no tiles
         g.kept_dice = vec![
@@ -1457,7 +1460,7 @@ mod test {
 
     #[test]
     fn test_take_advances_turn() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.rolled_dice = vec![
             DieFace::Sushi,
@@ -1474,7 +1477,7 @@ mod test {
 
     #[test]
     fn test_steal_advances_turn() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.player_blue_tiles[BJ] = vec![Tile {
             kind: TileType::Blue,
@@ -1496,7 +1499,7 @@ mod test {
 
     #[test]
     fn test_placings() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Mick: 5, Steve: 3, BJ: 7 -> placings [2, 3, 1]
         g.player_blue_tiles[MICK] = vec![Tile {
             kind: TileType::Blue,
@@ -1541,7 +1544,7 @@ mod test {
 
     #[test]
     fn test_placings_tie_standard_competition() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Mick and Steve tied at 5; BJ at 3
         g.player_blue_tiles[MICK] = vec![Tile {
             kind: TileType::Blue,
@@ -1575,7 +1578,7 @@ mod test {
 
     #[test]
     fn test_points_always_current() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_blue_tiles[0] = vec![Tile {
             kind: TileType::Blue,
             value: 6,
@@ -1593,7 +1596,7 @@ mod test {
 
     #[test]
     fn test_finished_placings() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.blue_tiles = vec![];
         g.red_tiles = vec![];
         g.player_blue_tiles[0] = vec![Tile {
@@ -1616,7 +1619,7 @@ mod test {
 
     #[test]
     fn test_pub_state_no_hidden_info() {
-        let (g, _) = Game::start(3).unwrap();
+        let (g, _) = Game::start(3, 1).unwrap();
         let ps = g.pub_state();
         assert_eq!(g.blue_tiles, ps.blue_tiles);
         assert_eq!(g.red_tiles, ps.red_tiles);
@@ -1630,7 +1633,7 @@ mod test {
 
     #[test]
     fn test_finished_pub_state_has_scores() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.blue_tiles = vec![];
         g.red_tiles = vec![];
         g.player_blue_tiles[0] = vec![Tile {
@@ -1648,7 +1651,7 @@ mod test {
 
     #[test]
     fn test_take_worst_red_picks_minimum() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.red_tiles = vec![
             Tile {
                 kind: TileType::Red,
@@ -1678,7 +1681,7 @@ mod test {
 
     #[test]
     fn test_take_worst_blue_when_no_red() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.red_tiles = vec![];
         g.blue_tiles = vec![
             Tile {

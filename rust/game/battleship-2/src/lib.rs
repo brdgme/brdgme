@@ -384,7 +384,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, _seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if players != NUM_PLAYERS {
             return Err(GameError::PlayerCount {
                 min: NUM_PLAYERS,
@@ -530,7 +530,7 @@ mod test {
     }
 
     fn mock_game() -> Game {
-        Game::start(2).unwrap().0
+        Game::start(2, 1).unwrap().0
     }
 
     fn place_all(g: &mut Game, player: usize) {
@@ -568,9 +568,9 @@ mod test {
     #[test]
     fn test_player_counts() {
         assert_eq!(vec![2], Game::player_counts());
-        assert!(Game::start(1).is_err());
-        assert!(Game::start(3).is_err());
-        assert!(Game::start(2).is_ok());
+        assert!(Game::start(1, 1).is_err());
+        assert!(Game::start(3, 1).is_err());
+        assert!(Game::start(2, 1).is_ok());
     }
 
     #[test]

@@ -43,6 +43,7 @@ where
     match requester
         .request(&Request::New {
             players: unadvertised_count,
+            seed: None,
         })
         .unwrap()
     {
@@ -55,7 +56,13 @@ where
 
     for &count in &player_counts {
         let (game_state, status) =
-            match requester.request(&Request::New { players: count }).unwrap() {
+            match requester
+                .request(&Request::New {
+                    players: count,
+                    seed: None,
+                })
+                .unwrap()
+            {
                 Response::New {
                     game,
                     public_render,

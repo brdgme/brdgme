@@ -9,6 +9,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
@@ -182,6 +183,10 @@ pub struct Game {
     pub played: Vec<Vec<Card>>,
     pub player_points: Vec<i32>,
     pub controller: usize,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
@@ -293,7 +298,7 @@ impl Game {
     pub fn start_hand(&mut self) -> Vec<Log> {
         let mut logs = vec![];
         if self.players == 2 && !self.hands[DUMMY].is_empty() {
-            let i = rand::rng().random_range(0..self.hands[DUMMY].len());
+            let i = self.rng.random_range(0..self.hands[DUMMY].len());
             let drawn = self.hands[DUMMY][i];
             logs.push(Log::private(
                 vec![
@@ -711,7 +716,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -729,8 +734,9 @@ impl Gamer for Game {
             played: vec![],
             player_points: vec![],
             controller: 0,
+            rng: GameRng::seed_from_u64(seed),
         };
-        g.deck.shuffle(&mut rand::rng());
+        g.deck.shuffle(&mut g.rng);
         g.playing = vec![None; g.all_players];
         g.played = vec![vec![]; g.all_players];
         g.player_points = vec![0; g.all_players];
@@ -882,13 +888,13 @@ mod test {
 
     #[test]
     fn test_game_start() {
-        let g = Game::start(2);
+        let g = Game::start(2, 1);
         assert!(g.is_ok());
     }
 
     #[test]
     fn test_game_score_maki() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let (score, _) = g.score();
         assert_eq!(vec![0, 0, 0], score);
 
@@ -911,7 +917,7 @@ mod test {
 
     #[test]
     fn test_game_score_pudding() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
 
         g.played[MICK] = vec![Card::Pudding];
         let (score, _) = g.score();
@@ -933,7 +939,7 @@ mod test {
 
     #[test]
     fn test_game_score_nigiri() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
 
         g.played[MICK] = vec![Card::EggNigiri];
         let (score, _) = g.score();
@@ -966,7 +972,7 @@ mod test {
 
     #[test]
     fn test_game_score_tempura() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
 
         g.played[MICK] = vec![Card::Tempura];
         let (score, _) = g.score();
@@ -987,7 +993,7 @@ mod test {
 
     #[test]
     fn test_game_score_sashimi() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
 
         g.played[MICK] = vec![Card::Sashimi];
         let (score, _) = g.score();
@@ -1008,7 +1014,7 @@ mod test {
 
     #[test]
     fn test_game_score_dumpling() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
 
         g.played[MICK] = vec![Card::Dumpling];
         let (score, _) = g.score();
@@ -1076,7 +1082,8 @@ mod test {
     fn test_shuffle() {
         let d = vec![Card::SquidNigiri, Card::Sashimi, Card::MakiRoll1];
         let mut shuffled = d.clone();
-        shuffled.shuffle(&mut rand::rng());
+        let mut rng = GameRng::seed_from_u64(1);
+        shuffled.shuffle(&mut rng);
         assert_eq!(d.len(), shuffled.len());
         for &c in &d {
             assert!(shuffled.contains(&c));
@@ -1087,7 +1094,7 @@ mod test {
 
     #[test]
     fn test_play_command_call() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         assert_eq!(vec![MICK, STEVE, BJ], g.whose_turn());
 
@@ -1115,7 +1122,7 @@ mod test {
 
     #[test]
     fn test_play_command_call_chopsticks() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
 
         g.hands[MICK] = vec![
@@ -1152,7 +1159,7 @@ mod test {
 
     #[test]
     fn test_play_command_call_dummy_play_two() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
 
         g.played[MICK] = vec![Card::Chopsticks];
@@ -1167,7 +1174,7 @@ mod test {
 
     #[test]
     fn test_dummy_command_call() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
         assert_eq!(vec![MICK, STEVE], g.whose_turn());
 
@@ -1193,15 +1200,15 @@ mod test {
     #[test]
     fn test_player_counts() {
         assert_eq!(vec![2, 3, 4, 5], Game::player_counts());
-        assert!(Game::start(1).is_err());
-        assert!(Game::start(6).is_err());
-        assert!(Game::start(2).is_ok());
-        assert!(Game::start(5).is_ok());
+        assert!(Game::start(1, 1).is_err());
+        assert!(Game::start(6, 1).is_err());
+        assert!(Game::start(2, 1).is_ok());
+        assert!(Game::start(5, 1).is_ok());
     }
 
     #[test]
     fn test_start_state() {
-        let (g, logs) = Game::start(3).unwrap();
+        let (g, logs) = Game::start(3, 1).unwrap();
         assert!(!logs.is_empty());
         assert_eq!(3, g.players);
         assert_eq!(3, g.all_players);
@@ -1218,7 +1225,7 @@ mod test {
 
     #[test]
     fn test_start_state_2p() {
-        let (g, logs) = Game::start(2).unwrap();
+        let (g, logs) = Game::start(2, 1).unwrap();
         assert!(!logs.is_empty());
         assert_eq!(2, g.players);
         assert_eq!(3, g.all_players);
@@ -1260,7 +1267,7 @@ mod test {
 
     #[test]
     fn test_can_play_can_dummy() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         // Both real players can play initially
         assert!(g.can_play(MICK));
         assert!(g.can_play(STEVE));
@@ -1278,7 +1285,7 @@ mod test {
 
     #[test]
     fn test_play_errors() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         // Out of range card number
         assert!(g.command(MICK, "play 99", &n).is_err());
@@ -1291,7 +1298,7 @@ mod test {
 
     #[test]
     fn test_play_same_card_twice() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.played[MICK] = vec![Card::Chopsticks];
         // Playing the same card index twice
@@ -1300,7 +1307,7 @@ mod test {
 
     #[test]
     fn test_command_after_finished() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.round = 3;
         g.hands = vec![vec![], vec![], vec![]];
@@ -1312,14 +1319,14 @@ mod test {
 
     #[test]
     fn test_command_unknown() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         assert!(g.command(0, "frobnicate", &n).is_err());
     }
 
     #[test]
     fn test_dummy_wrong_player() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let n = names();
         // Steve is not the controller
         assert!(g.command(STEVE, "dummy 1", &n).is_err());
@@ -1327,14 +1334,14 @@ mod test {
 
     #[test]
     fn test_dummy_in_non_2p() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         assert!(g.command(MICK, "dummy 1", &n).is_err());
     }
 
     #[test]
     fn test_chopsticks_returned_to_hand() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         g.hands[MICK] = vec![Card::Dumpling, Card::MakiRoll3];
         g.hands[STEVE] = vec![Card::Dumpling, Card::SalmonNigiri];
@@ -1351,7 +1358,7 @@ mod test {
 
     #[test]
     fn test_hand_passing_left() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let n = names();
         // Round 1 passes left (rotate_left)
         g.hands[MICK] = vec![Card::Tempura];
@@ -1371,7 +1378,7 @@ mod test {
 
     #[test]
     fn test_passing_direction() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Round 1: pass left. Simulate each player having played 1 card (mark as Played).
         g.hands = vec![
             vec![Card::Played, Card::Sashimi],
@@ -1393,7 +1400,7 @@ mod test {
 
     #[test]
     fn test_placings() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_points = vec![10, 5, 8];
         g.round = 3;
         g.hands = vec![vec![], vec![], vec![]];
@@ -1403,7 +1410,7 @@ mod test {
 
     #[test]
     fn test_placings_tie_standard_competition() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_points = vec![10, 10, 5];
         g.round = 3;
         g.hands = vec![vec![], vec![], vec![]];
@@ -1413,7 +1420,7 @@ mod test {
 
     #[test]
     fn test_placings_pudding_tiebreaker() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         // Mick and Steve tied on points, Mick has more puddings
         g.player_points = vec![10, 10, 0];
         g.played[MICK] = vec![Card::Pudding, Card::Pudding];
@@ -1426,7 +1433,7 @@ mod test {
 
     #[test]
     fn test_points_current() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_points = vec![5, 3, 0];
         let pts = g.points();
         assert_eq!(3, pts.len());
@@ -1437,7 +1444,7 @@ mod test {
 
     #[test]
     fn test_pub_state_redacts_hands() {
-        let (g, _) = Game::start(3).unwrap();
+        let (g, _) = Game::start(3, 1).unwrap();
         let ps = g.pub_state();
         assert_eq!(g.played, ps.played);
         assert_eq!(g.player_points, ps.player_points);
@@ -1448,7 +1455,7 @@ mod test {
 
     #[test]
     fn test_player_state_has_own_hand() {
-        let (g, _) = Game::start(3).unwrap();
+        let (g, _) = Game::start(3, 1).unwrap();
         let pls = g.player_state(0);
         assert_eq!(g.hands[0], pls.hand);
         assert_eq!(g.playing[0], pls.playing);
@@ -1456,7 +1463,7 @@ mod test {
 
     #[test]
     fn test_player_state_2p_dummy_playing() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.playing[DUMMY] = Some(vec![Card::Tempura]);
         let pls = g.player_state(g.controller);
         assert_eq!(Some(vec![Card::Tempura]), pls.dummy_playing);
@@ -1466,7 +1473,7 @@ mod test {
 
     #[test]
     fn test_finished_pub_state_has_scores() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.player_points = vec![10, 5, 8];
         g.round = 3;
         g.hands = vec![vec![], vec![], vec![]];
@@ -1479,7 +1486,7 @@ mod test {
     #[test]
     fn test_full_game_3p_completes() {
         let n = names();
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         for _ in 0..1000 {
             if g.is_finished() {
                 break;
@@ -1503,7 +1510,7 @@ mod test {
     #[test]
     fn test_full_game_2p_completes() {
         let n = vec!["Mick".to_string(), "Steve".to_string()];
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         for _ in 0..5000 {
             if g.is_finished() {
                 break;

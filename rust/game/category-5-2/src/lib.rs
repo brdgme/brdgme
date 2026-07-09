@@ -10,6 +10,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
@@ -64,8 +65,8 @@ pub fn deck() -> Vec<Card> {
     (1..=DECK_SIZE).map(Card).collect()
 }
 
-pub fn shuffle(mut cards: Vec<Card>) -> Vec<Card> {
-    cards.shuffle(&mut rand::rng());
+pub fn shuffle(mut cards: Vec<Card>, rng: &mut GameRng) -> Vec<Card> {
+    cards.shuffle(rng);
     cards
 }
 
@@ -89,6 +90,10 @@ pub struct Game {
     pub board: [Vec<Card>; ROWS],
     pub resolving: bool,
     pub choose_player: usize,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -259,7 +264,7 @@ impl Game {
         } else {
             let mut cards: Vec<Card> = self.deck.drain(..).collect();
             let remaining = n - cards.len();
-            self.deck = shuffle(std::mem::take(&mut self.discard));
+            self.deck = shuffle(std::mem::take(&mut self.discard), &mut self.rng);
             cards.extend(self.draw_cards(remaining));
             cards
         }
@@ -332,7 +337,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -340,13 +345,15 @@ impl Gamer for Game {
                 given: players,
             });
         }
+        let mut rng = GameRng::seed_from_u64(seed);
         let mut g = Game {
             players,
-            deck: shuffle(deck()),
+            deck: shuffle(deck(), &mut rng),
             player_points: vec![0; players],
             hands: vec![vec![]; players],
             player_cards: vec![vec![]; players],
             plays: vec![None; players],
+            rng,
             ..Game::default()
         };
         let logs = g.start_round();
@@ -476,7 +483,7 @@ mod test {
 
     #[test]
     fn test_game_draw_cards() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.discard = g.draw_cards(75);
         assert_eq!(75, g.discard.len());
         assert_eq!(5, g.deck.len());
@@ -488,7 +495,7 @@ mod test {
 
     #[test]
     fn test_auto_play_last_card() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.board = [vec![Card(1)], vec![Card(2)], vec![Card(3)], vec![Card(4)]];
         g.hands[MICK] = vec![Card(5), Card(6)];
         g.hands[STEVE] = vec![Card(7), Card(8)];
@@ -508,15 +515,15 @@ mod test {
     #[test]
     fn test_player_counts() {
         assert_eq!(vec![2, 3, 4, 5, 6, 7, 8, 9, 10], Game::player_counts());
-        assert!(Game::start(1).is_err());
-        assert!(Game::start(11).is_err());
-        assert!(Game::start(2).is_ok());
-        assert!(Game::start(10).is_ok());
+        assert!(Game::start(1, 1).is_err());
+        assert!(Game::start(11, 1).is_err());
+        assert!(Game::start(2, 1).is_ok());
+        assert!(Game::start(10, 1).is_ok());
     }
 
     #[test]
     fn test_start_initial_state() {
-        let (g, logs) = Game::start(3).unwrap();
+        let (g, logs) = Game::start(3, 1).unwrap();
         assert_eq!(3, g.players);
         for p in 0..3 {
             assert_eq!(HAND_SIZE, g.hands[p].len());
@@ -563,7 +570,7 @@ mod test {
 
     #[test]
     fn test_can_play_and_can_choose() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         assert!(g.can_play(0));
         assert!(g.can_play(1));
         assert!(!g.can_choose(0));
@@ -577,7 +584,7 @@ mod test {
 
     #[test]
     fn test_play_command_resolves_when_all_played() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.board = [vec![Card(1)], vec![Card(2)], vec![Card(3)], vec![Card(4)]];
         // 3 cards each so the resolve doesn't cascade into auto-play/end_round.
         g.hands[MICK] = vec![Card(5), Card(6), Card(100)];
@@ -599,7 +606,7 @@ mod test {
 
     #[test]
     fn test_play_wrong_player_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.hands[MICK] = vec![Card(5), Card(6)];
         g.hands[STEVE] = vec![Card(7), Card(8)];
         let p = players(2);
@@ -610,7 +617,7 @@ mod test {
 
     #[test]
     fn test_play_card_not_in_hand_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.hands[MICK] = vec![Card(5), Card(6)];
         let p = players(2);
         // Card 99 is not in Mick's hand but parses fine; play() rejects it.
@@ -619,7 +626,7 @@ mod test {
 
     #[test]
     fn test_choose_command_when_card_below_all_rows() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.board = [
             vec![Card(20)],
             vec![Card(30)],
@@ -651,7 +658,7 @@ mod test {
 
     #[test]
     fn test_choose_row_validation() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.board = [
             vec![Card(20)],
             vec![Card(30)],
@@ -669,7 +676,7 @@ mod test {
 
     #[test]
     fn test_row_full_takes_row() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.board = [
             vec![Card(1), Card(2), Card(3), Card(4), Card(5)],
             vec![Card(10)],
@@ -691,7 +698,7 @@ mod test {
 
     #[test]
     fn test_end_round_adds_points_and_starts_new_round() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.board = [vec![Card(1)], vec![Card(2)], vec![Card(3)], vec![Card(4)]];
         g.hands[MICK] = vec![Card(5)];
         g.hands[STEVE] = vec![Card(7)];
@@ -711,7 +718,7 @@ mod test {
 
     #[test]
     fn test_finished_at_threshold() {
-        let mut g = Game::start(2).unwrap().0;
+        let mut g = Game::start(2, 1).unwrap().0;
         g.player_points = vec![END_SCORE, 10];
         // Hands empty and highest >= END_SCORE -> finished.
         g.hands = vec![vec![], vec![]];
@@ -728,7 +735,7 @@ mod test {
     fn test_placings_standard_competition_ties() {
         // category_5 is lowest-score-wins (fewest bullheads), so lower
         // player_points ranks higher (1st).
-        let mut g = Game::start(3).unwrap().0;
+        let mut g = Game::start(3, 1).unwrap().0;
         g.player_points = vec![10, 10, 5];
         assert_eq!(vec![2, 2, 1], g.placings());
         g.player_points = vec![10, 5, 10];
@@ -743,14 +750,14 @@ mod test {
 
     #[test]
     fn test_command_unknown_input_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         let p = players(2);
         assert!(g.command(0, "fly", &p).is_err());
     }
 
     #[test]
     fn test_command_after_finished_errors() {
-        let (mut g, _) = Game::start(2).unwrap();
+        let (mut g, _) = Game::start(2, 1).unwrap();
         g.hands = vec![vec![], vec![]];
         g.player_points = vec![END_SCORE, 10];
         let p = players(2);
@@ -760,7 +767,7 @@ mod test {
 
     #[test]
     fn test_pub_state_captures_rendered_fields() {
-        let g = Game::start(3).unwrap().0;
+        let g = Game::start(3, 1).unwrap().0;
         let ps = g.pub_state();
         assert_eq!(g.players, ps.players);
         assert_eq!(g.board, ps.board);
@@ -775,7 +782,7 @@ mod test {
 
     #[test]
     fn test_player_state_includes_hand() {
-        let g = Game::start(2).unwrap().0;
+        let g = Game::start(2, 1).unwrap().0;
         let ps = g.player_state(0);
         assert_eq!(g.hands[0], ps.hand);
         assert_eq!(0, ps.player);

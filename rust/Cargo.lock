@@ -593,6 +593,7 @@ dependencies = [
  "brdgme_game",
  "brdgme_markup",
  "env_logger",
+ "rand 0.10.2",
  "serde",
  "serde_json",
  "term_size",
@@ -634,6 +635,7 @@ dependencies = [
  "combine",
  "log",
  "rand 0.10.2",
+ "rand_chacha 0.10.0",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -4435,6 +4437,17 @@ checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e6af7f3e25ded52c41df4e0b1af2d047e45896c2f3281792ed68a1c243daedb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.10.1",
+ "serde",
 ]
 
 [[package]]

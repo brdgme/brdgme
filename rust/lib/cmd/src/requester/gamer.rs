@@ -22,7 +22,7 @@ pub fn new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> GameReq
 impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for GameRequester<G> {
     fn request(&mut self, req: &Request) -> Result<Response, RequestError> {
         match *req {
-            Request::New { players } => Ok(handle_new::<G>(players)),
+            Request::New { players, seed } => Ok(handle_new::<G>(players, seed)),
             Request::PlayerCounts => Ok(handle_player_counts::<G>()),
             Request::Status { ref game } => {
                 let game = serde_json::from_str(game)?;
@@ -77,8 +77,12 @@ pub fn renders<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
     (pub_render, player_renders)
 }
 
-fn handle_new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(players: usize) -> Response {
-    match G::start(players) {
+fn handle_new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
+    players: usize,
+    seed: Option<u64>,
+) -> Response {
+    let seed = seed.unwrap_or_else(rand::random);
+    match G::start(players, seed) {
         Ok((game, logs)) => GameResponse::from_gamer(&game)
             .map(|gs| {
                 let (public_render, player_renders) = renders(&game);
@@ -87,6 +91,7 @@ fn handle_new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(players: 
                     logs: CliLog::from_logs(&logs),
                     public_render,
                     player_renders,
+                    seed,
                 }
             })
             .unwrap_or_else(|e| Response::SystemError {

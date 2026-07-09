@@ -7,6 +7,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
@@ -39,6 +40,10 @@ pub struct Game {
     pub bidding_player: usize,
     pub bids: Vec<i32>,
     pub finished_bidding: Vec<bool>,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -335,7 +340,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -354,9 +359,10 @@ impl Gamer for Game {
             finished_bidding: vec![false; players],
             bidding_player: 0,
             open_cards: vec![],
+            rng: GameRng::seed_from_u64(seed),
         };
-        g.building_deck.shuffle(&mut rand::rng());
-        g.cheque_deck.shuffle(&mut rand::rng());
+        g.building_deck.shuffle(&mut g.rng);
+        g.cheque_deck.shuffle(&mut g.rng);
         let mut logs = vec![];
         if players == 3 {
             logs.push(Log::public(vec![N::text(
@@ -512,7 +518,7 @@ mod test {
 
     #[test]
     fn test_full_game() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Set the state of the game to sorted decks
         let (_, bd) = pop_n(&building_deck(), 2);
         g.building_deck = bd;
@@ -572,15 +578,15 @@ mod test {
     #[test]
     fn test_player_counts() {
         assert_eq!(vec![3, 4, 5], Game::player_counts());
-        assert!(Game::start(2).is_err());
-        assert!(Game::start(6).is_err());
-        assert!(Game::start(3).is_ok());
-        assert!(Game::start(5).is_ok());
+        assert!(Game::start(2, 1).is_err());
+        assert!(Game::start(6, 1).is_err());
+        assert!(Game::start(3, 1).is_ok());
+        assert!(Game::start(5, 1).is_ok());
     }
 
     #[test]
     fn test_start_state() {
-        let (g, logs) = Game::start(3).unwrap();
+        let (g, logs) = Game::start(3, 1).unwrap();
         assert!(!logs.is_empty());
         assert_eq!(3, g.players);
         assert_eq!(STARTING_CHIPS, g.chips[0]);
@@ -613,7 +619,7 @@ mod test {
 
     #[test]
     fn test_can_bid_pass_play() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Buying phase: only the bidding player can bid/pass
         assert!(g.can_bid(0));
         assert!(g.can_pass(0));
@@ -627,7 +633,7 @@ mod test {
 
     #[test]
     fn test_bid_errors() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         // Not your turn
         assert!(g.command(1, "bid 1", &p).is_err());
@@ -644,7 +650,7 @@ mod test {
 
     #[test]
     fn test_pass_takes_lowest_pays_half() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         // Fix a known open set: [1, 2, 3] sorted
         g.open_cards = vec![1, 2, 3];
@@ -662,7 +668,7 @@ mod test {
 
     #[test]
     fn test_last_bidder_pays_full_takes_highest() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         g.open_cards = vec![1, 2, 3];
         // BJ has a standing bid of 6; the other two pass, leaving BJ as the last
@@ -681,7 +687,7 @@ mod test {
 
     #[test]
     fn test_play_resolves_cheques() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         // Force a selling round: cheques [4, 5, 6] already drawn, each player has
         // one building. (open_cards set directly so the hands-len-1 autoplay in
@@ -705,7 +711,7 @@ mod test {
 
     #[test]
     fn test_play_wrong_card_and_wrong_player() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         g.building_deck = vec![];
         g.cheque_deck = vec![0, 0, 3];
@@ -724,7 +730,7 @@ mod test {
 
     #[test]
     fn test_command_after_finished() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         // Force a finished state
         g.building_deck = vec![];
@@ -739,7 +745,7 @@ mod test {
 
     #[test]
     fn test_placings() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Mick: 22, Steve: 17, BJ: 19 -> placings [1, 3, 2]
         g.cheques[0] = vec![5, 3];
         g.chips[0] = 14;
@@ -755,7 +761,7 @@ mod test {
 
     #[test]
     fn test_placings_tie_standard_competition() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         // Two players (Mick, Steve) tied at the top with 20; BJ lower with 5.
         g.cheques[MICK] = vec![10];
         g.chips[MICK] = 10;
@@ -772,7 +778,7 @@ mod test {
 
     #[test]
     fn test_points_zero_until_finished() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.cheques[0] = vec![5];
         g.chips[0] = 14;
         assert_eq!(vec![0.0, 0.0, 0.0], g.points());
@@ -785,7 +791,7 @@ mod test {
 
     #[test]
     fn test_pub_state_redacts_hands_and_cheques() {
-        let (g, _) = Game::start(3).unwrap();
+        let (g, _) = Game::start(3, 1).unwrap();
         let ps = g.pub_state();
         // PubState must not contain per-player hands/cheques (hidden info)
         assert!(ps.final_scores.is_empty());
@@ -801,7 +807,7 @@ mod test {
 
     #[test]
     fn test_finished_pub_state_has_scores() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         g.cheques[0] = vec![5, 3];
         g.chips[0] = 14;
         g.cheques[1] = vec![6, 0];

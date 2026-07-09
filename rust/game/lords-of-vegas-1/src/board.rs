@@ -6,6 +6,7 @@ use serde::de::{Error as DeError, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use brdgme_game::Log;
+use brdgme_game::rng::GameRng;
 use brdgme_markup::Node as N;
 
 use crate::casino::Casino;
@@ -286,7 +287,7 @@ impl Board {
         casinos
     }
 
-    pub fn reroll_at(&mut self, loc: &Loc) -> Option<usize> {
+    pub fn reroll_at(&mut self, loc: &Loc, rng: &mut GameRng) -> Option<usize> {
         let t = self.get(loc);
         match t {
             BoardTile::Built {
@@ -295,7 +296,7 @@ impl Board {
                 height,
                 ..
             } => {
-                let die = roll();
+                let die = roll(rng);
                 self.set(
                     *loc,
                     BoardTile::Built {
@@ -310,7 +311,7 @@ impl Board {
         }
     }
 
-    pub fn resolve_boss_ties(&mut self) -> Option<Vec<Log>> {
+    pub fn resolve_boss_ties(&mut self, rng: &mut GameRng) -> Option<Vec<Log>> {
         let mut boss_tie = false;
         let mut logs: Vec<Log> = vec![];
 
@@ -327,13 +328,13 @@ impl Board {
             }
             boss_tie = true;
             for bt in &boss_tiles {
-                self.reroll_at(&bt.loc);
+                self.reroll_at(&bt.loc, rng);
             }
         }
 
         if boss_tie {
             // Do another pass, we may have created a new boss tie.
-            if let Some(new_logs) = self.resolve_boss_ties() {
+            if let Some(new_logs) = self.resolve_boss_ties(rng) {
                 logs.extend(new_logs);
             }
             Some(logs)

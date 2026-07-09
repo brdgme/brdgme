@@ -53,6 +53,7 @@ pub async fn create(
         &game_version.uri,
         &cli::Request::New {
             players: player_count,
+            seed: None,
         },
     )
     .await?;
@@ -62,6 +63,7 @@ pub async fn create(
             logs,
             public_render,
             player_renders,
+            ..
         } => (game, logs, public_render, player_renders),
         _ => return Err(anyhow!("expected cli::Response::New").into()),
     };
@@ -651,6 +653,7 @@ pub async fn restart(
         &game_extended.game_version.uri,
         &cli::Request::New {
             players: player_count,
+            seed: None,
         },
     )
     .await?;
@@ -660,6 +663,7 @@ pub async fn restart(
             logs,
             public_render,
             player_renders,
+            ..
         } => (game, logs, public_render, player_renders),
         _ => return Err(anyhow!("expected cli::Response::New").into()),
     };

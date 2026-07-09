@@ -7,6 +7,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
+use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
@@ -28,6 +29,10 @@ pub struct Game {
     pub bid_quantity: i32,
     pub bid_value: i32,
     pub bid_player: usize,
+    // Migration shim: pre-seed games get a fresh RNG on first load.
+    // Remove once no pre-RNG games remain active.
+    #[serde(default = "GameRng::from_entropy")]
+    pub rng: GameRng,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -86,7 +91,8 @@ impl Game {
     fn roll_dice(&mut self) {
         for p in 0..self.players {
             for d in 0..self.player_dice[p].len() {
-                self.player_dice[p][d] = rand::rng().random_range(1u8..=6);
+                let v = self.rng.random_range(1u8..=6);
+                self.player_dice[p][d] = v;
             }
         }
     }
@@ -213,7 +219,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    fn start(players: usize) -> Result<(Self, Vec<Log>), GameError> {
+    fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
                 min: MIN_PLAYERS,
@@ -221,10 +227,13 @@ impl Gamer for Game {
                 given: players,
             });
         }
+        let mut rng = GameRng::seed_from_u64(seed);
+        let current_player = rng.random_range(0..players);
         let mut g = Game {
             players,
-            current_player: rand::rng().random_range(0..players),
+            current_player,
             player_dice: vec![vec![0u8; START_DICE_COUNT]; players],
+            rng,
             ..Game::default()
         };
         g.start_round();
@@ -332,7 +341,7 @@ mod test {
 
     #[test]
     fn start_works() {
-        let (g, _) = Game::start(3).unwrap();
+        let (g, _) = Game::start(3, 1).unwrap();
         let wt = g.whose_turn();
         assert_eq!(1, wt.len());
         assert!(wt[0] < 3);
@@ -347,7 +356,7 @@ mod test {
 
     #[test]
     fn example_round() {
-        let (mut g, _) = Game::start(3).unwrap();
+        let (mut g, _) = Game::start(3, 1).unwrap();
         let p = players(3);
         g.player_dice = vec![vec![1, 3, 4, 4, 6], vec![2, 2, 3, 3, 3], vec![1]];
         g.current_player = 0;
@@ -370,7 +379,7 @@ mod test {
 
     #[test]
     fn player_elimination() {
-        let (mut g, _) = Game::start(4).unwrap();
+        let (mut g, _) = Game::start(4, 1).unwrap();
         g.player_dice[0] = vec![];
         g.player_dice[2] = vec![];
         let eliminated = g.eliminated_player_list();

@@ -68,10 +68,14 @@ where
                 game,
                 command,
                 error,
+                seed,
+                commands,
             } => {
                 println!(
-                    "\nError detected: {}\n\nCommand: {}\n\nGame: {:?}",
+                    "\nError detected: {}\n\nSeed: {:?}\nCommands: {:#?}\n\nCommand: {}\n\nGame: {:?}",
                     error,
+                    seed,
+                    commands,
                     command.unwrap_or_else(|| "none".to_string()),
                     game
                 );
@@ -115,6 +119,8 @@ struct Fuzzer {
     names: Vec<String>,
     game: Option<FuzzGame>,
     rng: ThreadRng,
+    seed: Option<u64>,
+    command_log: Vec<String>,
 }
 
 impl Fuzzer {
@@ -134,6 +140,8 @@ impl Fuzzer {
             names: vec![],
             game: None,
             rng: rand::rng(),
+            seed: None,
+            command_log: vec![],
         })
     }
 
@@ -143,12 +151,18 @@ impl Fuzzer {
             .choose(&mut self.rng)
             .ok_or_else(|| anyhow!("could not get player counts from {:?}", self.player_counts))?;
         self.names = names(players);
-        match self.client.request(&api::Request::New { players })? {
+        let seed: u64 = self.rng.random();
+        match self.client.request(&api::Request::New {
+            players,
+            seed: Some(seed),
+        })? {
             api::Response::New {
                 game,
                 player_renders,
                 ..
             } => {
+                self.seed = Some(seed);
+                self.command_log.clear();
                 self.game = Some(FuzzGame {
                     game,
                     player_renders,
@@ -196,14 +210,16 @@ impl Fuzzer {
             }) => return Err(anyhow!("the game is already finished")),
             None => return Err(anyhow!("there isn't a game")),
         };
-        exec_rand_command(
+        let (command, response) = exec_rand_command(
             &mut (*self.client),
             state.to_string(),
             player,
             self.names.clone(),
             &command_spec,
             &mut self.rng,
-        )
+        )?;
+        self.command_log.push(command);
+        Ok(response)
     }
 }
 
@@ -220,6 +236,8 @@ enum FuzzStep {
         game: Option<FuzzGame>,
         command: Option<String>,
         error: String,
+        seed: Option<u64>,
+        commands: Vec<String>,
     },
 }
 
@@ -249,6 +267,8 @@ impl Iterator for Fuzzer {
                     game: self.game.clone(),
                     command: None,
                     error: e.to_string(),
+                    seed: self.seed,
+                    commands: self.command_log.clone(),
                 }),
             },
             None => match self.new_game() {
@@ -257,6 +277,8 @@ impl Iterator for Fuzzer {
                     game: None,
                     command: None,
                     error: e.to_string(),
+                    seed: self.seed,
+                    commands: self.command_log.clone(),
                 }),
             },
         }
@@ -285,14 +307,10 @@ fn exec_rand_command(
     names: Vec<String>,
     command_spec: &command::Spec,
     rng: &mut ThreadRng,
-) -> Result<CommandResponse> {
-    exec_command(
-        client,
-        rand_command(command_spec, &names, rng),
-        game,
-        player,
-        names,
-    )
+) -> Result<(String, CommandResponse)> {
+    let command = rand_command(command_spec, &names, rng);
+    let response = exec_command(client, command.clone(), game, player, names)?;
+    Ok((command, response))
 }
 
 fn exec_command(
