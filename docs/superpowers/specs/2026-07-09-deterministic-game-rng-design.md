@@ -143,10 +143,22 @@ traits.
 - The trait change forces every game crate and caller to update in one
   commit (mechanical: signature + field + `rand::rng()` replacement).
 - Serialized-state compatibility: adding the `rng` field changes each game's
-  state schema. In-flight games without the field need a serde default
-  (e.g. `#[serde(default = ...)]` seeding from OS entropy on first
-  deserialize) or are accepted as broken per existing state-migration
-  practice - decided per existing project policy at implementation time.
+  state schema. The migration shim is contained per game, only where needed:
+  - Deployed crates with potentially in-flight games add a one-line serde
+    default on their `rng` field (`#[serde(default = "GameRng::from_os_rng")]`
+    or the rand 0.10 equivalent), commented as a migration shim and removed
+    once no pre-change games remain active. Old states get a fresh
+    entropy-seeded RNG at first load; such games are deterministic only from
+    that point on.
+  - New games and crates without in-flight state use a plain `rng: GameRng`
+    field - the clean end state, and the only form `GAME_PORTING.md`
+    documents.
+  - Shared code (`brdgme_game`, `brdgme_cmd`) carries no migration logic.
+  - Which crates need the shim is determined at implementation time from
+    deployed state; when in doubt, a crate gets it (cost: one line).
+  - `Option<GameRng>` with lazy init was rejected: optionality would leak
+    into every roll site forever to serve a one-time migration the serde
+    boundary handles.
 - zombie-dice-2's flaky tests are rewritten against fixed seeds as the
   proving case.
 
