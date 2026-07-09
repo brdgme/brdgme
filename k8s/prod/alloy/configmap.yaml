@@ -336,6 +336,20 @@ data:
           password = env("GC_TOKEN")
         }
       }
+
+      // Bound the on-disk WAL (emptyDir at /var/lib/alloy/data). A Grafana
+      // Cloud metrics-quota outage on 2026-07-09 blocked remote_write for a
+      // while, and with no bound here the WAL accumulated ~282 segments -
+      // replaying all of it on container start blew past the 256Mi memory
+      // limit in ~3 seconds, OOM-crash-looping the pod. The memory limit
+      // stays at 256Mi (cluster capacity is tight), so instead the WAL is
+      // truncated aggressively: losing backlogged metrics during an export
+      // outage is acceptable for this tiny agent.
+      wal {
+        truncate_frequency  = "15m"
+        min_keepalive_time  = "5m"
+        max_keepalive_time  = "1h"
+      }
     }
 
     // ---- Job 3: OTLP traces -> Tempo ---------------------------------------
