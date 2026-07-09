@@ -1,0 +1,32 @@
+# ArgoCD sync-wave: these Deployments read/write the postgres schema
+# (all have a postgres-config secretRef), so they must roll out after the
+# migrate Sync-phase hook (sync-wave 1, k8s/base/migrate/job.yaml) has run -
+# otherwise new pods can hit the DB before migrations create the tables they
+# depend on. Wave 2 puts them strictly after the hook.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operator
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"

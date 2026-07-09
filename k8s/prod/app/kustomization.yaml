@@ -8,6 +8,7 @@ resources:
 patches:
 - path: postgres-patch.yaml
 - path: web-patch.yaml
+- path: sync-wave-patch.yaml
 images:
 - name: brdgme/migrate
   newName: ghcr.io/brdgme/brdgme/migrate
