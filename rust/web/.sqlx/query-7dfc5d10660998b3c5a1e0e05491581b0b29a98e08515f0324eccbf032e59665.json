@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE login_confirmations SET attempts = attempts + 1 WHERE email = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7dfc5d10660998b3c5a1e0e05491581b0b29a98e08515f0324eccbf032e59665"
+}

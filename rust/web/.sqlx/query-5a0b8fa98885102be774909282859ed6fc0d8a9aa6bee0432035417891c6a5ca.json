@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,\n            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,\n            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,\n            gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,\n            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,\n            gp.is_read as gp_is_read, gp.points as gp_points,\n            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,\n            u.id as \"u_id?\", u.created_at as \"u_created_at?\", u.updated_at as \"u_updated_at?\",\n            u.name as \"u_name?\", u.pref_colors as \"u_pref_colors?\",\n            u.login_confirmation as \"u_login_confirmation?\", u.login_confirmation_at as \"u_login_confirmation_at?\",\n            gtu.id as \"gtu_id?\", gtu.created_at as \"gtu_created_at?\", gtu.updated_at as \"gtu_updated_at?\",\n            gtu.game_type_id as \"gtu_game_type_id?\", gtu.user_id as \"gtu_user_id?\",\n            gtu.last_game_finished_at as \"gtu_last_game_finished_at?\", gtu.rating as \"gtu_rating?\",\n            gtu.peak_rating as \"gtu_peak_rating?\",\n            gb.id as \"gb_id?\", gb.game_id as \"gb_game_id?\", gb.name as \"gb_name?\",\n            gb.difficulty as \"gb_difficulty?\"\n        FROM game_players gp\n        LEFT JOIN users u ON gp.user_id = u.id\n        LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = $2\n        LEFT JOIN game_bots gb ON gp.game_bot_id = gb.id\n        WHERE gp.game_id = $1\n        ORDER BY gp.position\n        ",
+  "query": "\n        SELECT\n            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,\n            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,\n            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,\n            gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,\n            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,\n            gp.is_read as gp_is_read, gp.points as gp_points,\n            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,\n            u.id as \"u_id?\", u.created_at as \"u_created_at?\", u.updated_at as \"u_updated_at?\",\n            u.name as \"u_name?\", u.pref_colors as \"u_pref_colors?\",\n            gtu.id as \"gtu_id?\", gtu.created_at as \"gtu_created_at?\", gtu.updated_at as \"gtu_updated_at?\",\n            gtu.game_type_id as \"gtu_game_type_id?\", gtu.user_id as \"gtu_user_id?\",\n            gtu.last_game_finished_at as \"gtu_last_game_finished_at?\", gtu.rating as \"gtu_rating?\",\n            gtu.peak_rating as \"gtu_peak_rating?\",\n            gb.id as \"gb_id?\", gb.game_id as \"gb_game_id?\", gb.name as \"gb_name?\",\n            gb.difficulty as \"gb_difficulty?\"\n        FROM game_players gp\n        LEFT JOIN users u ON gp.user_id = u.id\n        LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = $2\n        LEFT JOIN game_bots gb ON gp.game_bot_id = gb.id\n        WHERE gp.game_id = $1\n        ORDER BY gp.position\n        ",
   "describe": {
     "columns": [
       {
@@ -115,71 +115,61 @@
       },
       {
         "ordinal": 22,
-        "name": "u_login_confirmation?",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 23,
-        "name": "u_login_confirmation_at?",
-        "type_info": "Timestamp"
-      },
-      {
-        "ordinal": 24,
         "name": "gtu_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 25,
+        "ordinal": 23,
         "name": "gtu_created_at?",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 26,
+        "ordinal": 24,
         "name": "gtu_updated_at?",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 27,
+        "ordinal": 25,
         "name": "gtu_game_type_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 28,
+        "ordinal": 26,
         "name": "gtu_user_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 29,
+        "ordinal": 27,
         "name": "gtu_last_game_finished_at?",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 30,
+        "ordinal": 28,
         "name": "gtu_rating?",
         "type_info": "Int4"
       },
       {
-        "ordinal": 31,
+        "ordinal": 29,
         "name": "gtu_peak_rating?",
         "type_info": "Int4"
       },
       {
-        "ordinal": 32,
+        "ordinal": 30,
         "name": "gb_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 33,
+        "ordinal": 31,
         "name": "gb_game_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 34,
+        "ordinal": 32,
         "name": "gb_name?",
         "type_info": "Text"
       },
       {
-        "ordinal": 35,
+        "ordinal": 33,
         "name": "gb_difficulty?",
         "type_info": "Text"
       }
@@ -213,8 +203,6 @@
       false,
       false,
       false,
-      true,
-      true,
       false,
       false,
       false,
@@ -229,5 +217,5 @@
       false
     ]
   },
-  "hash": "9fd923481519a7c6d5eaba23785ece56ed685b0d773bcaf1bb1186929a194160"
+  "hash": "5a0b8fa98885102be774909282859ed6fc0d8a9aa6bee0432035417891c6a5ca"
 }

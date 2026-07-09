@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM users WHERE id = $1 AND login_confirmation = $2 AND login_confirmation_at > NOW() - INTERVAL '1 hour'",
+  "query": "SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors\n               FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1",
   "describe": {
     "columns": [
       {
@@ -27,21 +27,10 @@
         "ordinal": 4,
         "name": "pref_colors",
         "type_info": "TextArray"
-      },
-      {
-        "ordinal": 5,
-        "name": "login_confirmation",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 6,
-        "name": "login_confirmation_at",
-        "type_info": "Timestamp"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text"
       ]
     },
@@ -50,10 +39,8 @@
       false,
       false,
       false,
-      false,
-      true,
-      true
+      false
     ]
   },
-  "hash": "658fa64701207c942a88b562a51f1370403a16eceb701c967ccc05e5d86f58a5"
+  "hash": "6b0f9667f0097c7f4d0b6e79d71b56d4626011f0e070cb2924aec10945f10f98"
 }

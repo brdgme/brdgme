@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.login_confirmation, u.login_confirmation_at\n               FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1",
+  "query": "\n        SELECT id, created_at, updated_at, name, pref_colors\n        FROM users\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -27,21 +27,11 @@
         "ordinal": 4,
         "name": "pref_colors",
         "type_info": "TextArray"
-      },
-      {
-        "ordinal": 5,
-        "name": "login_confirmation",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 6,
-        "name": "login_confirmation_at",
-        "type_info": "Timestamp"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -49,10 +39,8 @@
       false,
       false,
       false,
-      false,
-      true,
-      true
+      false
     ]
   },
-  "hash": "986c889e277feb4cea039579f3032e3985cfc5e1d1688ca626c556282ef19c0f"
+  "hash": "bc3e6f0b62f9cefb1d1038f4db74bcb9a66eb272b7ef37001db83c8fd3be0f6a"
 }

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO login_confirmations (email, code, sent_count, last_sent_at)\n           VALUES ($1, $2, 1, NOW())\n           ON CONFLICT (email) DO UPDATE SET\n               code = CASE WHEN login_confirmations.created_at <= NOW() - INTERVAL '1 hour'\n                           THEN EXCLUDED.code ELSE login_confirmations.code END,\n               created_at = CASE WHEN login_confirmations.created_at <= NOW() - INTERVAL '1 hour'\n                                 THEN NOW() ELSE login_confirmations.created_at END,\n               attempts = CASE WHEN login_confirmations.created_at <= NOW() - INTERVAL '1 hour'\n                               THEN 0 ELSE login_confirmations.attempts END,\n               sent_count = login_confirmations.sent_count + 1,\n               last_sent_at = NOW()\n           RETURNING code",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Bpchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bpchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "335345df674b718a685ee75263e4cce211fd60624e7c39c23301d3686d1357a2"
+}

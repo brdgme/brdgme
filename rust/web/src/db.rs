@@ -18,8 +18,6 @@ fn build_user_from_row(
     updated_at: Option<time::PrimitiveDateTime>,
     name: Option<String>,
     pref_colors: Option<Vec<String>>,
-    login_confirmation: Option<String>,
-    login_confirmation_at: Option<time::PrimitiveDateTime>,
 ) -> Result<Option<crate::models::user::User>> {
     let Some(id) = id else { return Ok(None) };
     Ok(Some(crate::models::user::User {
@@ -31,8 +29,6 @@ fn build_user_from_row(
         name: name.ok_or_else(|| anyhow::anyhow!("user {id}: name missing from LEFT JOIN row"))?,
         pref_colors: pref_colors
             .ok_or_else(|| anyhow::anyhow!("user {id}: pref_colors missing from LEFT JOIN row"))?,
-        login_confirmation,
-        login_confirmation_at,
     }))
 }
 
@@ -169,7 +165,7 @@ pub async fn get_user_by_email(pool: &PgPool, email: &str) -> Result<Option<User
     sqlx::query_as!(
         User,
         r#"
-        SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.login_confirmation, u.login_confirmation_at
+        SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors
         FROM users u
         JOIN user_emails ue ON u.id = ue.user_id
         WHERE ue.email = $1
@@ -186,7 +182,7 @@ pub async fn get_user(pool: &PgPool, id: Uuid) -> Result<Option<User>> {
     sqlx::query_as!(
         User,
         r#"
-        SELECT id, created_at, updated_at, name, pref_colors, login_confirmation, login_confirmation_at
+        SELECT id, created_at, updated_at, name, pref_colors
         FROM users
         WHERE id = $1
         "#,
@@ -374,7 +370,6 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
             u.id as "u_id?", u.created_at as "u_created_at?", u.updated_at as "u_updated_at?",
             u.name as "u_name?", u.pref_colors as "u_pref_colors?",
-            u.login_confirmation as "u_login_confirmation?", u.login_confirmation_at as "u_login_confirmation_at?",
             gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?", gtu.updated_at as "gtu_updated_at?",
             gtu.game_type_id as "gtu_game_type_id?", gtu.user_id as "gtu_user_id?",
             gtu.last_game_finished_at as "gtu_last_game_finished_at?", gtu.rating as "gtu_rating?",
@@ -415,8 +410,6 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             p.u_updated_at,
             p.u_name,
             p.u_pref_colors,
-            p.u_login_confirmation,
-            p.u_login_confirmation_at,
         )?;
         let game_bot = build_game_bot_from_row(p.gb_id, p.gb_game_id, p.gb_name, p.gb_difficulty)?;
 
@@ -631,10 +624,13 @@ pub async fn create_game_with_users_tx(
     for email in opts.opponent_emails {
         let user = if let Some(u) = sqlx::query_as!(
             crate::models::user::User,
-            r#"SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.login_confirmation, u.login_confirmation_at
+            r#"SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors
                FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1"#,
             email
-        ).fetch_optional(&mut *tx).await? {
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        {
             u
         } else {
             // Create new user for email
@@ -1959,59 +1955,8 @@ mod tests {
     }
 
     // --- 8. Auth queries ---
-
-    #[sqlx::test]
-    async fn login_confirmation_token_expiry_boundary(pool: PgPool) {
-        // NOTE: production expiry window (auth/server.rs confirm_login) is
-        // 1 hour, not the 29/31 day window described in the plan - see report.
-        let user = make_user(&pool, "auth-user").await;
-        let now = {
-            let t = time::OffsetDateTime::now_utc();
-            time::PrimitiveDateTime::new(t.date(), t.time())
-        };
-
-        sqlx::query!(
-            "UPDATE users SET login_confirmation = $1, login_confirmation_at = $2 WHERE id = $3",
-            "123456",
-            now - time::Duration::minutes(55),
-            user.id
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let valid = sqlx::query_as!(
-            User,
-            "SELECT * FROM users WHERE login_confirmation = $1 AND login_confirmation_at > NOW() - INTERVAL '1 hour'",
-            "123456"
-        )
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
-        assert!(valid.is_some(), "token within the 1 hour window is valid");
-
-        sqlx::query!(
-            "UPDATE users SET login_confirmation_at = $1 WHERE id = $2",
-            now - time::Duration::minutes(65),
-            user.id
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let expired = sqlx::query_as!(
-            User,
-            "SELECT * FROM users WHERE login_confirmation = $1 AND login_confirmation_at > NOW() - INTERVAL '1 hour'",
-            "123456"
-        )
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
-        assert!(
-            expired.is_none(),
-            "token past the 1 hour window is rejected"
-        );
-    }
+    // Login-code expiry/attempt behaviour now lives in login_confirmations
+    // and is covered by the tests in auth/server.rs.
 
     #[sqlx::test]
     async fn session_token_validation(pool: PgPool) {

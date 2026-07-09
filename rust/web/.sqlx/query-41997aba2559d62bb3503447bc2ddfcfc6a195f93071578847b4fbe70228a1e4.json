@@ -27,16 +27,6 @@
         "ordinal": 4,
         "name": "pref_colors",
         "type_info": "TextArray"
-      },
-      {
-        "ordinal": 5,
-        "name": "login_confirmation",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 6,
-        "name": "login_confirmation_at",
-        "type_info": "Timestamp"
       }
     ],
     "parameters": {
@@ -51,9 +41,7 @@
       false,
       false,
       false,
-      false,
-      true,
-      true
+      false
     ]
   },
   "hash": "41997aba2559d62bb3503447bc2ddfcfc6a195f93071578847b4fbe70228a1e4"

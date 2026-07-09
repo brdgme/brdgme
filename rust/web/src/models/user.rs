@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use time::PrimitiveDateTime;
+use time::{OffsetDateTime, PrimitiveDateTime};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -10,10 +10,19 @@ pub struct User {
     pub updated_at: PrimitiveDateTime,
     pub name: String,
     pub pref_colors: Vec<String>,
-    #[serde(skip_serializing)]
-    pub login_confirmation: Option<String>,
-    #[serde(skip_serializing)]
-    pub login_confirmation_at: Option<PrimitiveDateTime>,
+}
+
+/// A pending login code, keyed by email. See D2 in
+/// `docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md`: no
+/// `users` row exists until the code here is confirmed.
+#[derive(Debug, Clone, FromRow)]
+pub struct LoginConfirmation {
+    pub email: String,
+    pub code: String,
+    pub created_at: OffsetDateTime,
+    pub attempts: i32,
+    pub sent_count: i32,
+    pub last_sent_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
