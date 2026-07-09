@@ -28,10 +28,11 @@ optimised WASM strips debug info and panics are otherwise silent.
       swallows errors since `GameLogs`'s sidebar shows the authoritative
       failure message for the same data. No gap to fill; nothing added.
 
-- [ ] **WASM source maps**: investigated and prototyped end-to-end
-      2026-07-05 - **blocked on a toolchain crash, not implemented.**
-      Local debugging aid only (see the client-side error telemetry note in
-      the spec), not telemetry.
+- [ ] **Descoped 2026-07-09 (do not do): WASM source maps** - descoped from
+      #18: hard wasm-opt/binaryen crash on DWARF output, local debugging aid
+      only (not telemetry), not on the go-live critical path; revisit if
+      binaryen or cargo-leptos changes upstream. Original investigation
+      notes retained below.
 
       Recipe researched and confirmed correct in principle: (1) set
       `debug = true` on the `wasm-release` profile so `rustc` emits DWARF
@@ -97,10 +98,13 @@ optimised WASM strips debug info and panics are otherwise silent.
          `PROM_URL`, `PROM_USER`, `TEMPO_URL`, `TEMPO_USER`, `GC_TOKEN`
          (Alloy config consumes these names - keep them in sync with the
          Alloy manifests task).
-      5. In the Grafana UI: Alerting → Contact points → edit the default
+      5. ~~In the Grafana UI: Alerting → Contact points → edit the default
          email contact point to mick.alexander@gmail.com (or add one and
          set it in the default notification policy). Send the test
-         notification and confirm it arrives.
+         notification and confirm it arrives.~~ **Done 2026-07-09**:
+         contact point configured to **beefsack@gmail.com** (changed
+         2026-07-09 - deliberate, not mick.alexander@gmail.com), test
+         notification confirmed delivered.
 
 - [x] **Grafana Alloy manifests** (`k8s/prod/alloy/` - prod-only, NOT in
       `k8s/base`; dev keeps reading logs via Tilt): Deployment (single
@@ -186,6 +190,112 @@ optimised WASM strips debug info and panics are otherwise silent.
         for the heartbeat/no-data alert (next bullet) without extra wiring.
       - Alloy image pinned to `grafana/alloy:v1.4.3`; bump alongside the
         Grafana Cloud stack setup task if a newer stable tag exists by then.
+
+      **Telemetry volume cut (2026-07-09):** the known issue logged in
+      `docs/BACKLOG.md` (telemetry volume exhausted the Grafana Cloud
+      free-tier quota within hours, remote_write rejected, Alloy OOM-looping
+      buffering the backlog) is addressed as follows, all in
+      `k8s/prod/alloy/configmap.yaml` unless noted:
+      - **Logs**: Job 1's `discovery.relabel "pod_logs"` now keeps only the
+        `brdgme` namespace (the only namespace in this cluster - confirmed
+        by reading `k8s/prod/app/kustomization.yaml`'s top-level
+        `namespace: brdgme`, which every base under it - web, bot, operator,
+        game services, NATS, CNPG postgres, migrate, legacy, and Alloy
+        itself - inherits; there is no separate CNPG/postgres namespace to
+        additionally include) and drops Alloy's own `alloy` container (it
+        was tailing itself, a feedback-loop risk during outages). Previously
+        tailed every pod in every namespace, including `kube-system`, with
+        no filtering.
+      - **cAdvisor metrics**: added `prometheus.relabel "cadvisor_filter"`
+        (Alloy's metric-relabel-equivalent component, analogous to
+        Prometheus's `metric_relabel_configs`) between the cAdvisor scrape
+        and remote_write, keeping only
+        `container_memory_working_set_bytes`, `container_fs_usage_bytes`,
+        `container_fs_limit_bytes`, `machine_memory_bytes` and
+        `container_cpu_usage_seconds_total`, and dropping the
+        empty-`container`-label cgroup-hierarchy rows for the four
+        per-container metrics (a compound `__name__`/`container`
+        source-label regex keeps `machine_memory_bytes` - which never
+        carries a `container` label - unaffected). This was the main
+        metric-series blower (previously shipped cAdvisor's entire series
+        set: network, blkio, per-cgroup, etc., unfiltered). **Node pressure
+        alert denominator note**: there's no kube-state-metrics in this
+        cluster, so `kube_node_status_allocatable` isn't available; the
+        alert's memory-pressure clause uses `machine_memory_bytes` (node's
+        total physical memory) as the allocatable-memory denominator
+        instead - slightly less precise (ignores whatever the kubelet
+        reserves for itself/system), acceptable for a single-node cluster.
+      - **PVC fullness metrics**: added a new `kubelet` scrape job
+        (`discovery.relabel "nodes_kubelet"` + `prometheus.scrape "kubelet"`
+        + `prometheus.relabel "kubelet_filter"`), mirroring the cAdvisor
+        node-discovery/API-server-proxy/auth pattern but against
+        `/api/v1/nodes/$1/proxy/metrics` (the kubelet's own metrics, not
+        `/metrics/cadvisor`), strictly keeping only
+        `kubelet_volume_stats_available_bytes` and
+        `kubelet_volume_stats_capacity_bytes` for the "Node pressure"
+        alert's PVC-fullness clause.
+      - **CNPG metrics**: `k8s/prod/app/postgres-patch.yaml`'s `postgres`
+        Cluster CR now sets `spec.inheritedMetadata.annotations`
+        (`prometheus.io/scrape: "true"`, `prometheus.io/port: "9187"`) -
+        confirmed via CNPG's API docs (`cloudnative-pg.io/docs/devel/cloudnative-pg.v1/`)
+        that `inheritedMetadata` is a real `ClusterSpec` field of type
+        `EmbeddedObjectMetadata` (`labels`/`annotations`) propagated onto
+        every pod CNPG creates for the Cluster; this **corrects** the
+        2026-07-07 "CNPG scrape discovery assumption" note above, which
+        named the wrong field (`.spec.metadata.annotations` - not a valid
+        field; `metadata` isn't nested under `spec` on any k8s resource).
+        CNPG instance pods also carry the standard `cnpg.io/cluster` label,
+        which the Alloy config now uses both to *exclude* them from the
+        generic annotation-discovered scrape job (2a, unfiltered - so
+        web's/anyone else's annotated metrics stay untouched) and to
+        *include* them in a new CNPG-only job (2b) that applies a tight
+        `metric_relabel` keep-list, rather than trying to scope a single
+        keep-list across both web and CNPG's series in one job.
+        - **Series kept for the "CNPG backup freshness" alert** (see that
+          alert's bullet below, which previously said "pick the exact
+          series during implementation and record it here"):
+          `cnpg_collector_last_available_backup_timestamp`,
+          `cnpg_collector_last_failed_backup_timestamp`,
+          `cnpg_collector_first_recoverability_point`, and
+          `cnpg_collector_pg_wal_archive_status`.
+        - **Confidence/caveat**: confirmed via CNPG's monitoring docs
+          (`cloudnative-pg.io/docs/devel/monitoring`) that these four names
+          are correct and are CNPG's own built-in collector metrics (not
+          from the `default-monitoring` ConfigMap's custom queries - on by
+          default, no extra ConfigMap needed), exposed on port 9187 at
+          `/metrics`. **Medium confidence on the three backup-timestamp
+          metrics specifically**: CNPG's docs mark
+          `cnpg_collector_last_available_backup_timestamp`,
+          `cnpg_collector_last_failed_backup_timestamp`, and
+          `cnpg_collector_first_recoverability_point` as deprecated since
+          1.26 "in favour of plugin-native backup status," and state they
+          "remain zero until the first backup is completed to the object
+          store" for "native backup solutions such as in-core Barman Cloud
+          (deprecated) and volume snapshots" - the docs don't explicitly
+          say whether they're populated for this cluster's actual backup
+          method (the `barman-cloud.cloudnative-pg.io` **plugin**, set via
+          `spec.plugins` in `postgres-patch.yaml`, which is neither of
+          those two). No live CNPG cluster in this sandbox to verify
+          against. Whoever first sees real data (or lack of it) in these
+          series post-deploy should confirm they populate correctly for
+          the plugin-based backup path, or find/substitute the plugin's own
+          equivalent metric if not.
+      - **Traces**: see the "APM / distributed tracing" section below - now
+        wired with `OTEL_EXPORTER_OTLP_ENDPOINT` pointed at Alloy and 10%
+        head sampling, added 2026-07-09 via
+        `k8s/prod/app/web-patch.yaml` (prod-only overlay patch, not
+        `k8s/base` - dev has no Alloy).
+      - **`rust/web` log level**: `init_tracing()` in `rust/web/src/main.rs`
+        previously had no `EnvFilter` at all - `RUST_LOG` had zero effect on
+        web's log volume/level (unlike `bot`/`operator`, which use
+        `tracing_subscriber::fmt::init()` and do honor it). Added
+        `tracing_subscriber::EnvFilter::try_from_default_env()` (falling
+        back to `"info"` if `RUST_LOG` is unset or unparseable) as a layer
+        in the same `registry()` composition, ahead of both `fmt_layer` and
+        `otel_layer` so it governs both. Required adding the `env-filter`
+        cargo feature to `tracing-subscriber` in `rust/web/Cargo.toml`
+        (already present as a default feature elsewhere in the workspace's
+        unified `Cargo.lock`, so no lockfile changes resulted).
 
 - [ ] **Heartbeat / no-data alert**: Alloy self-monitoring metrics (`up`,
       `alloy_build_info`) are already shipped by the scrape config. Add a
@@ -321,6 +431,11 @@ set the threshold to 0, wait one evaluation, restore) to prove delivery.
 Initial rule set; thresholds are starting points, tune during the Phase 16
 beta/validation window:
 
+**2026-07-09:** the email contact point is done (beefsack@gmail.com, see
+the Grafana Cloud stack setup task above). Rule creation and rollout
+verification below are no longer tracked in this repo/backlog - Michael
+tracks that work separately from here on.
+
 - [ ] Monolith 5xx: `>0.5%` of requests 5xx over 15m (from the `/metrics`
       histogram), AND an absolute guard: `>10` 5xx in 15m (catches
       low-traffic spikes the percentage misses).
@@ -328,31 +443,46 @@ beta/validation window:
       containers `>10` in 15m.
 - [ ] Heartbeat/no-data (specced above under Alloy).
 - [ ] CNPG backup freshness: alert if the newest base backup is older than
-      26h or WAL archiving is failing (CNPG exposes
-      `cnpg_pg_wal_archive_status`-family and backup metrics via its
-      `/metrics`; pick the exact series during implementation and record it
-      here).
+      26h or WAL archiving is failing. **Series recorded 2026-07-09** (see
+      the "Telemetry volume cut" note under the Alloy manifests task for
+      the full confidence caveat):
+      `cnpg_collector_last_available_backup_timestamp` (fire if
+      `time() - cnpg_collector_last_available_backup_timestamp > 26*3600`),
+      `cnpg_collector_last_failed_backup_timestamp` (fire on any recent
+      increase), and `cnpg_collector_pg_wal_archive_status` for WAL
+      archiving health. Not yet provisioned in Grafana Cloud (still human/
+      UI work per the section intro) and not verified against a live CNPG
+      instance - the metric names are CNPG's documented defaults but the
+      three backup-timestamp series are marked deprecated since CNPG 1.26
+      with docs ambiguous on whether they populate correctly for this
+      cluster's plugin-based (`barman-cloud.cloudnative-pg.io`) backup
+      method; confirm against real data post-deploy.
 - [ ] Node pressure: node memory working set >90% of allocatable for 15m;
       any PVC >85% full. (Node/kubelet/cadvisor metrics come with the Alloy
-      scrape of the kubelet - include that in the Alloy config task.)
+      scrape of the kubelet - include that in the Alloy config task.) Node
+      pressure denominator: no kube-state-metrics in this cluster, so use
+      `machine_memory_bytes` (from the cAdvisor scrape) rather than
+      `kube_node_status_allocatable` - see the "Telemetry volume cut" note
+      above.
 - [ ] Resend quota: login-email counter approaching the 100/day cap
       (>60/day). (22b will extend this when volume multiplies.)
 
 ### External uptime monitor (added 2026-07-05)
 
-- [ ] *(human - account creation)* Free external HTTPS check - the only
-      monitor that fires when the cluster, LB, DNS, or Grafana Cloud
-      shipping is down wholesale. Steps (UptimeRobot free tier or
-      equivalent):
-      1. Sign up at uptimerobot.com; confirm the account email.
-      2. Add New Monitor → type HTTP(s) → URL `https://beta.brdg.me/`
+- [x] *(human - account creation)* **Done 2026-07-09** (Michael): Free
+      external HTTPS check - the only monitor that fires when the cluster,
+      LB, DNS, or Grafana Cloud shipping is down wholesale. Steps
+      (UptimeRobot free tier or equivalent):
+      1. ~~Sign up at uptimerobot.com; confirm the account email.~~
+      2. ~~Add New Monitor → type HTTP(s) → URL `https://beta.brdg.me/`
          (during the Phase 16 beta) → interval 5 minutes → alert contact:
-         the account email (mick.alexander@gmail.com).
-      3. Verify it reports Up, then take the beta stack briefly down (or
+         the account email~~ (**beefsack@gmail.com** - changed 2026-07-09,
+         not mick.alexander@gmail.com).
+      3. ~~Verify it reports Up, then take the beta stack briefly down (or
          pause a Deployment) once to confirm a Down email actually
-         arrives.
+         arrives.~~
       4. At cutover: edit the monitor's URL to `https://brdg.me/` (Phase
-         16 runbook step).
+         16 runbook step). Not yet due (still pre-cutover).
 
 ### Probes (fleshed out 2026-07-05)
 
@@ -373,7 +503,7 @@ bot, and the brdgme operator have none**; NATS/CNPG covered as below.
       directly without a Service.
 - [x] **NATS**: confirm `k8s/base/nats` probes the monitoring port
       (`/healthz` on 8222 is the official pattern); add if missing.
-- [ ] **brdgme operator** (`rust/operator`, not CNPG): missed by the
+- [x] **brdgme operator** (`rust/operator`, not CNPG): missed by the
       original audit above - flagged in the 2026-07-04 review and not
       re-captured until this pass. It runs no HTTP server today, so it has
       neither a probe nor `/metrics`. Add a minimal axum `/healthz` (same
@@ -381,6 +511,19 @@ bot, and the brdgme operator have none**; NATS/CNPG covered as below.
       plus a liveness probe on it; `/metrics` optional v1 (reconcile
       counts/errors are low-cardinality, cheap to add via
       `axum-prometheus` like web).
+      **Implementation notes (2026-07-09):** added a static `/healthz`
+      (always 200) on `LISTEN_ADDR` (default `0.0.0.0:4000`), spawned in
+      `main` only after the `kube::Client` and `sqlx::PgPool` are
+      constructed, so a 200 means both startup dependencies are up - same
+      shape as bot's endpoint but without a dynamic connection check (the
+      operator has no cheap equivalent to bot's NATS `connection_state()`
+      to poll). Liveness probe added to
+      `k8s/base/operator/deploy/deployment.yaml` (port 4000,
+      initialDelaySeconds 5, periodSeconds 10), no readiness probe, no
+      Service - matches bot. `/metrics` skipped as optional v1 per the plan
+      text. Not verified against a live/prod cluster in this sandbox (no
+      cluster reachable); `cargo check` and `kubectl kustomize` render
+      checks only.
 - [ ] **CNPG / migrate Job**: operator-managed and Job respectively - no
       action, listed so the audit is complete.
 

@@ -105,6 +105,33 @@ will fail even though `cargo check --features ssr` passes. If the dev DB
 itself is unusable, `cargo sqlx database reset -y --source web/migrations`
 recreates it from scratch.
 
+## Build and Test Gotchas
+
+**Plain `cargo check --workspace` and `cargo test -p web` fail by design.**
+The `web` crate (Leptos) has no default features, so its default target
+excludes the ssr/hydrate feature gates - expect E0433 "cannot find
+brdgme_game" and missing ssr-gated deps (sqlx, tokio, etc.). This is not a
+build breakage; it just means `web` always needs an explicit `--features`
+flag.
+
+The canonical verification commands are the ones CI runs
+(`.github/workflows/ci.yml`), all with `SQLX_OFFLINE=true` (sqlx
+compile-time query checks work offline; without it, compilation tries to
+reach a live DB):
+
+```bash
+cargo clippy -p web --all-targets --features ssr -- -D warnings
+cargo test --workspace --exclude web
+cargo test -p web --features ssr
+```
+
+`cargo test -p web --features ssr` additionally needs a running Postgres at
+`DATABASE_URL` to pass at runtime (CI uses a `postgres:18` service
+container; locally devenv sets `DATABASE_URL` to the connection string in
+the Database section below and expects that DB to exist externally - devenv
+defines no postgres service). Without it the crate compiles but ~41 DB tests
+fail with connection timeouts.
+
 ## Rust Conventions
 
 - Edition: `2024` for all crates

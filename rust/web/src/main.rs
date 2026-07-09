@@ -157,7 +157,15 @@ fn init_tracing() -> Option<opentelemetry_sdk::trace::SdkTracerProvider> {
         .with_current_span(true)
         .with_span_list(false);
 
+    // Governs both fmt_layer and otel_layer (RUST_LOG unset -> "info"
+    // default) - previously unfiltered, so web's log level wasn't
+    // controlled by RUST_LOG at all, unlike bot/operator's
+    // `tracing_subscriber::fmt::init()`.
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
     tracing_subscriber::registry()
+        .with(env_filter)
         .with(fmt_layer)
         .with(otel_layer)
         .init();

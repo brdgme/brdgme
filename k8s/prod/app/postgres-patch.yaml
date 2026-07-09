@@ -11,6 +11,16 @@ metadata:
     # (sync-wave 1 in k8s/base/migrate/job.yaml) runs.
     argocd.argoproj.io/sync-wave: "-1"
 spec:
+  # Propagated onto every pod CNPG creates for this Cluster (instance pods),
+  # including the standard `cnpg.io/cluster` label - picked up by the
+  # `prometheus.io/scrape`-annotation-based discovery in
+  # k8s/prod/alloy/configmap.yaml's CNPG scrape job (2026-07-09). CNPG's
+  # exporter listens on 9187, path /metrics (the discovery default, no
+  # `prometheus.io/path` override needed).
+  inheritedMetadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9187"
   storage:
     size: 10Gi
     storageClass: do-block-storage

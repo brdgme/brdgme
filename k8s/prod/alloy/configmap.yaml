@@ -10,10 +10,19 @@ data:
     // injected as env vars on the container and read here via env().
 
     // ---- Job 1: pod log tailing -> Loki -----------------------------------
-    // Discovers all pods cluster-wide; label set is deliberately limited to
-    // namespace/pod/container/app (low cardinality) - structured fields the
-    // app already emits (trace_id, game_id, etc.) stay in the log body and
-    // are queried via LogQL JSON parsing, not promoted to labels.
+    // Discovers pods cluster-wide via the k8s API, but the discovery.relabel
+    // below restricts what's actually tailed to the `brdgme` namespace (the
+    // only namespace in this cluster - web/bot/operator/game
+    // services/NATS/CNPG postgres all land here via
+    // k8s/prod/app/kustomization.yaml's top-level `namespace: brdgme`,
+    // verified 2026-07-09) and drops Alloy's own container. Cut 2026-07-09:
+    // previously tailed ALL pods in ALL namespaces (including kube-system)
+    // with zero filtering, which blew through the Grafana Cloud free-tier
+    // log quota within hours and OOM-looped Alloy buffering the remote_write
+    // backlog. Label set is deliberately limited to namespace/pod/container/
+    // app (low cardinality) - structured fields the app already emits
+    // (trace_id, game_id, etc.) stay in the log body and are queried via
+    // LogQL JSON parsing, not promoted to labels.
 
     discovery.kubernetes "pods" {
       role = "pod"
@@ -22,6 +31,19 @@ data:
     discovery.relabel "pod_logs" {
       targets = discovery.kubernetes.pods.targets
 
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        regex         = "brdgme"
+        action        = "keep"
+      }
+      rule {
+        // Alloy tailing its own logs is a feedback loop: during an outage
+        // Alloy's own error spam about the outage would itself count
+        // against the log quota it's trying to protect.
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        regex         = "alloy"
+        action        = "drop"
+      }
       rule {
         source_labels = ["__meta_kubernetes_namespace"]
         target_label  = "namespace"
@@ -60,11 +82,10 @@ data:
     // 2a. Annotation-discovered pods: matches k8s/base/web/deployment.yaml's
     // `prometheus.io/scrape`/`port`/`path` annotations (port 9090, /metrics).
     // This is generic, not web-specific: any pod carrying the same three
-    // annotations is picked up automatically. CNPG instance pods are
-    // expected to be onboarded this way once Phase 19 lands - see the
-    // "CNPG scrape discovery" note in docs/superpowers/plans/2026-07-07-18-production-hardening.md
-    // for the assumption this relies on (CNPG's Cluster CR setting these
-    // annotations via `.spec.metadata.annotations`, port 9187).
+    // annotations is picked up automatically - EXCEPT CNPG instance pods,
+    // which are explicitly excluded below and scraped by their own job
+    // (2b) so a tight metric_relabel keep-list can be scoped to just CNPG's
+    // series without touching web's (or any other annotated pod's) metrics.
     discovery.relabel "annotated_scrape" {
       targets = discovery.kubernetes.pods.targets
 
@@ -72,6 +93,14 @@ data:
         source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
         regex         = "true"
         action        = "keep"
+      }
+      rule {
+        // CNPG instance pods carry this standard label (see 2b below) -
+        // excluded here so they're only scraped once, via the
+        // CNPG-specific job that applies the tight keep-list.
+        source_labels = ["__meta_kubernetes_pod_label_cnpg_io_cluster"]
+        regex         = ".+"
+        action        = "drop"
       }
       rule {
         source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
@@ -103,8 +132,84 @@ data:
       forward_to = [prometheus.remote_write.grafana_cloud.receiver]
     }
 
-    // 2c. Kubelet + cAdvisor (node metrics, for the "Node pressure" alert).
-    // Scraped by proxying through the API server, same pattern
+    // 2b. CNPG instance pods (port 9187, /metrics): onboarded via
+    // `.spec.inheritedMetadata.annotations` on the `postgres` Cluster CR
+    // (k8s/prod/app/postgres-patch.yaml, added 2026-07-09) setting the same
+    // `prometheus.io/scrape`/`port` annotations the generic job above looks
+    // for - CNPG propagates `inheritedMetadata` onto every pod it creates
+    // for the Cluster, including the standard `cnpg.io/cluster` label used
+    // to identify/exclude them from 2a above. Scraped separately (rather
+    // than folding into 2a) so the metric_relabel keep-list below can be
+    // scoped to just CNPG's series - keeping web's axum/login metrics
+    // unfiltered.
+    //
+    // Series kept, for the "CNPG backup freshness" alert
+    // (docs/superpowers/plans/2026-07-07-18-production-hardening.md):
+    // cnpg_collector_last_available_backup_timestamp,
+    // cnpg_collector_last_failed_backup_timestamp,
+    // cnpg_collector_first_recoverability_point (all three are CNPG core
+    // collector metrics, built in - not from the default-monitoring
+    // ConfigMap's custom queries - on by default; deprecated as of CNPG
+    // 1.26 in favour of plugin-native backup status but documented as
+    // still populated for object-store-backed backups, which is what this
+    // cluster uses via the barman-cloud plugin - see the plan doc note for
+    // confidence caveats), and cnpg_collector_pg_wal_archive_status for WAL
+    // archiving health.
+    discovery.relabel "annotated_scrape_cnpg" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+        regex         = "true"
+        action        = "keep"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_cnpg_io_cluster"]
+        regex         = ".+"
+        action        = "keep"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+        regex         = "(.+)"
+        target_label  = "__metrics_path__"
+      }
+      rule {
+        source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+        regex         = "([^:]+)(?::\\d+)?;(\\d+)"
+        replacement   = "$1:$2"
+        target_label  = "__address__"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+    }
+
+    prometheus.scrape "cnpg_pods" {
+      targets    = discovery.relabel.annotated_scrape_cnpg.output
+      forward_to = [prometheus.relabel.cnpg_filter.receiver]
+    }
+
+    prometheus.relabel "cnpg_filter" {
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+      rule {
+        source_labels = ["__name__"]
+        regex         = "cnpg_collector_last_available_backup_timestamp|cnpg_collector_last_failed_backup_timestamp|cnpg_collector_first_recoverability_point|cnpg_collector_pg_wal_archive_status"
+        action        = "keep"
+      }
+    }
+
+    // 2c. cAdvisor (node/container resource metrics, for the "Node pressure"
+    // alert). Scraped by proxying through the API server, same pattern
     // kube-prometheus-stack uses, since kubelets aren't otherwise routable
     // from in-cluster pods without node network access.
     discovery.kubernetes "nodes" {
@@ -132,7 +237,7 @@ data:
 
     prometheus.scrape "cadvisor" {
       targets    = discovery.relabel.nodes_cadvisor.output
-      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+      forward_to = [prometheus.relabel.cadvisor_filter.receiver]
 
       scheme            = "https"
       bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -140,6 +245,78 @@ data:
       tls_config {
         ca_file     = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
         server_name = "kubernetes"
+      }
+    }
+
+    // cAdvisor ships its full series set (network/blkio/per-cgroup, etc.)
+    // with no filtering - the main metric-series blower against the
+    // free-tier quota. Keep only what the planned alerts/capacity checks
+    // need (2026-07-09 cut). No kube-state-metrics in this cluster, so
+    // machine_memory_bytes (node's total physical memory, no `container`
+    // label) is the "Node pressure" alert's allocatable-memory denominator
+    // instead of `kube_node_status_allocatable` - see the plan doc note.
+    prometheus.relabel "cadvisor_filter" {
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+      rule {
+        source_labels = ["__name__"]
+        regex         = "container_memory_working_set_bytes|container_cpu_usage_seconds_total|machine_memory_bytes|container_fs_usage_bytes|container_fs_limit_bytes"
+        action        = "keep"
+      }
+      rule {
+        // Drop cgroup-hierarchy rows (empty `container` label - the
+        // pod/node aggregate rows cAdvisor also emits for the four
+        // per-container metrics above). machine_memory_bytes never carries
+        // a `container` label and is deliberately excluded from this
+        // regex's name-alternation so it survives.
+        source_labels = ["__name__", "container"]
+        regex         = "(container_memory_working_set_bytes|container_cpu_usage_seconds_total|container_fs_usage_bytes|container_fs_limit_bytes);"
+        action        = "drop"
+      }
+    }
+
+    // 2c-2. Kubelet /metrics (NOT /metrics/cadvisor) - PVC fullness for the
+    // "Node pressure" alert's ">85% full" PVC clause. Mirrors the cAdvisor
+    // node-discovery/proxy/auth pattern above.
+    discovery.relabel "nodes_kubelet" {
+      targets = discovery.kubernetes.nodes.targets
+
+      rule {
+        target_label = "__address__"
+        replacement  = "kubernetes.default.svc:443"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        regex         = "(.+)"
+        target_label  = "__metrics_path__"
+        replacement   = "/api/v1/nodes/$1/proxy/metrics"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    prometheus.scrape "kubelet" {
+      targets    = discovery.relabel.nodes_kubelet.output
+      forward_to = [prometheus.relabel.kubelet_filter.receiver]
+
+      scheme            = "https"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+      tls_config {
+        ca_file     = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        server_name = "kubernetes"
+      }
+    }
+
+    prometheus.relabel "kubelet_filter" {
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+      rule {
+        source_labels = ["__name__"]
+        regex         = "kubelet_volume_stats_available_bytes|kubelet_volume_stats_capacity_bytes"
+        action        = "keep"
       }
     }
 
@@ -162,8 +339,12 @@ data:
     }
 
     // ---- Job 3: OTLP traces -> Tempo ---------------------------------------
-    // rust/web's OTEL_EXPORTER_OTLP_ENDPOINT will eventually point here at
-    // http://alloy.brdgme.svc:4317 (see service.yaml).
+    // rust/web's OTEL_EXPORTER_OTLP_ENDPOINT points here at
+    // http://alloy.brdgme.svc:4317 (see service.yaml), set 2026-07-09 via
+    // k8s/prod/app/web-patch.yaml along with OTEL_TRACES_SAMPLER_ARG=0.1
+    // (10% head sampling) to bound trace volume against the free-tier quota.
+    // No sampling/filtering is applied here in Alloy - it's all at the SDK
+    // (head-sampling decision made once at span-start in rust/web).
 
     otelcol.receiver.otlp "default" {
       grpc {

@@ -13,7 +13,7 @@ Status table below into [`docs/archive/BACKLOG.md`](archive/BACKLOG.md),
 adding a Resolution and the date resolved - that file is append-only and
 keeps this one from filling up with closed work.
 
-**Priority order (updated 2026-07-08; hard-cutover resequencing
+**Priority order (updated 2026-07-09; hard-cutover resequencing
 2026-07-04):** done so far: restart-500 + 3-player-render bugs, #21
 OpenTofu (complete 2026-07-06), #22a Resend
 outbound, #14 dev + prod prereqs (fully done - client-IP/PROXY-protocol
@@ -21,9 +21,8 @@ attempted and dropped 2026-07-08),
 #13 NATS bot eventing, #17 NATS WS migration, #19 prod provisioning +
 #15 ArgoCD + sealed-secrets (live, first fully-green sync 2026-07-08;
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
-import rehearsal - remain). **Remaining pre-go-live:** #18 hardening
-(Grafana Cloud observability + APM, decided 2026-07-05, superseding
-VictoriaLogs) → #28 WP1-3 app hardening (promoted 2026-07-08) → #16 beta
+import rehearsal - remain). **Remaining pre-go-live:** #28 WP1-3 app
+hardening (promoted 2026-07-08) → #16 beta
 period (isolated DB) → hard cutover + 1-week validation gate →
 decommission. (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
@@ -63,17 +62,15 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## Status
 
-Fully done/resolved/superseded items (1-14, 17, 21, Quick wins, Review
-findings 2026-07-04, Development Workflow) have been moved to
+Fully done/resolved/superseded items (1-14, 17, 18, 20, 21, Quick wins,
+Review findings 2026-07-04, Development Workflow) have been moved to
 [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 
 | # | Title | Status | Spec | Plan |
 |---|---|---|---|---|
 | 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation, sync-failure drill (#16 beta) | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; beta period on isolated DB + freeze/TTL runbook added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-08-16-production-cutover-validation-design.md) | [plan](superpowers/plans/2026-07-08-16-production-cutover-validation.md) |
-| 18 | Production Hardening | Pending - fully specced 2026-07-05: all-in Grafana Cloud (logs/metrics/traces/alerting, supersedes VictoriaLogs), APM via OTLP, probes, external uptime monitor, capacity check | [spec](superpowers/specs/2026-07-07-18-production-hardening-design.md) | [plan](superpowers/plans/2026-07-07-18-production-hardening.md) |
 | 19 | CloudNativePG | Dev complete; prod Cluster + Barman Cloud backups running under ArgoCD (green 2026-07-08); remaining: PITR verify + import rehearsal (#16 beta), real import at cutover | [spec](superpowers/specs/2026-07-08-19-cloudnativepg-design.md) | [plan](superpowers/plans/2026-07-08-19-cloudnativepg.md) |
-| 20 | external-dns | Superseded 2026-07-05 - folded into Phases 16/21 | [spec](superpowers/specs/2026-07-08-20-external-dns-design.md) | - |
 | 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending | [spec](superpowers/specs/2026-07-05-22-email-via-resend-design.md) | [plan](superpowers/plans/2026-07-05-22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [spec](superpowers/specs/2026-07-04-23-rust-game-ports-design.md) | [plan](superpowers/plans/2026-07-04-23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-04-24-game-invites-design.md) | [plan](superpowers/plans/2026-07-04-24-game-invites.md) |
@@ -99,27 +96,19 @@ tasks are also marked *(human)* inline in their phase files. Added
    green. Outstanding: rotate the admin password + delete
    `argocd-initial-admin-secret` (still present 2026-07-08); confirm the
    sealing-key pair is backed up offline.
-2. **#18:** ~~stack created + `grafana-cloud` sealed~~ (secret live in the
-   cluster; Alloy deployed 2026-07-07). Known issue 2026-07-08: telemetry
-   volume exhausted the Grafana Cloud free-tier quota within hours, so
-   remote_write is rejected and Alloy OOM-loops buffering the backlog -
-   telemetry volume must be cut (and the quota window waited out) before
-   #18 can be called shipping. Outstanding: reduce telemetry volume;
-   configure the alert rules and email contact point in the Grafana UI;
-   set up the external uptime monitor account.
-3. **#16 beta:** drive the beta checklist (test games, Grafana
+2. **#16 beta:** drive the beta checklist (test games, Grafana
    verification). (The cilium PROXY-protocol ConfigMap flip is dropped -
    see History 2026-07-08; the `beta.brdg.me` record is already applied
    and resolving.)
-4. **#19 (during beta):** test import - `pg_dump` live Linode prod,
+3. **#19 (during beta):** test import - `pg_dump` live Linode prod,
    restore into a scratch CNPG database, record timings/fixes; verify a
    PITR restore from the Spaces backups.
-5. **#16 cutover:** lower TTLs (`tofu apply`); announce downtime; stop
+4. **#16 cutover:** lower TTLs (`tofu apply`); announce downtime; stop
    the Linode stack; real `pg_dump`/restore + migrations; repoint apex
    DNS (`tofu apply`); smoke test; flip the uptime monitor to apex.
    (The `postgres-config`/`postgres-rw` host is handled at Phase 15
    sealing time, not cutover - revised 2026-07-06.)
-6. **#16 decommission (after the validation week):** decommission the
+5. **#16 decommission (after the validation week):** decommission the
    Linode server (archive a final dump); the source/manifest deletion
    itself is agent-delegable.
 
@@ -219,3 +208,15 @@ See `docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md`,
 `docs/superpowers/plans/2026-07-08-16-production-cutover-validation.md`,
 and `docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md`
 for detail.
+
+2026-07-09: #18 hardening closed - full Grafana Cloud observability
+(Alloy log/metric/trace shipping with volume cuts, OTLP tracing at 10%
+sampling, /metrics, probes incl. operator /healthz) implemented in-tree;
+WASM source maps descoped (toolchain blocker); contact point
+(beefsack@gmail.com) + external uptime monitor done. Moved to the
+archive as fully done; remaining rollout (deploy, quota window,
+alert-rule creation) removed from the backlog - Michael tracks it
+separately. #20 (external-dns, superseded 2026-07-05) also moved to the
+archive - no remaining work was ever tracked against it. Dropped the
+now-stale '#18' line from Human tasks, same as the '#21' line was
+dropped 2026-07-08.

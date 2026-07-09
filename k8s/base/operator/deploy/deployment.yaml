@@ -18,15 +18,25 @@ spec:
       containers:
         - name: operator
           image: brdgme/operator
-          # No probes: the operator exposes no HTTP server; the process
-          # exits on fatal startup errors and otherwise requeues failed
-          # reconciles internally.
+          # Port is for the liveness probe only - no readiness probe (the
+          # operator takes no Service traffic to gate) and no Service is
+          # defined.
+          ports:
+            - containerPort: 4000
           envFrom:
             - secretRef:
                 name: postgres-config
           env:
             - name: RUST_LOG
               value: info
+            - name: LISTEN_ADDR
+              value: 0.0.0.0:4000
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             requests:
               cpu: 10m

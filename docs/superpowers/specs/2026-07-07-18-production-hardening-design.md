@@ -50,7 +50,9 @@ panic-reporting endpoint, etc. are all out of scope here). The WASM source
 maps item in the implementation plan is a local debugging aid only: it makes
 a panic already visible in someone's browser console (or reported by a user)
 resolve to a real Rust file:line, not a mechanism for getting that panic to
-the operator.
+the operator. **Update (2026-07-09):** the WASM source maps item was
+descoped from #18 (hard wasm-opt/binaryen crash on DWARF output blocks it;
+see the implementation plan).
 
 ## Not planned
 

@@ -537,6 +537,7 @@ dependencies = [
 name = "brdgme-operator"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "brdgme_cmd",
  "futures",
  "k8s-openapi",

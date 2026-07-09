@@ -7,6 +7,7 @@ resources:
 - postgres-backup.yaml
 patches:
 - path: postgres-patch.yaml
+- path: web-patch.yaml
 images:
 - name: brdgme/migrate
   newName: ghcr.io/brdgme/brdgme/migrate
