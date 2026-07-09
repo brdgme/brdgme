@@ -13,6 +13,22 @@
 //! RNG-outcome-invariant properties (counts, deterministic log content,
 //! structural equality) - see `zombie-dice-2` for a worked example of all
 //! three cases.
+//!
+//! # Design boundary
+//!
+//! `Randomizer` abstracts *game-meaningful outcomes* - dice rolls, shuffled
+//! deck order, tile draws - NOT `rand`'s primitive API. Production
+//! implementations use `rand` internally; tests script the outcomes
+//! directly (e.g. the exact post-shuffle order of a deck). The trait
+//! intentionally does not mirror `rand`'s trait surface: scripting
+//! primitives like `gen_range` makes test doubles depend on algorithm
+//! internals (e.g. how many draws a Fisher-Yates shuffle consumes) and is
+//! brittle. Input-taking operations beyond what `zombie-dice-2` needs
+//! ("shuffle this deck", "roll N dice") are deliberately out of scope for
+//! now - extend the pattern, at the outcome level, when a real consumer
+//! (e.g. a card game) adopts it. For genuinely distribution-heavy needs,
+//! the escape hatch is a test-local `Randomizer` impl over a seeded
+//! `RngCore`, accepting that test's local seed-brittleness.
 use rand::prelude::*;
 
 /// A source of "which outcome did this roll show" decisions, given the list
