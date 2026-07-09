@@ -640,8 +640,17 @@ mod test {
         g.scores = vec![0, 0];
         let logs = g.keep(0).unwrap();
         assert_eq!(4, g.scores[0]);
-        assert_eq!(1, g.current_turn);
-        assert!(!logs.is_empty());
+        // The turn passes to player 1, whose turn opens with an automatic
+        // roll. That roll can bust (three shotguns) and legitimately pass
+        // the turn straight back, so current_turn is not deterministic;
+        // assert the advance via the logs instead.
+        let rendered: String = logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect::<Vec<String>>()
+            .join("");
+        assert!(rendered.contains("{{player 0}} kept {{b}}4{{/b}} brains"));
+        assert!(rendered.contains("{{player 1}} rolled"));
     }
 
     #[test]
