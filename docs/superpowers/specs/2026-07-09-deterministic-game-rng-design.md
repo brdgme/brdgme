@@ -114,11 +114,15 @@ traits.
 
 ### Documentation
 
+- New permanent doc `docs/authoring/GAME_DEVELOPMENT.md`: best practices and
+  guidelines for building games (the porting guide is temporary and retires
+  once Go porting finishes). Seeded with a "Randomness" section: never call
+  `rand::rng()` in game code; store a `GameRng` seeded from `start()`'s seed
+  and draw everything from it; games without randomness ignore the seed.
+  Point at a migrated reference game (zombie-dice-2).
 - `docs/porting/GAME_PORTING.md`: update crate-layout deps and the "shuffle
-  with `rand::seq::SliceRandom`" line; add a "Randomness" section: never
-  call `rand::rng()` in game code; store a `GameRng` seeded from `start()`'s
-  seed and draw everything from it; games without randomness ignore the
-  seed. Point at a migrated reference game (zombie-dice-2).
+  with `rand::seq::SliceRandom`" line; link to the new authoring doc for the
+  randomness rules rather than duplicating them.
 - Rustdoc on `brdgme_game::rng` is the canonical explanation (why
   `ChaCha8Rng`, determinism guarantees, `usize` caveat); the porting guide
   links there rather than duplicating.
