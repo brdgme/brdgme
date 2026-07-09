@@ -790,9 +790,22 @@ mod test {
         // `keep` should also work (either still current's turn, or the new
         // current's turn after a bust). Find whose turn it is and keep.
         let keeper = g.current_turn;
+        let next = 1 - keeper;
         let resp = g.command(keeper, "keep", &p).unwrap();
         assert!(!resp.logs.is_empty());
-        assert_ne!(keeper, g.current_turn);
+        // keep() advances to the other player, whose turn opens with an
+        // automatic roll. That roll can bust (three shotguns) and
+        // legitimately pass the turn straight back to `keeper`, so
+        // current_turn is not deterministic; assert the advance via the
+        // logs instead.
+        let rendered: String = resp
+            .logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect::<Vec<String>>()
+            .join("");
+        assert!(rendered.contains(&format!("{{{{player {}}}}} kept", keeper)));
+        assert!(rendered.contains(&format!("{{{{player {}}}}} rolled", next)));
     }
 
     #[test]
