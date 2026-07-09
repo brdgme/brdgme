@@ -37,6 +37,16 @@ const LOGIN_GLOBAL_MAX_SENDS_PER_DAY: i64 = 50;
 #[cfg(feature = "ssr")]
 const CONFIRM_MAX_ATTEMPTS_PER_CODE: i32 = 10;
 
+/// Postgres advisory-lock key serializing the send-cap check-and-bump in
+/// `login()` across concurrent requests (any email). A global lock rather
+/// than a per-email row lock because the 24h cap sums over every row, not
+/// just the requesting email's; the endpoint is already IP-rate-limited and
+/// capped at 50 sends/day, so serializing the whole (fast, DB-only) decision
+/// section has no meaningful throughput cost. Arbitrary constant, just needs
+/// to not collide with another advisory lock key in this codebase.
+#[cfg(feature = "ssr")]
+const LOGIN_CAP_LOCK_KEY: i64 = 0x6c6f_6769_6e63_6170; // "loginc" + "ap" bytes, no meaning beyond uniqueness
+
 #[cfg(feature = "ssr")]
 async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, token: &str) {
     let Some(resend) = resend else {
@@ -118,13 +128,27 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
 
     let pool = expect_context::<PgPool>();
 
+    // Everything below - GC, the cap checks, and the upsert that bumps the
+    // counters they read - runs in one transaction guarded by a global
+    // advisory lock. Without it, concurrent requests can each pass the cap
+    // SELECTs before either upsert commits (TOCTOU), overshooting the
+    // per-email and global caps by roughly the concurrency level.
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(internal("login: begin transaction"))?;
+    sqlx::query!("SELECT pg_advisory_xact_lock($1)", LOGIN_CAP_LOCK_KEY)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal("login: acquire cap lock"))?;
+
     // Opportunistic GC: rows are useless for confirm after 1 hour, but they
     // still feed the 24h global send cap below, so only delete once they have
     // aged out of that accounting window too. No cron/job needed.
     sqlx::query!(
         "DELETE FROM login_confirmations WHERE last_sent_at < NOW() - INTERVAL '24 hours'"
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(internal("login: gc stale confirmations"))?;
 
@@ -141,7 +165,7 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         "SELECT * FROM login_confirmations WHERE email = $1",
         email
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(internal("login: look up confirmation"))?;
 
@@ -151,10 +175,16 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
             .last_sent_at
             .is_some_and(|at| at > now - time::Duration::seconds(LOGIN_RESEND_COOLDOWN_SECS));
         if in_cooldown {
+            tx.commit()
+                .await
+                .map_err(internal("login: commit transaction"))?;
             return Ok(generic_success);
         }
         let code_valid = row.created_at > now - time::Duration::hours(1);
         if code_valid && row.sent_count >= LOGIN_MAX_SENDS_PER_EMAIL {
+            tx.commit()
+                .await
+                .map_err(internal("login: commit transaction"))?;
             return Ok(generic_success);
         }
     }
@@ -168,10 +198,13 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
            FROM login_confirmations
            WHERE last_sent_at > NOW() - INTERVAL '24 hours'"#
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(internal("login: sum sends for global cap"))?;
     if sent_last_24h >= LOGIN_GLOBAL_MAX_SENDS_PER_DAY {
+        tx.commit()
+            .await
+            .map_err(internal("login: commit transaction"))?;
         axum_prometheus::metrics::counter!("login_email_cap_hit_total").increment(1);
         return Ok(LoginResponse {
             success: false,
@@ -200,9 +233,13 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         email,
         fresh_code
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(internal("login: upsert confirmation"))?;
+
+    tx.commit()
+        .await
+        .map_err(internal("login: commit transaction"))?;
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
     send_login_email(resend.as_ref(), &email, &code).await;
@@ -633,6 +670,91 @@ mod tests {
         assert!(
             get_confirmation(&pool, "stale@example.com").await.is_none(),
             "rows outside the 24h accounting window are GC'd on login"
+        );
+    }
+
+    #[sqlx::test]
+    async fn login_concurrent_requests_do_not_overshoot_per_email_cap(pool: PgPool) {
+        let email = "hammered@example.com";
+        // One send below the cap. Without serializing the check-and-bump,
+        // concurrent requests can each read `sent_count = 3` before any of
+        // their upserts commit, overshooting the cap of 5. With the fix,
+        // requests are processed one at a time: the first legitimately
+        // bumps to 4, and every request behind it in the burst then also
+        // sees a `last_sent_at` from mere moments ago and is cooldown-
+        // suppressed - so in practice a burst like this yields at most one
+        // real send. Either way, the cap must never be exceeded.
+        seed_confirmation(
+            &pool,
+            email,
+            "999999",
+            time::Duration::minutes(10),
+            0,
+            3,
+            time::Duration::minutes(5),
+        )
+        .await;
+
+        let calls = (0..5).map(|_| with_pool_context(&pool, || login(email.to_string())));
+        let results = futures_util::future::join_all(calls).await;
+        for r in results {
+            assert!(
+                r.unwrap().success,
+                "cap must be indistinguishable from success"
+            );
+        }
+
+        let row = get_confirmation(&pool, email).await.unwrap();
+        assert!(
+            row.sent_count <= LOGIN_MAX_SENDS_PER_EMAIL,
+            "concurrent requests must not overshoot the per-email cap: got {}",
+            row.sent_count
+        );
+    }
+
+    #[sqlx::test]
+    async fn login_concurrent_requests_do_not_overshoot_global_cap(pool: PgPool) {
+        // 9 other emails * 5 sends = 45 already counted in the 24h window.
+        for i in 0..9 {
+            seed_confirmation(
+                &pool,
+                &format!("burner-{i}@example.com"),
+                "222222",
+                time::Duration::minutes(30),
+                0,
+                5,
+                time::Duration::minutes(30),
+            )
+            .await;
+        }
+
+        // 6 distinct new emails logging in concurrently: only 5 more sends
+        // fit under the 50 global cap (45 + 5 = 50), so exactly one of these
+        // must be honestly refused. Without a lock spanning all rows (not
+        // just one email's), concurrent requests across different emails can
+        // each read the same pre-upsert SUM and all pass.
+        let calls = (0..6)
+            .map(|i| with_pool_context(&pool, move || login(format!("legit-{i}@example.com"))));
+        let results = futures_util::future::join_all(calls).await;
+
+        let refused = results
+            .iter()
+            .filter(|r| !r.as_ref().unwrap().success)
+            .count();
+        assert_eq!(
+            refused, 1,
+            "exactly one request must be refused at the boundary"
+        );
+
+        let total: i64 = sqlx::query_scalar!(
+            r#"SELECT COALESCE(SUM(sent_count), 0) AS "total!" FROM login_confirmations"#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            total, LOGIN_GLOBAL_MAX_SENDS_PER_DAY,
+            "concurrent requests must not overshoot the global cap"
         );
     }
 
