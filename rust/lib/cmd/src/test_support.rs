@@ -55,45 +55,44 @@ where
     }
 
     for &count in &player_counts {
-        let (game_state, status) =
-            match requester
-                .request(&Request::New {
-                    players: count,
-                    seed: None,
-                })
-                .unwrap()
-            {
-                Response::New {
-                    game,
-                    public_render,
-                    player_renders,
-                    ..
-                } => {
-                    assert_eq!(
-                        player_renders.len(),
-                        count,
-                        "New: player_renders length should match player count {}",
-                        count
-                    );
+        let (game_state, status) = match requester
+            .request(&Request::New {
+                players: count,
+                seed: None,
+            })
+            .unwrap()
+        {
+            Response::New {
+                game,
+                public_render,
+                player_renders,
+                ..
+            } => {
+                assert_eq!(
+                    player_renders.len(),
+                    count,
+                    "New: player_renders length should match player count {}",
+                    count
+                );
+                assert!(
+                    !public_render.render.trim().is_empty(),
+                    "New: public render must not be empty for player count {}",
+                    count
+                );
+                for player_render in &player_renders {
                     assert!(
-                        !public_render.render.trim().is_empty(),
-                        "New: public render must not be empty for player count {}",
+                        !player_render.render.trim().is_empty(),
+                        "New: player render must not be empty for player count {}",
                         count
                     );
-                    for player_render in &player_renders {
-                        assert!(
-                            !player_render.render.trim().is_empty(),
-                            "New: player render must not be empty for player count {}",
-                            count
-                        );
-                    }
-                    (game.state, game.status)
                 }
-                r => panic!(
-                    "expected New to succeed for advertised player count {}, got {:?}",
-                    count, r
-                ),
-            };
+                (game.state, game.status)
+            }
+            r => panic!(
+                "expected New to succeed for advertised player count {}, got {:?}",
+                count, r
+            ),
+        };
 
         match requester
             .request(&Request::Status {

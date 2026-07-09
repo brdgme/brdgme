@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn rand_ext_apis_work() {
         let mut r = GameRng::seed_from_u64(1);
-        let mut v = vec![1, 2, 3, 4, 5];
+        let mut v = [1, 2, 3, 4, 5];
         v.shuffle(&mut r);
         assert!(v.choose(&mut r).is_some());
     }

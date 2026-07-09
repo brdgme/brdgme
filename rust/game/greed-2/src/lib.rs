@@ -233,9 +233,7 @@ impl Game {
     }
 
     fn random_dice(rng: &mut GameRng, n: usize) -> Vec<Die> {
-        let mut dice: Vec<Die> = (0..n)
-            .map(|_| DIE_FACES[rng.random_range(0..6)])
-            .collect();
+        let mut dice: Vec<Die> = (0..n).map(|_| DIE_FACES[rng.random_range(0..6)]).collect();
         dice.sort();
         dice
     }
