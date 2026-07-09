@@ -6,3 +6,4 @@ pub mod command;
 pub mod errors;
 pub mod game;
 pub mod game_log;
+pub mod randomizer;
