@@ -21,9 +21,10 @@ attempted and dropped 2026-07-08),
 #13 NATS bot eventing, #17 NATS WS migration, #19 prod provisioning +
 #15 ArgoCD + sealed-secrets (live, first fully-green sync 2026-07-08;
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
-import rehearsal - remain). **Remaining pre-go-live:** #28 WP1-3 app
-hardening (promoted 2026-07-08), #32 Alloy/Grafana Cloud OTLP export
-failure investigation (added 2026-07-09) → #16 beta
+import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
+complete 2026-07-10). **Remaining pre-go-live:** #32 Alloy/Grafana Cloud
+OTLP export failure investigation (added 2026-07-09), #28 WP4 Cloudflare
+edge (promoted pre-go-live 2026-07-10) → #16 beta
 period (isolated DB) → hard cutover + 1-week validation gate →
 decommission. (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
@@ -78,7 +79,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-25-rules-rendering-design.md) | [plan](superpowers/plans/2026-07-05-25-rules-rendering.md) |
 | 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-26-theming-design.md) | [plan](superpowers/plans/2026-07-05-26-theming.md) |
 | 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
-| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | WP1-3 promoted to pre-go-live priority 2026-07-08 (WP4 Cloudflare stays post-cutover); client-IP/PROXY-protocol dropped the same day - per-IP app limits are collective/spoofable, D2's IP-independent caps + Cloudflare edge carry the protection | [spec](superpowers/specs/2026-07-08-28-abuse-protection-design.md) | [plan](superpowers/plans/2026-07-08-28-abuse-protection.md) |
+| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | WP1-3 complete 2026-07-10 (commits d9d1d1d/3c6fa72 WP1, 0093291 WP2, 6e53681 WP3, 5a7bb85 review fixes: limiter re-sized for shared bucket per D6, migration-005 window documented); WP4 (Cloudflare edge) promoted to pre-go-live 2026-07-10 (was post-cutover per D1; superseded same day - CF proxy/WS/rate-limit behaviour needs validating on beta.brdg.me before cutover) | [spec](superpowers/specs/2026-07-08-28-abuse-protection-design.md) | [plan](superpowers/plans/2026-07-08-28-abuse-protection.md) |
 | 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [spec](superpowers/specs/2026-07-08-29-stats-reports-design.md) | [plan](superpowers/plans/2026-07-08-29-stats-reports.md) |
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
@@ -227,3 +228,37 @@ dropped 2026-07-08.
 traces) observed stuck in a retry loop with `resolver error: produced
 zero addresses` in prod alloy pod logs; no traces are being exported.
 Promoted to pre-go-live priority - needs investigation before go-live.
+
+2026-07-10: #28 WP1-3 completed. WP2 (commits 666e35b..0093291) added
+global HTTP hygiene middleware to `build_router` - 256 KiB request body
+limit + 30s timeout - plus a live-websocket >30s survival test; task
+review approved. WP3 (commit 6e53681) switched rate-limit keying to
+`PeerIpKeyExtractor` (socket peer address only), with forwarding headers
+proven ignored, permanent per D6; task review approved (the dead
+`headers` param on `extract_client_ip` is kept intentionally, to be
+stripped in WP4's signature revisit). A final whole-branch review over
+WP1-3 found no Critical issues and two Important findings, both resolved
+by user decisions: the login/confirm rate-limit governor was loosened for
+the shared SNAT bucket (login burst 30/+1 per 2s, confirm burst 60/+1 per
+1s, with a D6 comment explaining why; WP4 will re-tighten per-IP via
+`CF-Connecting-IP`), and the migration-005 `DROP COLUMN` deploy window was
+accepted and documented (SQL comment plus a #16 beta-checklist line); a
+reviewer-recommended accepted-race comment was also added in
+`confirm_login_inner`. Fix commit 5a7bb85; re-review approved. Separately,
+Michael initially considered and rejected pulling WP4 (Cloudflare) ahead
+of go-live: it would stay post-cutover + 1-week gate per D1, since
+bringing it forward would entangle nameserver migration with the cutover
+itself, and the app-level DB caps are mandatory regardless (Cloudflare
+would still be bypassed by traffic hitting the load balancer directly).
+
+2026-07-10 (later, same day): that call was reversed - WP4 is promoted to
+pre-go-live, superseding D1's post-cutover scheduling. Rationale: CF
+proxy/WS/rate-limit behaviour is far easier to validate against
+beta.brdg.me while still in beta than after going live; the nameserver
+move happens well before cutover week, with legacy apex records ported
+DNS-only (unproxied) so the live Linode site is untouched until cutover
+day. The WP4 plan section needs a resequencing pass, since it was written
+assuming Phase 16 (cutover) was already complete; the design spec is a
+point-in-time record and is not being edited. Remaining pre-go-live order
+is now #32 investigation → #28 WP4 (Cloudflare edge) → #16 beta →
+cutover.
