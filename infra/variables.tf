@@ -57,3 +57,9 @@ variable "tofu_state_bucket_name" {
   type        = string
   default     = "brdgme-tofu-state"
 }
+
+variable "cloudflare_account_id" {
+  description = "Cloudflare account ID owning the brdg.me zone. Not secret (it appears in dashboard URLs); also in .env as CLOUDFLARE_ACCOUNT_ID for direct API calls outside tofu."
+  type        = string
+  default     = "cada680352b729d5b0c87470b05c55f7"
+}
