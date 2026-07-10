@@ -103,6 +103,33 @@
 4. Human: registrar NS flip to Cloudflare's nameservers.
 5. Validation checklist (below), then remove DO zone resources.
 
+## Post-approval state (2026-07-10)
+
+Approved by Michael 2026-07-10, with the following facts superseding the
+runbook order above:
+
+- The CF zone for brdg.me already exists; the scoped API token is
+  created. Local env has `CLOUDFLARE_API_TOKEN` and
+  `CLOUDFLARE_ACCOUNT_ID` set in `.env` (gitignored); both documented in
+  `.env.example`.
+- All existing DO records were copied to the CF zone at zone creation,
+  and the registrar nameservers are already cut over to Cloudflare.
+  Runbook steps 1, 3 and 4 are therefore done; the NS-flip sign-off gate
+  is moot.
+- Consequence for W4: the Tofu work is now adoption, not creation - the
+  cloudflare provider gets added and the existing zone + records are
+  imported into state (import blocks or `tofu import`), then reconciled
+  so `tofu plan` is clean. The proxied/DNS-only status of each imported
+  record must be audited against W4's intent (8 records DNS-only, beta
+  proxied) - CF's zone-creation import may have guessed proxied status.
+- W9 (keep WP2 hygiene middleware) confirmed by Michael, conditional on:
+  the code stays tiny (it is - one layer stack in `build_router`), no
+  maintenance burden, and no websocket interference (already proven by
+  WP2's live >30s WS survival test).
+- Validation checklist items that can run immediately (NS propagation,
+  cf-ray on beta, WS through proxy, login email) should be exercised
+  early in implementation since the proxy may already be live.
+
 ## Beta validation checklist
 
 - NS propagation (`dig NS brdg.me`), records resolve.
