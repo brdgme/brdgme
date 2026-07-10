@@ -1,24 +1,50 @@
 # Game Porting Guide (Go -> Rust)
 
-How to port a game to a Rust game crate in this project. Two source kinds:
+How to port a game to a Rust game crate in this project. Two source kinds,
+regardless of which version number the crate ends up with (see "Versioning"
+below):
 
-- **Old project** (`~/Development/brdg.me/game/<name>`) -> `rust/game/<name>-1`.
-  The bulk of this guide covers these.
-- **In-repo Go games** (`brdgme-go/<name>_1`) -> `rust/game/<name>-2` (new
-  edition number, like lost-cities-2). These skip most of the restructuring
-  below: the Go source already matches the platform architecture (int players,
-  returned logs, parser combinators, placings, JSON state), so the work is
-  language translation - int-const enums become Rust enums, `interface{}`
-  states become typed `PubState`/`PlayerState`, render strings become `Node`
-  trees. Tests are ported 1:1 (see step 8) - they are the proof that the
-  conversion preserves behaviour. Deployment-wise the `-2` gets its own
-  manifests and the `-1` `GameVersion` is marked `isDeprecated: true`.
+- **Old project** (`~/Development/brdg.me/game/<name>`). The bulk of this
+  guide covers these - the Go source follows the old monolithic-server
+  architecture and needs restructuring (see "Big picture").
+- **In-repo Go games** (`brdgme-go/<name>_1`). These skip most of the
+  restructuring below: the Go source already matches the platform architecture
+  (int players, returned logs, parser combinators, placings, JSON state), so
+  the work is language translation - int-const enums become Rust enums,
+  `interface{}` states become typed `PubState`/`PlayerState`, render strings
+  become `Node` trees. Tests are ported 1:1 (see step 8) - they are the proof
+  that the conversion preserves behaviour.
 
 Decision to target Rust rather than Go: `docs/decisions/GO_VS_RUST_PORTING.md`.
 Reference ports: `rust/game/lost-cities-1` (small, clean, recent idioms -
 primary template) and `rust/game/acquire-1` (large).
 
 General best practices: `docs/authoring/GAME_DEVELOPMENT.md`.
+
+## Porting correctness rule
+
+Preserve source behaviour by default. Every suspected source defect (inverted
+conditions, off-by-one counts, missing validations) must be raised with the
+user and approved before correction during implementation.
+
+## Versioning
+
+Every new port increments the highest existing version number for that game
+across all implementations, not merely Rust crates or deployments. The
+original Go implementation counts as version 1, so the first Rust port is
+`<name>-2` even when no `<name>-1` Rust crate exists. Never reuse an old
+version number. Authoring a truly new game (no prior implementation in any
+language) is outside this porting guide.
+
+- `lost-cities` was first ported from the old project as `lost-cities-1`
+  (predates this versioning rule); a later replacement port from the in-repo
+  Go code became `lost-cities-2`.
+- `jaipur` has only the old-project Go implementation (version 1). Its first
+  Rust port is `jaipur-2`.
+
+When replacing a previously deployed GameVersion, the new version gets its own
+manifests and the old GameVersion is marked `isDeprecated: true`. If no prior
+version was deployed in this repository, no deprecation manifest is needed.
 
 ## Big picture
 
@@ -33,7 +59,7 @@ entries from each call.
 ## Crate layout (mirror lost-cities-1)
 
 ```
-rust/game/<name>-1/
+rust/game/<name>-N/
   Cargo.toml            # deps: brdgme_cmd, brdgme_fuzz, brdgme_color,
                         #       brdgme_game, brdgme_markup, rand, serde, tokio
   RULES.md              # player-facing rules text
@@ -43,10 +69,10 @@ rust/game/<name>-1/
     command.rs          # Command enum + parser combinators
     render.rs           # Renderer impls for PubState/PlayerState
     bin/
-      <name>_1_cli.rs   # 4 tiny stubs calling brdgme_cmd entry points
-      <name>_1_http.rs  #   (http is what runs in production)
-      <name>_1_repl.rs
-      <name>_1_fuzz.rs
+      <name>_N_cli.rs   # 4 tiny stubs calling brdgme_cmd entry points
+      <name>_N_http.rs  #   (http is what runs in production)
+      <name>_N_repl.rs
+      <name>_N_fuzz.rs
   tests/
     contract.rs         # assert_gamer_contract::<Game>();
 ```
@@ -78,6 +104,11 @@ rust/game/<name>-1/
    effect parameters) goes in `impl` methods or const tables keyed by variant.
    Decks/hands are `Vec<Card>`; shuffle with the game's `rng` field - see
    `docs/authoring/GAME_DEVELOPMENT.md` (Randomness).
+
+   **Logs and information boundaries are observable behaviour.** Porting means
+   reproducing what players and spectators see, not just final state. Log
+   messages, their order, and public/private visibility are part of the spec.
+   Write tests that assert on `Vec<Log>` as well as game state.
 2. **Game state.** Translate the old `Game` struct: `Players []string` ->
    player count only; `map[int]X` keyed by player -> `Vec<X>`; phases ->
    `enum Phase`. Everything `#[derive(Default, Clone, Serialize, Deserialize)]`.
@@ -100,6 +131,16 @@ rust/game/<name>-1/
      (dice rolls, draws, reveals => `false`).
    - always pass through the parser's `remaining` - it enables chained
      commands in one input line.
+
+   **Validate parser combinator semantics against source behaviour.** Parser
+   combinators (`OneOf`, `Chain2`, `Token`, `Enum`, etc.) have subtle semantics
+   that may not exactly match source text parsing. After building the parser,
+   run every command form from the source test suite through it and verify:
+   the correct variant is parsed, error messages match intent, and edge cases
+   (leading/trailing spaces, partial matches, and ambiguous matches) match
+   source behaviour. Any deviation that appears preferable must be raised with
+   and approved by the user under the porting correctness rule. Add regression
+   tests at the parser level, not only at the command-dispatch level.
 6. **Pub/player state + render.** Define `PubState` (spectator view: hidden
    info reduced to counts/summaries) and `PlayerState` (usually
    `{ public: PubState, player: usize, hand: ... }`). Implement `Renderer`
@@ -148,35 +189,56 @@ rust/game/<name>-1/
      behaviour, not game rules), note it in the port's PR description.
    - Where old tests fixed game state directly (e.g. stacking a deck before a
      command), keep doing that - construct the `Game` struct explicitly.
+   - When mechanically constructing identical source state is impossible,
+     translate the test's intent - the rule it exercises - and construct a
+     deterministic Rust scenario that exercises the same rule. Do not contrive
+     brittle preconstructed state solely to match the source line-for-line
+     when a simpler setup tests the same behaviour.
    - Where the old suite is thin or absent (e.g. zombie_dice has zero tests),
      1:1 preserves nothing: add at least happy-path tests for every command
      plus end-of-game scoring before calling the port done.
    - `tests/contract.rs` with `assert_gamer_contract::<Game>()` (needs the
      `test-support` dev-dependency feature).
-   - The fuzz binary gives free crash-hunting: `cargo run --bin <name>_1_fuzz`.
+   - The fuzz binary gives free crash-hunting: `cargo run --bin <name>_N_fuzz`.
      Run it for a while before shipping; it catches panics unit tests miss.
 9. **Binaries**: copy the four ~12-line stubs from lost-cities-1, rename the
    crate references.
+10. **Update tracking documents.** After all CI/registration steps pass and
+    the port is deployed, update `docs/BACKLOG.md` to move the port from planned
+    to done. If any game-specific tracking documents reference the port, update
+    those too. This prevents stale backlog entries that make it unclear whether
+    a game still needs porting.
 
 ## Registration / deployment checklist (per game)
 
-1. `rust/Cargo.toml`: add `game/<name>-1` to workspace `members`.
-2. `rust/Dockerfile`: add final stage (`FROM debian:bookworm-slim AS <name>-1`,
-   copy `target/release/<name>_1_http`, `CMD`). The workspace build stage
+1. `rust/Cargo.toml`: add `game/<name>-N` to workspace `members`.
+2. `rust/Dockerfile`: add final stage (`FROM debian:bookworm-slim AS <name>-N`,
+   copy `target/release/<name>_N_http`, `CMD`). The workspace build stage
    picks the crate up automatically.
-3. `.github/workflows/ci.yml`: add an `image`/`target` entry to the
-   `build-rust-games` job matrix. Without this the image is never built or
-   pushed to GHCR, so the prod override in step 6 points at an image that
-   doesn't exist (this was missed for liars-dice-2/no-thanks-2 and only
-   caught in review).
-4. `Tiltfile`: add `"<name>-1"` to the Rust games list.
-5. `k8s/base/game/<name>-1/`: `deployment.yaml`, `service.yaml` (port 80),
+3. `docker-bake.hcl`: add the crate name (e.g. `<name>-N`) to the `tgt` array
+   inside `target "image"`. This makes the image matrix build and push that
+   game image to GHCR. Separately, CI runs `cargo test --workspace --exclude web`,
+   which covers this crate because item 1 registers it in the Cargo workspace.
+4. Report actual test counts, not hand-aggregated estimates. Run:
+   ```
+   cargo test --package <name>-N -- --list --format terse | rg ': test$' | wc -l
+   ```
+   Filtering `: test` excludes per-target summary lines. Use the integer from
+   that command in the PR description. If the ported count differs from the
+   source count, briefly explain why.
+5. `Tiltfile`: add `"<name>-N"` to the Rust games list.
+6. `k8s/base/game/<name>-N/`: `deployment.yaml`, `service.yaml` (port 80),
    `game-version.yaml` (`kind: GameVersion`, `spec.typeName` display name,
    `weight`), `kustomization.yaml`; add the dir to
    `k8s/base/game/kustomization.yaml`.
-6. `k8s/prod/app/kustomization.yaml`: add the `ghcr.io/brdgme/brdgme/<name>-1`
+7. `k8s/prod/app/kustomization.yaml`: add the `ghcr.io/brdgme/brdgme/<name>-N`
    image override.
-7. Verify: `cargo build && cargo test` in `rust/`, then a Tilt/Kind run.
+8. Verify: `cargo build --package <name>-N` and `cargo test --package <name>-N`
+   in `rust/`, then a Tilt/Kind run.
+9. Run `cargo fmt --all -- --check` and `cargo clippy --workspace --exclude web
+   --all-targets -- -D warnings` after completing Rust changes. These are the
+   same checks CI runs (`.github/workflows/ci.yml`) and must pass clean before
+   merging.
 
 ## Gotchas
 

@@ -1,0 +1,35 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tic-tac-toe-2
+spec:
+  selector:
+    matchLabels:
+      app: tic-tac-toe-2
+  template:
+    metadata:
+      labels:
+        app: tic-tac-toe-2
+    spec:
+      containers:
+      - name: tic-tac-toe-2
+        image: brdgme/tic-tac-toe-2
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi

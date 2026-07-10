@@ -14,14 +14,14 @@ tracks:
   17 are converted, the entire `brdgme-go/` stack (Go toolchain, Dockerfile,
   Bazel files) can be retired.
 
-Already done and out of scope: acquire-1, lost-cities-1/2 (Rust).
+Already done and out of scope: acquire-1, lost-cities-1/2, tic-tac-toe-2 (Rust).
 
 ## Track A: old-project ports
 
 | Game | Old size | Players | Effort | Notes |
 |---|---|---|---|---|
-| tic_tac_toe | 461 lines, 3 files | 2 | Small | Trivial; Rust-port warm-up |
-| jaipur | 993 lines, 9 files | 2 | Medium | Hidden hands; goods enum |
+| tic_tac_toe | 461 lines, 3 files | 2 | Done as tic-tac-toe-2 | Trivial; Rust-port warm-up |
+| jaipur | 993 lines, 9 files | 2 | Done as jaipur-2 | Hidden hands; goods enum |
 | red7 | 1,143 lines, 11 files | 2-4 | Medium | Bitmask cards -> struct; eliminations |
 | alhambra | 2,344 lines, 19 files | 2-6 | Large | Card enum; own square grid |
 | starship_catan | 3,997 lines, 34 files | 2 | Very large | Card enum redesign; 20+ commands |
@@ -29,7 +29,7 @@ Already done and out of scope: acquire-1, lost-cities-1/2 (Rust).
 | hive | 277 lines (stub) | 2 | Not a port | Old version unfinished; new development |
 | chess | 744 lines (engine only) | 2 | Not a port | Move-gen library only; new development |
 
-Suggested order: tic_tac_toe -> jaipur -> red7 -> alhambra -> starship_catan ->
+Remaining suggested order: red7 -> alhambra -> starship_catan ->
 seven_wonders. Defer hive and chess.
 
 Prerequisite library work (Rust, shared with Track B):
@@ -48,7 +48,7 @@ Prerequisite library work (Rust, shared with Track B):
 
 ## Track A per-game plans
 
-### tic_tac_toe (Small)
+### tic_tac_toe (Done as tic-tac-toe-2)
 
 - 3 files. 2 players, no hidden info.
 - One `play` command (coordinate parser); `PubState == PlayerState` in
@@ -57,15 +57,27 @@ Prerequisite library work (Rust, shared with Track B):
 - Good first Rust port to establish rhythm against the lost-cities-1
   template.
 
-### jaipur (Medium)
+**Done (Track A, 2026-07):** all 10 old Go tests ported 1:1, with focused
+Rust coverage for status, scoring, command availability, serialization,
+rendering, deterministic starter selection, and correct winner attribution
+when player 1 starts as X. `assert_gamer_contract` passes. Runtime registration
+includes the workspace, Dockerfile, Docker Bake, Tilt, and k8s base/prod
+manifests. No tic-tac-toe-1 service or GameVersion exists in this repository,
+so no deprecation manifest was added.
 
-- 2 players. Goods/camels are int enums in the old code (`pieces.go`) ->
-  `enum Good`. Commands: take, sell (+ trade variants inside take).
+### jaipur (Done as jaipur-2)
+
+- 2 players. Goods/camels enum -> `enum Good`. Commands: take, sell.
 - Hidden info: hands. `PlayerState { public, player, hand }`; `PubState`
   carries opponent hand count only. Deck draws => `can_undo: false`.
 - Round/point structure (bonus tokens, seals of excellence) -> metrics for
   `gen_placings` (seals, then points).
-- Old `helper.MatchStringInStrings` goods matching -> `Enum` parser.
+
+**Done (Track A, 2026-07):** all ported from Go source with 61 Rust tests
+covering deck, market, take (camels/goods/trade), sell, camel bonus, round
+transitions, token scoring, tiebreakers, hand-size limits, pub-state
+redaction, commands, parsers, and `assert_gamer_contract` green. Reg wired:
+workspace, Dockerfile, Tiltfile, k8s base/prod manifests.
 
 ### red7 (Medium)
 

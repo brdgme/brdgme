@@ -12,6 +12,7 @@ bases:
 - for-sale-2
 - greed-1
 - greed-2
+- jaipur-2
 - liars-dice-1
 - liars-dice-2
 - lost-cities-1
@@ -27,5 +28,6 @@ bases:
 - sushizock-1
 - sushizock-2
 - texas-holdem-1
+- tic-tac-toe-2
 - zombie-dice-1
 - zombie-dice-2

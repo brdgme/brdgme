@@ -41,6 +41,7 @@ target "image" {
       "farkle-2",
       "for-sale-2",
       "greed-2",
+      "jaipur-2",
       "liars-dice-2",
       "lost-cities-1",
       "lost-cities-2",
@@ -48,6 +49,7 @@ target "image" {
       "operator",
       "sushi-go-2",
       "sushizock-2",
+      "tic-tac-toe-2",
       "zombie-dice-2"
     ]
   }

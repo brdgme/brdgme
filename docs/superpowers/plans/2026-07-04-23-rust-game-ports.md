@@ -34,8 +34,8 @@ tests written during the port. See GAME_PORTING.md step 8.
 
 ## Track A - new ports from the old Go project (suggested order)
 
-- [ ] tic-tac-toe-1 (small; 2p, no hidden info; Rust-port warm-up)
-- [ ] jaipur-1 (medium; 2p, hidden hands, goods enum)
+- [x] tic-tac-toe-2 (small; 2p, no hidden info; Rust-port warm-up)
+- [x] jaipur-2 (medium; 2p, hidden hands, goods enum; complete)
 - [ ] red7-1 (medium; 2-4p, in-round eliminations, command chaining)
 - [ ] alhambra-1 (large; 2-6p, card enum, own square-grid module)
 - [ ] starship-catan-1 (very large; 2p, card enum redesign, 20+ commands)

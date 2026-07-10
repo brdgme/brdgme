@@ -2767,6 +2767,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jaipur-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "jiff"
 version = "0.2.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6165,6 +6180,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc0ed6038fcbc0795aca7c92963ddda636573b956679204e044492d2b13c8f64"
 dependencies = [
  "pin-project-lite",
+]
+
+[[package]]
+name = "tic-tac-toe-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

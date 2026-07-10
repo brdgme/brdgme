@@ -1,0 +1,8 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: jaipur-2
+  namespace: brdgme
+spec:
+  typeName: Jaipur
+  weight: 1.0

@@ -76,6 +76,9 @@ images:
 - name: brdgme/greed-2
   newName: ghcr.io/brdgme/brdgme/greed-2
   newTag: latest
+- name: brdgme/jaipur-2
+  newName: ghcr.io/brdgme/brdgme/jaipur-2
+  newTag: latest
 - name: brdgme/liars-dice-1
   newName: ghcr.io/brdgme/brdgme/liars-dice-1
   newTag: latest
@@ -114,6 +117,9 @@ images:
   newTag: latest
 - name: brdgme/texas-holdem-1
   newName: ghcr.io/brdgme/brdgme/texas-holdem-1
+  newTag: latest
+- name: brdgme/tic-tac-toe-2
+  newName: ghcr.io/brdgme/brdgme/tic-tac-toe-2
   newTag: latest
 - name: brdgme/zombie-dice-1
   newName: ghcr.io/brdgme/brdgme/zombie-dice-1
