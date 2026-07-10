@@ -214,6 +214,24 @@ async fn healthz_returns_200(pool: PgPool) {
     assert_eq!(body, "OK");
 }
 
+// WP2 (#28 abuse protection): the router's `RequestBodyLimitLayer` should
+// reject a request whose declared `Content-Length` exceeds the 256 KiB cap
+// before ever calling the matched route, mirroring tower-http's own
+// documented pattern of pre-checking the header rather than requiring the
+// oversized body to actually be sent.
+#[sqlx::test]
+async fn oversized_post_body_rejected_with_413(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/")
+        .header(header::CONTENT_LENGTH, (256 * 1024 + 1).to_string())
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
 #[sqlx::test]
 async fn home_page_anonymous(pool: PgPool) {
     let app = build_router(make_state(pool).await).await;

@@ -31,7 +31,7 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"], optio
 tower = { version = "0.5", features = ["util"], optional = true }
 tower-sessions = { version = "0.14.0", optional = true }
 tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"], optional = true }
-tower-http = { version = "0.7", features = ["cors", "trace"], optional = true }
+tower-http = { version = "0.7", features = ["cors", "trace", "limit", "timeout"], optional = true }
 anyhow = { version = "1.0.103", optional = true }
 thiserror = { version = "2.0.18", optional = true }
 
@@ -121,6 +121,7 @@ panic = "abort"
 
 [dev-dependencies]
 serial_test = "3.5.0"
+tokio-tungstenite = "0.29"
 
 [package.metadata.leptos]
 output-name = "web"

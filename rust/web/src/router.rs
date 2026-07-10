@@ -7,13 +7,27 @@ use crate::app::{App, shell};
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::MatchedPath;
-use axum::http::{Request, Response};
+use axum::http::{Request, Response, StatusCode};
 use leptos::prelude::*;
 use leptos_axum::{LeptosRoutes, generate_route_list};
 use opentelemetry::trace::{TraceContextExt, TraceId};
 use std::time::Duration;
+use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+/// Server-fn payloads are small forms, so 256 KiB is generous headroom.
+const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
+
+/// Bounds how long a request's handler future may run before the layer
+/// synthesizes a response - this does NOT bound `/ws`'s connection lifetime.
+/// `WebSocketUpgrade::on_upgrade` (axum) returns the 101 response and hands
+/// the actual socket off to a detached `tokio::spawn`ed task immediately, so
+/// the handler future this layer times completes almost instantly regardless
+/// of how long the socket stays open afterwards; a slow HTTP handler (or a
+/// stalled leptos server-fn) is what this actually guards against.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Root span for every HTTP request, carrying route (matched path, not raw path -
 /// same low-cardinality reasoning as the `/metrics` labels), status, and latency.
@@ -93,6 +107,24 @@ pub async fn build_router(state: AppState) -> Router {
         // needs to serve error pages and the WS layer independently of the
         // database being up.
         .route("/healthz", axum::routing::get(healthz))
+        // Global HTTP hygiene, not abuse-proofing: `tower_governor`'s login/confirm
+        // limiters (`auth::rate_limit`) and these two are in-memory per-process
+        // state, so with `replicas: 2` each pod enforces its own independent
+        // quota, and a redeploy resets it to zero - neither is a hard ceiling.
+        // The hard ceiling is the WP1 DB-backed send caps (`login()`'s
+        // cooldown/per-email/global caps in `auth/server.rs`), which are
+        // replica-safe and survive restarts because they live in Postgres.
+        // These two layers exist to stop a stray oversized POST or a wedged
+        // handler from tying up a worker/connection - added after `/healthz`
+        // (like `TraceLayer` below) so both apply to it too, which is harmless
+        // since the probe is bodyless and returns immediately. Placed before
+        // `TraceLayer` so it stays the outermost layer and still records a
+        // span (with e.g. a 413/408 status) for requests these reject.
+        .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            REQUEST_TIMEOUT,
+        ))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(make_root_span)
