@@ -12,8 +12,9 @@
 - WP4 promoted from post-cutover to pre-go-live 2026-07-10: CF
   proxy/websocket/rate-limit behaviour is far easier to validate against
   beta.brdg.me during beta than after going live.
-- WP3 (peer-only rate-limit keying, commit 6e53681) is the prerequisite
-  for the CF-Connecting-IP carve-out.
+- WP3 (peer-only rate-limit keying, commit 6e53681) proved forwarding
+  headers are ignored at the app, documenting the trust model that the
+  W6 limiter deletion relies on.
 - Michael's simplifying call 2026-07-10: the current brdg.me
   (Linode-hosted legacy site) is not actively used right now, so the
   migration does not need zero-downtime ceremony around the legacy
@@ -21,6 +22,10 @@
 - #32 (Alloy OTLP) demoted to post-go-live 2026-07-10 (Grafana Cloud
   quota needs to reset anyway); WP4 is now the sole remaining pre-go-live
   item before #16 beta.
+- Explicit goal: this pivot is also about using Cloudflare to remove
+  custom security complexity from the app wherever CF now provides the
+  equivalent, not just adding an edge in front of it. Rate limiting is
+  the primary case.
 
 ## Decisions
 
@@ -56,11 +61,22 @@
   websockets or login); the one free rate-limiting rule, path verified
   against the actual Leptos server-fn prefix at implementation time,
   tuned so normal SSR/server-fn bursts never trip it.
-- **W6 - App carve-out (after edge verified).** `extract_client_ip` in
-  `rust/web/src/auth/rate_limit.rs` prefers `CF-Connecting-IP`, dead
-  `headers` param stripped, login/confirm limiter constants re-tightened
-  per-IP (undoing the shared-SNAT-bucket loosening of 5a7bb85, per the
-  existing D6 comment).
+- **W6 - Delete in-app per-IP rate limiting instead of extending it.**
+  Once the CF rate-limiting rule (real client IPs at the edge) is
+  verified on beta, remove the tower_governor login/confirm limiters
+  from the app entirely: `rust/web/src/auth/rate_limit.rs`, the
+  governor dependency, `extract_client_ip` and its tests, and the
+  previously planned CF-Connecting-IP carve-out (now unnecessary -
+  nothing in-app keys on IP anymore). Rationale: per D6 the in-app
+  limiter was already one collective SNAT bucket (coarse damping only);
+  WP1's DB-backed caps (per-email cooldown/cap, global Resend cap,
+  per-code attempt cap) are IP-independent and remain the backstop for
+  direct-to-LB traffic. WP3's peer-only keying work is not wasted - it
+  proved forwarding headers are ignored, which documented the trust
+  model this deletion relies on. This supersedes the "re-tighten per-IP
+  in WP4" intent recorded in the D6 comment in `rate_limit.rs` and in
+  commit 5a7bb85's loosening rationale - the limiter is deleted, not
+  re-tightened.
 - **W7 - Origin lockdown investigation**, unchanged from the old WP4
   step 4 (`loadBalancerSourceRanges` vs DO LB annotations via the
   cilium Gateway `spec.infrastructure`), timed after the proxy is
@@ -69,6 +85,12 @@
 - **W8 - Cutover-day delta** stays in the #16 runbook: apex flips from
   DNS-only-Linode to proxied-new-LB, Gateway apex listeners added, DNS01
   already proven by then.
+- **W9 - Keep WP2's hygiene middleware (body limit 256 KiB + 30s
+  timeout).** Explicitly considered for removal and kept: Cloudflare
+  free tier's own limits are far looser (100 MB request bodies, ~100s
+  proxy timeout), the middleware still protects the direct-to-LB path,
+  and it is one small layer in `build_router` with near-zero complexity,
+  unlike the limiter machinery. Overridable at spec review.
 
 ## Human vs agent split (runbook order)
 
@@ -92,7 +114,8 @@
 - Forced DNS01 renewal succeeds (e.g. `cmctl renew` / delete the cert
   secret).
 - Rate-limiting rule trips under a curl loop, never under normal
-  browsing.
+  browsing. Must be verified before the W6 in-app limiter deletion
+  lands (CF rule proven first, then delete).
 - Bot Fight Mode verified against websockets + login; toggle off if it
   interferes.
 
