@@ -1,6 +1,7 @@
-# Pre-Go-Live UI/UX Polish
+# Pre-Go-Live Polish
 
-This is a running collection of minor UI/UX jank noticed before go-live.
+This is a running collection of jank noticed before go-live - mostly
+minor UI/UX issues, plus the occasional dev-process item.
 Each entry records observed behavior and expected behavior. These are not
 individually actioned as found - the list will be turned into a proper
 superpowers spec/plan and fixed as one batch when scheduled.
@@ -65,3 +66,36 @@ superpowers spec/plan and fixed as one batch when scheduled.
 - **Note:** The legacy system sent login emails from play@brdg.me (the
   address used for game plays). Using login@brdg.me for login emails is
   fine, but game emails later on must come from play@brdg.me.
+
+### 2026-07-10: CI runs every job on every change (dev process jank)
+
+- **Observed:** All CI jobs (Rust test/build, Go test/build, e2e,
+  kubeconform, legacy builds) run on every push, including docs-only
+  commits - long, heavy builds for no benefit. Rust builds in
+  particular are often really long even when they do need to run.
+- **Expected:** Jobs only run when relevant paths change. Preferred
+  mechanism: a `dorny/paths-filter` gate job with `if:` on its outputs,
+  keeping a single `ci.yml` so the existing `needs:` chains still work
+  and skipped jobs still report a status (unlike workflow-level
+  `paths:` filters, which break required checks). Rough gating:
+  - test-rust, cargo-deny, build-rust, e2e: `rust/**`,
+    `docker-bake.hcl`, `.github/workflows/ci.yml`
+  - test-go, build-go-games: `brdgme-go/**`, `.github/workflows/ci.yml`
+  - kubeconform: `k8s/**`
+  - build-legacy: `web/**`, `websocket/**`, `rust/api/**`
+- **Caveat:** Docker builds use context `.` - verify what the
+  Dockerfiles actually `COPY` and make sure the filters cover it.
+- **Also investigate:** whether Rust build caching is as good as it can
+  be - both the Swatinem/rust-cache CI jobs and the docker-bake
+  registry-backed layer cache (cargo-chef stages) - since Rust builds
+  are still often really long.
+- **Related (post-go-live deploy direction):** Nothing tags images on
+  git tags today - CI only triggers on master push and PRs, and images
+  are only tagged `sha-<short>` and `latest`. When moving to
+  tag-driven deploys, don't rebuild on tag push: retag the existing
+  image with `docker buildx imagetools create -t ...:v1.2.3
+  ...:sha-XXXXXXX`. Then move image-tag source of truth per the
+  comment in `k8s/argocd/brdgme-app.yaml` (deploy repo/overlay or Argo
+  CD Image Updater) to replace the manual bump. Edge case with path
+  filtering: a tag on a docs-only commit has no `sha-` image - retag
+  from the newest ancestor that built, or only tag commits that built.
