@@ -109,3 +109,52 @@ resource "cloudflare_dns_record" "beta_a" {
   proxied = true
   ttl     = 1
 }
+
+# Zone settings (spec W5). SSL "strict" = dashboard "Full (strict)":
+# CF connects to the origin over TLS and validates the origin cert
+# (cert-manager's Let's Encrypt cert on the Gateway). WebSockets must be
+# "on" for /ws through the proxy. Bot Fight Mode is deliberately NOT
+# managed here yet - it lands in a later, separately-verified task of
+# the 2026-07-10 WP4 plan because the free tier has no BFM exceptions
+# and it can break websockets/login.
+resource "cloudflare_zone_setting" "ssl" {
+  zone_id    = cloudflare_zone.brdgme.id
+  setting_id = "ssl"
+  value      = "strict"
+}
+
+resource "cloudflare_zone_setting" "websockets" {
+  zone_id    = cloudflare_zone.brdgme.id
+  setting_id = "websockets"
+  value      = "on"
+}
+
+# The one free-tier rate-limiting rule (spec W5/W6): per-IP, scoped to
+# the Leptos server-fn prefix /api/ (fns mount at
+# /api/<name><hash>, e.g. /api/login..., /api/confirm_login...).
+# Free tier constraints: period and mitigation_timeout are fixed at 10s,
+# action "block", and characteristics must include cf.colo.id alongside
+# ip.src. 60 req/10s/IP is deliberately generous - server-fn bursts from
+# one page load are far below it; a curl flood is far above. Tuned
+# during beta verification (plan Task 6) before the in-app limiters are
+# deleted (spec W6).
+resource "cloudflare_ruleset" "rate_limit" {
+  zone_id = cloudflare_zone.brdgme.id
+  name    = "brdgme rate limiting"
+  kind    = "zone"
+  phase   = "http_ratelimit"
+
+  rules = [{
+    ref         = "api_per_ip"
+    description = "Per-IP limit on Leptos server fns (/api/ prefix)"
+    expression  = "(starts_with(http.request.uri.path, \"/api/\"))"
+    action      = "block"
+    enabled     = true
+    ratelimit = {
+      characteristics     = ["cf.colo.id", "ip.src"]
+      period              = 10
+      requests_per_period = 60
+      mitigation_timeout  = 10
+    }
+  }]
+}
