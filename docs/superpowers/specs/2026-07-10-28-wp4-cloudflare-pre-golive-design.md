@@ -38,10 +38,10 @@
   (Zone.DNS Edit + Zone.Zone Settings Edit + Zone.Zone Read). Used by
   Tofu via `CLOUDFLARE_API_TOKEN` env (never committed) and sealed for
   cert-manager as a SealedSecret in `brdgme-config` (kubeseal pattern
-  identical to email-config, see plan
-  `docs/superpowers/specs/2026-07-08-15-production-cd-argocd-design.md`
-  lines 158-177). Rejected: split tokens per consumer - over-engineering
-  for this platform.
+  identical to email-config, see the "Bootstrap order" section, step 3,
+  of plan `docs/superpowers/plans/2026-07-08-15-production-cd-argocd.md`).
+  Rejected: split tokens per consumer - over-engineering for this
+  platform.
 - **W3 - TLS via DNS01.** ClusterIssuer `letsencrypt`
   (`k8s/base/cert-manager/cluster-issuer.yaml`) switches from the HTTP01
   gatewayHTTPRoute solver to DNS01 with the CF token. HTTP01 through the
