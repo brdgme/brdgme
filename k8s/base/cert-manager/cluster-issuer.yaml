@@ -1,14 +1,26 @@
 ---
 # ClusterIssuer for Let's Encrypt production certificates.
-# HTTP01 solver routes ACME challenge requests through the Gateway API
-# `brdgme` Gateway (k8s/base/gateway/gateway.yaml) via a gatewayHTTPRoute
-# solver, one per hostname listener.
+# DNS01 via Cloudflare (item 28 WP4, spec W3): HTTP01 through the CF
+# proxy is fragile (challenge caching, Always-Use-HTTPS interference),
+# and DNS01 also derisks cutover-day apex issuance. The token Secret
+# lives in the cert-manager namespace (cert-manager's cluster-resource
+# namespace for ClusterIssuer secret refs) as a SealedSecret in
+# brdgme-config (sealed-secrets/secrets/cloudflare-api-token.yaml),
+# scoped to the brdg.me zone (Zone.DNS Edit + Zone Settings Edit +
+# Zone Read).
 #
 # Prerequisite (one-time, not in kustomize - cluster infrastructure):
-# cert-manager must be installed with the Gateway API feature enabled
-# (Helm: --set config.enableGatewayAPI=true, or pass --enable-gateway-api
-# to the controller directly), and the Gateway API CRDs must already exist
-# in the cluster.
+# cert-manager installed with the Gateway API feature enabled
+# (--enable-gateway-api) - still required, because the Gateway
+# annotation cert-manager.io/cluster-issuer on
+# k8s/base/gateway/gateway.yaml is what creates the Certificate
+# resources; only the ACME challenge solver moved off the Gateway.
+#
+# Rollback: revert this file to the http01 gatewayHTTPRoute solver
+# (git history) - but note HTTP01 through the Cloudflare proxy is
+# unreliable, so a real rollback also means grey-clouding beta
+# (proxied = false on cloudflare_dns_record.beta_a in infra/) while
+# HTTP01 challenges run.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -20,11 +32,8 @@ spec:
     privateKeySecretRef:
       name: letsencrypt-account-key
     solvers:
-    # No sectionName: the solver HTTPRoute attaches to whichever listeners
-    # match the challenge hostname, so new hostnames need no new solver.
-    - http01:
-        gatewayHTTPRoute:
-          parentRefs:
-            - name: brdgme
-              namespace: brdgme
-              kind: Gateway
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cloudflare-api-token
+            key: api-token
