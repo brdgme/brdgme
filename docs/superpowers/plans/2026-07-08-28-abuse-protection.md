@@ -135,55 +135,21 @@ the key); WP1 gate.
 
 ## WP4: Cloudflare edge (post-cutover + 1-week gate, infra/Tofu)
 
-**Pre-req:** Phase 16 complete, break-glass window closed, legacy
-hostnames (`legacy`/`api`/`ws` per Phase 17/18 state) understood - only
-port records that still need to exist.
-
-1. **Tofu provider swap** in `infra/`: add the `cloudflare` provider,
-   `cloudflare_zone` for brdg.me, port every live record from `dns.tf`
-   (Resend DKIM/SPF/DMARC/MX and `send`/`_dmarc` records stay
-   **DNS-only**; apex/`www`-equivalents and any surviving app
-   hostnames become **proxied**). Keep the DO zone in place until the
-   NS move is verified, then remove `digitalocean_domain` +
-   `digitalocean_record` resources.
-2. **Registrar NS flip** to Cloudflare's assigned nameservers (manual
-   registrar step, like the Phase 21 flip; document in
-   `infra/README.md`).
-3. **TLS:** switch the cert-manager `ClusterIssuer` from HTTP01 to
-   DNS01 with a scoped Cloudflare API token (sealed-secret). Set the
-   CF zone SSL mode to **Full (strict)** (Tofu `cloudflare_zone_setting`).
-4. **Origin lockdown (best-effort):** restrict the DO LB to
-   Cloudflare's published IP ranges. The `do-loadbalancer-allow-rules`
-   annotation is deprecated (and has reported reliability issues -
-   verify behaviour when applied); `loadBalancerSourceRanges` is the
-   supported path but the Gateway-created Service only takes
-   annotations via `spec.infrastructure`. Investigate at implementation
-   time; if neither works cleanly, accept direct-to-LB bypass risk -
-   WP1 caps are the backstop - and note it here.
-5. **CF security config via Tofu:** Bot Fight Mode on; free managed
-   WAF ruleset (on by default); the one free rate-limiting rule on
-   `/api/*` (e.g. >30 req/10s per IP => block 10s - tune so real SSR
-   + server-fn bursts never trip it).
-6. **App client-IP carve-out:** extend WP3's extractor to prefer
-   `CF-Connecting-IP` (safe because either the LB only accepts CF
-   ranges, or - without lockdown - only when the PROXY-protocol peer
-   is within CF ranges). **Update 2026-07-08:** the PROXY-protocol
-   fallback in this parenthetical will never apply - the flip was
-   attempted and dropped permanently (see WP3 note above and D6 in the
-   design spec). Safety here rests solely on the origin-lockdown
-   `loadBalancerSourceRanges`/CF-IP-range restriction in step 4 (or, if
-   that never works cleanly, on accepting the direct-to-LB bypass risk
-   with WP1's caps as the backstop, as already noted in step 4).
-7. Update `docs/superpowers/specs/2026-07-08-20-external-dns-design.md` note: its "no second NS
-   cutover" rationale is superseded by this decision; Cloudflare also
-   restores an in-tree external-dns provider should that ever be
-   wanted.
-
-**Acceptance:** site serves through CF (response headers show
-`cf-ray`); websockets work through the proxy; login emails still
-deliver (Resend DNS untouched); certs renew via DNS01; `tofu plan`
-clean; rate-limit rule verified with a curl loop; real client IPs
-appear in the app (rate-limit keys + logs).
+> **Superseded 2026-07-10** - WP4 was resequenced from post-cutover to
+> pre-go-live and redesigned the same day (single-stage migration; the CF
+> zone is already live and the registrar NS already cut over by Michael,
+> so the Tofu work is adoption/import, not creation). The current design
+> is
+> `docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md`
+> and the executable plan is
+> `docs/superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md`;
+> this heading is kept as a point-in-time record only. Note in particular
+> that the old step 6 (`CF-Connecting-IP` carve-out in the app's
+> extractor) is superseded by DELETION of the in-app per-IP rate limiting
+> (new spec W6): once the CF edge rate-limit rule is proven on beta,
+> `rate_limit.rs`, the governor dependency, and `extract_client_ip` are
+> removed entirely - nothing in-app keys on IP anymore, so no carve-out
+> is needed.
 
 ## Observability tie-ins (fold into WP1, verify in Phase 18)
 

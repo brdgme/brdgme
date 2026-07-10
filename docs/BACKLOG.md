@@ -13,7 +13,7 @@ Status table below into [`docs/archive/BACKLOG.md`](archive/BACKLOG.md),
 adding a Resolution and the date resolved - that file is append-only and
 keeps this one from filling up with closed work.
 
-**Priority order (updated 2026-07-09; hard-cutover resequencing
+**Priority order (updated 2026-07-10; hard-cutover resequencing
 2026-07-04):** done so far: restart-500 + 3-player-render bugs, #21
 OpenTofu (complete 2026-07-06), #22a Resend
 outbound, #14 dev + prod prereqs (fully done - client-IP/PROXY-protocol
@@ -22,13 +22,15 @@ attempted and dropped 2026-07-08),
 #15 ArgoCD + sealed-secrets (live, first fully-green sync 2026-07-08;
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
-complete 2026-07-10). **Remaining pre-go-live:** #32 Alloy/Grafana Cloud
-OTLP export failure investigation (added 2026-07-09), #28 WP4 Cloudflare
-edge (promoted pre-go-live 2026-07-10) → #16 beta
-period (isolated DB) → hard cutover + 1-week validation gate →
-decommission. (#20 external-dns retired 2026-07-05 - no viable DO
+complete 2026-07-10). **Remaining pre-go-live:** #28 WP4 Cloudflare edge
+(promoted pre-go-live 2026-07-10; redesigned + resequenced same day,
+single-stage) -> #16 beta period (isolated DB) -> hard cutover + 1-week
+validation gate -> decommission. #32 demoted to post-go-live 2026-07-10
+(Michael: the Grafana Cloud quota must reset anyway - not a go-live
+blocker). (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
-**Post-go-live:** #22b-d (play-by-email, reminders, multi-email) →
+**Post-go-live:** #32 Alloy OTLP export investigation (demoted from
+pre-go-live 2026-07-10), #22b-d (play-by-email, reminders, multi-email) →
 #24 game invites → #25 rules rendering → #26 theming/dark mode →
 #23 Rust game ports (ongoing). #31 (Rust-only repo) spans both: WP1
 legacy-stack deletion can run pre-cutover (unblocked 2026-07-08 by the
@@ -79,11 +81,11 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-25-rules-rendering-design.md) | [plan](superpowers/plans/2026-07-05-25-rules-rendering.md) |
 | 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-26-theming-design.md) | [plan](superpowers/plans/2026-07-05-26-theming.md) |
 | 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
-| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | WP1-3 complete 2026-07-10 (commits d9d1d1d/3c6fa72 WP1, 0093291 WP2, 6e53681 WP3, 5a7bb85 review fixes: limiter re-sized for shared bucket per D6, migration-005 window documented); WP4 (Cloudflare edge) promoted to pre-go-live 2026-07-10 (was post-cutover per D1; superseded same day - CF proxy/WS/rate-limit behaviour needs validating on beta.brdg.me before cutover) | [spec](superpowers/specs/2026-07-08-28-abuse-protection-design.md) | [plan](superpowers/plans/2026-07-08-28-abuse-protection.md) |
+| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | WP1-3 complete 2026-07-10 (commits d9d1d1d/3c6fa72 WP1, 0093291 WP2, 6e53681 WP3, 5a7bb85 review fixes: limiter re-sized for shared bucket per D6, migration-005 window documented); WP4 (Cloudflare edge) promoted to pre-go-live 2026-07-10 (was post-cutover per D1; superseded same day - CF proxy/WS/rate-limit behaviour needs validating on beta.brdg.me before cutover); WP4 redesigned + resequenced 2026-07-10 (single-stage, adopt the already-live CF zone, delete in-app limiters once the edge rule is proven), see [2026-07-10 spec](superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md) and [2026-07-10 plan](superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md) | [spec](superpowers/specs/2026-07-08-28-abuse-protection-design.md) | [plan](superpowers/plans/2026-07-08-28-abuse-protection.md) |
 | 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [spec](superpowers/specs/2026-07-08-29-stats-reports-design.md) | [plan](superpowers/plans/2026-07-08-29-stats-reports.md) |
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
-| 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - promoted to pre-go-live priority 2026-07-09: investigate before go-live. Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
+| 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - demoted to post-go-live 2026-07-10 (Michael: the Grafana Cloud quota must reset anyway, not a go-live blocker; was promoted pre-go-live 2026-07-09). Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -262,3 +264,20 @@ assuming Phase 16 (cutover) was already complete; the design spec is a
 point-in-time record and is not being edited. Remaining pre-go-live order
 is now #32 investigation → #28 WP4 (Cloudflare edge) → #16 beta →
 cutover.
+
+2026-07-10 (later still): #28 WP4 redesigned for pre-go-live and specced
+(`docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md`,
+plan `docs/superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md`).
+Single-stage migration: Michael created the CF zone (free plan, existing
+account), CF copied the DO records at zone creation, and the registrar
+nameservers were cut over to Cloudflare the same day - so the Tofu work is
+adoption/import of the live zone, not creation, and beta.brdg.me is
+already proxied. Key redesign call (spec W6): once the CF edge rate-limit
+rule is proven on beta, the in-app per-IP rate limiting is DELETED
+(`rate_limit.rs`, governor deps, `extract_client_ip`) rather than
+re-tightened via a `CF-Connecting-IP` carve-out - WP1's DB-backed caps
+remain the backstop for direct-to-LB traffic, and WP2's hygiene middleware
+stays (W9). The old plan's WP4 section is superseded in place. Separately,
+#32 (Alloy OTLP export) demoted to post-go-live (Michael: the Grafana
+Cloud quota must reset anyway - not a go-live blocker); remaining
+pre-go-live order is now #28 WP4 -> #16 beta -> cutover.
