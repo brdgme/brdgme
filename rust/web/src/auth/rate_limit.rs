@@ -17,7 +17,7 @@ use std::time::Duration;
 use governor::clock::{Clock, DefaultClock};
 use governor::state::keyed::DefaultKeyedStateStore;
 use governor::{Quota, RateLimiter};
-use tower_governor::key_extractor::{KeyExtractor, SmartIpKeyExtractor};
+use tower_governor::key_extractor::{KeyExtractor, PeerIpKeyExtractor};
 
 pub type LoginRateLimiter = RateLimiter<IpAddr, DefaultKeyedStateStore<IpAddr>, DefaultClock>;
 
@@ -68,9 +68,20 @@ pub fn check_confirm_rate_limit(limiter: &ConfirmRateLimiter, ip: IpAddr) -> Res
     })
 }
 
-/// Extract the client IP from request headers (`X-Forwarded-For`, `X-Real-Ip`,
-/// `Forwarded`) or the socket's peer address, matching
-/// `SmartIpKeyExtractor`'s behaviour.
+/// Extract the client IP from the socket's peer address only.
+///
+/// Client-supplied forwarding headers (`X-Forwarded-For`, `X-Real-Ip`,
+/// `Forwarded`) are deliberately ignored: they're trivially spoofable by
+/// anyone who can reach the app directly, and on this platform we can't
+/// distinguish "set by our trusted LB" from "set by the client" (design
+/// decision D6 - the Cilium PROXY-protocol flip needed to recover the real
+/// client IP was attempted and permanently reverted by DOKS's managed
+/// reconciler, so the peer address the app sees is permanently the LB/node's
+/// SNAT address, not the client's). In prod this collapses per-IP limiting
+/// to one shared bucket for all honest clients, which is strictly better
+/// than trusting spoofable headers; WP1's DB-backed send caps carry the real
+/// abuse protection. A `cf-connecting-ip` carve-out is planned post-cutover
+/// once Cloudflare fronts the app, but is intentionally not added here.
 pub fn extract_client_ip(
     headers: &axum::http::HeaderMap,
     peer_addr: Option<std::net::SocketAddr>,
@@ -81,7 +92,7 @@ pub fn extract_client_ip(
         req.extensions_mut()
             .insert(axum::extract::ConnectInfo(addr));
     }
-    SmartIpKeyExtractor.extract(&req).ok()
+    PeerIpKeyExtractor.extract(&req).ok()
 }
 
 /// Returns `Ok(())` if the given IP is within its login rate limit, or
@@ -125,16 +136,23 @@ mod tests {
     }
 
     #[test]
-    fn extracts_ip_from_x_forwarded_for_header() {
+    fn spoofed_forwarding_headers_do_not_select_the_key() {
+        // A client can set any of these to whatever it likes; none of them
+        // may override the socket peer address (D6: real client IPs are
+        // permanently unavailable behind the LB, so the peer is all we can
+        // trust).
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("x-forwarded-for", "203.0.113.7".parse().unwrap());
+        headers.insert("x-real-ip", "203.0.113.8".parse().unwrap());
+        headers.insert("forwarded", "for=203.0.113.9".parse().unwrap());
+        let peer = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 5), 12345));
 
-        let ip = extract_client_ip(&headers, None);
-        assert_eq!(ip, Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7))));
+        let ip = extract_client_ip(&headers, Some(peer));
+        assert_eq!(ip, Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5))));
     }
 
     #[test]
-    fn falls_back_to_peer_addr_when_no_headers_present() {
+    fn extracts_ip_from_peer_addr() {
         let headers = axum::http::HeaderMap::new();
         let peer = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 5), 12345));
 
@@ -145,6 +163,13 @@ mod tests {
     #[test]
     fn returns_none_when_nothing_to_extract_from() {
         let headers = axum::http::HeaderMap::new();
+        assert_eq!(extract_client_ip(&headers, None), None);
+    }
+
+    #[test]
+    fn returns_none_when_only_spoofed_headers_present_and_no_peer_addr() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.7".parse().unwrap());
         assert_eq!(extract_client_ip(&headers, None), None);
     }
 
