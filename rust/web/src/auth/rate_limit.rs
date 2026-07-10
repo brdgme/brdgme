@@ -21,11 +21,18 @@ use tower_governor::key_extractor::{KeyExtractor, PeerIpKeyExtractor};
 
 pub type LoginRateLimiter = RateLimiter<IpAddr, DefaultKeyedStateStore<IpAddr>, DefaultClock>;
 
-/// Burst of 5 requests, replenishing 1 every 20s, per client IP. Chosen to
-/// let a real user retry a typo'd email a couple of times without coming
-/// close to draining the Resend free-tier 100/day cap if hammered.
-const BURST_SIZE: u32 = 5;
-const REPLENISH_PERIOD: Duration = Duration::from_secs(20);
+/// Burst of 30 requests, replenishing 1 every 2s, per client IP. Loosened
+/// from the original per-client sizing (burst 5, +1/20s) per D6 in
+/// docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md: on DOKS
+/// every client shares the LB SNAT address, so this bucket is collective
+/// across *all* honest users, permanently - the old constants throttled the
+/// 6th concurrent legitimate user in any ~20s window. The real quota
+/// protection is the DB-backed caps from WP1 (per-email 5, global 50/24h,
+/// 10 attempts/code); this governor is only coarse flood damping. WP4
+/// (Cloudflare `CF-Connecting-IP` keying) is the point where per-IP
+/// constants can be re-tightened to their original, per-client sizing.
+const BURST_SIZE: u32 = 30;
+const REPLENISH_PERIOD: Duration = Duration::from_secs(2);
 
 /// Build the login rate limiter. Called once at process startup; the
 /// constants above are nonzero by construction so this never panics in
@@ -43,11 +50,17 @@ pub fn build_login_rate_limiter() -> Arc<LoginRateLimiter> {
 /// 6-digit code is a 1M-value space that must not be brute-forceable.
 pub struct ConfirmRateLimiter(LoginRateLimiter);
 
-/// Burst of 10 attempts, replenishing 1 every 10s, per client IP. Tight
-/// enough that brute-forcing the 1M code space is infeasible, loose enough
-/// that a user mistyping their code a few times isn't locked out.
-const CONFIRM_BURST_SIZE: u32 = 10;
-const CONFIRM_REPLENISH_PERIOD: Duration = Duration::from_secs(10);
+/// Burst of 60 attempts, replenishing 1 every 1s, per client IP. Loosened
+/// from the original per-client sizing (burst 10, +1/10s) for the same
+/// shared-bucket reason as `BURST_SIZE`/`REPLENISH_PERIOD` above (D6): this
+/// governor no longer carries the brute-force protection for the 6-digit
+/// code space - that comes from the per-code attempts cap
+/// (`CONFIRM_MAX_ATTEMPTS_PER_CODE`, 10, in `server.rs`), which is
+/// IP-independent. This limiter is just generous flood damping so
+/// concurrent legit users sharing the collective bucket don't starve each
+/// other; re-tighten once WP4 (Cloudflare `CF-Connecting-IP` keying) lands.
+const CONFIRM_BURST_SIZE: u32 = 60;
+const CONFIRM_REPLENISH_PERIOD: Duration = Duration::from_secs(1);
 
 /// Build the confirm rate limiter. Called once at process startup, mirrors
 /// `build_login_rate_limiter`.

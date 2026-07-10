@@ -337,6 +337,10 @@ async fn confirm_login_inner(
         return Err(invalid());
     }
 
+    // Accepted race: two concurrent confirms with the same valid code can
+    // both pass the pre-checks above; the loser hits the user_emails unique
+    // constraint below and surfaces a generic internal error. Self-recovers
+    // on retry, so not worth locking around.
     let mut tx = pool
         .begin()
         .await

@@ -16,6 +16,14 @@ CREATE TABLE login_confirmations (
     last_sent_at TIMESTAMPTZ
 );
 
+-- Deploy note: the migrate Job runs at ArgoCD sync-wave 1 and the web
+-- Deployment updates at sync-wave 2, but old-image pods keep serving
+-- traffic until their rollout completes - so there's a brief (~30-60s)
+-- window where old pods still `SELECT`ing users.login_confirmation /
+-- login_confirmation_at hard-error against this schema. Accepted: the app
+-- self-heals once the rollout finishes, and beta traffic is low. See the
+-- beta-period checklist in
+-- docs/superpowers/plans/2026-07-08-16-production-cutover-validation.md.
 ALTER TABLE users
     DROP COLUMN login_confirmation,
     DROP COLUMN login_confirmation_at;

@@ -120,6 +120,15 @@ validation gate passes).
       distinct client IPs; instead exercise #28 WP1's DB-backed send/attempt
       caps and confirm they behave correctly against the shared collective
       IP bucket.)
+- [ ] Note: the first deploy that includes migration 005
+      (`rust/web/migrations/005_login_confirmations.sql`) drops
+      `users.login_confirmation`/`login_confirmation_at`, and the migrate
+      Job (sync-wave 1) completes before the web Deployment (sync-wave 2)
+      finishes rolling out - so old pods still serving during that brief
+      (~30-60s) window will hard-error on login/session queries against
+      those columns. Expected and self-healing; treat transient login/
+      session errors during that specific rollout as expected, not an
+      incident.
 - [ ] Run the Phase 15 PreSync failure verification and the Phase 19
       dump/restore rehearsal + PITR restore verification while the database
       is still disposable.
