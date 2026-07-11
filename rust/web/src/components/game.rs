@@ -136,40 +136,26 @@ fn PlayerInfo(player: PlayerViewData) -> impl IntoView {
     }
 }
 
-fn window_key(dt: time::PrimitiveDateTime) -> time::PrimitiveDateTime {
-    let minute = dt.minute() / 10 * 10;
-    time::PrimitiveDateTime::new(
-        dt.date(),
-        time::Time::from_hms(dt.hour(), minute, 0).unwrap_or(dt.time()),
-    )
+// 10-minute buckets on the UTC timeline; instant-based, so DST-immune.
+fn window_key(dt: time::PrimitiveDateTime) -> i64 {
+    dt.assume_utc().unix_timestamp() / 600
 }
 
-fn format_log_time(dt: time::PrimitiveDateTime) -> String {
-    let month_abbr = match dt.month() {
-        time::Month::January => "Jan",
-        time::Month::February => "Feb",
-        time::Month::March => "Mar",
-        time::Month::April => "Apr",
-        time::Month::May => "May",
-        time::Month::June => "Jun",
-        time::Month::July => "Jul",
-        time::Month::August => "Aug",
-        time::Month::September => "Sep",
-        time::Month::October => "Oct",
-        time::Month::November => "Nov",
-        time::Month::December => "Dec",
-    };
-    let hour12 = dt.hour() % 12;
-    let hour12 = if hour12 == 0 { 12 } else { hour12 };
-    let ampm = if dt.hour() < 12 { "AM" } else { "PM" };
-    format!(
-        "{} {}, {}:{:02} {}",
-        month_abbr,
-        dt.day(),
-        hour12,
-        dt.minute(),
-        ampm
-    )
+// Formats in the browser's local time zone via Date.toLocaleString, e.g. "Jul 11, 10:50 AM".
+// Only runs client-side (render_log_entries is reached via LocalResource).
+fn format_log_time(window: i64) -> String {
+    let date = js_sys::Date::new(&((window * 600_000) as f64).into());
+    let options = js_sys::Object::new();
+    for (key, value) in [
+        ("month", "short"),
+        ("day", "numeric"),
+        ("hour", "numeric"),
+        ("minute", "2-digit"),
+    ] {
+        let _ = js_sys::Reflect::set(&options, &key.into(), &value.into());
+    }
+    let _ = js_sys::Reflect::set(&options, &"hour12".into(), &true.into());
+    date.to_locale_string("en-US", &options.into()).into()
 }
 
 fn render_log_entries(
@@ -177,7 +163,7 @@ fn render_log_entries(
     show_timestamp: bool,
 ) -> impl IntoView {
     // Group into 10-minute windows; show log-time only on first entry of each group.
-    let mut windows: Vec<(time::PrimitiveDateTime, Vec<_>)> = vec![];
+    let mut windows: Vec<(i64, Vec<_>)> = vec![];
     for entry in entries {
         let key = window_key(entry.logged_at);
         if let Some(last) = windows.last_mut()
