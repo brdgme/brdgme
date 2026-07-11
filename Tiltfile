@@ -8,16 +8,9 @@
 #   Also builds brdgme/web and deploys it as a Deployment + ClusterIP Service
 #   in Kind.
 #
-# Legacy side-by-side mode (LEGACY=1):
-#   Also builds and deploys web-legacy, api, and websocket as Deployments +
-#   ClusterIP Services, plus a dev-only Gateway/HTTPRoute set routing by
-#   *.brdgme.lvh.me hostname. Reachable via `kubectl port-forward` (see the
-#   "legacy-gateway" resource below) on port 8080.
-#
 # Prerequisites: run scripts/setup-kind-cluster.sh once before `tilt up`.
 
 WEB_IN_CLUSTER = os.getenv("WEB_IN_CLUSTER", "") == "1"
-LEGACY = os.getenv("LEGACY", "") == "1"
 
 # Dev environment only - credentials are not sensitive here.
 secret_settings(disable_scrub=True)
@@ -171,16 +164,6 @@ local_resource(
     resource_deps=["postgres", "nats", "crd-ready"],
 )
 
-if LEGACY:
-    docker_build("brdgme/web-legacy", ".", dockerfile="web/Dockerfile", target="web", only=["web/"])
-    docker_build("brdgme/websocket", ".", dockerfile="websocket/Dockerfile", target="websocket", only=["websocket/"])
-    docker_build("brdgme/api", ".", dockerfile="rust/api/Dockerfile", target="api", only=["rust/"])
-    k8s_yaml(kustomize("k8s/dev-legacy"))
-    k8s_resource("web-legacy", links=["http://web-legacy.brdgme.lvh.me:8080"])
-    k8s_resource("api", links=["http://api.brdgme.lvh.me:8080"])
-    k8s_resource("websocket", links=["http://websocket.brdgme.lvh.me:8080"])
-    k8s_resource("redis", port_forwards=["6379:6379"])
-
 # Dev-only Gateway/HTTPRoute set routing by *.brdgme.lvh.me hostname.
 # k8s/base/gateway/ (real hostnames, HTTPS, cert-manager) is prod-only -
 # this dev equivalent is plain HTTP and lives only in the Tiltfile, per
@@ -199,13 +182,9 @@ if LEGACY:
 # setup-script patch - it has to wait for the Service to exist first.
 #
 # Created whenever a Deployment exists for it to route to: the "web" route
-# under WEB_IN_CLUSTER=1 (in-cluster web), the legacy trio's routes under
-# LEGACY=1.
-if WEB_IN_CLUSTER or LEGACY:
-    gateway_routes = ""
-    gateway_deps = []
-    if WEB_IN_CLUSTER:
-        gateway_routes += """
+# under WEB_IN_CLUSTER=1 (in-cluster web).
+if WEB_IN_CLUSTER:
+    gateway_routes = """
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -222,56 +201,7 @@ spec:
         - name: web
           port: 3000
 """
-        gateway_deps.append("web")
-    if LEGACY:
-        gateway_routes += """
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: web-legacy
-  namespace: brdgme
-spec:
-  parentRefs:
-    - name: brdgme-dev
-  hostnames:
-    - web-legacy.brdgme.lvh.me
-  rules:
-    - backendRefs:
-        - name: web-legacy
-          port: 80
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: api
-  namespace: brdgme
-spec:
-  parentRefs:
-    - name: brdgme-dev
-  hostnames:
-    - api.brdgme.lvh.me
-  rules:
-    - backendRefs:
-        - name: api
-          port: 8000
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: websocket
-  namespace: brdgme
-spec:
-  parentRefs:
-    - name: brdgme-dev
-  hostnames:
-    - websocket.brdgme.lvh.me
-  rules:
-    - backendRefs:
-        - name: websocket
-          port: 80
-"""
-        gateway_deps += ["web-legacy", "api", "websocket"]
+    gateway_deps = ["web"]
 
     k8s_yaml(blob("""
 apiVersion: gateway.networking.k8s.io/v1

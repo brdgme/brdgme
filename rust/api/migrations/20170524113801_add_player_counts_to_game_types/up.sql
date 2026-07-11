@@ -1,2 +1,0 @@
-ALTER TABLE game_types
-ADD COLUMN player_counts INT[] NOT NULL DEFAULT ARRAY[]::INT[];

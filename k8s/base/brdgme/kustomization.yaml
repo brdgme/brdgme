@@ -1,7 +1,6 @@
 bases:
 - ../bot
 - ../game
-- ../legacy
 - ../migrate
 - ../nats
 - ../operator/deploy

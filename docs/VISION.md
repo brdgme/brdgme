@@ -133,13 +133,11 @@ one `HTTPRoute` per hostname to the backing Service.
 | Domain | Service | Notes |
 |---|---|---|
 | `brdg.me` | `web` | Leptos monolith Deployment (target 2 replicas) |
-| `legacy.brdg.me` | `web-legacy` | Legacy React frontend, side-by-side only |
-| `api.brdg.me` | `api` | Legacy Rocket API, side-by-side only |
-| `ws.brdg.me` | `websocket` | Legacy Node.js WS, side-by-side only |
 
-Legacy services (`web-legacy`, `api`, `websocket`) are removed after cutover.
-TLS via cert-manager's Gateway API integration (certificates bound to Gateway
-listeners).
+Legacy services (`web-legacy`, `api`, `websocket`) were removed pre-cutover
+(2026-07-12, rust-only-repo WP1); go-live is a hard cutover from the old
+cluster. TLS via cert-manager's Gateway API integration (certificates bound
+to Gateway listeners).
 
 Estimated baseline cost: ~$63/month (3x 2GB nodes + load balancer + PostgreSQL
 storage minimum).

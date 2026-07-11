@@ -1,6 +1,0 @@
-namespace: brdgme
-resources:
-- ../base/web-legacy
-- ../base/api
-- ../base/redis
-- ../base/websocket

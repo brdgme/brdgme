@@ -16,15 +16,6 @@ images:
 - name: brdgme/web
   newName: ghcr.io/brdgme/brdgme/web
   newTag: latest
-- name: brdgme/web-legacy
-  newName: ghcr.io/brdgme/brdgme/web-legacy
-  newTag: latest
-- name: brdgme/websocket
-  newName: ghcr.io/brdgme/brdgme/websocket
-  newTag: latest
-- name: brdgme/api
-  newName: ghcr.io/brdgme/brdgme/api
-  newTag: latest
 - name: brdgme/bot
   newName: ghcr.io/brdgme/brdgme/bot
   newTag: latest

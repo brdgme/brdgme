@@ -1,5 +1,0 @@
-resources:
-- ../api
-- ../redis
-- ../websocket
-- ../web-legacy

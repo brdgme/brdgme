@@ -20,24 +20,29 @@ YAML, OpenTofu HCL, Dockerfiles, devenv.nix, shell scripts.
 Supersedes the matching lines of the #16 decommission list; #16 keeps the
 Linode decommission and its human steps. Single commit, tagged beforehand.
 
-- [ ] Tag `legacy-final` on master; record the last GHCR sha tags for
+- [x] Tag `legacy-final` on master; record the last GHCR sha tags for
       `web-legacy`, `websocket`, `api` in this file.
-- [ ] Delete source: `web/`, `websocket/`, `rust/api/` (includes
+      Tagged `legacy-final` = f83eced (2026-07-12). Last GHCR tags:
+      `web-legacy:sha-ae83392`, `websocket:sha-ae83392`, `api:sha-ae83392`
+      (ae83392 was the last commit touching the CI `legacy` path filter).
+- [x] Delete source: `web/`, `websocket/`, `rust/api/` (includes
       `rust/api/migrations` - the migrate image uses `rust/web/migrations`,
       self-sufficient since `001_initial_schema.sql`).
-- [ ] Remove `"api"` from `rust/Cargo.toml` workspace members.
-- [ ] Delete k8s: `k8s/base/legacy/`, `k8s/base/web-legacy/`,
+- [x] Remove `"api"` from `rust/Cargo.toml` workspace members.
+- [x] Delete k8s: `k8s/base/legacy/`, `k8s/base/web-legacy/`,
       `k8s/base/api/`, `k8s/base/websocket/`, `k8s/base/redis/` (kept only
       for break-glass + LEGACY dev; monolith dropped Redis in #17),
       `k8s/dev-legacy/`; remove the `web-legacy`/`websocket`/`api` image
       entries from `k8s/prod/app/kustomization.yaml`.
-- [ ] Tiltfile: remove `LEGACY=1` mode (image builds, k8s_yaml, gateway
+      (Also removed the `api` entry from `k8s/prod/app/sync-wave-patch.yaml`
+      and the three image entries + ref bump in brdgme-config.)
+- [x] Tiltfile: remove `LEGACY=1` mode (image builds, k8s_yaml, gateway
       legacy routes/listeners).
-- [ ] CI: remove the `build-legacy` job from `.github/workflows/ci.yml`.
-- [ ] Delete stale root artifacts (pulled forward from #16): `WORKSPACE`,
+- [x] CI: remove the `build-legacy` job from `.github/workflows/ci.yml`.
+- [x] Delete stale root artifacts (pulled forward from #16): `WORKSPACE`,
       `build.sh`, `test.sh`, `docker-compose.yml` - verify nothing
       references them first.
-- [ ] Update DEV.md (LEGACY mode docs) and ARCHITECTURE.md. (#16 already
+- [x] Update DEV.md (LEGACY mode docs) and ARCHITECTURE.md. (#16 already
       updated 2026-07-08: overlay superseded, rollback section replaced by
       the no-rollback decision.)
 

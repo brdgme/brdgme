@@ -26,17 +26,10 @@ WEB_IN_CLUSTER=1 tilt up
 Builds and deploys `brdgme/web` as a Deployment + ClusterIP Service inside
 Kind. Slow iteration - use only for cluster integration testing.
 
-```
-LEGACY=1 tilt up
-```
-
-Also deploys legacy stack. Services are accessible via domain-based routing
-through a dev-only Gateway API `Gateway`/`HTTPRoute` set (Cilium), forwarded
-to host port 8080 (all `*.lvh.me` subdomains resolve to 127.0.0.1):
-
-- `http://web-legacy.brdgme.lvh.me:8080` - old React frontend
-- `http://api.brdgme.lvh.me:8080` - old Rocket API
-- `http://websocket.brdgme.lvh.me:8080` - old WebSocket service
+In `WEB_IN_CLUSTER=1` mode the web service is accessible via domain-based
+routing through a dev-only Gateway API `Gateway`/`HTTPRoute` set (Cilium),
+forwarded to host port 8080 (all `*.lvh.me` subdomains resolve to
+127.0.0.1): `http://web.brdgme.lvh.me:8080`.
 
 ## Hybrid Mode Networking
 
@@ -235,7 +228,7 @@ not modified for dev convenience. Dev-specific workarounds (port-forwarding,
 local process substitutions) belong in the Tiltfile only.
 
 The dev-only Gateway/HTTPRoute set is created by the Tiltfile under
-`WEB_IN_CLUSTER=1` and/or `LEGACY=1` (not committed to `k8s/`, since it uses
+`WEB_IN_CLUSTER=1` (not committed to `k8s/`, since it uses
 plain HTTP and `lvh.me` hostnames that only make sense in dev - see the
 comment above the `gateway-nodeport` Tilt resource). Cilium provisions a
 per-Gateway LoadBalancer Service with no selector (Cilium programs endpoints

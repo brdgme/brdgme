@@ -1,2 +1,0 @@
-ALTER TABLE game_type_users
-DROP CONSTRAINT game_type_users_game_type_id_user_id_key;
