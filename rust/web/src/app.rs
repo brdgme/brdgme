@@ -159,9 +159,21 @@ fn LoginPage() -> impl IntoView {
                                 node_ref=email_input
                                 placeholder="Email address"
                                 required
+                                disabled=move || login_action.pending().get()
                             />
-                            <input type="submit" value="Get code"/>
+                            <input
+                                type="submit"
+                                value="Get code"
+                                disabled=move || login_action.pending().get()
+                            />
                         </div>
+                        <Show when=move || login_action.pending().get()>
+                            <div class="spinner">
+                                <div class="bounce1"></div>
+                                <div class="bounce2"></div>
+                                <div class="bounce3"></div>
+                            </div>
+                        </Show>
                         <div class="hasCode">
                             <a on:click=show_code_link style="cursor:pointer">"I already have a login code"</a>
                         </div>
