@@ -23,16 +23,18 @@ attempted and dropped 2026-07-08),
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
 complete 2026-07-10), #28 WP4 Cloudflare edge (complete 2026-07-11).
-**Remaining pre-go-live:** #33 pre-go-live UI/UX polish batch -> #16 beta
-period (isolated DB) -> hard cutover + 1-week validation gate ->
-decommission. #32 demoted to post-go-live 2026-07-10
+**Remaining pre-go-live:** #34 admin functions + #35 user settings
+(added 2026-07-11, wanted in place for the beta) -> #33 pre-go-live UI/UX
+polish batch -> #16 beta period (isolated DB) -> hard cutover + 1-week
+validation gate -> decommission. #32 demoted to post-go-live 2026-07-10
 (Michael: the Grafana Cloud quota must reset anyway - not a go-live
 blocker). (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
 **Post-go-live:** #32 Alloy OTLP export investigation (demoted from
 pre-go-live 2026-07-10), #22b-d (play-by-email, reminders, multi-email) →
 #24 game invites → #25 rules rendering → #26 theming/dark mode →
-#23 Rust game ports (ongoing). #31 (Rust-only repo) spans both: WP1
+#23 Rust game ports (ongoing) → (bottom of backlog) #36 Web Push turn
+notifications. #31 (Rust-only repo) spans both: WP1
 legacy-stack deletion can run pre-cutover (unblocked 2026-07-08 by the
 no-rollback decision; it simplifies #16); the rest follows #23.
 
@@ -86,6 +88,9 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
 | 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - demoted to post-go-live 2026-07-10 (Michael: the Grafana Cloud quota must reset anyway, not a go-live blocker; was promoted pre-go-live 2026-07-09). Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
 | 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Pending - pre-go-live (blocking go-live); collection doc only, not individually actioned - to be turned into a spec/plan and fixed as one batch when scheduled; see [docs/pre-go-live-polish.md](pre-go-live-polish.md) | - | - |
+| 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
+| 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) | - |
+| 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -281,6 +286,20 @@ stays (W9). The old plan's WP4 section is superseded in place. Separately,
 #32 (Alloy OTLP export) demoted to post-go-live (Michael: the Grafana
 Cloud quota must reset anyway - not a go-live blocker); remaining
 pre-go-live order is now #28 WP4 -> #16 beta -> cutover.
+
+2026-07-11 (pre-beta planning): #34 admin functions and #35 user settings
+added (both pre-beta, specs written same day); #36 Web Push turn
+notifications added at the bottom of the post-go-live backlog (scoped
+only - full service-worker/VAPID subsystem judged too large for now; an
+in-tab-only Notification API variant was considered and rejected in
+favour of doing Web Push properly later). Four new jank entries appended
+to docs/pre-go-live-polish.md under #33 (inert sidebar Menu button,
+missing autofocus set, white flash on command submit - a regression of
+the Suspense->Transition fix recorded in 2026-07-05-bugs.md, reactive
+title with my-turn count). Bot model configuration (multi-provider
+routing/failover, runtime model switching) was discussed and deliberately
+PARKED without a backlog item - to be revisited in a future session; the
+sealed-secret reseal workflow stands for now.
 
 2026-07-11: #28 WP4 (Cloudflare edge) completed, commits e34b8cf..0ef55d6:
 brdg.me zone adopted into tofu (import, free plan); SSL Full-strict + WS +
