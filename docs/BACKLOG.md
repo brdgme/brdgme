@@ -91,6 +91,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
 | 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) | - |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
+| 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - pre-beta-exit; added 2026-07-11 | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -322,3 +323,24 @@ than a #33 plan task. #33 Task 2 (CI path-gating via dorny/paths-filter,
 commit 8120ee3) already removed the cost of Rust builds for non-Rust
 changes, so this caching investigation only affects CI runs that
 genuinely touch Rust.
+
+2026-07-11 (beta testing): #37 added - Michael reports some of the games
+ported to Rust appear to have problems, from a beta testing pass on the
+deployed #33 batch (deploy sha-48686c8). Item is a checklist to do a full
+operator gameplay pass over every already-converted Rust game. Authoritative
+list compiled from the `rust/Cargo.toml` workspace members and the Tiltfile
+"Rust games" `docker_build` loop (both deployed via `k8s/base/game/`),
+excluding `lords-of-vegas-1` (implemented but intentionally not deployed,
+see Out of Scope above) - 15 games: acquire-1, battleship-2, category-5-2,
+farkle-2, for-sale-2, greed-2, jaipur-2, liars-dice-2, lost-cities-1,
+lost-cities-2, no-thanks-2, sushi-go-2, sushizock-2, tic-tac-toe-2,
+zombie-dice-2. Note `acquire-1` and `lost-cities-1` are native Rust `-1`
+editions (no Go predecessor), not Go-replacement `-2` conversions - both
+still count as Rust games in scope for this testing pass. Same testing
+pass also produced four new jank entries appended to
+docs/pre-go-live-polish.md: favicon grey too light (`#606060` fix already
+in Michael's working tree), game log sections (recent-logs panel + sidebar)
+still flashing on command submit, a reusable centered loading spinner
+needed for initial game page load, and disabling the command input/send
+button while a command is submitting. These are recorded for a future #33
+continuation session, not actioned now.

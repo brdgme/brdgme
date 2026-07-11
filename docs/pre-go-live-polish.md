@@ -161,3 +161,45 @@ superpowers spec/plan and fixed as one batch when scheduled.
   whose-turn info) and re-keys it on the websocket signal
   (`rust/web/src/components/layout.rs`) - the title can derive from the
   same data rather than a new query.
+
+### 2026-07-11: Favicon grey is too light against the tab background
+
+- **Observed:** Beta testing the deployed batch (deploy sha-48686c8) - the
+  dice favicon shape is correct, but the `#e0e0e0` grey used for the pips
+  and outline is too light to see against browser tab backgrounds.
+- **Expected:** A darker grey with enough contrast to read clearly as a
+  dice in the tab bar.
+- **Note:** Michael has already edited `rust/web/public/favicon.svg` in his
+  working tree to use `#606060` for the grey. The work here is to land
+  that edit and verify visibility after the next deploy.
+
+### 2026-07-11: Game log sections still flash on command submit
+
+- **Observed:** Beta testing the deployed batch (deploy sha-48686c8) - the
+  entry above (Suspense -> Transition in `GamePage`) stopped the board
+  from white-flashing on command submit, but the "Recent logs" section
+  above the command input and the logs in the right sidebar still flash
+  after submitting a command.
+- **Expected:** Same fix class as the board: those log resources/
+  components keep showing stale data while refetching instead of
+  remounting or dropping to a loading state.
+
+### 2026-07-11: No loading indicator on initial game page load
+
+- **Observed:** Beta testing the deployed batch (deploy sha-48686c8) -
+  when a game page is first opened, there is no loading indication while
+  the game data loads.
+- **Expected:** Show the same spinner used on the login page, vertically
+  and horizontally centered in the game area, while the game page loads.
+- **Note:** Make the spinner a reusable component so other pages that
+  load data from the server can show it too.
+
+### 2026-07-11: Command input stays enabled while a command is submitting
+
+- **Observed:** Beta testing the deployed batch (deploy sha-48686c8) - the
+  command input and send button remain enabled while a game command is
+  being submitted, allowing re-submission before the first one completes.
+- **Expected:** Disable the command input and the send button while
+  submitting. On success, clear the input (current behavior). On error,
+  re-enable both but keep the submitted text in the input so the user can
+  correct and resubmit.
