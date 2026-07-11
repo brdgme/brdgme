@@ -77,16 +77,12 @@ pub async fn build_router(state: AppState) -> Router {
                 let broadcaster = state.broadcaster.clone();
                 let http_client = state.http_client.clone();
                 let resend = state.resend.clone();
-                let login_rate_limiter = state.login_rate_limiter.clone();
-                let confirm_rate_limiter = state.confirm_rate_limiter.clone();
                 let jetstream = state.jetstream.clone();
                 move || {
                     provide_context(pool.clone());
                     provide_context(broadcaster.clone());
                     provide_context(http_client.clone());
                     provide_context(resend.clone());
-                    provide_context(login_rate_limiter.clone());
-                    provide_context(confirm_rate_limiter.clone());
                     provide_context(jetstream.clone());
                 }
             },
@@ -107,19 +103,19 @@ pub async fn build_router(state: AppState) -> Router {
         // needs to serve error pages and the WS layer independently of the
         // database being up.
         .route("/healthz", axum::routing::get(healthz))
-        // Global HTTP hygiene, not abuse-proofing: `tower_governor`'s login/confirm
-        // limiters (`auth::rate_limit`) and these two are in-memory per-process
-        // state, so with `replicas: 2` each pod enforces its own independent
-        // quota, and a redeploy resets it to zero - neither is a hard ceiling.
-        // The hard ceiling is the WP1 DB-backed send caps (`login()`'s
-        // cooldown/per-email/global caps in `auth/server.rs`), which are
-        // replica-safe and survive restarts because they live in Postgres.
-        // These two layers exist to stop a stray oversized POST or a wedged
-        // handler from tying up a worker/connection - added after `/healthz`
-        // (like `TraceLayer` below) so both apply to it too, which is harmless
-        // since the probe is bodyless and returns immediately. Placed before
-        // `TraceLayer` so it stays the outermost layer and still records a
-        // span (with e.g. a 413/408 status) for requests these reject.
+        // Global HTTP hygiene, not abuse-proofing (kept deliberately, spec
+        // W9 of the 2026-07-10 #28 WP4 design): these two layers stop a
+        // stray oversized POST or a wedged handler from tying up a
+        // worker/connection, and still cover direct-to-LB traffic that
+        // bypasses Cloudflare. Hard abuse quotas are the WP1 DB-backed send
+        // caps (`login()`'s cooldown/per-email/global caps in
+        // `auth/server.rs`) - replica-safe and restart-proof because they
+        // live in Postgres; per-IP rate limiting happens at the Cloudflare
+        // edge, not in-app. Added after `/healthz` (like `TraceLayer`
+        // below) so both apply to it too, which is harmless since the probe
+        // is bodyless and returns immediately. Placed before `TraceLayer`
+        // so it stays the outermost layer and still records a span (with
+        // e.g. a 413/408 status) for requests these reject.
         .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BODY_BYTES))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,

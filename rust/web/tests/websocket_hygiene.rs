@@ -46,8 +46,6 @@ async fn spawn_app(pool: PgPool) -> (SocketAddr, GameBroadcaster) {
         broadcaster: broadcaster.clone(),
         http_client: reqwest::Client::new(),
         resend: None,
-        login_rate_limiter: web::auth::rate_limit::build_login_rate_limiter(),
-        confirm_rate_limiter: web::auth::rate_limit::build_confirm_rate_limiter(),
         jetstream,
     };
 

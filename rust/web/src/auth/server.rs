@@ -93,36 +93,12 @@ pub struct AuthUser {
     pub email: String,
 }
 
-#[cfg(feature = "ssr")]
-async fn login_client_ip() -> Option<std::net::IpAddr> {
-    let headers: axum::http::HeaderMap = extract().await.ok()?;
-    let peer_addr = extract::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .await
-        .ok()
-        .map(|ci| ci.0);
-    crate::auth::rate_limit::extract_client_ip(&headers, peer_addr)
-}
-
 #[server(Login, "/api")]
 pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     if email.is_empty() || !email.contains('@') {
         return Ok(LoginResponse {
             success: false,
             message: "Invalid email address".to_string(),
-        });
-    }
-
-    let login_rate_limiter =
-        expect_context::<std::sync::Arc<crate::auth::rate_limit::LoginRateLimiter>>();
-    // Fail open if the client IP can't be determined (e.g. missing ConnectInfo
-    // in a test harness) rather than blocking logins outright.
-    if let Some(ip) = login_client_ip().await
-        && let Err(wait_secs) =
-            crate::auth::rate_limit::check_login_rate_limit(&login_rate_limiter, ip)
-    {
-        return Ok(LoginResponse {
-            success: false,
-            message: format!("Too many login attempts. Try again in {}s.", wait_secs),
         });
     }
 
@@ -189,10 +165,11 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         }
     }
 
-    // Global cap protecting the Resend 100/day quota. DB-backed so it holds
-    // across replicas and deploys, unlike the in-process governor above.
-    // This one affects legit users, so it is an honest refusal, not a
-    // pretend-success.
+    // Global cap protecting the Resend 100/day quota. Unlike edge/per-process
+    // limits, these caps live in Postgres so they hold across replicas and
+    // deploys (the per-IP edge limit is Cloudflare's, see the 2026-07-10 WP4
+    // spec W6). This one affects legit users, so it is an honest refusal,
+    // not a pretend-success.
     let sent_last_24h = sqlx::query_scalar!(
         r#"SELECT COALESCE(SUM(sent_count), 0) AS "total!"
            FROM login_confirmations
@@ -249,20 +226,6 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
 
 #[server(ConfirmLogin, "/api")]
 pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, ServerFnError> {
-    let confirm_rate_limiter =
-        expect_context::<std::sync::Arc<crate::auth::rate_limit::ConfirmRateLimiter>>();
-    // Fail open if the client IP can't be determined (e.g. missing ConnectInfo
-    // in a test harness) rather than blocking confirmation outright.
-    if let Some(ip) = login_client_ip().await
-        && let Err(wait_secs) =
-            crate::auth::rate_limit::check_confirm_rate_limit(&confirm_rate_limiter, ip)
-    {
-        return Err(ServerFnError::new(format!(
-            "Too many attempts. Try again in {}s.",
-            wait_secs
-        )));
-    }
-
     // Extract the session before touching the database so a harness without
     // request parts fails here, not after user/token rows were written.
     let session: Session = extract()
@@ -475,8 +438,6 @@ mod tests {
         owner.with(|| {
             provide_context(pool.clone());
             provide_context(None::<resend_rs::Resend>);
-            provide_context(crate::auth::rate_limit::build_login_rate_limiter());
-            provide_context(crate::auth::rate_limit::build_confirm_rate_limiter());
         });
         owner
             .with(|| leptos::reactive::computed::ScopedFuture::new(f()))

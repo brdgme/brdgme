@@ -50,9 +50,6 @@ async fn main() {
     if resend.is_none() {
         log!("RESEND_API_KEY not set; login emails will be logged instead of sent");
     }
-    let login_rate_limiter = web::auth::rate_limit::build_login_rate_limiter();
-    let confirm_rate_limiter = web::auth::rate_limit::build_confirm_rate_limiter();
-
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
@@ -63,8 +60,6 @@ async fn main() {
         broadcaster: broadcaster.clone(),
         http_client: http_client.clone(),
         resend: resend.clone(),
-        login_rate_limiter: login_rate_limiter.clone(),
-        confirm_rate_limiter: confirm_rate_limiter.clone(),
         jetstream: jetstream.clone(),
     };
 

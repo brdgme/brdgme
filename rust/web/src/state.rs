@@ -1,9 +1,7 @@
-use crate::auth::rate_limit::{ConfirmRateLimiter, LoginRateLimiter};
 use crate::websocket::GameBroadcaster;
 use axum::extract::FromRef;
 use leptos::prelude::LeptosOptions;
 use sqlx::PgPool;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,8 +12,6 @@ pub struct AppState {
     /// `None` when `RESEND_API_KEY` is unset, in which case login emails are
     /// logged instead of sent.
     pub resend: Option<resend_rs::Resend>,
-    pub login_rate_limiter: Arc<LoginRateLimiter>,
-    pub confirm_rate_limiter: Arc<ConfirmRateLimiter>,
     pub jetstream: async_nats::jetstream::Context,
 }
 

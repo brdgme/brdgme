@@ -38,10 +38,6 @@ thiserror = { version = "2.0.18", optional = true }
 # Email functionality
 resend-rs = { version = "0.27", default-features = false, features = ["rustls-tls"], optional = true }
 
-# Login rate limiting
-tower_governor = { version = "0.8", optional = true }
-governor = { version = "0.10", optional = true }
-
 # Environment variables
 dotenvy = { version = "0.15", optional = true }
 
@@ -93,8 +89,6 @@ ssr = [
     "dep:anyhow",
     "dep:thiserror",
     "dep:resend-rs",
-    "dep:tower_governor",
-    "dep:governor",
     "dep:brdgme_cmd",
     "dep:brdgme_game",
     "dep:brdgme_color",
