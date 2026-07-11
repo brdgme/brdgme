@@ -71,9 +71,27 @@ pub fn App() -> impl IntoView {
         });
     provide_context(current_user);
 
+    // Derived from the same active-games data the sidebar renders, not a
+    // new query - counts games where it's this user's turn.
+    let turn_count = Memo::new(move |_| {
+        active_games
+            .get()
+            .and_then(|r| r.ok())
+            .map(|games| count_my_turn(&games))
+            .unwrap_or(0)
+    });
+    let title_text = move || {
+        let n = turn_count.get();
+        if n > 0 {
+            format!("brdg.me ({n})")
+        } else {
+            "brdg.me".to_string()
+        }
+    };
+
     view! {
         <Stylesheet id="leptos" href="/pkg/web.css"/>
-        <Title text="brdg.me"/>
+        <Title text=title_text/>
 
         <Router>
             <Routes fallback=|| "Page not found.".into_view()>
@@ -657,5 +675,41 @@ fn GamePage() -> impl IntoView {
                 }}
             </Transition>
         </MainLayout>
+    }
+}
+
+/// Counts active games where it's the user's turn - the title's "(N)" badge.
+/// Pure (no resource/DOM access) so it's unit-testable on its own.
+fn count_my_turn(games: &[crate::game::server_fns::GameSummary]) -> usize {
+    games.iter().filter(|g| g.is_turn).count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::server_fns::{GameSummary, OpponentSummary};
+
+    fn game_summary(is_turn: bool) -> GameSummary {
+        GameSummary {
+            id: Uuid::new_v4(),
+            name: "test".to_string(),
+            type_name: "Test Game".to_string(),
+            opponents: vec![OpponentSummary {
+                name: "Bob".to_string(),
+                color: "#000".to_string(),
+            }],
+            is_turn,
+        }
+    }
+
+    #[test]
+    fn count_my_turn_counts_only_is_turn_games() {
+        let games = vec![game_summary(true), game_summary(false), game_summary(true)];
+        assert_eq!(count_my_turn(&games), 2);
+    }
+
+    #[test]
+    fn count_my_turn_zero_for_empty() {
+        assert_eq!(count_my_turn(&[]), 0);
     }
 }
