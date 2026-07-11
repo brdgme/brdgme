@@ -1150,7 +1150,7 @@ without digging through task reports:
 - [x] Rate-limit rule: path prefix `/api/`, requests_per_period = 60
   (proposed 60, verified unchanged), period 10s, mitigation_timeout 10s, action block,
   characteristics ip.src (+ cf.colo.id, API-required). Verified 2026-07-11: flood 100req/10-parallel -> 60 pass / 40 429 from Cloudflare (cf-ray confirmed), recovery after 10s mitigation window; operator confirmed normal use (login + game session + websockets) never trips it.
-- [ ] Bot Fight Mode: on / off because ___.
+- [x] Bot Fight Mode: on (fight_mode = true, enable_js = true - JS detections required by the API for fight mode). Verified 2026-07-11: WS 101 through proxy, idle >60s survival, login flow unchallenged, all with BFM live. Token needed Zone Bot Management Edit (403 code 10000 on first apply, operator extended policy).
 - [ ] Origin lockdown: ENABLED via do-loadbalancer-allow-rules / REJECTED
   (accepted direct-to-LB bypass, WP1 DB caps backstop) because ___.
 

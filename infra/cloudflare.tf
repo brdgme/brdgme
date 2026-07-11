@@ -158,3 +158,15 @@ resource "cloudflare_ruleset" "rate_limit" {
     }
   }]
 }
+
+# Bot Fight Mode (spec W5) - flipped as the LAST edge toggle and
+# verified in isolation: the free tier has no BFM exceptions, and the
+# documented fallback is fight_mode = false if it breaks websockets or
+# login (spec's beta validation checklist).
+# JS detections must be on for fight mode (API rejects fight_mode
+# without enable_js, found at apply 2026-07-11).
+resource "cloudflare_bot_management" "brdgme" {
+  zone_id    = cloudflare_zone.brdgme.id
+  enable_js  = true
+  fight_mode = true
+}
