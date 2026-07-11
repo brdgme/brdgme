@@ -44,6 +44,33 @@ pub fn App() -> impl IntoView {
     provide_context(RwSignal::<Option<(Uuid, u64)>>::new(None));
     crate::websocket_client::use_websocket();
 
+    // Hoisted above <Router> so these survive client-side navigation instead
+    // of being torn down and recreated by every page's own <MainLayout>
+    // (each page wraps its own <MainLayout>, so the sidebar remounts on
+    // every route change). Fixes the sidebar's Logout->Login and "Loading
+    // games..." flash: the resources themselves never remount, only the
+    // components reading them do, so a fresh mount just reads the value
+    // already sitting in these signals instead of starting from None.
+    let logout_action = ServerAction::<crate::auth::Logout>::new();
+    provide_context(logout_action);
+
+    let active_games: LocalResource<
+        Result<Vec<crate::game::server_fns::GameSummary>, ServerFnError>,
+    > = LocalResource::new(move || async move {
+        let _ = last_update.get();
+        crate::game::server_fns::get_active_games().await
+    });
+    provide_context(active_games);
+
+    // None until the fetch resolves; treat that as logged-out so anonymous
+    // visitors never see "Logout". Re-fetches after a logout dispatch.
+    let current_user: LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>> =
+        LocalResource::new(move || async move {
+            let _ = logout_action.version().get();
+            crate::auth::get_current_user().await
+        });
+    provide_context(current_user);
+
     view! {
         <Stylesheet id="leptos" href="/pkg/web.css"/>
         <Title text="brdg.me"/>

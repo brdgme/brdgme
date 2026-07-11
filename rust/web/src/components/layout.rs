@@ -1,5 +1,5 @@
 use crate::components::game::PlayerName;
-use crate::game::server_fns::{GameSummary, get_active_games};
+use crate::game::server_fns::GameSummary;
 use leptos::prelude::*;
 use leptos_router::NavigateOptions;
 use leptos_router::components::A;
@@ -48,7 +48,7 @@ pub fn MainLayout(
 
 #[component]
 pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>) -> impl IntoView {
-    let logout_action = ServerAction::<crate::auth::Logout>::new();
+    let logout_action = expect_context::<ServerAction<crate::auth::Logout>>();
     let navigate = use_navigate();
     Effect::new(move |_| {
         if logout_action.value().get().is_some_and(|r| r.is_ok()) {
@@ -59,20 +59,13 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
         logout_action.dispatch(crate::auth::Logout {});
     };
 
-    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
-    let active_games: LocalResource<Result<Vec<GameSummary>, ServerFnError>> =
-        LocalResource::new(move || async move {
-            let _ = trigger.last_update.get();
-            get_active_games().await
-        });
-
-    // None until the fetch resolves; treat that as logged-out so anonymous
-    // visitors never see "Logout". Re-fetches after a logout dispatch.
-    let current_user: LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>> =
-        LocalResource::new(move || async move {
-            let _ = logout_action.version().get();
-            crate::auth::get_current_user().await
-        });
+    // Provided once in `App` (outside the router) so these resources survive
+    // client-side navigation instead of being torn down and recreated by
+    // every page's own `<MainLayout>` - see the comment at their
+    // `provide_context` call sites in `app.rs`.
+    let active_games = expect_context::<LocalResource<Result<Vec<GameSummary>, ServerFnError>>>();
+    let current_user =
+        expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
     let logged_in = move || matches!(current_user.get(), Some(Ok(Some(_))));
 
     // Close the mobile menu overlay on every route change - covers
