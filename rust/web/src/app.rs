@@ -564,16 +564,19 @@ fn GamePage() -> impl IntoView {
             .unwrap_or(false)
     });
 
-    // MainLayout is outside Suspense so it is always in the initial SSR HTML
-    // with no streaming placeholder risk. Suspense defers hydration of game
-    // content until game_data deserializes, matching SSR and client structure.
+    // MainLayout is outside Transition so it is always in the initial SSR
+    // HTML with no streaming placeholder risk. Transition (not Suspense)
+    // wraps the game content: Suspense's fallback replaces its children on
+    // every refetch, blanking the board to white on each WS-triggered
+    // update; Transition keeps the last-rendered children visible during a
+    // refetch and only shows `fallback` before the first load.
     view! {
         <MainLayout
             is_my_turn=Signal::from(is_my_turn)
             has_sub_menu=Signal::from(true)
             has_next_game=Signal::from(is_my_turn)
         >
-            <Suspense fallback=|| view! { <div></div> }>
+            <Transition fallback=|| view! { <div></div> }>
                 {move || {
                     let base = game_data.get();
                     base.map(|res| match res {
@@ -625,7 +628,7 @@ fn GamePage() -> impl IntoView {
                         },
                     })
                 }}
-            </Suspense>
+            </Transition>
         </MainLayout>
     }
 }
