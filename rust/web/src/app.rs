@@ -615,16 +615,6 @@ fn GamePage() -> impl IntoView {
         },
     );
 
-    // is_my_turn starts false in hydrate mode (Memo returns false until resource
-    // deserializes). This only changes a CSS class — no structural mismatch.
-    let is_my_turn = Memo::new(move |_| {
-        game_data
-            .get()
-            .and_then(|r| r.ok())
-            .map(|d| d.is_my_turn)
-            .unwrap_or(false)
-    });
-
     // MainLayout is outside Transition so it is always in the initial SSR
     // HTML with no streaming placeholder risk. Transition (not Suspense)
     // wraps the game content: Suspense's fallback replaces its children on
@@ -632,11 +622,7 @@ fn GamePage() -> impl IntoView {
     // update; Transition keeps the last-rendered children visible during a
     // refetch and only shows `fallback` before the first load.
     view! {
-        <MainLayout
-            is_my_turn=Signal::from(is_my_turn)
-            has_sub_menu=Signal::from(true)
-            has_next_game=Signal::from(is_my_turn)
-        >
+        <MainLayout has_sub_menu=Signal::from(true)>
             <Transition fallback=|| view! { <div></div> }>
                 {move || {
                     let base = game_data.get();
@@ -715,6 +701,10 @@ mod tests {
                 color: "#000".to_string(),
             }],
             is_turn,
+            is_turn_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            ),
         }
     }
 

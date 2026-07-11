@@ -5,27 +5,95 @@ use leptos_router::NavigateOptions;
 use leptos_router::components::A;
 use leptos_router::hooks::use_navigate;
 
+/// Open state for the header "Sub menu" button's target (the game meta
+/// panel). Provided by `MainLayout` so `GameMeta`, which lives deep inside
+/// the page children, can toggle its `.open` class and render the close
+/// underlay.
+#[derive(Clone, Copy)]
+pub struct SubMenuOpen {
+    pub open: ReadSignal<bool>,
+    pub set_open: WriteSignal<bool>,
+}
+
+/// Picks the game that has been awaiting the player's turn the longest -
+/// the "Next game" button's target.
+fn next_game_id(games: &[GameSummary]) -> Option<uuid::Uuid> {
+    games
+        .iter()
+        .filter(|g| g.is_turn)
+        .min_by_key(|g| g.is_turn_at)
+        .map(|g| g.id)
+}
+
 #[component]
 pub fn MainLayout(
-    #[prop(into, default = Signal::from(false))] is_my_turn: Signal<bool>,
     #[prop(into, default = Signal::from(false))] has_sub_menu: Signal<bool>,
-    #[prop(into, default = Signal::from(false))] has_next_game: Signal<bool>,
     children: Children,
 ) -> impl IntoView {
     let (menu_open, set_menu_open) = signal(false);
+    let (sub_menu_open, set_sub_menu_open) = signal(false);
+    provide_context(SubMenuOpen {
+        open: sub_menu_open,
+        set_open: set_sub_menu_open,
+    });
+
+    // Close the sub menu overlay on every route change, mirroring the
+    // sidebar menu's effect in `SidebarMenu`.
+    let location = leptos_router::hooks::use_location();
+    Effect::new(move |_| {
+        location.pathname.get();
+        set_sub_menu_open.set(false);
+    });
+
+    // Header state derives from the sidebar's active-games resource (provided
+    // in `App`), not from the current page: the bar is "my turn" coloured
+    // whenever ANY game is awaiting this player, on every page it is visible.
+    // The resource is None during SSR/hydration so both start inactive -
+    // class/attribute-only changes, no structural mismatch.
+    let active_games = expect_context::<LocalResource<Result<Vec<GameSummary>, ServerFnError>>>();
+    let is_my_turn = Memo::new(move |_| {
+        active_games
+            .get()
+            .and_then(|r| r.ok())
+            .is_some_and(|games| games.iter().any(|g| g.is_turn))
+    });
+    // The longest-waiting my-turn game, hidden while already viewing it.
+    let next_game = Memo::new(move |_| {
+        let id = active_games
+            .get()
+            .and_then(|r| r.ok())
+            .as_deref()
+            .and_then(next_game_id)?;
+        (location.pathname.get() != format!("/games/{}", id)).then_some(id)
+    });
+    let navigate = use_navigate();
 
     view! {
         <div class="layout">
             <div class="layout-header" class:my-turn=move || is_my_turn.get()>
-                <input
-                    type="button"
-                    value="Menu"
+                <button
+                    class="header-icon-button"
+                    aria-label="Menu"
                     on:click=move |_| set_menu_open.update(|v| *v = !*v)
-                />
+                >"\u{2630}"</button>
                 <span class="header-title">"brdg.me"</span>
                 // Always render same element type; toggle visibility to avoid structural mismatch
-                <input type="button" value="Sub menu" hidden=move || !has_sub_menu.get()/>
-                <input type="button" value="Next game" hidden=move || !has_next_game.get()/>
+                <button
+                    class="header-icon-button header-sub-menu"
+                    aria-label="Sub menu"
+                    hidden=move || !has_sub_menu.get()
+                    on:click=move |_| set_sub_menu_open.update(|v| *v = !*v)
+                >"\u{22ee}"</button>
+                <input
+                    type="button"
+                    value="Next game"
+                    hidden=move || next_game.get().is_none()
+                    on:click=move |_| {
+                        if let Some(id) = next_game.get_untracked() {
+                            navigate(&format!("/games/{}", id), NavigateOptions::default());
+                        }
+                    }
+                />
             </div>
             <div class="layout-body">
                 <SidebarMenu open=menu_open set_open=set_menu_open />
@@ -122,5 +190,42 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
                 }}
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::server_fns::GameSummary;
+    use uuid::Uuid;
+
+    fn game_summary(is_turn: bool, hour: u8) -> GameSummary {
+        GameSummary {
+            id: Uuid::new_v4(),
+            name: "test".to_string(),
+            type_name: "Test Game".to_string(),
+            opponents: Vec::new(),
+            is_turn,
+            is_turn_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::from_hms(hour, 0, 0).unwrap(),
+            ),
+        }
+    }
+
+    #[test]
+    fn next_game_id_picks_longest_waiting_my_turn_game() {
+        let games = vec![
+            game_summary(false, 1),
+            game_summary(true, 9),
+            game_summary(true, 3),
+        ];
+        assert_eq!(next_game_id(&games), Some(games[2].id));
+    }
+
+    #[test]
+    fn next_game_id_none_when_no_game_is_my_turn() {
+        let games = vec![game_summary(false, 1)];
+        assert_eq!(next_game_id(&games), None);
     }
 }

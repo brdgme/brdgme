@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            g.id as game_id,\n            gv.name as version_name,\n            gt.name as type_name,\n            me.is_turn as my_is_turn,\n            me.is_turn_at as my_is_turn_at,\n            opp.id as \"opp_id?\",\n            COALESCE(u.name, gb.name, 'Bot') as \"opp_name!\",\n            opp.color as \"opp_color?\"\n        FROM games g\n        JOIN game_versions gv ON gv.id = g.game_version_id\n        JOIN game_types gt ON gt.id = gv.game_type_id\n        JOIN game_players me ON me.game_id = g.id AND me.user_id = $1\n        LEFT JOIN game_players opp ON opp.game_id = g.id AND opp.id <> me.id\n        LEFT JOIN users u ON u.id = opp.user_id\n        LEFT JOIN game_bots gb ON gb.id = opp.game_bot_id\n        WHERE g.is_finished = false\n        ORDER BY me.is_turn DESC, g.updated_at DESC, g.id, opp.position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "game_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "version_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "my_is_turn",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "my_is_turn_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 5,
+        "name": "opp_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "opp_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "opp_color?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "4616b92d8866363684760f479d5974f08338d297f41111cb9905fb3ca5f92348"
+}

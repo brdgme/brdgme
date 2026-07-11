@@ -24,6 +24,9 @@ pub struct GameSummary {
     pub type_name: String,
     pub opponents: Vec<OpponentSummary>,
     pub is_turn: bool,
+    /// When `is_turn` last changed (trigger-maintained) - the "Next game"
+    /// button targets the game waiting on the player the longest.
+    pub is_turn_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

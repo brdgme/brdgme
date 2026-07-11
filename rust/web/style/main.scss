@@ -126,6 +126,25 @@ body {
 .layout .layout-header .header-title {
   font-weight: 700;
   font-size: 1.6em;
+  /* Push everything after the title (sub menu, next game) to the right
+     edge of the screen. */
+  flex: 1;
+}
+
+.layout .layout-header .header-icon-button {
+  background: none;
+  border: none;
+  padding: 0 0.63em;
+  font-size: 1.3em;
+  color: #606060;
+  cursor: pointer;
+}
+
+/* The sub menu (game meta panel) only collapses below 60em - between 60em
+   and 80em the header is visible but the panel is still on screen, so the
+   button must stay hidden; see the 60em media block below. */
+.layout .layout-header .header-sub-menu {
+  display: none;
 }
 
 .layout .layout-body {

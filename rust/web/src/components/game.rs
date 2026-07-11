@@ -54,8 +54,19 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
         }
     });
 
+    // Header "Sub menu" button state, provided by `MainLayout`. Drives the
+    // narrow-viewport overlay (see the `@media (max-width: 60em)` block in
+    // main.scss); underlay mounted only while open, like the sidebar menu.
+    let sub_menu = expect_context::<crate::components::layout::SubMenuOpen>();
+
     view! {
-        <div class="game-meta">
+        <Show when=move || sub_menu.open.get()>
+            <div
+                class="game-meta-close-underlay"
+                on:click=move |_| sub_menu.set_open.set(false)
+            ></div>
+        </Show>
+        <div class="game-meta" class:open=move || sub_menu.open.get()>
             <div class="game-meta-main">
                 <div>
                     <h2>{data.type_name}</h2>

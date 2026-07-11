@@ -215,3 +215,61 @@ superpowers spec/plan and fixed as one batch when scheduled.
   the click lands on the suggestion element, so the type-anywhere keydown
   handler's "nothing focused" guard does not help here. The click handler
   itself should refocus the input.
+
+### 2026-07-11: Header "Sub menu" button does nothing
+
+- **Observed:** On narrow viewports the header's "Sub menu" button is
+  visible but clicking it does not open the game meta panel - same class
+  of bug as the earlier inert "Menu" button (no `on:click` at all; the
+  `.game-meta.open` / `.game-meta-close-underlay` CSS in the
+  `@media (max-width: 60em)` block was never wired up).
+- **Expected:** The button opens the game meta panel as an overlay;
+  clicking the underlay or navigating closes it, like the sidebar menu.
+- **Resolved:** Fixed same day - `MainLayout` provides a `SubMenuOpen`
+  context that `GameMeta` consumes to toggle `.open` and mount the
+  underlay.
+
+### 2026-07-11: "Sub menu" button visible at widths where the panel is already shown
+
+- **Observed:** Between 60em and 80em the main menu is collapsed (so the
+  header is visible) but the game meta panel is still on screen - yet the
+  "Sub menu" button shows anyway. Only the "Menu" button should show in
+  that range.
+- **Expected:** The "Sub menu" button only appears below 60em, where the
+  game meta panel actually collapses.
+- **Resolved:** Fixed same day - `.header-sub-menu` is `display: none` by
+  default and only shown inside the 60em media block.
+
+### 2026-07-11: Header buttons should be icons, sub menu right-aligned
+
+- **Observed:** "Menu" and "Sub menu" are plain form buttons with text
+  labels, and the sub menu button sits directly right of the heading.
+- **Expected:** Unicode icon buttons - U+2630 (the trigram hamburger, the
+  standard choice over U+2261 which is the maths "identical to" operator)
+  for the menu, U+22EE (vertical ellipsis, the conventional
+  secondary/overflow "kebab" menu glyph, broadly available) for the sub
+  menu - with the sub menu button aligned to the right edge of the screen.
+- **Resolved:** Fixed same day - borderless `.header-icon-button` styling,
+  `aria-label`s kept for accessibility, title given `flex: 1` so trailing
+  buttons align right.
+
+### 2026-07-11: Titlebar colour only reflects the current game's turn
+
+- **Observed:** The header's my-turn highlight was driven by an
+  `is_my_turn` prop only the game page passed, so on the index/dashboard
+  (or a game where it is not your turn) the bar never showed the active
+  colour even with other games waiting.
+- **Expected:** The bar shows the active colour whenever ANY active game
+  is awaiting the player's turn, on every page the bar is visible.
+- **Resolved:** Fixed same day - `MainLayout` derives it from the shared
+  active-games resource (same data as the sidebar and title badge).
+
+### 2026-07-11: "Next game" button broken
+
+- **Observed:** The header's "Next game" button had no click handler at
+  all, and its visibility was just "is it my turn in the current game".
+- **Expected:** Links to the active game that has been awaiting the
+  player's turn the longest (oldest `game_players.is_turn_at`); hidden
+  when there is no such game or the player is already viewing it.
+- **Resolved:** Fixed same day - `is_turn_at` added to `GameSummary`, the
+  target computed in `MainLayout` from the shared active-games resource.

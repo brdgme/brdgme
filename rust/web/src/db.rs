@@ -504,6 +504,7 @@ pub async fn find_active_game_summaries(
             gv.name as version_name,
             gt.name as type_name,
             me.is_turn as my_is_turn,
+            me.is_turn_at as my_is_turn_at,
             opp.id as "opp_id?",
             COALESCE(u.name, gb.name, 'Bot') as "opp_name!",
             opp.color as "opp_color?"
@@ -531,6 +532,7 @@ pub async fn find_active_game_summaries(
                 type_name: row.type_name,
                 opponents: Vec::new(),
                 is_turn: row.my_is_turn,
+                is_turn_at: row.my_is_turn_at,
             });
         }
         if row.opp_id.is_some() {
