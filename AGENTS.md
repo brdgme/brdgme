@@ -40,6 +40,25 @@ on demand when the task at hand references them.
   kubectl output (`tilt logs -f`, foreground `port-forward`,
   `kubectl wait` without `--timeout`); poll bounded snapshots instead.
 
+## Database migrations
+
+- Migration files under `rust/web/migrations/` are immutable once applied to
+  any environment - never edit them, not even comments. sqlx checksums the
+  file contents against what was recorded as applied; any edit (including
+  comment-only changes) breaks the checksum and fails the prod migrate Job.
+  This happened with migration 005 on 2026-07-11.
+- New work goes in a new numbered migration, never a change to an existing
+  one.
+- Commentary about an already-applied migration belongs in docs or
+  AGENTS.md, not the `.sql` file.
+- Note on migration 005 (`login_confirmations`): ArgoCD runs the migrate Job
+  at sync-wave 1 and the web Deployment at sync-wave 2, but old-image pods
+  keep serving traffic until their rollout completes. This leaves a brief
+  (~30-60s) window where old pods hard-error `SELECT`ing the
+  `login_confirmation` / `login_confirmation_at` columns that 005 drops.
+  Accepted: the app self-heals once the rollout finishes, and beta traffic
+  is low.
+
 ## Working style
 
 - Never install packages on the host machine - all tooling comes from the
