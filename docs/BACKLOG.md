@@ -92,6 +92,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) | - |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
 | 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - pre-beta-exit; added 2026-07-11 | - | - |
+| 38 | Frontend cache busting on new deploys (investigate stale WASM/asset caching when a new version is bumped in brdgme-config; options: user-facing "new version released, please reload" messaging, or simply force a reload when a new version is deployed) | Pending - unscheduled; added 2026-07-11 | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -344,3 +345,11 @@ still flashing on command submit, a reusable centered loading spinner
 needed for initial game page load, and disabling the command input/send
 button while a command is submitting. These are recorded for a future #33
 continuation session, not actioned now.
+
+2026-07-11: #38 added - investigate frontend cache busting when a new
+version is bumped in brdgme-config: browsers may keep serving stale
+WASM/JS/assets after a deploy. Candidate approaches, simplest-first: force
+a reload in clients whenever a new version is deployed, or surface a "new
+version released, please reload" message to the user; the underlying
+cache-busting story (hashed asset filenames / cache headers) should be
+investigated as part of the same item.
