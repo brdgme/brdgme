@@ -10,7 +10,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Single gate job computing which path groups changed, so every other job
+  # can skip with an `if:` instead of the workflow-level `on.paths` filter
+  # (which would make GitHub report skipped jobs as *missing*, breaking
+  # required-status checks that name them). A skipped job here still reports
+  # a (skipped) status, which satisfies required checks.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      go: ${{ steps.filter.outputs.go }}
+      k8s: ${{ steps.filter.outputs.k8s }}
+      legacy: ${{ steps.filter.outputs.legacy }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'rust/**'
+              - 'docker-bake.hcl'
+              - '.github/workflows/ci.yml'
+            go:
+              - 'brdgme-go/**'
+              - 'go.mod'
+              - '.github/workflows/ci.yml'
+            k8s:
+              - 'k8s/**'
+              - '.github/workflows/ci.yml'
+            # rust/api/Dockerfile builds with context `.` and `COPY rust/ .`,
+            # then `cargo build -p brdgme_api` - brdgme_api path-depends on
+            # rust/lib/{cmd,game,color,markup} and resolves against the
+            # workspace-level Cargo.toml/Cargo.lock, so all of those must
+            # gate this build too, not just rust/api/**.
+            legacy:
+              - 'web/**'
+              - 'websocket/**'
+              - 'rust/api/**'
+              - 'rust/lib/**'
+              - 'rust/Cargo.toml'
+              - 'rust/Cargo.lock'
+              - '.github/workflows/ci.yml'
+
   test-rust:
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,6 +104,8 @@ jobs:
       - run: cargo test -p web --features ssr
 
   cargo-deny:
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -72,6 +119,8 @@ jobs:
       - run: cargo deny check
 
   kubeconform:
+    needs: [changes]
+    if: needs.changes.outputs.k8s == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -101,6 +150,8 @@ jobs:
             -ignore-missing-schemas
 
   e2e:
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     # Flaky (hydration-race in the login flow, still being tracked down) -
     # don't let it block merges/deploys while that's investigated.
@@ -176,6 +227,8 @@ jobs:
         run: ./run.sh
 
   test-go:
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -196,7 +249,15 @@ jobs:
   # rust layers blow straight through the 10GB GHA cache quota, which
   # caused constant eviction and cold builds.
   build-rust:
-    needs: [test-rust]
+    needs: [changes, test-rust]
+    # `test-rust` reports "skipped" (not "success") when the gate skips it,
+    # so this can't rely on the default implicit `success()` check - it
+    # would skip build-rust too. Proceed on skip, still block on a real
+    # failure/cancellation.
+    if: |
+      needs.changes.outputs.rust == 'true' &&
+      needs.test-rust.result != 'failure' &&
+      needs.test-rust.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -225,6 +286,8 @@ jobs:
           WRITE_CACHE: ${{ github.ref == 'refs/heads/master' }}
 
   build-legacy:
+    needs: [changes]
+    if: needs.changes.outputs.legacy == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -265,7 +328,13 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-go-games:
-    needs: [test-go]
+    needs: [changes, test-go]
+    # See build-rust's comment: proceed when test-go was skipped, still
+    # block on a real failure/cancellation.
+    if: |
+      needs.changes.outputs.go == 'true' &&
+      needs.test-go.result != 'failure' &&
+      needs.test-go.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       contents: read
