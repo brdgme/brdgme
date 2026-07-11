@@ -203,3 +203,15 @@ superpowers spec/plan and fixed as one batch when scheduled.
   submitting. On success, clear the input (current behavior). On error,
   re-enable both but keep the submitted text in the input so the user can
   correct and resubmit.
+
+### 2026-07-11: Autocomplete click doesn't focus the command input
+
+- **Observed:** Beta testing the deployed batch (deploy sha-48686c8) -
+  clicking an autocomplete word above the game command input correctly
+  inserts the word into the command input, but focus does not move.
+- **Expected:** The command input should also be focused after the click
+  so the user can keep typing.
+- **Note:** Related to the input-auto-focus entry above (Task 9 work) -
+  the click lands on the suggestion element, so the type-anywhere keydown
+  handler's "nothing focused" guard does not help here. The click handler
+  itself should refocus the input.
