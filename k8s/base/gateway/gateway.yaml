@@ -28,6 +28,15 @@ spec:
   gatewayClassName: cilium
   infrastructure:
     annotations:
+      # Origin lockdown spike attempted 2026-07-11 (28 WP4 W7):
+      # service.beta.kubernetes.io/do-loadbalancer-allow-rules set to
+      # Cloudflare's published ranges. Failed - the Gateway's generated
+      # Service could not be updated (condition: Accepted=False,
+      # reason=NoResources, message="Unable to create Service resource");
+      # the old Service was left in place unchanged (no allow-rules
+      # annotation ever reached it). Reverted (commit 084abee). Direct-to-LB
+      # bypass is accepted; WP1 DB-backed send/attempt caps are the backstop
+      # per spec W7.
       # Default is 60s. The monolith already pings every 30s
       # (rust/web/src/websocket.rs) to keep long-lived WS connections alive
       # across LB idle timeouts - this just adds margin.
