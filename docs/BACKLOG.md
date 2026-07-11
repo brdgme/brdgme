@@ -312,3 +312,13 @@ annotation rejected by the controller, direct-to-LB bypass accepted and
 documented (spec W7, DB caps backstop); docs updated (infra README
 migration record, external-dns spec cross-ref). With WP1-4 all done, #28
 is fully done and moved to the archive.
+
+2026-07-11: #33 entry 5's secondary "Also investigate" item - whether
+Rust build caching (Swatinem/rust-cache CI jobs, the docker-bake
+registry-backed layer cache / cargo-chef stages) is as good as it can be,
+since Rust builds are still often really long - was deliberately deferred
+by operator decision: recorded here as an unscheduled backlog note rather
+than a #33 plan task. #33 Task 2 (CI path-gating via dorny/paths-filter,
+commit 8120ee3) already removed the cost of Rust builds for non-Rust
+changes, so this caching investigation only affects CI runs that
+genuinely touch Rust.
