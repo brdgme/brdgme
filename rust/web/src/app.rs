@@ -189,6 +189,22 @@ fn LoginPage() -> impl IntoView {
         set_show_code_input.set(true);
     };
 
+    // Autofocus: email field on load, code field once the code step renders
+    // (both re-fire once their `NodeRef` resolves, matching the pattern
+    // already used by `GameCommandInput`'s mount effect).
+    Effect::new(move |_| {
+        if let Some(el) = email_input.get() {
+            let _ = el.focus();
+        }
+    });
+    Effect::new(move |_| {
+        if show_code_input.get()
+            && let Some(el) = code_input.get()
+        {
+            let _ = el.focus();
+        }
+    });
+
     view! {
         <div class="login">
             <h1>"brdg.me"</h1>

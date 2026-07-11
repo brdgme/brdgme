@@ -335,6 +335,30 @@ pub fn GameCommandInput(
         }
     });
 
+    // Type-anywhere-focuses-command-field: only single, unmodified,
+    // printable-character keystrokes are diverted, and only when nothing is
+    // already focused - so Tab-focused links/buttons keep their normal
+    // keyboard behaviour, especially Enter navigating a focused link.
+    let keydown_listener = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.ctrl_key() || ev.meta_key() || ev.alt_key() {
+            return;
+        }
+        if ev.key().chars().count() != 1 {
+            return;
+        }
+        let nothing_focused = document()
+            .active_element()
+            .map(|el| el.tag_name() == "BODY")
+            .unwrap_or(true);
+        if !nothing_focused {
+            return;
+        }
+        if let Some(el) = input_ref.get_untracked() {
+            let _ = el.focus();
+        }
+    });
+    on_cleanup(move || keydown_listener.remove());
+
     // Clear command, refocus input, and trigger re-fetch on successful submit.
     // Local bump makes the own action refetch even if the WS is down; the
     // trigger bump is still needed for the layout header.
