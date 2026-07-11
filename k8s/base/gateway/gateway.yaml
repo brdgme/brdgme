@@ -32,6 +32,10 @@ spec:
       # (rust/web/src/websocket.rs) to keep long-lived WS connections alive
       # across LB idle timeouts - this just adds margin.
       service.beta.kubernetes.io/do-loadbalancer-http-idle-timeout-seconds: "120"
+      # Spike (28 WP4 W7): restrict the DO LB to Cloudflare's published
+      # ranges so direct-to-origin traffic can't bypass the edge.
+      # Value generated from https://www.cloudflare.com/ips-v4 + ips-v6.
+      service.beta.kubernetes.io/do-loadbalancer-allow-rules: "cidr:173.245.48.0/20,cidr:103.21.244.0/22,cidr:103.22.200.0/22,cidr:103.31.4.0/22,cidr:141.101.64.0/18,cidr:108.162.192.0/18,cidr:190.93.240.0/20,cidr:188.114.96.0/20,cidr:197.234.240.0/22,cidr:198.41.128.0/17,cidr:162.158.0.0/15,cidr:104.16.0.0/13,cidr:104.24.0.0/14,cidr:172.64.0.0/13,cidr:131.0.72.0/22,cidr:2400:cb00::/32,cidr:2606:4700::/32,cidr:2803:f800::/32,cidr:2405:b500::/32,cidr:2405:8100::/32,cidr:2a06:98c0::/29,cidr:2c0f:f248::/32"
       # WARNING: never set do-loadbalancer-enable-proxy-protocol here. Envoy
       # cannot be made to expect PROXY protocol on DOKS (the cilium-config
       # flag that would tell it to is owned by DOKS's managed reconciler and
