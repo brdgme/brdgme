@@ -22,10 +22,10 @@ attempted and dropped 2026-07-08),
 #15 ArgoCD + sealed-secrets (live, first fully-green sync 2026-07-08;
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
-complete 2026-07-10). **Remaining pre-go-live:** #28 WP4 Cloudflare edge
-(promoted pre-go-live 2026-07-10; redesigned + resequenced same day,
-single-stage) -> #16 beta period (isolated DB) -> hard cutover + 1-week
-validation gate -> decommission. #32 demoted to post-go-live 2026-07-10
+complete 2026-07-10), #28 WP4 Cloudflare edge (complete 2026-07-11).
+**Remaining pre-go-live:** #33 pre-go-live UI/UX polish batch -> #16 beta
+period (isolated DB) -> hard cutover + 1-week validation gate ->
+decommission. #32 demoted to post-go-live 2026-07-10
 (Michael: the Grafana Cloud quota must reset anyway - not a go-live
 blocker). (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
@@ -66,7 +66,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## Status
 
-Fully done/resolved/superseded items (1-14, 17, 18, 20, 21, Quick wins,
+Fully done/resolved/superseded items (1-14, 17, 18, 20, 21, 28, Quick wins,
 Review findings 2026-07-04, Development Workflow) have been moved to
 [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 
@@ -81,7 +81,6 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-25-rules-rendering-design.md) | [plan](superpowers/plans/2026-07-05-25-rules-rendering.md) |
 | 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-26-theming-design.md) | [plan](superpowers/plans/2026-07-05-26-theming.md) |
 | 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
-| 28 | Abuse Protection (bots, scripted clients, DoS) - login rework + send caps + Cloudflare edge | WP1-3 complete 2026-07-10 (commits d9d1d1d/3c6fa72 WP1, 0093291 WP2, 6e53681 WP3, 5a7bb85 review fixes: limiter re-sized for shared bucket per D6, migration-005 window documented); WP4 (Cloudflare edge) promoted to pre-go-live 2026-07-10 (was post-cutover per D1; superseded same day - CF proxy/WS/rate-limit behaviour needs validating on beta.brdg.me before cutover); WP4 redesigned + resequenced 2026-07-10 (single-stage, adopt the already-live CF zone, delete in-app limiters once the edge rule is proven), see [2026-07-10 spec](superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md) and [2026-07-10 plan](superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md) | [spec](superpowers/specs/2026-07-08-28-abuse-protection-design.md) | [plan](superpowers/plans/2026-07-08-28-abuse-protection.md) |
 | 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [spec](superpowers/specs/2026-07-08-29-stats-reports-design.md) | [plan](superpowers/plans/2026-07-08-29-stats-reports.md) |
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
@@ -282,3 +281,15 @@ stays (W9). The old plan's WP4 section is superseded in place. Separately,
 #32 (Alloy OTLP export) demoted to post-go-live (Michael: the Grafana
 Cloud quota must reset anyway - not a go-live blocker); remaining
 pre-go-live order is now #28 WP4 -> #16 beta -> cutover.
+
+2026-07-11: #28 WP4 (Cloudflare edge) completed, commits e34b8cf..0ef55d6:
+brdg.me zone adopted into tofu (import, free plan); SSL Full-strict + WS +
+edge rate-limit rule (60 req/10s on `/api/`, flood-proven 60 pass/40 429);
+TLS switched HTTP01 -> DNS01, DO DNS resources deleted; in-app per-IP rate
+limiting deleted per spec W6 (WP1 DB caps + WP2 hygiene middleware remain
+the app-side backstop); Bot Fight Mode on (enable_js required), verified
+against WS + login; origin lockdown spike REJECTED - DO LB allow-rules
+annotation rejected by the controller, direct-to-LB bypass accepted and
+documented (spec W7, DB caps backstop); docs updated (infra README
+migration record, external-dns spec cross-ref). With WP1-4 all done, #28
+is fully done and moved to the archive.
