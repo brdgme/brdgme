@@ -1,5 +1,5 @@
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{Die, PlayerState, PubState};
 
@@ -25,16 +25,19 @@ impl Renderer for PubState {
     fn render(&self) -> Vec<N> {
         let mut out: Vec<N> = vec![];
 
-        out.push(N::Table(vec![
-            vec![
-                (A::Left, vec![N::Bold(vec![N::text("Remaining dice")])]),
-                (A::Left, vec![render_dice(&self.remaining_dice, " ")]),
+        out.push(table_with_gap(
+            &[
+                vec![
+                    (A::Left, vec![N::Bold(vec![N::text("Remaining dice")])]),
+                    (A::Left, vec![render_dice(&self.remaining_dice, " ")]),
+                ],
+                vec![
+                    (A::Left, vec![N::Bold(vec![N::text("Score this turn")])]),
+                    (A::Left, vec![N::text(self.turn_score.to_string())]),
+                ],
             ],
-            vec![
-                (A::Left, vec![N::Bold(vec![N::text("Score this turn")])]),
-                (A::Left, vec![N::text(self.turn_score.to_string())]),
-            ],
-        ]));
+            1,
+        ));
         out.push(N::text("\n\n"));
 
         let mut rows: Vec<Row> = vec![vec![
@@ -51,7 +54,7 @@ impl Renderer for PubState {
                 (A::Left, vec![N::text(self.scores[p].to_string())]),
             ]);
         }
-        out.push(N::Table(rows));
+        out.push(table_with_gap(&rows, 1));
 
         out
     }

@@ -1,6 +1,6 @@
 use brdgme_color::{BLUE, GREEN, GREY};
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Node as N, comma_list_and};
 
 use crate::{Phase, PlayerState, PubState};
 
@@ -29,17 +29,6 @@ pub fn cards(deck: &[i32], is_building: bool) -> N {
         });
     }
     N::Group(nodes)
-}
-
-fn join_nodes(nodes: Vec<N>) -> N {
-    let mut out: Vec<N> = vec![];
-    for (i, n) in nodes.into_iter().enumerate() {
-        if i > 0 {
-            out.push(N::text(", "));
-        }
-        out.push(n);
-    }
-    N::Group(out)
 }
 
 fn highest_bid(pub_state: &PubState) -> Option<(usize, i32)> {
@@ -91,13 +80,13 @@ fn render(pub_state: &PubState, player: Option<usize>, own: Option<&PlayerState>
                     N::text("\n"),
                 ]));
             }
-            let remaining: Vec<N> = (0..pub_state.players)
+            let remaining: Vec<Vec<N>> = (0..pub_state.players)
                 .filter(|p| !pub_state.finished_bidding[*p])
-                .map(N::Player)
+                .map(|p| vec![N::Player(p)])
                 .collect();
             out.push(N::text("Remaining players: "));
-            out.push(join_nodes(remaining));
-            out.push(N::text("\n"));
+            out.extend(comma_list_and(&remaining));
+            out.push(N::text("\n\n"));
         }
         Phase::Selling => {
             out.push(N::text("Cheques available: "));
@@ -112,30 +101,12 @@ fn render(pub_state: &PubState, player: Option<usize>, own: Option<&PlayerState>
                     N::text("\n"),
                 ]));
             }
+            out.push(N::text("\n"));
         }
-        Phase::Finished => {
-            let mut rows: Vec<Row> = vec![vec![
-                (A::Left, vec![N::Bold(vec![N::text("Player")])]),
-                (A::Left, vec![N::Bold(vec![N::text("Score")])]),
-            ]];
-            for p in 0..pub_state.players {
-                rows.push(vec![
-                    (A::Left, vec![N::Player(p)]),
-                    (
-                        A::Left,
-                        vec![N::Bold(vec![N::text(
-                            pub_state.final_scores[p].to_string(),
-                        )])],
-                    ),
-                ]);
-            }
-            out.push(N::Table(rows));
-        }
+        Phase::Finished => {}
     }
 
-    if let Some(own) = own
-        && pub_state.phase != Phase::Finished
-    {
+    if let Some(own) = own {
         out.push(N::Group(vec![
             N::text("Your chips: "),
             bold_num(own.chips),

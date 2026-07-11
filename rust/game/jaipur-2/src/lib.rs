@@ -11,7 +11,7 @@ use brdgme_game::rng::GameRng;
 use brdgme_game::{Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
-use crate::render::render_goods_list;
+use crate::render::render_goods_items;
 
 mod command;
 mod render;
@@ -249,13 +249,14 @@ impl Game {
         let drawn: Vec<Good> = self.deck.drain(..n).collect();
         let mut display_drawn = drawn.clone();
         display_drawn.sort_by_key(|g| *g as u8);
-        logs.push(Log::public(vec![
-            N::text("Drew "),
-            crate::render::comma_list_nodes(crate::render::render_goods_list(&display_drawn)),
-            N::text(" from the deck and added "),
-            N::text(if n == 1 { "it" } else { "them" }),
-            N::text(" to the market"),
-        ]));
+        let mut drawn_content = vec![N::text("Drew ")];
+        drawn_content.extend(brdgme_markup::comma_list_and(&render_goods_items(
+            &display_drawn,
+        )));
+        drawn_content.push(N::text(" from the deck and added "));
+        drawn_content.push(N::text(if n == 1 { "it" } else { "them" }));
+        drawn_content.push(N::text(" to the market"));
+        logs.push(Log::public(drawn_content));
         self.market.extend(drawn);
         true
     }
@@ -278,13 +279,9 @@ impl Game {
                 }
             }
         }
-        logs.push(Log::private(
-            vec![
-                N::text("You drew "),
-                crate::render::comma_list_nodes(render_goods_list(&cards)),
-            ],
-            vec![player],
-        ));
+        let mut drew_content = vec![N::text("You drew ")];
+        drew_content.extend(brdgme_markup::comma_list_and(&render_goods_items(&cards)));
+        logs.push(Log::private(drew_content, vec![player]));
 
         let other = opponent(player);
         logs.push(Log::private(
@@ -1251,18 +1248,20 @@ mod tests {
     }
 
     #[test]
-    fn comma_list_nodes_follows_natural_language() {
-        use crate::render::comma_list_nodes;
+    fn goods_comma_list_follows_natural_language() {
+        use brdgme_markup::{comma_list_and, plain, transform};
 
-        let one = comma_list_nodes(vec![N::text("diamond")]);
-        assert_eq!(brdgme_markup::to_string(&[one]), "diamond");
+        let render_plain = |goods: &[Good]| -> String {
+            plain(&transform(&comma_list_and(&render_goods_items(goods)), &[]))
+        };
 
-        let two = comma_list_nodes(vec![N::text("diamond"), N::text("gold")]);
-        assert_eq!(brdgme_markup::to_string(&[two]), "diamond and gold");
-
-        let three = comma_list_nodes(vec![N::text("diamond"), N::text("gold"), N::text("silver")]);
+        assert_eq!(render_plain(&[Good::Diamond]), "diamond");
         assert_eq!(
-            brdgme_markup::to_string(&[three]),
+            render_plain(&[Good::Diamond, Good::Gold]),
+            "diamond and gold"
+        );
+        assert_eq!(
+            render_plain(&[Good::Diamond, Good::Gold, Good::Silver]),
             "diamond, gold and silver"
         );
     }
@@ -1460,24 +1459,21 @@ mod tests {
             rng: GameRng::seed_from_u64(0),
             ..Game::default()
         };
-        g.market = vec![Good::Camel, Good::Camel, Good::Camel];
-        g.deck = vec![Good::Diamond, Good::Gold];
+        g.market = vec![Good::Camel, Good::Camel];
+        g.deck = vec![Good::Diamond, Good::Gold, Good::Leather];
         let mut logs = vec![];
         assert!(g.replenish_market(&mut logs));
         assert_eq!(g.market.len(), 5);
         assert!(g.market.contains(&Good::Diamond));
         assert!(g.market.contains(&Good::Gold));
+        assert!(g.market.contains(&Good::Leather));
 
         let pub_logs: Vec<&Log> = logs.iter().filter(|l| l.public).collect();
         assert_eq!(pub_logs.len(), 1, "expected exactly one public log");
-        let log_str = brdgme_markup::to_string(&pub_logs[0].content);
-        assert!(
-            log_str.contains("diamond"),
-            "log should mention diamond, got: {log_str}"
-        );
-        assert!(
-            log_str.contains("gold"),
-            "log should mention gold, got: {log_str}"
+        let log_str = brdgme_markup::plain(&brdgme_markup::transform(&pub_logs[0].content, &[]));
+        assert_eq!(
+            log_str, "Drew diamond, gold and leather from the deck and added them to the market",
+            "goods should be joined with a natural-language comma list, got: {log_str}"
         );
     }
 

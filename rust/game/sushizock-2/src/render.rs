@@ -1,6 +1,6 @@
 use brdgme_color::{BLUE, GREY, RED};
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{DieFace, PlayerState, PubState, Tile, TileType};
 
@@ -64,52 +64,23 @@ pub fn bold_tile_list(tiles: &[Tile]) -> N {
     N::Group(nodes)
 }
 
-fn tile_row(tiles: &[Tile], highlight_idx: Option<usize>) -> Vec<N> {
-    let mut nodes: Vec<N> = vec![];
-    for (i, t) in tiles.iter().enumerate() {
-        if i > 0 {
-            nodes.push(N::text(" "));
-        }
-        if highlight_idx == Some(i) {
-            nodes.push(N::Bold(vec![tile(t)]));
-        } else {
-            nodes.push(tile(t));
-        }
-    }
-    if tiles.is_empty() {
-        nodes.push(N::Fg(GREY.into(), vec![N::text("none")]));
-    }
-    nodes
+fn tile_cells(tiles: &[Tile], highlight_idx: Option<usize>) -> Row {
+    tiles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let node = if highlight_idx == Some(i) {
+                N::Bold(vec![tile(t)])
+            } else {
+                tile(t)
+            };
+            (A::Left, vec![node])
+        })
+        .collect()
 }
 
-fn render(pub_state: &PubState, player: Option<usize>) -> Vec<N> {
+fn render(pub_state: &PubState, _player: Option<usize>) -> Vec<N> {
     let mut out: Vec<N> = vec![];
-
-    if pub_state.finished {
-        let mut rows: Vec<Row> = vec![vec![
-            (A::Left, vec![N::Bold(vec![N::text("Player")])]),
-            (A::Left, vec![N::Bold(vec![N::text("Score")])]),
-        ]];
-        for p in 0..pub_state.players {
-            rows.push(vec![
-                (A::Left, vec![N::Player(p)]),
-                (
-                    A::Left,
-                    vec![N::Bold(vec![N::text(
-                        pub_state
-                            .final_scores
-                            .get(p)
-                            .copied()
-                            .unwrap_or(0)
-                            .to_string(),
-                    )])],
-                ),
-            ]);
-        }
-        out.push(N::Bold(vec![N::text("The game is finished!\n")]));
-        out.push(N::Table(rows));
-        return out;
-    }
 
     // Dice section
     out.push(N::Bold(vec![N::text("Dice\n")]));
@@ -159,10 +130,12 @@ fn render(pub_state: &PubState, player: Option<usize>) -> Vec<N> {
     } else {
         None
     };
-    out.push(N::Group(tile_row(&pub_state.blue_tiles, blue_highlight)));
-    out.push(N::text("\n"));
-    out.push(N::Group(tile_row(&pub_state.red_tiles, red_highlight)));
-    out.push(N::text("\n"));
+    let tile_rows: Vec<Row> = vec![
+        tile_cells(&pub_state.blue_tiles, blue_highlight),
+        tile_cells(&pub_state.red_tiles, red_highlight),
+    ];
+    out.push(table_with_gap(&tile_rows, 1));
+    out.push(N::text("\n\n"));
 
     // Players table
     let mut rows: Vec<Row> = vec![vec![
@@ -207,16 +180,7 @@ fn render(pub_state: &PubState, player: Option<usize>) -> Vec<N> {
             (A::Left, red_text),
         ]);
     }
-    out.push(N::Table(rows));
-
-    if let Some(p) = player
-        && (!pub_state.player_blue_tiles[p].is_empty() || !pub_state.player_red_tiles[p].is_empty())
-    {
-        out.push(N::text("\nYour tiles: "));
-        let mut all: Vec<Tile> = pub_state.player_blue_tiles[p].clone();
-        all.extend(pub_state.player_red_tiles[p].clone());
-        out.push(bold_tile_list(&all));
-    }
+    out.push(table_with_gap(&rows, 2));
 
     out
 }

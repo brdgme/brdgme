@@ -1,6 +1,6 @@
 use brdgme_color as color;
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{Card, END_SCORE, PlayerState, PubState, ROW_MAX, ROWS, cards_heads};
 
@@ -29,7 +29,7 @@ fn render_board(board: &[Vec<Card>; ROWS]) -> N {
         ));
         rows.push(row);
     }
-    N::Table(rows)
+    table_with_gap(&rows, 2)
 }
 
 fn render_hand(hand: &[Card]) -> N {
@@ -39,7 +39,7 @@ fn render_hand(hand: &[Card]) -> N {
     for c in &sorted {
         row.push((A::Left, vec![render_card(*c)]));
     }
-    N::Table(vec![row])
+    table_with_gap(&[row], 2)
 }
 
 fn render_legend() -> N {
@@ -50,7 +50,7 @@ fn render_legend() -> N {
         (5, color::RED),
         (7, color::PURPLE),
     ];
-    let mut nodes: Vec<N> = vec![N::Bold(vec![N::text("Legend:")])];
+    let mut nodes: Vec<N> = vec![N::Bold(vec![N::text("Legend:")]), N::text(" ")];
     for (i, (heads, col)) in order.iter().enumerate() {
         if i > 0 {
             nodes.push(N::text(", "));
@@ -73,7 +73,7 @@ fn render_scores(pub_state: &PubState) -> N {
         rows.push(vec![
             (A::Left, vec![N::Player(p)]),
             (
-                A::Left,
+                A::Center,
                 vec![N::text(
                     pub_state
                         .player_cards_counts
@@ -84,7 +84,7 @@ fn render_scores(pub_state: &PubState) -> N {
                 )],
             ),
             (
-                A::Left,
+                A::Center,
                 vec![N::Bold(vec![N::text(
                     pub_state
                         .player_points
@@ -96,7 +96,7 @@ fn render_scores(pub_state: &PubState) -> N {
             ),
         ]);
     }
-    N::Table(rows)
+    table_with_gap(&rows, 2)
 }
 
 fn render(pub_state: &PubState, hand: Option<&[Card]>) -> Vec<N> {

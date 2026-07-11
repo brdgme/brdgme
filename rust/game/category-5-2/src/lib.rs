@@ -240,12 +240,12 @@ impl Game {
             lines.push(N::Group(vec![
                 N::text("\n  "),
                 N::Player(p),
-                N::text(format!(
-                    " had {} cards worth {} points, total now {}",
-                    self.player_cards[p].len(),
-                    total,
-                    self.player_points[p],
-                )),
+                N::text(" had "),
+                N::Bold(vec![N::text(self.player_cards[p].len().to_string())]),
+                N::text(" cards worth "),
+                N::Bold(vec![N::text(total.to_string())]),
+                N::text(" points, total now "),
+                N::Bold(vec![N::text(self.player_points[p].to_string())]),
             ]));
         }
         let logs = vec![Log::public(lines)];

@@ -1,6 +1,6 @@
 use brdgme_color as color;
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{Colour, Dice, DiceResult, PlayerState, PubState};
 
@@ -93,34 +93,37 @@ impl Renderer for PubState {
         let mut out: Vec<N> = vec![];
 
         // Main status table: Brains / Shots / Runners / Kept / In cup.
-        out.push(N::Table(vec![
-            vec![
-                (A::Right, vec![N::text("Brains")]),
-                (
-                    A::Left,
-                    vec![N::Bold(vec![N::text(self.round_brains.to_string())])],
-                ),
+        out.push(table_with_gap(
+            &[
+                vec![
+                    (A::Right, vec![N::text("Brains")]),
+                    (
+                        A::Left,
+                        vec![N::Bold(vec![N::text(self.round_brains.to_string())])],
+                    ),
+                ],
+                vec![
+                    (A::Right, vec![N::text("Shots:")]),
+                    (
+                        A::Left,
+                        vec![N::Bold(vec![N::text(self.round_shotguns.to_string())])],
+                    ),
+                ],
+                vec![
+                    (A::Right, vec![N::text("Runners:")]),
+                    (A::Left, vec![render_dice_result_list(&self.current_roll)]),
+                ],
+                vec![
+                    (A::Right, vec![N::text("Kept:")]),
+                    (A::Left, vec![render_dice_result_list(&self.kept)]),
+                ],
+                vec![
+                    (A::Right, vec![N::text("In cup:")]),
+                    (A::Left, vec![render_cup(&self.cup)]),
+                ],
             ],
-            vec![
-                (A::Right, vec![N::text("Shots:")]),
-                (
-                    A::Left,
-                    vec![N::Bold(vec![N::text(self.round_shotguns.to_string())])],
-                ),
-            ],
-            vec![
-                (A::Right, vec![N::text("Runners:")]),
-                (A::Left, vec![render_dice_result_list(&self.current_roll)]),
-            ],
-            vec![
-                (A::Right, vec![N::text("Kept:")]),
-                (A::Left, vec![render_dice_result_list(&self.kept)]),
-            ],
-            vec![
-                (A::Right, vec![N::text("In cup:")]),
-                (A::Left, vec![render_cup(&self.cup)]),
-            ],
-        ]));
+            2,
+        ));
 
         out.push(N::Bold(vec![N::text("\n\n\nScores:\n")]));
 
@@ -135,7 +138,7 @@ impl Renderer for PubState {
                 ),
             ]);
         }
-        out.push(N::Table(rows));
+        out.push(table_with_gap(&rows, 2));
 
         out
     }

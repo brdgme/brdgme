@@ -57,7 +57,6 @@ pub struct PubState {
     pub bidding_player: usize,
     pub bids: Vec<i32>,
     pub finished_bidding: Vec<bool>,
-    pub final_scores: Vec<i32>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -95,26 +94,21 @@ impl Game {
             Phase::Buying => self.start_buying_round(),
             Phase::Selling => self.start_selling_round(),
             Phase::Finished => {
-                use brdgme_markup::{Align as A, Row};
-                let mut rows: Vec<Row> = vec![vec![
-                    (A::Left, vec![N::Bold(vec![N::text("Player")])]),
-                    (A::Left, vec![N::Bold(vec![N::text("Score")])]),
-                ]];
+                use brdgme_markup::{Align as A, Row, table_with_gap};
+                let mut rows: Vec<Row> = vec![];
                 for p in 0..self.players {
                     rows.push(vec![
                         (A::Left, vec![N::Player(p)]),
                         (
                             A::Left,
-                            vec![N::Bold(vec![render::bold_num(Self::deck_value(
-                                &self.cheques[p],
-                            ))])],
+                            vec![render::bold_num(Self::deck_value(&self.cheques[p]))],
                         ),
                     ]);
                 }
                 vec![Log::public(vec![
                     N::Bold(vec![N::text("The game has finished!  The scores are:")]),
                     N::text("\n"),
-                    N::Table(rows),
+                    table_with_gap(&rows, 1),
                 ])]
             }
         }
@@ -393,22 +387,16 @@ impl Gamer for Game {
     }
 
     fn pub_state(&self) -> Self::PubState {
-        let finished = self.is_finished();
         PubState {
             players: self.players,
             phase: self.current_phase(),
-            finished,
+            finished: self.is_finished(),
             buy_rounds_remaining: self.building_deck.len() / self.players,
             sell_rounds_remaining: self.cheque_deck.len() / self.players,
             open_cards: self.open_cards.clone(),
             bidding_player: self.bidding_player,
             bids: self.bids.clone(),
             finished_bidding: self.finished_bidding.clone(),
-            final_scores: if finished {
-                (0..self.players).map(|p| self.player_points(p)).collect()
-            } else {
-                vec![]
-            },
         }
     }
 
@@ -794,7 +782,6 @@ mod test {
         let (g, _) = Game::start(3, 1).unwrap();
         let ps = g.pub_state();
         // PubState must not contain per-player hands/cheques (hidden info)
-        assert!(ps.final_scores.is_empty());
         assert!(!ps.finished);
         assert_eq!(g.open_cards, ps.open_cards);
         assert_eq!(g.bids, ps.bids);
@@ -806,19 +793,12 @@ mod test {
     }
 
     #[test]
-    fn test_finished_pub_state_has_scores() {
+    fn test_finished_pub_state_is_finished() {
         let (mut g, _) = Game::start(3, 1).unwrap();
-        g.cheques[0] = vec![5, 3];
-        g.chips[0] = 14;
-        g.cheques[1] = vec![6, 0];
-        g.chips[1] = 11;
-        g.cheques[2] = vec![4, 0];
-        g.chips[2] = 15;
         g.building_deck = vec![];
         g.cheque_deck = vec![];
         g.open_cards = vec![];
         let ps = g.pub_state();
         assert!(ps.finished);
-        assert_eq!(vec![22, 17, 19], ps.final_scores);
     }
 }

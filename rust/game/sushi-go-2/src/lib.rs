@@ -346,14 +346,16 @@ impl Game {
             logs.push(Log::public(vec![N::text("Players are swapping hands")]));
             self.hands.swap(0, 1);
         } else if self.round % 2 == 1 {
-            logs.push(Log::public(vec![N::Bold(vec![N::text(
-                "Passing hands to the left",
-            )])]));
+            logs.push(Log::public(vec![
+                N::text("Passing hands to the "),
+                N::Bold(vec![N::text("left")]),
+            ]));
             self.hands.rotate_left(1);
         } else {
-            logs.push(Log::public(vec![N::Bold(vec![N::text(
-                "Passing hands to the right",
-            )])]));
+            logs.push(Log::public(vec![
+                N::text("Passing hands to the "),
+                N::Bold(vec![N::text("right")]),
+            ]));
             self.hands.rotate_right(1);
         }
         logs.extend(self.start_hand());
@@ -516,10 +518,10 @@ impl Game {
 
         // Score normal cards
         for (p, score_p) in scores.iter_mut().enumerate() {
-            output.push(vec![
-                N::Bold(vec![N::text("Scoring cards for ")]),
+            output.push(vec![N::Bold(vec![
+                N::text("Scoring cards for "),
                 self.render_name(p),
-            ]);
+            ])]);
             let mut counts: Vec<(Card, i32)> = vec![];
             for &c in &self.played[p] {
                 if let Some(s) = c.base_score() {

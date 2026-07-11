@@ -27,26 +27,40 @@ fn render_cell(cell: Cell, x: usize, y: usize) -> N {
     N::Bg(bg.into(), vec![content])
 }
 
-fn render_board(board: &Board) -> N {
-    let mut rows: Vec<Row> = vec![];
-    let mut header: Row = vec![(A::Center, vec![N::text(" ")])];
+/// Matches Go's `"  1 2 3 4 5 6 7 8 9 10"` header/footer line: two leading
+/// spaces, then column numbers separated by single spaces, no trailing
+/// space.
+fn header_footer_line() -> String {
+    let mut s = String::from("  ");
     for x in 1..=BOARD_SIZE {
-        header.push((A::Center, vec![N::text(format!("{}", x))]));
+        if x > 1 {
+            s.push(' ');
+        }
+        s.push_str(&x.to_string());
     }
-    header.push((A::Center, vec![N::text(" ")]));
-    rows.push(header.clone());
+    s
+}
+
+fn render_board(board: &Board) -> N {
+    let header = header_footer_line();
+    let mut nodes: Vec<N> = vec![N::text(header.clone())];
     for (y, row) in board.iter().enumerate().take(BOARD_SIZE) {
         let letter = (b'A' + y as u8) as char;
-        let mut row_cells: Row =
-            vec![(A::Center, vec![N::Bold(vec![N::text(letter.to_string())])])];
-        for (x, &cell) in row.iter().enumerate().take(BOARD_SIZE) {
-            row_cells.push((A::Center, vec![render_cell(cell, x, y)]));
-        }
-        row_cells.push((A::Center, vec![N::Bold(vec![N::text(letter.to_string())])]));
-        rows.push(row_cells);
+        let row_cells: Row = row
+            .iter()
+            .enumerate()
+            .take(BOARD_SIZE)
+            .map(|(x, &cell)| (A::Center, vec![render_cell(cell, x, y)]))
+            .collect();
+        nodes.push(N::text("\n"));
+        nodes.push(N::Bold(vec![N::text(letter.to_string())]));
+        nodes.push(N::text(" "));
+        nodes.push(N::Table(vec![row_cells]));
+        nodes.push(N::text(format!(" {}", letter)));
     }
-    rows.push(header);
-    N::Table(rows)
+    nodes.push(N::text("\n"));
+    nodes.push(N::text(header));
+    N::Group(nodes)
 }
 
 fn render_ships_left(ships: &[Ship]) -> N {

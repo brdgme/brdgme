@@ -358,12 +358,8 @@ impl Game {
     }
 
     pub fn log_game_end(&self) -> Vec<Log> {
-        use brdgme_markup::{Align as A, Row};
-        let mut rows: Vec<Row> = vec![vec![
-            (A::Left, vec![N::Bold(vec![N::text("Player")])]),
-            (A::Left, vec![N::Bold(vec![N::text("Tiles")])]),
-            (A::Left, vec![N::Bold(vec![N::text("Score")])]),
-        ]];
+        use brdgme_markup::{Align as A, Row, table_with_gap};
+        let mut rows: Vec<Row> = vec![];
         for p in 0..self.players {
             let mut all_tiles: Vec<Tile> = self.player_blue_tiles[p].clone();
             all_tiles.extend(self.player_red_tiles[p].clone());
@@ -383,7 +379,7 @@ impl Game {
             N::Bold(vec![N::text(
                 "The game is now finished, scores are as follows:\n",
             )]),
-            N::Table(rows),
+            table_with_gap(&rows, 2),
         ])]
     }
 

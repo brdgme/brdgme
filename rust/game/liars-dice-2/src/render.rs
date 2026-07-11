@@ -1,6 +1,6 @@
 use brdgme_color::{BLACK, CYAN, GREY, RED};
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{PlayerState, PubState};
 
@@ -48,7 +48,7 @@ fn render(pub_state: &PubState, _player: Option<usize>, hand: Option<&[u8]>) -> 
             ),
         ]);
     }
-    out.push(N::Table(rows));
+    out.push(table_with_gap(&rows, 1));
 
     out
 }
@@ -176,7 +176,7 @@ pub fn reveal_table(player_dice: &[Vec<u8>], active: &[usize], bid_value: i32) -
             (A::Left, vec![N::Bold(dice_nodes)]),
         ]);
     }
-    N::Table(rows)
+    table_with_gap(&rows, 1)
 }
 
 #[cfg(test)]

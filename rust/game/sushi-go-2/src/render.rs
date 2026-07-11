@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use brdgme_color::GREY;
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{Card, PlayerState, PubState};
 
@@ -148,7 +148,7 @@ fn render(pub_state: &PubState, own: Option<&PlayerState>) -> Vec<N> {
     if let Some(own) = own {
         let p = own.player;
         out.push(N::Bold(vec![N::text("Hand:\n\n")]));
-        out.push(N::Table(hand_table(&own.hand)));
+        out.push(table_with_gap(&hand_table(&own.hand), 2));
         out.push(N::text("\n\n"));
 
         let mut playing_output = false;
@@ -197,8 +197,8 @@ fn render(pub_state: &PubState, own: Option<&PlayerState>) -> Vec<N> {
         out.push(N::Bold(vec![N::text(
             pub_state.player_points[p_usize].to_string(),
         )]));
-        out.push(N::text("):\n"));
-        out.push(N::Table(cards_cells(&pub_state.played[p_usize])));
+        out.push(N::text(" points):\n"));
+        out.push(table_with_gap(&cards_cells(&pub_state.played[p_usize]), 3));
         out.push(N::text("\n\n"));
     }
 

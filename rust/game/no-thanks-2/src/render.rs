@@ -1,6 +1,6 @@
 use brdgme_color::{BLUE, GREEN, GREY, PURPLE};
 use brdgme_game::Renderer;
-use brdgme_markup::{Align as A, Node as N, Row};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{PlayerState, PubState};
 
@@ -133,7 +133,7 @@ fn render(pub_state: &PubState, player: Option<usize>, own_chips: Option<i32>) -
         }
         rows.push(row);
     }
-    out.push(N::Table(rows));
+    out.push(table_with_gap(&rows, 2));
 
     out
 }
