@@ -1,6 +1,9 @@
 use combine::Parser;
 
-pub use crate::ast::{Align, Node, Row, TNode, row_pad, row_pad_cell};
+pub use crate::ast::{
+    Align, Node, Row, TNode, comma_list_and, comma_list_or, row_pad, row_pad_cell, table_with_gap,
+    table_with_spacer,
+};
 pub use crate::error::MarkupError;
 use crate::parser::markup;
 pub use crate::transform::{Player, from_lines, to_lines, transform};
@@ -129,6 +132,107 @@ mod tests {
             ],
             &[],
         ));
+    }
+
+    #[test]
+    fn table_with_gap_works() {
+        let rendered = plain(&transform(
+            &[table_with_gap(
+                &[
+                    vec![
+                        (A::Left, vec![N::text("Player")]),
+                        (A::Left, vec![N::text("Blue")]),
+                    ],
+                    vec![(A::Left, vec![N::Player(0)]), (A::Left, vec![N::text("2")])],
+                ],
+                2,
+            )],
+            &[Player {
+                name: "Alice".to_string(),
+                color: BLUE,
+            }],
+        ));
+        assert_eq!(
+            vec!["Player   Blue", "<Alice>  2"],
+            rendered
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<&str>>()
+        );
+    }
+
+    #[test]
+    fn table_with_gap_zero_works() {
+        let rendered = plain(&transform(
+            &[table_with_gap(
+                &[
+                    vec![(A::Left, vec![N::text("a")]), (A::Left, vec![N::text("b")])],
+                    vec![
+                        (A::Left, vec![N::text("cc")]),
+                        (A::Left, vec![N::text("d")]),
+                    ],
+                ],
+                0,
+            )],
+            &[],
+        ));
+        assert_eq!(
+            vec!["a b", "ccd"],
+            rendered
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<&str>>()
+        );
+    }
+
+    #[test]
+    fn table_with_spacer_works() {
+        let rendered = plain(&transform(
+            &[table_with_spacer(
+                &[
+                    vec![
+                        (A::Left, vec![N::text("a")]),
+                        (A::Left, vec![N::text("bb")]),
+                    ],
+                    vec![
+                        (A::Left, vec![N::text("ccc")]),
+                        (A::Left, vec![N::text("d")]),
+                    ],
+                ],
+                &[N::text("|")],
+            )],
+            &[],
+        ));
+        assert_eq!(
+            vec!["a  |bb", "ccc|d"],
+            rendered
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<&str>>()
+        );
+    }
+
+    #[test]
+    fn table_with_spacer_uneven_rows_works() {
+        // Rows with fewer cells don't get trailing spacers, matching Go's
+        // render.Table behaviour.
+        let rendered = plain(&transform(
+            &[table_with_spacer(
+                &[
+                    vec![(A::Left, vec![N::text("a")]), (A::Left, vec![N::text("b")])],
+                    vec![(A::Left, vec![N::text("c")])],
+                ],
+                &[N::text("|")],
+            )],
+            &[],
+        ));
+        assert_eq!(
+            vec!["a|b", "c"],
+            rendered
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<&str>>()
+        );
     }
 
     #[test]

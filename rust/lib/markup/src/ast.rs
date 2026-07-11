@@ -259,11 +259,93 @@ pub fn row_pad_cell(row: &[Cell], pad: &Cell) -> Row {
 
 pub type Cell = (Align, Vec<Node>);
 
+/// Builds a table with `spacer` nodes inserted between adjacent cells in each
+/// row. Rows with fewer cells don't get trailing spacers.
+pub fn table_with_spacer(rows: &[Row], spacer: &[Node]) -> Node {
+    let pad: Cell = (Align::Left, spacer.to_vec());
+    Node::Table(rows.iter().map(|r| row_pad_cell(r, &pad)).collect())
+}
+
+/// Builds a table with a gap of `gap` spaces between adjacent columns.
+pub fn table_with_gap(rows: &[Row], gap: usize) -> Node {
+    if gap == 0 {
+        return Node::Table(rows.to_vec());
+    }
+    table_with_spacer(rows, &[Node::Text(" ".repeat(gap))])
+}
+
+fn comma_list(items: &[Vec<Node>], last_sep: &str) -> Vec<Node> {
+    let mut output: Vec<Node> = vec![];
+    let len = items.len();
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            output.push(Node::text(if i == len - 1 { last_sep } else { ", " }));
+        }
+        output.extend(item.to_owned());
+    }
+    output
+}
+
+/// Joins node lists into "a, b and c" style output.
+pub fn comma_list_and(items: &[Vec<Node>]) -> Vec<Node> {
+    comma_list(items, " and ")
+}
+
+/// Joins node lists into "a, b or c" style output.
+pub fn comma_list_or(items: &[Vec<Node>]) -> Vec<Node> {
+    comma_list(items, " or ")
+}
+
 #[cfg(test)]
 mod tests {
     use brdgme_color::*;
 
     use super::*;
+
+    #[test]
+    fn comma_list_and_works() {
+        assert_eq!(comma_list_and(&[]), vec![]);
+        assert_eq!(
+            comma_list_and(&[vec![Node::Player(0)]]),
+            vec![Node::Player(0)]
+        );
+        assert_eq!(
+            comma_list_and(&[vec![Node::Player(0)], vec![Node::Player(1)]]),
+            vec![Node::Player(0), Node::text(" and "), Node::Player(1)]
+        );
+        assert_eq!(
+            comma_list_and(&[
+                vec![Node::text("a")],
+                vec![Node::Bold(vec![Node::text("b")])],
+                vec![Node::Player(2)],
+            ]),
+            vec![
+                Node::text("a"),
+                Node::text(", "),
+                Node::Bold(vec![Node::text("b")]),
+                Node::text(" and "),
+                Node::Player(2),
+            ]
+        );
+    }
+
+    #[test]
+    fn comma_list_or_works() {
+        assert_eq!(
+            comma_list_or(&[
+                vec![Node::text("a")],
+                vec![Node::text("b")],
+                vec![Node::text("c")],
+            ]),
+            vec![
+                Node::text("a"),
+                Node::text(", "),
+                Node::text("b"),
+                Node::text(" or "),
+                Node::text("c"),
+            ]
+        );
+    }
 
     #[test]
     fn bg_ranges_works() {
