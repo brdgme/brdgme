@@ -12,17 +12,32 @@ pub fn MainLayout(
     #[prop(into, default = Signal::from(false))] has_next_game: Signal<bool>,
     children: Children,
 ) -> impl IntoView {
+    let (menu_open, set_menu_open) = signal(false);
+
     view! {
         <div class="layout">
             <div class="layout-header" class:my-turn=move || is_my_turn.get()>
-                <input type="button" value="Menu"/>
+                <input
+                    type="button"
+                    value="Menu"
+                    on:click=move |_| set_menu_open.update(|v| *v = !*v)
+                />
                 <span class="header-title">"brdg.me"</span>
                 // Always render same element type; toggle visibility to avoid structural mismatch
                 <input type="button" value="Sub menu" hidden=move || !has_sub_menu.get()/>
                 <input type="button" value="Next game" hidden=move || !has_next_game.get()/>
             </div>
             <div class="layout-body">
-                <SidebarMenu />
+                <SidebarMenu open=menu_open set_open=set_menu_open />
+                // Mobile-only overlay (see the `@media (max-width: 80em)` block in
+                // main.scss); only mounted while the menu is open so it never
+                // covers the page underneath it when closed.
+                <Show when=move || menu_open.get()>
+                    <div
+                        class="menu-close-underlay"
+                        on:click=move |_| set_menu_open.set(false)
+                    ></div>
+                </Show>
                 <div class="content">
                     {children()}
                 </div>
@@ -32,7 +47,7 @@ pub fn MainLayout(
 }
 
 #[component]
-pub fn SidebarMenu() -> impl IntoView {
+pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>) -> impl IntoView {
     let logout_action = ServerAction::<crate::auth::Logout>::new();
     let navigate = use_navigate();
     Effect::new(move |_| {
@@ -60,8 +75,16 @@ pub fn SidebarMenu() -> impl IntoView {
         });
     let logged_in = move || matches!(current_user.get(), Some(Ok(Some(_))));
 
+    // Close the mobile menu overlay on every route change - covers
+    // "navigating closes it" for every link without per-link handlers.
+    let location = leptos_router::hooks::use_location();
+    Effect::new(move |_| {
+        location.pathname.get();
+        set_open.set(false);
+    });
+
     view! {
-        <div class="menu">
+        <div class="menu" class:open=move || open.get()>
             <h1><A href="/">"brdg.me"</A></h1>
             <div class="subheading"><A href="/">"Lo-fi board games"</A></div>
             <div>
