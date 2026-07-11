@@ -47,6 +47,34 @@ const CONFIRM_MAX_ATTEMPTS_PER_CODE: i32 = 10;
 #[cfg(feature = "ssr")]
 const LOGIN_CAP_LOCK_KEY: i64 = 0x6c6f_6769_6e63_6170; // "loginc" + "ap" bytes, no meaning beyond uniqueness
 
+/// Builds the login-confirmation email's plain-text and HTML bodies. Pure
+/// (no I/O), so it is unit-testable without a Resend account.
+/// `code_valid` in `login()` allows a 1-hour validity window - this copy
+/// must stay in sync with that if the window ever changes.
+#[cfg(feature = "ssr")]
+fn login_email_bodies(token: &str) -> (String, String) {
+    let text = format!(
+        "Your brdg.me confirmation is {token}\n\n\
+         This confirmation will expire in 1 hour if not used."
+    );
+    let html = format!(
+        r#"<link
+    href="https://fonts.googleapis.com/css?family=Source+Code+Pro:400,700"
+    rel="stylesheet"
+>
+<pre
+    style="
+        background-color: white;
+        color: black;
+        font-family: 'Source Code Pro', 'Lucida Console', monospace;
+    "
+>Your brdg.me confirmation is <b>{token}</b>
+
+This confirmation will expire in 1 hour if not used.</pre>"#
+    );
+    (text, html)
+}
+
 #[cfg(feature = "ssr")]
 async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, token: &str) {
     let Some(resend) = resend else {
@@ -60,15 +88,14 @@ async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, to
     axum_prometheus::metrics::counter!("login_emails_sent_total").increment(1);
 
     let from_addr = std::env::var("EMAIL_FROM").unwrap_or_else(|_| "login@brdg.me".to_string());
+    let (text_body, html_body) = login_email_bodies(token);
     let email = resend_rs::types::CreateEmailBaseOptions::new(
         from_addr,
         [to_email.to_string()],
-        "Your brdgme login code",
+        "brdg.me login confirmation",
     )
-    .with_text(&format!(
-        "Your login code is: {}\n\nThis code expires in 1 hour.",
-        token
-    ));
+    .with_text(&text_body)
+    .with_html(&html_body);
 
     if let Err(e) = resend.emails.send(email).await {
         tracing::error!("Failed to send login email to {}: {}", to_email, e);
@@ -732,6 +759,27 @@ mod tests {
     async fn send_login_email_logs_when_resend_unset() {
         // Must not panic or attempt any network I/O when `resend` is `None`.
         send_login_email(None, "someone@example.com", "123456").await;
+    }
+
+    #[test]
+    fn login_email_bodies_use_brdg_me_branding_and_token() {
+        let (text, html) = login_email_bodies("643856");
+
+        assert!(text.contains("Your brdg.me confirmation is 643856"));
+        assert!(text.contains("expire in 1 hour"));
+        assert!(
+            !text.contains("brdgme"),
+            "must never render unbranded 'brdgme': {text}"
+        );
+
+        assert!(html.contains("<b>643856</b>"));
+        assert!(html.contains("Source Code Pro"));
+        assert!(html.contains("background-color: white"));
+        assert!(html.contains("color: black"));
+        assert!(
+            !html.contains("brdgme"),
+            "must never render unbranded 'brdgme': {html}"
+        );
     }
 
     #[sqlx::test]
