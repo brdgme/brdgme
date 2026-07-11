@@ -1147,9 +1147,9 @@ feature.
 Task 6/8/9 record their outcomes here so the final state is readable
 without digging through task reports:
 
-- [ ] Rate-limit rule: path prefix `/api/`, requests_per_period = ___
-  (proposed 60), period 10s, mitigation_timeout 10s, action block,
-  characteristics ip.src (+ cf.colo.id, API-required).
+- [x] Rate-limit rule: path prefix `/api/`, requests_per_period = 60
+  (proposed 60, verified unchanged), period 10s, mitigation_timeout 10s, action block,
+  characteristics ip.src (+ cf.colo.id, API-required). Verified 2026-07-11: flood 100req/10-parallel -> 60 pass / 40 429 from Cloudflare (cf-ray confirmed), recovery after 10s mitigation window; operator confirmed normal use (login + game session + websockets) never trips it.
 - [ ] Bot Fight Mode: on / off because ___.
 - [ ] Origin lockdown: ENABLED via do-loadbalancer-allow-rules / REJECTED
   (accepted direct-to-LB bypass, WP1 DB caps backstop) because ___.
