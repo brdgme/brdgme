@@ -20,9 +20,10 @@ provider with official in-tree support (Cloudflare, Route53, etc.) was
 considered and rejected: the zone only just moved from Route53 to DO
 nameservers this week (Phase 21), and a second nameserver cutover for this
 alone isn't worth it. (Update 2026-07-08: item 28 decided to move the
-zone to Cloudflare anyway, post-cutover, for the free WAF/DoS/CDN edge -
-a materially better return on the same NS-move cost than external-dns
-convenience. See docs/superpowers/plans/2026-07-08-28-abuse-protection.md WP4. That incidentally
+zone to Cloudflare anyway - resequenced 2026-07-10 to pre-go-live,
+single-stage - for the free WAF/DoS/CDN edge - a materially better
+return on the same NS-move cost than external-dns convenience. See
+docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md. That incidentally
 restores an in-tree external-dns provider option, should it ever be
 wanted.)
 
