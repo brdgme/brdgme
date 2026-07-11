@@ -665,6 +665,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "brdgme_render_plain"
+version = "0.1.0"
+dependencies = [
+ "brdgme_color",
+ "brdgme_markup",
+]
+
+[[package]]
 name = "brdgme_repl"
 version = "0.1.0"
 dependencies = [

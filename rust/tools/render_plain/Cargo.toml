@@ -1,0 +1,14 @@
+[package]
+name = "brdgme_render_plain"
+version = "0.1.0"
+publish = false
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+edition = "2024"
+
+[[bin]]
+name = "render_plain"
+path = "src/main.rs"
+
+[dependencies]
+brdgme_color = { path = "../../lib/color" }
+brdgme_markup = { path = "../../lib/markup" }

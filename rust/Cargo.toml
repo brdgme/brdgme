@@ -24,6 +24,7 @@ members = [
     "lib/markup",
     "lib/rand_bot",
     "tools/fuzz",
+    "tools/render_plain",
     "tools/repl",
     "web",
     "operator",
