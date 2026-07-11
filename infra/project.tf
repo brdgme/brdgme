@@ -13,7 +13,6 @@ resource "digitalocean_project" "brdgme" {
 resource "digitalocean_project_resources" "brdgme" {
   project = digitalocean_project.brdgme.id
   resources = [
-    digitalocean_domain.brdgme.urn,
     digitalocean_spaces_bucket.tofu_state.urn,
     digitalocean_spaces_bucket.cnpg_backups.urn,
     digitalocean_kubernetes_cluster.brdgme.urn,
