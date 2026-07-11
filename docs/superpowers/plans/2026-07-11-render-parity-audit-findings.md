@@ -161,6 +161,19 @@ All decided follow-ups were executed:
   with the kept Rust "invalid input," prefix).
 - tic-tac-toe-2 audited CLEAN; acquire-1 / lost-cities-1/2 exempted.
 
+## Re-verification note (2026-07-11, user request)
+
+User wants the analysis re-run in a fresh session against
+`brdgme-go` in this repository to confirm the comparison baseline.
+For the record: the 10 first-round games WERE compared against
+in-repo `brdgme-go/<game>_1/cmd` binaries; only jaipur-2 and
+tic-tac-toe-2 (plus exempt acquire-1/lost-cities-1/2) used the old
+`~/Development/brdg.me` repo, because no `brdgme-go` implementation
+of those games exists (verified: absent from `brdgme-go/` and from
+this repo's git history). The rerun should confirm all 10 fixed games
+now pass render parity vs `brdgme-go`, using the procedure in
+`docs/porting/RENDER_PARITY.md`.
+
 Remaining open items (not blocking):
 
 1. Parser error-offset propagation: Rust `chain_2`
