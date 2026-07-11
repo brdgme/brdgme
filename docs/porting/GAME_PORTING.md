@@ -161,6 +161,18 @@ rust/game/<name>-N/
    still shows dice correctly because it reads `g.PlayerDice` directly.
    Copying that state struct literally would have hidden every player's
    dice in the Rust port.
+
+   **REQUIRED: verify render parity against the Go CLI before calling this
+   step done.** Build the Rust `<name>_N_cli` binary and the Go
+   `<game>_1/cmd` binary, render both to plain text, and compare wording,
+   whitespace/column spacing, and alignment for the pub render **and every
+   player render**, at game start and after representative mid-game
+   commands. Full procedure: `docs/porting/RENDER_PARITY.md`. Known trap:
+   Go `render.Table(cells, rowSpacing, colSpacing)` inserts literal spacer
+   cells between columns; `Node::Table` in Rust has no spacing parameter, so
+   the port must insert those spacer cells by hand or columns glue together
+   (this is exactly how `category-5-2` shipped broken - see the "Known bug"
+   section of that doc).
 7. **status/points.** `Status::Finished { placings: gen_placings(&metrics),
    stats }` - build per-player metric vectors (score, then tiebreakers)
    exactly like the old `Winners()` logic implied. `points()` returns the
@@ -235,10 +247,13 @@ rust/game/<name>-N/
    image override.
 8. Verify: `cargo build --package <name>-N` and `cargo test --package <name>-N`
    in `rust/`, then a Tilt/Kind run.
-9. Run `cargo fmt --all -- --check` and `cargo clippy --workspace --exclude web
-   --all-targets -- -D warnings` after completing Rust changes. These are the
-   same checks CI runs (`.github/workflows/ci.yml`) and must pass clean before
-   merging.
+9. Render-parity comparison (step 6) has been performed and passed for the
+   pub render and every player render, at game start and after
+   representative mid-game commands - per `docs/porting/RENDER_PARITY.md`.
+10. Run `cargo fmt --all -- --check` and `cargo clippy --workspace --exclude web
+    --all-targets -- -D warnings` after completing Rust changes. These are the
+    same checks CI runs (`.github/workflows/ci.yml`) and must pass clean before
+    merging.
 
 ## Gotchas
 
