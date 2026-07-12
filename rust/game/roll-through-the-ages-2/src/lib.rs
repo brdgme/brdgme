@@ -16,6 +16,7 @@ pub mod player_board;
 pub mod take;
 
 mod command;
+mod render;
 
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
-use brdgme_game::game::{Renderer, gen_placings};
+use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
@@ -98,34 +99,18 @@ impl Default for Game {
 
 /// No hidden information in this game (`PlayerState`/`PubState` both return
 /// `nil` in Go; `PubRender()` is literally `PlayerRender(CurrentPlayer)`).
-/// Render still needs a concrete type to implement `Renderer` against; the
-/// full render tables land in Task 4.
-#[derive(Default, Serialize, Deserialize)]
+/// Both states carry a full clone of the game so `render.rs` can port
+/// `PlayerRender` verbatim; `PubState`'s render uses `game.current_player`,
+/// matching Go's `PubRender() = PlayerRender(CurrentPlayer)` exactly.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct PubState {
-    pub current_player: usize,
+    pub game: Game,
 }
 
-/// Minimal placeholder render so the `Gamer` contract (which requires
-/// non-empty render output) passes ahead of Task 4's full render-parity
-/// implementation (the 6-table `PlayerRender`/`PubRender` port).
-impl Renderer for PubState {
-    fn render(&self) -> Vec<N> {
-        vec![N::text(format!(
-            "Roll Through the Ages - player {}'s turn (full render lands in Task 4)",
-            self.current_player
-        ))]
-    }
-}
-
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct PlayerState {
-    pub public: PubState,
-}
-
-impl Renderer for PlayerState {
-    fn render(&self) -> Vec<N> {
-        self.public.render()
-    }
+    pub game: Game,
+    pub player: usize,
 }
 
 impl Game {
@@ -1513,14 +1498,13 @@ impl Gamer for Game {
     }
 
     fn pub_state(&self) -> Self::PubState {
-        PubState {
-            current_player: self.current_player,
-        }
+        PubState { game: self.clone() }
     }
 
-    fn player_state(&self, _player: usize) -> Self::PlayerState {
+    fn player_state(&self, player: usize) -> Self::PlayerState {
         PlayerState {
-            public: self.pub_state(),
+            game: self.clone(),
+            player,
         }
     }
 
