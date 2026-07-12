@@ -51,6 +51,7 @@ target "image" {
       "modern-art-2",
       "no-thanks-2",
       "operator",
+      "roll-through-the-ages-2",
       "sushi-go-2",
       "sushizock-2",
       "tic-tac-toe-2",

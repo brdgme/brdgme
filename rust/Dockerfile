@@ -164,3 +164,7 @@ CMD ["./modern_art_2_http"]
 FROM debian:bookworm-slim AS cathedral-2
 COPY --from=builder /app/target/release/cathedral_2_http .
 CMD ["./cathedral_2_http"]
+
+FROM debian:bookworm-slim AS roll-through-the-ages-2
+COPY --from=builder /app/target/release/roll_through_the_ages_2_http .
+CMD ["./roll_through_the_ages_2_http"]

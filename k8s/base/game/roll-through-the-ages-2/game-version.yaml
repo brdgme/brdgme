@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: roll-through-the-ages-1
+  name: roll-through-the-ages-2
   namespace: brdgme
 spec:
   typeName: Roll Through the Ages
-  weight: 1.5
-  isDeprecated: true
+  weight: 1.0

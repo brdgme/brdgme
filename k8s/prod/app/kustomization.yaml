@@ -103,6 +103,9 @@ images:
 - name: brdgme/roll-through-the-ages-1
   newName: ghcr.io/brdgme/brdgme/roll-through-the-ages-1
   newTag: latest
+- name: brdgme/roll-through-the-ages-2
+  newName: ghcr.io/brdgme/brdgme/roll-through-the-ages-2
+  newTag: latest
 - name: brdgme/splendor-1
   newName: ghcr.io/brdgme/brdgme/splendor-1
   newTag: latest
