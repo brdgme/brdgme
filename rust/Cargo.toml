@@ -2,6 +2,7 @@
 members = [
     "bot",
     "game/acquire-1",
+    "game/age-of-war-2",
     "game/battleship-2",
     "game/category-5-2",
     "game/farkle-2",
