@@ -18,9 +18,9 @@ the shrinking board.
 (e.g. `A1` is the top-left corner, `J10` the bottom-right).
 
 **The Cathedral.** One neutral 6-cell piece, belonging to neither player.
-Player 1 must place it before playing anything else. Once placed, it can never
-be captured or moved, but the territory around and under it can still change
-hands through captures like any other tile.
+Player 1 must place it before playing anything else. Once placed, it is never
+returned to a hand (there is no hand for it), but the territory around and
+under it can still change hands through captures like any other tile.
 
 **Player pieces.** Each player has 14 of their own pieces (distinct
 polyomino shapes), sized 5, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 1, 1 tiles. Every

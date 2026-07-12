@@ -570,3 +570,44 @@ age-of-war-2-specific port notes:
 - Placings use Rust standard-competition tie semantics; the Go suite had no
   placings test, so no assertion adaptation was needed.
 - `can_undo`: `true` for attack, `false` for line and roll.
+
+**Done (Track B, 2026-07):** cathedral-2 ported from `brdgme-go/cathedral_1`.
+All 5 Go tests ported 1:1 (`TestParseBoard`, `TestOutputBoard`, `TestJSON`
+from `game_test.go`; `TestPlay_Capture`, `TestPlay_CaptureWithOnePiece` from
+`play_command_test.go`) - `test_json` substituted with an idiomatic
+`serde_json` round-trip test since the Go gob/map-key roundtrip quirk that
+motivated the original doesn't apply to `serde`. Per step 8's thin-suite rule
+a full baseline suite was added (26 unit + 1 contract tests total) covering
+placement, rotation, cathedral-first, turn switching, simultaneous end-phase,
+and end-of-game scoring. Placings: both Go's `GenPlacings` and Rust's
+`gen_placings` rank descending with standard-competition tie handling for
+this game, so there is no cross-language tie deviation to record (unlike
+age-of-war-2/no-thanks-2). `assert_gamer_contract` green, fmt/clippy clean,
+fuzzed ~2 minutes in release mode: 418 games started / 410 finished, ~3.39M
+commands, zero panics. Reg wired: workspace, Dockerfile, docker-bake, Tiltfile,
+k8s base/prod manifests; cathedral-1 GameVersion marked `isDeprecated: true`.
+
+cathedral-2-specific port notes:
+- Four Go quirks preserved verbatim (not "fixed"), per the porting-correctness
+  rule:
+  1. `CanPlayPiece` bounds check is off-by-one (`piece > len` instead of
+     `piece >= len`), so `piece == len` passes the guard; unreachable through
+     the normal command parser, ported as-is.
+  2. Cathedral placement does not cost player 1 a turn - `NextPlayer()` is
+     skipped only when player 1 plays piece index 0 (the Cathedral), so
+     player 1 immediately gets another placement.
+  3. Cathedral tiles inside a captured region flip to the capturing player's
+     territory like any other tile, but never count toward the returned-piece
+     totals in the capture log (there is no hand for the neutral Cathedral).
+  4. Captured pieces are returned to their owner's hand fully unplayed and are
+     replayable later in the game.
+- Board is `HashMap<String, Tile>` keyed by the loc string (`"A1"`..`"J10"`),
+  mirroring Go's `map[string]Tile` keying exactly.
+- Render's `open_sides` computation looks up neighbouring cells that may be
+  off-board; Go's `map[string]Tile` returns a harmless zero-value `Tile` for a
+  missing key, but Rust's `HashMap` has no equivalent implicit default, so a
+  `valid()` guard was added before the lookup to preserve the same
+  harmless-miss semantics without panicking or introducing a new behaviour.
+- `PubRender()` is `PlayerRender(0)` verbatim in Go (no hidden information
+  exists for this game) - Rust's `PubState` render is identical to
+  `PlayerState(0)`'s render, not a separate neutral layout.
