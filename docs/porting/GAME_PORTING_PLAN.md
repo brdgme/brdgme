@@ -577,7 +577,8 @@ from `game_test.go`; `TestPlay_Capture`, `TestPlay_CaptureWithOnePiece` from
 `play_command_test.go`) - `test_json` substituted with an idiomatic
 `serde_json` round-trip test since the Go gob/map-key roundtrip quirk that
 motivated the original doesn't apply to `serde`. Per step 8's thin-suite rule
-a full baseline suite was added (26 unit + 1 contract tests total) covering
+a full baseline suite was added (25 unit + 1 contract = 26 tests total)
+covering
 placement, rotation, cathedral-first, turn switching, simultaneous end-phase,
 and end-of-game scoring. Placings: both Go's `GenPlacings` and Rust's
 `gen_placings` rank descending with standard-competition tie handling for
