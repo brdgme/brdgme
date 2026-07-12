@@ -35,6 +35,7 @@ target "image" {
       "web",
       "migrate",
       "acquire-1",
+      "age-of-war-2",
       "battleship-2",
       "bot",
       "category-5-2",

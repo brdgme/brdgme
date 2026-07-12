@@ -34,6 +34,9 @@ images:
 - name: brdgme/age-of-war-1
   newName: ghcr.io/brdgme/brdgme/age-of-war-1
   newTag: latest
+- name: brdgme/age-of-war-2
+  newName: ghcr.io/brdgme/brdgme/age-of-war-2
+  newTag: latest
 - name: brdgme/battleship-1
   newName: ghcr.io/brdgme/brdgme/battleship-1
   newTag: latest

@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: age-of-war-1
+  name: age-of-war-2
   namespace: brdgme
 spec:
   typeName: Age of War
   weight: 1.0
-  isDeprecated: true

@@ -148,3 +148,7 @@ CMD ["./tic_tac_toe_2_http"]
 FROM debian:bookworm-slim AS jaipur-2
 COPY --from=builder /app/target/release/jaipur_2_http .
 CMD ["./jaipur_2_http"]
+
+FROM debian:bookworm-slim AS age-of-war-2
+COPY --from=builder /app/target/release/age_of_war_2_http .
+CMD ["./age_of_war_2_http"]

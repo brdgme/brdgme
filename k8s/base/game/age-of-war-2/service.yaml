@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: age-of-war-2
+  labels:
+    app: age-of-war-2
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+  selector:
+    app: age-of-war-2
