@@ -1,9 +1,9 @@
 //! Port of `brdgme-go/roll_through_the_ages_1/command.go`.
 //!
-//! All 11 gated sub-parsers are wired up in this task (Task 2), matching
-//! `CommandParser`'s `OneOf` construction. Only `Next`/`Roll`/`Preserve`
-//! dispatch to real actions this task; the rest are wired to real actions in
-//! Task 3.
+//! All 11 gated sub-parsers were wired up in Task 2, matching
+//! `CommandParser`'s `OneOf` construction. Task 3 wires the remaining 8
+//! `Command` variants (`Build`/`Trade`/`Buy`/`Take`/`Discard`/`Invade`/
+//! `Sell`/`Swap`) to real actions in `lib.rs`'s `command()` dispatch.
 
 use brdgme_game::command::parser::*;
 
@@ -314,7 +314,7 @@ impl Game {
         Map::new(
             Chain2::new(
                 Doc::name_desc("take", "take food or workers from dice", Token::new("take")),
-                AfterSpace::new(Many::bounded_spaced(Enum::exact(choices), 1, max)),
+                AfterSpace::new(Many::bounded_spaced(Enum::partial(choices), 1, max)),
             ),
             |(_, actions): (String, Vec<Choice<TakeAction>>)| Command::Take {
                 actions: actions.into_iter().map(|c| c.value).collect(),

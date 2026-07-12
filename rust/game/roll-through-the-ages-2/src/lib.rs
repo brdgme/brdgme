@@ -1,12 +1,12 @@
 //! Port of `brdgme-go/roll_through_the_ages_1`.
 //!
-//! Task 2 provides the full `Game` struct + `Gamer` impl (start/status/
+//! Task 2 provided the full `Game` struct + `Gamer` impl (start/status/
 //! points/whose_turn/pub+player state shapes), the complete phase/turn
 //! cascade engine (including resolve-phase disasters), and the full
-//! `command_parser` (all 11 gated sub-parsers). Only `next`/`roll`/
-//! `preserve` dispatch to real actions this task; the remaining 8 command
-//! variants (`build`/`trade`/`buy`/`take`/`discard`/`invade`/`sell`/`swap`)
-//! are wired up in Task 3.
+//! `command_parser` (all 11 gated sub-parsers), with `next`/`roll`/
+//! `preserve` dispatching to real actions. Task 3 wires up the remaining 8
+//! command variants (`build`/`trade`/`buy`/`take`/`discard`/`invade`/
+//! `sell`/`swap`), finishing `command()`'s dispatch.
 
 pub mod development;
 pub mod dice;
@@ -30,11 +30,12 @@ use brdgme_markup::Node as N;
 
 use development::DevelopmentId;
 use dice::Die;
-use good::{GOODS, Good};
+use good::{GOODS, Good, good_maximum, good_value};
 use monument::{MONUMENTS, MonumentId};
 use player_board::PlayerBoard;
+use take::TakeAction;
 
-pub use command::Command;
+pub use command::{BuildTarget, BuyGoods, Command};
 
 pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 4;
@@ -836,6 +837,651 @@ impl Game {
         })
     }
 
+    // ---------------------------------------------------------------
+    // `build`, ported from `build_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `BuildCity`.
+    fn build_city(&mut self, player: usize, amount: i32) -> Result<Vec<Log>, GameError> {
+        if !self.can_build_building(player) {
+            return Err(GameError::invalid_input("you can't build at the moment"));
+        }
+        if amount < 1 {
+            return Err(GameError::invalid_input("amount must be a positive number"));
+        }
+        if amount > self.remaining_workers {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} workers left",
+                self.remaining_workers
+            )));
+        }
+        if self.boards[player].city_progress + amount > player_board::MAX_CITY_PROGRESS {
+            return Err(GameError::invalid_input(
+                "that is more than what remains to be built",
+            ));
+        }
+        let initial_cities = self.boards[player].cities();
+        self.remaining_workers -= amount;
+        self.boards[player].city_progress += amount;
+        let mut logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" used "),
+            N::Bold(vec![N::text(amount.to_string())]),
+            N::text(" workers on "),
+            N::Bold(vec![N::text("cities")]),
+        ])];
+        let new_cities = self.boards[player].cities();
+        if new_cities > initial_cities {
+            logs.push(Log::public(vec![
+                N::Player(player),
+                N::text(" now has "),
+                N::Bold(vec![N::text(format!("{} cities", new_cities))]),
+            ]));
+        }
+        if !self.can_build_or_trade(player) {
+            logs.extend(self.next_phase());
+        }
+        Ok(logs)
+    }
+
+    /// Port of `BuildShip`.
+    fn build_ship(&mut self, player: usize, amount: i32) -> Result<Vec<Log>, GameError> {
+        if !self.can_build_ship(player) {
+            return Err(GameError::invalid_input(
+                "you can't build a ship at the moment",
+            ));
+        }
+        if amount < 1 {
+            return Err(GameError::invalid_input("amount must be a positive number"));
+        }
+        let wood = self.boards[player]
+            .goods
+            .get(&Good::Wood)
+            .copied()
+            .unwrap_or(0);
+        if amount > wood {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} wood left",
+                wood
+            )));
+        }
+        let cloth = self.boards[player]
+            .goods
+            .get(&Good::Cloth)
+            .copied()
+            .unwrap_or(0);
+        if amount > cloth {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} cloth left",
+                cloth
+            )));
+        }
+        if self.boards[player].ships + amount > 5 {
+            return Err(GameError::invalid_input("you can only have 5 ships"));
+        }
+        self.boards[player].ships += amount;
+        *self.boards[player].goods.entry(Good::Wood).or_insert(0) -= amount;
+        *self.boards[player].goods.entry(Good::Cloth).or_insert(0) -= amount;
+        let mut logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" built "),
+            N::Bold(vec![N::text(format!("{} ships", amount))]),
+        ])];
+        if !self.can_build_or_trade(player) {
+            logs.extend(self.next_phase());
+        }
+        Ok(logs)
+    }
+
+    /// Port of `BuildMonument`. Go's `ContainsInt(monument, Monuments)`
+    /// validity check is always true here: `MonumentId` is a closed enum
+    /// whose only possible values are the 7 real monuments (the parser's
+    /// `Enum` choices are built from `available_monuments`, so an invalid
+    /// variant can never reach this function) - not ported as a runtime
+    /// check for that reason, matching how other closed-enum "invalid X"
+    /// Go checks have been treated in prior Track B ports. The "who built
+    /// it first" scan (Go quirk #5) is a simple flag scan, ported as-is;
+    /// confirmed not a real defect since builds are strictly sequential per
+    /// player (no two players can complete the same monument in the same
+    /// call).
+    fn build_monument(
+        &mut self,
+        player: usize,
+        amount: i32,
+        monument: MonumentId,
+    ) -> Result<Vec<Log>, GameError> {
+        if !self.can_build_building(player) {
+            return Err(GameError::invalid_input("you can't build at the moment"));
+        }
+        if amount < 1 {
+            return Err(GameError::invalid_input("amount must be a positive number"));
+        }
+        if amount > self.remaining_workers {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} workers left",
+                self.remaining_workers
+            )));
+        }
+        let mv = monument.value();
+        let cur = self.boards[player]
+            .monuments
+            .get(&monument)
+            .copied()
+            .unwrap_or(0);
+        if cur + amount > mv.size {
+            return Err(GameError::invalid_input(
+                "that is more than what remains to be built",
+            ));
+        }
+        self.remaining_workers -= amount;
+        let new_progress = cur + amount;
+        self.boards[player].monuments.insert(monument, new_progress);
+        let mut logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" used "),
+            N::Bold(vec![N::text(amount.to_string())]),
+            N::text(" workers on the "),
+            N::Bold(vec![N::text(mv.name)]),
+        ])];
+        if new_progress >= mv.size {
+            let first = !self
+                .boards
+                .iter()
+                .any(|b| b.monument_built_first.contains(&monument));
+            if first {
+                self.boards[player].monument_built_first.insert(monument);
+            }
+            logs.push(Log::public(vec![
+                N::Player(player),
+                N::text(" completed the "),
+                N::Bold(vec![N::text(mv.name)]),
+            ]));
+            logs.extend(self.check_game_end_triggered(player));
+        }
+        if !self.can_build_or_trade(player) {
+            logs.extend(self.next_phase());
+        }
+        Ok(logs)
+    }
+
+    fn build_command(
+        &mut self,
+        player: usize,
+        amount: i32,
+        target: BuildTarget,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = match target {
+            BuildTarget::City => self.build_city(player, amount),
+            BuildTarget::Ship => self.build_ship(player, amount),
+            BuildTarget::Monument(m) => self.build_monument(player, amount, m),
+        }?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `trade`, ported from `trade_command.go` (stone -> workers, Build
+    // phase, Engineering - NOT the goods `swap` command, see the plan's
+    // Global Constraints on the `PhaseBuild`/`PhaseTrade` naming trap).
+    // ---------------------------------------------------------------
+
+    /// Port of `TradeStone`. Note Go has no `amount < 1` guard here (unlike
+    /// most other commands) - preserved verbatim; the parser's
+    /// `Int::bounded(1, max)` already prevents non-positive amounts from
+    /// reaching this function in practice.
+    fn trade_stone(&mut self, player: usize, amount: i32) -> Result<Vec<Log>, GameError> {
+        if !self.can_trade(player) {
+            return Err(GameError::invalid_input("you can't trade at the moment"));
+        }
+        let stone = self.boards[player]
+            .goods
+            .get(&Good::Stone)
+            .copied()
+            .unwrap_or(0);
+        if amount > stone {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} stone",
+                stone
+            )));
+        }
+        let workers = amount * 3;
+        self.remaining_workers += workers;
+        *self.boards[player].goods.entry(Good::Stone).or_insert(0) -= amount;
+        Ok(vec![Log::public(vec![
+            N::Player(player),
+            N::text(" traded "),
+            N::Bold(vec![N::text(amount.to_string())]),
+            N::text(" "),
+            N::text(Good::Stone.name()),
+            N::text(" for "),
+            N::Bold(vec![N::text(format!("{} workers", workers))]),
+        ])])
+    }
+
+    fn trade_command(
+        &mut self,
+        player: usize,
+        amount: i32,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.trade_stone(player, amount)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `buy`, ported from `buy_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `BuyDevelopment`. Go quirk #4 preserved verbatim: goods are
+    /// selected by TYPE, not by unit - the entire held stack of each named
+    /// good (deduped for totalling/suffix purposes) is spent/zeroed toward
+    /// the cost, and the zeroing loop below deliberately iterates the
+    /// original (possibly-duplicated) `goods` list rather than the deduped
+    /// set, matching Go's `for _, good := range goods { ...Goods[good] = 0 }`.
+    fn buy_development(
+        &mut self,
+        player: usize,
+        development: DevelopmentId,
+        goods: Vec<Good>,
+    ) -> Result<Vec<Log>, GameError> {
+        if !self.can_buy(player) {
+            return Err(GameError::invalid_input("you can't buy at the moment"));
+        }
+        if self.boards[player].developments.contains(&development) {
+            return Err(GameError::invalid_input(
+                "you already have that development",
+            ));
+        }
+        let dv = development.value();
+
+        let mut total = self.remaining_coins;
+        let mut used_goods: Vec<Good> = vec![];
+        for &good in goods.iter() {
+            if used_goods.contains(&good) {
+                continue;
+            }
+            let n = self.boards[player].goods.get(&good).copied().unwrap_or(0);
+            total += good_value(good, n);
+            used_goods.push(good);
+        }
+        if total < dv.cost {
+            return Err(GameError::invalid_input(format!(
+                "you require {} but your coins and specified goods only amount to {}, you may need to add more goods",
+                dv.cost, total
+            )));
+        }
+
+        let mut suffix = String::new();
+        if !used_goods.is_empty() {
+            let parts: Vec<&str> = used_goods.iter().map(|g| g.name()).collect();
+            suffix = format!(", using {}", parts.join(", "));
+        }
+        let mut logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" bought the "),
+            N::Bold(vec![N::text(format!("{} development", dv.name))]),
+            N::text(suffix),
+        ])];
+        self.boards[player].developments.insert(development);
+        for &good in goods.iter() {
+            self.boards[player].goods.insert(good, 0);
+        }
+
+        logs.extend(self.check_game_end_triggered(player));
+        logs.extend(self.next_phase());
+        Ok(logs)
+    }
+
+    fn buy_command(
+        &mut self,
+        player: usize,
+        development: DevelopmentId,
+        goods: BuyGoods,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let good_list = if goods.all_goods {
+            GOODS
+                .iter()
+                .copied()
+                .filter(|g| self.boards[player].goods.get(g).copied().unwrap_or(0) > 0)
+                .collect()
+        } else {
+            goods.goods
+        };
+        let logs = self.buy_development(player, development, good_list)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `take`, ported from `take_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `Take`. Go quirk: the "wrong number of actions" error
+    /// message reports `len(actions)` (what the player actually supplied),
+    /// not `numDice` (what was actually required) - re-read `take_command.go`
+    /// closely: `if l := len(actions); l != numDice { return ...fmt.Errorf(
+    /// "you must specify %d take actions...", l) }` uses `l`, which is
+    /// `len(actions)`, in the message, even though the error only fires
+    /// when `l != numDice` - so the message always echoes back the
+    /// (wrong) count the player gave, not the count actually needed. This
+    /// looks like a bug (the message should say `numDice`) but is
+    /// preserved verbatim per the porting correctness rule.
+    fn take(&mut self, player: usize, actions: Vec<TakeAction>) -> Result<Vec<Log>, GameError> {
+        if !self.can_take(player) {
+            return Err(GameError::invalid_input("you can't take at the moment"));
+        }
+        let num_dice = self
+            .kept_dice
+            .iter()
+            .filter(|&&d| d == Die::FoodOrWorkers)
+            .count();
+        if actions.len() != num_dice {
+            return Err(GameError::invalid_input(format!(
+                "you must specify {} take actions after the take command",
+                actions.len()
+            )));
+        }
+        let cp = self.current_player;
+        for a in actions {
+            match a {
+                TakeAction::Food => {
+                    let modifier = self.boards[cp].food_modifier();
+                    self.boards[cp].food += 2 + modifier;
+                }
+                TakeAction::Workers => {
+                    let modifier = self.boards[cp].worker_modifier();
+                    self.remaining_workers += 2 + modifier;
+                }
+            }
+        }
+        Ok(self.next_phase())
+    }
+
+    fn take_command(
+        &mut self,
+        player: usize,
+        actions: Vec<TakeAction>,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.take(player, actions)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `discard`, ported from `discard_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `Discard`.
+    fn discard(&mut self, player: usize, amount: i32, good: Good) -> Result<Vec<Log>, GameError> {
+        if !self.can_discard(player) {
+            return Err(GameError::invalid_input("you can't discard at the moment"));
+        }
+        if amount < 1 {
+            return Err(GameError::invalid_input("amount must be a positive number"));
+        }
+        let num = self.boards[player].goods.get(&good).copied().unwrap_or(0);
+        if amount > num {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} {}",
+                num,
+                good.name()
+            )));
+        }
+        let goods_over_limit = self.boards[player].goods_over_limit();
+        if amount > goods_over_limit {
+            return Err(GameError::invalid_input(format!(
+                "you only need to discard {}",
+                goods_over_limit
+            )));
+        }
+        *self.boards[player].goods.entry(good).or_insert(0) -= amount;
+        let logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" discarded "),
+            N::Bold(vec![N::text(amount.to_string())]),
+            N::text(" "),
+            N::text(good.name()),
+        ])];
+        let mut logs = logs;
+        if self.boards[player].goods_over_limit() <= 0 {
+            logs.extend(self.next_turn());
+        }
+        Ok(logs)
+    }
+
+    fn discard_command(
+        &mut self,
+        player: usize,
+        amount: i32,
+        good: Good,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.discard(player, amount, good)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `invade`, ported from `invade_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `Invade`. Go quirk found while porting: the per-opponent
+    /// log line reports `amount` disaster points, but the actual effect
+    /// applied is `amount * 2` (`g.Boards[p].Disasters += amount * 2`
+    /// vs. the log text `"%d disaster points", amount`) - the log
+    /// understates the real damage by half. Preserved verbatim per the
+    /// porting correctness rule (not in the plan's enumerated quirk list;
+    /// recorded here and in the Task 3 report).
+    fn invade(&mut self, player: usize, amount: i32) -> Result<Vec<Log>, GameError> {
+        if !self.can_invade(player) {
+            return Err(GameError::invalid_input("you can't invade at the moment"));
+        }
+        if amount <= 0 {
+            return Err(GameError::invalid_input(
+                "you must specify a positive amount of spearheads",
+            ));
+        }
+        let sh = self.boards[player]
+            .goods
+            .get(&Good::Spearhead)
+            .copied()
+            .unwrap_or(0);
+        if amount > sh {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} spearheads",
+                sh
+            )));
+        }
+        *self.boards[player]
+            .goods
+            .entry(Good::Spearhead)
+            .or_insert(0) -= amount;
+        let mut content = vec![
+            N::Player(player),
+            N::text(" used "),
+            N::Bold(vec![N::text(amount.to_string())]),
+            N::text(" spearheads to cause extra damage"),
+        ];
+        for p in 0..self.players {
+            if p == player {
+                continue;
+            }
+            if self.boards[p].has_built(MonumentId::GreatWall) {
+                content.push(N::text("\n  "));
+                content.push(N::Player(p));
+                content.push(N::text(" avoids the extra damage with their wall"));
+            } else {
+                self.boards[p].disasters += amount * 2;
+                content.push(N::text("\n  "));
+                content.push(N::Player(p));
+                content.push(N::text(" takes "));
+                content.push(N::Bold(vec![N::text(format!(
+                    "{} disaster points",
+                    amount
+                ))]));
+            }
+        }
+        let mut logs = vec![Log::public(content)];
+        logs.extend(self.next_phase());
+        Ok(logs)
+    }
+
+    fn invade_command(
+        &mut self,
+        player: usize,
+        amount: i32,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.invade(player, amount)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `sell`, ported from `sell_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `SellFood`. Note Go has no `amount < 1` guard here - only
+    /// checks against held food - preserved verbatim; the parser already
+    /// bounds `amount` to `1..=food`.
+    fn sell_food(&mut self, player: usize, amount: i32) -> Result<Vec<Log>, GameError> {
+        if !self.can_sell(player) {
+            return Err(GameError::invalid_input("you can't sell at the moment"));
+        }
+        if amount > self.boards[player].food {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} food",
+                self.boards[player].food
+            )));
+        }
+        let coins = amount * 6;
+        self.remaining_coins += coins;
+        self.boards[player].food -= amount;
+        Ok(vec![Log::public(vec![
+            N::Player(player),
+            N::text(" sold "),
+            N::Bold(vec![N::text(amount.to_string())]),
+            N::text(" food for "),
+            N::Bold(vec![N::text(format!("{} coins", coins))]),
+        ])])
+    }
+
+    fn sell_command(
+        &mut self,
+        player: usize,
+        amount: i32,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.sell_food(player, amount)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `swap`, ported from `swap_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `Swap`.
+    fn swap(
+        &mut self,
+        player: usize,
+        from: Good,
+        to: Good,
+        amount: i32,
+    ) -> Result<Vec<Log>, GameError> {
+        if !self.can_swap(player) {
+            return Err(GameError::invalid_input("you can't swap at the moment"));
+        }
+        if amount < 1 {
+            return Err(GameError::invalid_input("amount must be positive"));
+        }
+        if from == to {
+            return Err(GameError::invalid_input(
+                "you must specify two different goods",
+            ));
+        }
+        if amount > self.remaining_ships {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} ships remaining",
+                self.remaining_ships
+            )));
+        }
+        let from_num = self.boards[player].goods.get(&from).copied().unwrap_or(0);
+        if from_num < amount {
+            return Err(GameError::invalid_input(format!(
+                "you only have {} {} left",
+                from_num,
+                from.name()
+            )));
+        }
+        let max = good_maximum(to);
+        let to_num = self.boards[player].goods.get(&to).copied().unwrap_or(0);
+        if to_num + amount > max {
+            return Err(GameError::invalid_input(format!(
+                "the you only have room for {} {}",
+                max,
+                to.name()
+            )));
+        }
+        *self.boards[player].goods.entry(from).or_insert(0) -= amount;
+        *self.boards[player].goods.entry(to).or_insert(0) += amount;
+        self.remaining_ships -= amount;
+        let mut logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" swapped "),
+            N::Bold(vec![N::text(amount.to_string())]),
+            N::text(" "),
+            N::text(from.name()),
+            N::text(" for "),
+            N::text(to.name()),
+        ])];
+        if self.remaining_ships == 0 {
+            logs.extend(self.next_phase());
+        }
+        Ok(logs)
+    }
+
+    fn swap_command(
+        &mut self,
+        player: usize,
+        from: Good,
+        to: Good,
+        amount: i32,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.swap(player, from, to, amount)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
     /// Port of `Points` (per-turn running score, always computed directly
     /// from `Score()`, not zero-until-finished).
     fn scores(&self) -> Vec<i32> {
@@ -909,22 +1555,46 @@ impl Gamer for Game {
                 remaining,
                 ..
             }) => self.preserve_command(player, remaining),
-            // The remaining 8 command variants are wired to real actions in
-            // Task 3; their parsers are already fully gated above.
             Ok(ParseOutput {
-                value:
-                    Command::Build { .. }
-                    | Command::Trade { .. }
-                    | Command::Buy { .. }
-                    | Command::Take { .. }
-                    | Command::Discard { .. }
-                    | Command::Invade { .. }
-                    | Command::Sell { .. }
-                    | Command::Swap { .. },
+                value: Command::Build { amount, target },
+                remaining,
                 ..
-            }) => Err(GameError::invalid_input(
-                "this command isn't implemented yet (Task 3)",
-            )),
+            }) => self.build_command(player, amount, target, remaining),
+            Ok(ParseOutput {
+                value: Command::Trade { amount },
+                remaining,
+                ..
+            }) => self.trade_command(player, amount, remaining),
+            Ok(ParseOutput {
+                value: Command::Buy { development, goods },
+                remaining,
+                ..
+            }) => self.buy_command(player, development, goods, remaining),
+            Ok(ParseOutput {
+                value: Command::Take { actions },
+                remaining,
+                ..
+            }) => self.take_command(player, actions, remaining),
+            Ok(ParseOutput {
+                value: Command::Discard { amount, good },
+                remaining,
+                ..
+            }) => self.discard_command(player, amount, good, remaining),
+            Ok(ParseOutput {
+                value: Command::Invade { amount },
+                remaining,
+                ..
+            }) => self.invade_command(player, amount, remaining),
+            Ok(ParseOutput {
+                value: Command::Sell { amount },
+                remaining,
+                ..
+            }) => self.sell_command(player, amount, remaining),
+            Ok(ParseOutput {
+                value: Command::Swap { amount, from, to },
+                remaining,
+                ..
+            }) => self.swap_command(player, from, to, amount, remaining),
             Err(e) => Err(GameError::invalid_input(e.to_string())),
         }
     }
@@ -1579,5 +2249,847 @@ mod test {
         assert_eq!(Phase::Build, g.phase);
         assert_eq!(3, g.remaining_workers); // 3 base + 0 masonry modifier
         assert_eq!(MICK, g.current_player);
+    }
+
+    // =================================================================
+    // Task 3: build/buy/discard/invade/sell/swap/take/trade.
+    // =================================================================
+
+    // Port of TestBuildCityCommand (build_command_test.go).
+    #[test]
+    fn test_build_city_command() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Workers, Die::Workers, Die::FoodOrWorkers];
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "take w", &p).is_ok());
+        assert!(g.command(MICK, "build 8 city", &p).is_ok());
+        assert_eq!(8, g.boards[MICK].city_progress);
+    }
+
+    // Port of TestBuildMonumentCommand (build_command_test.go).
+    #[test]
+    fn test_build_monument_command() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![
+            Die::Workers,
+            Die::Workers,
+            Die::FoodOrWorkers,
+            Die::FoodOrWorkers,
+        ];
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "take w w", &p).is_ok());
+        assert!(g.command(MICK, "build 10 wall", &p).is_ok());
+        assert_eq!(
+            10,
+            g.boards[MICK]
+                .monuments
+                .get(&MonumentId::GreatWall)
+                .copied()
+                .unwrap_or(0)
+        );
+    }
+
+    // Port of TestBuildShipCommand (build_command_test.go).
+    #[test]
+    fn test_build_ship_command() {
+        let mut g = new_blank(3);
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Cloth, 2);
+        g.boards[MICK].goods.insert(Good::Wood, 3);
+        g.rolled_dice = vec![
+            Die::Workers,
+            Die::Workers,
+            Die::FoodOrWorkers,
+            Die::FoodOrWorkers,
+        ];
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "take w f", &p).is_ok());
+        assert!(g.command(MICK, "build 3 ship", &p).is_err());
+        assert!(g.command(MICK, "build 2 ship", &p).is_ok());
+        assert_eq!(2, g.boards[MICK].ships);
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Cloth));
+        assert_eq!(Some(&1), g.boards[MICK].goods.get(&Good::Wood));
+    }
+
+    // Port of TestBuyCommandCoins (buy_command_test.go).
+    #[test]
+    fn test_buy_command_coins() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Coins, Die::Coins];
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "buy leader", &p).is_ok());
+        assert!(
+            g.boards[MICK]
+                .developments
+                .contains(&DevelopmentId::Leadership)
+        );
+        assert_ne!(Phase::Buy, g.phase);
+    }
+
+    // Port of TestBuyCommandCoinsWithCoinage (buy_command_test.go).
+    #[test]
+    fn test_buy_command_coins_with_coinage() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Coins, Die::Coins];
+        g.boards[MICK].developments.insert(DevelopmentId::Coinage);
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "buy cara", &p).is_ok());
+        assert!(
+            g.boards[MICK]
+                .developments
+                .contains(&DevelopmentId::Caravans)
+        );
+        assert_ne!(Phase::Buy, g.phase);
+    }
+
+    // Port of TestBuyCommandGoodsSpecific (buy_command_test.go).
+    #[test]
+    fn test_buy_command_goods_specific() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Good; 6];
+        g.boards[MICK].developments.insert(DevelopmentId::Coinage);
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(
+            g.command(MICK, "buy agri wood stone pot cloth spear", &p)
+                .is_ok()
+        );
+        assert!(
+            g.boards[MICK]
+                .developments
+                .contains(&DevelopmentId::Agriculture)
+        );
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Wood));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Stone));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Pottery));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Cloth));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Spearhead));
+        assert_ne!(Phase::Buy, g.phase);
+    }
+
+    // Port of TestBuyCommandGoodsAll (buy_command_test.go).
+    #[test]
+    fn test_buy_command_goods_all() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Good; 6];
+        g.boards[MICK].developments.insert(DevelopmentId::Coinage);
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "buy agri all", &p).is_ok());
+        assert!(
+            g.boards[MICK]
+                .developments
+                .contains(&DevelopmentId::Agriculture)
+        );
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Wood));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Stone));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Pottery));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Cloth));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Spearhead));
+        assert_ne!(Phase::Buy, g.phase);
+    }
+
+    // Port of TestTakeCommand (take_command_test.go).
+    #[test]
+    fn test_take_command() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![
+            Die::Workers,
+            Die::Workers,
+            Die::FoodOrWorkers,
+            Die::FoodOrWorkers,
+            Die::FoodOrWorkers,
+        ];
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "take w w f", &p).is_ok());
+        assert!(g.command(MICK, "build 10 city", &p).is_ok());
+        assert_eq!(10, g.boards[MICK].city_progress);
+    }
+
+    // Port of TestDiscardCommand (discard_command_test.go).
+    #[test]
+    fn test_discard_command() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![
+            Die::Skull,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+        ];
+        let p = test_players();
+        // Keep dice
+        assert!(g.command(MICK, "next", &p).is_ok());
+        // Skip buy phase
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Discard, g.phase);
+        assert!(g.command(MICK, "discard 1 wood", &p).is_ok());
+        assert!(g.command(MICK, "discard 1 spear", &p).is_ok());
+        assert_eq!(Some(&1), g.boards[MICK].goods.get(&Good::Wood));
+        assert_eq!(Some(&2), g.boards[MICK].goods.get(&Good::Stone));
+        assert_eq!(Some(&2), g.boards[MICK].goods.get(&Good::Pottery));
+        assert_eq!(Some(&1), g.boards[MICK].goods.get(&Good::Cloth));
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Spearhead));
+    }
+
+    // Port of TestInvadeCommand (invade_command_test.go).
+    #[test]
+    fn test_invade_command() {
+        let mut g = new_blank(3);
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        g.rolled_dice = vec![
+            Die::Skull,
+            Die::Skull,
+            Die::Skull,
+            Die::Skull,
+            Die::Good,
+            Die::Good,
+        ];
+        let p = test_players();
+        // Keep dice
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Invade, g.phase);
+        assert_eq!(4, g.boards[STEVE].disasters);
+        assert_eq!(4, g.boards[BJ].disasters);
+        assert!(g.command(MICK, "invade 2", &p).is_ok());
+        assert_eq!(8, g.boards[STEVE].disasters);
+        assert_eq!(8, g.boards[BJ].disasters);
+    }
+
+    // Port of TestSellCommand (sell_command_test.go).
+    #[test]
+    fn test_sell_command() {
+        let mut g = new_blank(3);
+        g.boards[MICK].developments.insert(DevelopmentId::Granaries);
+        g.boards[MICK].food = 10; // Will need to feed 3 cities
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "sell 5", &p).is_ok());
+        assert_eq!(2, g.boards[MICK].food);
+        assert_eq!(30, g.remaining_coins);
+    }
+
+    // Port of TestSwapCommand (swap_command_test.go).
+    #[test]
+    fn test_swap_command() {
+        let mut g = new_blank(3);
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].ships = 3;
+        g.rolled_dice = vec![
+            Die::Skull,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+            Die::Good,
+        ];
+        let p = test_players();
+        // Keep dice
+        assert!(g.command(MICK, "next", &p).is_ok());
+        // Skip build
+        assert!(g.command(MICK, "next", &p).is_ok());
+        // Swap all wood for spearheads
+        assert!(g.command(MICK, "swap 2 wood spear", &p).is_ok());
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Wood));
+        assert_eq!(Some(&3), g.boards[MICK].goods.get(&Good::Spearhead));
+    }
+
+    // Port of TestTradeCommand (trade_command_test.go).
+    #[test]
+    fn test_trade_command() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Food, Die::Food, Die::Food];
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Engineering);
+        g.boards[MICK].goods.insert(Good::Stone, 3);
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert!(g.command(MICK, "trade 3", &p).is_ok());
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Stone));
+        assert!(g.command(MICK, "build 9 great", &p).is_ok());
+        assert_eq!(
+            9,
+            g.boards[MICK]
+                .monuments
+                .get(&MonumentId::GreatPyramid)
+                .copied()
+                .unwrap_or(0)
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Baseline: guard functions (Can*) for the Task 3 commands.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn can_build_building_requires_build_phase_and_workers() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 0;
+        assert!(!g.can_build_building(MICK));
+        g.remaining_workers = 1;
+        assert!(g.can_build_building(MICK));
+    }
+
+    #[test]
+    fn can_build_ship_requires_shipping_and_goods() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        assert!(!g.can_build_ship(MICK));
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        assert!(!g.can_build_ship(MICK)); // no wood/cloth yet
+        g.boards[MICK].goods.insert(Good::Wood, 1);
+        g.boards[MICK].goods.insert(Good::Cloth, 1);
+        assert!(g.can_build_ship(MICK));
+    }
+
+    #[test]
+    fn can_trade_requires_build_phase_not_trade_phase() {
+        let mut g = new_blank(2);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Engineering);
+        g.boards[MICK].goods.insert(Good::Stone, 1);
+        g.phase = Phase::Trade;
+        assert!(!g.can_trade(MICK)); // trade command needs PhaseBuild, not PhaseTrade
+        g.phase = Phase::Build;
+        assert!(g.can_trade(MICK));
+    }
+
+    #[test]
+    fn can_buy_requires_buy_phase() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        assert!(!g.can_buy(MICK));
+        g.phase = Phase::Buy;
+        assert!(g.can_buy(MICK));
+    }
+
+    #[test]
+    fn can_take_requires_collect_phase() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        assert!(!g.can_take(MICK));
+        g.phase = Phase::Collect;
+        assert!(g.can_take(MICK));
+    }
+
+    #[test]
+    fn can_discard_requires_over_limit() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Discard;
+        assert!(!g.can_discard(MICK));
+        g.boards[MICK].goods.insert(Good::Wood, 8);
+        assert!(g.can_discard(MICK));
+    }
+
+    #[test]
+    fn can_invade_requires_smithing_and_spearheads() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Invade;
+        assert!(!g.can_invade(MICK));
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        assert!(!g.can_invade(MICK));
+        g.boards[MICK].goods.insert(Good::Spearhead, 1);
+        assert!(g.can_invade(MICK));
+    }
+
+    #[test]
+    fn can_sell_requires_granaries_and_food() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        assert!(!g.can_sell(MICK));
+        g.boards[MICK].developments.insert(DevelopmentId::Granaries);
+        // PlayerBoard::default() sets food=3, so with Granaries now present
+        // this already satisfies CanSell - explicitly zero it first to
+        // exercise the food>0 guard.
+        g.boards[MICK].food = 0;
+        assert!(!g.can_sell(MICK));
+        g.boards[MICK].food = 1;
+        assert!(g.can_sell(MICK));
+    }
+
+    #[test]
+    fn can_swap_requires_shipping_and_goods() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Trade;
+        assert!(!g.can_swap(MICK));
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        assert!(!g.can_swap(MICK));
+        g.boards[MICK].goods.insert(Good::Wood, 1);
+        assert!(g.can_swap(MICK));
+    }
+
+    // -----------------------------------------------------------------
+    // Baseline: build error paths.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn build_city_rejects_over_max_progress() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 20;
+        g.boards[MICK].city_progress = 10;
+        assert!(g.build_city(MICK, 10).is_err());
+    }
+
+    #[test]
+    fn build_city_rejects_more_than_remaining_workers() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 2;
+        assert!(g.build_city(MICK, 3).is_err());
+    }
+
+    #[test]
+    fn build_monument_rejects_over_size() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 20;
+        assert!(g.build_monument(MICK, 4, MonumentId::StepPyramid).is_err()); // size 3
+    }
+
+    #[test]
+    fn build_monument_first_flag_set_only_for_first_builder() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 20;
+        g.build_monument(MICK, 3, MonumentId::StepPyramid).unwrap();
+        assert!(
+            g.boards[MICK]
+                .monument_built_first
+                .contains(&MonumentId::StepPyramid)
+        );
+
+        g.current_player = STEVE;
+        g.phase = Phase::Build;
+        g.remaining_workers = 20;
+        g.build_monument(STEVE, 3, MonumentId::StepPyramid).unwrap();
+        assert!(
+            !g.boards[STEVE]
+                .monument_built_first
+                .contains(&MonumentId::StepPyramid)
+        );
+    }
+
+    #[test]
+    fn build_monument_completion_triggers_game_end_check() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 20;
+        for &m in MONUMENTS.iter().filter(|&&m| m != MonumentId::StepPyramid) {
+            g.boards[MICK].monuments.insert(m, m.value().size);
+        }
+        assert!(!g.final_round);
+        g.build_monument(MICK, 3, MonumentId::StepPyramid).unwrap();
+        assert!(g.final_round);
+    }
+
+    #[test]
+    fn build_ship_rejects_over_five_cap() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 6);
+        g.boards[MICK].goods.insert(Good::Cloth, 6);
+        g.boards[MICK].ships = 4;
+        assert!(g.build_ship(MICK, 2).is_err());
+    }
+
+    #[test]
+    fn build_ship_rejects_insufficient_wood_or_cloth() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 1);
+        assert!(g.build_ship(MICK, 1).is_err());
+    }
+
+    // -----------------------------------------------------------------
+    // Baseline: trade/buy/take/discard/invade/sell/swap error paths.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn trade_stone_rejects_insufficient_stone() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Engineering);
+        g.boards[MICK].goods.insert(Good::Stone, 1);
+        assert!(g.trade_stone(MICK, 2).is_err());
+    }
+
+    #[test]
+    fn buy_development_rejects_already_owned() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        assert!(
+            g.buy_development(MICK, DevelopmentId::Leadership, vec![])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn buy_development_rejects_insufficient_total_with_exact_message() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        let res = g.buy_development(MICK, DevelopmentId::Leadership, vec![]);
+        assert!(res.is_err());
+        let msg = res.unwrap_err().to_string();
+        assert!(msg.contains("you require 10"));
+        assert!(msg.contains("only amount to 0"));
+    }
+
+    #[test]
+    fn buy_development_mix_of_coins_and_goods() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        g.remaining_coins = 5;
+        g.boards[MICK].goods.insert(Good::Wood, 4); // value 10
+        assert!(
+            g.buy_development(MICK, DevelopmentId::Leadership, vec![Good::Wood])
+                .is_ok()
+        );
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Wood));
+    }
+
+    #[test]
+    fn buy_development_completing_seventh_triggers_game_end() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        g.remaining_coins = 1000;
+        for d in [
+            DevelopmentId::Leadership,
+            DevelopmentId::Irrigation,
+            DevelopmentId::Agriculture,
+            DevelopmentId::Quarrying,
+            DevelopmentId::Medicine,
+            DevelopmentId::Preservation,
+        ] {
+            g.boards[MICK].developments.insert(d);
+        }
+        assert!(!g.final_round);
+        g.buy_development(MICK, DevelopmentId::Coinage, vec![])
+            .unwrap();
+        assert!(g.final_round);
+    }
+
+    #[test]
+    fn take_rejects_wrong_action_count() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Collect;
+        g.kept_dice = vec![Die::FoodOrWorkers, Die::FoodOrWorkers];
+        assert!(g.take(MICK, vec![TakeAction::Food]).is_err());
+    }
+
+    #[test]
+    fn discard_rejects_exceeding_holdings() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Discard;
+        g.boards[MICK].goods.insert(Good::Wood, 8);
+        assert!(g.discard(MICK, 10, Good::Wood).is_err());
+    }
+
+    #[test]
+    fn discard_rejects_exceeding_over_limit_amount() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Discard;
+        g.boards[MICK].goods.insert(Good::Wood, 8); // 2 over limit
+        assert!(g.discard(MICK, 8, Good::Wood).is_err());
+    }
+
+    #[test]
+    fn discard_completes_turn_once_at_or_under_limit() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Discard;
+        g.boards[MICK].goods.insert(Good::Wood, 8); // 2 over limit
+        g.current_player = MICK;
+        g.discard(MICK, 2, Good::Wood).unwrap();
+        // Under limit now, so NextTurn() should have advanced the player.
+        assert_eq!(STEVE, g.current_player);
+    }
+
+    #[test]
+    fn invade_rejects_non_positive_amount() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Invade;
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        g.boards[MICK].goods.insert(Good::Spearhead, 1);
+        assert!(g.invade(MICK, 0).is_err());
+    }
+
+    #[test]
+    fn invade_wall_blocks_per_opponent() {
+        let mut g = new_blank(3);
+        g.phase = Phase::Invade;
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        g.boards[MICK].goods.insert(Good::Spearhead, 1);
+        g.boards[STEVE].monuments.insert(MonumentId::GreatWall, 13);
+        g.invade(MICK, 1).unwrap();
+        assert_eq!(0, g.boards[STEVE].disasters);
+        assert_eq!(2, g.boards[BJ].disasters);
+    }
+
+    #[test]
+    fn sell_rejects_exceeding_food() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        g.boards[MICK].developments.insert(DevelopmentId::Granaries);
+        g.boards[MICK].food = 2;
+        assert!(g.sell_food(MICK, 3).is_err());
+    }
+
+    #[test]
+    fn swap_rejects_same_good() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Trade;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 2);
+        g.remaining_ships = 2;
+        assert!(g.swap(MICK, Good::Wood, Good::Wood, 1).is_err());
+    }
+
+    #[test]
+    fn swap_rejects_exceeding_ship_budget() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Trade;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 5);
+        g.remaining_ships = 1;
+        assert!(g.swap(MICK, Good::Wood, Good::Stone, 2).is_err());
+    }
+
+    #[test]
+    fn swap_rejects_exceeding_target_capacity() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Trade;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 5);
+        g.boards[MICK].goods.insert(Good::Spearhead, 4); // cap is 4
+        g.remaining_ships = 5;
+        assert!(g.swap(MICK, Good::Wood, Good::Spearhead, 1).is_err());
+    }
+
+    #[test]
+    fn swap_remaining_ships_reaching_zero_auto_advances() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Trade;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 2);
+        g.remaining_ships = 2;
+        g.swap(MICK, Good::Wood, Good::Stone, 2).unwrap();
+        assert_ne!(Phase::Trade, g.phase);
+    }
+
+    // -----------------------------------------------------------------
+    // Parser-level regression tests for the exact Go command strings.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn parser_accepts_go_command_strings() {
+        let p = test_players();
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 20;
+        match g.command_parser(MICK).unwrap().parse("build 8 city", &p) {
+            Ok(out) => assert_eq!(
+                Command::Build {
+                    amount: 8,
+                    target: BuildTarget::City
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.remaining_workers = 20;
+        match g.command_parser(MICK).unwrap().parse("build 10 wall", &p) {
+            Ok(out) => assert_eq!(
+                Command::Build {
+                    amount: 10,
+                    target: BuildTarget::Monument(MonumentId::GreatWall)
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 3);
+        g.boards[MICK].goods.insert(Good::Cloth, 3);
+        match g.command_parser(MICK).unwrap().parse("build 2 ship", &p) {
+            Ok(out) => assert_eq!(
+                Command::Build {
+                    amount: 2,
+                    target: BuildTarget::Ship
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        match g.command_parser(MICK).unwrap().parse("buy leader", &p) {
+            Ok(out) => assert_eq!(
+                Command::Buy {
+                    development: DevelopmentId::Leadership,
+                    goods: BuyGoods::default()
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        match g.command_parser(MICK).unwrap().parse("buy cara", &p) {
+            Ok(out) => assert_eq!(
+                Command::Buy {
+                    development: DevelopmentId::Caravans,
+                    goods: BuyGoods::default()
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        match g
+            .command_parser(MICK)
+            .unwrap()
+            .parse("buy agri wood stone pot cloth spear", &p)
+        {
+            Ok(out) => assert_eq!(
+                Command::Buy {
+                    development: DevelopmentId::Agriculture,
+                    goods: BuyGoods {
+                        all_goods: false,
+                        goods: vec![
+                            Good::Wood,
+                            Good::Stone,
+                            Good::Pottery,
+                            Good::Cloth,
+                            Good::Spearhead
+                        ]
+                    }
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        match g.command_parser(MICK).unwrap().parse("buy agri all", &p) {
+            Ok(out) => assert_eq!(
+                Command::Buy {
+                    development: DevelopmentId::Agriculture,
+                    goods: BuyGoods {
+                        all_goods: true,
+                        goods: vec![]
+                    }
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Collect;
+        g.kept_dice = vec![Die::FoodOrWorkers, Die::FoodOrWorkers, Die::FoodOrWorkers];
+        match g.command_parser(MICK).unwrap().parse("take w w f", &p) {
+            Ok(out) => assert_eq!(
+                Command::Take {
+                    actions: vec![TakeAction::Workers, TakeAction::Workers, TakeAction::Food]
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Discard;
+        g.boards[MICK].goods.insert(Good::Wood, 8);
+        match g.command_parser(MICK).unwrap().parse("discard 1 wood", &p) {
+            Ok(out) => assert_eq!(
+                Command::Discard {
+                    amount: 1,
+                    good: Good::Wood
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Invade;
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        g.boards[MICK].goods.insert(Good::Spearhead, 2);
+        match g.command_parser(MICK).unwrap().parse("invade 2", &p) {
+            Ok(out) => assert_eq!(Command::Invade { amount: 2 }, out.value),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Trade;
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].goods.insert(Good::Wood, 2);
+        g.remaining_ships = 5;
+        match g
+            .command_parser(MICK)
+            .unwrap()
+            .parse("swap 2 wood spear", &p)
+        {
+            Ok(out) => assert_eq!(
+                Command::Swap {
+                    amount: 2,
+                    from: Good::Wood,
+                    to: Good::Spearhead
+                },
+                out.value
+            ),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Build;
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Engineering);
+        g.boards[MICK].goods.insert(Good::Stone, 3);
+        match g.command_parser(MICK).unwrap().parse("trade 3", &p) {
+            Ok(out) => assert_eq!(Command::Trade { amount: 3 }, out.value),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
+
+        let mut g = new_blank(2);
+        g.phase = Phase::Buy;
+        g.boards[MICK].developments.insert(DevelopmentId::Granaries);
+        g.boards[MICK].food = 5;
+        match g.command_parser(MICK).unwrap().parse("sell 5", &p) {
+            Ok(out) => assert_eq!(Command::Sell { amount: 5 }, out.value),
+            Err(e) => panic!("expected ok, got {}", e),
+        }
     }
 }
