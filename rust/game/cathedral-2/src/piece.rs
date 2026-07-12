@@ -3,11 +3,13 @@
 use crate::loc::Loc;
 use crate::tile::{PLAYER_CATHEDRAL, PlayerType};
 
-/// Port of `Piece` (`piece.go`). `directional` is carried but, per the Go
-/// source, is not read anywhere outside this struct's definition - it is
-/// dead data preserved for fidelity (rotation/placement is not gated by it;
-/// see `CanPlayPiece`/`Play` in `play_command.go`, which rotate by `dir`
-/// regardless of this flag).
+/// Port of `Piece` (`piece.go`). `directional` gates *which* directions
+/// `CanPlaySomething`/`can_play_something` tries when searching for a legal
+/// move (`game.go:214-217`: non-directional pieces are only tried facing
+/// down), but it does not gate rotation/placement validity itself - a
+/// `play`/`Play` command with an explicit non-down direction still rotates
+/// and places a non-directional piece (see `CanPlayPiece`/`Play` in
+/// `play_command.go`, which rotate by `dir` unconditionally).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Piece {
     pub player_type: PlayerType,

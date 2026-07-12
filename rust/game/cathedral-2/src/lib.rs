@@ -856,7 +856,8 @@ C1C1C1..........G4G4
     fn play_rotation_produces_correct_offsets() {
         // Piece index 2 (type 3) is asymmetric and non-directional in Go,
         // but CanPlayPiece/Play still rotate it regardless of the
-        // `directional` flag (which is unread outside its definition).
+        // `directional` flag (that flag only gates which directions
+        // CanPlaySomething tries, not whether play()/CanPlayPiece rotate).
         // Positions: (0,0),(0,1),(-1,1),(1,1),(0,2).
         let (g, _) = Game::start(2, 1).unwrap();
         let origin = Loc::new(5, 5);
@@ -1215,4 +1216,34 @@ C1C1C1..G1G1....G1..
     // does pass the (buggy, `>` not `>=`) bounds check and then panics on
     // the out-of-range slice index, matching Go's behaviour exactly (see
     // `can_play_piece`'s doc comment above).
+
+    // Render parity verification (Task 2 of the port plan) exercised this
+    // exact post-capture board fixture (occupied tiles on the board edge,
+    // e.g. column A/row 1) rendered through `brdgme_render_plain` side by
+    // side with the equivalent Go `PubRender()` output for the same
+    // fixture, confirming character-for-character parity. That manual
+    // check caught a real panic: `open_sides` looked up off-board
+    // neighbours (e.g. one column left of an edge tile) via
+    // `Loc::to_key`, which asserts `0..=9` and overflows on a negative
+    // coordinate; fixed by having `Tiler::tile_at` reject invalid locs
+    // before keying (`render.rs`). This test guards against a regression
+    // of that panic for edge-of-board occupied tiles.
+    #[test]
+    fn render_does_not_panic_on_board_edge_tiles() {
+        let g = parse_game(
+            "............G1G.G.G.
+..C1......G1G1G1G1G.
+C1C1C1..G1G1G.G.G1G.
+..C1......G1G.G.G1G.
+..C1......G2G.G.G1G.
+..........G2G2G2G9G.
+................G9G9
+....................
+..R1R1..............
+....................
+",
+        );
+        let markup = brdgme_game::Renderer::render(&g.pub_state());
+        assert!(!markup.is_empty());
+    }
 }
