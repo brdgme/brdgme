@@ -1,33 +1,45 @@
 //! Port of `brdgme-go/roll_through_the_ages_1`.
 //!
-//! This crate is being built up task-by-task per
-//! `docs/superpowers/plans/2026-07-12-roll-through-the-ages-2-port.md`.
-//! Task 1 provides only the domain types (`dice`, `good`, `development`,
-//! `monument`, `player_board`) and a bare `Game` skeleton; the full
-//! `Gamer` impl (phase engine, commands, render) lands in later tasks.
+//! Task 2 provides the full `Game` struct + `Gamer` impl (start/status/
+//! points/whose_turn/pub+player state shapes), the complete phase/turn
+//! cascade engine (including resolve-phase disasters), and the full
+//! `command_parser` (all 11 gated sub-parsers). Only `next`/`roll`/
+//! `preserve` dispatch to real actions this task; the remaining 8 command
+//! variants (`build`/`trade`/`buy`/`take`/`discard`/`invade`/`sell`/`swap`)
+//! are wired up in Task 3.
 
 pub mod development;
 pub mod dice;
 pub mod good;
 pub mod monument;
 pub mod player_board;
+pub mod take;
 
+mod command;
+
+use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use brdgme_game::command::Spec as CommandSpec;
+use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
-use brdgme_game::game::Renderer;
+use brdgme_game::game::{Renderer, gen_placings};
 use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
+use development::DevelopmentId;
+use dice::Die;
+use good::{GOODS, Good};
+use monument::{MONUMENTS, MonumentId};
 use player_board::PlayerBoard;
+
+pub use command::Command;
 
 pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 4;
 
-/// Phase enum, ported from `game.go`'s `Phase` iota. Full phase-engine
-/// wiring lands in Task 2.
+/// Phase enum, ported from `game.go`'s `Phase` iota.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Phase {
     Preserve,
@@ -49,14 +61,15 @@ pub struct Game {
     pub phase: Phase,
     pub boards: Vec<PlayerBoard>,
 
-    pub rolled_dice: Vec<dice::Die>,
-    pub kept_dice: Vec<dice::Die>,
+    pub rolled_dice: Vec<Die>,
+    pub kept_dice: Vec<Die>,
     pub remaining_rolls: i32,
     pub remaining_workers: i32,
     pub remaining_ships: i32,
     pub remaining_coins: i32,
 
     pub final_round: bool,
+    pub finished: bool,
 
     #[serde(default = "GameRng::from_entropy")]
     pub rng: GameRng,
@@ -76,39 +89,757 @@ impl Default for Game {
             remaining_ships: 0,
             remaining_coins: 0,
             final_round: false,
+            finished: false,
             rng: GameRng::default(),
         }
     }
 }
 
-impl Game {
-    /// The players whose turn it currently is. Full multi-phase engine
-    /// lands in Task 2; for now this always names the single current
-    /// player, matching this game's strict single-current-player turn
-    /// structure.
-    pub fn players(&self) -> Vec<String> {
-        (0..self.players).map(|i| format!("player{}", i)).collect()
-    }
+/// No hidden information in this game (`PlayerState`/`PubState` both return
+/// `nil` in Go; `PubRender()` is literally `PlayerRender(CurrentPlayer)`).
+/// Render still needs a concrete type to implement `Renderer` against; the
+/// full render tables land in Task 4.
+#[derive(Default, Serialize, Deserialize)]
+pub struct PubState {
+    pub current_player: usize,
 }
 
-/// No hidden information in this game (`PlayerState`/`PubState` both return
-/// `nil` in Go); render still needs a concrete type to implement `Renderer`
-/// against, wired up fully in Task 4.
-#[derive(Default, Serialize, Deserialize)]
-pub struct PubState;
-
+/// Minimal placeholder render so the `Gamer` contract (which requires
+/// non-empty render output) passes ahead of Task 4's full render-parity
+/// implementation (the 6-table `PlayerRender`/`PubRender` port).
 impl Renderer for PubState {
     fn render(&self) -> Vec<N> {
-        vec![]
+        vec![N::text(format!(
+            "Roll Through the Ages - player {}'s turn (full render lands in Task 4)",
+            self.current_player
+        ))]
     }
 }
 
 #[derive(Default, Serialize, Deserialize)]
-pub struct PlayerState;
+pub struct PlayerState {
+    pub public: PubState,
+}
 
 impl Renderer for PlayerState {
     fn render(&self) -> Vec<N> {
+        self.public.render()
+    }
+}
+
+impl Game {
+    // ---------------------------------------------------------------
+    // Guard functions (Can*), ported from each `*_command.go`. Each Go file
+    // is read directly, not assumed uniform; see the plan's Global
+    // Constraints re `can_undo` for why this matters.
+    // ---------------------------------------------------------------
+
+    /// Port of `CanNext` (next_command.go).
+    pub fn can_next(&self, player: usize) -> bool {
+        player == self.current_player
+            && matches!(
+                self.phase,
+                Phase::Preserve
+                    | Phase::Roll
+                    | Phase::ExtraRoll
+                    | Phase::Invade
+                    | Phase::Build
+                    | Phase::Trade
+                    | Phase::Buy
+            )
+    }
+
+    /// Port of `CanRoll` (roll_command.go). Preserves Go's exact operator
+    /// precedence: `(Phase==Roll && (RemainingRolls>0 && len(RolledDice)>0))
+    /// || Phase==ExtraRoll`.
+    pub fn can_roll(&self, player: usize) -> bool {
+        if self.current_player != player {
+            return false;
+        }
+        (self.phase == Phase::Roll && (self.remaining_rolls > 0 && !self.rolled_dice.is_empty()))
+            || self.phase == Phase::ExtraRoll
+    }
+
+    /// Port of `CanPreserve` (preserve_command.go).
+    pub fn can_preserve(&self, player: usize) -> bool {
+        let b = &self.boards[player];
+        self.current_player == player
+            && self.phase == Phase::Preserve
+            && b.developments.contains(&DevelopmentId::Preservation)
+            && b.goods.get(&Good::Pottery).copied().unwrap_or(0) > 0
+            && b.food > 0
+    }
+
+    /// Port of `CanBuildBuilding` (build_command.go).
+    pub fn can_build_building(&self, player: usize) -> bool {
+        self.current_player == player && self.phase == Phase::Build && self.remaining_workers > 0
+    }
+
+    /// Port of `CanBuildShip` (build_command.go).
+    pub fn can_build_ship(&self, player: usize) -> bool {
+        let b = &self.boards[player];
+        self.current_player == player
+            && self.phase == Phase::Build
+            && b.developments.contains(&DevelopmentId::Shipping)
+            && b.goods.get(&Good::Wood).copied().unwrap_or(0) > 0
+            && b.goods.get(&Good::Cloth).copied().unwrap_or(0) > 0
+    }
+
+    /// Port of `CanBuild` (build_command.go).
+    pub fn can_build(&self, player: usize) -> bool {
+        self.can_build_building(player) || self.can_build_ship(player)
+    }
+
+    /// Port of `CanTrade` (trade_command.go). Note the Go quirk this
+    /// comment preserves: this checks `Phase == PhaseBuild`, not a
+    /// dedicated trade phase - see the plan's Global Constraints.
+    pub fn can_trade(&self, player: usize) -> bool {
+        let b = &self.boards[player];
+        self.current_player == player
+            && self.phase == Phase::Build
+            && b.developments.contains(&DevelopmentId::Engineering)
+            && b.goods.get(&Good::Stone).copied().unwrap_or(0) > 0
+    }
+
+    /// Port of `CanBuildOrTrade` (build_command.go).
+    pub fn can_build_or_trade(&self, player: usize) -> bool {
+        self.can_build(player) || self.can_trade(player)
+    }
+
+    /// Port of `CanBuy` (buy_command.go).
+    pub fn can_buy(&self, player: usize) -> bool {
+        self.current_player == player && self.phase == Phase::Buy
+    }
+
+    /// Port of `CanTake` (take_command.go).
+    pub fn can_take(&self, player: usize) -> bool {
+        self.current_player == player && self.phase == Phase::Collect
+    }
+
+    /// Port of `CanDiscard` (discard_command.go).
+    pub fn can_discard(&self, player: usize) -> bool {
+        self.current_player == player
+            && self.phase == Phase::Discard
+            && self.boards[self.current_player].goods_over_limit() > 0
+    }
+
+    /// Port of `CanInvade` (invade_command.go).
+    pub fn can_invade(&self, player: usize) -> bool {
+        let b = &self.boards[player];
+        self.current_player == player
+            && self.phase == Phase::Invade
+            && b.developments.contains(&DevelopmentId::Smithing)
+            && b.goods.get(&Good::Spearhead).copied().unwrap_or(0) > 0
+    }
+
+    /// Port of `CanSell` (sell_command.go).
+    pub fn can_sell(&self, player: usize) -> bool {
+        let b = &self.boards[player];
+        self.current_player == player
+            && self.phase == Phase::Buy
+            && b.developments.contains(&DevelopmentId::Granaries)
+            && b.food > 0
+    }
+
+    /// Port of `CanSwap` (swap_command.go).
+    pub fn can_swap(&self, player: usize) -> bool {
+        let b = &self.boards[player];
+        self.current_player == player
+            && self.phase == Phase::Trade
+            && b.developments.contains(&DevelopmentId::Shipping)
+            && b.goods_num() > 0
+    }
+
+    // ---------------------------------------------------------------
+    // Phase/turn cascade engine, ported from `game.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `StartTurn`.
+    fn start_turn(&mut self) -> Vec<Log> {
+        self.remaining_coins = 0;
+        self.remaining_workers = 0;
+        self.preserve_phase()
+    }
+
+    /// Port of `NextPhase`.
+    fn next_phase(&mut self) -> Vec<Log> {
+        match self.phase {
+            Phase::Preserve => self.roll_phase(),
+            Phase::Roll => self.roll_extra_phase(),
+            Phase::ExtraRoll => self.collect_phase(),
+            Phase::Collect => self.phase_resolve(),
+            Phase::Resolve | Phase::Invade => self.build_phase(),
+            Phase::Build => self.trade_phase(),
+            Phase::Trade => self.buy_phase(),
+            Phase::Buy => self.discard_phase(),
+            Phase::Discard => self.next_turn(),
+        }
+    }
+
+    /// Port of `PreservePhase`.
+    fn preserve_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Preserve;
+        if !self.can_preserve(self.current_player) {
+            return self.next_phase();
+        }
         vec![]
+    }
+
+    /// Port of `RollPhase`.
+    fn roll_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Roll;
+        let cities = self.boards[self.current_player].cities();
+        let logs = self.new_roll(cities);
+        self.remaining_rolls = 2;
+        logs
+    }
+
+    /// Port of `RollExtraPhase`.
+    fn roll_extra_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::ExtraRoll;
+        // Can reroll anything.
+        let mut kept = std::mem::take(&mut self.kept_dice);
+        self.rolled_dice.append(&mut kept);
+        self.kept_dice = vec![];
+        if !self.boards[self.current_player]
+            .developments
+            .contains(&DevelopmentId::Leadership)
+        {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `CollectPhase`.
+    fn collect_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Collect;
+        // Go: `g.KeptDice = append(g.RolledDice, g.KeptDice...)`.
+        let mut new_kept = std::mem::take(&mut self.rolled_dice);
+        new_kept.append(&mut self.kept_dice);
+        self.kept_dice = new_kept;
+        self.rolled_dice = vec![];
+
+        let cp = self.current_player;
+        let mut has_food_or_workers_dice = false;
+        let mut goods = 0i32;
+        for &d in self.kept_dice.clone().iter() {
+            match d {
+                Die::Food => {
+                    let modifier = self.boards[cp].food_modifier();
+                    self.boards[cp].food += 3 + modifier;
+                }
+                Die::Good => goods += 1,
+                Die::Skull => goods += 2,
+                Die::Workers => {
+                    let modifier = self.boards[cp].worker_modifier();
+                    self.remaining_workers += 3 + modifier;
+                }
+                Die::FoodOrWorkers => has_food_or_workers_dice = true,
+                Die::Coins => {
+                    self.remaining_coins += self.boards[cp].coins_die_value();
+                }
+            }
+        }
+        self.boards[cp].gain_goods(goods);
+        if !has_food_or_workers_dice {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `PhaseResolve`.
+    fn phase_resolve(&mut self) -> Vec<Log> {
+        self.phase = Phase::Resolve;
+        let cp = self.current_player;
+        let players = self.players;
+        let mut logs: Vec<Log> = vec![];
+
+        // Check food isn't over maximum.
+        if self.boards[cp].food > 15 {
+            logs.push(Log::public(vec![
+                N::Player(cp),
+                N::text(" had their food reduced from "),
+                N::Bold(vec![N::text(self.boards[cp].food.to_string())]),
+                N::text(" to the maximum of "),
+                N::Bold(vec![N::text("15")]),
+            ]));
+            self.boards[cp].food = 15;
+        }
+
+        // Feed cities.
+        let cities = self.boards[cp].cities();
+        if self.boards[cp].food >= cities {
+            self.boards[cp].food -= cities;
+            logs.push(Log::public(vec![
+                N::Player(cp),
+                N::text(" fed "),
+                N::Bold(vec![N::text(cities.to_string())]),
+                N::text(" cities"),
+            ]));
+        } else {
+            let famine = cities - self.boards[cp].food;
+            self.boards[cp].food = 0;
+            self.boards[cp].disasters += famine;
+            logs.push(Log::public(vec![
+                N::text("Famine! "),
+                N::Player(cp),
+                N::text(" takes "),
+                N::Bold(vec![N::text(format!("{} disaster points", famine))]),
+            ]));
+        }
+
+        // Resolve disasters.
+        let skulls = self.kept_dice.iter().filter(|&&d| d == Die::Skull).count();
+        match skulls {
+            0 | 1 => {}
+            2 => {
+                if self.boards[cp]
+                    .developments
+                    .contains(&DevelopmentId::Irrigation)
+                {
+                    logs.push(Log::public(vec![
+                        N::Player(cp),
+                        N::text(" avoids a drought with their irrigation development"),
+                    ]));
+                } else {
+                    self.boards[cp].disasters += 2;
+                    logs.push(Log::public(vec![
+                        N::text("Drought! "),
+                        N::Player(cp),
+                        N::text(" takes "),
+                        N::Bold(vec![N::text("2 disaster points")]),
+                    ]));
+                }
+            }
+            3 => {
+                let mut content: Vec<N> = vec![N::text("Pestilence!")];
+                for p in 0..players {
+                    if p == cp {
+                        continue;
+                    }
+                    if self.boards[p]
+                        .developments
+                        .contains(&DevelopmentId::Medicine)
+                    {
+                        content.push(N::text("\n  "));
+                        content.push(N::Player(p));
+                        content.push(N::text(
+                            " avoids pestilence with their medicine development",
+                        ));
+                    } else {
+                        self.boards[p].disasters += 3;
+                        content.push(N::text("\n  "));
+                        content.push(N::Player(p));
+                        content.push(N::text(" takes "));
+                        content.push(N::Bold(vec![N::text("3 disaster points")]));
+                    }
+                }
+                logs.push(Log::public(content));
+            }
+            4 => {
+                if self.boards[cp]
+                    .developments
+                    .contains(&DevelopmentId::Smithing)
+                {
+                    let mut content: Vec<N> = vec![
+                        N::text("Invasion! "),
+                        N::Player(cp),
+                        N::text(" has the smithing development, so "),
+                        N::Bold(vec![N::text("all other players are invaded")]),
+                    ];
+                    for p in 0..players {
+                        if p == cp {
+                            continue;
+                        }
+                        if self.boards[p].has_built(MonumentId::GreatWall) {
+                            content.push(N::text("\n  "));
+                            content.push(N::Player(p));
+                            content.push(N::text(" avoids an invasion with their wall"));
+                        } else {
+                            self.boards[p].disasters += 4;
+                            content.push(N::text("\n  "));
+                            content.push(N::Player(p));
+                            content.push(N::text(" takes "));
+                            content.push(N::Bold(vec![N::text("4 disaster points")]));
+                        }
+                    }
+                    logs.push(Log::public(content));
+                    logs.extend(self.invade_phase());
+                    return logs;
+                } else if self.boards[cp].has_built(MonumentId::GreatWall) {
+                    logs.push(Log::public(vec![
+                        N::Player(cp),
+                        N::text(" avoids an invasion with their wall"),
+                    ]));
+                } else {
+                    self.boards[cp].disasters += 4;
+                    logs.push(Log::public(vec![
+                        N::text("Invasion! "),
+                        N::Player(cp),
+                        N::text(" takes "),
+                        N::Bold(vec![N::text("4 disaster points")]),
+                    ]));
+                }
+            }
+            _ => {
+                if self.boards[cp]
+                    .developments
+                    .contains(&DevelopmentId::Religion)
+                {
+                    for p in 0..players {
+                        if p == cp {
+                            continue;
+                        }
+                        for &good in GOODS.iter() {
+                            self.boards[p].goods.insert(good, 0);
+                        }
+                    }
+                    logs.push(Log::public(vec![
+                        N::text("Revolt! "),
+                        N::Player(cp),
+                        N::text(" has the religion development, so "),
+                        N::Bold(vec![N::text("all other players")]),
+                        N::text(" lose "),
+                        N::Bold(vec![N::text("all of their goods")]),
+                    ]));
+                } else {
+                    for &good in GOODS.iter() {
+                        self.boards[cp].goods.insert(good, 0);
+                    }
+                    logs.push(Log::public(vec![
+                        N::text("Revolt! "),
+                        N::Player(cp),
+                        N::text(" loses "),
+                        N::Bold(vec![N::text("all of their goods")]),
+                    ]));
+                }
+            }
+        }
+        logs.extend(self.next_phase());
+        logs
+    }
+
+    /// Port of `InvadePhase`.
+    fn invade_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Invade;
+        if !self.can_invade(self.current_player) {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `BuildPhase`.
+    fn build_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Build;
+        if !self.can_build_or_trade(self.current_player) {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `TradePhase` (the ship-based goods-swapping phase, `Swap`,
+    /// NOT the stone-for-workers `Trade` command - see the plan's Global
+    /// Constraints re the `PhaseBuild`/`PhaseTrade` naming trap).
+    fn trade_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Trade;
+        let b = &self.boards[self.current_player];
+        self.remaining_ships = b.ships;
+        if b.ships == 0 || b.goods_num() == 0 {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `BuyPhase`.
+    fn buy_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Buy;
+        let b = &self.boards[self.current_player];
+        let mut buying_power = self.remaining_coins + b.goods_value();
+        if b.developments.contains(&DevelopmentId::Granaries) {
+            buying_power += b.food * 6;
+        }
+        if buying_power < 10 {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `DiscardPhase`.
+    fn discard_phase(&mut self) -> Vec<Log> {
+        self.phase = Phase::Discard;
+        let b = &self.boards[self.current_player];
+        if b.goods_num() <= 6 || b.developments.contains(&DevelopmentId::Caravans) {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `NextTurn`.
+    fn next_turn(&mut self) -> Vec<Log> {
+        self.current_player = (self.current_player + 1) % self.players;
+        if self.current_player == 0 && self.final_round {
+            self.finished = true;
+        }
+        if !self.finished {
+            return self.start_turn();
+        }
+        vec![]
+    }
+
+    /// Port of `CheckGameEndTriggered`. Called from both `BuildMonument` on
+    /// monument completion and `BuyDevelopment` on development purchase
+    /// (wired up in Task 3); the phase-engine plumbing here is what those
+    /// callers will invoke.
+    pub fn check_game_end_triggered(&mut self, player: usize) -> Vec<Log> {
+        if self.final_round {
+            return vec![];
+        }
+        // Go's comment says "5th development built" but the check is
+        // `len(Developments) >= 7` - a stale comment with zero behavioural
+        // effect (Go quirk #6). Ported threshold: 7, not 5.
+        if self.boards[player].developments.len() >= 7 {
+            return self.trigger_game_end();
+        }
+        // Every monument built (by anyone).
+        for &m in MONUMENTS.iter() {
+            let built = self.boards.iter().any(|b| b.has_built(m));
+            if !built {
+                return vec![];
+            }
+        }
+        self.trigger_game_end()
+    }
+
+    /// Port of `TriggerGameEnd`.
+    pub fn trigger_game_end(&mut self) -> Vec<Log> {
+        self.final_round = true;
+        vec![Log::public(vec![N::Bold(vec![N::text(
+            "Game end has been triggered, the game will be finished after the last player has their turn",
+        )])])]
+    }
+
+    /// Port of `AvailableMonuments`.
+    pub fn available_monuments(&self, player: usize) -> Vec<MonumentId> {
+        MONUMENTS
+            .iter()
+            .copied()
+            .filter(|&m| {
+                self.boards[player].monuments.get(&m).copied().unwrap_or(0) < m.value().size
+            })
+            .collect()
+    }
+
+    /// Port of `AvailableDevelopments`.
+    pub fn available_developments(&self, player: usize) -> Vec<DevelopmentId> {
+        development::DEVELOPMENTS
+            .iter()
+            .copied()
+            .filter(|d| !self.boards[player].developments.contains(d))
+            .collect()
+    }
+
+    /// Port of `WhoseTurn`.
+    pub fn whose_turn(&self) -> Vec<usize> {
+        vec![self.current_player]
+    }
+
+    // ---------------------------------------------------------------
+    // Dice/roll mechanics, ported from `roll_command.go`.
+    // ---------------------------------------------------------------
+
+    fn roll_n(&mut self, n: usize) -> Vec<Die> {
+        (0..n)
+            .map(|_| {
+                let idx = self.rng.random_range(0..dice::DICE_FACES.len());
+                dice::DICE_FACES[idx]
+            })
+            .collect()
+    }
+
+    /// Port of `NewRoll`.
+    fn new_roll(&mut self, n: i32) -> Vec<Log> {
+        self.rolled_dice = self.roll_n(n.max(0) as usize);
+        let mut logs = vec![self.log_roll(self.rolled_dice.clone(), vec![])];
+        self.kept_dice = vec![];
+        logs.extend(self.keep_skulls());
+        logs
+    }
+
+    /// Port of `KeepSkulls`.
+    fn keep_skulls(&mut self) -> Vec<Log> {
+        // Go: "You can reroll skulls in single player" - `PlayerCount()==1`
+        // guard. Dead in this platform (`PlayerCounts()` is `[2,3,4]`), but
+        // ported anyway for source fidelity.
+        if self.players == 1 {
+            return vec![];
+        }
+        let mut kept_skulls = 0;
+        self.rolled_dice.retain(|&d| {
+            if d == Die::Skull {
+                kept_skulls += 1;
+                false
+            } else {
+                true
+            }
+        });
+        for _ in 0..kept_skulls {
+            self.kept_dice.push(Die::Skull);
+        }
+        if self.rolled_dice.is_empty()
+            && !(self.phase == Phase::ExtraRoll
+                && self.boards[self.current_player]
+                    .developments
+                    .contains(&DevelopmentId::Leadership))
+        {
+            return self.next_phase();
+        }
+        vec![]
+    }
+
+    /// Port of `LogRoll`.
+    fn log_roll(&self, new_dice: Vec<Die>, old_dice: Vec<Die>) -> Log {
+        let mut content: Vec<N> = vec![N::Player(self.current_player), N::text(" rolled  ")];
+        for (i, d) in new_dice.iter().chain(old_dice.iter()).enumerate() {
+            if i > 0 {
+                content.push(N::text("  "));
+            }
+            if i < new_dice.len() {
+                content.push(N::Bold(vec![N::text(d.face_string())]));
+            } else {
+                content.push(N::text(d.face_string()));
+            }
+        }
+        Log::public(content)
+    }
+
+    /// Port of `Roll`.
+    fn roll(&mut self, player: usize, dice_num: Vec<i32>) -> Result<Vec<Log>, GameError> {
+        if !self.can_roll(player) {
+            return Err(GameError::invalid_input("you can't roll at the moment"));
+        }
+        if dice_num.is_empty() {
+            return Err(GameError::invalid_input(
+                "you must specify which dice to roll",
+            ));
+        }
+        if self.phase == Phase::ExtraRoll && dice_num.len() > 1 {
+            return Err(GameError::invalid_input(
+                "you may only roll one dice on the extra roll",
+            ));
+        }
+        let l = self.rolled_dice.len() as i32;
+        for &n in dice_num.iter() {
+            if n < 0 || n > l {
+                return Err(GameError::invalid_input(format!(
+                    "dice number must be between 1 and {}",
+                    l
+                )));
+            }
+        }
+        let mut kept = vec![];
+        for (i, &d) in self.rolled_dice.iter().enumerate() {
+            if !dice_num.contains(&((i + 1) as i32)) {
+                kept.push(d);
+            }
+        }
+        let rolled = self.roll_n(self.rolled_dice.len() - kept.len());
+        let old_dice: Vec<Die> = kept.iter().cloned().chain(self.kept_dice.clone()).collect();
+        let mut logs = vec![self.log_roll(rolled.clone(), old_dice)];
+        self.rolled_dice = rolled.into_iter().chain(kept).collect();
+        logs.extend(self.keep_skulls());
+        match self.phase {
+            Phase::Roll => {
+                self.remaining_rolls -= 1;
+                if self.remaining_rolls == 0 {
+                    logs.extend(self.next_phase());
+                }
+            }
+            Phase::ExtraRoll => {
+                logs.extend(self.next_phase());
+            }
+            _ => {}
+        }
+        Ok(logs)
+    }
+
+    /// Port of `RollCommand`. `CanUndo` is hardcoded `false` in Go - the
+    /// only command in this game that is (genuine RNG); preserve verbatim.
+    fn roll_command(
+        &mut self,
+        player: usize,
+        dice: Vec<i32>,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.roll(player, dice)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: false,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    // ---------------------------------------------------------------
+    // `next`/`preserve`, ported from `next_command.go`/`preserve_command.go`.
+    // ---------------------------------------------------------------
+
+    /// Port of `Next`.
+    fn next(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
+        if !self.can_next(player) {
+            return Err(GameError::invalid_input("you can't next at the moment"));
+        }
+        Ok(self.next_phase())
+    }
+
+    fn next_command(
+        &mut self,
+        player: usize,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.next(player)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    /// Port of `Preserve`.
+    fn preserve(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
+        if !self.can_preserve(player) {
+            return Err(GameError::invalid_input("you can't preserve at the moment"));
+        }
+        self.boards[player].food *= 2;
+        *self.boards[player].goods.entry(Good::Pottery).or_insert(0) -= 1;
+        let mut logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" used "),
+            N::Bold(vec![N::text("preservation")]),
+            N::text(" to double their food to "),
+            N::Bold(vec![N::text(self.boards[player].food.to_string())]),
+            N::text(" for "),
+            N::Bold(vec![N::text("1 pottery")]),
+        ])];
+        logs.extend(self.next_phase());
+        Ok(logs)
+    }
+
+    fn preserve_command(
+        &mut self,
+        player: usize,
+        remaining: &str,
+    ) -> Result<CommandResponse, GameError> {
+        let logs = self.preserve(player)?;
+        Ok(CommandResponse {
+            logs,
+            can_undo: self.current_player == player,
+            remaining_input: remaining.to_string(),
+        })
+    }
+
+    /// Port of `Points` (per-turn running score, always computed directly
+    /// from `Score()`, not zero-until-finished).
+    fn scores(&self) -> Vec<i32> {
+        self.boards.iter().map(|b| b.score()).collect()
     }
 }
 
@@ -116,8 +847,7 @@ impl Gamer for Game {
     type PubState = PubState;
     type PlayerState = PlayerState;
 
-    /// Placeholder implementation so the crate's bin stubs compile in Task
-    /// 1; the real phase-cascading `start()` lands in Task 2.
+    /// Port of `New`.
     fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
             return Err(GameError::PlayerCount {
@@ -126,42 +856,113 @@ impl Gamer for Game {
                 given: players,
             });
         }
-        let g = Game {
+        let mut g = Game {
             players,
             boards: (0..players).map(|_| PlayerBoard::default()).collect(),
             rng: GameRng::seed_from_u64(seed),
             ..Game::default()
         };
-        Ok((g, vec![]))
+        let logs = g.start_turn();
+        Ok((g, logs))
     }
 
     fn pub_state(&self) -> Self::PubState {
-        PubState
-    }
-
-    fn player_state(&self, _player: usize) -> Self::PlayerState {
-        PlayerState
-    }
-
-    /// Placeholder: no commands are wired up until Task 2/3.
-    fn command(
-        &mut self,
-        _player: usize,
-        _input: &str,
-        _players: &[String],
-    ) -> Result<CommandResponse, GameError> {
-        Err(GameError::invalid_input("not yet implemented"))
-    }
-
-    fn status(&self) -> Status {
-        Status::Active {
-            whose_turn: vec![self.current_player],
-            eliminated: vec![],
+        PubState {
+            current_player: self.current_player,
         }
     }
 
-    fn command_spec(&self, _player: usize) -> Option<CommandSpec> {
-        None
+    fn player_state(&self, _player: usize) -> Self::PlayerState {
+        PlayerState {
+            public: self.pub_state(),
+        }
+    }
+
+    /// Port of `Command`. Follows the borrow-order gotcha: `command_parser`
+    /// is never bound to a `let` before the mutating action call - the
+    /// parser-construction-then-parse expression is inlined so the
+    /// immutable borrow of `self` ends before any `&mut self` action runs.
+    fn command(
+        &mut self,
+        player: usize,
+        input: &str,
+        players: &[String],
+    ) -> Result<CommandResponse, GameError> {
+        let output = match self.command_parser(player) {
+            Some(cp) => cp,
+            None => return Err(GameError::invalid_input("you have no commands available")),
+        }
+        .parse(input, players);
+        match output {
+            Ok(ParseOutput {
+                value: Command::Next,
+                remaining,
+                ..
+            }) => self.next_command(player, remaining),
+            Ok(ParseOutput {
+                value: Command::Roll { dice },
+                remaining,
+                ..
+            }) => self.roll_command(player, dice, remaining),
+            Ok(ParseOutput {
+                value: Command::Preserve,
+                remaining,
+                ..
+            }) => self.preserve_command(player, remaining),
+            // The remaining 8 command variants are wired to real actions in
+            // Task 3; their parsers are already fully gated above.
+            Ok(ParseOutput {
+                value:
+                    Command::Build { .. }
+                    | Command::Trade { .. }
+                    | Command::Buy { .. }
+                    | Command::Take { .. }
+                    | Command::Discard { .. }
+                    | Command::Invade { .. }
+                    | Command::Sell { .. }
+                    | Command::Swap { .. },
+                ..
+            }) => Err(GameError::invalid_input(
+                "this command isn't implemented yet (Task 3)",
+            )),
+            Err(e) => Err(GameError::invalid_input(e.to_string())),
+        }
+    }
+
+    fn command_spec(&self, player: usize) -> Option<CommandSpec> {
+        self.command_parser(player).map(|cp| cp.to_spec())
+    }
+
+    /// Port of `Status`. `Winners()` (Go) implements its own two-stage
+    /// tie-break (score, then goods value) but is confirmed dead code: it
+    /// is not called anywhere else in `roll_through_the_ages_1` (grepped
+    /// the whole package), not called anywhere else in `brdgme-go` (not
+    /// part of the `brdgme.Gamer` interface either - `liars_dice_1` and
+    /// `texas_holdem_1` each define their own unrelated `Winners()` too, so
+    /// it's a per-game convention method, not framework plumbing), and
+    /// `Status()` uses `brdgme.GenPlacings(scores)` with a plain
+    /// single-value `[]int{Score()}` metric per player - no goods-value
+    /// tiebreaker at all. So this port intentionally does NOT carry over
+    /// `Winners()`'s extra goods-value tiebreaker; `gen_placings` here is
+    /// given the single-value score metric, matching what `Status()`
+    /// actually uses.
+    fn status(&self) -> Status {
+        if self.finished {
+            let metrics: Vec<Vec<i32>> = self.scores().into_iter().map(|s| vec![s]).collect();
+            Status::Finished {
+                placings: gen_placings(&metrics),
+                stats: vec![],
+            }
+        } else {
+            Status::Active {
+                whose_turn: self.whose_turn(),
+                eliminated: vec![],
+            }
+        }
+    }
+
+    fn points(&self) -> Vec<f32> {
+        self.scores().into_iter().map(|s| s as f32).collect()
     }
 
     fn player_count(&self) -> usize {
@@ -178,8 +979,43 @@ impl Gamer for Game {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test_helpers {
     use super::*;
+
+    pub const MICK: usize = 0;
+    pub const STEVE: usize = 1;
+    pub const BJ: usize = 2;
+
+    pub fn test_players() -> Vec<String> {
+        vec!["Mick".to_string(), "Steve".to_string(), "BJ".to_string()]
+    }
+
+    /// Port of the shared `NewBlank(players)` Go test helper (`game_test.go`):
+    /// bypasses the normal `start()`/`StartTurn` dice roll, sets
+    /// `current_player=Mick(0)`, `phase=Roll`, `remaining_rolls=2` directly,
+    /// so tests stay deterministic without needing to seed/mock the RNG for
+    /// every case.
+    pub fn new_blank(players: usize) -> Game {
+        assert!((MIN_PLAYERS..=MAX_PLAYERS).contains(&players));
+        Game {
+            players,
+            boards: (0..players).map(|_| PlayerBoard::default()).collect(),
+            current_player: MICK,
+            phase: Phase::Roll,
+            remaining_rolls: 2,
+            ..Game::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::test_helpers::*;
+    use super::*;
+
+    // ---------------------------------------------------------------
+    // Baseline: start()/player_counts.
+    // ---------------------------------------------------------------
 
     #[test]
     fn start_rejects_invalid_player_counts() {
@@ -188,9 +1024,560 @@ mod test {
     }
 
     #[test]
-    fn start_ok_for_valid_player_counts() {
+    fn start_ok_for_valid_player_counts_and_initial_state() {
         for n in 2..=4 {
-            assert!(Game::start(n, 1).is_ok());
+            let (g, _) = Game::start(n, 1).unwrap();
+            assert_eq!(n, g.boards.len());
+            assert_eq!(0, g.current_player);
+            for b in g.boards.iter() {
+                assert_eq!(3, b.food);
+                assert!(b.developments.is_empty());
+                assert!(b.monuments.is_empty());
+                assert!(b.goods.is_empty());
+            }
         }
+    }
+
+    // Port of TestGame_KeepSkulls_allDisasterSkip (game_test.go).
+    #[test]
+    fn test_game_keep_skulls_all_disaster_skip() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Skull, Die::Skull, Die::Skull];
+        let res = g.command(MICK, "next", &test_players());
+        assert!(res.is_ok());
+        assert_eq!(MICK, g.current_player);
+        assert_eq!(Phase::Buy, g.phase);
+    }
+
+    // Port of TestGame_KeepSkulls_allDisasterLeadership (game_test.go).
+    #[test]
+    fn test_game_keep_skulls_all_disaster_leadership() {
+        let mut g = new_blank(3);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        g.rolled_dice = vec![Die::Skull, Die::Skull, Die::Skull];
+        let res = g.command(MICK, "next", &test_players());
+        assert!(res.is_ok());
+        assert_eq!(MICK, g.current_player);
+        assert_eq!(Phase::ExtraRoll, g.phase);
+    }
+
+    // Port of TestRollCommand (roll_command_test.go).
+    #[test]
+    fn test_roll_command() {
+        let mut g = new_blank(3);
+        g.rolled_dice = vec![Die::Coins; 7];
+        let res = g.command(MICK, "roll 2 4 7", &test_players());
+        assert!(res.is_ok());
+    }
+
+    // Port of TestRollExtraCommand (roll_command_test.go).
+    #[test]
+    fn test_roll_extra_command() {
+        let mut g = new_blank(3);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        g.rolled_dice = vec![Die::Coins; 4];
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull];
+        let res = g.command(MICK, "roll 7", &test_players());
+        assert!(res.is_err());
+        let res = g.command(MICK, "next", &test_players());
+        assert!(res.is_ok());
+        let res = g.command(MICK, "roll 7", &test_players());
+        assert!(res.is_ok());
+    }
+
+    // Port of TestNextCommandPreserve (next_command_test.go).
+    #[test]
+    fn test_next_command_preserve() {
+        let mut g = new_blank(3);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Preservation);
+        g.boards[MICK].goods.insert(Good::Pottery, 3);
+        g.boards[MICK].food = 3;
+        g.phase = Phase::Preserve;
+        let res = g.command(MICK, "next", &test_players());
+        assert!(res.is_ok());
+        assert_ne!(Phase::Preserve, g.phase);
+    }
+
+    // Port of TestNextCommand (next_command_test.go).
+    #[test]
+    fn test_next_command() {
+        let mut g = new_blank(3);
+        // For reroll.
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        // For invade.
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        g.boards[MICK].goods.insert(Good::Spearhead, 1);
+        // For trade.
+        g.boards[MICK].developments.insert(DevelopmentId::Shipping);
+        g.boards[MICK].ships = 3;
+        assert_eq!(Phase::Roll, g.phase);
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull, Die::Skull, Die::Workers];
+        let p = test_players();
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::ExtraRoll, g.phase);
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Invade, g.phase);
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Build, g.phase);
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Trade, g.phase);
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Buy, g.phase);
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Discard, g.phase);
+    }
+
+    // Port of TestPreserveCommand (preserve_command_test.go).
+    #[test]
+    fn test_preserve_command() {
+        let mut g = new_blank(3);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Preservation);
+        g.boards[MICK].goods.insert(Good::Pottery, 3);
+        g.boards[MICK].food = 3;
+        g.phase = Phase::Preserve;
+        let res = g.command(MICK, "preserve", &test_players());
+        assert!(res.is_ok());
+        assert_eq!(6, g.boards[MICK].food);
+    }
+
+    // ---------------------------------------------------------------
+    // Baseline: individual phase-skip conditions.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn preserve_phase_skips_when_cannot_preserve() {
+        let mut g = new_blank(2);
+        g.phase = Phase::Discard; // arbitrary prior phase
+        let logs = g.preserve_phase();
+        assert_ne!(Phase::Preserve, g.phase);
+        assert!(!logs.is_empty() || g.phase != Phase::Preserve);
+    }
+
+    #[test]
+    fn roll_extra_phase_skips_without_leadership() {
+        let mut g = new_blank(2);
+        g.kept_dice = vec![Die::Coins];
+        g.rolled_dice = vec![];
+        g.phase = Phase::Roll;
+        g.roll_extra_phase();
+        assert_ne!(Phase::ExtraRoll, g.phase);
+    }
+
+    #[test]
+    fn roll_extra_phase_stays_with_leadership() {
+        let mut g = new_blank(2);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        g.kept_dice = vec![Die::Coins];
+        g.rolled_dice = vec![];
+        g.roll_extra_phase();
+        assert_eq!(Phase::ExtraRoll, g.phase);
+    }
+
+    #[test]
+    fn collect_phase_skips_without_food_or_workers_die() {
+        let mut g = new_blank(2);
+        g.rolled_dice = vec![Die::Coins, Die::Good];
+        g.collect_phase();
+        assert_ne!(Phase::Collect, g.phase);
+    }
+
+    #[test]
+    fn collect_phase_stays_with_food_or_workers_die() {
+        let mut g = new_blank(2);
+        g.rolled_dice = vec![Die::FoodOrWorkers];
+        g.collect_phase();
+        assert_eq!(Phase::Collect, g.phase);
+    }
+
+    #[test]
+    fn invade_phase_skips_when_cannot_invade() {
+        let mut g = new_blank(2);
+        g.invade_phase();
+        assert_ne!(Phase::Invade, g.phase);
+    }
+
+    #[test]
+    fn invade_phase_stays_when_can_invade() {
+        let mut g = new_blank(2);
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        g.boards[MICK].goods.insert(Good::Spearhead, 1);
+        g.phase = Phase::Collect;
+        g.invade_phase();
+        assert_eq!(Phase::Invade, g.phase);
+    }
+
+    #[test]
+    fn build_phase_skips_when_cannot_build_or_trade() {
+        let mut g = new_blank(2);
+        g.remaining_workers = 0;
+        g.build_phase();
+        assert_ne!(Phase::Build, g.phase);
+    }
+
+    #[test]
+    fn build_phase_stays_with_workers() {
+        let mut g = new_blank(2);
+        g.remaining_workers = 1;
+        g.build_phase();
+        assert_eq!(Phase::Build, g.phase);
+    }
+
+    #[test]
+    fn trade_phase_skips_without_ships_or_goods() {
+        let mut g = new_blank(2);
+        g.trade_phase();
+        assert_ne!(Phase::Trade, g.phase);
+    }
+
+    #[test]
+    fn trade_phase_stays_with_ships_and_goods() {
+        let mut g = new_blank(2);
+        g.boards[MICK].ships = 2;
+        g.boards[MICK].goods.insert(Good::Wood, 1);
+        g.phase = Phase::Build;
+        g.trade_phase();
+        assert_eq!(Phase::Trade, g.phase);
+    }
+
+    #[test]
+    fn buy_phase_skips_when_buying_power_below_ten() {
+        let mut g = new_blank(2);
+        g.remaining_coins = 5;
+        g.buy_phase();
+        assert_ne!(Phase::Buy, g.phase);
+    }
+
+    #[test]
+    fn buy_phase_stays_when_buying_power_at_least_ten() {
+        let mut g = new_blank(2);
+        g.remaining_coins = 10;
+        g.buy_phase();
+        assert_eq!(Phase::Buy, g.phase);
+    }
+
+    #[test]
+    fn discard_phase_skips_at_or_under_limit() {
+        let mut g = new_blank(2);
+        g.discard_phase();
+        assert_ne!(Phase::Discard, g.phase);
+    }
+
+    #[test]
+    fn discard_phase_skips_with_caravans_over_limit() {
+        let mut g = new_blank(2);
+        g.boards[MICK].developments.insert(DevelopmentId::Caravans);
+        g.boards[MICK].goods.insert(Good::Wood, 8);
+        g.discard_phase();
+        assert_ne!(Phase::Discard, g.phase);
+    }
+
+    #[test]
+    fn discard_phase_stays_over_limit_without_caravans() {
+        let mut g = new_blank(2);
+        g.boards[MICK].goods.insert(Good::Wood, 8);
+        g.phase = Phase::Buy;
+        g.discard_phase();
+        assert_eq!(Phase::Discard, g.phase);
+    }
+
+    // ---------------------------------------------------------------
+    // Baseline: resolve-phase disaster-dice logic.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn resolve_no_disaster_for_zero_or_one_skull() {
+        let mut g = new_blank(2);
+        g.kept_dice = vec![Die::Skull];
+        g.phase_resolve();
+        assert_eq!(0, g.boards[MICK].disasters);
+    }
+
+    #[test]
+    fn resolve_drought_without_irrigation() {
+        let mut g = new_blank(2);
+        g.kept_dice = vec![Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(2, g.boards[MICK].disasters);
+    }
+
+    #[test]
+    fn resolve_drought_avoided_with_irrigation() {
+        let mut g = new_blank(2);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Irrigation);
+        g.kept_dice = vec![Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(0, g.boards[MICK].disasters);
+    }
+
+    #[test]
+    fn resolve_pestilence_hits_other_players_without_medicine() {
+        let mut g = new_blank(3);
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(0, g.boards[MICK].disasters);
+        assert_eq!(3, g.boards[STEVE].disasters);
+        assert_eq!(3, g.boards[BJ].disasters);
+    }
+
+    #[test]
+    fn resolve_pestilence_avoided_per_player_with_medicine() {
+        let mut g = new_blank(3);
+        g.boards[STEVE].developments.insert(DevelopmentId::Medicine);
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(0, g.boards[STEVE].disasters);
+        assert_eq!(3, g.boards[BJ].disasters);
+    }
+
+    #[test]
+    fn resolve_invasion_hits_self_without_smithing_or_wall() {
+        let mut g = new_blank(2);
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(4, g.boards[MICK].disasters);
+    }
+
+    #[test]
+    fn resolve_invasion_avoided_self_with_wall() {
+        let mut g = new_blank(2);
+        g.boards[MICK].monuments.insert(MonumentId::GreatWall, 13);
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(0, g.boards[MICK].disasters);
+    }
+
+    #[test]
+    fn resolve_invasion_with_smithing_hits_all_others() {
+        let mut g = new_blank(3);
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        // Mick also needs spearheads for `can_invade` to keep the cascade
+        // parked on `PhaseInvade` (i.e. an *attacker* with no spearheads to
+        // spend auto-skips straight through it, same as any other guard).
+        g.boards[MICK].goods.insert(Good::Spearhead, 1);
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(0, g.boards[MICK].disasters);
+        assert_eq!(4, g.boards[STEVE].disasters);
+        assert_eq!(4, g.boards[BJ].disasters);
+        assert_eq!(Phase::Invade, g.phase);
+    }
+
+    #[test]
+    fn resolve_invasion_with_smithing_wall_blocks_per_opponent() {
+        let mut g = new_blank(3);
+        g.boards[MICK].developments.insert(DevelopmentId::Smithing);
+        g.boards[STEVE].monuments.insert(MonumentId::GreatWall, 13);
+        g.kept_dice = vec![Die::Skull, Die::Skull, Die::Skull, Die::Skull];
+        g.phase_resolve();
+        assert_eq!(0, g.boards[STEVE].disasters);
+        assert_eq!(4, g.boards[BJ].disasters);
+    }
+
+    #[test]
+    fn resolve_revolt_wipes_own_goods_without_religion() {
+        let mut g = new_blank(2);
+        g.boards[MICK].goods.insert(Good::Wood, 3);
+        g.kept_dice = vec![Die::Skull; 5];
+        g.phase_resolve();
+        assert_eq!(Some(&0), g.boards[MICK].goods.get(&Good::Wood));
+    }
+
+    #[test]
+    fn resolve_revolt_wipes_all_others_goods_with_religion() {
+        let mut g = new_blank(3);
+        g.boards[MICK].developments.insert(DevelopmentId::Religion);
+        g.boards[MICK].goods.insert(Good::Wood, 3);
+        g.boards[STEVE].goods.insert(Good::Wood, 2);
+        g.boards[BJ].goods.insert(Good::Wood, 1);
+        g.kept_dice = vec![Die::Skull; 5];
+        g.phase_resolve();
+        assert_eq!(Some(&3), g.boards[MICK].goods.get(&Good::Wood));
+        assert_eq!(Some(&0), g.boards[STEVE].goods.get(&Good::Wood));
+        assert_eq!(Some(&0), g.boards[BJ].goods.get(&Good::Wood));
+    }
+
+    // ---------------------------------------------------------------
+    // Baseline: game-end triggering, next_turn, status/points/whose_turn.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn check_game_end_triggered_on_seventh_development() {
+        let mut g = new_blank(2);
+        for d in [
+            DevelopmentId::Leadership,
+            DevelopmentId::Irrigation,
+            DevelopmentId::Agriculture,
+            DevelopmentId::Quarrying,
+            DevelopmentId::Medicine,
+            DevelopmentId::Preservation,
+            DevelopmentId::Coinage,
+        ] {
+            g.boards[MICK].developments.insert(d);
+        }
+        assert!(!g.final_round);
+        g.check_game_end_triggered(MICK);
+        assert!(g.final_round);
+    }
+
+    #[test]
+    fn check_game_end_not_triggered_under_seven_developments() {
+        let mut g = new_blank(2);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        g.check_game_end_triggered(MICK);
+        assert!(!g.final_round);
+    }
+
+    #[test]
+    fn check_game_end_triggered_when_all_monuments_built() {
+        let mut g = new_blank(2);
+        for &m in MONUMENTS.iter() {
+            g.boards[MICK].monuments.insert(m, m.value().size);
+        }
+        g.check_game_end_triggered(MICK);
+        assert!(g.final_round);
+    }
+
+    #[test]
+    fn check_game_end_not_triggered_when_one_monument_incomplete() {
+        let mut g = new_blank(2);
+        for &m in MONUMENTS.iter().take(MONUMENTS.len() - 1) {
+            g.boards[MICK].monuments.insert(m, m.value().size);
+        }
+        g.check_game_end_triggered(MICK);
+        assert!(!g.final_round);
+    }
+
+    #[test]
+    fn check_game_end_already_triggered_is_a_no_op() {
+        let mut g = new_blank(2);
+        g.final_round = true;
+        let logs = g.check_game_end_triggered(MICK);
+        assert!(logs.is_empty());
+    }
+
+    #[test]
+    fn next_turn_wraps_player_index() {
+        let mut g = new_blank(3);
+        g.current_player = BJ;
+        g.next_turn();
+        assert_eq!(MICK, g.current_player);
+    }
+
+    #[test]
+    fn next_turn_finishes_game_on_wraparound_during_final_round() {
+        let mut g = new_blank(2);
+        g.current_player = 1;
+        g.final_round = true;
+        g.next_turn();
+        assert_eq!(0, g.current_player);
+        assert!(g.finished);
+    }
+
+    #[test]
+    fn next_turn_does_not_finish_without_final_round() {
+        let mut g = new_blank(2);
+        g.current_player = 1;
+        g.next_turn();
+        assert_eq!(0, g.current_player);
+        assert!(!g.finished);
+    }
+
+    #[test]
+    fn whose_turn_and_status_active_during_play() {
+        let g = new_blank(2);
+        assert_eq!(vec![0], g.whose_turn());
+        match g.status() {
+            Status::Active { whose_turn, .. } => assert_eq!(vec![0], whose_turn),
+            _ => panic!("expected Active status"),
+        }
+    }
+
+    #[test]
+    fn status_finished_uses_plain_score_metric_no_goods_tiebreak() {
+        let mut g = new_blank(2);
+        g.finished = true;
+        // Tie on score but NOT on goods value - per the plan's dead-code
+        // investigation, `Status()` does not use `Winners()`'s goods-value
+        // tiebreaker, so both players should be tied for 1st here even
+        // though their goods values differ.
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership); // 2 pts
+        g.boards[STEVE]
+            .developments
+            .insert(DevelopmentId::Irrigation); // 2 pts
+        g.boards[STEVE].goods.insert(Good::Spearhead, 4); // high goods value, irrelevant
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(1, placings[MICK]);
+                assert_eq!(1, placings[STEVE]);
+            }
+            _ => panic!("expected Finished status"),
+        }
+    }
+
+    #[test]
+    fn status_finished_places_higher_score_first() {
+        let mut g = new_blank(2);
+        g.finished = true;
+        g.boards[MICK].developments.insert(DevelopmentId::Empire); // 10 pts + cities
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(1, placings[MICK]);
+                assert_eq!(2, placings[STEVE]);
+            }
+            _ => panic!("expected Finished status"),
+        }
+    }
+
+    #[test]
+    fn points_returns_raw_current_score_at_all_times() {
+        let mut g = new_blank(2);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        let points = g.points();
+        assert_eq!(2.0 + g.boards[MICK].cities() as f32 * 0.0, points[MICK]);
+        assert_eq!(0.0, points[STEVE]);
+        // Not finished, but points still reflects current score (unlike
+        // for-sale-2's zero-until-finished convention).
+        assert!(!g.finished);
+    }
+
+    // ---------------------------------------------------------------
+    // Integration: a full deterministic multi-phase command() sequence.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn integration_next_and_roll_cascade_through_multiple_phases() {
+        let mut g = new_blank(2);
+        let p = vec!["Mick".to_string(), "Steve".to_string()];
+        // `new_blank` starts at PhaseRoll with no dice rolled, so `next` is
+        // the only legal command (CanRoll requires a non-empty
+        // RolledDice); a single kept Workers die drives the cascade
+        // Roll -> ExtraRoll -> Collect (collects 3 workers) -> Resolve (no
+        // skulls) -> Build (stays, since RemainingWorkers > 0), all without
+        // ever touching the RNG (no fresh dice are rolled along the way).
+        g.kept_dice = vec![Die::Workers];
+        assert!(g.command(MICK, "next", &p).is_ok());
+        assert_eq!(Phase::Build, g.phase);
+        assert_eq!(3, g.remaining_workers); // 3 base + 0 masonry modifier
+        assert_eq!(MICK, g.current_player);
     }
 }
