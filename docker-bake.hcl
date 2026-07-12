@@ -38,6 +38,7 @@ target "image" {
       "age-of-war-2",
       "battleship-2",
       "bot",
+      "cathedral-2",
       "category-5-2",
       "farkle-2",
       "for-sale-2",

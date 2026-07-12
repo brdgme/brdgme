@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: cathedral-1
+  name: cathedral-2
   namespace: brdgme
 spec:
   typeName: Cathedral
   weight: 1.5
-  isDeprecated: true

@@ -43,6 +43,9 @@ images:
 - name: brdgme/battleship-2
   newName: ghcr.io/brdgme/brdgme/battleship-2
   newTag: latest
+- name: brdgme/cathedral-2
+  newName: ghcr.io/brdgme/brdgme/cathedral-2
+  newTag: latest
 - name: brdgme/category-5-1
   newName: ghcr.io/brdgme/brdgme/category-5-1
   newTag: latest
