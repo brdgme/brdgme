@@ -61,19 +61,25 @@ Every cell the piece would occupy must be:
 After you place a (non-Cathedral) piece, once the Cathedral has been placed,
 the game checks whether your new piece has sealed off a region. Starting from
 your new piece and walking outward through your own contiguous pieces, any
-enclosed empty or opponent region that touches **at most one** distinct
-opponent piece identity is captured:
+enclosed region not belonging to you that contains **at most one** distinct
+piece identity is captured. The Cathedral counts as a piece identity for
+this limit exactly like an opponent piece - a region containing the
+Cathedral plus one opponent piece has two distinct identities and is NOT
+captured.
 
-- Every cell in that region becomes your claimed territory.
-- Any single opponent piece found inside is returned to its owner's hand,
-  fully unplayed and free to be played again later in the game.
-- The Cathedral is never returned to a hand (there is no hand for it) and
-  never counts toward the "pieces returned" total, but a Cathedral tile
-  inside a captured region still flips to your territory like any other
-  tile.
+When a region is captured:
 
-If the enclosed region touches **two or more** distinct opponent piece
-identities, nothing is captured and the region is left untouched.
+- Every cell in that region becomes your claimed territory - including any
+  Cathedral tiles, whose ownership flips like any other captured tile.
+- A captured opponent piece is returned to its owner's hand, fully unplayed
+  and free to be played again later in the game.
+- The Cathedral's only special treatment is on this return step: it is
+  never returned to a hand (there is no hand for it) and never counts
+  toward the "pieces returned" totals in the capture log.
+
+If the enclosed region contains **two or more** distinct piece identities
+(counting the Cathedral), nothing is captured and the region is left
+untouched.
 
 ### 4. Turn passes
 
