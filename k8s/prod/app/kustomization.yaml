@@ -91,6 +91,9 @@ images:
 - name: brdgme/modern-art-1
   newName: ghcr.io/brdgme/brdgme/modern-art-1
   newTag: latest
+- name: brdgme/modern-art-2
+  newName: ghcr.io/brdgme/brdgme/modern-art-2
+  newTag: latest
 - name: brdgme/no-thanks-1
   newName: ghcr.io/brdgme/brdgme/no-thanks-1
   newTag: latest

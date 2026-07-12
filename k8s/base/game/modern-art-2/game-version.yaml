@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: modern-art-1
+  name: modern-art-2
   namespace: brdgme
 spec:
   typeName: Modern Art
   weight: 2.0
-  isDeprecated: true

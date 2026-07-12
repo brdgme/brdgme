@@ -157,6 +157,10 @@ FROM debian:bookworm-slim AS age-of-war-2
 COPY --from=builder /app/target/release/age_of_war_2_http .
 CMD ["./age_of_war_2_http"]
 
+FROM debian:bookworm-slim AS modern-art-2
+COPY --from=builder /app/target/release/modern_art_2_http .
+CMD ["./modern_art_2_http"]
+
 FROM debian:bookworm-slim AS cathedral-2
 COPY --from=builder /app/target/release/cathedral_2_http .
 CMD ["./cathedral_2_http"]

@@ -51,8 +51,9 @@ value:
 
 - [x] liars-dice-2, greed-2, farkle-2, zombie-dice-2, no-thanks-2, category-5-2, battleship-2, for-sale-2, sushizock-2, sushi-go-2 (small/small-medium)
 - [x] love-letter-2 (medium; 2-4p, deck/hand/discard tracking, complete)
+- [x] modern-art-2 (medium; 3-5p, auction phases, complete)
 - [ ] texas-holdem-2 (needs poker module), age-of-war-2,
-      modern-art-2, cathedral-2 (medium)
+      cathedral-2 (medium)
 - [ ] splendor-2 (needs cost module), roll-through-the-ages-2 (large)
 - [ ] Retire brdgme-go stack once no active `-1` games remain (Dockerfile,
       Tiltfile entries, Bazel, go.mod)

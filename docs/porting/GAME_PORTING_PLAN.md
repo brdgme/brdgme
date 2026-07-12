@@ -612,3 +612,25 @@ cathedral-2-specific port notes:
 - `PubRender()` is `PlayerRender(0)` verbatim in Go (no hidden information
   exists for this game) - Rust's `PubState` render is identical to
   `PlayerState(0)`'s render, not a separate neutral layout.
+
+**Done (Track B, 2026-07):** modern-art-2 ported from `brdgme-go/modern_art_1`.
+13 Rust tests (12 unit + 1 contract) covering start, dealing, painting/auction
+phases (open/one-offer/hidden/fixed-price), bidding, selling, round-end
+scoring, and game-end. `assert_gamer_contract` green, fmt/clippy clean, render
+parity verified against the Go CLI for pub render and every player render at
+game start and after representative mid-game commands. Reg wired: workspace,
+Dockerfile, docker-bake, Tiltfile, k8s base/prod manifests; modern-art-1
+GameVersion marked `isDeprecated: true`.
+
+modern-art-2-specific port notes:
+- Suit colour: Go's Krypto suit renders with `render.Brown`; `brdgme_color`
+  has no distinct brown constant family, so the port maps it to
+  `brdgme_color::BROWN`, the closest/only match.
+- `can_bid` additionally requires `min_bid() <= player money` - a narrow
+  defensive deviation from Go, which relied on the `Int` parser's bounded
+  range to reject unaffordable bids at parse time rather than in the guard.
+  This only removes an unsatisfiable "bid" option from the command spec; it
+  does not change any reachable outcome.
+- Placings: the Go suite has no tie-case assertions in its
+  `Placings`/`Winners` tests, so no compact-ordinal -> standard-competition
+  adaptation was needed (unlike no-thanks-2/age-of-war-2).
