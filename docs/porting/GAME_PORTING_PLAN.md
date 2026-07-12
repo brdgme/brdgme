@@ -634,3 +634,62 @@ modern-art-2-specific port notes:
 - Placings: the Go suite has no tie-case assertions in its
   `Placings`/`Winners` tests, so no compact-ordinal -> standard-competition
   adaptation was needed (unlike no-thanks-2/age-of-war-2).
+
+**Done (Track B, 2026-07):** roll-through-the-ages-2 ported from
+`brdgme-go/roll_through_the_ages_1` (the largest Track B game, 2,806 non-test
+Go lines). All 20 Go tests ported 1:1 (snake_cased, same assertions) plus
+extensive baseline coverage per step 8's thin-suite rule: 115 Rust tests
+(114 unit + 1 contract). `assert_gamer_contract` green, fmt/clippy clean,
+fuzzed ~200s in release mode: 788 games started / 780 finished, 467,204
+commands, zero panics. Render parity verified byte-identical to the Go CLI
+for New 2/3/4p, mid-game states, and both turn-supplies variants (Build/Buy
+and Trade). Reg wired: workspace, Dockerfile, docker-bake, Tiltfile, k8s
+base/prod manifests; roll-through-the-ages-1 GameVersion marked
+`isDeprecated: true`.
+
+roll-through-the-ages-2-specific port notes:
+- **`Winners()` is dead code in Go.** `Game.Winners()` implements a two-stage
+  tie-break (max `Score()`, then max `GoodsValue()`) but is never called by
+  anything - not by `Status()`, not by any framework plumbing (grep of the
+  whole `brdgme-go` tree confirms; `liars_dice_1`/`texas_holdem_1` define
+  their own unrelated `Winners()` too, so it's a per-game convention method,
+  not an interface). `Status()` builds `scores[p] = []int{b.Score()}` and
+  passes it straight to `brdgme.GenPlacings` - plain single-value score, no
+  goods tiebreaker. The port implements `Status()`'s semantics only;
+  `Winners()`'s goods-value tiebreak was intentionally not carried over,
+  asserted by an explicit tied-score/different-goods placings test.
+- Eight Go quirks preserved verbatim, per the porting-correctness rule:
+  1. `Roll()`'s 1-based dice-index validation (`n < 0 || n > l`) never
+     rejects `n == 0`; a `0` silently matches no die instead of erroring.
+     Unreachable through the normal parser (`Int{Min: 1}`), ported as-is.
+  2. `KeepSkulls` auto-advances via `NextPhase()` whenever `RolledDice` is
+     empty UNLESS in the ExtraRoll phase with Leadership - the exact Go
+     condition ported, pinned by both `game_test.go` all-disaster tests.
+  3. `GainGoods(n)` restarts its round-robin at Wood on every call (not
+     continuing from a prior call), and the Quarrying `+1 stone` bonus fires
+     only on the first Stone landing within a single call.
+  4. `BuyDevelopment` spends goods by TYPE (entire stacks of each named good
+     are zeroed); duplicate good names in the command are deduped for the
+     total and log suffix but the (harmless) zeroing loop is not deduped.
+  5. `BuildMonument`'s "first to build" flag scan is a simple
+     has-anyone-got-this-flag loop - confirmed not a reachable defect (builds
+     are strictly sequential), ported as a plain loop.
+  6. `CheckGameEndTriggered`'s comment says "5th development" but the check
+     is `len(Developments) >= 7` - comment-only inaccuracy; `>= 7` ported.
+  7. `swap`'s capacity error message contains a typo: "the you only have
+     room for %d %s" (`swap_command.go`) - preserved verbatim.
+  8. `invade`'s log line reports `amount` damage while the code applies
+     `amount*2` disaster points per opponent (`invade_command.go`) -
+     preserved verbatim.
+- **`can_undo` is not uniform**: `roll` hardcodes `can_undo: false` (RNG);
+  every other command (`next`, `preserve`, `trade`, `build`, `buy`, `take`,
+  `discard`, `invade`, `sell`, `swap`) computes
+  `can_undo: current_player == player`, each read from its own Go
+  `CommandResponse` construction. This asymmetry (deterministic
+  resource-consuming commands undoable, roll not) is faithful to Go.
+- `take`'s food/workers parser uses partial (prefix) enum matching - Go's
+  `brdgme.Enum` leaves `Exact` unset (default false), so `take w w f`
+  abbreviations work; the Rust port uses `Enum::partial` to match.
+- `CanTrade` gates on `Phase == Build`, not the (differently-purposed)
+  `PhaseTrade`: `trade` (stone->workers, Engineering) runs during the Build
+  phase, while `PhaseTrade` is the ship-based `swap` phase (Shipping).
