@@ -551,3 +551,22 @@ sushi-go-2-specific port notes (vs other Track B ports):
 Priority between tracks: Track A games are net-new content; Track B removes
 the Go stack. Interleave as desired - both use the same method and any Track B
 game is a low-risk filler task.
+
+**Done (Track B, 2026-07):** age-of-war-2 ported from `brdgme-go/age_of_war_1`.
+27 Rust tests (26 unit + 1 contract) covering the Go suite (28 non-test lines
+of tests) plus baseline coverage. `assert_gamer_contract` green, fmt/clippy
+clean, fuzzed 120s in release mode: 22 games / 151,120 commands with no panic.
+Render parity verified (pub + all player renders, 2p and 4p, across New/attack
+/line/roll states). Reg wired: workspace, Dockerfile, CI matrix, Tiltfile,
+k8s base/prod manifests; age-of-war-1 GameVersion marked `isDeprecated: true`.
+
+age-of-war-2-specific port notes:
+- Go quirk preserved verbatim: `CanAttack`/`CanLine`/`CanRoll` do not check
+  `IsFinished`, so a finished game still accepts attack/line/roll commands.
+  Noted here rather than fixed, per the porting-correctness rule (match Go
+  behaviour exactly, including bugs, unless the plan says otherwise).
+- Attack command parser uses partial (prefix) enum matching, matching Go's
+  behaviour.
+- Placings use Rust standard-competition tie semantics; the Go suite had no
+  placings test, so no assertion adaptation was needed.
+- `can_undo`: `true` for attack, `false` for line and roll.
