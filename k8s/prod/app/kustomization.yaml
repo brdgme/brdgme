@@ -85,6 +85,9 @@ images:
 - name: brdgme/love-letter-1
   newName: ghcr.io/brdgme/brdgme/love-letter-1
   newTag: latest
+- name: brdgme/love-letter-2
+  newName: ghcr.io/brdgme/brdgme/love-letter-2
+  newTag: latest
 - name: brdgme/modern-art-1
   newName: ghcr.io/brdgme/brdgme/modern-art-1
   newTag: latest

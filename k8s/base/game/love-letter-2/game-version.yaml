@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: love-letter-1
+  name: love-letter-2
   namespace: brdgme
 spec:
   typeName: Love Letter
   weight: 1.0
-  isDeprecated: true

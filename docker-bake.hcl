@@ -47,6 +47,7 @@ target "image" {
       "liars-dice-2",
       "lost-cities-1",
       "lost-cities-2",
+      "love-letter-2",
       "no-thanks-2",
       "operator",
       "sushi-go-2",
