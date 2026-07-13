@@ -5,7 +5,16 @@
 
 use std::sync::LazyLock;
 
-use brdgme_color::{IN_USE_SOFTENS, palette_css_vars, themes};
+use brdgme_color::{IN_USE_SOFTENS, NamedColor, palette_css_vars, themes};
+
+/// Chrome-only soften expressions (main.scss surfaces: my-turn/finished/hover
+/// tints) - kept separate from `IN_USE_SOFTENS` so the game-text contrast
+/// gate in `brdgme_color` stays scoped to games; see THEMING.md.
+const CHROME_SOFTENS: &[(NamedColor, u8)] = &[
+    (NamedColor::Orange, 86),
+    (NamedColor::Red, 86),
+    (NamedColor::Foreground, 96),
+];
 
 /// Known theme slugs, paired with the display name from `brdgme_color::themes()`.
 /// Hardcoded (rather than derived) so the cookie/`data-theme` value is a
@@ -38,8 +47,8 @@ fn build_theme_style_css() -> String {
 
     css.push_str(&brdgme_markup::markup_class_css());
 
-    // Minimal chrome hookup so dark themes are visible at all; main.scss's
-    // hardcoded chrome colours are NOT retheme'd here - see THEMING.md gotcha.
+    // Base body colours; main.scss agrees (its chrome colours are all
+    // var(--mk-*) / color-mix over the palette vars emitted below).
     css.push_str("body{background-color:var(--mk-background);color:var(--mk-foreground);}\n");
 
     let light = themes()
@@ -53,13 +62,16 @@ fn build_theme_style_css() -> String {
         .map(|(_, p)| *p)
         .expect("brdgme dark theme must exist");
 
-    css.push_str(&format!(
-        ":root{{{}}}\n",
-        palette_css_vars(light, IN_USE_SOFTENS)
-    ));
+    let softens: Vec<(NamedColor, u8)> = IN_USE_SOFTENS
+        .iter()
+        .chain(CHROME_SOFTENS)
+        .copied()
+        .collect();
+
+    css.push_str(&format!(":root{{{}}}\n", palette_css_vars(light, &softens)));
     css.push_str(&format!(
         "@media (prefers-color-scheme: dark){{:root:not([data-theme]){{{}}}}}\n",
-        palette_css_vars(dark, IN_USE_SOFTENS)
+        palette_css_vars(dark, &softens)
     ));
 
     for (name, palette) in themes() {
@@ -67,7 +79,7 @@ fn build_theme_style_css() -> String {
         css.push_str(&format!(
             "[data-theme=\"{}\"]{{{}}}\n",
             slug,
-            palette_css_vars(palette, IN_USE_SOFTENS)
+            palette_css_vars(palette, &softens)
         ));
     }
 
@@ -161,6 +173,26 @@ mod tests {
         assert!(css.contains("[data-theme=\"brdgme-dark\"]"));
         assert!(css.contains("prefers-color-scheme: dark"));
         assert!(css.contains(".mk-fg-player-0{color:var(--mk-player-0)}"));
+        assert!(css.contains("--mk-soften-orange-86"));
+    }
+
+    #[test]
+    fn chrome_softens_meet_contrast_floor() {
+        use brdgme_color::{contrast_ratio, soften};
+        for (theme_name, palette) in themes() {
+            for &(named, pct) in CHROME_SOFTENS {
+                let surface = soften(palette.color(named), pct, palette.background);
+                let ratio = contrast_ratio(palette.foreground, surface);
+                assert!(
+                    ratio >= 3.0,
+                    "[{}] foreground vs soften({}, {}): {:.2} < 3.0",
+                    theme_name,
+                    named,
+                    pct,
+                    ratio
+                );
+            }
+        }
     }
 
     #[test]

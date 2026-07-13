@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::css::{IN_USE_SOFTENS, palette_css_vars};
 pub use crate::error::ColorError;
-pub use crate::palette::{DARK, DRACULA, LIGHT, NamedColor, Palette, contrast, soften, themes};
+pub use crate::palette::{
+    DARK, DRACULA, LIGHT, NamedColor, Palette, contrast, contrast_ratio, soften, themes,
+};
 
 mod css;
 mod error;

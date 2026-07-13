@@ -557,14 +557,11 @@ mod tests {
     #[test]
     fn unknown_named_color_fails_to_parse() {
         let result = markup().parse("{{fg gren}}x{{/fg}}");
-        match result {
-            Ok((nodes, _)) => {
-                assert!(
-                    !nodes.iter().any(|n| matches!(n, N::Fg(..))),
-                    "unknown colour name must not silently produce a Fg node: {nodes:?}"
-                );
-            }
-            Err(_) => {}
+        if let Ok((nodes, _)) = result {
+            assert!(
+                !nodes.iter().any(|n| matches!(n, N::Fg(..))),
+                "unknown colour name must not silently produce a Fg node: {nodes:?}"
+            );
         }
     }
 

@@ -447,7 +447,8 @@ fn relative_luminance(c: Color) -> f64 {
         + 0.0722 * srgb_channel_to_linear(c.b)
 }
 
-fn contrast_ratio(a: Color, b: Color) -> f64 {
+/// WCAG contrast ratio between two colours (1.0..=21.0).
+pub fn contrast_ratio(a: Color, b: Color) -> f64 {
     let la = relative_luminance(a);
     let lb = relative_luminance(b);
     let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };
