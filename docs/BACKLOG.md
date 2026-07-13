@@ -361,6 +361,16 @@ lords-of-vegas-1 `shuffled_deck` iterates HashMap keys pre-shuffle, so
 seeded starts are non-deterministic across processes (pre-existing bug,
 unscheduled).
 
+2026-07-13 (later): web chrome theming shipped (f185ae5, plan
+`2026-07-13-26-web-chrome-theming.md`), closing D11. Follow-up noted
+(Michael, not for this session): `THEME_BOOT_SCRIPT` - the inline
+minified pre-paint cookie-reading script in `rust/web/src/app.rs` -
+reads like a malicious injection at first glance even though review
+shows it is fine. Find a cleaner approach (e.g. readable source
+minified/embedded at build time, an external same-origin script file,
+or an SSR-set attribute from the cookie on the request) that keeps the
+no-flash-before-first-paint behaviour.
+
 2026-07-11: #38 added - investigate frontend cache busting when a new
 version is bumped in brdgme-config: browsers may keep serving stale
 WASM/JS/assets after a deploy. Candidate approaches, simplest-first: force
