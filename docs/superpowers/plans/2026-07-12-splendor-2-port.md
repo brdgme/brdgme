@@ -198,8 +198,8 @@ Add at minimum (no existing Go game-level test file to port from):
 - Modify: `docs/porting/GAME_PORTING_PLAN.md` (add "Done (Track B, <date>): splendor-2 ported..." entry with test counts, fuzz numbers, port notes incl. the libcost-inline decision and the dropped `Cost.Take`/`Drop`/`Keys`/`IsZero`/`Trim`/`Ints`/`PosNeg`/`perm.go` functions, matching prior entries' style; also update the `splendor` row in the Track B table (currently `| splendor | 2,262 (53) | cost | Needs cost module |`) to reflect completion)
 - Modify: `docs/BACKLOG.md` (move/mark splendor port done if listed there)
 
-- [ ] Step 1: Write the done entry and port-specific notes (quirks preserved, libcost subset ported, placings semantics used, any decisions made without user input).
-- [ ] Step 2: Commit `docs: mark splendor-2 port done` touching only `docs/porting/GAME_PORTING_PLAN.md` and `docs/BACKLOG.md`.
+- [x] Step 1: Write the done entry and port-specific notes (quirks preserved, libcost subset ported, placings semantics used, any decisions made without user input).
+- [x] Step 2: Commit `docs: mark splendor-2 port done` touching only `docs/porting/GAME_PORTING_PLAN.md` and `docs/BACKLOG.md`.
 
 ---
 

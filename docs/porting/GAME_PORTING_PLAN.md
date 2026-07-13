@@ -182,7 +182,7 @@ Sizes are non-test Go lines (tests in parentheses):
 | modern_art | 1,123 (583) | card | Best-tested; auction phases |
 | love_letter | 1,256 (128) | - | Hidden hands, eliminations |
 | cathedral | 1,432 (278) | - | Own grid/shape placement code |
-| splendor | 2,262 (53) | cost | Needs cost module |
+| splendor | 2,262 (53) | cost | Done - cost module ported inline |
 | roll_through_the_ages | 2,806 (551) | die | Largest |
 
 ~17.6k lines of game code total. Suggested approach: start with a small dice
@@ -693,3 +693,45 @@ roll-through-the-ages-2-specific port notes:
 - `CanTrade` gates on `Phase == Build`, not the (differently-purposed)
   `PhaseTrade`: `trade` (stone->workers, Engineering) runs during the Build
   phase, while `PhaseTrade` is the ship-based `swap` phase (Shipping).
+
+**Done (Track B, 2026-07):** splendor-2 ported from `brdgme-go/splendor_1`.
+53 Rust tests (52 unit + 1 contract) via
+`cargo test --package splendor-2 -- --list --format terse | rg ': test$' | wc -l`.
+`assert_gamer_contract` green, fmt/clippy clean, fuzzed ~130s in release mode:
+23 games started / 15 finished, ~9.2M commands, zero panics. Render parity
+verified against the Go CLI for the pub render and every player render, at
+both 2p and 4p, for New and mid-game take/reserve states; one fix found and
+applied during parity checking - the "(card+token)" sub-row label needed
+bold+grey styling to match Go. Reg wired: workspace, Dockerfile, docker-bake,
+Tiltfile, k8s base/prod manifests; splendor-1 GameVersion marked
+`isDeprecated: true`.
+
+splendor-2-specific port notes:
+- **Cost module scoped down, not ported wholesale.** `libcost` was ported
+  inline as `src/cost.rs`, containing only the subset splendor actually uses:
+  `Cost`/`from_ints`/`clone`/`add`/`sub`/`inv`/`can_afford`/`sum`, plus
+  splendor's own `amount.go` `can_afford`. Intentionally NOT ported:
+  `Cost.Take`/`Drop`/`Keys`/`IsZero`/`Trim`/`Ints`/`PosNeg`, and all of
+  `perm.go` - none are exercised by splendor; they're deferred to a shared
+  lib extraction if/when seven_wonders (the other `libcost` consumer) is
+  ported. Go's `Cost.Drop` has a pre-existing index bug (ranges over a
+  slice's index instead of its values) - noted for the record, not carried
+  over since the function itself wasn't ported.
+- Quirks preserved verbatim: `visit` has no affordability re-check; `reserve`
+  is publicly logged but privately rendered (the reserved card's identity is
+  hidden from opponents); end-trigger-then-wrap round handling, with
+  `MainPhase` skipped on the move that triggers the end condition;
+  positional (letter) board locations; `Pay`'s gold-fallback arithmetic
+  iterates gems in Go's fixed `Gems` order; taking two of a colour requires
+  bank >= 4 of that colour.
+- One documented deviation: every action method starts with an
+  assert-not-finished guard that Go's `Can*` guards lack - defence in depth
+  matching sibling Rust crates' convention; it does not change any outcome
+  reachable through Go's own command dispatch, since Go's framework already
+  rejects commands once a game is finished.
+- Placings: no Go placings test existed to adapt, so the baseline suite pins
+  Rust's standard-competition tie semantics directly (as documented in the
+  Global Constraints already for this crate).
+- `can_undo`: hardcoded `false` for all five commands (`take`, `reserve`,
+  `purchase`, `discard`, `visit`) - matches Go, which never marks any
+  splendor command undoable.
