@@ -6,7 +6,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Renderer, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status};
 use brdgme_markup::Node as N;
 
 use crate::card::{Card, GEMS, Noble, Resource, level_1_cards, level_2_cards, level_3_cards};
@@ -18,6 +18,7 @@ pub mod card;
 pub mod command;
 pub mod cost;
 pub mod player_board;
+pub mod render;
 
 const MIN_PLAYERS: usize = 2;
 const MAX_PLAYERS: usize = 4;
@@ -90,22 +91,6 @@ pub struct PlayerState {
     pub reserve: Vec<Card>,
 }
 
-// Temporary minimal renderer; full render parity is ported in Task 3.
-impl Renderer for PubState {
-    fn render(&self) -> Vec<N> {
-        vec![N::text(format!(
-            "Splendor: {} players, phase {:?}",
-            self.players, self.phase
-        ))]
-    }
-}
-
-impl Renderer for PlayerState {
-    fn render(&self) -> Vec<N> {
-        self.public.render()
-    }
-}
-
 /// Ported from `game.go`'s `MaxGems`.
 fn max_gems(players: usize) -> i32 {
     match players {
@@ -116,7 +101,7 @@ fn max_gems(players: usize) -> i32 {
 }
 
 /// Ported from `render.go`'s `ResourceColours`.
-fn resource_color(r: Resource) -> brdgme_color::Color {
+pub(crate) fn resource_color(r: Resource) -> brdgme_color::Color {
     match r {
         Resource::Diamond => brdgme_color::BLACK,
         Resource::Sapphire => brdgme_color::BLUE,
