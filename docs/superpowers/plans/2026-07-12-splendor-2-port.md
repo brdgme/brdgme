@@ -173,8 +173,8 @@ Add at minimum (no existing Go game-level test file to port from):
 **Files:**
 - Modify: `rust/game/splendor-2/RULES.md`
 
-- [ ] Step 1: Read `docs/authoring/RULES_AUTHORING.md` in full and the splendor source; write RULES.md per required sections (Overview, Components incl. 90 cards/10 nobles/token supply table by player count, Turn Structure with inline `take`/`buy`/`reserve`/`discard`/`visit` commands and the visit auto-advance behaviour, Scoring with a worked prestige example, Game End [15-prestige trigger + finish-the-round-to-player-0 wrap], Winning [prestige then card count tiebreak], Reading the Display with a real render captured from the Rust CLI in a ```brdgme block, Commands table, Strategy Tips section).
-- [ ] Step 2: Verify command syntax against `command.rs` and scoring/end-of-game against `lib.rs`. Commit `docs(splendor-2): add RULES.md` touching only `rust/game/splendor-2/RULES.md`.
+- [x] Step 1: Read `docs/authoring/RULES_AUTHORING.md` in full and the splendor source; write RULES.md per required sections (Overview, Components incl. 90 cards/10 nobles/token supply table by player count, Turn Structure with inline `take`/`buy`/`reserve`/`discard`/`visit` commands and the visit auto-advance behaviour, Scoring with a worked prestige example, Game End [15-prestige trigger + finish-the-round-to-player-0 wrap], Winning [prestige then card count tiebreak], Reading the Display with a real render captured from the Rust CLI in a ```brdgme block, Commands table, Strategy Tips section).
+- [x] Step 2: Verify command syntax against `command.rs` and scoring/end-of-game against `lib.rs`. Commit `docs(splendor-2): add RULES.md` touching only `rust/game/splendor-2/RULES.md`.
 
 ### Task 5: Registration, deprecation, fuzz, lint
 
