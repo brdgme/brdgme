@@ -18,7 +18,7 @@ secret_settings(disable_scrub=True)
 # --- Game image builds ---
 
 # Rust games
-for game in ["acquire-1", "age-of-war-2", "battleship-2", "category-5-2", "cathedral-2", "farkle-2", "for-sale-2", "greed-2", "jaipur-2", "liars-dice-2", "lost-cities-1", "lost-cities-2", "love-letter-2", "modern-art-2", "no-thanks-2", "roll-through-the-ages-2", "splendor-2", "sushi-go-2", "sushizock-2", "tic-tac-toe-2", "zombie-dice-2"]:
+for game in ["acquire-1", "age-of-war-2", "battleship-2", "category-5-2", "cathedral-2", "farkle-2", "for-sale-2", "greed-2", "jaipur-2", "liars-dice-2", "lost-cities-1", "lost-cities-2", "love-letter-2", "modern-art-2", "no-thanks-2", "roll-through-the-ages-2", "splendor-2", "sushi-go-2", "sushizock-2", "texas-holdem-2", "tic-tac-toe-2", "zombie-dice-2"]:
     docker_build("brdgme/" + game, ".", dockerfile="rust/Dockerfile", target=game, only=["rust/"])
 
 # Go games

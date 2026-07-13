@@ -55,6 +55,7 @@ target "image" {
       "splendor-2",
       "sushi-go-2",
       "sushizock-2",
+      "texas-holdem-2",
       "tic-tac-toe-2",
       "zombie-dice-2"
     ]

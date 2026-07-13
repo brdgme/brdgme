@@ -21,6 +21,7 @@ members = [
     "game/splendor-2",
     "game/sushi-go-2",
     "game/sushizock-2",
+    "game/texas-holdem-2",
     "game/tic-tac-toe-2",
     "game/zombie-dice-2",
     "lib/cmd",

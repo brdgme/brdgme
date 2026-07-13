@@ -172,3 +172,7 @@ CMD ["./roll_through_the_ages_2_http"]
 FROM debian:bookworm-slim AS splendor-2
 COPY --from=builder /app/target/release/splendor_2_http .
 CMD ["./splendor_2_http"]
+
+FROM debian:bookworm-slim AS texas-holdem-2
+COPY --from=builder /app/target/release/texas_holdem_2_http .
+CMD ["./texas_holdem_2_http"]

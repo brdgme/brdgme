@@ -127,6 +127,9 @@ images:
 - name: brdgme/texas-holdem-1
   newName: ghcr.io/brdgme/brdgme/texas-holdem-1
   newTag: latest
+- name: brdgme/texas-holdem-2
+  newName: ghcr.io/brdgme/brdgme/texas-holdem-2
+  newTag: latest
 - name: brdgme/tic-tac-toe-2
   newName: ghcr.io/brdgme/brdgme/tic-tac-toe-2
   newTag: latest

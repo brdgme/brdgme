@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: texas-holdem-1
+  name: texas-holdem-2
   namespace: brdgme
 spec:
   typeName: "Texas Hold'em"
   weight: 2.0
-  isDeprecated: true

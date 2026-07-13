@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: texas-holdem-2
+  labels:
+    app: texas-holdem-2
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+  selector:
+    app: texas-holdem-2

@@ -735,3 +735,35 @@ splendor-2-specific port notes:
 - `can_undo`: hardcoded `false` for all five commands (`take`, `reserve`,
   `purchase`, `discard`, `visit`) - matches Go, which never marks any
   splendor command undoable.
+
+**Done (Track B, 2026-07):** texas-holdem-2 ported from
+`brdgme-go/texas_holdem_1`. All 7 Go tests ported 1:1 plus a baseline suite;
+44 Rust tests (43 unit + 1 contract) via the documented `--list` command.
+`assert_gamer_contract` green, fmt/clippy clean, fuzzed ~125s in release
+mode: 43,241 games started / 43,234 finished, 1,167,375 commands, zero
+panics. Render parity verified against the Go CLI for the pub render and
+every player render, at both 2p and 4p, across New/flop/raise/fold states;
+one fix found and applied during parity checking - card lists must use
+`render_standard_52_fixed_width` (Go's `RenderCards` uses fixed-width) - now
+matches. Reg wired: workspace, Dockerfile, docker-bake, Tiltfile, k8s
+base/prod manifests; texas-holdem-1 GameVersion marked
+`isDeprecated: true`.
+
+texas-holdem-2-specific port notes:
+- **libcard/libpoker scoped down, not ported wholesale.** Ported inline as
+  `src/card.rs` and `src/poker.rs`, containing only the subset
+  texas_holdem actually uses; unported functions are documented in the
+  module comments, following splendor-2's cost-module precedent. All
+  libpoker `hand_test.go` tests were ported.
+- Quirks preserved verbatim: `PopN` pops the last N (top of deck);
+  `RenderStandard52FixedWidth` pads by numeric rank comparison, not
+  rendered width; `CardsBySuit`'s sort loop skips the Spades bucket (inert,
+  since callers re-sort); `CanRaise` and the raise parser bound use
+  `LargestRaise`, while the raise action's check/error use `MinRaise()`;
+  `Showdown -> NewHand` recursion means post-showdown money assertions must
+  read logs (new blinds are posted immediately); `RenderCashFixedWidth` is
+  dead code in Go and was omitted.
+- `can_undo`: `false` for `allin`/`call`/`check`/`fold`, `true` for `raise`
+  (faithful to Go).
+- Placings: Go suite has no tie placings test; baseline tests pin Rust's
+  standard-competition tie semantics.
