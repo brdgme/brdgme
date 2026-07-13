@@ -109,6 +109,9 @@ images:
 - name: brdgme/splendor-1
   newName: ghcr.io/brdgme/brdgme/splendor-1
   newTag: latest
+- name: brdgme/splendor-2
+  newName: ghcr.io/brdgme/brdgme/splendor-2
+  newTag: latest
 - name: brdgme/sushi-go-1
   newName: ghcr.io/brdgme/brdgme/sushi-go-1
   newTag: latest

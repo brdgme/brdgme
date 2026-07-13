@@ -52,6 +52,7 @@ target "image" {
       "no-thanks-2",
       "operator",
       "roll-through-the-ages-2",
+      "splendor-2",
       "sushi-go-2",
       "sushizock-2",
       "tic-tac-toe-2",

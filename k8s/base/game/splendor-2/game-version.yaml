@@ -1,9 +1,8 @@
 apiVersion: brdgme.com/v1
 kind: GameVersion
 metadata:
-  name: splendor-1
+  name: splendor-2
   namespace: brdgme
 spec:
   typeName: Splendor
   weight: 2.0
-  isDeprecated: true

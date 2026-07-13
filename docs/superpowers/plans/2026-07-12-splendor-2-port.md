@@ -187,10 +187,10 @@ Add at minimum (no existing Go game-level test file to port from):
 - Modify: `k8s/prod/app/kustomization.yaml` (add `ghcr.io/brdgme/brdgme/splendor-2` image override)
 - Modify: `k8s/base/game/splendor-1/game-version.yaml` (add `isDeprecated: true`)
 
-- [ ] Step 1: Make all registration edits, mirroring an existing deployed Track B game's entries exactly (`k8s/base/game/splendor-1` already exists in-repo - read it first for the display name/weight conventions to reuse).
-- [ ] Step 2: Run fuzzer `cargo run --release --package splendor-2 --bin splendor_2_fuzz` for ~2 minutes; zero panics required.
-- [ ] Step 3: `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude web --all-targets -- -D warnings`, `cargo test --package splendor-2` all clean. Record test count via `cargo test --package splendor-2 -- --list --format terse | rg ': test$' | wc -l`.
-- [ ] Step 4: Commit `feat(splendor-2): register and deploy, deprecate splendor-1` touching only `rust/Dockerfile`, `docker-bake.hcl`, `Tiltfile`, `k8s/base/game/splendor-2/`, `k8s/base/game/kustomization.yaml`, `k8s/prod/app/kustomization.yaml`, `k8s/base/game/splendor-1/game-version.yaml`.
+- [x] Step 1: Make all registration edits, mirroring an existing deployed Track B game's entries exactly (`k8s/base/game/splendor-1` already exists in-repo - read it first for the display name/weight conventions to reuse).
+- [x] Step 2: Run fuzzer `cargo run --release --package splendor-2 --bin splendor_2_fuzz` for ~2 minutes; zero panics required.
+- [x] Step 3: `cargo fmt --all -- --check`, `cargo clippy --workspace --exclude web --all-targets -- -D warnings`, `cargo test --package splendor-2` all clean. Record test count via `cargo test --package splendor-2 -- --list --format terse | rg ': test$' | wc -l`.
+- [x] Step 4: Commit `feat(splendor-2): register and deploy, deprecate splendor-1` touching only `rust/Dockerfile`, `docker-bake.hcl`, `Tiltfile`, `k8s/base/game/splendor-2/`, `k8s/base/game/kustomization.yaml`, `k8s/prod/app/kustomization.yaml`, `k8s/base/game/splendor-1/game-version.yaml`.
 
 ### Task 6: Tracking docs
 

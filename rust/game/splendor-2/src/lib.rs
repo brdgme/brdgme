@@ -343,7 +343,7 @@ impl Game {
         let ParsedLoc { row, col } = loc;
         let mut logs = vec![];
         match row {
-            0 | 1 | 2 => {
+            0..=2 => {
                 if col >= self.board[row].len() {
                     return Err(GameError::invalid_input("that is not a valid card"));
                 }
