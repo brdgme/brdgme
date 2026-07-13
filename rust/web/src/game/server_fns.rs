@@ -42,11 +42,18 @@ pub struct GameViewData {
     pub is_2player: bool,
     pub players: Vec<PlayerViewData>,
     pub command_spec: Option<brdgme_game::command::Spec>,
+    /// `--mk-player-{n}`/`--mk-player-{n}-contrast` var declarations for this
+    /// game's players, in position order. Apply as an inline `style` on any
+    /// container whose `html` (board or log) content uses the markup
+    /// `mk-fg-player-{n}`/`mk-bg-player-{n}` classes.
+    pub player_style: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerViewData {
     pub name: String,
+    /// The player's `--mk-{slot}` colour slot token (e.g. "green") - never a
+    /// resolved hex value, so display always follows the active theme.
     pub color: String,
     pub rating: i32,
     pub points: f32,
@@ -135,11 +142,17 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
     .await
     .map_err(internal("get_game_details: render game"))?;
 
-    // Convert markup to HTML
+    // Convert markup to HTML, semantically: colours stay symbolic (CSS
+    // classes referencing `--mk-*` vars) rather than baked-in hex, so the
+    // rendered board follows the viewer's active theme.
     let (nodes, _) = brdgme_markup::from_string(&render_resp.render)
         .map_err(internal("get_game_details: parse markup"))?;
 
-    let html = brdgme_markup::html(&brdgme_markup::transform(&nodes, &ge.markup_players()));
+    let html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
+        &nodes,
+        &ge.semantic_players(),
+    ));
+    let player_style = ge.player_style();
 
     Ok(GameViewData {
         id: ge.game.id,
@@ -158,7 +171,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             .iter()
             .map(|p| PlayerViewData {
                 name: p.name().to_string(),
-                color: p.color().hex(),
+                color: p.slot().to_string(),
                 rating: p.game_type_user.rating,
                 points: p.game_player.points.unwrap_or(0.0),
                 is_turn: p.game_player.is_turn,
@@ -166,6 +179,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             })
             .collect(),
         command_spec: render_resp.command_spec,
+        player_style,
     })
 }
 
@@ -389,13 +403,16 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
         .await
         .map_err(internal("get_game_logs: load logs"))?;
 
-    let markup_players = ge.markup_players();
+    let semantic_players = ge.semantic_players();
 
     let entries = logs
         .into_iter()
         .map(|log| {
             let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
-            let body_html = brdgme_markup::html(&brdgme_markup::transform(&nodes, &markup_players));
+            let body_html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
+                &nodes,
+                &semantic_players,
+            ));
             let is_new = log.created_at >= last_turn_at;
             GameLogEntry {
                 body_html,

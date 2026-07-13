@@ -101,20 +101,20 @@ fn max_gems(players: usize) -> i32 {
 }
 
 /// Ported from `render.go`'s `ResourceColours`.
-pub(crate) fn resource_color(r: Resource) -> brdgme_color::Color {
+pub(crate) fn resource_color(r: Resource) -> brdgme_color::NamedColor {
     match r {
-        Resource::Diamond => brdgme_color::BLACK,
-        Resource::Sapphire => brdgme_color::BLUE,
-        Resource::Emerald => brdgme_color::GREEN,
-        Resource::Ruby => brdgme_color::RED,
-        Resource::Onyx => brdgme_color::GREY,
-        Resource::Gold => brdgme_color::YELLOW,
-        Resource::Prestige => brdgme_color::PURPLE,
+        Resource::Diamond => brdgme_color::NamedColor::Grey,
+        Resource::Sapphire => brdgme_color::NamedColor::Blue,
+        Resource::Emerald => brdgme_color::NamedColor::Green,
+        Resource::Ruby => brdgme_color::NamedColor::Red,
+        Resource::Onyx => brdgme_color::NamedColor::Foreground,
+        Resource::Gold => brdgme_color::NamedColor::Yellow,
+        Resource::Prestige => brdgme_color::NamedColor::Purple,
     }
 }
 
 fn resource_node(r: Resource) -> N {
-    N::Fg((&resource_color(r)).into(), vec![N::text(r.name())])
+    N::Fg(resource_color(r).into(), vec![N::text(r.name())])
 }
 
 fn bold_resource_node(r: Resource) -> N {
@@ -134,7 +134,7 @@ fn card_node(c: &Card) -> N {
 /// Port of `RenderNoble` (`render.go`), simplified as above.
 fn noble_node(n: &Noble) -> N {
     N::Bold(vec![N::Fg(
-        (&resource_color(Resource::Prestige)).into(),
+        resource_color(Resource::Prestige).into(),
         vec![N::text(format!("{}", n.prestige))],
     )])
 }

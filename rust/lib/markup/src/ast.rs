@@ -45,12 +45,16 @@ impl FromStr for Align {
 pub enum ColTrans {
     Mono,
     Inv,
+    Contrast,
 }
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum ColType {
-    RGB(Color),
     Player(usize),
+    Named {
+        color: brdgme_color::NamedColor,
+        soften: Option<u8>,
+    },
 }
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
@@ -73,8 +77,11 @@ impl Col {
 
     fn markup_col_type(&self) -> String {
         match self.color {
-            ColType::RGB(c) => format!("rgb({},{},{})", c.r, c.g, c.b),
             ColType::Player(p) => format!("player({})", p),
+            ColType::Named { color, soften } => match soften {
+                Some(pct) => format!("soften({}, {})", color, pct),
+                None => color.to_string(),
+            },
         }
     }
 
@@ -84,6 +91,7 @@ impl Col {
             .map(|t| match *t {
                 ColTrans::Mono => "mono".to_string(),
                 ColTrans::Inv => "inv".to_string(),
+                ColTrans::Contrast => "contrast".to_string(),
             })
             .collect::<Vec<String>>()
             .join(" | ")
@@ -100,6 +108,12 @@ impl Col {
         new.transform.push(ColTrans::Mono);
         new
     }
+
+    pub fn contrast(&self) -> Self {
+        let mut new = self.clone();
+        new.transform.push(ColTrans::Contrast);
+        new
+    }
 }
 
 impl From<usize> for Col {
@@ -111,19 +125,13 @@ impl From<usize> for Col {
     }
 }
 
-impl From<Color> for Col {
-    fn from(c: Color) -> Col {
+impl From<brdgme_color::NamedColor> for Col {
+    fn from(c: brdgme_color::NamedColor) -> Col {
         Col {
-            color: ColType::RGB(c),
-            transform: vec![],
-        }
-    }
-}
-
-impl From<&Color> for Col {
-    fn from(c: &Color) -> Col {
-        Col {
-            color: ColType::RGB(*c),
+            color: ColType::Named {
+                color: c,
+                soften: None,
+            },
             transform: vec![],
         }
     }
@@ -152,24 +160,46 @@ impl Node {
     }
 }
 
+/// A transformed node, generic over its colour representation `C`.
+///
+/// Layout code (to_lines/from_lines/table/align/canvas in transform.rs) only
+/// ever measures text length and rearranges nodes - it never inspects the
+/// colour value itself - so it works unchanged for any `C`. The default `C =
+/// Color` preserves the original concrete-colour pipeline used by
+/// html/ansi/plain rendering; a semantic colour type is plugged in for the
+/// web semantic-class renderer (see `semantic.rs`).
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
-pub enum TNode {
-    Fg(Color, Vec<TNode>),
-    Bg(Color, Vec<TNode>),
-    Bold(Vec<TNode>),
+pub enum TNode<C = Color> {
+    Fg(C, Vec<TNode<C>>),
+    Bg(C, Vec<TNode<C>>),
+    Bold(Vec<TNode<C>>),
     Text(String),
 }
 
-impl TNode {
-    pub fn text<T>(t: T) -> TNode
+impl<C> TNode<C> {
+    pub fn text<T>(t: T) -> TNode<C>
     where
         T: Into<String>,
     {
         TNode::Text(t.into())
     }
 
-    pub fn bg_ranges(nodes: &[TNode]) -> Vec<BgRange> {
-        let mut rs: Vec<BgRange> = vec![];
+    /// Calculates the length of the containing text.  Panics if it detects an untransformed node.
+    pub fn len(nodes: &[TNode<C>]) -> usize {
+        nodes.iter().fold(0, |sum, n| {
+            sum + match *n {
+                TNode::Text(ref text) => text.chars().count(),
+                TNode::Fg(_, ref children)
+                | TNode::Bg(_, ref children)
+                | TNode::Bold(ref children) => TNode::len(children),
+            }
+        })
+    }
+}
+
+impl<C: Copy> TNode<C> {
+    pub fn bg_ranges(nodes: &[TNode<C>]) -> Vec<BgRange<C>> {
+        let mut rs: Vec<BgRange<C>> = vec![];
         let mut offset = 0;
         for n in nodes {
             match *n {
@@ -206,29 +236,17 @@ impl TNode {
         }
         rs
     }
-
-    /// Calculates the length of the containing text.  Panics if it detects an untransformed node.
-    pub fn len(nodes: &[TNode]) -> usize {
-        nodes.iter().fold(0, |sum, n| {
-            sum + match *n {
-                TNode::Text(ref text) => text.chars().count(),
-                TNode::Fg(_, ref children)
-                | TNode::Bg(_, ref children)
-                | TNode::Bold(ref children) => TNode::len(children),
-            }
-        })
-    }
 }
 
 #[derive(PartialEq, Debug)]
-pub struct BgRange {
+pub struct BgRange<C = Color> {
     pub start: usize,
     pub end: usize,
-    pub color: Option<Color>,
+    pub color: Option<C>,
 }
 
-impl BgRange {
-    pub fn offset(&self, offset: usize) -> BgRange {
+impl<C: Copy> BgRange<C> {
+    pub fn offset(&self, offset: usize) -> BgRange<C> {
         BgRange {
             start: self.start + offset,
             end: self.end + offset,
@@ -298,7 +316,7 @@ pub fn comma_list_or(items: &[Vec<Node>]) -> Vec<Node> {
 
 #[cfg(test)]
 mod tests {
-    use brdgme_color::*;
+    use brdgme_color::LIGHT;
 
     use super::*;
 
@@ -359,17 +377,17 @@ mod tests {
                 BgRange {
                     start: 9,
                     end: 14,
-                    color: Some(RED),
+                    color: Some(LIGHT.red),
                 },
                 BgRange {
                     start: 14,
                     end: 17,
-                    color: Some(ORANGE),
+                    color: Some(LIGHT.orange),
                 },
                 BgRange {
                     start: 17,
                     end: 23,
-                    color: Some(RED),
+                    color: Some(LIGHT.red),
                 },
                 BgRange {
                     start: 23,
@@ -380,12 +398,12 @@ mod tests {
             TNode::bg_ranges(&[
                 TNode::text("blah blah"),
                 TNode::Bg(
-                    RED,
+                    LIGHT.red,
                     vec![TNode::Fg(
-                        BLUE,
+                        LIGHT.blue,
                         vec![
                             TNode::text("lolol"),
-                            TNode::Bg(ORANGE, vec![TNode::text("egg")]),
+                            TNode::Bg(LIGHT.orange, vec![TNode::text("egg")]),
                             TNode::text("bacon!"),
                         ],
                     ),],

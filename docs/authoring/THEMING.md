@@ -13,7 +13,8 @@ the web) is unchanged.
 
 ## The palette
 
-A theme defines exactly 14 colour slots.
+A theme defines exactly 12 colour slots. (Revised 2026-07-13: the two
+BACKGROUND_SHADE slots were replaced by the `soften` transform below.)
 
 ### Hues (9)
 
@@ -29,26 +30,51 @@ A theme defines exactly 14 colour slots.
 | ORANGE | `#f57c00` (245,124,0)   | corps, rainbow suits; player colour         |
 | BROWN  | `#5d4037` (93,64,55)    | goods, casino tiles; player colour          |
 
-### Neutrals (4)
+### Neutrals (2)
 
 | Slot               | Default (light) value | Meaning                                      |
 | ------------------ | --------------------- | -------------------------------------------- |
 | FOREGROUND         | `#000000`             | default text; "black" game identities        |
 | BACKGROUND         | `#ffffff`             | page/board background; default text bg       |
-| BACKGROUND_SHADE_1 | `#dcdcdc` (220)       | subtle surface step (checkerboards, outlines)|
-| BACKGROUND_SHADE_2 | `#bebebe` (190)       | stronger surface step                        |
+
+Surface steps (checkerboards, outlines, muted tile backgrounds) are not
+slots; they are derived via the `soften` transform below, e.g.
+`soften(FOREGROUND, 86)` / `soften(FOREGROUND, 75)` for the classic
+subtle/strong checkerboard pair (`#dbdbdb` / `#bfbfbf` on the light
+default - within 1/255 of the old `220`/`190` greys).
 
 GREY is a tenth hue-like slot for de-emphasised text and neutral game
 identities (empty cells, grid lines, folded/out states). Default (light):
 `#616161` (97,97,97). It is the single most used colour across all games
 and must remain readable everywhere text appears (see contrast rules).
 
-The shades are an ordered ramp stepping from BACKGROUND toward
-FOREGROUND: SHADE_1 is subtle, SHADE_2 is stronger. The naming is
-deliberately direction-neutral - on light themes the ramp darkens, on
-dark themes it lightens. As a starting point, mix BACKGROUND toward
-FOREGROUND by roughly 10-15% for SHADE_1 and 20-30% for SHADE_2, then
-adjust to taste and validate contrast.
+### The `soften` transform
+
+`soften(color, pct)` derives a muted surface tint from any palette slot,
+resolved at theme-resolution time (like `contrast`): resolve `color`
+through the theme, convert to HSL, and move only the lightness toward
+the theme BACKGROUND's lightness by `pct`% (`l' = l + (l_bg - l) *
+pct/100`), keeping hue and saturation. `pct` is an integer 1-99.
+
+Properties:
+
+- Direction-neutral for free: on light themes softening lightens, on
+  dark themes it darkens - "softened" always means "recedes toward the
+  background", which is what a surface tint should do on any theme.
+- Applied to FOREGROUND it yields the neutral surface ramp (the old
+  SHADE slots): `soften(FOREGROUND, 86)` = `#dbdbdb`,
+  `soften(FOREGROUND, 75)` = `#bfbfbf` on the light default.
+- Applied to a hue it yields a pale wash clearly distinct from the
+  saturated hue, so e.g. Acquire can highlight available tiles with
+  `soften(PINK, 75)` (`#f7bed4`, vs the historical Material Pink 100
+  `#f8bbd0`) without colliding with PINK as a player colour.
+- Softened colours are backgrounds, never text. Put `contrast` (or an
+  explicitly validated colour) on top of them.
+
+Games should prefer the standard steps 25 / 50 / 75 / 86 unless
+matching a specific legacy value. The set of `soften` expressions in
+use is enumerable (grep over game crates), and the theme contrast test
+validates exactly that set.
 
 ### The `contrast` transform
 
@@ -96,24 +122,27 @@ reverse-maps the known legacy triples to palette slots at parse time -
 this themes Go game output and historical markup stored in the DB
 without any Go-side change. The reverse map covers the 21 old constants
 plus the 11 bespoke acquire-1/lords-of-vegas-1 values (mapped to their
-Appendix A slots); unknown triples fall back to FOREGROUND with a
+Appendix A slots or `soften` expressions); unknown triples fall back to FOREGROUND with a
 warning. `rgb(...)` is purely a parse-time compatibility form - it never
 survives into the AST, and games cannot emit it (see the rules below).
 
 ## Contrast requirements (themes MUST validate these)
 
 Games freely place any hue, GREY, or FOREGROUND text on BACKGROUND and
-on both shades - Acquire, for example, renders GREY text inside
-SHADE_1/SHADE_2 checkerboard cells. A theme is only valid if:
+on softened surfaces - Acquire, for example, renders GREY text inside
+`soften(FOREGROUND, 86)`/`soften(FOREGROUND, 75)` checkerboard cells.
+The set of softened surfaces to validate is the set of `soften`
+expressions actually used by games (enumerable by grep). A theme is
+only valid if:
 
 - FOREGROUND, GREY, and every hue used as text reach at least 3:1
-  contrast against BACKGROUND, BACKGROUND_SHADE_1, and
-  BACKGROUND_SHADE_2. Aim for 4.5:1 (WCAG AA body text) where the
-  palette allows it; the light default's weakest pair (GREY on
-  SHADE_2) sits at roughly 3.3:1, so 3:1 is the hard floor.
+  contrast against BACKGROUND and every in-use softened surface. Aim
+  for 4.5:1 (WCAG AA body text) where the palette allows it; the light
+  default's weakest pair (GREY on `soften(FOREGROUND, 75)`) sits at
+  roughly 3.3:1, so 3:1 is the hard floor.
 - `contrast` output (FOREGROUND or BACKGROUND) reaches at least 4.5:1
-  against every hue and both shades, since it exists specifically to
-  carry text on coloured backgrounds.
+  against every hue and every in-use softened surface, since it exists
+  specifically to carry text on coloured backgrounds.
 - All 8 player colours are pairwise distinguishable, and each is
   distinguishable from GREY and FOREGROUND. Colourblind-friendly themes
   should verify this under deuteranopia/protanopia simulation - the
@@ -146,14 +175,15 @@ be tuned/validated rather than taken as gospel.
 | GREY               | `#6272a4` | Comment                       |
 | FOREGROUND         | `#f8f8f2` | Foreground                    |
 | BACKGROUND         | `#282a36` | Background                    |
-| BACKGROUND_SHADE_1 | `#343746` | derived (bg -> fg step)       |
-| BACKGROUND_SHADE_2 | `#44475a` | Current Line/Selection        |
 
-Note GREY takes Comment, so BLUE cannot also use it - the two must stay
-distinct (see contrast requirements). GREY at Comment likely fails 3:1
-against SHADE_2 here; a Dracula theme may need to lighten GREY or keep
-SHADE_2 closer to BACKGROUND. This is exactly the kind of trade-off the
-contrast test exists to catch.
+Surface steps are derived by `soften`, so Dracula gets its
+checkerboard for free (`soften(FOREGROUND, 86)`/`soften(FOREGROUND,
+75)` land near Dracula's own Current Line tones). Note GREY takes
+Comment, so BLUE cannot also use it - the two must stay distinct (see
+contrast requirements). GREY at Comment may fail 3:1 against the
+stronger softened surfaces; a Dracula theme may need to lighten GREY.
+This is exactly the kind of trade-off the contrast test exists to
+catch.
 
 ## Rules for game authors
 
@@ -170,8 +200,10 @@ contrast test exists to catch.
   black/white text.
 - Use `Player(n)` nodes for anything player-owned. Never hardcode
   per-player hues (the legacy `hive` port must fix this).
-- Board surfaces and checkerboards use BACKGROUND and the two shades,
-  not literal greys.
+- Board surfaces and checkerboards use BACKGROUND and `soften`
+  (typically `soften(FOREGROUND, 86)` / `soften(FOREGROUND, 75)`), not
+  literal greys. Muted hue washes (tile highlights, casino tiles) use
+  `soften(HUE, pct)`, never a bespoke pale RGB.
 - "Black" and "white" game identities (black dice, black corp, white
   suit) use FOREGROUND and GREY respectively - see Appendix A for the
   reasoning and precedents.
@@ -216,17 +248,18 @@ Bespoke colour migrations (the only two games with out-of-palette
 colours anywhere in rust/, brdgme-go/, or brdg.me):
 
 - **acquire-1** (`src/render.rs`): checkerboard `220`/`190` greys ->
-  BACKGROUND_SHADE_1 / BACKGROUND_SHADE_2; unincorporated `100` grey ->
-  GREY bg; unavailable-tile `80` grey text -> GREY; available-tile pink
-  bg `248,187,208` -> PINK (or a shade, at porting discretion); corp
+  `soften(FOREGROUND, 86)` / `soften(FOREGROUND, 75)`; unincorporated
+  `100` grey -> GREY bg; unavailable-tile `80` grey text -> GREY;
+  available-tile pink bg `248,187,208` (Material Pink 100) ->
+  `soften(PINK, 75)` (`#f7bed4` on the light default); corp
   DEEP_ORANGE -> ORANGE; corp BLACK -> FOREGROUND; `.inv().mono()` ->
   `contrast`.
 - **lords-of-vegas-1** (`src/casino.rs`, `src/render.rs`): Albion ->
   PURPLE, Sphinx -> ORANGE or BROWN, Vega -> GREEN, Tivoli -> GREY,
-  Pioneer -> BROWN, unbuilt tile `200` grey -> BACKGROUND_SHADE_2;
+  Pioneer -> BROWN, unbuilt tile `200` grey -> `soften(FOREGROUND, 78)`;
   `.inv().mono()` -> `contrast`. The casino colours are tile backgrounds
   under player-coloured content; if plain hues clash in practice, the
-  theme-level answer is bg-muted variants, not bespoke RGB.
+  answer is `soften(HUE, pct)` washes, not bespoke RGB.
 - **cathedral_1** (brdgme-go, `render.go:149-154`): the one `Mono, Inv`
   flag use -> `contrast` at porting time.
 

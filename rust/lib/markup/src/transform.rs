@@ -2,7 +2,7 @@ use std::cmp;
 use std::iter;
 use std::ops::Range;
 
-use brdgme_color::{Color, player_color};
+use brdgme_color::{Color, LIGHT, Palette};
 
 use crate::ast::{Align, BgRange, Col, ColTrans, ColType, Node, Row, TNode};
 
@@ -12,18 +12,25 @@ pub struct Player {
 }
 
 impl Col {
-    fn to_color(&self, players: &[Player]) -> Color {
+    fn to_color(&self, players: &[Player], palette: &Palette) -> Color {
         let mut c = match self.color {
             ColType::Player(p) => players
                 .get(p)
                 .map(|p| p.color)
-                .unwrap_or_else(|| player_color(p).to_owned()),
-            ColType::RGB(c) => c,
+                .unwrap_or_else(|| palette.player_color(p)),
+            ColType::Named { color, soften } => {
+                let base = palette.color(color);
+                match soften {
+                    Some(pct) => brdgme_color::soften(base, pct, palette.background),
+                    None => base,
+                }
+            }
         };
         for tf in &self.transform {
             c = match *tf {
                 ColTrans::Mono => c.mono(),
                 ColTrans::Inv => c.inv(),
+                ColTrans::Contrast => brdgme_color::contrast(c, palette),
             }
         }
         c
@@ -31,30 +38,48 @@ impl Col {
 }
 
 pub fn transform(input: &[Node], players: &[Player]) -> Vec<TNode> {
+    transform_with_palette(input, players, &LIGHT)
+}
+
+pub fn transform_with_palette(input: &[Node], players: &[Player], palette: &Palette) -> Vec<TNode> {
     let mut ret: Vec<TNode> = vec![];
     for n in input {
         match *n {
             // Direct copy nodes.
-            Node::Fg(ref c, ref children) => {
-                ret.push(TNode::Fg(c.to_color(players), transform(children, players)))
+            Node::Fg(ref c, ref children) => ret.push(TNode::Fg(
+                c.to_color(players, palette),
+                transform_with_palette(children, players, palette),
+            )),
+            Node::Bg(ref c, ref children) => ret.push(TNode::Bg(
+                c.to_color(players, palette),
+                transform_with_palette(children, players, palette),
+            )),
+            Node::Bold(ref children) => ret.push(TNode::Bold(transform_with_palette(
+                children, players, palette,
+            ))),
+            Node::Group(ref children) => {
+                ret.extend(transform_with_palette(children, players, palette))
             }
-            Node::Bg(ref c, ref children) => {
-                ret.push(TNode::Bg(c.to_color(players), transform(children, players)))
-            }
-            Node::Bold(ref children) => ret.push(TNode::Bold(transform(children, players))),
-            Node::Group(ref children) => ret.extend(transform(children, players)),
             Node::Text(ref t) => ret.push(TNode::Text(t.to_string())),
-            Node::Player(p) => ret.extend(player(p, players)),
-            Node::Align(ref a, w, ref c) => ret.extend(align(a, w, &transform(c, players))),
-            Node::Indent(n, ref c) => ret.extend(indent(n, &transform(c, players))),
-            Node::Table(ref rows) => ret.extend(table(rows, players)),
-            Node::Canvas(ref els) => ret.extend(canvas(els, players)),
+            Node::Player(p) => ret.extend(player(p, players, palette)),
+            Node::Align(ref a, w, ref c) => {
+                ret.extend(align(a, w, &transform_with_palette(c, players, palette)))
+            }
+            Node::Indent(n, ref c) => {
+                ret.extend(indent(n, &transform_with_palette(c, players, palette)))
+            }
+            Node::Table(ref rows) => ret.extend(table(rows, |children| {
+                transform_with_palette(children, players, palette)
+            })),
+            Node::Canvas(ref els) => ret.extend(canvas(els, |nodes| {
+                transform_with_palette(nodes, players, palette)
+            })),
         }
     }
     ret
 }
 
-fn player(p: usize, players: &[Player]) -> Vec<TNode> {
+fn player(p: usize, players: &[Player], palette: &Palette) -> Vec<TNode> {
     let p_name = players
         .get(p)
         .map(|p| p.name.to_string())
@@ -62,23 +87,26 @@ fn player(p: usize, players: &[Player]) -> Vec<TNode> {
     let p_col = players
         .get(p)
         .map(|p| p.color)
-        .unwrap_or_else(|| player_color(p).to_owned());
+        .unwrap_or_else(|| palette.player_color(p));
     vec![TNode::Bold(vec![TNode::Fg(
         p_col,
         vec![TNode::text(format!("<{}>", p_name))],
     )])]
 }
 
-fn table(rows: &[Row], players: &[Player]) -> Vec<TNode> {
+pub(crate) fn table<C: Copy>(
+    rows: &[Row],
+    mut transform_children: impl FnMut(&[Node]) -> Vec<TNode<C>>,
+) -> Vec<TNode<C>> {
     // Transform individual cells and calculate row heights and column widths.
-    let mut transformed: Vec<Vec<Vec<Vec<TNode>>>> = vec![];
+    let mut transformed: Vec<Vec<Vec<Vec<TNode<C>>>>> = vec![];
     let mut widths: Vec<usize> = vec![];
     let mut heights: Vec<usize> = vec![];
     for r in rows {
-        let mut row: Vec<Vec<Vec<TNode>>> = vec![];
+        let mut row: Vec<Vec<Vec<TNode<C>>>> = vec![];
         let mut row_height: usize = 1;
         for (i, (_, children)) in r.iter().enumerate() {
-            let cell_lines = to_lines(&transform(children, players));
+            let cell_lines = to_lines(&transform_children(children));
             row_height = cmp::max(row_height, cell_lines.len());
             let width = cell_lines
                 .iter()
@@ -94,7 +122,7 @@ fn table(rows: &[Row], players: &[Player]) -> Vec<TNode> {
         transformed.push(row);
     }
     // Second pass, output, padding and aligning where required.
-    let mut output: Vec<TNode> = vec![];
+    let mut output: Vec<TNode<C>> = vec![];
     for (ri, r) in rows.iter().enumerate() {
         for line_i in 0..heights[ri] {
             if ri > 0 || line_i > 0 {
@@ -116,8 +144,8 @@ fn table(rows: &[Row], players: &[Player]) -> Vec<TNode> {
     output
 }
 
-fn align(a: &Align, width: usize, children: &[TNode]) -> Vec<TNode> {
-    let mut aligned: Vec<TNode> = vec![];
+pub(crate) fn align<C: Clone>(a: &Align, width: usize, children: &[TNode<C>]) -> Vec<TNode<C>> {
+    let mut aligned: Vec<TNode<C>> = vec![];
     for l in to_lines(children) {
         if !aligned.is_empty() {
             aligned.push(TNode::text("\n"));
@@ -153,7 +181,7 @@ fn align(a: &Align, width: usize, children: &[TNode]) -> Vec<TNode> {
     aligned
 }
 
-fn indent(n: usize, children: &[TNode]) -> Vec<TNode> {
+pub(crate) fn indent<C: Clone>(n: usize, children: &[TNode<C>]) -> Vec<TNode<C>> {
     from_lines(
         &to_lines(children)
             .iter()
@@ -162,24 +190,24 @@ fn indent(n: usize, children: &[TNode]) -> Vec<TNode> {
                 new_l.extend(l.clone());
                 new_l
             })
-            .collect::<Vec<Vec<TNode>>>(),
+            .collect::<Vec<Vec<TNode<C>>>>(),
     )
 }
 
 /// `to_lines` splits text nodes into multiple text nodes, duplicating parent
 /// nodes as necessary.
-pub fn to_lines(nodes: &[TNode]) -> Vec<Vec<TNode>> {
-    let mut lines: Vec<Vec<TNode>> = vec![];
-    let mut line: Vec<TNode> = vec![];
+pub fn to_lines<C: Clone>(nodes: &[TNode<C>]) -> Vec<Vec<TNode<C>>> {
+    let mut lines: Vec<Vec<TNode<C>>> = vec![];
+    let mut line: Vec<TNode<C>> = vec![];
     for n in nodes {
-        let n_lines: Vec<Vec<TNode>> = match *n {
+        let n_lines: Vec<Vec<TNode<C>>> = match *n {
             TNode::Fg(ref color, ref children) => to_lines(children)
                 .iter()
-                .map(|l| vec![TNode::Fg(*color, l.to_owned())])
+                .map(|l| vec![TNode::Fg(color.clone(), l.to_owned())])
                 .collect(),
             TNode::Bg(ref color, ref children) => to_lines(children)
                 .iter()
-                .map(|l| vec![TNode::Bg(*color, l.to_owned())])
+                .map(|l| vec![TNode::Bg(color.clone(), l.to_owned())])
                 .collect(),
             TNode::Bold(ref children) => to_lines(children)
                 .iter()
@@ -203,7 +231,7 @@ pub fn to_lines(nodes: &[TNode]) -> Vec<Vec<TNode>> {
     lines
 }
 
-pub fn from_lines(lines: &[Vec<TNode>]) -> Vec<TNode> {
+pub fn from_lines<C: Clone>(lines: &[Vec<TNode<C>>]) -> Vec<TNode<C>> {
     lines
         .iter()
         .enumerate()
@@ -219,7 +247,7 @@ pub fn from_lines(lines: &[Vec<TNode>]) -> Vec<TNode> {
         .collect()
 }
 
-fn slice(nodes: &[TNode], range: &Range<usize>) -> Vec<TNode> {
+fn slice<C: Copy>(nodes: &[TNode<C>], range: &Range<usize>) -> Vec<TNode<C>> {
     if range.start >= range.end {
         return vec![];
     }
@@ -233,7 +261,7 @@ fn slice(nodes: &[TNode], range: &Range<usize>) -> Vec<TNode> {
             end -= n_len;
             continue;
         }
-        let n_s: TNode = match *n {
+        let n_s: TNode<C> = match *n {
             TNode::Fg(ref color, ref children) => TNode::Fg(*color, slice(children, &(start..end))),
             TNode::Bg(ref color, ref children) => TNode::Bg(*color, slice(children, &(start..end))),
             TNode::Bold(ref children) => TNode::Bold(slice(children, &(start..end))),
@@ -253,18 +281,18 @@ fn slice(nodes: &[TNode], range: &Range<usize>) -> Vec<TNode> {
     s
 }
 
-fn canvas_line_bg_ranges(cl: &[(usize, Vec<TNode>)]) -> Vec<BgRange> {
+fn canvas_line_bg_ranges<C: Copy>(cl: &[(usize, Vec<TNode<C>>)]) -> Vec<BgRange<C>> {
     cl.iter()
         .flat_map(|&(offset, ref els)| {
             TNode::bg_ranges(els)
                 .iter()
                 .map(|bgr| bgr.offset(offset))
-                .collect::<Vec<BgRange>>()
+                .collect::<Vec<BgRange<C>>>()
         })
         .collect()
 }
 
-fn bg_ranges_slice(bgrs: &[BgRange], range: &Range<usize>) -> Vec<BgRange> {
+fn bg_ranges_slice<C: Copy>(bgrs: &[BgRange<C>], range: &Range<usize>) -> Vec<BgRange<C>> {
     bgrs.iter()
         .filter_map(|bgr| {
             if bgr.start >= range.end || bgr.end <= range.start {
@@ -280,12 +308,15 @@ fn bg_ranges_slice(bgrs: &[BgRange], range: &Range<usize>) -> Vec<BgRange> {
         .collect()
 }
 
-fn canvas(els: &[(usize, usize, Vec<Node>)], players: &[Player]) -> Vec<TNode> {
+pub(crate) fn canvas<C: Copy>(
+    els: &[(usize, usize, Vec<Node>)],
+    mut transform_children: impl FnMut(&[Node]) -> Vec<TNode<C>>,
+) -> Vec<TNode<C>> {
     // Output is split into lines each with a start position.
-    let mut lines: Vec<Vec<(usize, Vec<TNode>)>> = vec![];
+    let mut lines: Vec<Vec<(usize, Vec<TNode<C>>)>> = vec![];
     for &(x, y, ref nodes) in els {
         let lines_len = lines.len();
-        let node_lines = to_lines(&transform(nodes, players));
+        let node_lines = to_lines(&transform_children(nodes));
         let node_lines_len = node_lines.len();
         if y + node_lines_len > lines_len {
             lines.extend(iter::repeat_n(vec![], y + node_lines_len - lines_len));
@@ -295,7 +326,7 @@ fn canvas(els: &[(usize, usize, Vec<Node>)], players: &[Player]) -> Vec<TNode> {
             let n_line_len = TNode::len(orig_n_line);
             // Inherit background colors from existing lines if required.
             let ex_n_line_bgrs = canvas_line_bg_ranges(&lines[n_line_y]);
-            let n_line: Vec<TNode> = TNode::bg_ranges(orig_n_line)
+            let n_line: Vec<TNode<C>> = TNode::bg_ranges(orig_n_line)
                 .iter()
                 .flat_map(|bgr| match bgr.color {
                     Some(_) => slice(orig_n_line, &(bgr.start..bgr.end)),
@@ -365,9 +396,9 @@ fn canvas(els: &[(usize, usize, Vec<Node>)], players: &[Player]) -> Vec<TNode> {
                         last_x = x + TNode::len(nodes);
                         ret_nodes
                     })
-                    .collect()
+                    .collect::<Vec<TNode<C>>>()
             })
-            .collect::<Vec<Vec<TNode>>>(),
+            .collect::<Vec<Vec<TNode<C>>>>(),
     )
 }
 
@@ -379,6 +410,64 @@ mod tests {
     use crate::plain::render;
 
     use super::*;
+
+    #[test]
+    fn transform_with_palette_named_works() {
+        assert_eq!(
+            transform_with_palette(
+                &[N::Fg(NamedColor::Green.into(), vec![N::text("x")])],
+                &[],
+                &LIGHT
+            ),
+            vec![TN::Fg(LIGHT.green, vec![TN::text("x")])]
+        );
+        assert_eq!(
+            transform_with_palette(
+                &[N::Fg(NamedColor::Green.into(), vec![N::text("x")])],
+                &[],
+                &DARK
+            ),
+            vec![TN::Fg(DARK.green, vec![TN::text("x")])]
+        );
+    }
+
+    #[test]
+    fn transform_with_palette_soften_works() {
+        let nodes = [N::Bg(
+            crate::ast::Col {
+                color: crate::ast::ColType::Named {
+                    color: NamedColor::Foreground,
+                    soften: Some(86),
+                },
+                transform: vec![],
+            },
+            vec![N::text("x")],
+        )];
+        let result = transform_with_palette(&nodes, &[], &LIGHT);
+        assert_eq!(
+            result,
+            vec![TN::Bg(
+                Color::from_hex("#dbdbdb").unwrap(),
+                vec![TN::text("x")]
+            )]
+        );
+    }
+
+    #[test]
+    fn transform_with_palette_contrast_works() {
+        let nodes = [N::Fg(
+            crate::ast::Col {
+                color: crate::ast::ColType::Named {
+                    color: NamedColor::Yellow,
+                    soften: None,
+                },
+                transform: vec![crate::ast::ColTrans::Contrast],
+            },
+            vec![N::text("x")],
+        )];
+        let result = transform_with_palette(&nodes, &[], &LIGHT);
+        assert_eq!(result, vec![TN::Fg(LIGHT.foreground, vec![TN::text("x")])]);
+    }
 
     #[test]
     fn align_works() {
@@ -404,7 +493,10 @@ mod tests {
                 &[N::Table(vec![
                     vec![
                         (A::Left, vec![]),
-                        (A::Center, vec![N::Fg(GREY.into(), vec![N::text("blah")])]),
+                        (
+                            A::Center,
+                            vec![N::Fg(NamedColor::Grey.into(), vec![N::text("blah")])]
+                        ),
                     ],
                     vec![
                         (A::Right, vec![N::text("header")]),
@@ -441,7 +533,7 @@ mod tests {
     #[test]
     fn to_lines_works() {
         assert_eq!(
-            to_lines(&[TN::text("one\ntwo")]),
+            to_lines::<Color>(&[TN::text("one\ntwo")]),
             vec![vec![TN::text("one")], vec![TN::text("two")]]
         );
     }
@@ -450,23 +542,23 @@ mod tests {
     fn slice_works() {
         assert_eq!(
             slice(
-                &[TN::Fg(RED, vec![TN::Bold(vec![TN::text("blah")])])],
+                &[TN::Fg(LIGHT.red, vec![TN::Bold(vec![TN::text("blah")])])],
                 &(1..3),
             ),
-            vec![TN::Fg(RED, vec![TN::Bold(vec![TN::text("la")])])]
+            vec![TN::Fg(LIGHT.red, vec![TN::Bold(vec![TN::text("la")])])]
         );
         assert_eq!(
             slice(
                 &[TN::Bold(vec![
-                    TN::Fg(RED, vec![TN::text("one"), TN::text("two")]),
-                    TN::Bg(BLUE, vec![TN::text("three"), TN::text("four")]),
-                    TN::Bg(GREY, vec![TN::text("five"), TN::text("six")]),
+                    TN::Fg(LIGHT.red, vec![TN::text("one"), TN::text("two")]),
+                    TN::Bg(LIGHT.blue, vec![TN::text("three"), TN::text("four")]),
+                    TN::Bg(LIGHT.grey, vec![TN::text("five"), TN::text("six")]),
                 ]),],
                 &(10..16),
             ),
             vec![TN::Bold(vec![
-                TN::Bg(BLUE, vec![TN::text("e"), TN::text("four")]),
-                TN::Bg(GREY, vec![TN::text("f")]),
+                TN::Bg(LIGHT.blue, vec![TN::text("e"), TN::text("four")]),
+                TN::Bg(LIGHT.grey, vec![TN::text("f")]),
             ]),]
         );
     }

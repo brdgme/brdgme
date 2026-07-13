@@ -1,6 +1,6 @@
 use std::cmp;
 
-use brdgme_color::GREY;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::ast::Cell;
 use brdgme_markup::{Align as A, Node as N, Row};
@@ -42,7 +42,7 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
             vec![],
             vec![(
                 A::Center,
-                vec![N::Fg(GREY.into(), vec![N::text("Your hand")])],
+                vec![N::Fg(NamedColor::Grey.into(), vec![N::text("Your hand")])],
             )],
             vec![(A::Center, render_hand(h))],
         ]);
@@ -59,13 +59,19 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
             (A::Left, vec![N::text(SCORE_SPACER)]),
             (
                 A::Center,
-                vec![N::Fg(GREY.into(), vec![N::text(format!("R{}", r))])],
+                vec![N::Fg(
+                    NamedColor::Grey.into(),
+                    vec![N::text(format!("R{}", r))],
+                )],
             ),
         ]);
     }
     header.extend(vec![
         (A::Left, vec![N::text("  ")]),
-        (A::Center, vec![N::Fg(GREY.into(), vec![N::text("Tot")])]),
+        (
+            A::Center,
+            vec![N::Fg(NamedColor::Grey.into(), vec![N::text("Tot")])],
+        ),
     ]);
     scores.push(header);
     for p_offset in 0..pub_state.players {
@@ -98,7 +104,10 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
     }
     layout.append(&mut vec![
         vec![],
-        vec![(A::Center, vec![N::Fg(GREY.into(), vec![N::text("Scores")])])],
+        vec![(
+            A::Center,
+            vec![N::Fg(NamedColor::Grey.into(), vec![N::text("Scores")])],
+        )],
         vec![(A::Center, vec![N::Table(scores)])],
     ]);
     vec![N::Table(layout)]
@@ -186,8 +195,10 @@ impl PubState {
         }
 
         // Discards
-        let mut discards: Row =
-            vec![(A::Right, vec![N::Fg(GREY.into(), vec![N::text("Discard")])])];
+        let mut discards: Row = vec![(
+            A::Right,
+            vec![N::Fg(NamedColor::Grey.into(), vec![N::text("Discard")])],
+        )];
         for (i, &e) in expeditions().iter().enumerate() {
             // Column spacing
             discards.push((
@@ -211,7 +222,7 @@ impl PubState {
         discards.push((
             A::Left,
             vec![N::Fg(
-                GREY.into(),
+                NamedColor::Grey.into(),
                 vec![
                     N::text("   "),
                     N::Bold(vec![N::text(format!("{}", self.deck_remaining))]),

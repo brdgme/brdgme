@@ -5,7 +5,7 @@
 //! of blank spacer cells). `rowSpacing` is always 0 in the Go source so no
 //! row spacers are needed anywhere in this file.
 
-use brdgme_color::{CYAN, GREY};
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::ast::Cell;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
@@ -29,11 +29,11 @@ fn resource_abbr(r: Resource) -> &'static str {
 
 /// Port of `RenderResourceColour` (`render.go`).
 fn render_resource_colour(text: impl Into<String>, r: Resource) -> N {
-    N::Fg((&crate::resource_color(r)).into(), vec![N::text(text)])
+    N::Fg(crate::resource_color(r).into(), vec![N::text(text)])
 }
 
 fn grey(nodes: Vec<N>) -> N {
-    N::Fg((&GREY).into(), nodes)
+    N::Fg(NamedColor::Grey.into(), nodes)
 }
 
 fn cel(align: A, nodes: Vec<N>) -> Cell {
@@ -91,12 +91,12 @@ fn card_cells(c: &Card, afford: Option<(&Cost, &Cost)>) -> (Cell, Cell) {
     if let Some((bonuses, buying_power)) = afford {
         if cost::can_afford(bonuses, &c.cost) {
             upper.push(N::Bold(vec![N::Fg(
-                (&brdgme_color::GREEN).into(),
+                NamedColor::Green.into(),
                 vec![N::text("X ")],
             )]));
         } else if cost::can_afford(buying_power, &c.cost) {
             upper.push(N::Bold(vec![N::Fg(
-                (&brdgme_color::YELLOW).into(),
+                NamedColor::Yellow.into(),
                 vec![N::text("X ")],
             )]));
         }
@@ -262,7 +262,10 @@ fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
     header.push(cel(A::Center, vec![N::Bold(vec![N::text("Tok")])]));
     header.push(cel(
         A::Center,
-        vec![N::Bold(vec![N::Fg((&CYAN).into(), vec![N::text("Res")])])],
+        vec![N::Bold(vec![N::Fg(
+            NamedColor::Cyan.into(),
+            vec![N::text("Res")],
+        )])],
     ));
     header.push(cel(
         A::Center,

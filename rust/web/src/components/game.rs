@@ -6,9 +6,9 @@ use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
 
 #[component]
-pub fn GameBoard(html: String) -> impl IntoView {
+pub fn GameBoard(html: String, player_style: String) -> impl IntoView {
     view! {
-        <div class="game-render"><pre inner_html=html></pre></div>
+        <div class="game-render" style=player_style><pre inner_html=html></pre></div>
     }
 }
 
@@ -22,6 +22,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let can_restart = is_finished && restarted_game_id.is_none();
 
     let has_bot_waiting = data.players.iter().any(|p| p.is_bot && p.is_turn);
+    let player_style = data.player_style.clone();
 
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
@@ -125,7 +126,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
             <div class="game-meta-logs">
                 <h2>"Logs"</h2>
                 <div class="game-meta-logs-content">
-                    <GameLogs game_id=game_id />
+                    <GameLogs game_id=game_id player_style=player_style />
                 </div>
             </div>
         </div>
@@ -211,7 +212,7 @@ fn render_log_entries(
 }
 
 #[component]
-pub fn GameLogs(game_id: Uuid) -> impl IntoView {
+pub fn GameLogs(game_id: Uuid, player_style: String) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
@@ -242,7 +243,7 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
         {move || logs.get().map(|result| match result {
             Err(_) => view! { <div>"Failed to load logs."</div> }.into_any(),
             Ok(entries) => view! {
-                <div class="game-logs" node_ref=logs_ref>
+                <div class="game-logs" node_ref=logs_ref style=player_style.clone()>
                     {render_log_entries(entries, true)}
                 </div>
             }.into_any(),
@@ -251,7 +252,7 @@ pub fn GameLogs(game_id: Uuid) -> impl IntoView {
 }
 
 #[component]
-pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
+pub fn RecentGameLogs(game_id: Uuid, player_style: String) -> impl IntoView {
     use crate::game::server_fns::get_game_logs;
 
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
@@ -285,7 +286,7 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
                     None
                 } else {
                     Some(view! {
-                        <div class="recent-logs-container">
+                        <div class="recent-logs-container" style=player_style.clone()>
                             <div class="recent-logs-header">"Recent logs"</div>
                             <div class="recent-logs game-logs" node_ref=recent_ref>
                                 {render_log_entries(recent, false)}
@@ -298,10 +299,12 @@ pub fn RecentGameLogs(game_id: Uuid) -> impl IntoView {
     }
 }
 
+/// `color` is a `--mk-{slot}` colour slot token (e.g. "green"), not a hex
+/// value - display always follows the active theme.
 #[component]
 pub fn PlayerName(name: String, color: String) -> impl IntoView {
     view! {
-        <strong style=format!("color:{}", color)>"<" {name} ">"</strong>
+        <strong style=format!("color:var(--mk-{})", color)>"<" {name} ">"</strong>
     }
 }
 

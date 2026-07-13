@@ -29,11 +29,11 @@ pub enum Colour {
 }
 
 impl Colour {
-    pub fn to_color(self) -> color::Color {
+    pub fn to_color(self) -> color::NamedColor {
         match self {
-            Colour::Green => color::GREEN,
-            Colour::Yellow => color::YELLOW,
-            Colour::Red => color::RED,
+            Colour::Green => color::NamedColor::Green,
+            Colour::Yellow => color::NamedColor::Yellow,
+            Colour::Red => color::NamedColor::Red,
         }
     }
 }

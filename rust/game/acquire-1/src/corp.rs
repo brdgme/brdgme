@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use brdgme_color::*;
+use brdgme_color::NamedColor;
 use brdgme_markup::Node as N;
 
 pub const SAFE_SIZE: usize = 11;
@@ -62,15 +62,15 @@ impl Corp {
         self.base_value() + additional_value(size)
     }
 
-    pub fn color(self) -> Color {
+    pub fn color(self) -> NamedColor {
         match self {
-            Corp::Worldwide => PURPLE,
-            Corp::Sackson => DEEP_ORANGE,
-            Corp::Festival => GREEN,
-            Corp::Imperial => YELLOW,
-            Corp::American => BLUE,
-            Corp::Continental => RED,
-            Corp::Tower => BLACK,
+            Corp::Worldwide => NamedColor::Purple,
+            Corp::Sackson => NamedColor::Orange,
+            Corp::Festival => NamedColor::Green,
+            Corp::Imperial => NamedColor::Yellow,
+            Corp::American => NamedColor::Blue,
+            Corp::Continental => NamedColor::Red,
+            Corp::Tower => NamedColor::Foreground,
         }
     }
 

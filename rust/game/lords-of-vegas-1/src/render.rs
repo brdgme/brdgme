@@ -1,6 +1,6 @@
-use brdgme_color::*;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
-use brdgme_markup::ast::{Col, Row};
+use brdgme_markup::ast::{Col, ColType, Row};
 use brdgme_markup::{Align as A, Node as N};
 
 use crate::CASINO_CARDS;
@@ -23,12 +23,6 @@ const INLAY_TOP: usize = 1;
 const INLAY_LEFT: usize = 2;
 const ALLEY_FULL_HEIGHT: usize = 3;
 const STRIP_FULL_WIDTH: usize = 9;
-
-static UNBUILT_TILE_BG: Color = Color {
-    r: 200,
-    g: 200,
-    b: 200,
-};
 
 impl Renderer for PubState {
     fn render(&self) -> Vec<N> {
@@ -178,15 +172,15 @@ impl BoardTile {
                 owner: Some(TileOwner { player, .. }),
                 ..
             } => player.into(),
-            _ => WHITE.into(),
+            _ => NamedColor::Background.into(),
         };
-        let player_color_fg = player_color.inv().mono();
+        let player_color_fg = player_color.contrast();
         let middle_text = match *self {
             BoardTile::Built {
                 owner: Some(TileOwner { die, .. }),
                 ..
             } => vec![N::Bg(
-                player_color,
+                player_color.clone(),
                 vec![N::Fg(
                     player_color_fg,
                     vec![N::Bold(vec![N::text(format!(" {} ", die))])],
@@ -194,7 +188,7 @@ impl BoardTile {
             )],
             _ => vec![
                 N::Bg(
-                    player_color,
+                    player_color.clone(),
                     vec![N::Fg(
                         player_color_fg,
                         vec![N::text(format!("${:2}", TILES[loc].build_cost))],
@@ -205,12 +199,18 @@ impl BoardTile {
         };
 
         let border_bg = match *self {
-            BoardTile::Built { casino, .. } => *casino.color(),
-            _ => UNBUILT_TILE_BG,
+            BoardTile::Built { casino, .. } => Col::from(casino.color()),
+            _ => Col {
+                color: ColType::Named {
+                    color: NamedColor::Foreground,
+                    soften: Some(78),
+                },
+                transform: vec![],
+            },
         };
-        let inlay_bg = WHITE;
-        let border_fg = border_bg.inv().mono();
-        let inlay_fg = inlay_bg.inv().mono();
+        let inlay_bg: Col = NamedColor::Background.into();
+        let border_fg = border_bg.clone().contrast();
+        let inlay_fg = inlay_bg.clone().contrast();
 
         N::Canvas(vec![
             // Tile background
@@ -218,7 +218,7 @@ impl BoardTile {
                 0,
                 0,
                 vec![N::Bg(
-                    border_bg.into(),
+                    border_bg,
                     vec![N::text(rect(TILE_WIDTH, TILE_HEIGHT))],
                 )],
             ),
@@ -227,7 +227,7 @@ impl BoardTile {
                 INLAY_LEFT,
                 INLAY_TOP,
                 vec![N::Bg(
-                    inlay_bg.into(),
+                    inlay_bg,
                     vec![N::text(rect(INLAY_WIDTH, INLAY_HEIGHT))],
                 )],
             ),
@@ -238,7 +238,7 @@ impl BoardTile {
                 vec![N::Align(
                     A::Center,
                     INLAY_WIDTH,
-                    vec![N::Fg(inlay_fg.into(), middle_text)],
+                    vec![N::Fg(inlay_fg, middle_text)],
                 )],
             ),
             // Bot text
@@ -248,10 +248,7 @@ impl BoardTile {
                 vec![N::Align(
                     A::Center,
                     TILE_WIDTH,
-                    vec![N::Fg(
-                        border_fg.into(),
-                        vec![N::Bold(vec![N::text(bot_text)])],
-                    )],
+                    vec![N::Fg(border_fg, vec![N::Bold(vec![N::text(bot_text)])])],
                 )],
             ),
         ])
@@ -270,7 +267,7 @@ fn rect(w: usize, h: usize) -> String {
 
 pub fn render_cash(amount: usize) -> N {
     N::Bold(vec![N::Fg(
-        GREEN.into(),
+        NamedColor::Green.into(),
         vec![N::text(format!("${}", amount))],
     )])
 }

@@ -11,7 +11,17 @@ use uuid::Uuid;
 use crate::auth::server::{confirm_login, login};
 use crate::components::MainLayout;
 
+// Reads the `theme` cookie before first paint so the correct theme is
+// visible from the very first frame, both logged out and hard-refreshed
+// while logged in (no flash of the wrong theme). Absent/"system" removes the
+// attribute so the `prefers-color-scheme` media query in THEME_STYLE_CSS
+// takes over. An explicit `data-theme` set by this script always wins.
+// The slug list here must stay in sync with `crate::theme::THEME_SLUGS`;
+// `theme_boot_script_contains_all_theme_slugs` (below) pins that.
+const THEME_BOOT_SCRIPT: &str = r#"(function(){try{var m=document.cookie.match(/(?:^|; )theme=([^;]*)/);var t=m?decodeURIComponent(m[1]):null;if(t&&["brdgme-light","brdgme-dark","dracula"].indexOf(t)>=0){document.documentElement.dataset.theme=t;}else{delete document.documentElement.dataset.theme;}}catch(e){}})();"#;
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+    let theme_css = crate::theme::THEME_STYLE_CSS.clone();
     view! {
         <!DOCTYPE html>
         <html lang="en">
@@ -21,6 +31,8 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta name="apple-mobile-web-app-capable" content="yes"/>
                 <meta name="mobile-web-app-capable" content="yes"/>
                 <link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
+                <style inner_html=theme_css></style>
+                <script inner_html=THEME_BOOT_SCRIPT></script>
                 <AutoReload options=options.clone() />
                 <HydrationScripts options/>
                 <MetaTags/>
@@ -71,6 +83,36 @@ pub fn App() -> impl IntoView {
         });
     provide_context(current_user);
 
+    // Profile theme sync: once the current user resolves to logged-in for
+    // the first time this session, fetch their stored theme (if any) and
+    // apply it - the profile wins over whatever was showing pre-login
+    // (system default or a locally-set-but-unsaved theme). If the profile has
+    // no stored preference, instead push the local choice (if any) up to the
+    // profile, so the local choice syncs to the account and follows the user
+    // to new devices. No-ops for anonymous visitors. Runs only on hydrate
+    // (Effects are inert during SSR), so `set_theme_client`'s/`web_sys` calls
+    // are safe here.
+    let applied_profile_theme = RwSignal::new(false);
+    Effect::new(move |_| {
+        if matches!(current_user.get(), Some(Ok(Some(_)))) && !applied_profile_theme.get_untracked()
+        {
+            applied_profile_theme.set(true);
+            leptos::task::spawn_local(async move {
+                match crate::auth::get_user_theme().await {
+                    Ok(Some(theme)) => set_theme_client(Some(&theme)),
+                    Ok(None) => {
+                        if let Some(local) = local_data_theme()
+                            && crate::theme::is_known_slug(&local)
+                        {
+                            let _ = crate::auth::set_theme(Some(local)).await;
+                        }
+                    }
+                    Err(_) => {}
+                }
+            });
+        }
+    });
+
     // Derived from the same active-games data the sidebar renders, not a
     // new query - counts games where it's this user's turn.
     let turn_count = Memo::new(move |_| {
@@ -99,9 +141,112 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("login") view=LoginPage/>
                 <Route path=StaticSegment("games") view=GamesPage/>
                 <Route path=StaticSegment("dashboard") view=DashboardPage/>
+                <Route path=StaticSegment("theme") view=ThemeSettingsPage/>
                 <Route path=(StaticSegment("games"), ParamSegment("id")) view=GamePage/>
             </Routes>
         </Router>
+    }
+}
+
+/// Applies a theme selection instantly client-side: sets/removes
+/// `document.documentElement.dataset.theme` (picked up immediately by the
+/// `[data-theme="..."]` CSS from `THEME_STYLE_CSS`) and persists the choice
+/// in the `theme` cookie (`None` -> "System" -> delete the cookie) so a hard
+/// refresh or a future visit boots into the same theme via `THEME_BOOT_SCRIPT`.
+/// No-op if `web_sys::window()` is unavailable (SSR - callers only invoke
+/// this from Effects/event handlers, which don't run during SSR).
+fn set_theme_client(slug: Option<&str>) {
+    use web_sys::wasm_bindgen::JsCast;
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    if let Some(html) = document.document_element() {
+        match slug {
+            Some(s) => {
+                let _ = html.set_attribute("data-theme", s);
+            }
+            None => {
+                let _ = html.remove_attribute("data-theme");
+            }
+        }
+    }
+    if let Ok(html_doc) = document.dyn_into::<web_sys::HtmlDocument>() {
+        let cookie = match slug {
+            Some(s) => format!("theme={}; path=/; max-age=31536000", s),
+            None => "theme=; path=/; max-age=0".to_string(),
+        };
+        let _ = html_doc.set_cookie(&cookie);
+    }
+}
+
+/// Reads the current `data-theme` attribute set on `<html>` (by
+/// `THEME_BOOT_SCRIPT` pre-paint, or by a prior `set_theme_client` call this
+/// session). `None` if unset (SSR, or "system") or `web_sys` is unavailable.
+fn local_data_theme() -> Option<String> {
+    web_sys::window()?
+        .document()?
+        .document_element()?
+        .get_attribute("data-theme")
+}
+
+#[component]
+fn ThemeSettingsPage() -> impl IntoView {
+    let current_user =
+        expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
+    let set_theme_action = ServerAction::<crate::auth::SetTheme>::new();
+
+    // `ServerAction`/`LocalResource` handles are `Copy`, so this can be
+    // called directly from any number of `move` closures below without
+    // needing an `Rc` wrapper.
+    fn select(
+        slug: Option<String>,
+        current_user: LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>,
+        set_theme_action: ServerAction<crate::auth::SetTheme>,
+    ) {
+        set_theme_client(slug.as_deref());
+        // Fire-and-forget profile sync; anonymous visitors only get the
+        // cookie/local behaviour above.
+        if matches!(current_user.get_untracked(), Some(Ok(Some(_)))) {
+            set_theme_action.dispatch(crate::auth::SetTheme { theme: slug });
+        }
+    }
+
+    view! {
+        <MainLayout>
+            <h1>"Theme"</h1>
+            <div class="theme-grid">
+                <div
+                    class="theme-tile"
+                    style="background-color: var(--mk-background); color: var(--mk-foreground);"
+                    on:click=move |_| select(None, current_user, set_theme_action)
+                >
+                    <div class="theme-tile-label">"System"</div>
+                </div>
+                {crate::theme::THEME_SLUGS.iter().map(|&(slug, name)| {
+                    let sample_html = crate::theme::SAMPLE_HTML.clone();
+                    let player_style = crate::theme::sample_player_style();
+                    let on_click = move |_| select(Some(slug.to_string()), current_user, set_theme_action);
+                    view! {
+                        <div
+                            class="theme-tile"
+                            data-theme=slug
+                            style=format!(
+                                "background-color: var(--mk-background); color: var(--mk-foreground); {}",
+                                player_style,
+                            )
+                            on:click=on_click
+                        >
+                            <div class="theme-tile-label">{name}</div>
+                            <div class="theme-tile-sample" inner_html=sample_html></div>
+                        </div>
+                    }
+                }).collect_view()}
+            </div>
+        </MainLayout>
     }
 }
 
@@ -633,6 +778,7 @@ fn GamePage() -> impl IntoView {
                             let is_finished = data.is_finished;
                             let id = data.id;
                             let html = data.html.clone();
+                            let player_style = data.player_style.clone();
                             let command_spec = data.command_spec.clone();
                             let player_names: Vec<String> = data.players.iter().map(|p| p.name.clone()).collect();
                             let waiting_on = StoredValue::new(
@@ -644,8 +790,8 @@ fn GamePage() -> impl IntoView {
                             view! {
                                 <div class="game-container">
                                     <div class="game-main">
-                                        <GameBoard html=html />
-                                        <RecentGameLogs game_id=id />
+                                        <GameBoard html=html player_style=player_style.clone() />
+                                        <RecentGameLogs game_id=id player_style=player_style.clone() />
                                         <Show when=move || is_turn>
                                             <GameCommandInput
                                                 game_id=id
@@ -717,5 +863,15 @@ mod tests {
     #[test]
     fn count_my_turn_zero_for_empty() {
         assert_eq!(count_my_turn(&[]), 0);
+    }
+
+    #[test]
+    fn theme_boot_script_contains_all_theme_slugs() {
+        for (slug, _) in crate::theme::THEME_SLUGS {
+            assert!(
+                THEME_BOOT_SCRIPT.contains(&format!("\"{slug}\"")),
+                "THEME_BOOT_SCRIPT missing slug {slug}"
+            );
+        }
     }
 }

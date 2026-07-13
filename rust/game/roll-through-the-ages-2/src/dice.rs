@@ -6,7 +6,7 @@
 //! precedent), rolling here instead draws from the game's own `rng` field,
 //! wired up in Task 2.
 
-use brdgme_color::{self as color, Color};
+use brdgme_color::NamedColor;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -43,13 +43,13 @@ impl Die {
 
 /// Port of `DiceValueColours`, keyed by the single-letter symbol used in a
 /// die's face string.
-pub fn dice_value_colour(symbol: char) -> Option<Color> {
+pub fn dice_value_colour(symbol: char) -> Option<NamedColor> {
     match symbol {
-        'F' => Some(color::GREEN),
-        'G' => Some(color::PURPLE),
-        'X' => Some(color::RED),
-        'W' => Some(color::CYAN),
-        'C' => Some(color::YELLOW),
+        'F' => Some(NamedColor::Green),
+        'G' => Some(NamedColor::Purple),
+        'X' => Some(NamedColor::Red),
+        'W' => Some(NamedColor::Cyan),
+        'C' => Some(NamedColor::Yellow),
         _ => None,
     }
 }

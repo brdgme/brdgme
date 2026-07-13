@@ -69,15 +69,14 @@ impl Suit {
         }
     }
 
-    pub fn color(self) -> brdgme_color::Color {
+    pub fn color(self) -> brdgme_color::NamedColor {
         match self {
-            Suit::LiteMetal => brdgme_color::YELLOW,
-            Suit::Yoko => brdgme_color::GREEN,
-            Suit::ChristineP => brdgme_color::RED,
-            Suit::KarlGitter => brdgme_color::BLUE,
-            // Go used render.Brown; brdgme_color's closest / only brown-family
-            // constant is BROWN.
-            Suit::Krypto => brdgme_color::BROWN,
+            Suit::LiteMetal => brdgme_color::NamedColor::Yellow,
+            Suit::Yoko => brdgme_color::NamedColor::Green,
+            Suit::ChristineP => brdgme_color::NamedColor::Red,
+            Suit::KarlGitter => brdgme_color::NamedColor::Blue,
+            // Go used render.Brown.
+            Suit::Krypto => brdgme_color::NamedColor::Brown,
         }
     }
 }

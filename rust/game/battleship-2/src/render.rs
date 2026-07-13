@@ -1,4 +1,4 @@
-use brdgme_color as color;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row};
 
@@ -6,23 +6,23 @@ use crate::{BOARD_SIZE, Board, Cell, Phase, PlayerState, PubState, Ship, other_p
 
 fn render_cell(cell: Cell, x: usize, y: usize) -> N {
     let bg = if (x + y).is_multiple_of(2) {
-        color::CYAN
+        NamedColor::Cyan
     } else {
-        color::BLUE
+        NamedColor::Blue
     };
     let content = match cell {
         Cell::Empty => N::text("  "),
         Cell::Carrier | Cell::Battleship | Cell::Cruiser | Cell::Submarine | Cell::Destroyer => {
-            N::Bg(color::GREY.into(), vec![N::text("  ")])
+            N::Bg(NamedColor::Grey.into(), vec![N::text("  ")])
         }
         Cell::Hit => N::Bg(
-            color::RED.into(),
+            NamedColor::Red.into(),
             vec![N::Fg(
-                color::YELLOW.into(),
+                NamedColor::Yellow.into(),
                 vec![N::Bold(vec![N::text("XX")])],
             )],
         ),
-        Cell::Miss => N::Fg(color::GREY.into(), vec![N::Bold(vec![N::text("XX")])]),
+        Cell::Miss => N::Fg(NamedColor::Grey.into(), vec![N::Bold(vec![N::text("XX")])]),
     };
     N::Bg(bg.into(), vec![content])
 }

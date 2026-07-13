@@ -1,15 +1,21 @@
-use brdgme_color::{BLUE, GREEN, GREY};
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Node as N, comma_list_and};
 
 use crate::{Phase, PlayerState, PubState};
 
 pub fn building(n: i32) -> N {
-    N::Fg(GREEN.into(), vec![N::Bold(vec![N::text(n.to_string())])])
+    N::Fg(
+        NamedColor::Green.into(),
+        vec![N::Bold(vec![N::text(n.to_string())])],
+    )
 }
 
 pub fn cheque(n: i32) -> N {
-    N::Fg(BLUE.into(), vec![N::Bold(vec![N::text(n.to_string())])])
+    N::Fg(
+        NamedColor::Blue.into(),
+        vec![N::Bold(vec![N::text(n.to_string())])],
+    )
 }
 
 pub fn bold_num(n: i32) -> N {
@@ -70,7 +76,7 @@ fn render(pub_state: &PubState, player: Option<usize>, own: Option<&PlayerState>
                 Some((p, amt)) => {
                     out.push(N::Group(vec![bold_num(amt), N::text(" by "), N::Player(p)]))
                 }
-                None => out.push(N::Fg(GREY.into(), vec![N::text("none")])),
+                None => out.push(N::Fg(NamedColor::Grey.into(), vec![N::text("none")])),
             }
             out.push(N::text("\n"));
             if let Some(p) = player {

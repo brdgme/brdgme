@@ -5,15 +5,19 @@ pub use crate::ast::{
     table_with_spacer,
 };
 pub use crate::error::MarkupError;
+pub use crate::html_class::{html_class, markup_class_css};
 use crate::parser::markup;
-pub use crate::transform::{Player, from_lines, to_lines, transform};
+pub use crate::semantic::{SemanticCol, SemanticColType, SemanticPlayer, transform_semantic};
+pub use crate::transform::{Player, from_lines, to_lines, transform, transform_with_palette};
 
 mod ansi;
 pub mod ast;
 mod error;
 mod html;
+mod html_class;
 mod parser;
 mod plain;
+mod semantic;
 mod transform;
 
 pub fn html(input: &[TNode]) -> String {
@@ -149,7 +153,7 @@ mod tests {
             )],
             &[Player {
                 name: "Alice".to_string(),
-                color: BLUE,
+                color: brdgme_color::LIGHT.blue,
             }],
         ));
         assert_eq!(
@@ -245,8 +249,11 @@ mod tests {
                 vec![N::Table(vec![vec![(
                     A::Center,
                     vec![N::Fg(
-                        AMBER.into(),
-                        vec![N::Bg(BLUE.into(), vec![N::Bold(vec![N::text("moo")])],),],
+                        NamedColor::Orange.into(),
+                        vec![N::Bg(
+                            NamedColor::Blue.into(),
+                            vec![N::Bold(vec![N::text("moo")])],
+                        ),],
                     ),],
                 ),],]),],
             ),])],)

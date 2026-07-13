@@ -14,7 +14,7 @@
 //! - `RenderStandard52Hidden` / `RenderStandard52HiddenFixedWidth` (rendering
 //!   a face-down card; texas_holdem_1 doesn't hide cards this way).
 
-use brdgme_color::Color;
+use brdgme_color::NamedColor;
 use brdgme_markup::Node as N;
 use serde::{Deserialize, Serialize};
 
@@ -118,10 +118,10 @@ impl Suit {
         }
     }
 
-    fn color(self) -> Color {
+    fn color(self) -> NamedColor {
         match self {
-            Suit::Clubs | Suit::Spades => brdgme_color::BLACK,
-            Suit::Diamonds | Suit::Hearts => brdgme_color::RED,
+            Suit::Clubs | Suit::Spades => NamedColor::Foreground,
+            Suit::Diamonds | Suit::Hearts => NamedColor::Red,
         }
     }
 }

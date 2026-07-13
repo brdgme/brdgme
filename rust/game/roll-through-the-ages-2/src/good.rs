@@ -1,6 +1,6 @@
 //! Port of `brdgme-go/roll_through_the_ages_1/good.go`.
 
-use brdgme_color::{self as color, Color};
+use brdgme_color::NamedColor;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
@@ -49,13 +49,13 @@ impl Good {
         }
     }
 
-    pub fn colour(self) -> Color {
+    pub fn colour(self) -> NamedColor {
         match self {
-            Good::Wood => color::PURPLE,
-            Good::Stone => color::GREY,
-            Good::Pottery => color::RED,
-            Good::Cloth => color::BLUE,
-            Good::Spearhead => color::YELLOW,
+            Good::Wood => NamedColor::Purple,
+            Good::Stone => NamedColor::Grey,
+            Good::Pottery => NamedColor::Red,
+            Good::Cloth => NamedColor::Blue,
+            Good::Spearhead => NamedColor::Yellow,
         }
     }
 }

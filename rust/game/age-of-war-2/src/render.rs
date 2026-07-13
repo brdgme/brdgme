@@ -1,4 +1,4 @@
-use brdgme_color::{GREEN, GREY};
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -57,7 +57,10 @@ pub fn render_castle(state: &PubState, idx: usize, roll: &[Die]) -> N {
         // joined via a nested colSpacing=1 table below.
         let mut cells: Row = vec![(
             A::Left,
-            vec![N::Fg(GREY.into(), vec![N::text(format!("{}.", i + 1))])],
+            vec![N::Fg(
+                NamedColor::Grey.into(),
+                vec![N::text(format!("{}.", i + 1))],
+            )],
         )];
         let (can_afford, _) = l.can_afford(roll);
         let marker = (state.currently_attacking == Some(idx)
@@ -68,13 +71,19 @@ pub fn render_castle(state: &PubState, idx: usize, roll: &[Die]) -> N {
         if marker {
             cells.push((
                 A::Left,
-                vec![N::Bold(vec![N::Fg(GREEN.into(), vec![N::text("X ")])])],
+                vec![N::Bold(vec![N::Fg(
+                    NamedColor::Green.into(),
+                    vec![N::text("X ")],
+                )])],
             ));
         } else {
             cells.push((A::Left, vec![N::text("  ")]));
         }
         if state.currently_attacking == Some(idx) && state.completed_lines.contains(&i) {
-            cells.push((A::Left, vec![N::Fg(GREY.into(), vec![N::text("complete")])]));
+            cells.push((
+                A::Left,
+                vec![N::Fg(NamedColor::Grey.into(), vec![N::text("complete")])],
+            ));
         } else {
             for n in l.render_row() {
                 cells.push((A::Left, vec![n]));

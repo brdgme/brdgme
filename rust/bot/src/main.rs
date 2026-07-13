@@ -4,7 +4,7 @@ mod prompt;
 use anyhow::{Context, Result, anyhow};
 use axum::{Router, extract::State as AxumState, http::StatusCode, routing::get};
 use brdgme_cmd::api::{Request, Response};
-use brdgme_color::player_color;
+use brdgme_color::LIGHT;
 use futures_util::StreamExt;
 use nats::{BotCommandEvent, BotTurnEvent};
 use prompt::{
@@ -555,14 +555,14 @@ fn build_prompt_context(
         .map(|s| s.as_str())
         .unwrap_or(bot_name)
         .to_string();
-    let my_colour = format!("{}", player_color(player_position));
+    let my_colour = format!("{}", LIGHT.player_color(player_position));
 
     let players = names
         .iter()
         .enumerate()
         .map(|(i, name)| PlayerInfo {
             name: name.clone(),
-            colour: format!("{}", player_color(i)),
+            colour: format!("{}", LIGHT.player_color(i)),
             score: bot_ctx.points.get(i).copied().unwrap_or(0.0),
         })
         .collect();

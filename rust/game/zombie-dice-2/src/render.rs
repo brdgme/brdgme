@@ -50,7 +50,7 @@ pub fn render_dice_result_list(drl: &[DiceResult]) -> N {
 /// the Go `PubRender` cup section.
 fn render_cup(cup: &[Dice]) -> N {
     if cup.is_empty() {
-        return N::Fg(color::GREY.into(), vec![N::text("None")]);
+        return N::Fg(color::NamedColor::Grey.into(), vec![N::text("None")]);
     }
     let counts = cup_counts(cup);
     let order = [Colour::Green, Colour::Yellow, Colour::Red];

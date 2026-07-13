@@ -1,3 +1,4 @@
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -86,15 +87,15 @@ fn player_table(pub_state: &PubState) -> Vec<Row> {
     ];
     for p in 0..pub_state.players {
         let status = if pub_state.eliminated.get(p).copied().unwrap_or(false) {
-            N::Fg(brdgme_color::GREY.into(), vec![N::text("eliminated")])
+            N::Fg(NamedColor::Grey.into(), vec![N::text("eliminated")])
         } else if pub_state.protected.get(p).copied().unwrap_or(false) {
             N::Bold(vec![N::Fg(
-                brdgme_color::BLACK.into(),
+                NamedColor::Foreground.into(),
                 vec![N::text("protected")],
             )])
         } else {
             N::Bold(vec![N::Fg(
-                brdgme_color::GREEN.into(),
+                NamedColor::Green.into(),
                 vec![N::text("active")],
             )])
         };
@@ -144,7 +145,7 @@ fn help_table() -> Vec<Row> {
             (A::Left, vec![N::text(format!("{}", deck_count(c)))]),
             (
                 A::Left,
-                vec![N::Fg(brdgme_color::GREY.into(), vec![N::text(c.text())])],
+                vec![N::Fg(NamedColor::Grey.into(), vec![N::text(c.text())])],
             ),
         ]);
     }

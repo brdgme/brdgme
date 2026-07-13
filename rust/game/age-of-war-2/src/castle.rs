@@ -1,4 +1,4 @@
-use brdgme_color::{BLUE, Color, GREEN, GREY, PURPLE, RED};
+use brdgme_color::NamedColor;
 use brdgme_markup::Node as N;
 use serde::{Deserialize, Serialize};
 
@@ -46,12 +46,12 @@ impl Die {
     }
 
     /// Port of DiceColours (InfantryColour = render.Blue for the inf faces).
-    pub fn colour(self) -> Color {
+    pub fn colour(self) -> NamedColor {
         match self {
-            Die::Inf1 | Die::Inf2 | Die::Inf3 => BLUE,
-            Die::Archery => PURPLE,
-            Die::Cavalry => GREEN,
-            Die::Daimyo => RED,
+            Die::Inf1 | Die::Inf2 | Die::Inf3 => NamedColor::Blue,
+            Die::Archery => NamedColor::Purple,
+            Die::Cavalry => NamedColor::Green,
+            Die::Daimyo => NamedColor::Red,
         }
     }
 
@@ -110,14 +110,14 @@ impl Clan {
     }
 
     /// Port of ClanColours.
-    pub fn colour(self) -> Color {
+    pub fn colour(self) -> NamedColor {
         match self {
-            Clan::Oda => brdgme_color::YELLOW,
-            Clan::Tokugawa => GREY,
-            Clan::Uesugi => PURPLE,
-            Clan::Mori => RED,
-            Clan::Chosokabe => brdgme_color::BLACK,
-            Clan::Shimazu => GREEN,
+            Clan::Oda => NamedColor::Yellow,
+            Clan::Tokugawa => NamedColor::Grey,
+            Clan::Uesugi => NamedColor::Purple,
+            Clan::Mori => NamedColor::Red,
+            Clan::Chosokabe => NamedColor::Foreground,
+            Clan::Shimazu => NamedColor::Green,
         }
     }
 
@@ -191,7 +191,7 @@ impl Line {
 /// Port of RenderInf.
 pub fn render_inf(n: u32) -> N {
     N::Bold(vec![N::Fg(
-        BLUE.into(),
+        NamedColor::Blue.into(),
         vec![N::text(format!("{} inf", n))],
     )])
 }

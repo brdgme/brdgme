@@ -7,18 +7,29 @@
 > sequencing and defers to it for slots, values, transforms, and contrast
 > requirements.
 
-**Status:** Pending - post-go-live, non-blocking
+**Status:** In progress - implementation plan at
+`docs/superpowers/plans/2026-07-13-26-theming-semantic-colors.md`
 **Added:** 2026-07-05
-**Revised:** 2026-07-11 (palette finalised, Go markup question answered)
+**Revised:** 2026-07-13 (`soften` transform replaces the two
+BACKGROUND_SHADE slots; palette is now 12 slots - see THEMING.md)
 
 ## Decisions (2026-07-05)
 
 - **Board colours: full remap per theme.** Each theme provides values for
-  the full abstract palette: 14 slots (9 hues + GREY + FOREGROUND,
-  BACKGROUND, BACKGROUND_SHADE_1, BACKGROUND_SHADE_2) plus the 8-colour
-  player sequence - see `docs/authoring/THEMING.md` (2026-07-11; replaces
-  the earlier assumption that all ~21 Material colours survive). No
-  fixed-board shortcut.
+  the full abstract palette: 12 slots (9 hues + GREY + FOREGROUND +
+  BACKGROUND) plus the 8-colour player sequence - see
+  `docs/authoring/THEMING.md`. No fixed-board shortcut.
+- **`soften(color, pct)` transform (2026-07-13).** Surface steps and
+  muted hue washes are derived, not slots: resolve the slot through the
+  theme, then move HSL lightness toward BACKGROUND's lightness by pct%
+  (hue/saturation kept). This one transform reproduces the old
+  checkerboard shade slots (`soften(FOREGROUND, 86)`/`soften(FOREGROUND,
+  75)` = `#dbdbdb`/`#bfbfbf` on light, vs the historical `220`/`190`
+  greys) and Acquire's available-tile pink (`soften(PINK, 75)` =
+  `#f7bed4` vs the historical Material Pink 100 `#f8bbd0`), and is
+  direction-neutral on dark themes. Like `contrast`, it is evaluated
+  after theme resolution, so markup stays fully abstract. Softened
+  colours are backgrounds only.
 - **Neutral light/dark are the defaults**, mapped from the existing
   Material palette. System `prefers-color-scheme` picks between them when
   the user has no explicit preference. Dracula is opt-in, not the dark
@@ -67,10 +78,11 @@ Game render colours are baked in as literal RGB:
 Make colour semantic end-to-end and resolve to concrete values only at
 the final render boundary, against a theme palette:
 
-1. **`brdgme-color`:** introduce a `NamedColor` enum covering the 14
+1. **`brdgme-color`:** introduce a `NamedColor` enum covering the 12
    palette slots defined in `docs/authoring/THEMING.md` (RED ... BROWN,
-   GREY, FOREGROUND, BACKGROUND, BACKGROUND_SHADE_1/2) and a `Palette`
-   type: `NamedColor -> Color` plus the 8-entry player-colour list. The
+   GREY, FOREGROUND, BACKGROUND) and a `Palette` type: `NamedColor ->
+   Color` plus the 8-entry player-colour list, plus the `soften` and
+   `contrast` resolution helpers. The
    current Material values become the built-in `LIGHT` palette
    (FOREGROUND/BACKGROUND replace BLACK/WHITE; the 8 unused constants
    are deleted and AMBER is renamed ORANGE per THEMING.md Appendix A).

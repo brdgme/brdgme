@@ -1,6 +1,6 @@
 use std::fmt;
 
-use brdgme_color::Color;
+use brdgme_color::NamedColor;
 use serde::{Deserialize, Serialize};
 
 /// Card values match the Go `love_letter_1` int constants: `Guard = 1` up to
@@ -63,16 +63,16 @@ impl Card {
         }
     }
 
-    pub fn color(self) -> Color {
+    pub fn color(self) -> NamedColor {
         match self {
-            Card::Guard => brdgme_color::GREY,
-            Card::Priest => brdgme_color::CYAN,
-            Card::Baron => brdgme_color::GREEN,
-            Card::Handmaid => brdgme_color::BLACK,
-            Card::Prince => brdgme_color::PURPLE,
-            Card::King => brdgme_color::BLUE,
-            Card::Countess => brdgme_color::RED,
-            Card::Princess => brdgme_color::YELLOW,
+            Card::Guard => NamedColor::Grey,
+            Card::Priest => NamedColor::Cyan,
+            Card::Baron => NamedColor::Green,
+            Card::Handmaid => NamedColor::Foreground,
+            Card::Prince => NamedColor::Purple,
+            Card::King => NamedColor::Blue,
+            Card::Countess => NamedColor::Red,
+            Card::Princess => NamedColor::Yellow,
         }
     }
 }

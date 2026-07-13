@@ -1,4 +1,4 @@
-use brdgme_color::{BLACK, CYAN, GREY, RED};
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -8,7 +8,7 @@ fn render(pub_state: &PubState, _player: Option<usize>, hand: Option<&[u8]>) -> 
     let mut out: Vec<N> = vec![];
 
     let bid = if pub_state.bid_quantity == 0 {
-        N::Fg(GREY.into(), vec![N::text("first bid")])
+        N::Fg(NamedColor::Grey.into(), vec![N::text("first bid")])
     } else {
         render_bid(pub_state.bid_quantity, pub_state.bid_value)
     };
@@ -153,7 +153,11 @@ fn ones_str(n: i32) -> &'static str {
 }
 
 pub fn render_die(value: i32) -> N {
-    let color = if value == 1 { CYAN } else { BLACK };
+    let color = if value == 1 {
+        NamedColor::Cyan
+    } else {
+        NamedColor::Foreground
+    };
     N::Bold(vec![N::Fg(color.into(), vec![N::text(value.to_string())])])
 }
 
@@ -166,7 +170,7 @@ pub fn reveal_table(player_dice: &[Vec<u8>], active: &[usize], bid_value: i32) -
                 dice_nodes.push(N::text(" "));
             }
             if *d as i32 == bid_value || *d == 1 {
-                dice_nodes.push(N::Fg(RED.into(), vec![N::text(d.to_string())]));
+                dice_nodes.push(N::Fg(NamedColor::Red.into(), vec![N::text(d.to_string())]));
             } else {
                 dice_nodes.push(N::text(d.to_string()));
             }

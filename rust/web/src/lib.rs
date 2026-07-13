@@ -2,6 +2,8 @@
 
 pub mod app;
 
+pub mod theme;
+
 #[cfg(feature = "ssr")]
 pub mod state;
 

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use brdgme_color::GREY;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::ast::Col;
 use brdgme_markup::{Align, Node as N, Row, table_with_gap};
@@ -224,7 +224,7 @@ fn render_player_tile(tile: &Tile, open: &HashMap<Dir, bool>) -> Vec<N> {
     s.push_str(&bottom_c.repeat(TILE_WIDTH - 2));
     s.push_str(render_corner(DIR_DOWN | DIR_RIGHT, open));
 
-    let fg = player_col(tile.player).mono().inv();
+    let fg = player_col(tile.player).contrast();
     let bg = player_col(tile.player);
     vec![N::Bold(vec![N::Fg(fg, vec![N::Bg(bg, vec![N::text(s)])])])]
 }
@@ -254,12 +254,12 @@ fn render_empty_tile(loc: Loc, owner: i32) -> Vec<N> {
     let before = remaining_width / 2;
     let after = remaining_width - before;
     let label = if owner == NO_PLAYER {
-        N::Bold(vec![N::Fg(GREY.into(), vec![N::text(s)])])
+        N::Bold(vec![N::Fg(NamedColor::Grey.into(), vec![N::text(s)])])
     } else {
         N::Bold(vec![N::Fg(player_col(owner), vec![N::text(s)])])
     };
     vec![N::Fg(
-        GREY.into(),
+        NamedColor::Grey.into(),
         vec![
             N::text(format!("{}{}", top, " ".repeat(before))),
             label,
@@ -379,7 +379,10 @@ fn render_player_remaining_tiles(state: &PubState, p_num: usize) -> Vec<N> {
     }
 
     if !has_tiles {
-        return vec![N::Bold(vec![N::Fg(GREY.into(), vec![N::text("None")])])];
+        return vec![N::Bold(vec![N::Fg(
+            NamedColor::Grey.into(),
+            vec![N::text("None")],
+        )])];
     }
 
     nodes.push(N::text("\n"));

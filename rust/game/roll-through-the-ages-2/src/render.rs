@@ -8,7 +8,7 @@
 //! `colSpacing=2`; all six tables here use `table_with_gap(&rows, 2)` to
 //! insert the equivalent spacer cells (see `docs/porting/RENDER_PARITY.md`).
 
-use brdgme_color::{BLUE, GREEN, GREY, RED};
+use brdgme_color::NamedColor;
 use brdgme_game::game::Renderer;
 use brdgme_markup::ast::Cell;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
@@ -52,9 +52,7 @@ fn render_dice(die: Die) -> Vec<N> {
     let mut run_colour = None;
     for c in s.chars() {
         let colour = crate::dice::dice_value_colour(c);
-        if colour.map(|c| (c.r, c.g, c.b))
-            != run_colour.map(|c: brdgme_color::Color| (c.r, c.g, c.b))
-        {
+        if colour != run_colour {
             if !run.is_empty() {
                 nodes.push(match run_colour {
                     Some(col) => N::Fg(col.into(), vec![N::text(run.clone())]),
@@ -119,7 +117,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
         let dice_string = d.face_string();
         number_row.push(cell(vec![
             N::text(" ".repeat(dice_string.len() / 2)),
-            N::Fg(GREY.into(), vec![N::text((i + 1).to_string())]),
+            N::Fg(NamedColor::Grey.into(), vec![N::text((i + 1).to_string())]),
         ]));
     }
     for &d in game.kept_dice.iter() {
@@ -128,7 +126,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
     out.push(N::Bold(vec![N::text("Dice")]));
     out.push(N::text(" "));
     out.push(N::Fg(
-        GREY.into(),
+        NamedColor::Grey.into(),
         vec![N::text("(F: food, W: worker, G: good, C: coin, X: skull)")],
     ));
     out.push(N::text("\n"));
@@ -180,7 +178,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
     out.push(N::Bold(vec![N::text("Cities")]));
     out.push(N::text(" "));
     out.push(N::Fg(
-        GREY.into(),
+        NamedColor::Grey.into(),
         vec![N::text("(number of dice and food used per turn)")],
     ));
     out.push(N::text("\n"));
@@ -206,13 +204,16 @@ fn render(game: &Game, player: usize) -> Vec<N> {
             progress_nodes.push(N::text(" "));
         }
         for _ in 0..remaining {
-            progress_nodes.push(N::Fg(GREY.into(), vec![N::text(".")]));
+            progress_nodes.push(N::Fg(NamedColor::Grey.into(), vec![N::text(".")]));
             progress_nodes.push(N::text(" "));
         }
         let mut row: Row = vec![cell(vec![N::Player(p)]), cell(progress_nodes)];
         if remaining > 0 {
             let left = bold_if(
-                N::Fg(GREY.into(), vec![N::text(format!("({} left)", remaining))]),
+                N::Fg(
+                    NamedColor::Grey.into(),
+                    vec![N::text(format!("({} left)", remaining))],
+                ),
                 p == player,
             );
             row.push(cell(vec![left]));
@@ -238,13 +239,16 @@ fn render(game: &Game, player: usize) -> Vec<N> {
             let node = if game.boards[p].developments.contains(&d) {
                 render_x(p, player == p)
             } else {
-                N::Fg(GREY.into(), vec![N::text(".")])
+                N::Fg(NamedColor::Grey.into(), vec![N::text(".")])
             };
             row.push(cell_align(vec![node], A::Center));
         }
         row.push(cell(vec![N::text(format!(" {}", dv.cost))]));
         row.push(cell(vec![N::text(format!(" {}", dv.points))]));
-        row.push(cell(vec![N::Fg(GREY.into(), vec![N::text(dv.effect)])]));
+        row.push(cell(vec![N::Fg(
+            NamedColor::Grey.into(),
+            vec![N::text(dv.effect)],
+        )]));
         dev_rows.push(row);
     }
     out.push(table_with_gap(&dev_rows, 2));
@@ -265,7 +269,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
         for p in 0..game.players {
             let progress = game.boards[p].monuments.get(&m).copied().unwrap_or(0);
             let node = if progress == 0 {
-                N::Fg(GREY.into(), vec![N::text(".")])
+                N::Fg(NamedColor::Grey.into(), vec![N::text(".")])
             } else if progress == mv.size {
                 render_x(p, game.boards[p].monument_built_first.contains(&m))
             } else {
@@ -278,7 +282,10 @@ fn render(game: &Game, player: usize) -> Vec<N> {
             N::Bold(vec![N::text(mv.points.to_string())]),
             N::text(format!("/{}", mv.subsequent_points)),
         ]));
-        row.push(cell(vec![N::Fg(GREY.into(), vec![N::text(mv.effect)])]));
+        row.push(cell(vec![N::Fg(
+            NamedColor::Grey.into(),
+            vec![N::text(mv.effect)],
+        )]));
         mon_rows.push(row);
     }
     out.push(table_with_gap(&mon_rows, 2));
@@ -303,7 +310,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
                     p == player,
                 )
             } else {
-                N::Fg(GREY.into(), vec![N::text(".")])
+                N::Fg(NamedColor::Grey.into(), vec![N::text(".")])
             };
             row.push(cell_align(vec![node], A::Center));
         }
@@ -328,7 +335,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
     res_rows.push(vec![]);
 
     let mut food_row: Row = vec![cell(vec![N::Bold(vec![N::Fg(
-        GREEN.into(),
+        NamedColor::Green.into(),
         vec![N::text("food")],
     )])])];
     for p in 0..game.players {
@@ -338,7 +345,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
     res_rows.push(food_row);
 
     let mut ship_row: Row = vec![cell(vec![N::Bold(vec![N::Fg(
-        BLUE.into(),
+        NamedColor::Blue.into(),
         vec![N::text("ship")],
     )])])];
     for p in 0..game.players {
@@ -348,7 +355,7 @@ fn render(game: &Game, player: usize) -> Vec<N> {
     res_rows.push(ship_row);
 
     let mut disaster_row: Row = vec![cell(vec![N::Bold(vec![N::Fg(
-        RED.into(),
+        NamedColor::Red.into(),
         vec![N::text("disaster")],
     )])])];
     for p in 0..game.players {

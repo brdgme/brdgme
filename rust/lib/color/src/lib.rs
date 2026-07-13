@@ -5,9 +5,13 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+pub use crate::css::{IN_USE_SOFTENS, palette_css_vars};
 pub use crate::error::ColorError;
+pub use crate::palette::{DARK, DRACULA, LIGHT, NamedColor, Palette, contrast, soften, themes};
 
+mod css;
 mod error;
+mod palette;
 
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Color {
@@ -19,9 +23,13 @@ pub struct Color {
 impl Color {
     pub fn mono(self) -> Color {
         if self.r / 3 + self.g / 3 + self.b / 3 >= 128 {
-            WHITE
+            Color {
+                r: 255,
+                g: 255,
+                b: 255,
+            }
         } else {
-            BLACK
+            Color { r: 0, g: 0, b: 0 }
         }
     }
 
@@ -83,8 +91,8 @@ pub struct Style<'a> {
 impl<'a> Default for Style<'a> {
     fn default() -> Style<'a> {
         Style {
-            fg: &BLACK,
-            bg: &WHITE,
+            fg: &LIGHT.foreground,
+            bg: &LIGHT.background,
             bold: false,
         }
     }
@@ -105,122 +113,10 @@ impl Style<'_> {
     }
 }
 
-pub static RED: Color = Color {
-    r: 211,
-    g: 47,
-    b: 47,
-};
-pub static PINK: Color = Color {
-    r: 194,
-    g: 24,
-    b: 91,
-};
-pub static PURPLE: Color = Color {
-    r: 123,
-    g: 31,
-    b: 162,
-};
-pub static DEEP_PURPLE: Color = Color {
-    r: 81,
-    g: 45,
-    b: 168,
-};
-pub static INDIGO: Color = Color {
-    r: 48,
-    g: 63,
-    b: 159,
-};
-pub static BLUE: Color = Color {
-    r: 25,
-    g: 118,
-    b: 210,
-};
-pub static LIGHT_BLUE: Color = Color {
-    r: 2,
-    g: 136,
-    b: 209,
-};
-pub static CYAN: Color = Color {
-    r: 0,
-    g: 151,
-    b: 167,
-};
-pub static TEAL: Color = Color {
-    r: 0,
-    g: 121,
-    b: 107,
-};
-pub static GREEN: Color = Color {
-    r: 56,
-    g: 142,
-    b: 60,
-};
-pub static LIGHT_GREEN: Color = Color {
-    r: 104,
-    g: 159,
-    b: 56,
-};
-pub static LIME: Color = Color {
-    r: 175,
-    g: 180,
-    b: 43,
-};
-pub static YELLOW: Color = Color {
-    r: 251,
-    g: 192,
-    b: 45,
-};
-pub static AMBER: Color = Color {
-    r: 255,
-    g: 160,
-    b: 0,
-};
-pub static ORANGE: Color = Color {
-    r: 245,
-    g: 124,
-    b: 0,
-};
-pub static DEEP_ORANGE: Color = Color {
-    r: 230,
-    g: 74,
-    b: 25,
-};
-pub static BROWN: Color = Color {
-    r: 93,
-    g: 64,
-    b: 55,
-};
-pub static GREY: Color = Color {
-    r: 97,
-    g: 97,
-    b: 97,
-};
-pub static BLUE_GREY: Color = Color {
-    r: 69,
-    g: 90,
-    b: 100,
-};
-pub static WHITE: Color = Color {
-    r: 255,
-    g: 255,
-    b: 255,
-};
-pub static BLACK: Color = Color { r: 0, g: 0, b: 0 };
-
 impl fmt::Display for Color {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
     }
-}
-
-static PLAYER_COLORS: &[Color] = &[GREEN, RED, BLUE, AMBER, PURPLE, BROWN, BLUE_GREY];
-
-pub fn player_colors() -> &'static [Color] {
-    PLAYER_COLORS
-}
-
-pub fn player_color(player: usize) -> &'static Color {
-    &PLAYER_COLORS[player % PLAYER_COLORS.len()]
 }
 
 // Normalises a color name to lowercase alpha-only before matching.
@@ -232,27 +128,28 @@ fn named(name: &str) -> Option<&'static Color> {
         .collect::<String>()
         .to_lowercase();
     match key.as_str() {
-        "red" => Some(&RED),
-        "pink" => Some(&PINK),
-        "purple" => Some(&PURPLE),
-        "deeppurple" => Some(&DEEP_PURPLE),
-        "indigo" => Some(&INDIGO),
-        "blue" => Some(&BLUE),
-        "lightblue" => Some(&LIGHT_BLUE),
-        "cyan" => Some(&CYAN),
-        "teal" => Some(&TEAL),
-        "green" => Some(&GREEN),
-        "lightgreen" => Some(&LIGHT_GREEN),
-        "lime" => Some(&LIME),
-        "yellow" => Some(&YELLOW),
-        "amber" => Some(&AMBER),
-        "orange" => Some(&ORANGE),
-        "deeporange" => Some(&DEEP_ORANGE),
-        "brown" => Some(&BROWN),
-        "grey" => Some(&GREY),
-        "bluegrey" => Some(&BLUE_GREY),
-        "white" => Some(&WHITE),
-        "black" => Some(&BLACK),
+        "red" => Some(&LIGHT.red),
+        "pink" => Some(&LIGHT.pink),
+        "purple" => Some(&LIGHT.purple),
+        "deeppurple" => Some(&LIGHT.purple),
+        "indigo" => Some(&LIGHT.blue),
+        "blue" => Some(&LIGHT.blue),
+        "lightblue" => Some(&LIGHT.blue),
+        "cyan" => Some(&LIGHT.cyan),
+        "teal" => Some(&LIGHT.cyan),
+        "green" => Some(&LIGHT.green),
+        "lightgreen" => Some(&LIGHT.green),
+        "lime" => Some(&LIGHT.green),
+        "yellow" => Some(&LIGHT.yellow),
+        "amber" => Some(&LIGHT.orange),
+        "orange" => Some(&LIGHT.orange),
+        "deeporange" => Some(&LIGHT.orange),
+        "brown" => Some(&LIGHT.brown),
+        "grey" => Some(&LIGHT.grey),
+        "bluegrey" => Some(&LIGHT.cyan),
+        "magenta" => Some(&LIGHT.purple),
+        "white" => Some(&LIGHT.background),
+        "black" => Some(&LIGHT.foreground),
         _ => None,
     }
 }
@@ -263,14 +160,18 @@ mod tests {
 
     #[test]
     fn color_from_hex_works() {
-        assert_eq!(Color::from_hex(&RED.hex()).expect("error parsing hex"), RED);
+        assert_eq!(
+            Color::from_hex(&LIGHT.red.hex()).expect("error parsing hex"),
+            LIGHT.red
+        );
     }
 
     #[test]
     fn color_from_str_named_works() {
-        assert_eq!("Green".parse::<Color>().unwrap(), GREEN);
-        assert_eq!("BlueGrey".parse::<Color>().unwrap(), BLUE_GREY);
-        assert_eq!("blue_grey".parse::<Color>().unwrap(), BLUE_GREY);
-        assert_eq!("BLUE_GREY".parse::<Color>().unwrap(), BLUE_GREY);
+        assert_eq!("Green".parse::<Color>().unwrap(), LIGHT.green);
+        assert_eq!("BlueGrey".parse::<Color>().unwrap(), LIGHT.cyan);
+        assert_eq!("blue_grey".parse::<Color>().unwrap(), LIGHT.cyan);
+        assert_eq!("BLUE_GREY".parse::<Color>().unwrap(), LIGHT.cyan);
+        assert_eq!("Amber".parse::<Color>().unwrap(), LIGHT.orange);
     }
 }

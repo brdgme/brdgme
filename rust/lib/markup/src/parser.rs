@@ -1,10 +1,12 @@
 use std::str::FromStr;
 
+use combine::error::StreamError;
 use combine::parser::char::{digit, letter, string};
+use combine::stream::StreamErrorFor;
 use combine::{ParseError, Stream, attempt, choice, none_of, parser};
 use combine::{Parser, many, many1};
 
-use brdgme_color::*;
+use brdgme_color::NamedColor;
 
 use crate::ast::{Align, Cell, Col, ColTrans, ColType, Node, Row};
 
@@ -96,12 +98,26 @@ where
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (
-        choice((col_type_player(), col_type_rgb())),
+        choice((
+            attempt(col_type_player()),
+            attempt(col_type_rgb()),
+            attempt(col_type_soften()),
+            attempt(col_type_named()),
+        )),
         many(col_trans()),
     )
-        .map(|(ct, trans)| Col {
-            color: ct,
-            transform: trans,
+        .map(|(ct, trans): (ColType, Vec<ColTrans>)| {
+            let has_inv = trans.contains(&ColTrans::Inv);
+            let has_mono = trans.contains(&ColTrans::Mono);
+            let trans = if has_inv && has_mono {
+                vec![ColTrans::Contrast]
+            } else {
+                trans
+            };
+            Col {
+                color: ct,
+                transform: trans,
+            }
         })
 }
 
@@ -111,6 +127,102 @@ where
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
     (attempt(string("player(")), parse_usize(), string(")")).map(|(_, p, _)| ColType::Player(p))
+}
+
+fn resolve_named(name: &str) -> Option<NamedColor> {
+    match name {
+        "magenta" => Some(NamedColor::Purple),
+        "amber" => Some(NamedColor::Orange),
+        "black" => Some(NamedColor::Foreground),
+        "white" => Some(NamedColor::Background),
+        _ => NamedColor::from_str(name).ok(),
+    }
+}
+
+fn col_type_named<Input>() -> impl Parser<Input, Output = ColType>
+where
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+{
+    many1::<String, _, _>(letter()).and_then(|name| {
+        resolve_named(&name)
+            .map(|color| ColType::Named {
+                color,
+                soften: None,
+            })
+            .ok_or_else(|| <StreamErrorFor<Input>>::message_static_message("unknown named colour"))
+    })
+}
+
+fn col_type_soften<Input>() -> impl Parser<Input, Output = ColType>
+where
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+{
+    (
+        attempt(string("soften(")),
+        many1::<String, _, _>(letter()),
+        string(","),
+        combine::optional(string(" ")),
+        parse_u8(),
+        string(")"),
+    )
+        .and_then(|(_, name, _, _, pct, _)| {
+            resolve_named(&name)
+                .map(|color| ColType::Named {
+                    color,
+                    soften: Some(pct),
+                })
+                .ok_or_else(|| {
+                    <StreamErrorFor<Input>>::message_static_message("unknown named colour")
+                })
+        })
+}
+
+fn rgb_reverse_map(r: u8, g: u8, b: u8) -> ColType {
+    let named = match (r, g, b) {
+        (211, 47, 47) => Some((NamedColor::Red, None)),
+        (194, 24, 91) => Some((NamedColor::Pink, None)),
+        (123, 31, 162) => Some((NamedColor::Purple, None)),
+        (81, 45, 168) => Some((NamedColor::Purple, None)),
+        (48, 63, 159) => Some((NamedColor::Blue, None)),
+        (25, 118, 210) => Some((NamedColor::Blue, None)),
+        (2, 136, 209) => Some((NamedColor::Blue, None)),
+        (0, 151, 167) => Some((NamedColor::Cyan, None)),
+        (0, 121, 107) => Some((NamedColor::Cyan, None)),
+        (56, 142, 60) => Some((NamedColor::Green, None)),
+        (104, 159, 56) => Some((NamedColor::Green, None)),
+        (175, 180, 43) => Some((NamedColor::Green, None)),
+        (251, 192, 45) => Some((NamedColor::Yellow, None)),
+        (255, 160, 0) => Some((NamedColor::Orange, None)),
+        (245, 124, 0) => Some((NamedColor::Orange, None)),
+        (230, 74, 25) => Some((NamedColor::Orange, None)),
+        (93, 64, 55) => Some((NamedColor::Brown, None)),
+        (97, 97, 97) => Some((NamedColor::Grey, None)),
+        (69, 90, 100) => Some((NamedColor::Cyan, None)),
+        (255, 255, 255) => Some((NamedColor::Background, None)),
+        (0, 0, 0) => Some((NamedColor::Foreground, None)),
+        (220, 220, 220) => Some((NamedColor::Foreground, Some(86))),
+        (190, 190, 190) => Some((NamedColor::Foreground, Some(75))),
+        (248, 187, 208) => Some((NamedColor::Pink, Some(75))),
+        (200, 200, 200) => Some((NamedColor::Foreground, Some(78))),
+        (100, 100, 100) => Some((NamedColor::Grey, None)),
+        (80, 80, 80) => Some((NamedColor::Grey, None)),
+        _ => None,
+    };
+    match named {
+        Some((color, soften)) => ColType::Named { color, soften },
+        None => {
+            eprintln!(
+                "warning: unknown rgb colour rgb({},{},{}), falling back to foreground",
+                r, g, b
+            );
+            ColType::Named {
+                color: NamedColor::Foreground,
+                soften: None,
+            }
+        }
+    }
 }
 
 fn col_type_rgb<Input>() -> impl Parser<Input, Output = ColType>
@@ -127,7 +239,7 @@ where
         parse_u8(),
         string(")"),
     )
-        .map(|(_, r, _, g, _, b, _)| ColType::RGB(Color { r, g, b }))
+        .map(|(_, r, _, g, _, b, _)| rgb_reverse_map(r, g, b))
 }
 
 fn col_trans<Input>() -> impl Parser<Input, Output = ColTrans>
@@ -137,17 +249,36 @@ where
 {
     (
         attempt(string(" | ")),
-        choice([string("mono"), string("inv")]),
+        choice([string("mono"), string("inv"), string("contrast")]),
     )
         .map(|(_, t)| match t {
             "mono" => ColTrans::Mono,
             "inv" => ColTrans::Inv,
+            "contrast" => ColTrans::Contrast,
             _ => panic!("invalid transform"),
         })
 }
 
-/// Backwards compatibility with Go brdgme. Magenta is handled manually as it doesn't exist in this
-/// version of brdgme.
+/// Backwards compatibility with Go brdgme's legacy `{{c name}}` colour tag.
+fn resolve_legacy_c_named(name: &str) -> NamedColor {
+    let normalised: String = name
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    resolve_named(&normalised).unwrap_or(match normalised.as_str() {
+        "deeppurple" => NamedColor::Purple,
+        "indigo" => NamedColor::Blue,
+        "lightblue" => NamedColor::Blue,
+        "teal" => NamedColor::Cyan,
+        "lightgreen" => NamedColor::Green,
+        "lime" => NamedColor::Green,
+        "deeporange" => NamedColor::Orange,
+        "bluegrey" => NamedColor::Cyan,
+        _ => NamedColor::Foreground,
+    })
+}
+
 fn c<Input>() -> impl Parser<Input, Output = Node>
 where
     Input: Stream<Token = char>,
@@ -161,11 +292,7 @@ where
         string("{{/c}}"),
     )
         .map(|(_, col, _, children, _)| {
-            let color = if col == "magenta" {
-                PURPLE
-            } else {
-                Color::from_str(&col).unwrap_or(BLACK)
-            };
+            let color = resolve_legacy_c_named(&col);
             Node::Fg(color.into(), children)
         })
 }
@@ -307,11 +434,11 @@ mod tests {
             vec![N::Table(vec![vec![(
                 A::Center,
                 vec![N::Fg(
-                    RED.into(),
+                    NamedColor::Red.into(),
                     vec![N::Bg(
                         Col {
                             color: ColType::Player(2),
-                            transform: vec![ColTrans::Inv, ColTrans::Mono],
+                            transform: vec![ColTrans::Contrast],
                         },
                         vec![
                             N::Player(5),
@@ -325,9 +452,181 @@ mod tests {
                 )],
             )]])],
         )])];
+        // The old `| inv | mono` syntax is still accepted, but the parser
+        // normalises it to the single `contrast` transform, so we build the
+        // AST above with `Contrast` directly and just confirm the string
+        // form round-trips through `to_string`/`markup()`.
         assert_eq!(
             Ok((expected.clone(), "")),
             markup().parse(to_string(&expected).as_ref())
         );
+
+        // Confirm the legacy composed idiom is still accepted and normalised.
+        let legacy = "{{bg player(2) | inv | mono}}x{{/bg}}";
+        let (parsed, rest) = markup().parse(legacy).unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(
+            parsed,
+            vec![N::Bg(
+                Col {
+                    color: ColType::Player(2),
+                    transform: vec![ColTrans::Contrast],
+                },
+                vec![N::text("x")],
+            )]
+        );
+    }
+
+    #[test]
+    fn named_color_alias_parsing_works() {
+        let (parsed, rest) = markup().parse("{{fg magenta}}x{{/fg}}").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Purple.into(), vec![N::text("x")])]
+        );
+
+        let (parsed, _) = markup().parse("{{fg amber}}x{{/fg}}").unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Orange.into(), vec![N::text("x")])]
+        );
+
+        let (parsed, _) = markup().parse("{{fg black}}x{{/fg}}").unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Foreground.into(), vec![N::text("x")])]
+        );
+
+        let (parsed, _) = markup().parse("{{fg white}}x{{/fg}}").unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Background.into(), vec![N::text("x")])]
+        );
+
+        let (parsed, _) = markup().parse("{{bg soften(pink, 75)}}x{{/bg}}").unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Bg(
+                Col {
+                    color: ColType::Named {
+                        color: NamedColor::Pink,
+                        soften: Some(75),
+                    },
+                    transform: vec![],
+                },
+                vec![N::text("x")],
+            )]
+        );
+
+        // No space after comma also parses.
+        let (parsed_nospace, _) = markup().parse("{{bg soften(pink,75)}}x{{/bg}}").unwrap();
+        assert_eq!(parsed_nospace, parsed);
+    }
+
+    #[test]
+    fn rgb_reverse_map_works() {
+        let (parsed, _) = markup().parse("{{fg rgb(211,47,47)}}x{{/fg}}").unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Red.into(), vec![N::text("x")])]
+        );
+
+        let (parsed, _) = markup().parse("{{bg rgb(220,220,220)}}x{{/bg}}").unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Bg(
+                Col {
+                    color: ColType::Named {
+                        color: NamedColor::Foreground,
+                        soften: Some(86),
+                    },
+                    transform: vec![],
+                },
+                vec![N::text("x")],
+            )]
+        );
+
+        let (parsed, _) = markup().parse("{{fg rgb(1,2,3)}}x{{/fg}}").unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Foreground.into(), vec![N::text("x")])]
+        );
+    }
+
+    #[test]
+    fn unknown_named_color_fails_to_parse() {
+        let result = markup().parse("{{fg gren}}x{{/fg}}");
+        match result {
+            Ok((nodes, _)) => {
+                assert!(
+                    !nodes.iter().any(|n| matches!(n, N::Fg(..))),
+                    "unknown colour name must not silently produce a Fg node: {nodes:?}"
+                );
+            }
+            Err(_) => {}
+        }
+    }
+
+    #[test]
+    fn legacy_c_tag_parses() {
+        let (parsed, rest) = markup().parse("{{c magenta}}x{{/c}}").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Purple.into(), vec![N::text("x")])]
+        );
+
+        let (parsed, rest) = markup().parse("{{c bluegrey}}x{{/c}}").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(
+            parsed,
+            vec![N::Fg(NamedColor::Cyan.into(), vec![N::text("x")])]
+        );
+    }
+
+    #[test]
+    fn contrast_trans_parses() {
+        let (parsed, _) = markup()
+            .parse("{{fg player(0) | contrast}}x{{/fg}}")
+            .unwrap();
+        assert_eq!(
+            parsed,
+            vec![N::Fg(
+                Col {
+                    color: ColType::Player(0),
+                    transform: vec![ColTrans::Contrast],
+                },
+                vec![N::text("x")],
+            )]
+        );
+    }
+
+    #[test]
+    fn round_trip_named_colors_works() {
+        let nodes: Vec<Node> = vec![
+            N::Fg(NamedColor::Green.into(), vec![N::text("a")]),
+            N::Bg(
+                Col {
+                    color: ColType::Named {
+                        color: NamedColor::Pink,
+                        soften: Some(75),
+                    },
+                    transform: vec![],
+                },
+                vec![N::text("b")],
+            ),
+            N::Fg(
+                Col {
+                    color: ColType::Player(1),
+                    transform: vec![ColTrans::Contrast],
+                },
+                vec![N::text("c")],
+            ),
+        ];
+        let s = to_string(&nodes);
+        let (parsed, rest) = markup().parse(s.as_str()).unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(parsed, nodes);
     }
 }

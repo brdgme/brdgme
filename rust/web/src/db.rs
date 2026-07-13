@@ -310,9 +310,11 @@ impl GamePlayerExtended {
         }
     }
 
-    pub fn color(&self) -> brdgme_color::Color {
-        use std::str::FromStr;
-        brdgme_color::Color::from_str(&self.game_player.color).unwrap_or(brdgme_color::WHITE)
+    /// This game player's `--mk-{slot}` colour slot token (e.g. "green") -
+    /// the web layer's colour representation; never resolve this to a
+    /// concrete hex value for display, that bakes in one theme.
+    pub fn slot(&self) -> &'static str {
+        crate::theme::slot_from_color_name(&self.game_player.color)
     }
 }
 
@@ -327,14 +329,23 @@ pub struct GameExtended {
 
 #[cfg(feature = "ssr")]
 impl GameExtended {
-    pub fn markup_players(&self) -> Vec<brdgme_markup::Player> {
+    /// Names-only semantic players for `transform_semantic` - colour stays
+    /// symbolic (`SemanticColType::Player(n)`) and is resolved client-side by
+    /// the `--mk-player-{n}` vars this game's `player_style_vars` container
+    /// sets, not baked into the HTML here.
+    pub fn semantic_players(&self) -> Vec<brdgme_markup::SemanticPlayer> {
         self.game_players
             .iter()
-            .map(|p| brdgme_markup::Player {
+            .map(|p| brdgme_markup::SemanticPlayer {
                 name: p.name().to_string(),
-                color: p.color(),
             })
             .collect()
+    }
+
+    /// The `--mk-player-{n}` container style for this game's board/log HTML.
+    pub fn player_style(&self) -> String {
+        let slots: Vec<&str> = self.game_players.iter().map(|p| p.slot()).collect();
+        crate::theme::player_style_vars(&slots)
     }
 }
 
@@ -495,8 +506,6 @@ pub async fn find_active_game_summaries(
     pool: &PgPool,
     user_id: Uuid,
 ) -> Result<Vec<crate::game::server_fns::GameSummary>> {
-    use std::str::FromStr;
-
     let rows = sqlx::query!(
         r#"
         SELECT
@@ -536,12 +545,8 @@ pub async fn find_active_game_summaries(
             });
         }
         if row.opp_id.is_some() {
-            let color = row
-                .opp_color
-                .as_deref()
-                .and_then(|c| brdgme_color::Color::from_str(c).ok())
-                .unwrap_or(brdgme_color::WHITE)
-                .hex();
+            let color = crate::theme::slot_from_color_name(row.opp_color.as_deref().unwrap_or(""))
+                .to_string();
             let summary = summaries.last_mut().ok_or_else(|| {
                 anyhow::anyhow!("opponent row for game {} has no summary", row.game_id)
             })?;
@@ -679,7 +684,7 @@ pub async fn create_game_with_users_tx(
 
     // 3. Assign colors
     let colors = [
-        "Green", "Red", "Blue", "Amber", "Purple", "Brown", "BlueGrey",
+        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
     ];
 
     // 4. Create Game
@@ -709,7 +714,7 @@ pub async fn create_game_with_users_tx(
     .ok_or_else(|| anyhow::anyhow!("Game version not found"))?;
 
     for (pos, slot) in slots.iter().enumerate() {
-        let color = colors.get(pos).unwrap_or(&"BlueGrey").to_string();
+        let color = colors.get(pos).unwrap_or(&"Pink").to_string();
         let is_turn = opts.whose_turn.contains(&pos);
         let is_eliminated = opts.eliminated.contains(&pos);
         let place = opts.placings.get(pos).map(|&p| p as i32);
@@ -1270,6 +1275,31 @@ pub async fn update_game_command_success(
     insert_game_logs_tx(&mut tx, game_id, logs).await?;
 
     tx.commit().await?;
+    Ok(())
+}
+
+/// Written as a plain (non-macro) query rather than `query_scalar!`: adding
+/// `users.theme` to the `sqlx::query_as!(User, "SELECT * FROM users ...")`
+/// macros elsewhere in this file would require regenerating `.sqlx` against a
+/// live database, which isn't available in this environment - see the
+/// `SQLX_OFFLINE` note in web/README or the phase notes. Plain queries need
+/// no cache entry.
+#[cfg(feature = "ssr")]
+pub async fn get_user_theme(pool: &PgPool, user_id: Uuid) -> Result<Option<String>> {
+    let row: Option<(Option<String>,)> = sqlx::query_as("SELECT theme FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.and_then(|(theme,)| theme))
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_user_theme(pool: &PgPool, user_id: Uuid, theme: Option<&str>) -> Result<()> {
+    sqlx::query("UPDATE users SET theme = $1, updated_at = NOW() WHERE id = $2")
+        .bind(theme)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -2382,5 +2412,23 @@ mod tests {
         let (non_conceder_rating, _) =
             game_type_rating(&pool, game_type_id, non_conceder.user.as_ref().unwrap().id).await;
         assert_eq!(non_conceder_rating, 1216);
+    }
+
+    #[sqlx::test]
+    async fn user_theme_defaults_none_and_round_trips(pool: PgPool) {
+        let user = make_user(&pool, "themed").await;
+
+        assert_eq!(get_user_theme(&pool, user.id).await.unwrap(), None);
+
+        set_user_theme(&pool, user.id, Some("dracula"))
+            .await
+            .unwrap();
+        assert_eq!(
+            get_user_theme(&pool, user.id).await.unwrap(),
+            Some("dracula".to_string())
+        );
+
+        set_user_theme(&pool, user.id, None).await.unwrap();
+        assert_eq!(get_user_theme(&pool, user.id).await.unwrap(), None);
     }
 }

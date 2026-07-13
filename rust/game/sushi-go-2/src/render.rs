@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use brdgme_color::GREY;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -8,7 +8,7 @@ use crate::{Card, PlayerState, PubState};
 
 pub fn card(c: Card) -> N {
     if c == Card::Played {
-        N::Fg(GREY.into(), vec![N::text("played")])
+        N::Fg(NamedColor::Grey.into(), vec![N::text("played")])
     } else {
         N::Fg(c.color().into(), vec![N::Bold(vec![N::text(c.name())])])
     }
@@ -38,7 +38,10 @@ pub fn comma_list_nodes(nodes: Vec<N>) -> N {
 
 fn render_name(player: usize, players: usize) -> N {
     if player > players - 1 {
-        N::Fg(GREY.into(), vec![N::Bold(vec![N::text("<dummy>")])])
+        N::Fg(
+            NamedColor::Grey.into(),
+            vec![N::Bold(vec![N::text("<dummy>")])],
+        )
     } else {
         N::Player(player)
     }
@@ -112,7 +115,10 @@ fn hand_table(hand: &[Card]) -> Vec<Row> {
         let mut row: Row = vec![
             (
                 A::Left,
-                vec![N::Fg(GREY.into(), vec![N::text(format!("({})", i + 1))])],
+                vec![N::Fg(
+                    NamedColor::Grey.into(),
+                    vec![N::text(format!("({})", i + 1))],
+                )],
             ),
             (A::Left, vec![card(c)]),
         ];
@@ -120,7 +126,7 @@ fn hand_table(hand: &[Card]) -> Vec<Row> {
             row.push((
                 A::Left,
                 vec![N::Fg(
-                    GREY.into(),
+                    NamedColor::Grey.into(),
                     vec![N::text(format!("  {}", c.explanation()))],
                 )],
             ));

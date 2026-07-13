@@ -44,13 +44,13 @@ impl Card {
         }
     }
 
-    pub fn color(self) -> color::Color {
+    pub fn color(self) -> color::NamedColor {
         match self.heads() {
-            7 => color::PURPLE,
-            5 => color::RED,
-            3 => color::YELLOW,
-            2 => color::CYAN,
-            _ => color::GREY,
+            7 => color::NamedColor::Purple,
+            5 => color::NamedColor::Red,
+            3 => color::NamedColor::Yellow,
+            2 => color::NamedColor::Cyan,
+            _ => color::NamedColor::Grey,
         }
     }
 }
@@ -561,11 +561,11 @@ mod test {
 
     #[test]
     fn test_card_colors() {
-        assert_eq!(color::PURPLE, Card(55).color());
-        assert_eq!(color::RED, Card(11).color());
-        assert_eq!(color::YELLOW, Card(10).color());
-        assert_eq!(color::CYAN, Card(5).color());
-        assert_eq!(color::GREY, Card(7).color());
+        assert_eq!(color::NamedColor::Purple, Card(55).color());
+        assert_eq!(color::NamedColor::Red, Card(11).color());
+        assert_eq!(color::NamedColor::Yellow, Card(10).color());
+        assert_eq!(color::NamedColor::Cyan, Card(5).color());
+        assert_eq!(color::NamedColor::Grey, Card(7).color());
     }
 
     #[test]

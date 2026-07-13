@@ -301,8 +301,9 @@ The available tags in brdgme markup are:
 
 {% raw -%}
 - `{{b}}...{{/b}}` - bold (typically used to highlight playable or important elements)
-- `{{fg rgb(r,g,b)}}...{{/fg}}` - foreground colour
-- `{{bg rgb(r,g,b)}}...{{/bg}}` - background colour
+- `{{fg color}}...{{/fg}}` - foreground colour, where `color` is one of: red, green, blue, yellow, purple, cyan, pink, orange, brown, grey, foreground, background
+- `{{bg color}}...{{/bg}}` - background colour, same named colours as above; can also use `soften(color, pct)` (pct 1-99) for a muted wash of the colour toward the background
+- a colour may be followed by ` | contrast`, which replaces it with whichever of foreground/background is more readable against it, e.g. `{{fg green | contrast}}...{{/fg}}`
 - Player references (`{{player N}}`) are already resolved to player names, zero indexed.
 {%- endraw %}
 

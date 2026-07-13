@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 mod command;
 mod render;
 
-use brdgme_color as color;
+use brdgme_color::NamedColor;
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
@@ -24,15 +24,15 @@ pub const WIN_SCORE: i32 = 5000;
 /// Die face value, always 1..=6.
 pub type Die = u8;
 
-pub fn die_color(d: Die) -> color::Color {
+pub fn die_color(d: Die) -> NamedColor {
     match d {
-        1 => color::CYAN,
-        2 => color::GREEN,
-        3 => color::RED,
-        4 => color::BLUE,
-        5 => color::YELLOW,
-        6 => color::PURPLE,
-        _ => color::GREY,
+        1 => NamedColor::Cyan,
+        2 => NamedColor::Green,
+        3 => NamedColor::Red,
+        4 => NamedColor::Blue,
+        5 => NamedColor::Yellow,
+        6 => NamedColor::Purple,
+        _ => NamedColor::Grey,
     }
 }
 

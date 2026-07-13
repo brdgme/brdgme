@@ -554,13 +554,13 @@ mod tests {
         assert_eq!(
             brdgme_markup::to_string(&game.pub_state().render()),
             concat!(
-                "{{b}}x{{/b}}{{fg rgb(97,97,97)}}|{{/fg}}{{b}}o{{/b}}",
-                "{{fg rgb(97,97,97)}}|{{/fg}}{{fg rgb(25,118,210)}}c{{/fg}}\n",
-                "{{fg rgb(25,118,210)}}d{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}",
-                "{{b}}x{{/b}}{{fg rgb(97,97,97)}}|{{/fg}}",
-                "{{fg rgb(25,118,210)}}f{{/fg}}\n",
-                "{{b}}o{{/b}}{{fg rgb(97,97,97)}}|{{/fg}}",
-                "{{fg rgb(25,118,210)}}h{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}",
+                "{{b}}x{{/b}}{{fg grey}}|{{/fg}}{{b}}o{{/b}}",
+                "{{fg grey}}|{{/fg}}{{fg blue}}c{{/fg}}\n",
+                "{{fg blue}}d{{/fg}}{{fg grey}}|{{/fg}}",
+                "{{b}}x{{/b}}{{fg grey}}|{{/fg}}",
+                "{{fg blue}}f{{/fg}}\n",
+                "{{b}}o{{/b}}{{fg grey}}|{{/fg}}",
+                "{{fg blue}}h{{/fg}}{{fg grey}}|{{/fg}}",
                 "{{b}}x{{/b}}",
             )
         );

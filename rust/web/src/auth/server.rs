@@ -451,6 +451,45 @@ pub async fn logout() -> Result<bool, ServerFnError> {
     Ok(true)
 }
 
+/// Persists the caller's theme choice to their profile (client-side already
+/// applied the cookie/`data-theme` before calling this - see `theme.rs` in
+/// the components layer). `None` means "system".
+#[server(SetTheme, "/api")]
+pub async fn set_theme(theme: Option<String>) -> Result<(), ServerFnError> {
+    use sqlx::PgPool;
+
+    if let Some(t) = &theme
+        && !crate::theme::is_known_slug(t)
+    {
+        return Err(ServerFnError::new("Unknown theme"));
+    }
+
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    crate::db::set_user_theme(&pool, user.id, theme.as_deref())
+        .await
+        .map_err(internal("set_theme: update"))
+}
+
+/// The signed-in user's stored theme preference, or `None` for anonymous
+/// visitors / no preference set ("system"). Fetched client-side right after
+/// login so the profile's theme wins over whatever was showing pre-login.
+#[server(GetUserTheme, "/api")]
+pub async fn get_user_theme() -> Result<Option<String>, ServerFnError> {
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    match get_current_user().await? {
+        Some(user) => crate::db::get_user_theme(&pool, user.id)
+            .await
+            .map_err(internal("get_user_theme: load")),
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

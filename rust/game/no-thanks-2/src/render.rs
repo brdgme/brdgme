@@ -1,23 +1,23 @@
-use brdgme_color::{BLUE, GREEN, GREY, PURPLE};
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::{PlayerState, PubState};
 
 pub fn render_card(card: i32) -> N {
-    N::Fg(BLUE.into(), vec![N::text(card.to_string())])
+    N::Fg(NamedColor::Blue.into(), vec![N::text(card.to_string())])
 }
 
 pub fn render_chips(chips: i32) -> N {
-    N::Fg(GREEN.into(), vec![N::text(chips.to_string())])
+    N::Fg(NamedColor::Green.into(), vec![N::text(chips.to_string())])
 }
 
 pub fn render_points(points: i32) -> N {
-    N::Fg(PURPLE.into(), vec![N::text(points.to_string())])
+    N::Fg(NamedColor::Purple.into(), vec![N::text(points.to_string())])
 }
 
 fn no_cards() -> N {
-    N::Fg(GREY.into(), vec![N::text("no cards")])
+    N::Fg(NamedColor::Grey.into(), vec![N::text("no cards")])
 }
 
 fn group_sorted(sorted: &[i32]) -> Vec<Vec<i32>> {

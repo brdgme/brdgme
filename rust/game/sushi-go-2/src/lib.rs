@@ -96,18 +96,18 @@ impl Card {
         }
     }
 
-    pub fn color(self) -> brdgme_color::Color {
-        use brdgme_color::*;
+    pub fn color(self) -> brdgme_color::NamedColor {
+        use brdgme_color::NamedColor;
         match self {
-            Card::Played => GREY,
-            Card::Tempura => PURPLE,
-            Card::Sashimi => PURPLE,
-            Card::Dumpling => YELLOW,
-            Card::MakiRoll3 | Card::MakiRoll2 | Card::MakiRoll1 => RED,
-            Card::SalmonNigiri | Card::SquidNigiri | Card::EggNigiri => CYAN,
-            Card::Pudding => BLUE,
-            Card::Wasabi => GREEN,
-            Card::Chopsticks => BLACK,
+            Card::Played => NamedColor::Grey,
+            Card::Tempura => NamedColor::Purple,
+            Card::Sashimi => NamedColor::Purple,
+            Card::Dumpling => NamedColor::Yellow,
+            Card::MakiRoll3 | Card::MakiRoll2 | Card::MakiRoll1 => NamedColor::Red,
+            Card::SalmonNigiri | Card::SquidNigiri | Card::EggNigiri => NamedColor::Cyan,
+            Card::Pudding => NamedColor::Blue,
+            Card::Wasabi => NamedColor::Green,
+            Card::Chopsticks => NamedColor::Foreground,
         }
     }
 
@@ -238,7 +238,7 @@ impl Game {
     pub fn render_name(&self, player: usize) -> N {
         if player > self.players - 1 {
             N::Fg(
-                brdgme_color::GREY.into(),
+                brdgme_color::NamedColor::Grey.into(),
                 vec![N::Bold(vec![N::text("<dummy>")])],
             )
         } else {
@@ -400,7 +400,7 @@ impl Game {
             }
         }
         let maki_str = N::Fg(
-            brdgme_color::RED.into(),
+            brdgme_color::NamedColor::Red.into(),
             vec![N::Bold(vec![N::text("maki rolls")])],
         );
         if first == 0 {
@@ -473,7 +473,7 @@ impl Game {
                 }
             }
             let puddings_str = N::Fg(
-                brdgme_color::BLUE.into(),
+                brdgme_color::NamedColor::Blue.into(),
                 vec![N::Bold(vec![N::text("puddings")])],
             );
             if first == last {

@@ -43,12 +43,12 @@ fn render_hand(hand: &[Card]) -> N {
 }
 
 fn render_legend() -> N {
-    let order: [(i32, color::Color); 5] = [
-        (1, color::GREY),
-        (2, color::CYAN),
-        (3, color::YELLOW),
-        (5, color::RED),
-        (7, color::PURPLE),
+    let order: [(i32, color::NamedColor); 5] = [
+        (1, color::NamedColor::Grey),
+        (2, color::NamedColor::Cyan),
+        (3, color::NamedColor::Yellow),
+        (5, color::NamedColor::Red),
+        (7, color::NamedColor::Purple),
     ];
     let mut nodes: Vec<N> = vec![N::Bold(vec![N::text("Legend:")]), N::text(" ")];
     for (i, (heads, col)) in order.iter().enumerate() {
@@ -56,7 +56,7 @@ fn render_legend() -> N {
             nodes.push(N::text(", "));
         }
         nodes.push(N::Fg(
-            col.into(),
+            (*col).into(),
             vec![N::Bold(vec![N::text(format!("{} pts", heads))])],
         ));
     }

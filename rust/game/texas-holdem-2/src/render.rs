@@ -7,8 +7,7 @@
 //! `Node::Table`/`table_with_gap` output does not need manual fixed-width
 //! padding since the table renderer aligns columns itself.
 
-use brdgme_color::GREEN as MONEY_GREEN;
-use brdgme_color::GREY;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -18,7 +17,7 @@ use crate::{PlayerState, PubState};
 /// Port of `RenderCash`.
 pub fn cash(amount: i32) -> N {
     N::Bold(vec![N::Fg(
-        MONEY_GREEN.into(),
+        NamedColor::Green.into(),
         vec![N::text(format!("${}", amount))],
     )])
 }
@@ -67,7 +66,10 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
         }
         let mut row: Row = vec![(A::Left, name)];
         if pub_state.player_money[table_player_num] == 0 && pub_state.bets[table_player_num] == 0 {
-            row.push((A::Left, vec![N::Fg(GREY.into(), vec![N::text("Out")])]));
+            row.push((
+                A::Left,
+                vec![N::Fg(NamedColor::Grey.into(), vec![N::text("Out")])],
+            ));
         } else {
             row.push((
                 A::Left,
@@ -75,7 +77,7 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
             ));
             row.push((A::Left, vec![cash(pub_state.bets[table_player_num])]));
             let extra: Vec<N> = if pub_state.folded_players[table_player_num] {
-                vec![N::Fg(GREY.into(), vec![N::text("Folded")])]
+                vec![N::Fg(NamedColor::Grey.into(), vec![N::text("Folded")])]
             } else {
                 vec![]
             };

@@ -81,7 +81,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 23 | Rust Game Ports | Pending | [spec](superpowers/specs/2026-07-04-23-rust-game-ports-design.md) | [plan](superpowers/plans/2026-07-04-23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-04-24-game-invites-design.md) | [plan](superpowers/plans/2026-07-04-24-game-invites.md) |
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-25-rules-rendering-design.md) | [plan](superpowers/plans/2026-07-05-25-rules-rendering.md) |
-| 26 | Theming / Dark Mode (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-26-theming-design.md) | [plan](superpowers/plans/2026-07-05-26-theming.md) |
+| 26 | Theming / Dark Mode (Web UI + Email) | Core complete 2026-07-13 (semantic colours end-to-end, `soften`/`contrast` transforms, 3 themes + system default + instant switching, migrations 006/007 written; see [implementation plan](superpowers/plans/2026-07-13-26-theming-semantic-colors.md) D1-D15 for review items). **Remaining - NEXT UP: web chrome theming** (~20 hardcoded colours in `web/style/main.scss`; boards/logs/sidebar theme correctly but page chrome stays light - critical to wrap up #26). Email theming deferred behind #22b-d | [spec](superpowers/specs/2026-07-05-26-theming-design.md) | [plan](superpowers/plans/2026-07-13-26-theming-semantic-colors.md) |
 | 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
 | 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | Draft 2026-07-08 - post-go-live, non-blocking; no schema changes for v1 | [spec](superpowers/specs/2026-07-08-29-stats-reports-design.md) | [plan](superpowers/plans/2026-07-08-29-stats-reports.md) |
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
@@ -345,6 +345,21 @@ still flashing on command submit, a reusable centered loading spinner
 needed for initial game page load, and disabling the command input/send
 button while a command is submitting. These are recorded for a future #33
 continuation session, not actioned now.
+
+2026-07-13: #26 theming core implemented end-to-end (28-phase serial
+run, plan `2026-07-13-26-theming-semantic-colors.md`): 12-slot palette +
+`soften`/`contrast` transforms (THEMING.md revised), all 23 games on
+named colours, `ColType::RGB` removed from the AST, semantic-class web
+renderer with per-theme CSS custom properties, brdgme light/dark +
+Dracula themes with a contrast gate test, system-theme default with
+instant client-side switching, migrations 006 (player colour palette)
+and 007 (user theme) written but not yet run. Decisions D1-D15 in the
+plan need Michael's review. **Web chrome theming is the immediate next
+work item** (operator decision 2026-07-13: critical for wrapping up
+#26) - `main.scss` still hardcodes ~20 chrome colours. Also found:
+lords-of-vegas-1 `shuffled_deck` iterates HashMap keys pre-shuffle, so
+seeded starts are non-deterministic across processes (pre-existing bug,
+unscheduled).
 
 2026-07-11: #38 added - investigate frontend cache busting when a new
 version is bumped in brdgme-config: browsers may keep serving stale

@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::{stdin, stdout};
 
-use brdgme_color::{Style, player_color};
+use brdgme_color::{LIGHT, Style};
 use brdgme_game::Status;
 use brdgme_game::command::doc;
 use brdgme_markup::{self, Node, Player, TNode, ansi, from_lines, to_lines, transform};
@@ -32,7 +32,7 @@ where
         .enumerate()
         .map(|(i, pn)| Player {
             name: pn.to_string(),
-            color: player_color(i).to_owned(),
+            color: LIGHT.player_color(i),
         })
         .collect::<Vec<Player>>();
     let (mut game, logs, mut public_render, mut player_renders) = match client
@@ -119,7 +119,7 @@ where
                         } else {
                             output_nodes(
                                 &[Node::Bold(vec![Node::Fg(
-                                    brdgme_color::RED.into(),
+                                    brdgme_color::NamedColor::Red.into(),
                                     vec![Node::text("No undos available")],
                                 )])],
                                 &players,
@@ -208,7 +208,7 @@ fn output_nodes(nodes: &[Node], players: &[Player]) {
 fn output_error<I: Into<String>>(s: I) {
     output_nodes(
         &[Node::Bold(vec![Node::Fg(
-            brdgme_color::RED.into(),
+            brdgme_color::NamedColor::Red.into(),
             vec![Node::text(s)],
         )])],
         &[],

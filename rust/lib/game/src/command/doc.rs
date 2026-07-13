@@ -1,4 +1,4 @@
-use brdgme_color::GREY;
+use brdgme_color::NamedColor;
 use brdgme_markup::Node;
 
 use crate::command::Spec;
@@ -175,7 +175,10 @@ pub fn render(docs: &[(Vec<Node>, Option<String>)]) -> Vec<Node> {
             output.push(Node::text("\n"));
         }
         if let Some(ref desc) = *desc {
-            output.push(Node::Fg(GREY.into(), vec![Node::text(desc.to_owned())]));
+            output.push(Node::Fg(
+                NamedColor::Grey.into(),
+                vec![Node::text(desc.to_owned())],
+            ));
             output.push(Node::text("\n  "));
         }
         output.extend(doc.to_owned());

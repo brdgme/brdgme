@@ -19,13 +19,13 @@ pub enum Expedition {
 }
 
 impl Expedition {
-    pub fn color(&self) -> brdgme_color::Color {
+    pub fn color(&self) -> brdgme_color::NamedColor {
         match *self {
-            Expedition::Red => brdgme_color::RED,
-            Expedition::Green => brdgme_color::GREEN,
-            Expedition::White => brdgme_color::GREY,
-            Expedition::Blue => brdgme_color::BLUE,
-            Expedition::Yellow => brdgme_color::AMBER,
+            Expedition::Red => brdgme_color::NamedColor::Red,
+            Expedition::Green => brdgme_color::NamedColor::Green,
+            Expedition::White => brdgme_color::NamedColor::Grey,
+            Expedition::Blue => brdgme_color::NamedColor::Blue,
+            Expedition::Yellow => brdgme_color::NamedColor::Orange,
         }
     }
 

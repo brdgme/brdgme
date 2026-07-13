@@ -1,5 +1,4 @@
-use brdgme_color::GREEN as MONEY_GREEN;
-use brdgme_color::GREY;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -8,7 +7,7 @@ use crate::{PlayerState, PubState};
 
 pub fn money(amount: i32) -> N {
     N::Bold(vec![N::Fg(
-        MONEY_GREEN.into(),
+        NamedColor::Green.into(),
         vec![N::text(format!("${}", amount))],
     )])
 }
@@ -94,7 +93,7 @@ fn render(
     for op in 0..pub_state.players {
         let cards = pub_state.purchases.get(op).cloned().unwrap_or_default();
         let cards_node = if cards.is_empty() {
-            N::Fg(GREY.into(), vec![N::text("None")])
+            N::Fg(NamedColor::Grey.into(), vec![N::text("None")])
         } else {
             let mut nodes: Vec<N> = vec![];
             for (i, &c) in cards.iter().enumerate() {

@@ -56,14 +56,14 @@ impl Die {
         }
     }
 
-    pub fn color(self) -> color::Color {
+    pub fn color(self) -> color::NamedColor {
         match self {
-            Die::Dollar => color::GREY,
-            Die::G => color::YELLOW,
-            Die::R => color::RED,
-            Die::E1 => color::BLACK,
-            Die::E2 => color::GREEN,
-            Die::D => color::CYAN,
+            Die::Dollar => color::NamedColor::Grey,
+            Die::G => color::NamedColor::Yellow,
+            Die::R => color::NamedColor::Red,
+            Die::E1 => color::NamedColor::Foreground,
+            Die::E2 => color::NamedColor::Green,
+            Die::D => color::NamedColor::Cyan,
         }
     }
 }

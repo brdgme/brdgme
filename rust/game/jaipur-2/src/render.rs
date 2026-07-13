@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use brdgme_color::GREY;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -72,14 +72,20 @@ fn render_token_table(goods: &HashMap<Good, Vec<u32>>) -> N {
         (A::Center, vec![]),
         (
             A::Center,
-            vec![N::Fg(GREY.into(), vec![N::Bold(vec![N::text("Rare")])])],
+            vec![N::Fg(
+                NamedColor::Grey.into(),
+                vec![N::Bold(vec![N::text("Rare")])],
+            )],
         ),
         (A::Center, vec![]),
         (A::Center, vec![]),
         (A::Center, vec![]),
         (
             A::Center,
-            vec![N::Fg(GREY.into(), vec![N::Bold(vec![N::text("Common")])])],
+            vec![N::Fg(
+                NamedColor::Grey.into(),
+                vec![N::Bold(vec![N::text("Common")])],
+            )],
         ),
         (A::Center, vec![]),
     ]);

@@ -9,7 +9,7 @@
 use std::env;
 use std::io::{self, Read};
 
-use brdgme_color::player_color;
+use brdgme_color::LIGHT;
 use brdgme_markup::{Player, from_string, plain, transform};
 
 fn main() {
@@ -18,7 +18,7 @@ fn main() {
         .enumerate()
         .map(|(i, name)| Player {
             name,
-            color: *player_color(i),
+            color: LIGHT.player_color(i),
         })
         .collect();
 

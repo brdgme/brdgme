@@ -507,6 +507,30 @@ body {
   }
 }
 
+/* Theme picker */
+.theme-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1em;
+}
+
+.theme-tile {
+  width: 14em;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.63em;
+  padding: 0.63em;
+  cursor: pointer;
+}
+
+.theme-tile .theme-tile-label {
+  font-weight: 700;
+  margin-bottom: 0.4em;
+}
+
+.theme-tile .theme-tile-sample {
+  font-size: 0.8em;
+}
+
 /* brdgme color classes */
 .brdgme-red { color: #d32f2f; }
 .brdgme-pink { color: #c2185b; }

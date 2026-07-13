@@ -4,7 +4,7 @@ use std::fmt;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use brdgme_color as color;
+use brdgme_color::NamedColor;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
@@ -82,15 +82,15 @@ impl Good {
         }
     }
 
-    pub fn color(self) -> color::Color {
+    pub fn color(self) -> NamedColor {
         match self {
-            Good::Diamond => color::RED,
-            Good::Gold => color::YELLOW,
-            Good::Silver => color::GREY,
-            Good::Cloth => color::PURPLE,
-            Good::Spice => color::GREEN,
-            Good::Leather => color::BLUE,
-            Good::Camel => color::BLACK,
+            Good::Diamond => NamedColor::Red,
+            Good::Gold => NamedColor::Yellow,
+            Good::Silver => NamedColor::Grey,
+            Good::Cloth => NamedColor::Purple,
+            Good::Spice => NamedColor::Green,
+            Good::Leather => NamedColor::Blue,
+            Good::Camel => NamedColor::Foreground,
         }
     }
 

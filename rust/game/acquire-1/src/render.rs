@@ -1,5 +1,6 @@
-use brdgme_color::*;
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
+use brdgme_markup::ast::{Col, ColType};
 use brdgme_markup::{Align as A, Node as N, Row, row_pad};
 
 use crate::CanEnd;
@@ -12,35 +13,15 @@ use crate::corp::{Corp, GAME_END_SIZE, MAJOR_MULT, MINOR_MULT};
 const TILE_WIDTH: usize = 5;
 const TILE_HEIGHT: usize = 2;
 
-static EMPTY_COLOR_EVEN: Color = Color {
-    r: 220,
-    g: 220,
-    b: 220,
-};
-
-static EMPTY_COLOR_ODD: Color = Color {
-    r: 190,
-    g: 190,
-    b: 190,
-};
-
-static UNINCORPORATED_COLOR: Color = Color {
-    r: 100,
-    g: 100,
-    b: 100,
-};
-
-static UNAVAILABLE_LOC_TEXT_COLOR: Color = Color {
-    r: 80,
-    g: 80,
-    b: 80,
-};
-
-static AVAILABLE_LOC_BG: Color = Color {
-    r: 248,
-    g: 187,
-    b: 208,
-};
+fn available_loc_bg() -> Col {
+    Col {
+        color: ColType::Named {
+            color: NamedColor::Pink,
+            soften: Some(75),
+        },
+        transform: vec![],
+    }
+}
 
 fn render(pub_state: &PubState, player: Option<usize>, tiles: &[Loc]) -> Vec<N> {
     vec![N::Table(vec![
@@ -110,7 +91,7 @@ impl PubState {
 
     fn render_remaining_tiles_text(&self) -> N {
         N::Fg(
-            GREY.into(),
+            NamedColor::Grey.into(),
             vec![
                 N::text("Draw tiles remaining: "),
                 N::Bold(vec![N::text(format!("{}", self.remaining_tiles))]),
@@ -162,7 +143,7 @@ impl PubState {
     }
 }
 
-fn tile_background(c: Color) -> N {
+fn tile_background<C: Into<Col>>(c: C) -> N {
     N::Bg(
         c.into(),
         vec![N::text(
@@ -173,17 +154,24 @@ fn tile_background(c: Color) -> N {
     )
 }
 
-fn empty_color(l: Loc) -> Color {
-    if (l.row + l.col).is_multiple_of(2) {
-        EMPTY_COLOR_EVEN
+fn empty_color(l: Loc) -> Col {
+    let soften = if (l.row + l.col).is_multiple_of(2) {
+        86
     } else {
-        EMPTY_COLOR_ODD
+        75
+    };
+    Col {
+        color: ColType::Named {
+            color: NamedColor::Foreground,
+            soften: Some(soften),
+        },
+        transform: vec![],
     }
 }
 
 fn corp_main_text_thin(c: Corp, size: usize) -> Vec<N> {
     vec![N::Fg(
-        c.color().inv().mono().into(),
+        Col::from(c.color()).contrast(),
         vec![N::Align(
             A::Center,
             TILE_WIDTH,
@@ -196,7 +184,7 @@ fn corp_main_text_wide(c: Corp, size: usize) -> Vec<N> {
     let mut c_name = c.name();
     c_name.truncate(TILE_WIDTH * 2 - 2);
     vec![N::Fg(
-        c.color().inv().mono().into(),
+        Col::from(c.color()).contrast(),
         vec![N::Align(
             A::Center,
             TILE_WIDTH * 2,
@@ -221,19 +209,12 @@ impl Board {
                         vec![N::Align(
                             A::Center,
                             TILE_WIDTH,
-                            vec![N::Fg(
-                                UNAVAILABLE_LOC_TEXT_COLOR.into(),
-                                vec![N::text(l.name())],
-                            )],
+                            vec![N::Fg(NamedColor::Grey.into(), vec![N::text(l.name())])],
                         )],
                     ));
                 }
                 Tile::Unincorporated => {
-                    layers.push((
-                        render_x,
-                        render_y,
-                        vec![tile_background(UNINCORPORATED_COLOR)],
-                    ));
+                    layers.push((render_x, render_y, vec![tile_background(NamedColor::Grey)]));
                 }
                 Tile::Corp(ref c) => {
                     layers.push((render_x, render_y, vec![tile_background(c.color())]));
@@ -246,7 +227,11 @@ impl Board {
             let l = *t;
             let render_x = l.col * TILE_WIDTH;
             let render_y = l.row * TILE_HEIGHT;
-            layers.push((render_x, render_y, vec![tile_background(AVAILABLE_LOC_BG)]));
+            layers.push((
+                render_x,
+                render_y,
+                vec![tile_background(available_loc_bg())],
+            ));
             layers.push((
                 render_x,
                 render_y,
@@ -254,7 +239,7 @@ impl Board {
                     A::Center,
                     TILE_WIDTH,
                     vec![N::Bold(vec![N::Fg(
-                        AVAILABLE_LOC_BG.inv().mono().into(),
+                        available_loc_bg().contrast(),
                         vec![N::text(l.name())],
                     )])],
                 )],
@@ -338,7 +323,7 @@ impl Corp {
 impl CanEnd {
     fn render_end_text(&self) -> N {
         N::Fg(
-            GREY.into(),
+            NamedColor::Grey.into(),
             vec![match *self {
                 CanEnd::Triggered => {
                     N::Bold(vec![N::text("The game will end at the end of this turn")])

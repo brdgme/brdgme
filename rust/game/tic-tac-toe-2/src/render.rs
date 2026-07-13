@@ -1,4 +1,4 @@
-use brdgme_color::{BLUE, GREY};
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::Node as N;
 
@@ -9,12 +9,15 @@ fn render_board(board: &Board) -> Vec<N> {
     for (row, cells) in board.iter().enumerate() {
         for (col, cell) in cells.iter().enumerate() {
             nodes.push(match cell {
-                Cell::Empty => N::Fg(BLUE.into(), vec![N::text(Loc { row, col }.to_string())]),
+                Cell::Empty => N::Fg(
+                    NamedColor::Blue.into(),
+                    vec![N::text(Loc { row, col }.to_string())],
+                ),
                 Cell::X => N::Bold(vec![N::text("x")]),
                 Cell::O => N::Bold(vec![N::text("o")]),
             });
             if col + 1 < BOARD_SIZE {
-                nodes.push(N::Fg(GREY.into(), vec![N::text("|")]));
+                nodes.push(N::Fg(NamedColor::Grey.into(), vec![N::text("|")]));
             }
         }
         if row + 1 < BOARD_SIZE {

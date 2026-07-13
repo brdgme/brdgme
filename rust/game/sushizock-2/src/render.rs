@@ -1,4 +1,4 @@
-use brdgme_color::{BLUE, GREY, RED};
+use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
@@ -6,8 +6,8 @@ use crate::{DieFace, PlayerState, PubState, Tile, TileType};
 
 pub fn tile(t: &Tile) -> N {
     let color = match t.kind {
-        TileType::Blue => BLUE,
-        TileType::Red => RED,
+        TileType::Blue => NamedColor::Blue,
+        TileType::Red => NamedColor::Red,
     };
     N::Fg(color.into(), vec![N::text(t.value.to_string())])
 }
@@ -25,10 +25,10 @@ pub fn bold_dice(dice: &[DieFace]) -> N {
 
 fn die_node(d: DieFace) -> N {
     let (color, ch) = match d {
-        DieFace::Sushi => (BLUE, "\u{0398}"),
-        DieFace::BlueChopsticks => (BLUE, "X"),
-        DieFace::Bones => (RED, "\u{00a5}"),
-        DieFace::RedChopsticks => (RED, "X"),
+        DieFace::Sushi => (NamedColor::Blue, "\u{0398}"),
+        DieFace::BlueChopsticks => (NamedColor::Blue, "X"),
+        DieFace::Bones => (NamedColor::Red, "\u{00a5}"),
+        DieFace::RedChopsticks => (NamedColor::Red, "X"),
     };
     N::Fg(color.into(), vec![N::text(ch)])
 }
@@ -109,7 +109,10 @@ fn render(pub_state: &PubState, _player: Option<usize>) -> Vec<N> {
                 if i > 0 {
                     pos_nodes.push(N::text("  "));
                 }
-                pos_nodes.push(N::Fg(GREY.into(), vec![N::text((i + 1).to_string())]));
+                pos_nodes.push(N::Fg(
+                    NamedColor::Grey.into(),
+                    vec![N::text((i + 1).to_string())],
+                ));
             }
             out.push(N::text("\n"));
             out.push(N::Group(pos_nodes));
@@ -149,7 +152,7 @@ fn render(pub_state: &PubState, _player: Option<usize>) -> Vec<N> {
             vec![
                 tile(last),
                 N::Fg(
-                    GREY.into(),
+                    NamedColor::Grey.into(),
                     vec![N::text(format!(
                         " ({} tiles)",
                         pub_state.player_blue_tiles[p].len()
@@ -157,14 +160,14 @@ fn render(pub_state: &PubState, _player: Option<usize>) -> Vec<N> {
                 ),
             ]
         } else {
-            vec![N::Fg(GREY.into(), vec![N::text("none")])]
+            vec![N::Fg(NamedColor::Grey.into(), vec![N::text("none")])]
         };
         let red_text: Vec<N> = if !pub_state.player_red_tiles[p].is_empty() {
             let last = &pub_state.player_red_tiles[p][pub_state.player_red_tiles[p].len() - 1];
             vec![
                 tile(last),
                 N::Fg(
-                    GREY.into(),
+                    NamedColor::Grey.into(),
                     vec![N::text(format!(
                         " ({} tiles)",
                         pub_state.player_red_tiles[p].len()
@@ -172,7 +175,7 @@ fn render(pub_state: &PubState, _player: Option<usize>) -> Vec<N> {
                 ),
             ]
         } else {
-            vec![N::Fg(GREY.into(), vec![N::text("none")])]
+            vec![N::Fg(NamedColor::Grey.into(), vec![N::text("none")])]
         };
         rows.push(vec![
             (A::Left, vec![N::Player(p)]),
