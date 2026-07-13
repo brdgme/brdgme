@@ -31,7 +31,7 @@ impl Cost {
         *self.0.get(&r).unwrap_or(&0)
     }
 
-    fn set(&mut self, r: Resource, v: i32) {
+    pub fn set(&mut self, r: Resource, v: i32) {
         self.0.insert(r, v);
     }
 

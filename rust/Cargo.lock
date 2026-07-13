@@ -4927,6 +4927,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "splendor-2"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "sqlx"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

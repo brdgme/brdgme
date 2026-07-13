@@ -24,6 +24,27 @@ pub const RESOURCES: [Resource; 7] = [
     Resource::Prestige,
 ];
 
+impl Resource {
+    /// Ported from `render.go`'s `ResourceStrings`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Resource::Diamond => "Diamond",
+            Resource::Sapphire => "Sapphire",
+            Resource::Emerald => "Emerald",
+            Resource::Ruby => "Ruby",
+            Resource::Onyx => "Onyx",
+            Resource::Gold => "Gold",
+            Resource::Prestige => "Prestige",
+        }
+    }
+}
+
+impl std::fmt::Display for Resource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 pub const GEMS: [Resource; 5] = [
     Resource::Diamond,
     Resource::Sapphire,

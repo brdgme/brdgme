@@ -148,11 +148,11 @@ Add at minimum (no existing Go game-level test file to port from):
 - Consumes: `cost.rs`, `card.rs`, `player_board.rs` from Task 1.
 - Produces: `splendor_2::Game` implementing `brdgme_game::Gamer`.
 
-- [ ] Step 1: Read `brdgme-go/splendor_1/{game.go,command.go,take_command.go,buy_command.go,reserve_command.go,discard_command.go,visit_command.go}` again in full before implementing (re-verify against "Key Go source facts" above rather than relying purely on this document).
-- [ ] Step 2: Write failing tests first per the "Baseline test suite" section above, plus 1:1 nothing-else-to-port (the 3 Go test files are fully covered in Task 1; this task's tests are entirely the baseline suite since `splendor_1` has no `game_test.go`/`command_test.go`).
-- [ ] Step 3: Implement `command.rs` parsers (buy/discard/reserve/take/visit, `LocParser` computed fresh from current board+reserve state, `TokenParser`/`TokensParser` with `include_gold` flag) and `lib.rs` (phases, `pay`, `take`/`buy`/`reserve`/`discard`/`visit` actions, `next_phase`/`visit_phase`/`discard_phase`/`next_player`/`check_end_triggered`, `placings`). Use the borrow-order pattern from GAME_PORTING.md for `command()`. Preserve all "Quirks to preserve" verbatim. All five `CommandResponse`s use `can_undo: false`.
-- [ ] Step 4: `cargo test --package splendor-2` passes; `cargo build --package splendor-2` builds all 4 bins; `tests/contract.rs` passes.
-- [ ] Step 5: Commit `feat(splendor-2): game engine, phases, and commands` touching only `rust/game/splendor-2/`.
+- [x] Step 1: Read `brdgme-go/splendor_1/{game.go,command.go,take_command.go,buy_command.go,reserve_command.go,discard_command.go,visit_command.go}` again in full before implementing (re-verify against "Key Go source facts" above rather than relying purely on this document).
+- [x] Step 2: Write failing tests first per the "Baseline test suite" section above, plus 1:1 nothing-else-to-port (the 3 Go test files are fully covered in Task 1; this task's tests are entirely the baseline suite since `splendor_1` has no `game_test.go`/`command_test.go`).
+- [x] Step 3: Implement `command.rs` parsers (buy/discard/reserve/take/visit, `LocParser` computed fresh from current board+reserve state, `TokenParser`/`TokensParser` with `include_gold` flag) and `lib.rs` (phases, `pay`, `take`/`buy`/`reserve`/`discard`/`visit` actions, `next_phase`/`visit_phase`/`discard_phase`/`next_player`/`check_end_triggered`, `placings`). Use the borrow-order pattern from GAME_PORTING.md for `command()`. Preserve all "Quirks to preserve" verbatim. All five `CommandResponse`s use `can_undo: false`.
+- [x] Step 4: `cargo test --package splendor-2` passes; `cargo build --package splendor-2` builds all 4 bins; `tests/contract.rs` passes.
+- [x] Step 5: Commit `feat(splendor-2): game engine, phases, and commands` touching only `rust/game/splendor-2/`.
 
 ### Task 3: Render + render parity
 
