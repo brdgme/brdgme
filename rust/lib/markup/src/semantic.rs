@@ -17,6 +17,11 @@ pub enum SemanticColType {
         color: NamedColor,
         soften: Option<u8>,
     },
+    Mix {
+        source: NamedColor,
+        target: NamedColor,
+        pct: u8,
+    },
     Player(usize),
 }
 
@@ -31,6 +36,15 @@ impl Col {
         let color = match self.color {
             ColType::Player(p) => SemanticColType::Player(p),
             ColType::Named { color, soften } => SemanticColType::Named { color, soften },
+            ColType::Mix {
+                source,
+                target,
+                pct,
+            } => SemanticColType::Mix {
+                source,
+                target,
+                pct,
+            },
         };
         let contrast = self
             .transform
@@ -139,6 +153,38 @@ mod tests {
                     },
                     vec![TNode::text("x")],
                 )],
+            )]
+        );
+    }
+
+    #[test]
+    fn transform_semantic_mix_works() {
+        let result = transform_semantic(
+            &[N::Bg(
+                Col {
+                    color: ColType::Mix {
+                        source: NamedColor::Red,
+                        target: NamedColor::Blue,
+                        pct: 50,
+                    },
+                    transform: vec![],
+                },
+                vec![N::text("x")],
+            )],
+            &[],
+        );
+        assert_eq!(
+            result,
+            vec![TNode::Bg(
+                SemanticCol {
+                    color: SemanticColType::Mix {
+                        source: NamedColor::Red,
+                        target: NamedColor::Blue,
+                        pct: 50,
+                    },
+                    contrast: false,
+                },
+                vec![TNode::text("x")],
             )]
         );
     }

@@ -25,6 +25,11 @@ impl Col {
                     None => base,
                 }
             }
+            ColType::Mix {
+                source,
+                target,
+                pct,
+            } => brdgme_color::mix(palette.color(source), palette.color(target), pct),
         };
         for tf in &self.transform {
             c = match *tf {
@@ -448,6 +453,29 @@ mod tests {
             result,
             vec![TN::Bg(
                 Color::from_hex("#dbdbdb").unwrap(),
+                vec![TN::text("x")]
+            )]
+        );
+    }
+
+    #[test]
+    fn transform_with_palette_mix_works() {
+        let nodes = [N::Bg(
+            crate::ast::Col {
+                color: crate::ast::ColType::Mix {
+                    source: NamedColor::Red,
+                    target: NamedColor::Blue,
+                    pct: 50,
+                },
+                transform: vec![],
+            },
+            vec![N::text("x")],
+        )];
+        let result = transform_with_palette(&nodes, &[], &LIGHT);
+        assert_eq!(
+            result,
+            vec![TN::Bg(
+                Color::from_hex("#765381").unwrap(),
                 vec![TN::text("x")]
             )]
         );

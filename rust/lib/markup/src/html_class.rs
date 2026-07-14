@@ -1,4 +1,4 @@
-use brdgme_color::{IN_USE_SOFTENS, NamedColor};
+use brdgme_color::{IN_USE_MIXES, IN_USE_SOFTENS, NamedColor};
 
 use crate::ast::TNode;
 use crate::semantic::{SemanticCol, SemanticColType};
@@ -24,6 +24,15 @@ pub fn markup_class_css() -> String {
     }
     for &(named, pct) in IN_USE_SOFTENS {
         let token = format!("soften-{}-{}", named, pct);
+        rule(&mut buf, &token, &format!("--mk-{}", token));
+        rule(
+            &mut buf,
+            &format!("c-{}", token),
+            &format!("--mk-{}-contrast", token),
+        );
+    }
+    for &(source, target, pct) in IN_USE_MIXES {
+        let token = format!("mix-{}-{}-{}", source, target, pct);
         rule(&mut buf, &token, &format!("--mk-{}", token));
         rule(
             &mut buf,
@@ -67,6 +76,13 @@ fn color_token(color: &SemanticColType) -> String {
             Some(pct) => format!("soften-{}-{}", color, pct),
             None => color.to_string(),
         },
+        SemanticColType::Mix {
+            source,
+            target,
+            pct,
+        } => {
+            format!("mix-{}-{}-{}", source, target, pct)
+        }
         SemanticColType::Player(n) => format!("player-{}", n),
     }
 }
@@ -163,6 +179,24 @@ mod tests {
     }
 
     #[test]
+    fn mix_works() {
+        assert_eq!(
+            html_class(&[TNode::Bg(
+                SemanticCol {
+                    color: SemanticColType::Mix {
+                        source: NamedColor::Red,
+                        target: NamedColor::Blue,
+                        pct: 50,
+                    },
+                    contrast: false,
+                },
+                vec![TNode::text("x")]
+            )]),
+            r#"<span class="mk-bg-mix-red-blue-50">x</span>"#
+        );
+    }
+
+    #[test]
     fn player_works() {
         assert_eq!(
             html_class(&[TNode::Fg(
@@ -221,8 +255,8 @@ mod tests {
         assert!(css.contains(".mk-fg-red{color:var(--mk-red)}"));
         assert!(css.contains(".mk-bg-red{background-color:var(--mk-red)}"));
         assert!(css.contains(".mk-fg-c-green{color:var(--mk-green-contrast)}"));
-        assert!(css.contains(".mk-fg-soften-foreground-86{color:var(--mk-soften-foreground-86)}"));
-        assert!(css.contains(".mk-fg-c-soften-pink-75{color:var(--mk-soften-pink-75-contrast)}"));
+        assert!(css.contains(".mk-fg-soften-foreground-90{color:var(--mk-soften-foreground-90)}"));
+        assert!(css.contains(".mk-fg-c-soften-pink-80{color:var(--mk-soften-pink-80-contrast)}"));
         assert!(css.contains(".mk-fg-player-0{color:var(--mk-player-0)}"));
         assert!(css.contains(".mk-bg-player-0{background-color:var(--mk-player-0)}"));
         assert!(css.contains(".mk-fg-c-player-0{color:var(--mk-player-0-contrast)}"));

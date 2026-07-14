@@ -55,6 +55,11 @@ pub enum ColType {
         color: brdgme_color::NamedColor,
         soften: Option<u8>,
     },
+    Mix {
+        source: brdgme_color::NamedColor,
+        target: brdgme_color::NamedColor,
+        pct: u8,
+    },
 }
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +87,11 @@ impl Col {
                 Some(pct) => format!("soften({}, {})", color, pct),
                 None => color.to_string(),
             },
+            ColType::Mix {
+                source,
+                target,
+                pct,
+            } => format!("mix({}, {}, {})", source, target, pct),
         }
     }
 

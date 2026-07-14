@@ -54,6 +54,23 @@ where
     many1(digit()).map(|s: String| s.parse::<u8>().unwrap())
 }
 
+/// Parses a percentage, valid only from 0 through 100 inclusive. Shared by
+/// `soften` and `mix` so both forms enforce the same bound.
+fn parse_pct<Input>() -> impl Parser<Input, Output = u8>
+where
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+{
+    many1(digit()).and_then(|s: String| {
+        s.parse::<u8>()
+            .ok()
+            .filter(|pct| *pct <= 100)
+            .ok_or_else(|| {
+                <StreamErrorFor<Input>>::message_static_message("percentage must be 0 through 100")
+            })
+    })
+}
+
 fn parse_usize<Input>() -> impl Parser<Input, Output = usize>
 where
     Input: Stream<Token = char>,
@@ -101,6 +118,7 @@ where
         choice((
             attempt(col_type_player()),
             attempt(col_type_rgb()),
+            attempt(col_type_mix()),
             attempt(col_type_soften()),
             attempt(col_type_named()),
         )),
@@ -164,7 +182,7 @@ where
         many1::<String, _, _>(letter()),
         string(","),
         combine::optional(string(" ")),
-        parse_u8(),
+        parse_pct(),
         string(")"),
     )
         .and_then(|(_, name, _, _, pct, _)| {
@@ -176,6 +194,36 @@ where
                 .ok_or_else(|| {
                     <StreamErrorFor<Input>>::message_static_message("unknown named colour")
                 })
+        })
+}
+
+fn col_type_mix<Input>() -> impl Parser<Input, Output = ColType>
+where
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+{
+    (
+        attempt(string("mix(")),
+        many1::<String, _, _>(letter()),
+        string(","),
+        combine::optional(string(" ")),
+        many1::<String, _, _>(letter()),
+        string(","),
+        combine::optional(string(" ")),
+        parse_pct(),
+        string(")"),
+    )
+        .and_then(|(_, source, _, _, target, _, _, pct, _)| {
+            match (resolve_named(&source), resolve_named(&target)) {
+                (Some(source), Some(target)) => Ok(ColType::Mix {
+                    source,
+                    target,
+                    pct,
+                }),
+                _ => Err(<StreamErrorFor<Input>>::message_static_message(
+                    "unknown named colour",
+                )),
+            }
         })
 }
 
@@ -620,10 +668,63 @@ mod tests {
                 },
                 vec![N::text("c")],
             ),
+            N::Bg(
+                Col {
+                    color: ColType::Mix {
+                        source: NamedColor::Red,
+                        target: NamedColor::Blue,
+                        pct: 50,
+                    },
+                    transform: vec![],
+                },
+                vec![N::text("d")],
+            ),
         ];
         let s = to_string(&nodes);
+        assert!(s.contains("mix(red, blue, 50)"));
         let (parsed, rest) = markup().parse(s.as_str()).unwrap();
         assert_eq!(rest, "");
         assert_eq!(parsed, nodes);
+    }
+
+    #[test]
+    fn mix_parsing_works() {
+        let (parsed, rest) = markup().parse("{{bg mix(red, blue, 50)}}x{{/bg}}").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(
+            parsed,
+            vec![N::Bg(
+                Col {
+                    color: ColType::Mix {
+                        source: NamedColor::Red,
+                        target: NamedColor::Blue,
+                        pct: 50,
+                    },
+                    transform: vec![],
+                },
+                vec![N::text("x")],
+            )]
+        );
+
+        // No space after comma also parses.
+        let (parsed_nospace, _) = markup().parse("{{bg mix(red,blue,50)}}x{{/bg}}").unwrap();
+        assert_eq!(parsed_nospace, parsed);
+
+        if let Ok((nodes, _)) = markup().parse("{{bg mix(red,blue,101)}}x{{/bg}}") {
+            assert!(
+                !nodes.iter().any(|node| matches!(node, N::Bg(..))),
+                "out-of-range mix must not produce a background node: {nodes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn soften_out_of_range_pct_fails_to_parse() {
+        if let Ok((nodes, _)) = markup().parse("{{bg soften(pink,101)}}x{{/bg}}") {
+            assert!(
+                !nodes.iter().any(|node| matches!(node, N::Bg(..))),
+                "out-of-range soften must not produce a background node: {nodes:?}"
+            );
+        }
     }
 }
