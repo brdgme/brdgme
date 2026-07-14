@@ -23,6 +23,9 @@ attempted and dropped 2026-07-08),
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
 complete 2026-07-10), #28 WP4 Cloudflare edge (complete 2026-07-11).
+**Top of backlog (added 2026-07-14):** #39 accessibility themes (CVD
+variants of brdgme light/dark) + theme picker categories
+(Default/Accessibility/Custom, alphabetical within category).
 **Remaining pre-go-live:** #34 admin functions + #35 user settings
 (added 2026-07-11, wanted in place for the beta) -> #33 pre-go-live UI/UX
 polish batch -> #16 beta period (isolated DB) -> hard cutover + 1-week
@@ -92,6 +95,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) | - |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
 | 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - pre-beta-exit; added 2026-07-11 | - | - |
+| 39 | Accessibility themes + theme picker categories (added 2026-07-14, **top priority**): (a) colour-blind variants of the two default themes - brdgme light/dark each get variants for the major colour vision deficiency groups (deuteranopia, protanopia, tritanopia), derived from established CVD-safe palettes (Okabe-Ito / Paul Tol) and validated under CVD simulation per THEMING.md's contrast rules; (b) add a category to each registered theme and render the picker grouped: Default (the two brdgme themes, no heading, top), Accessibility (the CVD variants + any adopted third-party accessibility themes), Custom (everything else, bottom); themes sorted alphabetically within each category; (c) evaluate adopting established colourblind-first third-party themes - candidates: GitHub Dark/Light Colorblind (official github-vscode-theme variants, orange/blue in place of red/green, widely used) and the Modus themes' deuteranopia/tritanopia variants (Emacs, WCAG AAA-focused) - verify against upstream before adopting | - | - |
 | 38 | Frontend cache busting on new deploys (investigate stale WASM/asset caching when a new version is bumped in brdgme-config; options: user-facing "new version released, please reload" messaging, or simply force a reload when a new version is deployed) | Pending - unscheduled; added 2026-07-11 | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
