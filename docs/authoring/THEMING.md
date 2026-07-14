@@ -147,7 +147,7 @@ survives into the AST, and games cannot emit it (see the rules below).
 
 Games freely place any hue, GREY, or FOREGROUND text on BACKGROUND and
 on softened surfaces - Acquire, for example, renders GREY text inside
-`soften(FOREGROUND, 86)`/`soften(FOREGROUND, 75)` checkerboard cells.
+`soften(FOREGROUND, 90)`/`soften(FOREGROUND, 80)` checkerboard cells.
 The set of softened surfaces to validate is the set of `soften`
 expressions actually used by games (enumerable by grep). A theme is
 only valid if:
@@ -155,8 +155,8 @@ only valid if:
 - FOREGROUND, GREY, and every hue used as text reach at least 3:1
   contrast against BACKGROUND and every in-use softened surface. Aim
   for 4.5:1 (WCAG AA body text) where the palette allows it; the light
-  default's weakest pair (GREY on `soften(FOREGROUND, 75)`) sits at
-  roughly 3.3:1, so 3:1 is the hard floor.
+  default's weakest pair (GREY on `soften(FOREGROUND, 80)`) sits at
+  roughly 3.9:1, so 3:1 is the hard floor.
 - `contrast` output (FOREGROUND or BACKGROUND) reaches at least 4.5:1
   against every hue and every in-use softened surface, since it exists
   specifically to carry text on coloured backgrounds.
@@ -258,7 +258,7 @@ catch.
 - Use `Player(n)` nodes for anything player-owned. Never hardcode
   per-player hues (the legacy `hive` port must fix this).
 - Board surfaces and checkerboards use BACKGROUND and `soften`
-  (typically `soften(FOREGROUND, 86)` / `soften(FOREGROUND, 75)`), not
+  (typically `soften(FOREGROUND, 90)` / `soften(FOREGROUND, 80)`), not
   literal greys. Muted hue washes (tile highlights, casino tiles) use
   `soften(HUE, pct)`, never a bespoke pale RGB.
 - "Black" and "white" game identities (black dice, black corp, white
@@ -305,7 +305,7 @@ Bespoke colour migrations (the only two games with out-of-palette
 colours anywhere in rust/, brdgme-go/, or brdg.me):
 
 - **acquire-1** (`src/render.rs`): checkerboard `220`/`190` greys ->
-  `soften(FOREGROUND, 86)` / `soften(FOREGROUND, 75)`; unincorporated
+  `soften(FOREGROUND, 90)` / `soften(FOREGROUND, 80)`; unincorporated
   `100` grey -> GREY bg; unavailable-tile `80` grey text -> GREY;
   available-tile pink bg `248,187,208` (Material Pink 100) ->
   `soften(PINK, 80)` (`#f3d1de` on the light default, sRGB-mixed;
@@ -316,7 +316,7 @@ colours anywhere in rust/, brdgme-go/, or brdg.me):
   `contrast`.
 - **lords-of-vegas-1** (`src/casino.rs`, `src/render.rs`): Albion ->
   PURPLE, Sphinx -> ORANGE or BROWN, Vega -> GREEN, Tivoli -> GREY,
-  Pioneer -> BROWN, unbuilt tile `200` grey -> `soften(FOREGROUND, 78)`;
+  Pioneer -> BROWN, unbuilt tile `200` grey -> `soften(FOREGROUND, 80)`;
   `.inv().mono()` -> `contrast`. The casino colours are tile backgrounds
   under player-coloured content; if plain hues clash in practice, the
   answer is `soften(HUE, pct)` washes, not bespoke RGB.
