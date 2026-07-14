@@ -3315,7 +3315,7 @@ mod tests {
             soften(LIGHT.foreground, 80, LIGHT.background).hex(),
             "#cccccc"
         );
-        assert_eq!(soften(LIGHT.pink, 75, LIGHT.background).hex(), "#f0c5d6");
+        assert_eq!(soften(LIGHT.pink, 80, LIGHT.background).hex(), "#f3d1de");
     }
 
     #[test]
@@ -3336,7 +3336,6 @@ mod tests {
             mix(DRACULA.foreground, DRACULA.background, 90).hex(),
             "#3d3f49"
         );
-        assert_eq!(soften(LIGHT.pink, 75, LIGHT.background).hex(), "#f0c5d6");
     }
 
     #[test]
