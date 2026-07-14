@@ -229,35 +229,53 @@ sync tests; sqlx DB failures expected); clippy -D warnings
     Operator decision: skip rather than re-tune Modus's expert-chosen
     values enough to pass a bar they were never aimed at - `DeutanProtan`'s
     dual-gate requirement is a hard requirement, not negotiable per-theme.
-- [ ] Final verification (tests, checks, clippy, fmt)
+- [x] Final verification (tests, checks, clippy, fmt): re-ran the full
+  suite at HEAD `b3f2c79` via a fresh independent agent. `cargo test -p
+  brdgme_color` 13/13 pass; `SQLX_OFFLINE=true cargo check -p web
+  --features ssr`/`--features hydrate` clean; `SQLX_OFFLINE=true cargo
+  test -p web --lib --features ssr` 17 passed/52 failed (all 52 the
+  expected live-Postgres `PoolTimedOut` failures, none theme-related; all
+  7 `theme::tests::*` plus `app::tests::theme_boot_script_contains_all_theme_slugs`
+  pass); `cargo clippy -p brdgme_color -- -D warnings` and
+  `SQLX_OFFLINE=true cargo clippy -p web --features ssr -- -D warnings`
+  both clean; `cargo fmt --check` clean. Repo-wide grep for leftover
+  `ThemeCategory::Accessibility`/`ThemeCategory::Custom` references in
+  palette.rs/theme.rs/app.rs/THEMING.md/this plan file: none found outside
+  this plan's own historical narrative (expected) and one unrelated "CSS
+  custom properties" mention in THEMING.md (harmless).
 
-## Handover (updated 2026-07-14, second sub-orchestrator attempt)
+## Handover (updated 2026-07-14, third pass - all work packages complete)
 
-State: WP1 and WP2 complete, verified, and committed (HEAD `d6632ed`).
-WP2b and WP3 not started (a first sub-orchestrator attempt at WP2b/WP3
-died mid-flight from a model usage limit; its uncommitted, superseded-scheme
-draft work is discarded/redone rather than built on - see the WP2b/WP3
-progress-log entries above for what it left behind).
+State: WP1, WP2, WP2b, and WP3 all complete, verified, and committed.
+Final verification passed at HEAD `b3f2c79` (see the Final verification
+progress-log entry above for full results). Nothing left to do on this
+plan; a first sub-orchestrator attempt at WP2b/WP3 died mid-flight from a
+model usage limit earlier and left uncommitted, superseded-scheme draft
+work that was discarded rather than built on - see the WP2b/WP3
+progress-log entries above for what it left behind and how it was
+handled.
 
-What exists now (at `d6632ed`):
-- `brdgme_color::ThemeCategory { Default, Accessibility, Custom }`;
-  `themes()` returns `&[(&str, ThemeCategory, &Palette)]`. 2 Default
-  (brdgme light/dark), 24 Custom, 6 Accessibility (the WP2 CVD variants).
+What exists now:
+- `brdgme_color::ThemeCategory { Default, Light, Dark, DeutanProtan,
+  Tritan }`; `themes()` returns `&[(&str, ThemeCategory, &Palette)]`. 32
+  registered themes: 2 Default, 9 Light, 15 Dark, 4 DeutanProtan, 2
+  Tritan.
 - Ordering contract: `themes()` registry order stays authoritative and
   `THEME_SLUGS`/`THEME_BOOT_SCRIPT` mirror it exactly (the
   `theme_slugs_match_brdgme_color_themes` test asserts order). Grouping +
   alphabetical sorting happen only in the picker via the pure
-  `grouped_themes()` in `rust/web/src/theme.rs` (unit-tested).
+  `grouped_themes()` in `rust/web/src/theme.rs` (unit-tested), in category
+  order Default, Light, Dark, DeutanProtan, Tritan.
 - Picker (`ThemeSettingsPage`, `rust/web/src/app.rs`): System tile first,
   Default tiles with no heading, then category headings (`<h2
   class="theme-category-heading">`, flex-basis 100% inside the flex
-  `.theme-grid`). Empty categories are omitted.
+  `.theme-grid`) with exact display strings "Light", "Dark", "Deuteranopia
+  / Protanopia", "Tritanopia". Empty categories are omitted.
 - `gate_cvd_simulation` test (palette.rs) keyword-matches theme names for
   deuteranopia/protanopia/tritanopia; floor `CVD_DISTINCT_DELTA_E = 10.0`.
-
-Next steps (WP2b, then WP3 - full specs are in the orchestrator brief /
-Goal / operator-decision sections above): see the WP2b and WP3
-progress-log bullets above for the concrete task breakdown and what to
-watch out for from the dead attempt's leftovers. Final verification
-commands are in **Verify** above; run per-WP and at the end. Update this
-log per WP.
+- Third-party CVD adoptions: `modus operandi tritanopia` and
+  `modus vivendi tritanopia` only (both `Tritan`). GitHub Light/Dark
+  Colorblind and Modus Operandi/Vivendi Deuteranopia were evaluated and
+  explicitly skipped - see the WP3 progress-log entry for the reasoning
+  (upstream palettes not designed/validated for what brdgme's gates would
+  have required of them).
