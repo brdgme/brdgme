@@ -23,8 +23,8 @@ pub type MixExpression = (NamedColor, NamedColor, u8);
 
 /// Explicit mix expressions actually used across game crates. Empty for now
 /// - no game currently emits an explicit `mix` expression. Kept as a single
-/// source of truth so the web layer's generated CSS only carries the
-/// variables/classes that are ever referenced.
+///   source of truth so the web layer's generated CSS only carries the
+///   variables/classes that are ever referenced.
 pub const IN_USE_MIXES: &[MixExpression] = &[];
 
 /// Generates `:root`-scope-free CSS custom property declarations (just the
