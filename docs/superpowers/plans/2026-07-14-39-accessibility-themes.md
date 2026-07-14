@@ -30,18 +30,42 @@
    category; skip (and record why) if a candidate cannot meet the gates
    without losing its identity.
 
-**Operator decision (2026-07-14, supersedes the category model above):**
-Accessibility themes are categorised by colour blindness type instead of
-one flat "Accessibility" category, because there will be multiple theme
-choices per type. Combined-category model: `ThemeCategory::Accessibility`
-is replaced by two categories - one displayed as "Deuteranopia /
-Protanopia" and one displayed as "Tritanopia". Deutan- and
-protan-targeted themes (near-identical palettes in practice) share the
-combined category; tritan themes get their own. Default and Custom are
-unchanged. Picker category order: Default (no heading), then
-Deuteranopia / Protanopia, then Tritanopia, then Custom; alphabetical
-sort within each group stays. WP3 adoptions go into the appropriate
-CVD-type category rather than "Accessibility".
+**Operator decision (2026-07-14, first revision, superseded by the next
+paragraph):** Accessibility themes are categorised by colour blindness
+type instead of one flat "Accessibility" category, because there will be
+multiple theme choices per type. Combined-category model:
+`ThemeCategory::Accessibility` is replaced by two categories - one
+displayed as "Deuteranopia / Protanopia" and one displayed as
+"Tritanopia". Deutan- and protan-targeted themes (near-identical palettes
+in practice) share the combined category; tritan themes get their own.
+
+**Operator decision (2026-07-14, final, supersedes both paragraphs
+above):** the flat "Custom" category is also split by background
+lightness, giving five categories total. `ThemeCategory` variants (exact
+Rust identifiers left to the implementer, semantics fixed): `Default`,
+`Light`, `Dark`, `DeutanProtan`, `Tritan`. Display strings: "Light",
+"Dark", "Deuteranopia / Protanopia", "Tritanopia" (`Default` still
+renders with no heading). Each theme keeps exactly one `ThemeCategory` -
+no multi-category/duplicate-tile membership - because in this theme set
+deutan and protan always travel together on one shared palette, so the
+overlap between the two CVD types is total, not partial; a single
+`DeutanProtan` category loses no information the scheme would otherwise
+need to represent. Picker order (top to bottom):
+1. No heading: System tile, brdgme light, brdgme dark (`Default`,
+   unchanged).
+2. "Light" heading: non-default, non-CVD themes with light backgrounds -
+   alphabetical.
+3. "Dark" heading: non-default, non-CVD themes with dark backgrounds -
+   alphabetical.
+4. "Deuteranopia / Protanopia" heading: CVD themes covering deutan and/or
+   protan - alphabetical.
+5. "Tritanopia" heading: CVD themes for tritanopia - alphabetical.
+
+Existing themes are re-tagged, not moved: the 24 former-`Custom` themes
+split into `Light`/`Dark` by their actual background colour (read each
+palette's background slot, don't guess from the name alone); the 6 CVD
+themes keep the deutan/protan-vs-tritan split from the first revision
+above (4 -> `DeutanProtan`, 2 -> `Tritan`).
 
 **Verify:** cargo test -p brdgme_color (contrast gate incl. any new CVD
 gate); SQLX_OFFLINE=true cargo check -p web --features ssr / --features
@@ -87,51 +111,56 @@ sync tests; sqlx DB failures expected); clippy -D warnings
   clean; one deferred cosmetic note - DARK_DEUTERANOPIA's re-tuned PURPLE
   (hue 238.5) sits 6.2 degrees from its BLUE, reads blue-lavender, but
   both gates clear with margin.
-- [ ] WP2b: re-categorisation per operator decision - replace
-  `ThemeCategory::Accessibility` with per-CVD-type categories
-  ("Deuteranopia / Protanopia" combined, "Tritanopia"); re-tag the 6 WP2
-  themes; update `grouped_themes()`/picker ordering, headings, unit
-  tests; update THEMING.md category docs.
+- [ ] WP2b: re-categorisation per the final operator decision above (5
+  categories: Default, Light, Dark, DeutanProtan, Tritan). A prior
+  sub-orchestrator attempt died mid-flight (model usage limit, not a code
+  problem) after implementing only the *first-revision* 4-category scheme
+  (Default/DeutanProtan/Tritan/Custom, no Light/Dark split) as an
+  uncommitted working-tree diff, plus 3 orphaned/unregistered draft Modus
+  palette statics in `palette.rs` left over from a premature WP3 start.
+  Nothing from that attempt was committed. WP2b redo picks up from
+  scratch: 5-category enum, all 30 themes re-tagged (2 Default, 24
+  Light/Dark split by actual background colour, 4 DeutanProtan, 2
+  Tritan), `grouped_themes()` + picker + THEMING.md updated for the new
+  order, orphaned Modus statics removed (or left for WP3 to redo
+  verified, implementer's call - see WP3 note below).
 - [ ] WP3: third-party colourblind-first theme evaluation/adoption
-  (adopt into the appropriate CVD-type category)
+  (GitHub Light/Dark Colorblind + Modus Operandi/Vivendi
+  Deuteranopia/Tritanopia; adopt into `DeutanProtan` or `Tritan`). Note:
+  the dead attempt's scratchpad has unverified research drafts
+  (`wp3-research-github.md`, `wp3-research-modus.md`, fetched upstream
+  `.el`/`.json` files) - treat as unverified draft input only, re-fetch
+  and re-verify every hex value against real upstream sources before
+  trusting it.
 - [ ] Final verification (tests, checks, clippy, fmt)
 
-## Handover (paused 2026-07-14 after WP1)
+## Handover (updated 2026-07-14, second sub-orchestrator attempt)
 
-State: WP1 complete, verified, and committed. WP2/WP3 not started.
+State: WP1 and WP2 complete, verified, and committed (HEAD `d6632ed`).
+WP2b and WP3 not started (a first sub-orchestrator attempt at WP2b/WP3
+died mid-flight from a model usage limit; its uncommitted, superseded-scheme
+draft work is discarded/redone rather than built on - see the WP2b/WP3
+progress-log entries above for what it left behind).
 
-What exists now:
+What exists now (at `d6632ed`):
 - `brdgme_color::ThemeCategory { Default, Accessibility, Custom }`;
-  `themes()` returns `&[(&str, ThemeCategory, &Palette)]`. brdgme
-  light/dark = Default, the other 24 = Custom. No Accessibility themes
-  registered yet.
-- Ordering contract (decided in WP1): `themes()` registry order stays
-  authoritative and `THEME_SLUGS` mirrors it exactly (the
-  `theme_slugs_match_brdgme_color_themes` test still asserts order).
-  Grouping + alphabetical sorting happen only in the picker via the pure
+  `themes()` returns `&[(&str, ThemeCategory, &Palette)]`. 2 Default
+  (brdgme light/dark), 24 Custom, 6 Accessibility (the WP2 CVD variants).
+- Ordering contract: `themes()` registry order stays authoritative and
+  `THEME_SLUGS`/`THEME_BOOT_SCRIPT` mirror it exactly (the
+  `theme_slugs_match_brdgme_color_themes` test asserts order). Grouping +
+  alphabetical sorting happen only in the picker via the pure
   `grouped_themes()` in `rust/web/src/theme.rs` (unit-tested).
 - Picker (`ThemeSettingsPage`, `rust/web/src/app.rs`): System tile first,
-  Default tiles with no heading, then "Accessibility"/"Custom" `<h2
-  class="theme-category-heading">` sections (styled in `main.scss` with
-  flex-basis 100% inside the flex `.theme-grid`). Empty categories are
-  omitted, so the Accessibility heading appears automatically once WP2
-  registers themes.
+  Default tiles with no heading, then category headings (`<h2
+  class="theme-category-heading">`, flex-basis 100% inside the flex
+  `.theme-grid`). Empty categories are omitted.
+- `gate_cvd_simulation` test (palette.rs) keyword-matches theme names for
+  deuteranopia/protanopia/tritanopia; floor `CVD_DISTINCT_DELTA_E = 10.0`.
 
-Next steps (WP2, then WP3 - full specs are in the orchestrator brief /
-Goal sections above):
-- WP2: add 6 Accessibility themes ("brdgme light/dark
-  deuteranopia/protanopia/tritanopia") to palette.rs keeping base
-  neutrals, hues derived from Okabe-Ito / Paul Tol; implement
-  Viénot/Brettel-style deutan/protan/tritan simulation matrices in the
-  palette.rs test module and add a `gate_cvd_simulation` test (keyed off
-  CVD keywords in theme names) asserting pairwise player+GREY+FOREGROUND
-  deltaE under simulation >= a calibrated floor (document achieved
-  minima); append slugs to `THEME_SLUGS` (theme.rs) and the
-  `THEME_BOOT_SCRIPT` array (app.rs) in registry order.
-- WP3: evaluate GitHub Light/Dark Colorblind (primer/github-vscode-theme)
-  and Modus Operandi/Vivendi Deuteranopia + Tritanopia
-  (protesilaos/modus-themes) against upstream sources; map to 12 slots,
-  pass contrast gate + matching CVD gate, adopt as Accessibility or
-  record skip reasons here.
-- Final verification commands are in **Verify** above; run per-WP and at
-  the end. Update this log per WP.
+Next steps (WP2b, then WP3 - full specs are in the orchestrator brief /
+Goal / operator-decision sections above): see the WP2b and WP3
+progress-log bullets above for the concrete task breakdown and what to
+watch out for from the dead attempt's leftovers. Final verification
+commands are in **Verify** above; run per-WP and at the end. Update this
+log per WP.
