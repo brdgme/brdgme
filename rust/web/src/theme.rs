@@ -5,7 +5,7 @@
 
 use std::sync::LazyLock;
 
-use brdgme_color::{IN_USE_SOFTENS, NamedColor, palette_css_vars, themes};
+use brdgme_color::{IN_USE_SOFTENS, NamedColor, ThemeCategory, palette_css_vars, themes};
 
 /// Chrome-only soften expressions (main.scss surfaces: my-turn/finished/hover
 /// tints) - kept separate from `IN_USE_SOFTENS` so the game-text contrast
@@ -47,7 +47,41 @@ pub const THEME_SLUGS: &[(&str, &str)] = &[
     ("darcula", "darcula"),
     ("vs-code-dark-plus", "vs code dark plus"),
     ("vs-code-dark-modern", "vs code dark modern"),
+    ("brdgme-light-deuteranopia", "brdgme light deuteranopia"),
+    ("brdgme-light-protanopia", "brdgme light protanopia"),
+    ("brdgme-light-tritanopia", "brdgme light tritanopia"),
+    ("brdgme-dark-deuteranopia", "brdgme dark deuteranopia"),
+    ("brdgme-dark-protanopia", "brdgme dark protanopia"),
+    ("brdgme-dark-tritanopia", "brdgme dark tritanopia"),
 ];
+
+/// Groups `THEME_SLUGS` by `brdgme_color::themes()`'s per-theme category,
+/// sorted alphabetically by display name within each category, in category
+/// order Default, Accessibility, Custom (empty categories omitted). Pure
+/// sort/group layer over the registry order that `themes()`/`THEME_SLUGS`
+/// otherwise preserve.
+pub fn grouped_themes() -> Vec<(ThemeCategory, Vec<(&'static str, &'static str)>)> {
+    let categories = [
+        ThemeCategory::Default,
+        ThemeCategory::Accessibility,
+        ThemeCategory::Custom,
+    ];
+    categories
+        .into_iter()
+        .filter_map(|category| {
+            let mut group: Vec<(&'static str, &'static str)> = themes()
+                .iter()
+                .filter(|(_, c, _)| *c == category)
+                .filter_map(|(name, _, _)| THEME_SLUGS.iter().find(|(_, n)| n == name).copied())
+                .collect();
+            if group.is_empty() {
+                return None;
+            }
+            group.sort_by_key(|(_, name)| *name);
+            Some((category, group))
+        })
+        .collect()
+}
 
 /// Slugifies a theme's display name: lowercase, spaces -> hyphens.
 pub fn slugify(name: &str) -> String {
@@ -76,13 +110,13 @@ fn build_theme_style_css() -> String {
 
     let light = themes()
         .iter()
-        .find(|(n, _)| *n == "brdgme light")
-        .map(|(_, p)| *p)
+        .find(|(n, _, _)| *n == "brdgme light")
+        .map(|(_, _, p)| *p)
         .expect("brdgme light theme must exist");
     let dark = themes()
         .iter()
-        .find(|(n, _)| *n == "brdgme dark")
-        .map(|(_, p)| *p)
+        .find(|(n, _, _)| *n == "brdgme dark")
+        .map(|(_, _, p)| *p)
         .expect("brdgme dark theme must exist");
 
     let softens: Vec<(NamedColor, u8)> = IN_USE_SOFTENS
@@ -97,7 +131,7 @@ fn build_theme_style_css() -> String {
         palette_css_vars(dark, &softens)
     ));
 
-    for (name, palette) in themes() {
+    for (name, _, palette) in themes() {
         let slug = slugify(name);
         css.push_str(&format!(
             "[data-theme=\"{}\"]{{{}}}\n",
@@ -183,9 +217,45 @@ mod tests {
 
     #[test]
     fn theme_slugs_match_brdgme_color_themes() {
-        let names: Vec<String> = themes().iter().map(|(n, _)| slugify(n)).collect();
+        let names: Vec<String> = themes().iter().map(|(n, _, _)| slugify(n)).collect();
         let ours: Vec<&str> = THEME_SLUGS.iter().map(|(s, _)| *s).collect();
         assert_eq!(names, ours);
+    }
+
+    #[test]
+    fn grouped_themes_category_order_and_sorting() {
+        let groups = grouped_themes();
+        let cats: Vec<ThemeCategory> = groups.iter().map(|(c, _)| *c).collect();
+        // Only categories present in the registry appear, in this order.
+        let mut expected_order = vec![
+            ThemeCategory::Default,
+            ThemeCategory::Accessibility,
+            ThemeCategory::Custom,
+        ];
+        expected_order.retain(|c| cats.contains(c));
+        assert_eq!(cats, expected_order);
+
+        for (_, themes_in_group) in &groups {
+            let mut sorted = themes_in_group.clone();
+            sorted.sort_by_key(|(_, name)| *name);
+            assert_eq!(themes_in_group, &sorted, "group not alphabetically sorted");
+        }
+
+        let total: usize = groups.iter().map(|(_, g)| g.len()).sum();
+        assert_eq!(total, THEME_SLUGS.len());
+
+        let default_group = groups
+            .iter()
+            .find(|(c, _)| *c == ThemeCategory::Default)
+            .expect("Default category must be present")
+            .1
+            .clone();
+        assert!(
+            default_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-light")
+        );
+        assert!(default_group.iter().any(|(slug, _)| *slug == "brdgme-dark"));
     }
 
     #[test]
@@ -202,7 +272,7 @@ mod tests {
     #[test]
     fn chrome_softens_meet_contrast_floor() {
         use brdgme_color::{contrast_ratio, soften};
-        for (theme_name, palette) in themes() {
+        for (theme_name, _, palette) in themes() {
             for &(named, pct) in CHROME_SOFTENS {
                 let surface = soften(palette.color(named), pct, palette.background);
                 let ratio = contrast_ratio(palette.foreground, surface);

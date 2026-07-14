@@ -18,7 +18,7 @@ use crate::components::MainLayout;
 // takes over. An explicit `data-theme` set by this script always wins.
 // The slug list here must stay in sync with `crate::theme::THEME_SLUGS`;
 // `theme_boot_script_contains_all_theme_slugs` (below) pins that.
-const THEME_BOOT_SCRIPT: &str = r#"(function(){try{var m=document.cookie.match(/(?:^|; )theme=([^;]*)/);var t=m?decodeURIComponent(m[1]):null;if(t&&["brdgme-light","brdgme-dark","dracula","alucard","solarized-dark","solarized-light","nord-dark","nord-light","one-dark","one-light","gruvbox-dark","gruvbox-light","catppuccin-mocha","catppuccin-latte","tokyo-night","tokyo-night-storm","tokyo-night-light","night-owl","light-owl","synthwave-84","papercolor-light","papercolor-dark","monokai","darcula","vs-code-dark-plus","vs-code-dark-modern"].indexOf(t)>=0){document.documentElement.dataset.theme=t;}else{delete document.documentElement.dataset.theme;}}catch(e){}})();"#;
+const THEME_BOOT_SCRIPT: &str = r#"(function(){try{var m=document.cookie.match(/(?:^|; )theme=([^;]*)/);var t=m?decodeURIComponent(m[1]):null;if(t&&["brdgme-light","brdgme-dark","dracula","alucard","solarized-dark","solarized-light","nord-dark","nord-light","one-dark","one-light","gruvbox-dark","gruvbox-light","catppuccin-mocha","catppuccin-latte","tokyo-night","tokyo-night-storm","tokyo-night-light","night-owl","light-owl","synthwave-84","papercolor-light","papercolor-dark","monokai","darcula","vs-code-dark-plus","vs-code-dark-modern","brdgme-light-deuteranopia","brdgme-light-protanopia","brdgme-light-tritanopia","brdgme-dark-deuteranopia","brdgme-dark-protanopia","brdgme-dark-tritanopia"].indexOf(t)>=0){document.documentElement.dataset.theme=t;}else{delete document.documentElement.dataset.theme;}}catch(e){}})();"#;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     let theme_css = crate::theme::THEME_STYLE_CSS.clone();
@@ -215,6 +215,31 @@ fn ThemeSettingsPage() -> impl IntoView {
         }
     }
 
+    fn tile(
+        slug: &'static str,
+        name: &'static str,
+        current_user: LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>,
+        set_theme_action: ServerAction<crate::auth::SetTheme>,
+    ) -> impl IntoView {
+        let sample_html = crate::theme::SAMPLE_HTML.clone();
+        let player_style = crate::theme::sample_player_style();
+        let on_click = move |_| select(Some(slug.to_string()), current_user, set_theme_action);
+        view! {
+            <div
+                class="theme-tile"
+                data-theme=slug
+                style=format!(
+                    "background-color: var(--mk-background); color: var(--mk-foreground); {}",
+                    player_style,
+                )
+                on:click=on_click
+            >
+                <div class="theme-tile-label">{name}</div>
+                <div class="theme-tile-sample" inner_html=sample_html></div>
+            </div>
+        }
+    }
+
     view! {
         <MainLayout>
             <h1>"Theme"</h1>
@@ -226,23 +251,17 @@ fn ThemeSettingsPage() -> impl IntoView {
                 >
                     <div class="theme-tile-label">"System"</div>
                 </div>
-                {crate::theme::THEME_SLUGS.iter().map(|&(slug, name)| {
-                    let sample_html = crate::theme::SAMPLE_HTML.clone();
-                    let player_style = crate::theme::sample_player_style();
-                    let on_click = move |_| select(Some(slug.to_string()), current_user, set_theme_action);
+                {crate::theme::grouped_themes().into_iter().map(|(category, group)| {
+                    let heading = match category {
+                        brdgme_color::ThemeCategory::Default => None,
+                        brdgme_color::ThemeCategory::Accessibility => Some("Accessibility"),
+                        brdgme_color::ThemeCategory::Custom => Some("Custom"),
+                    };
                     view! {
-                        <div
-                            class="theme-tile"
-                            data-theme=slug
-                            style=format!(
-                                "background-color: var(--mk-background); color: var(--mk-foreground); {}",
-                                player_style,
-                            )
-                            on:click=on_click
-                        >
-                            <div class="theme-tile-label">{name}</div>
-                            <div class="theme-tile-sample" inner_html=sample_html></div>
-                        </div>
+                        {heading.map(|h| view! { <h2 class="theme-category-heading">{h}</h2> })}
+                        {group.into_iter().map(|(slug, name)| {
+                            tile(slug, name, current_user, set_theme_action)
+                        }).collect_view()}
                     }
                 }).collect_view()}
             </div>
