@@ -2824,11 +2824,7 @@ pub static DARK_PROTANOPIA: Palette = Palette {
 /// simultaneously. Achieved minimum: tritanopia 13.29 deltaE (red/brown),
 /// clearing the 12.0 floor with margin.
 pub static LIGHT_TRITANOPIA: Palette = Palette {
-    red: Color {
-        r: 172,
-        g: 0,
-        b: 0,
-    },
+    red: Color { r: 172, g: 0, b: 0 },
     green: Color {
         r: 26,
         g: 75,
@@ -2854,11 +2850,7 @@ pub static LIGHT_TRITANOPIA: Palette = Palette {
         g: 135,
         b: 206,
     },
-    pink: Color {
-        r: 83,
-        g: 5,
-        b: 80,
-    },
+    pink: Color { r: 83, g: 5, b: 80 },
     orange: Color {
         r: 215,
         g: 158,
@@ -2995,10 +2987,18 @@ pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
         ("darcula", Custom, &DARCULA),
         ("vs code dark plus", Custom, &VS_CODE_DARK_PLUS),
         ("vs code dark modern", Custom, &VS_CODE_DARK_MODERN),
-        ("brdgme light deuteranopia", Accessibility, &LIGHT_DEUTERANOPIA),
+        (
+            "brdgme light deuteranopia",
+            Accessibility,
+            &LIGHT_DEUTERANOPIA,
+        ),
         ("brdgme light protanopia", Accessibility, &LIGHT_PROTANOPIA),
         ("brdgme light tritanopia", Accessibility, &LIGHT_TRITANOPIA),
-        ("brdgme dark deuteranopia", Accessibility, &DARK_DEUTERANOPIA),
+        (
+            "brdgme dark deuteranopia",
+            Accessibility,
+            &DARK_DEUTERANOPIA,
+        ),
         ("brdgme dark protanopia", Accessibility, &DARK_PROTANOPIA),
         ("brdgme dark tritanopia", Accessibility, &DARK_TRITANOPIA),
     ];
