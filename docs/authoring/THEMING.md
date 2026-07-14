@@ -155,6 +155,39 @@ only valid if:
 A contrast-check test over these pairs should gate adding any theme
 (per the theming design spec).
 
+## Theme registry and categories
+
+`brdgme_color::themes()` returns every registered theme tagged with a
+`ThemeCategory`:
+
+- `Default` - the two brdgme themes (light/dark).
+- `Light` - non-default, non-CVD themes (adopted third-party editor themes,
+  etc) whose palette has a light `background`.
+- `Dark` - non-default, non-CVD themes whose palette has a dark
+  `background`.
+- `DeutanProtan` - deuteranopia- and protanopia-targeted themes, grouped
+  together (their palettes are near-identical in practice); displayed in
+  the web picker as "Deuteranopia / Protanopia".
+- `Tritan` - tritanopia-targeted themes; displayed as "Tritanopia".
+
+Light vs. Dark is decided from each palette's actual `background` colour
+(its HSL lightness, thresholded at 50%), not guessed from the theme's name -
+a theme called "X Dark" is only tagged `Dark` if its `background` really is
+dark. Every theme has exactly one category: in this theme set deutan- and
+protan-targeted themes always share one palette (see the deuteranopia/
+protanopia CVD-simulation notes above), so `DeutanProtan` alone captures
+that overlap without any theme needing to belong to two categories.
+
+The registry order (and `web/src/theme.rs`'s `THEME_SLUGS`/
+`THEME_BOOT_SCRIPT`, which mirror it) is not grouped by category; the web
+`/theme` picker groups and sorts via the pure `grouped_themes()` helper in
+`web/src/theme.rs`, in category order `Default`, `Light`, `Dark`,
+`DeutanProtan`, `Tritan`, alphabetically by display name within each group.
+`Default` renders with no heading (its themes sit at the top of the grid);
+the other categories render a heading with their display string ("Light",
+"Dark", "Deuteranopia / Protanopia", "Tritanopia"). Empty categories are
+omitted entirely.
+
 ## Worked example: Dracula
 
 Dracula's published palette covers 11 of the 14 slots natively; BLUE and

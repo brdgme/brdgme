@@ -254,8 +254,12 @@ fn ThemeSettingsPage() -> impl IntoView {
                 {crate::theme::grouped_themes().into_iter().map(|(category, group)| {
                     let heading = match category {
                         brdgme_color::ThemeCategory::Default => None,
-                        brdgme_color::ThemeCategory::Accessibility => Some("Accessibility"),
-                        brdgme_color::ThemeCategory::Custom => Some("Custom"),
+                        brdgme_color::ThemeCategory::Light => Some("Light"),
+                        brdgme_color::ThemeCategory::Dark => Some("Dark"),
+                        brdgme_color::ThemeCategory::DeutanProtan => {
+                            Some("Deuteranopia / Protanopia")
+                        }
+                        brdgme_color::ThemeCategory::Tritan => Some("Tritanopia"),
                     };
                     view! {
                         {heading.map(|h| view! { <h2 class="theme-category-heading">{h}</h2> })}

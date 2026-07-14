@@ -57,14 +57,16 @@ pub const THEME_SLUGS: &[(&str, &str)] = &[
 
 /// Groups `THEME_SLUGS` by `brdgme_color::themes()`'s per-theme category,
 /// sorted alphabetically by display name within each category, in category
-/// order Default, Accessibility, Custom (empty categories omitted). Pure
-/// sort/group layer over the registry order that `themes()`/`THEME_SLUGS`
-/// otherwise preserve.
+/// order Default, Light, Dark, DeutanProtan, Tritan (empty categories
+/// omitted). Pure sort/group layer over the registry order that `themes()`/
+/// `THEME_SLUGS` otherwise preserve.
 pub fn grouped_themes() -> Vec<(ThemeCategory, Vec<(&'static str, &'static str)>)> {
     let categories = [
         ThemeCategory::Default,
-        ThemeCategory::Accessibility,
-        ThemeCategory::Custom,
+        ThemeCategory::Light,
+        ThemeCategory::Dark,
+        ThemeCategory::DeutanProtan,
+        ThemeCategory::Tritan,
     ];
     categories
         .into_iter()
@@ -229,8 +231,10 @@ mod tests {
         // Only categories present in the registry appear, in this order.
         let mut expected_order = vec![
             ThemeCategory::Default,
-            ThemeCategory::Accessibility,
-            ThemeCategory::Custom,
+            ThemeCategory::Light,
+            ThemeCategory::Dark,
+            ThemeCategory::DeutanProtan,
+            ThemeCategory::Tritan,
         ];
         expected_order.retain(|c| cats.contains(c));
         assert_eq!(cats, expected_order);
@@ -256,6 +260,80 @@ mod tests {
                 .any(|(slug, _)| *slug == "brdgme-light")
         );
         assert!(default_group.iter().any(|(slug, _)| *slug == "brdgme-dark"));
+
+        let light_group = groups
+            .iter()
+            .find(|(c, _)| *c == ThemeCategory::Light)
+            .expect("Light category must be present")
+            .1
+            .clone();
+        assert!(light_group.iter().any(|(slug, _)| *slug == "alucard"));
+        assert!(light_group.iter().any(|(slug, _)| *slug == "gruvbox-light"));
+        assert!(!light_group.iter().any(|(slug, _)| *slug == "gruvbox-dark"));
+
+        let dark_group = groups
+            .iter()
+            .find(|(c, _)| *c == ThemeCategory::Dark)
+            .expect("Dark category must be present")
+            .1
+            .clone();
+        assert!(dark_group.iter().any(|(slug, _)| *slug == "dracula"));
+        assert!(dark_group.iter().any(|(slug, _)| *slug == "gruvbox-dark"));
+        assert!(!dark_group.iter().any(|(slug, _)| *slug == "gruvbox-light"));
+
+        let deutan_protan_group = groups
+            .iter()
+            .find(|(c, _)| *c == ThemeCategory::DeutanProtan)
+            .expect("DeutanProtan category must be present")
+            .1
+            .clone();
+        assert!(
+            deutan_protan_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-light-deuteranopia")
+        );
+        assert!(
+            deutan_protan_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-light-protanopia")
+        );
+        assert!(
+            deutan_protan_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-dark-deuteranopia")
+        );
+        assert!(
+            deutan_protan_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-dark-protanopia")
+        );
+        assert!(
+            !deutan_protan_group
+                .iter()
+                .any(|(slug, _)| slug.contains("tritanopia"))
+        );
+
+        let tritan_group = groups
+            .iter()
+            .find(|(c, _)| *c == ThemeCategory::Tritan)
+            .expect("Tritan category must be present")
+            .1
+            .clone();
+        assert!(
+            tritan_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-light-tritanopia")
+        );
+        assert!(
+            tritan_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-dark-tritanopia")
+        );
+        assert!(
+            !tritan_group
+                .iter()
+                .any(|(slug, _)| slug.contains("deuteranopia") || slug.contains("protanopia"))
+        );
     }
 
     #[test]

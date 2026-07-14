@@ -2968,58 +2968,70 @@ pub static DARK_TRITANOPIA: Palette = Palette {
     },
 };
 
-/// Grouping used by the web theme picker to sort/section the registry.
+/// Grouping used by the web theme picker to sort/section the registry. Every
+/// theme has exactly one category - none of the five overlap in practice for
+/// this theme set (see `DeutanProtan`'s doc comment).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ThemeCategory {
+    /// The two brdgme base themes (light/dark). Renders first in the picker
+    /// with no heading.
     Default,
-    Accessibility,
-    Custom,
+    /// Non-default, non-CVD themes with a light background. Displayed as
+    /// "Light".
+    Light,
+    /// Non-default, non-CVD themes with a dark background. Displayed as
+    /// "Dark".
+    Dark,
+    /// Deuteranopia- and protanopia-targeted themes (near-identical
+    /// palettes in practice), grouped together. Displayed as "Deuteranopia
+    /// / Protanopia".
+    DeutanProtan,
+    /// Tritanopia-targeted themes. Displayed as "Tritanopia".
+    Tritan,
 }
 
-/// The set of registered themes, in display order.
+/// The set of registered themes, in display order. Light/Dark is assigned by
+/// each palette's actual `background` lightness (see `rgb_to_hsl`), not by
+/// theme name.
 pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
-    use ThemeCategory::{Accessibility, Custom, Default as DefaultCat};
+    use ThemeCategory::{Dark, Default as DefaultCat, DeutanProtan, Light, Tritan};
     static THEMES: [(&str, ThemeCategory, &Palette); 32] = [
         ("brdgme light", DefaultCat, &LIGHT),
         ("brdgme dark", DefaultCat, &DARK),
-        ("dracula", Custom, &DRACULA),
-        ("alucard", Custom, &ALUCARD),
-        ("solarized dark", Custom, &SOLARIZED_DARK),
-        ("solarized light", Custom, &SOLARIZED_LIGHT),
-        ("nord dark", Custom, &NORD_DARK),
-        ("nord light", Custom, &NORD_LIGHT),
-        ("one dark", Custom, &ONE_DARK),
-        ("one light", Custom, &ONE_LIGHT),
-        ("gruvbox dark", Custom, &GRUVBOX_DARK),
-        ("gruvbox light", Custom, &GRUVBOX_LIGHT),
-        ("catppuccin mocha", Custom, &CATPPUCCIN_MOCHA),
-        ("catppuccin latte", Custom, &CATPPUCCIN_LATTE),
-        ("tokyo night", Custom, &TOKYO_NIGHT),
-        ("tokyo night storm", Custom, &TOKYO_NIGHT_STORM),
-        ("tokyo night light", Custom, &TOKYO_NIGHT_LIGHT),
-        ("night owl", Custom, &NIGHT_OWL),
-        ("light owl", Custom, &LIGHT_OWL),
-        ("synthwave 84", Custom, &SYNTHWAVE_84),
-        ("papercolor light", Custom, &PAPERCOLOR_LIGHT),
-        ("papercolor dark", Custom, &PAPERCOLOR_DARK),
-        ("monokai", Custom, &MONOKAI),
-        ("darcula", Custom, &DARCULA),
-        ("vs code dark plus", Custom, &VS_CODE_DARK_PLUS),
-        ("vs code dark modern", Custom, &VS_CODE_DARK_MODERN),
+        ("dracula", Dark, &DRACULA),
+        ("alucard", Light, &ALUCARD),
+        ("solarized dark", Dark, &SOLARIZED_DARK),
+        ("solarized light", Light, &SOLARIZED_LIGHT),
+        ("nord dark", Dark, &NORD_DARK),
+        ("nord light", Light, &NORD_LIGHT),
+        ("one dark", Dark, &ONE_DARK),
+        ("one light", Light, &ONE_LIGHT),
+        ("gruvbox dark", Dark, &GRUVBOX_DARK),
+        ("gruvbox light", Light, &GRUVBOX_LIGHT),
+        ("catppuccin mocha", Dark, &CATPPUCCIN_MOCHA),
+        ("catppuccin latte", Light, &CATPPUCCIN_LATTE),
+        ("tokyo night", Dark, &TOKYO_NIGHT),
+        ("tokyo night storm", Dark, &TOKYO_NIGHT_STORM),
+        ("tokyo night light", Light, &TOKYO_NIGHT_LIGHT),
+        ("night owl", Dark, &NIGHT_OWL),
+        ("light owl", Light, &LIGHT_OWL),
+        ("synthwave 84", Dark, &SYNTHWAVE_84),
+        ("papercolor light", Light, &PAPERCOLOR_LIGHT),
+        ("papercolor dark", Dark, &PAPERCOLOR_DARK),
+        ("monokai", Dark, &MONOKAI),
+        ("darcula", Dark, &DARCULA),
+        ("vs code dark plus", Dark, &VS_CODE_DARK_PLUS),
+        ("vs code dark modern", Dark, &VS_CODE_DARK_MODERN),
         (
             "brdgme light deuteranopia",
-            Accessibility,
+            DeutanProtan,
             &LIGHT_DEUTERANOPIA,
         ),
-        ("brdgme light protanopia", Accessibility, &LIGHT_PROTANOPIA),
-        ("brdgme light tritanopia", Accessibility, &LIGHT_TRITANOPIA),
-        (
-            "brdgme dark deuteranopia",
-            Accessibility,
-            &DARK_DEUTERANOPIA,
-        ),
-        ("brdgme dark protanopia", Accessibility, &DARK_PROTANOPIA),
-        ("brdgme dark tritanopia", Accessibility, &DARK_TRITANOPIA),
+        ("brdgme light protanopia", DeutanProtan, &LIGHT_PROTANOPIA),
+        ("brdgme light tritanopia", Tritan, &LIGHT_TRITANOPIA),
+        ("brdgme dark deuteranopia", DeutanProtan, &DARK_DEUTERANOPIA),
+        ("brdgme dark protanopia", DeutanProtan, &DARK_PROTANOPIA),
+        ("brdgme dark tritanopia", Tritan, &DARK_TRITANOPIA),
     ];
     &THEMES
 }
