@@ -111,19 +111,34 @@ sync tests; sqlx DB failures expected); clippy -D warnings
   clean; one deferred cosmetic note - DARK_DEUTERANOPIA's re-tuned PURPLE
   (hue 238.5) sits 6.2 degrees from its BLUE, reads blue-lavender, but
   both gates clear with margin.
-- [ ] WP2b: re-categorisation per the final operator decision above (5
+- [x] WP2b: re-categorisation per the final operator decision above (5
   categories: Default, Light, Dark, DeutanProtan, Tritan). A prior
   sub-orchestrator attempt died mid-flight (model usage limit, not a code
   problem) after implementing only the *first-revision* 4-category scheme
   (Default/DeutanProtan/Tritan/Custom, no Light/Dark split) as an
   uncommitted working-tree diff, plus 3 orphaned/unregistered draft Modus
-  palette statics in `palette.rs` left over from a premature WP3 start.
-  Nothing from that attempt was committed. WP2b redo picks up from
-  scratch: 5-category enum, all 30 themes re-tagged (2 Default, 24
-  Light/Dark split by actual background colour, 4 DeutanProtan, 2
-  Tritan), `grouped_themes()` + picker + THEMING.md updated for the new
-  order, orphaned Modus statics removed (or left for WP3 to redo
-  verified, implementer's call - see WP3 note below).
+  palette statics in `palette.rs` left over from a premature WP3 start;
+  none of that was committed and it was discarded, not built on.
+  Implemented fresh in `497ddd8`: `ThemeCategory { Default, Light, Dark,
+  DeutanProtan, Tritan }`; all 30 themes re-tagged (2 Default, 4
+  DeutanProtan, 2 Tritan, 24 split Light/Dark by each palette's actual
+  `background` HSL lightness at a 50% threshold, reusing the existing
+  `rgb_to_hsl` helper - no theme in this set is borderline, all are
+  <20% or >85% lightness, so no name-vs-actual-colour surprises). Split:
+  9 Light, 15 Dark. Registry order in `themes()`, `THEME_SLUGS`, and
+  `THEME_BOOT_SCRIPT` unchanged (categories re-tagged in place, no
+  reordering). `grouped_themes()` + its unit tests, the picker heading
+  match in `app.rs` (exact strings "Light"/"Dark"/"Deuteranopia /
+  Protanopia"/"Tritanopia"), THEMING.md's category section, and the #39
+  BACKLOG.md line all updated for the 5-category order. `gate_cvd_simulation`/
+  `gate_contrast_all_themes` untouched and still pass (they key off theme
+  name keywords, not category, so were unaffected by the rename). Orphaned
+  Modus statics fully removed (verified zero `MODUS` references in
+  palette.rs). Verified: brdgme_color tests (13), web theme-scoped tests,
+  checks (ssr+hydrate), clippy (both, -D warnings, `SQLX_OFFLINE=true`
+  needed for the web clippy invocation too), fmt. Independent review:
+  clean, no Critical/Important findings; spot-checked 8+ of the 24
+  Light/Dark re-tags against actual background RGB values, all matched.
 - [ ] WP3: third-party colourblind-first theme evaluation/adoption
   (GitHub Light/Dark Colorblind + Modus Operandi/Vivendi
   Deuteranopia/Tritanopia; adopt into `DeutanProtan` or `Tritan`). Note:
