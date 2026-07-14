@@ -3188,8 +3188,7 @@ pub enum ThemeCategory {
 }
 
 /// The set of registered themes, in display order. Light/Dark is assigned by
-/// each palette's actual `background` lightness (see `rgb_to_hsl`), not by
-/// theme name.
+/// each palette's actual `background` lightness, not by theme name.
 pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
     use ThemeCategory::{Dark, Default as DefaultCat, DeutanProtan, Light, Tritan};
     static THEMES: [(&str, ThemeCategory, &Palette); 34] = [
