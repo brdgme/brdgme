@@ -139,14 +139,96 @@ sync tests; sqlx DB failures expected); clippy -D warnings
   needed for the web clippy invocation too), fmt. Independent review:
   clean, no Critical/Important findings; spot-checked 8+ of the 24
   Light/Dark re-tags against actual background RGB values, all matched.
-- [ ] WP3: third-party colourblind-first theme evaluation/adoption
-  (GitHub Light/Dark Colorblind + Modus Operandi/Vivendi
-  Deuteranopia/Tritanopia; adopt into `DeutanProtan` or `Tritan`). Note:
-  the dead attempt's scratchpad has unverified research drafts
-  (`wp3-research-github.md`, `wp3-research-modus.md`, fetched upstream
-  `.el`/`.json` files) - treat as unverified draft input only, re-fetch
-  and re-verify every hex value against real upstream sources before
-  trusting it.
+- [x] WP3: third-party colourblind-first theme evaluation/adoption.
+  Research (fresh upstream fetches, byte-identical-diff verified against
+  `protesilaos/modus-themes` and `primer/github-vscode-theme`, cross-checked
+  gate math via a line-by-line Python port of `palette.rs`) covered all 6
+  original candidates; the operator narrowed adoption scope after reviewing
+  it, on the grounds that forcing upstream palettes to satisfy a gate
+  requirement they were never designed or validated against undermines the
+  actual expert work behind them rather than "adopting" it. Two adopted,
+  four documented skips - no code exists in the repo for the skipped four.
+
+  **Adopted** (commit `56e4e1e`), both `ThemeCategory::Tritan`:
+  - `modus operandi tritanopia`: 11/12 slots are unchanged Modus named
+    colours (`red-faint`, `green`, `blue`, `yellow`, `magenta-cooler`,
+    `cyan`, `magenta-warmer`, `red-warmer`, `fg-dim`, `fg-main`,
+    `bg-main`), each already >=7:1 AAA against `bg-main` per Modus's own
+    design claim. BROWN has no viable stock swap (`yellow-faint` collapses
+    to 0.54 deltaE from RED post-tritanopia-simulation - tritanopia
+    collapses exactly the yellow/brown axis both values sit on); derived
+    to `#493227` by desaturating RED's own hue (hue 20 deg, sat 30%, same
+    22% lightness), separating the two via post-simulation lightness
+    rather than hue. Achieved (real-Rust-verified, not just the research's
+    Python port): normal-vision distinctness min 20.41 deltaE
+    (brown/grey); CVD tritanopia-simulated min **10.66 deltaE**, clearing
+    the 10.0 floor - the binding pair turned out to be RED/PINK (both
+    stock values), not BROWN itself (BROWN's nearest post-sim neighbour is
+    11.40 deltaE from RED). **Correction to the research doc**: it had
+    claimed a numerically-tuned derived BROWN (off Modus's `olive`) would
+    reach 24.70 deltaE: that number didn't hold under independent
+    real-Rust re-verification (confirmed by the WP3 reviewer via a
+    temporary diagnostic test run directly against the committed
+    `simulate_cvd`/`delta_e` functions, then reverted). The RED-desaturation
+    approach actually shipped reaches 10.66, a materially thinner margin -
+    flagged in the palette's doc comment as the tightest CVD margin of any
+    theme in the file, same as the pattern used for the WP2 CVD themes'
+    thinnest cases, in case a future `simulate_cvd` coefficient correction
+    changes the result.
+  - `modus vivendi tritanopia`: 9/12 slots unchanged Modus named colours
+    (`red`, `green`, `indigo`, `yellow`, `magenta-cooler`, `cyan-cooler`,
+    `maroon`, `fg-dim`, `fg-main`, `bg-main`). Two stock-swap collisions
+    needed fixing: ORANGE (`yellow-warmer` `#ffa00f`) sat 8.31 deltaE from
+    RED (short of the 10.0 floor) - lightened along the same hue/saturation
+    to `#ffb84d` (light 53%->65%), raising the pair to 12.41 deltaE; BROWN
+    (`gold`) collapsed to 0.48 deltaE from PINK (`maroon`) - derived to
+    `#957656` (hue 31 deg, between stock `gold`'s 35 deg and `rust`'s 13
+    deg, sat 27%, light 46%), raising the pair to 19.00 deltaE. The
+    research's own fallback for this slot landed on a pale yellow-green
+    (`#f2f2a1`) that didn't read as brown - rejected in favour of the
+    derived value above. Achieved: normal-vision min 20.48 deltaE
+    (blue/purple); CVD tritanopia-simulated min **10.83 deltaE** (RED/PINK
+    again the binding pair, independent of both fixed slots).
+  - Both themes' registry order, `THEME_SLUGS` (theme.rs), and
+    `THEME_BOOT_SCRIPT` (app.rs) wiring verified consistent (operandi then
+    vivendi, appended at the end, matching the WP2 CVD themes' pattern).
+    Review: clean, no Critical/Important findings; independently
+    hand-verified HSL math for all 3 derived/nudged hexes and spot-checked
+    upstream fidelity of all stock-swap slots byte-for-byte against the
+    research file's cited `defconst` values for both themes.
+
+  **Skipped, documented, no code added:**
+  - `github light colorblind` / `github dark colorblind`: GitHub's
+    colorblind theme is a 2-way red/green confusion fix for its own UI
+    (collapses green onto the blue design-token scale, has no native red
+    distinct from its orange scale), not a general N-way categorical
+    distinctness palette. Forcing it through brdgme's "8 players must all
+    be mutually distinguishable" contract is possible - the research's
+    tuned mapping measured 10.20-13.04 deltaE across both variants, above
+    the 10.0 floor - but only by fully inventing 2 of 9 hues (no native
+    GitHub-Colorblind green or red-distinct-from-orange exists to draw on)
+    and cutting PURPLE's lightness ~24pt and PINK's ~10-23pt to escape
+    collisions. At that point the result is mostly brdgme-original colour
+    wearing GitHub's name, with thinner CVD margins than every other theme
+    in the file besides the two Modus tritan adoptions above. Operator
+    decision: skip: brdgme's own Okabe-Ito-derived CVD themes (WP2) already
+    solve the same accessibility need with better margins (12.75-15.43
+    deltaE) and without fabricating a quarter of the palette.
+  - `modus operandi deuteranopia` / `modus vivendi deuteranopia`: Modus
+    designed and validated these palettes for deuteranopia specifically -
+    Modus does not ship a separate protanopia variant, because that wasn't
+    the target. brdgme's `DeutanProtan` category (decided earlier in this
+    plan) requires passing **both** deuteranopia and protanopia simulation
+    on one shared palette, a bar brdgme's own CVD themes were purpose-built
+    for from the start but Modus's deuteranopia palettes were not. Measured
+    protanopia-simulated minima for the research's proposed mappings:
+    operandi **7.35 deltaE** (purple/cyan), vivendi **2.02 deltaE**
+    (blue/purple, a near-total collision) - both far under the 10.0 floor,
+    and not a tuning gap so much as a validation-target mismatch (Modus
+    never designed or vetted these hues against protanopia at all).
+    Operator decision: skip rather than re-tune Modus's expert-chosen
+    values enough to pass a bar they were never aimed at - `DeutanProtan`'s
+    dual-gate requirement is a hard requirement, not negotiable per-theme.
 - [ ] Final verification (tests, checks, clippy, fmt)
 
 ## Handover (updated 2026-07-14, second sub-orchestrator attempt)
