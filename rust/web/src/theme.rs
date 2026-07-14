@@ -53,6 +53,8 @@ pub const THEME_SLUGS: &[(&str, &str)] = &[
     ("brdgme-dark-deuteranopia", "brdgme dark deuteranopia"),
     ("brdgme-dark-protanopia", "brdgme dark protanopia"),
     ("brdgme-dark-tritanopia", "brdgme dark tritanopia"),
+    ("modus-operandi-tritanopia", "modus operandi tritanopia"),
+    ("modus-vivendi-tritanopia", "modus vivendi tritanopia"),
 ];
 
 /// Groups `THEME_SLUGS` by `brdgme_color::themes()`'s per-theme category,

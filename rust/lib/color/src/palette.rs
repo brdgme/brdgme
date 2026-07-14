@@ -2968,6 +2968,203 @@ pub static DARK_TRITANOPIA: Palette = Palette {
     },
 };
 
+/// Modus Operandi Tritanopia (protesilaos/modus-themes, `modus-themes.el`,
+/// `defconst modus-themes-operandi-tritanopia-palette`; verified against a
+/// fresh fetch of `main`, 2026-07-14). 11 of 12 slots are Modus's own named
+/// colours, unchanged: RED `red-faint` `#702000`, GREEN `green` `#006800`,
+/// BLUE `blue` `#0031a9`, YELLOW `yellow` `#695500`, PURPLE `magenta-cooler`
+/// `#531ab6`, CYAN `cyan` `#005e8b`, PINK `magenta-warmer` `#8f0075`, ORANGE
+/// `red-warmer` `#b21100`, GREY `fg-dim` `#595959`, FOREGROUND `fg-main`
+/// `#000000`, BACKGROUND `bg-main` `#ffffff` - all of Modus's own >=7:1 AAA
+/// text-contrast claim against `bg-main`, preserved intact.
+///
+/// BROWN has no non-colliding stock Modus swap: the nearest candidate,
+/// `yellow-faint` (`#624416`), simulates to within 0.54 deltaE of RED
+/// (`red-faint`) under tritanopia - both collapse to a near-identical warm
+/// grey once the S-cone signal is gone, differing only in the R/G channel
+/// magnitude tritanopia keeps, which the two source lightnesses happen to
+/// share. Modus's `olive` (`#4c6000`) very nearly fixes this (9.88 deltaE,
+/// still short of the 10.0 floor) but a real fix needs the deficiency
+/// tritanopia doesn't erase - post-simulation *lightness* separation, not
+/// hue - so BROWN here is derived off RED's own hue (`red-faint`'s ~17°)
+/// desaturated from 100% to 30% at the same 22% lightness -> `#493227`
+/// (hue 20°/sat 30%/light 22%, numerically searched): heavily desaturating a
+/// hue that's otherwise identical to RED changes its post-tritanopia
+/// simulated *lightness* enough (63 vs. RED's simulated 83, both R=G/B=0
+/// "yellow" after the S-cone loss) to separate the two by 11.40 deltaE,
+/// comfortably reading as a warm coffee-brown at 11.87:1 contrast against
+/// `bg-main` (still clears Modus's own 7:1 AAA bar).
+///
+/// Achieved minima: normal-vision 20.41 deltaE (brown/grey, `tests::
+/// gate_contrast_all_themes`); tritanopia-simulated 10.66 deltaE (`tests::
+/// gate_cvd_simulation`) - not triggered by BROWN (its nearest simulated
+/// neighbour is RED at 11.40) but by RED/PINK (`red-faint`/`magenta-warmer`),
+/// an inherent property of those two stock Modus values that was already
+/// present before any BROWN derivation and is out of this theme's scope to
+/// change. 10.66 clears the 10.0 floor but is the tightest CVD margin of any
+/// theme in this file to date (previous tightest: LIGHT_TRITANOPIA's 11.06) -
+/// flagged here in case a future `simulate_cvd` coefficient correction (as
+/// already happened once, see that function's doc comment) needs to re-check
+/// it.
+pub static MODUS_OPERANDI_TRITANOPIA: Palette = Palette {
+    red: Color {
+        r: 112,
+        g: 32,
+        b: 0,
+    },
+    green: Color { r: 0, g: 104, b: 0 },
+    blue: Color {
+        r: 0,
+        g: 49,
+        b: 169,
+    },
+    yellow: Color {
+        r: 105,
+        g: 85,
+        b: 0,
+    },
+    purple: Color {
+        r: 83,
+        g: 26,
+        b: 182,
+    },
+    cyan: Color {
+        r: 0,
+        g: 94,
+        b: 139,
+    },
+    pink: Color {
+        r: 143,
+        g: 0,
+        b: 117,
+    },
+    orange: Color {
+        r: 178,
+        g: 17,
+        b: 0,
+    },
+    brown: Color {
+        r: 73,
+        g: 50,
+        b: 39,
+    },
+    grey: Color {
+        r: 89,
+        g: 89,
+        b: 89,
+    },
+    foreground: Color { r: 0, g: 0, b: 0 },
+    background: Color {
+        r: 255,
+        g: 255,
+        b: 255,
+    },
+};
+
+/// Modus Vivendi Tritanopia (protesilaos/modus-themes, `modus-themes.el`,
+/// `defconst modus-themes-vivendi-tritanopia-palette`; verified against the
+/// same fresh fetch as `MODUS_OPERANDI_TRITANOPIA`). 9 of 12 slots are Modus's
+/// own named colours, unchanged: RED `red` `#ff5f59`, GREEN `green` `#44bc44`,
+/// BLUE `indigo` `#9099d9`, YELLOW `yellow` `#cabf00`, PURPLE `magenta-cooler`
+/// `#b6a0ff`, CYAN `cyan-cooler` `#6ae4b9`, PINK `maroon` `#cf7fa7`, GREY
+/// `fg-dim` `#989898`, FOREGROUND `fg-main` `#ffffff`, BACKGROUND `bg-main`
+/// `#000000`.
+///
+/// The stock swap fails the tritanopia gate on two pairs at once (this
+/// palette has less slack than its light sibling above - `indigo` is already
+/// spent on BLUE, leaving no untouched blue-ish stock hue to lean on):
+/// - ORANGE (`yellow-warmer` `#ffa00f`) sits only 8.31 deltaE from
+///   RED (`red`) post-simulation - short of the 10.0 floor by 1.69.
+/// - BROWN (`gold` `#c0965b`) collapses to 0.48 deltaE from PINK (`maroon`) -
+///   both are warm mid-lightness hues that tritanopia flattens to nearly the
+///   same simulated colour.
+///
+/// ORANGE is a minimal nudge, not an invented hue: same hue (36°) and
+/// saturation (100%) as stock `yellow-warmer`, lightened from l 53% to l 65%
+/// (`#ffa00f` -> `#ffb84d`). `yellow-warmer`'s own lightness put its
+/// post-simulation brightness too close to RED's; lightening it further
+/// separates the two (12.41 deltaE from RED post-simulation) while staying
+/// on Modus's own orange hue, at 12.22:1 contrast against `bg-main`.
+///
+/// BROWN has no viable stock swap: every Modus named warm hue at
+/// `gold`/`rust`'s lightness collides with either PINK or (once ORANGE moved)
+/// something else post-simulation, and an unconstrained numerical search's
+/// only clean pass landed at a pale yellow-green (hue 60°, `#f2f2a1`) that
+/// reads as a second yellow, not a brown - rejected as not in-character (see
+/// WP3 research notes). Derived instead, same "desaturate near RED/ORANGE's
+/// hue family" strategy as `MODUS_OPERANDI_TRITANOPIA`'s BROWN: hue 31°
+/// (between stock `gold`'s 35° and `rust`'s 13°), sat 27%, light 46% ->
+/// `#957656`, a muted tan/coffee brown clearing PINK by 19.00 deltaE
+/// post-simulation at 5.00:1 contrast against `bg-main`.
+///
+/// Achieved minima: normal-vision 20.48 deltaE (blue/purple, `tests::
+/// gate_contrast_all_themes`); tritanopia-simulated 10.83 deltaE (`tests::
+/// gate_cvd_simulation`) - like `MODUS_OPERANDI_TRITANOPIA`, not triggered by
+/// either derived slot (ORANGE's nearest simulated neighbour is RED at 12.41;
+/// BROWN's is PINK at 19.00) but by RED/PINK (`red`/`maroon`), the same
+/// inherent stock-Modus constraint noted on that palette, independently
+/// present here under a different pair of hex values. 10.83 clears the 10.0
+/// floor but, like its light sibling, is one of the tightest CVD margins in
+/// this file - flagged for the same reason.
+pub static MODUS_VIVENDI_TRITANOPIA: Palette = Palette {
+    red: Color {
+        r: 255,
+        g: 95,
+        b: 89,
+    },
+    green: Color {
+        r: 68,
+        g: 188,
+        b: 68,
+    },
+    blue: Color {
+        r: 144,
+        g: 153,
+        b: 217,
+    },
+    yellow: Color {
+        r: 202,
+        g: 191,
+        b: 0,
+    },
+    purple: Color {
+        r: 182,
+        g: 160,
+        b: 255,
+    },
+    cyan: Color {
+        r: 106,
+        g: 228,
+        b: 185,
+    },
+    pink: Color {
+        r: 207,
+        g: 127,
+        b: 167,
+    },
+    orange: Color {
+        r: 255,
+        g: 184,
+        b: 77,
+    },
+    brown: Color {
+        r: 149,
+        g: 118,
+        b: 86,
+    },
+    grey: Color {
+        r: 152,
+        g: 152,
+        b: 152,
+    },
+    foreground: Color {
+        r: 255,
+        g: 255,
+        b: 255,
+    },
+    background: Color { r: 0, g: 0, b: 0 },
+};
+
 /// Grouping used by the web theme picker to sort/section the registry. Every
 /// theme has exactly one category - none of the five overlap in practice for
 /// this theme set (see `DeutanProtan`'s doc comment).
@@ -2995,7 +3192,7 @@ pub enum ThemeCategory {
 /// theme name.
 pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
     use ThemeCategory::{Dark, Default as DefaultCat, DeutanProtan, Light, Tritan};
-    static THEMES: [(&str, ThemeCategory, &Palette); 32] = [
+    static THEMES: [(&str, ThemeCategory, &Palette); 34] = [
         ("brdgme light", DefaultCat, &LIGHT),
         ("brdgme dark", DefaultCat, &DARK),
         ("dracula", Dark, &DRACULA),
@@ -3032,6 +3229,16 @@ pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
         ("brdgme dark deuteranopia", DeutanProtan, &DARK_DEUTERANOPIA),
         ("brdgme dark protanopia", DeutanProtan, &DARK_PROTANOPIA),
         ("brdgme dark tritanopia", Tritan, &DARK_TRITANOPIA),
+        (
+            "modus operandi tritanopia",
+            Tritan,
+            &MODUS_OPERANDI_TRITANOPIA,
+        ),
+        (
+            "modus vivendi tritanopia",
+            Tritan,
+            &MODUS_VIVENDI_TRITANOPIA,
+        ),
     ];
     &THEMES
 }
