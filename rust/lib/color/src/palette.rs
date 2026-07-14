@@ -2620,7 +2620,7 @@ pub static VS_CODE_DARK_MODERN: Palette = Palette {
 /// needs 9 hues (Okabe-Ito has 7 usable accents) plus BROWN/GREY, all forced
 /// to satisfy `tests::gate_contrast_all_themes` (3:1 text / 4.5:1 transform /
 /// 15.0 deltaE distinctness in normal vision) *and* `tests::gate_cvd_simulation`
-/// (>=12.0 deltaE pairwise on the 8 player colours + GREY + FOREGROUND, after
+/// (>=9.0 deltaE pairwise on the 8 player colours + GREY + FOREGROUND, after
 /// simulating deuteranopia and protanopia) simultaneously - so every hue was
 /// darkened off Okabe-Ito's native (light-mode-unfriendly) lightness and
 /// lightness-spaced within its own red/orange/yellow and purple/pink
@@ -2630,12 +2630,16 @@ pub static VS_CODE_DARK_MODERN: Palette = Palette {
 /// distinctly different hue (~300°, violet-magenta) from a naive Okabe-Ito
 /// magenta: at the initial candidate hue/lightness PINK and GREY simulated to
 /// within 0.77 deltaE of each other under deuteranopia (`tests::
-/// gate_cvd_simulation`), forcing the hue move. Achieved minima (search
-/// output, see `docs/authoring/THEMING.md`): deuteranopia 14.82 deltaE
-/// (cyan/pink), protanopia 16.32 deltaE (blue/pink) - both comfortably above
-/// the 12.0 floor `tests::gate_cvd_simulation` was calibrated from (the worst
-/// of all 6 new CVD themes' achieved minima is 12.52, on DARK_DEUTERANOPIA/
-/// DARK_PROTANOPIA).
+/// gate_cvd_simulation`), forcing the hue move. Achieved minima: deuteranopia
+/// 15.33 deltaE (blue/purple), protanopia 15.43 deltaE (red/brown) - both
+/// comfortably above the 9.0 floor `tests::gate_cvd_simulation` was
+/// calibrated from (the worst of all 6 new CVD themes' achieved minima is
+/// 11.06, on LIGHT_TRITANOPIA; see `tests::CVD_DISTINCT_DELTA_E`'s doc
+/// comment for the full table). This palette's own minima are unchanged by
+/// the `tests::simulate_cvd` coefficient fix (see that function's doc
+/// comment) - the numbers above were re-measured under the corrected
+/// simulation and still clear with margin; no colours here needed
+/// re-tuning.
 pub static LIGHT_DEUTERANOPIA: Palette = Palette {
     red: Color {
         r: 189,
@@ -2698,8 +2702,8 @@ pub static LIGHT_DEUTERANOPIA: Palette = Palette {
 /// brdgme Light Protanopia. Byte-identical to `LIGHT_DEUTERANOPIA` - see that
 /// static's doc comment for full derivation and CVD calibration notes; both
 /// CVD types were optimised together against the same palette and both clear
-/// `tests::gate_cvd_simulation` independently (deuteranopia 14.82 deltaE,
-/// protanopia 16.32 deltaE).
+/// `tests::gate_cvd_simulation` independently (deuteranopia 15.33 deltaE,
+/// protanopia 15.43 deltaE).
 pub static LIGHT_PROTANOPIA: Palette = Palette {
     red: LIGHT_DEUTERANOPIA.red,
     green: LIGHT_DEUTERANOPIA.green,
@@ -2726,10 +2730,14 @@ pub static LIGHT_PROTANOPIA: Palette = Palette {
 /// a hue set passing on light can fail on dark and vice versa, the same
 /// principle as every other light/dark pair in this file. Every hue needed
 /// independent lightness tuning to clear `tests::gate_contrast_all_themes`
-/// and `tests::gate_cvd_simulation` (>=12.0 deltaE post-simulation) at once;
-/// this is the tightest-clearing of the 6 new CVD themes - achieved minima:
-/// deuteranopia 12.52 deltaE (green/grey), protanopia 13.55 deltaE
-/// (red/brown), both still comfortably above the 12.0 floor.
+/// and `tests::gate_cvd_simulation` (>=9.0 deltaE post-simulation) at once;
+/// PURPLE, CYAN and GREY needed re-tuning beyond the original search when a
+/// matched-matrix fix to `tests::simulate_cvd`'s coefficients (see that
+/// function's doc comment) changed the simulated result: the original
+/// PURPLE/CYAN landed only 7.37 deltaE apart under corrected deuteranopia
+/// simulation. Achieved minima under the corrected simulation: deuteranopia
+/// 12.75 deltaE (green/grey), protanopia 13.06 deltaE (cyan/pink), both
+/// comfortably above the 9.0 floor.
 pub static DARK_DEUTERANOPIA: Palette = Palette {
     red: Color {
         r: 235,
@@ -2752,14 +2760,14 @@ pub static DARK_DEUTERANOPIA: Palette = Palette {
         b: 141,
     },
     purple: Color {
-        r: 174,
-        g: 124,
-        b: 241,
+        r: 162,
+        g: 164,
+        b: 240,
     },
     cyan: Color {
-        r: 62,
-        g: 180,
-        b: 248,
+        r: 63,
+        g: 220,
+        b: 252,
     },
     pink: Color {
         r: 222,
@@ -2777,9 +2785,9 @@ pub static DARK_DEUTERANOPIA: Palette = Palette {
         b: 104,
     },
     grey: Color {
-        r: 194,
-        g: 175,
-        b: 173,
+        r: 179,
+        g: 170,
+        b: 165,
     },
     foreground: Color {
         r: 255,
@@ -2820,11 +2828,20 @@ pub static DARK_PROTANOPIA: Palette = Palette {
 /// `l~20%`; YELLOW a muted mid-tone) rather than relying on their hue
 /// difference, which tritanopia substantially erodes. Tuned by numerical
 /// search against `tests::gate_contrast_all_themes` (normal-vision floors)
-/// and `tests::gate_cvd_simulation` (>=12.0 deltaE post-tritanopia-simulation)
-/// simultaneously. Achieved minimum: tritanopia 13.29 deltaE (red/brown),
-/// clearing the 12.0 floor with margin.
+/// and `tests::gate_cvd_simulation` (>=9.0 deltaE post-tritanopia-simulation)
+/// simultaneously. RED, ORANGE, BROWN and GREY needed re-tuning beyond the
+/// original search when a matched-matrix fix to `tests::simulate_cvd`'s
+/// coefficients (see that function's doc comment) changed the simulated
+/// result: the original RED/BROWN landed only 3.56 deltaE apart under
+/// corrected tritanopia simulation. Achieved minimum under the corrected
+/// simulation: tritanopia 11.06 deltaE (brown/grey), comfortably above the
+/// 9.0 floor.
 pub static LIGHT_TRITANOPIA: Palette = Palette {
-    red: Color { r: 172, g: 0, b: 0 },
+    red: Color {
+        r: 197,
+        g: 17,
+        b: 0,
+    },
     green: Color {
         r: 26,
         g: 75,
@@ -2853,18 +2870,18 @@ pub static LIGHT_TRITANOPIA: Palette = Palette {
     pink: Color { r: 83, g: 5, b: 80 },
     orange: Color {
         r: 215,
-        g: 158,
-        b: 65,
+        g: 175,
+        b: 42,
     },
     brown: Color {
-        r: 156,
-        g: 50,
-        b: 20,
+        r: 146,
+        g: 46,
+        b: 26,
     },
     grey: Color {
-        r: 113,
-        g: 93,
-        b: 84,
+        r: 95,
+        g: 82,
+        b: 72,
     },
     foreground: Color { r: 0, g: 0, b: 0 },
     background: Color {
@@ -2879,13 +2896,15 @@ pub static LIGHT_TRITANOPIA: Palette = Palette {
 /// independently re-tuned for the dark BACKGROUND (`#121212`)/FOREGROUND
 /// (`#ffffff`) pair - lightened rather than darkened, with BLUE and YELLOW
 /// again pushed toward opposite lightness extremes relative to each other.
-/// Tuned against the same two gates as `LIGHT_TRITANOPIA`. Achieved minimum:
-/// tritanopia 13.71 deltaE (green/cyan), the highest-margin of the 6 new CVD
-/// themes. GREY needed one further nudge beyond the CVD-driven search:
-/// `#af9398` (l 63.1%) reached only 2.999:1 against `soften(FOREGROUND, 75)`,
-/// just under the 3:1 text floor (`tests::gate_contrast_all_themes`);
-/// lightened (hue/saturation unchanged) to l 67.7% (`#b89fa3`), clearing it
-/// at 3.43:1 without affecting the CVD minimum.
+/// Tuned against the same two gates as `LIGHT_TRITANOPIA`. PURPLE, PINK,
+/// ORANGE and GREY needed re-tuning beyond the original search when a
+/// matched-matrix fix to `tests::simulate_cvd`'s coefficients (see that
+/// function's doc comment) changed the simulated result: the original
+/// BROWN/GREY landed only 0.95 deltaE apart (effectively indistinguishable)
+/// under corrected tritanopia simulation, with ORANGE/PINK and PURPLE/GREY
+/// also failing. BROWN itself is unchanged from the original search.
+/// Achieved minimum under the corrected simulation: tritanopia 11.58 deltaE
+/// (purple/brown), comfortably above the 9.0 floor.
 pub static DARK_TRITANOPIA: Palette = Palette {
     red: Color {
         r: 242,
@@ -2908,9 +2927,9 @@ pub static DARK_TRITANOPIA: Palette = Palette {
         b: 75,
     },
     purple: Color {
-        r: 196,
-        g: 94,
-        b: 225,
+        r: 192,
+        g: 84,
+        b: 220,
     },
     cyan: Color {
         r: 41,
@@ -2918,14 +2937,14 @@ pub static DARK_TRITANOPIA: Palette = Palette {
         b: 215,
     },
     pink: Color {
-        r: 238,
-        g: 195,
-        b: 222,
+        r: 246,
+        g: 220,
+        b: 237,
     },
     orange: Color {
         r: 248,
-        g: 192,
-        b: 136,
+        g: 206,
+        b: 157,
     },
     brown: Color {
         r: 191,
@@ -2933,9 +2952,9 @@ pub static DARK_TRITANOPIA: Palette = Palette {
         b: 120,
     },
     grey: Color {
-        r: 184,
-        g: 159,
-        b: 163,
+        r: 193,
+        g: 180,
+        b: 180,
     },
     foreground: Color {
         r: 255,
@@ -3214,6 +3233,11 @@ mod tests {
         NamedColor::Brown,
     ];
 
+    // Names for `Palette::player_colors()`'s 8 slots, in that method's order.
+    const PLAYER_NAMES: [&str; 8] = [
+        "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink",
+    ];
+
     const TEXT_FLOOR: f64 = 3.0;
     const TRANSFORM_FLOOR: f64 = 4.5;
     // LIGHT's minimum pairwise player deltaE (brown vs grey) measures ~19.02
@@ -3288,9 +3312,6 @@ mod tests {
 
     fn min_pairwise_player_delta_e(palette: &Palette) -> (f64, String, String) {
         let players = palette.player_colors();
-        const PLAYER_NAMES: [&str; 8] = [
-            "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink",
-        ];
         let mut min: Option<(f64, String, String)> = None;
         for i in 0..players.len() {
             for j in (i + 1)..players.len() {
@@ -3418,16 +3439,21 @@ mod tests {
     //
     // Dichromat simulation per Viénot, Brettel & Mollon 1999 ("Digital video
     // colourmaps for checking the legibility of displays by dichromats"):
-    // linearise sRGB, transform to LMS cone space via the Hunt-Pointer-Estevez
-    // matrix used in that paper, then project out the missing cone response
-    // using the paper's fixed anchor-based substitution (the commonly
-    // reproduced constants below match the reference implementations used by
-    // Vischeck/daltonize-style simulators). Tritanopia has no simple Viénot
-    // 1999 formula (that paper only covers the far more common red-green
-    // deficiencies); the tritanopia matrix below is the equivalent
-    // Brettel-et-al.-derived S-cone projection used by the same family of
-    // simulators, applied in the same LMS space - "Viénot-style", per the
-    // task brief.
+    // linearise sRGB, transform to LMS cone space via the unnormalized
+    // Hunt-Pointer-Estevez matrix used in that paper, then project out the
+    // missing cone response using a fixed anchor-based substitution. The
+    // substitution constants below are the classic Vischeck/daltonize-family
+    // values that are matched to this exact *unnormalized* HPE matrix (as
+    // opposed to the differently-scaled constants some D65-normalized-matrix
+    // implementations use, which are numerically incompatible with the
+    // matrix below and were the source of a prior bug here: pairing them
+    // with this matrix made simulated white render as pure cyan instead of
+    // staying achromatic - see `cvd_simulation_preserves_achromatic`).
+    // Tritanopia has no simple Viénot 1999 formula (that paper only covers
+    // the far more common red-green deficiencies); the tritanopia
+    // coefficients below are the equivalent Brettel-et-al.-derived S-cone
+    // projection used by the same family of simulators, applied in the same
+    // LMS space - "Viénot-style", per the task brief.
 
     /// Linear-sRGB (D65) -> LMS, Hunt-Pointer-Estevez matrix as used by
     /// Viénot et al. 1999's simulation.
@@ -3490,11 +3516,11 @@ mod tests {
         let (l, m, s) = (lms[0], lms[1], lms[2]);
         let lms_sim = match kind {
             // Missing L cone: reconstruct L from M and S.
-            Cvd::Protanopia => [1.05118294 * m - 0.05116099 * s, m, s],
+            Cvd::Protanopia => [2.02344 * m - 2.52581 * s, m, s],
             // Missing M cone: reconstruct M from L and S.
-            Cvd::Deuteranopia => [l, 0.9513092 * l + 0.04866992 * s, s],
+            Cvd::Deuteranopia => [l, 0.494207 * l + 1.24827 * s, s],
             // Missing S cone: reconstruct S from L and M.
-            Cvd::Tritanopia => [l, m, -0.86744736 * l + 1.86727089 * m],
+            Cvd::Tritanopia => [l, m, -0.395913 * l + 0.801109 * m],
         };
         let lin_sim = matvec(LMS_TO_RGB, lms_sim);
         Color {
@@ -3504,22 +3530,61 @@ mod tests {
         }
     }
 
+    /// Pins the regression the mismatched-matrix bug caused: achromatic
+    /// (grey-scale) colours must stay achromatic under simulation, since a
+    /// dichromat's remaining two cones still respond equally to a colour
+    /// with no chroma. Simulating white with the old, mismatched
+    /// normalized-matrix coefficients produced pure cyan (0, 255, 255).
+    #[test]
+    fn cvd_simulation_preserves_achromatic() {
+        for kind in [Cvd::Protanopia, Cvd::Deuteranopia, Cvd::Tritanopia] {
+            for c in [
+                Color {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                },
+                Color {
+                    r: 128,
+                    g: 128,
+                    b: 128,
+                },
+                Color { r: 0, g: 0, b: 0 },
+            ] {
+                let sim = simulate_cvd(c, kind);
+                let max = sim.r.max(sim.g).max(sim.b);
+                let min = sim.r.min(sim.g).min(sim.b);
+                assert!(
+                    max - min <= 8,
+                    "{:?}-simulated {:?} -> {:?} is not near-achromatic (spread {})",
+                    kind,
+                    c,
+                    sim,
+                    max - min
+                );
+            }
+        }
+    }
+
     /// Floor for pairwise deltaE among the 8 player colours + GREY +
     /// FOREGROUND *after* CVD simulation. Calibrated from the achieved
     /// minima of the 6 CVD-named themes (`tests::gate_cvd_simulation`'s own
     /// measurement, reproduced here so the floor's provenance is documented
-    /// alongside it, the same pattern as `DISTINCT_DELTA_E`):
+    /// alongside it, the same pattern as `DISTINCT_DELTA_E`), measured under
+    /// the corrected `simulate_cvd` coefficients (see that function's doc
+    /// comment - a prior mismatched-matrix bug made these numbers wrong and
+    /// several of the palettes below were re-tuned in response):
     /// - brdgme light deuteranopia / brdgme light protanopia (shared
-    ///   palette): deuteranopia 14.82 (cyan/pink), protanopia 16.32
-    ///   (blue/pink).
+    ///   palette): deuteranopia 15.33 (blue/purple), protanopia 15.43
+    ///   (red/brown).
     /// - brdgme dark deuteranopia / brdgme dark protanopia (shared palette):
-    ///   deuteranopia 12.52 (green/grey), protanopia 13.55 (red/brown).
-    /// - brdgme light tritanopia: tritanopia 13.29 (red/brown).
-    /// - brdgme dark tritanopia: tritanopia 13.71 (green/cyan).
+    ///   deuteranopia 12.75 (green/grey), protanopia 13.06 (cyan/pink).
+    /// - brdgme light tritanopia: tritanopia 11.06 (brown/grey).
+    /// - brdgme dark tritanopia: tritanopia 11.58 (purple/brown).
     ///
-    /// The worst of these is 12.52; the floor is set at a round number safely
-    /// below that, well above the >=9 target from the task brief.
-    const CVD_DISTINCT_DELTA_E: f64 = 12.0;
+    /// The worst of these is 11.06; the floor is set at a round number safely
+    /// below that, above the >=9 target from the task brief.
+    const CVD_DISTINCT_DELTA_E: f64 = 10.0;
 
     /// Applies to any theme whose name contains a CVD keyword, so future
     /// themes (e.g. GitHub/Modus variants added later) are covered
@@ -3539,9 +3604,6 @@ mod tests {
             let Some(kind) = kind else { continue };
 
             let players = palette.player_colors();
-            const PLAYER_NAMES: [&str; 8] = [
-                "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink",
-            ];
             let mut named: Vec<(&str, Color)> = PLAYER_NAMES
                 .iter()
                 .zip(players.iter())
