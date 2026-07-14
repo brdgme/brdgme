@@ -30,6 +30,19 @@
    category; skip (and record why) if a candidate cannot meet the gates
    without losing its identity.
 
+**Operator decision (2026-07-14, supersedes the category model above):**
+Accessibility themes are categorised by colour blindness type instead of
+one flat "Accessibility" category, because there will be multiple theme
+choices per type. Combined-category model: `ThemeCategory::Accessibility`
+is replaced by two categories - one displayed as "Deuteranopia /
+Protanopia" and one displayed as "Tritanopia". Deutan- and
+protan-targeted themes (near-identical palettes in practice) share the
+combined category; tritan themes get their own. Default and Custom are
+unchanged. Picker category order: Default (no heading), then
+Deuteranopia / Protanopia, then Tritanopia, then Custom; alphabetical
+sort within each group stays. WP3 adoptions go into the appropriate
+CVD-type category rather than "Accessibility".
+
 **Verify:** cargo test -p brdgme_color (contrast gate incl. any new CVD
 gate); SQLX_OFFLINE=true cargo check -p web --features ssr / --features
 hydrate; SQLX_OFFLINE=true cargo test -p web --lib --features ssr (theme
@@ -74,7 +87,13 @@ sync tests; sqlx DB failures expected); clippy -D warnings
   clean; one deferred cosmetic note - DARK_DEUTERANOPIA's re-tuned PURPLE
   (hue 238.5) sits 6.2 degrees from its BLUE, reads blue-lavender, but
   both gates clear with margin.
+- [ ] WP2b: re-categorisation per operator decision - replace
+  `ThemeCategory::Accessibility` with per-CVD-type categories
+  ("Deuteranopia / Protanopia" combined, "Tritanopia"); re-tag the 6 WP2
+  themes; update `grouped_themes()`/picker ordering, headings, unit
+  tests; update THEMING.md category docs.
 - [ ] WP3: third-party colourblind-first theme evaluation/adoption
+  (adopt into the appropriate CVD-type category)
 - [ ] Final verification (tests, checks, clippy, fmt)
 
 ## Handover (paused 2026-07-14 after WP1)
