@@ -5,7 +5,9 @@
 
 use std::sync::LazyLock;
 
-use brdgme_color::{IN_USE_SOFTENS, NamedColor, ThemeCategory, palette_css_vars, themes};
+use brdgme_color::{
+    IN_USE_MIXES, IN_USE_SOFTENS, NamedColor, ThemeCategory, palette_css_vars, themes,
+};
 
 /// Chrome-only soften expressions (main.scss surfaces: my-turn/finished/hover
 /// tints) - kept separate from `IN_USE_SOFTENS` so the game-text contrast
@@ -129,10 +131,13 @@ fn build_theme_style_css() -> String {
         .copied()
         .collect();
 
-    css.push_str(&format!(":root{{{}}}\n", palette_css_vars(light, &softens)));
+    css.push_str(&format!(
+        ":root{{{}}}\n",
+        palette_css_vars(light, &softens, IN_USE_MIXES)
+    ));
     css.push_str(&format!(
         "@media (prefers-color-scheme: dark){{:root:not([data-theme]){{{}}}}}\n",
-        palette_css_vars(dark, &softens)
+        palette_css_vars(dark, &softens, IN_USE_MIXES)
     ));
 
     for (name, _, palette) in themes() {
@@ -140,7 +145,7 @@ fn build_theme_style_css() -> String {
         css.push_str(&format!(
             "[data-theme=\"{}\"]{{{}}}\n",
             slug,
-            palette_css_vars(palette, &softens)
+            palette_css_vars(palette, &softens, IN_USE_MIXES)
         ));
     }
 
@@ -366,6 +371,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn dracula_shared_chrome_surface_is_background_tinted() {
+        let css = &*THEME_STYLE_CSS;
+        let (_, dracula) = css
+            .split_once("[data-theme=\"dracula\"]{")
+            .expect("dracula theme block");
+        let (dracula, _) = dracula.split_once("}\n").expect("theme block end");
+        assert!(dracula.contains("--mk-soften-foreground-90: #3d3f49;"));
     }
 
     #[test]

@@ -39,22 +39,34 @@ BACKGROUND_SHADE slots were replaced by the `soften` transform below.)
 
 Surface steps (checkerboards, outlines, muted tile backgrounds) are not
 slots; they are derived via the `soften` transform below, e.g.
-`soften(FOREGROUND, 86)` / `soften(FOREGROUND, 75)` for the classic
-subtle/strong checkerboard pair (`#dbdbdb` / `#bfbfbf` on the light
-default - within 1/255 of the old `220`/`190` greys).
+`soften(FOREGROUND, 90)` / `soften(FOREGROUND, 80)` for the classic
+subtle/strong checkerboard pair (`#e6e6e6` / `#cccccc` on the light
+default).
 
 GREY is a tenth hue-like slot for de-emphasised text and neutral game
 identities (empty cells, grid lines, folded/out states). Default (light):
 `#616161` (97,97,97). It is the single most used colour across all games
 and must remain readable everywhere text appears (see contrast rules).
 
+### The `mix` transform
+
+`mix(source, target, pct)` is the base colour-blend primitive: resolve
+`source` and `target` through the theme (like `contrast`), then
+interpolate each sRGB channel independently toward `target` by `pct`%
+(`c' = c_source + (c_target - c_source) * pct/100`, rounded half-up).
+`pct` is an integer 0-100 inclusive - `0` returns `source` unchanged,
+`100` returns `target` unchanged. Unlike the old HSL-based `soften`,
+this never touches hue/saturation/lightness as separate axes; it blends
+the actual displayed channel values, so the result is exactly what a
+"partially opaque `target` painted over `source`" would look like.
+
 ### The `soften` transform
 
-`soften(color, pct)` derives a muted surface tint from any palette slot,
-resolved at theme-resolution time (like `contrast`): resolve `color`
-through the theme, convert to HSL, and move only the lightness toward
-the theme BACKGROUND's lightness by `pct`% (`l' = l + (l_bg - l) *
-pct/100`), keeping hue and saturation. `pct` is an integer 1-99.
+`soften(color, pct)` is a convenience wrapper: `soften(color, pct) =
+mix(color, BACKGROUND, pct)` - it always mixes toward the theme's own
+BACKGROUND, which is what a receding surface tint needs. `pct` is an
+integer 1-99 (the 0/100 endpoints are degenerate - `color` itself or
+BACKGROUND itself - so `mix` is used directly for those).
 
 Properties:
 
@@ -62,17 +74,21 @@ Properties:
   dark themes it darkens - "softened" always means "recedes toward the
   background", which is what a surface tint should do on any theme.
 - Applied to FOREGROUND it yields the neutral surface ramp (the old
-  SHADE slots): `soften(FOREGROUND, 86)` = `#dbdbdb`,
-  `soften(FOREGROUND, 75)` = `#bfbfbf` on the light default.
+  SHADE slots): `soften(FOREGROUND, 90)` = `#e6e6e6`,
+  `soften(FOREGROUND, 80)` = `#cccccc` on the light default.
 - Applied to a hue it yields a pale wash clearly distinct from the
   saturated hue, so e.g. Acquire can highlight available tiles with
-  `soften(PINK, 75)` (`#f7bed4`, vs the historical Material Pink 100
-  `#f8bbd0`) without colliding with PINK as a player colour.
+  `soften(PINK, 80)` (`#f3d1de`, vs the historical Material Pink 100
+  `#f8bbd0`) without colliding with PINK as a player colour. Moved from
+  `soften(PINK, 75)` (`#f7bed4` under the historical HSL-based
+  transform) - under sRGB-channel `mix`, 75 no longer clears the
+  contrast gate's 3:1 text floor on every registered theme, so the
+  standard stops moved to 80/90.
 - Softened colours are backgrounds, never text. Put `contrast` (or an
   explicitly validated colour) on top of them.
 
-Games should prefer the standard steps 25 / 50 / 75 / 86 unless
-matching a specific legacy value. The set of `soften` expressions in
+Games should prefer the standard steps 80 / 90 unless matching a
+specific legacy value. The set of `soften` (and `mix`) expressions in
 use is enumerable (grep over game crates), and the theme contrast test
 validates exactly that set.
 
@@ -209,11 +225,18 @@ be tuned/validated rather than taken as gospel.
 | FOREGROUND         | `#f8f8f2` | Foreground                    |
 | BACKGROUND         | `#282a36` | Background                    |
 
-Surface steps are derived by `soften`, so Dracula gets its
-checkerboard for free (`soften(FOREGROUND, 86)`/`soften(FOREGROUND,
-75)` land near Dracula's own Current Line tones). Note GREY takes
-Comment, so BLUE cannot also use it - the two must stay distinct (see
-contrast requirements). GREY at Comment may fail 3:1 against the
+Surface steps are derived by `soften`, which mixes FOREGROUND toward
+BACKGROUND in sRGB, so Dracula's checkerboard/chrome surfaces come out
+as blue-grey tints between its own Foreground and Background tones -
+`soften(FOREGROUND, 90)` = `#3d3f49`, `soften(FOREGROUND, 80)` =
+`#52535c`, both close to Dracula's own Current Line/Selection greys.
+(Prior to the sRGB `mix` rewrite, the shared chrome stop was `86`; the
+registry consolidated onto the two standard stops `90`/`80` - folding
+in the former `86`/`75`/`78` callers - once `75` needed bumping to `80`
+to keep clearing the 3:1 contrast floor under sRGB `mix`, so `86`
+became `90` rather than staying a third, near-duplicate stop.) Note GREY
+takes Comment, so BLUE cannot also use it - the two must stay distinct
+(see contrast requirements). GREY at Comment may fail 3:1 against the
 stronger softened surfaces; a Dracula theme may need to lighten GREY.
 This is exactly the kind of trade-off the contrast test exists to
 catch.
@@ -284,7 +307,10 @@ colours anywhere in rust/, brdgme-go/, or brdg.me):
   `soften(FOREGROUND, 86)` / `soften(FOREGROUND, 75)`; unincorporated
   `100` grey -> GREY bg; unavailable-tile `80` grey text -> GREY;
   available-tile pink bg `248,187,208` (Material Pink 100) ->
-  `soften(PINK, 75)` (`#f7bed4` on the light default); corp
+  `soften(PINK, 80)` (`#f3d1de` on the light default, sRGB-mixed;
+  moved from `soften(PINK, 75)` (`#f7bed4` under the historical
+  HSL-based transform) because sRGB `soften(_, 75)` no longer clears
+  the contrast gate's 3:1 text floor on every registered theme); corp
   DEEP_ORANGE -> ORANGE; corp BLACK -> FOREGROUND; `.inv().mono()` ->
   `contrast`.
 - **lords-of-vegas-1** (`src/casino.rs`, `src/render.rs`): Albion ->

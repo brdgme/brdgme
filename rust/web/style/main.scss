@@ -115,7 +115,7 @@ body {
 
 .layout .layout-header {
   display: none;
-  background-color: var(--mk-soften-foreground-86);
+  background-color: var(--mk-soften-foreground-90);
   line-height: 2.5em;
 }
 
@@ -154,7 +154,7 @@ body {
 }
 
 .layout .layout-body .menu {
-  background-color: var(--mk-soften-foreground-86);
+  background-color: var(--mk-soften-foreground-90);
   height: 100%;
   width: 15em;
   padding-left: 0.5em;
@@ -264,7 +264,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-right: 1px solid var(--mk-soften-foreground-86);
+  border-right: 1px solid var(--mk-soften-foreground-90);
   flex-direction: column;
 }
 
@@ -287,7 +287,7 @@ body {
 .game-main .recent-logs-container .recent-logs-header {
   text-align: center;
   font-weight: 700;
-  background-color: var(--mk-soften-foreground-86);
+  background-color: var(--mk-soften-foreground-90);
   border-top-left-radius: 0.63em;
   border-top-right-radius: 0.63em;
 }
@@ -299,7 +299,7 @@ body {
   overflow-y: auto;
   border-bottom-left-radius: 0.63em;
   border-bottom-right-radius: 0.63em;
-  border: 1px solid var(--mk-soften-foreground-86);
+  border: 1px solid var(--mk-soften-foreground-90);
   padding: 0.63em;
   white-space: pre-wrap;
 }
@@ -311,7 +311,7 @@ body {
 
 .game-main .suggestions-container .suggestions-content {
   border-radius: 0.63em;
-  border: 1px solid var(--mk-soften-foreground-86);
+  border: 1px solid var(--mk-soften-foreground-90);
   padding: 0.63em;
   overflow-y: auto;
 }
@@ -353,7 +353,7 @@ body {
 }
 
 .game-main .game-command-input form input[type="text"]:disabled {
-  background-color: var(--mk-soften-foreground-86);
+  background-color: var(--mk-soften-foreground-90);
 }
 
 .game-main .game-command-input .command-error {
@@ -371,9 +371,9 @@ body {
   position: absolute;
   bottom: 0;
   width: 100%;
-  border-top: 1px solid var(--mk-soften-foreground-86);
-  border-left: 1px solid var(--mk-soften-foreground-86);
-  border-right: 1px solid var(--mk-soften-foreground-86);
+  border-top: 1px solid var(--mk-soften-foreground-90);
+  border-left: 1px solid var(--mk-soften-foreground-90);
+  border-right: 1px solid var(--mk-soften-foreground-90);
   border-top-left-radius: 0.63em;
   border-top-right-radius: 0.63em;
 }
@@ -381,7 +381,7 @@ body {
 .game-main .game-logs-summary .header {
   padding: 0.3em;
   padding-left: 0.63em;
-  background-color: color-mix(in srgb, var(--mk-soften-foreground-86) 60%, transparent);
+  background-color: color-mix(in srgb, var(--mk-soften-foreground-90) 60%, transparent);
 }
 
 .game-main .game-logs-summary .content {
@@ -393,7 +393,7 @@ body {
 .game-meta {
   display: flex;
   flex-direction: column;
-  background-color: var(--mk-soften-foreground-86);
+  background-color: var(--mk-soften-foreground-90);
   width: 15em;
   padding-left: 0.5em;
   padding-right: 0.5em;
@@ -445,8 +445,8 @@ body {
   height: 1.3em;
   width: 63%;
   text-align: center;
-  background-color: var(--mk-soften-foreground-86);
-  border: 1px solid var(--mk-soften-foreground-86);
+  background-color: var(--mk-soften-foreground-90);
+  border: 1px solid var(--mk-soften-foreground-90);
 }
 
 .game-logs {
@@ -516,7 +516,7 @@ body {
 
 .theme-tile {
   width: 14em;
-  border: 1px solid var(--mk-soften-foreground-86);
+  border: 1px solid var(--mk-soften-foreground-90);
   border-radius: 0.63em;
   padding: 0.63em;
   cursor: pointer;
