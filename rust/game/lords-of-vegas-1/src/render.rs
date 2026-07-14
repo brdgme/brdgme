@@ -203,7 +203,7 @@ impl BoardTile {
             _ => Col {
                 color: ColType::Named {
                     color: NamedColor::Foreground,
-                    soften: Some(78),
+                    soften: Some(80),
                 },
                 transform: vec![],
             },

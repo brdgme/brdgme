@@ -207,7 +207,7 @@ pub fn sample_player_style() -> String {
     player_style_vars(&["green", "red", "blue"])
 }
 
-const SAMPLE_MARKUP: &str = "{{fg red}}Red{{/fg}} {{fg blue}}Blue{{/fg}} {{fg grey}}Grey{{/fg}} {{player 0}} {{player 1}} {{bg soften(foreground, 86)}}{{fg foreground | contrast}}Surface{{/fg}}{{/bg}} {{b}}Bold{{/b}}";
+const SAMPLE_MARKUP: &str = "{{fg red}}Red{{/fg}} {{fg blue}}Blue{{/fg}} {{fg grey}}Grey{{/fg}} {{player 0}} {{player 1}} {{bg soften(foreground, 90)}}{{fg foreground | contrast}}Surface{{/fg}}{{/bg}} {{b}}Bold{{/b}}";
 
 fn build_sample_html() -> String {
     let (nodes, _) = brdgme_markup::from_string(SAMPLE_MARKUP).unwrap_or_default();

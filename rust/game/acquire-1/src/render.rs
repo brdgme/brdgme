@@ -17,7 +17,7 @@ fn available_loc_bg() -> Col {
     Col {
         color: ColType::Named {
             color: NamedColor::Pink,
-            soften: Some(75),
+            soften: Some(80),
         },
         transform: vec![],
     }
@@ -156,9 +156,9 @@ fn tile_background<C: Into<Col>>(c: C) -> N {
 
 fn empty_color(l: Loc) -> Col {
     let soften = if (l.row + l.col).is_multiple_of(2) {
-        86
+        90
     } else {
-        75
+        80
     };
     Col {
         color: ColType::Named {
