@@ -3243,100 +3243,27 @@ pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
     &THEMES
 }
 
-/// Converts RGB (0..=255 each) to HSL, with h in 0..360, s and l in 0..=1.
-fn rgb_to_hsl(c: Color) -> (f64, f64, f64) {
-    let r = c.r as f64 / 255.0;
-    let g = c.g as f64 / 255.0;
-    let b = c.b as f64 / 255.0;
-
-    let max = r.max(g).max(b);
-    let min = r.min(g).min(b);
-    let l = (max + min) / 2.0;
-
-    if (max - min).abs() < f64::EPSILON {
-        return (0.0, 0.0, l);
-    }
-
-    let d = max - min;
-    let s = if l > 0.5 {
-        d / (2.0 - max - min)
-    } else {
-        d / (max + min)
-    };
-
-    let h = if (max - r).abs() < f64::EPSILON {
-        let mut h = (g - b) / d;
-        if g < b {
-            h += 6.0;
-        }
-        h
-    } else if (max - g).abs() < f64::EPSILON {
-        (b - r) / d + 2.0
-    } else {
-        (r - g) / d + 4.0
-    };
-
-    (h * 60.0, s, l)
-}
-
-fn hue_to_rgb(p: f64, q: f64, t: f64) -> f64 {
-    let mut t = t;
-    if t < 0.0 {
-        t += 1.0;
-    }
-    if t > 1.0 {
-        t -= 1.0;
-    }
-    if t < 1.0 / 6.0 {
-        return p + (q - p) * 6.0 * t;
-    }
-    if t < 1.0 / 2.0 {
-        return q;
-    }
-    if t < 2.0 / 3.0 {
-        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
-    }
-    p
-}
-
 /// Rounds a 0..=255 scale value half-up.
 fn round_u8(v: f64) -> u8 {
     (v + 0.5).floor().clamp(0.0, 255.0) as u8
 }
 
-fn hsl_to_rgb(h: f64, s: f64, l: f64) -> Color {
-    if s.abs() < f64::EPSILON {
-        let v = round_u8(l * 255.0);
-        return Color { r: v, g: v, b: v };
-    }
-
-    let q = if l < 0.5 {
-        l * (1.0 + s)
-    } else {
-        l + s - l * s
+/// Mixes `source` toward `target` in sRGB by `pct` percent.
+pub fn mix(source: Color, target: Color, pct: u8) -> Color {
+    let weight = f64::from(pct.min(100)) / 100.0;
+    let channel = |source: u8, target: u8| {
+        round_u8(f64::from(source) + (f64::from(target) - f64::from(source)) * weight)
     };
-    let p = 2.0 * l - q;
-    let h_norm = h / 360.0;
-
-    let r = hue_to_rgb(p, q, h_norm + 1.0 / 3.0);
-    let g = hue_to_rgb(p, q, h_norm);
-    let b = hue_to_rgb(p, q, h_norm - 1.0 / 3.0);
-
     Color {
-        r: round_u8(r * 255.0),
-        g: round_u8(g * 255.0),
-        b: round_u8(b * 255.0),
+        r: channel(source.r, target.r),
+        g: channel(source.g, target.g),
+        b: channel(source.b, target.b),
     }
 }
 
-/// Derives a muted surface tint from `color`, moving its lightness toward
-/// `background`'s lightness by `pct`% (1..=99), keeping hue and saturation.
+/// Derives a surface by mixing `color` toward `background` in sRGB.
 pub fn soften(color: Color, pct: u8, background: Color) -> Color {
-    let pct = pct.clamp(1, 99);
-    let (h, s, l) = rgb_to_hsl(color);
-    let (_, _, l_bg) = rgb_to_hsl(background);
-    let l_new = l + (l_bg - l) * (pct as f64 / 100.0);
-    hsl_to_rgb(h, s, l_new)
+    mix(color, background, pct)
 }
 
 fn srgb_channel_to_linear(c: u8) -> f64 {
@@ -3381,14 +3308,43 @@ mod tests {
     #[test]
     fn soften_exactness() {
         assert_eq!(
-            soften(LIGHT.foreground, 86, LIGHT.background).hex(),
-            "#dbdbdb"
+            soften(LIGHT.foreground, 90, LIGHT.background).hex(),
+            "#e6e6e6"
         );
         assert_eq!(
-            soften(LIGHT.foreground, 75, LIGHT.background).hex(),
-            "#bfbfbf"
+            soften(LIGHT.foreground, 80, LIGHT.background).hex(),
+            "#cccccc"
         );
-        assert_eq!(soften(LIGHT.pink, 75, LIGHT.background).hex(), "#f7bed4");
+        assert_eq!(soften(LIGHT.pink, 75, LIGHT.background).hex(), "#f0c5d6");
+    }
+
+    #[test]
+    fn mix_exactness() {
+        assert_eq!(
+            mix(DRACULA.foreground, DRACULA.background, 0),
+            DRACULA.foreground
+        );
+        assert_eq!(
+            mix(DRACULA.foreground, DRACULA.background, 100),
+            DRACULA.background
+        );
+        assert_eq!(
+            mix(DRACULA.foreground, DRACULA.background, 86).hex(),
+            "#454751"
+        );
+        assert_eq!(
+            mix(DRACULA.foreground, DRACULA.background, 90).hex(),
+            "#3d3f49"
+        );
+        assert_eq!(soften(LIGHT.pink, 75, LIGHT.background).hex(), "#f0c5d6");
+    }
+
+    #[test]
+    fn soften_is_a_mix_to_background() {
+        assert_eq!(
+            soften(DRACULA.foreground, 86, DRACULA.background),
+            mix(DRACULA.foreground, DRACULA.background, 86)
+        );
     }
 
     #[test]
@@ -3465,15 +3421,21 @@ mod tests {
     const DISTINCT_DELTA_E: f64 = 15.0;
 
     fn in_use_surfaces(palette: &Palette) -> Vec<(String, Color)> {
-        crate::css::IN_USE_SOFTENS
+        let softens = crate::css::IN_USE_SOFTENS.iter().map(|&(named, pct)| {
+            (
+                format!("soften({}, {})", named, pct),
+                soften(palette.color(named), pct, palette.background),
+            )
+        });
+        let mixes = crate::css::IN_USE_MIXES
             .iter()
-            .map(|&(named, pct)| {
+            .map(|&(source, target, pct)| {
                 (
-                    format!("soften({}, {})", named, pct),
-                    soften(palette.color(named), pct, palette.background),
+                    format!("mix({}, {}, {})", source, target, pct),
+                    mix(palette.color(source), palette.color(target), pct),
                 )
-            })
-            .collect()
+            });
+        softens.chain(mixes).collect()
     }
 
     /// sRGB (D65) -> CIE Lab, for CIE76 deltaE.
