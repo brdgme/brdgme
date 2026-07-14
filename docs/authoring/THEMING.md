@@ -65,8 +65,9 @@ the actual displayed channel values, so the result is exactly what a
 `soften(color, pct)` is a convenience wrapper: `soften(color, pct) =
 mix(color, BACKGROUND, pct)` - it always mixes toward the theme's own
 BACKGROUND, which is what a receding surface tint needs. `pct` is an
-integer 1-99 (the 0/100 endpoints are degenerate - `color` itself or
-BACKGROUND itself - so `mix` is used directly for those).
+integer 0-100 inclusive, same as `mix`; in practice authors use 1-99
+since the 0/100 endpoints are degenerate (`color` itself or BACKGROUND
+itself) and read more clearly written as `mix` directly.
 
 Properties:
 
