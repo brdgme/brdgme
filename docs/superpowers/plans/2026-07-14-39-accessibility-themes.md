@@ -50,7 +50,30 @@ sync tests; sqlx DB failures expected); clippy -D warnings
   Accessibility/Custom headings (`.theme-category-heading`, flex-basis
   100% inside the flex `.theme-grid`). Verified: brdgme_color tests, web
   theme tests, checks (ssr+hydrate), clippy, fmt.
-- [ ] WP2: CVD variants of brdgme light/dark (6 themes) + CVD simulation gate
+- [x] WP2: CVD variants of brdgme light/dark (6 themes) + CVD simulation
+  gate. 6 Accessibility themes registered: brdgme light/dark x
+  deuteranopia/protanopia/tritanopia (deutan+protan share one palette per
+  base, tuned to clear both simulations; Okabe-Ito-seeded hues, base
+  neutrals kept). `gate_cvd_simulation` (palette.rs test module) keys off
+  CVD keywords in theme names and asserts pairwise player+GREY+FOREGROUND
+  deltaE under matching Vienot/Brettel-style simulation >=
+  `CVD_DISTINCT_DELTA_E` (10.0). Note: the initial simulation paired the
+  unnormalized Vienot 1999 HPE matrix with coefficients derived for a
+  D65-normalized matrix (simulated white came out cyan); fixed in dd7d350
+  to the matched Vischeck/daltonize constants, pinned by
+  `cvd_simulation_preserves_achromatic` (white/grey/black are exact fixed
+  points), with three palettes re-tuned under the corrected simulation.
+  Achieved minima (independently re-verified by review): light
+  deutan/protan 15.33 (blue/purple) / 15.43 (red/brown); dark
+  deutan/protan 12.75 (green/grey) / 13.06 (cyan/pink); light tritan
+  11.06 (brown/grey); dark tritan 11.58 (purple/brown) - all above the
+  10.0 floor and the >=9 target. Slugs appended to `THEME_SLUGS`
+  (theme.rs) and `THEME_BOOT_SCRIPT` (app.rs) in registry order.
+  Verified: brdgme_color tests (13), web theme/sync tests, checks
+  (ssr+hydrate), clippy (both, -D warnings), fmt. Review: spec compliant,
+  clean; one deferred cosmetic note - DARK_DEUTERANOPIA's re-tuned PURPLE
+  (hue 238.5) sits 6.2 degrees from its BLUE, reads blue-lavender, but
+  both gates clear with margin.
 - [ ] WP3: third-party colourblind-first theme evaluation/adoption
 - [ ] Final verification (tests, checks, clippy, fmt)
 
