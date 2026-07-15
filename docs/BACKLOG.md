@@ -98,6 +98,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - pre-beta-exit; added 2026-07-11 | - | - |
 | 39 | Accessibility themes + theme picker categories (added 2026-07-14, **top priority**): (a) colour-blind variants of the two default themes - brdgme light/dark each get variants for the major colour vision deficiency groups (deuteranopia, protanopia, tritanopia), derived from established CVD-safe palettes (Okabe-Ito / Paul Tol) and validated under CVD simulation per THEMING.md's contrast rules; (b) add a category to each registered theme and render the picker grouped: Default (the two brdgme themes, no heading, top), Light (non-default, non-CVD themes with a light background), Dark (non-default, non-CVD themes with a dark background), Deuteranopia / Protanopia (deutan- and protan-targeted CVD variants, combined), Tritanopia (tritan-targeted CVD variants); themes sorted alphabetically within each category; (c) evaluate adopting established colourblind-first third-party themes - candidates: GitHub Dark/Light Colorblind (official github-vscode-theme variants, orange/blue in place of red/green, widely used) and the Modus themes' deuteranopia/tritanopia variants (Emacs, WCAG AAA-focused) - verify against upstream before adopting | - | - |
 | 38 | Frontend cache busting on new deploys (investigate stale WASM/asset caching when a new version is bumped in brdgme-config; options: user-facing "new version released, please reload" messaging, or simply force a reload when a new version is deployed) | Pending - unscheduled; added 2026-07-11 | - | - |
+| 40 | DB tests run (and fail) by default (every local/agent test run hits DB test failures, repeatedly surprising agents; investigate whether DB-dependent tests should be opt-in - e.g. feature/env gated - instead of opt-out, or made to pass by default) | Pending - unscheduled; added 2026-07-15 | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -375,6 +376,12 @@ shows it is fine. Find a cleaner approach (e.g. readable source
 minified/embedded at build time, an external same-origin script file,
 or an SSR-set attribute from the cookie on the request) that keeps the
 no-flash-before-first-paint behaviour.
+
+2026-07-15: #40 added - every local/agent test run produces DB test
+failures (DB-dependent tests fail without a database), which repeatedly
+surprises agents mid-task. Investigate whether DB tests should be opt-in
+rather than opt-out, or made to pass by default. An agent-facing warning
+was added to AGENTS.md (Working style) the same day.
 
 2026-07-11: #38 added - investigate frontend cache busting when a new
 version is bumped in brdgme-config: browsers may keep serving stale

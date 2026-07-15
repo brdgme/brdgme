@@ -67,6 +67,11 @@ on demand when the task at hand references them.
 - Keep local verification light: `fmt` and a quick lint pass. Push and let CI
   run the full test/clippy suites rather than burning time re-running them
   locally.
+- Running the test suite locally always produces DB test failures - tests
+  that need a database fail in a plain local/agent run. This is a known,
+  pre-existing condition, not caused by your change; do not chase it or
+  report it as a regression. Whether DB tests should be opt-in instead of
+  on-by-default is tracked as backlog #40.
 - Do not background-poll CI runs waiting for completion - the user watches
   CI himself.
 - Do not run commands that would print secret material (sealed-secrets
