@@ -132,6 +132,11 @@ tokio-tungstenite = "0.30"
 output-name = "web"
 site-root = "target/site"
 site-pkg-dir = "pkg"
+# Content-hash pkg/ asset filenames (web.<hash>.wasm/js/css) so Cloudflare
+# edge caching can't serve stale JS glue against a new wasm after a deploy.
+# The server must run with LEPTOS_HASH_FILES=true (set in rust/Dockerfile)
+# for HydrationScripts to actually read hash.txt and emit hashed URLs.
+hash-files = true
 style-file = "style/main.scss"
 # Assets source dir; copied/synced to site-root.
 assets-dir = "public"

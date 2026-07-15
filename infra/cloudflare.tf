@@ -159,6 +159,40 @@ resource "cloudflare_ruleset" "rate_limit" {
   }]
 }
 
+# Cache rule for hashed /pkg/ assets. Root cause of the post-deploy
+# wasm-bindgen LinkError this fixes: Cloudflare's default cached-extension
+# list includes .js/.css but not .wasm, so the edge could serve a cached JS
+# glue file alongside an evicted-then-refetched, newer wasm. This rule makes
+# all of /pkg/ cache-eligible and defers TTL to origin Cache-Control - the
+# app serves /pkg/* as `public, max-age=31536000, immutable` (see
+# rust/web/src/router.rs's `set_cache_control` middleware). See
+# docs/decisions/ASSET_CACHING.md.
+#
+# ORDERING CONSTRAINT: apply this rule ONLY AFTER the app deploy shipping
+# hashed /pkg/ filenames (hash-files in web/Cargo.toml) is live. Applying it
+# while /pkg/web.wasm is still a stable, unhashed URL would edge-cache that
+# wasm long-term and reproduce the very bug this fixes.
+resource "cloudflare_ruleset" "cache_rules" {
+  zone_id = cloudflare_zone.brdgme.id
+  name    = "brdgme cache rules"
+  kind    = "zone"
+  phase   = "http_request_cache_settings"
+
+  rules = [{
+    ref         = "pkg_immutable_assets"
+    description = "Edge-cache hashed /pkg/ assets, respect origin Cache-Control"
+    expression  = "(starts_with(http.request.uri.path, \"/pkg/\"))"
+    action      = "set_cache_settings"
+    enabled     = true
+    action_parameters = {
+      cache = true
+      edge_ttl = {
+        mode = "respect_origin"
+      }
+    }
+  }]
+}
+
 # Bot Fight Mode (spec W5) - flipped as the LAST edge toggle and
 # verified in isolation: the free tier has no BFM exceptions, and the
 # documented fallback is fight_mode = false if it breaks websockets or

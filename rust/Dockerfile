@@ -97,10 +97,27 @@ RUN wasm-bindgen --target web --keep-debug --no-typescript \
 # build_id custom section for Sentry's debug-file matching (survives wasm-opt).
 RUN wasm-split /tmp/wasm-dwarf/web_bg.wasm -o /tmp/wasm-dwarf/web_stripped.wasm \
     --strip --debug-out=/tmp/wasm-dwarf/web.debug
-# Size-optimize the now-DWARF-free wasm over the top of the shipped web.wasm.
+# Size-optimize the now-DWARF-free wasm. Written to a scratch path, not
+# straight over the shipped pkg/web.<hash>.wasm: with hash-files on, that
+# filename is only valid for the bytes cargo-leptos hashed during
+# `cargo leptos build`, and this step changes the bytes.
 # Flags mirror wasm-opt-features in web/Cargo.toml; -g keeps the name section.
 RUN wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int -g \
-    /tmp/wasm-dwarf/web_stripped.wasm -o /app/target/site/pkg/web.wasm
+    /tmp/wasm-dwarf/web_stripped.wasm -o /tmp/wasm-dwarf/web_final.wasm
+# cargo-leptos hashed the pre-Sentry wasm during `cargo leptos build`, but
+# the wasm-opt step above produces different bytes, so the shipped file must
+# be renamed to the MD5/base64url-unpadded hash of its FINAL content (same
+# scheme as cargo-leptos src/compile/hash.rs) and hash.txt's wasm line
+# rewritten - otherwise HydrationScripts would emit a URL pointing at the
+# pre-Sentry wasm. Sentry symbolication is unaffected: wasm-split (above)
+# injected a build_id custom section and Sentry matches on that, not the
+# filename.
+RUN set -eu; \
+    HASH=$(md5sum /tmp/wasm-dwarf/web_final.wasm | head -c32 | tr 'a-f' 'A-F' | basenc --base16 -d | basenc --base64url | tr -d '='); \
+    rm /app/target/site/pkg/web.*.wasm; \
+    cp /tmp/wasm-dwarf/web_final.wasm "/app/target/site/pkg/web.${HASH}.wasm"; \
+    sed -i "s|^wasm: .*|wasm: ${HASH}|" /app/target/release/hash.txt; \
+    cat /app/target/release/hash.txt
 
 # --- Debug companion for Web (DWARF for Sentry Symbolicator) ---
 FROM scratch AS web-debug
@@ -126,11 +143,17 @@ RUN apt-get -y update && apt-get install -y --no-install-recommends libpq5 ca-ce
 WORKDIR /app
 # Copy the server binary from web-builder
 COPY --from=web-builder /app/target/release/web ./brdgme_web
+# hash.txt must sit next to the server binary: leptos's HydrationScripts
+# reads it from current_exe().parent() at request time, which is /app here.
+COPY --from=web-builder /app/target/release/hash.txt ./hash.txt
 # Copy the site assets from web-builder
 COPY --from=web-builder /app/target/site ./site
 ENV LEPTOS_SITE_ADDR="0.0.0.0:3000"
 ENV LEPTOS_SITE_ROOT="site"
 ENV SENTRY_RELEASE="sha-${SHORT_SHA}"
+# HydrationScripts only consults hash.txt when this is set (cargo-leptos
+# issue #347) - silently falls back to unhashed pkg/ filenames otherwise.
+ENV LEPTOS_HASH_FILES="true"
 EXPOSE 3000
 CMD ["./brdgme_web"]
 

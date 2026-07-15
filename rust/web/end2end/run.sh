@@ -63,6 +63,8 @@ echo "==> Starting web on $WEB_ADDR"
     export LEPTOS_SITE_ADDR="$WEB_ADDR"
     export LEPTOS_SITE_ROOT="$RUST_DIR/target/site"
     export LEPTOS_ENV="PROD"
+    # hash-files is enabled in web/Cargo.toml, so HydrationScripts needs this set to read hash.txt (which cargo-leptos wrote next to the binary) - without it the page references unhashed /pkg/ names that no longer exist.
+    export LEPTOS_HASH_FILES="true"
     exec "$RUST_DIR/target/release/web"
 ) &
 WEB_PID=$!
