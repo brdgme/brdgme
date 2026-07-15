@@ -291,12 +291,10 @@ jobs:
       - name: Upload debug files to Sentry
         if: github.ref == 'refs/heads/master' && env.SENTRY_AUTH_TOKEN != ''
         env:
-          # TODO(michael): confirm Sentry org/project slugs before first master run.
-          # Org id from the DSN is o4511737783451648; the browser project is
-          # described in the design spec as `web-frontend`-style. Debug files
-          # belong to the BROWSER project (wasm symbolication), not the server one.
-          SENTRY_ORG: o4511737783451648
-          SENTRY_PROJECT: web-frontend
+          # Slugs confirmed per docs/superpowers/plans/2026-07-15-ws3-sentry.md
+          # (org `brdgme`; browser project `web-javascript` receives debug-file uploads).
+          SENTRY_ORG: brdgme
+          SENTRY_PROJECT: web-javascript
         run: |
           sudo curl -sL -o /usr/local/bin/sentry-cli \
             https://downloads.sentry-cdn.com/sentry-cli/3.6.0/sentry-cli-Linux-x86_64
