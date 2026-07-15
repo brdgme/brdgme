@@ -618,7 +618,7 @@ mod test {
     fn parse_game(input: &str) -> Game {
         let board = parse_board(input);
         let (mut g, _) = Game::start(2, 1).unwrap();
-        for (_, t) in board.iter() {
+        for t in board.values() {
             if t.player != NO_PLAYER {
                 let player = if t.player == PLAYER_CATHEDRAL {
                     1
