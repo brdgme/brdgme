@@ -340,6 +340,12 @@ fn HomePage() -> impl IntoView {
 
 #[component]
 fn LoginPage() -> impl IntoView {
+    let current_user =
+        expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
+    let active_games = expect_context::<
+        LocalResource<Result<Vec<crate::game::server_fns::GameSummary>, ServerFnError>>,
+    >();
+
     let (show_code_input, set_show_code_input) = signal(false);
     let (email, set_email) = signal(String::new());
 
@@ -367,10 +373,15 @@ fn LoginPage() -> impl IntoView {
         }
     });
 
-    // Navigate to dashboard on successful login.
+    // Navigate to dashboard on successful login. `current_user`/`active_games`
+    // live above the Router (see App()), so this navigation no longer
+    // remounts them - refetch explicitly or the sidebar keeps showing
+    // logged-out state and no active games until a hard reload.
     let navigate = use_navigate();
     Effect::new(move |_| {
         if confirm_action.value().get().is_some_and(|r| r.is_ok()) {
+            current_user.refetch();
+            active_games.refetch();
             navigate("/dashboard", NavigateOptions::default());
         }
     });
