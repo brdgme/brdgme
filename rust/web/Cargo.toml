@@ -36,7 +36,7 @@ anyhow = { version = "1.0.103", optional = true }
 thiserror = { version = "2.0.18", optional = true }
 
 # Email functionality
-resend-rs = { version = "0.27", default-features = false, features = ["rustls-tls"], optional = true }
+resend-rs = { version = "0.28", default-features = false, features = ["rustls-tls"], optional = true }
 
 # Environment variables
 dotenvy = { version = "0.15", optional = true }
@@ -49,7 +49,7 @@ brdgme_markup = { path = "../lib/markup", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
 rand = "0.10.2"
 futures-util = "0.3.32"
-gloo-net = { version = "0.6.0", features = ["websocket"] }
+gloo-net = { version = "0.7", features = ["websocket"] }
 gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3.77", features = ["Location", "Window", "Document", "HtmlDocument", "Element"] }
 js-sys = "0.3"
@@ -63,6 +63,12 @@ opentelemetry = { version = "0.32", optional = true }
 opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"], optional = true }
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["grpc-tonic", "trace"], optional = true }
 tracing-opentelemetry = { version = "0.33", optional = true }
+
+# Error tracking (Sentry). Default features (reqwest + native-tls transport) -
+# no rustls involvement, see CODING.md's rustls crypto-provider section.
+sentry = { version = "0.48", optional = true }
+sentry-tower = { version = "0.48", optional = true, features = ["http"] }
+sentry-tracing = { version = "0.48", optional = true }
 
 [features]
 hydrate = [
@@ -104,6 +110,10 @@ ssr = [
     "dep:opentelemetry_sdk",
     "dep:opentelemetry-otlp",
     "dep:tracing-opentelemetry",
+    # Error tracking (Sentry)
+    "dep:sentry",
+    "dep:sentry-tower",
+    "dep:sentry-tracing",
 ]
 
 # Defines a size-optimized profile for the WASM bundle in release mode
@@ -116,7 +126,7 @@ panic = "abort"
 
 [dev-dependencies]
 serial_test = "3.5.0"
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 
 [package.metadata.leptos]
 output-name = "web"
@@ -136,3 +146,4 @@ bin-default-features = false
 lib-features = ["hydrate"]
 lib-default-features = false
 lib-profile-release = "wasm-release"
+wasm-opt-features = ["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "-g"]

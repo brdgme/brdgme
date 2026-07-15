@@ -64,6 +64,10 @@ target "image" {
   context    = "."
   dockerfile = "rust/Dockerfile"
   target     = tgt
+  # Only the web image consumes SHORT_SHA (as SENTRY_RELEASE); scoped to
+  # avoid passing an unconsumed build-arg to the other 25 targets sharing
+  # this matrix.
+  args = tgt == "web" ? { SHORT_SHA = SHORT_SHA } : {}
   tags = concat(
     ["ghcr.io/${OWNER}/brdgme/${tgt}:sha-${SHORT_SHA}"],
     PUSH_LATEST == "true" ? ["ghcr.io/${OWNER}/brdgme/${tgt}:latest"] : []
@@ -77,4 +81,18 @@ target "image" {
   cache-to = WRITE_CACHE == "true" ? [
     "type=registry,ref=ghcr.io/${OWNER}/brdgme/build-cache:${tgt},mode=max,image-manifest=true,oci-mediatypes=true"
   ] : []
+}
+
+# Extracts the DWARF companion file (web.debug) for the web image's wasm
+# bundle onto the local filesystem, for CI to upload to Sentry via
+# sentry-cli. Not part of the default group - invoked explicitly.
+target "web-debug" {
+  context    = "."
+  dockerfile = "rust/Dockerfile"
+  target     = "web-debug"
+  args       = { SHORT_SHA = SHORT_SHA }
+  output     = ["type=local,dest=out/web-debug"]
+  cache-from = [
+    "type=registry,ref=ghcr.io/${OWNER}/brdgme/build-cache:web"
+  ]
 }

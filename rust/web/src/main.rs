@@ -13,6 +13,14 @@ async fn main() {
 
     dotenvy::dotenv().ok();
     let _tracer_provider = init_tracing();
+    // Runs after `init_tracing` (matches sentry-rust's own tracing-demo.rs
+    // example, which sets up the tracing_subscriber registry before calling
+    // `sentry::init`): the `sentry_tracing::layer()` installed in
+    // `init_tracing` doesn't need an initialized client to be constructed -
+    // it reads `Hub::current()` at each event, so any order works, but this
+    // also lets `init_sentry`'s own "disabled" debug log go through the
+    // already-installed subscriber.
+    let _sentry_guard = init_sentry();
 
     let pool = create_pool().await.expect("Failed to create database pool");
     let http_client = reqwest::Client::builder()
@@ -163,6 +171,13 @@ fn init_tracing() -> Option<opentelemetry_sdk::trace::SdkTracerProvider> {
         .with(env_filter)
         .with(fmt_layer)
         .with(otel_layer)
+        // Unconditional: forwards `error`-level events as Sentry events and
+        // `warn`/`info` as breadcrumbs (sentry-tracing's default filter).
+        // Verified safe with no client initialized - it only calls
+        // `sentry_core::capture_event`/`add_breadcrumb`/`start_transaction`,
+        // which all check `Hub::current()`'s bound client and no-op when
+        // there isn't one (sentry-tracing 0.48.5 `layer/mod.rs` source).
+        .with(sentry_tracing::layer())
         .init();
 
     if let Some(bad_value) = bad_sampler_arg {
@@ -179,6 +194,38 @@ fn init_tracing() -> Option<opentelemetry_sdk::trace::SdkTracerProvider> {
     }
 
     provider
+}
+
+/// Reads `SENTRY_DSN_SERVER` and, if set, initializes the Sentry Rust SDK
+/// (error capture, panic hook, breadcrumbs from the `sentry_tracing` layer
+/// installed in `init_tracing`, and the `sentry_tower` router layers in
+/// `router.rs`). Returns the `ClientInitGuard` so `main` can hold it alive
+/// for the process lifetime - dropping it early flushes and shuts down the
+/// transport prematurely (same reasoning as `init_tracing`'s
+/// `_tracer_provider`). Unset (dev/Tilt/CI default): returns `None` without
+/// calling `sentry::init` at all, so the process boots normally and every
+/// Sentry integration point elsewhere in the codebase is a documented no-op.
+#[cfg(feature = "ssr")]
+fn init_sentry() -> Option<sentry::ClientInitGuard> {
+    let Ok(dsn) = std::env::var("SENTRY_DSN_SERVER") else {
+        tracing::debug!("SENTRY_DSN_SERVER not set; Sentry error tracking disabled");
+        return None;
+    };
+    let release = std::env::var("SENTRY_RELEASE")
+        .ok()
+        .map(std::borrow::Cow::Owned);
+    Some(sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            release,
+            // Sentry's own quickstart examples default this to `true`; brdgme
+            // opts out so client IPs, cookies, and auth headers are never
+            // sent to the hosted Sentry SaaS instance without a separate,
+            // explicit future decision (WS3 plan, 2026-07-15).
+            send_default_pii: false,
+            ..Default::default()
+        },
+    )))
 }
 
 /// Serves `/metrics` in Prometheus text format on a private port, separate from

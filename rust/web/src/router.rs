@@ -11,6 +11,7 @@ use axum::http::{Request, Response, StatusCode};
 use leptos::prelude::*;
 use leptos_axum::{LeptosRoutes, generate_route_list};
 use opentelemetry::trace::{TraceContextExt, TraceId};
+use sentry_tower::{NewSentryLayer, SentryHttpLayer};
 use std::time::Duration;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -126,6 +127,19 @@ pub async fn build_router(state: AppState) -> Router {
                 .make_span_with(make_root_span)
                 .on_response(record_response),
         )
+        // Outermost: binds a fresh Sentry hub per request, then attaches
+        // request metadata (method/URL/headers, PII-scrubbed unless
+        // `send_default_pii` is set) to anything captured while handling it.
+        // Declared Http-then-NewSentry because axum applies `.layer()` calls
+        // in the opposite order to `tower::ServiceBuilder` (see sentry-tower's
+        // crate docs) - NewSentryLayer ends up outermost, wrapping every
+        // other layer above including `/healthz` and `TraceLayer`. Both are
+        // safe to add unconditionally: with no Sentry client bound (dev/Tilt/
+        // CI, and every call from `tests/ssr_pages.rs`, which never sets
+        // `SENTRY_DSN_SERVER`), they only shuffle a no-op `Hub` around and
+        // never send anything (sentry-tower 0.48.5 source).
+        .layer(SentryHttpLayer::new())
+        .layer(NewSentryLayer::<Request<axum::body::Body>>::new_from_top())
         .with_state(state)
 }
 

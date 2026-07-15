@@ -267,17 +267,35 @@ sides start from the same empty state.
 
 ## Dependency Management
 
-**`wasm-bindgen` is pinned** to `=0.2.108` in `Cargo.toml` to match the
-`wasm-bindgen-cli` version provided by nixpkgs. Do not update it without
-updating `devenv.nix` in lockstep. A version mismatch between the CLI and the
-crate causes the WASM build to fail at link time.
+**Stay on latest dependencies.** We aggressively track the latest releases of
+everything: crates, build tools, Docker base images, pinned CLI versions
+(Dockerfile, devenv.nix), and GitHub Actions. Whenever a feature or a
+troubleshooting effort might be affected by dependency behavior, check the
+involved dependencies against latest and bump first, before building
+workarounds against old versions. (Policy set 2026-07-15.)
 
-**Other pinned-by-ecosystem crates** (as of 2026-04-04): `gloo-net 0.6`,
-`gloo-timers 0.3`, `js-sys/web-sys 0.3.85`, `tower 0.4`, `tower-sessions 0.14`,
-`reqwest 0.12`, `redis 0.28`. Newer major versions have breaking API changes and
-require coordinated updates. Run `cargo update --verbose` periodically to check
-for patch-level updates; ignore "Unchanged" lines where a newer major version
-exists but the Cargo.toml constraint intentionally excludes it.
+**`wasm-bindgen` is pinned** to `=0.2.121` in `rust/web/Cargo.toml` to match
+the `wasm-bindgen-cli` version provided by nixpkgs, which also drives the
+pins in `rust/Dockerfile` and `.github/workflows/ci.yml`. Do not update any
+one of these without updating the other two and the devenv shell in
+lockstep. A version mismatch between the CLI and the crate causes the WASM
+build to fail at link time.
+
+**Other pinned-by-ecosystem crates** (as of 2026-07-15): `js-sys`/`web-sys`
+are held at `0.3.98` by the `wasm-bindgen =0.2.121` pin above (latest is
+`0.3.103`). `web`'s `sqlx` is on `0.8` (latest `0.9`) and `tower-sessions` is
+on `0.14.0` (latest `0.15`) because `tower-sessions-sqlx-store 0.15.0`
+requires `sqlx ^0.8` and `tower-sessions ^0.14`; `bot` and `operator` are
+already on `sqlx 0.9`. The `sqlx-cli` pin in `rust/Dockerfile` (`0.8.6`) is
+kept matching `web`'s `sqlx 0.8`. When `tower-sessions-sqlx-store` releases
+`sqlx-0.9` support, move `web`'s `sqlx`, `tower-sessions`, and the
+Dockerfile `sqlx-cli` pin together. Run `cargo update --verbose`
+periodically to check for patch-level updates; ignore "Unchanged" lines
+where a newer major version exists but the Cargo.toml constraint
+intentionally excludes it.
+
+**`rust/web/end2end`'s `@types/node`** tracks the Node.js major provided by
+the devenv shell (currently 24), not npm latest.
 
 **rustls crypto backends: the workspace enables both, and any binary relying
 on the process default provider must install one in `main`.** `reqwest`'s

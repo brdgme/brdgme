@@ -20,8 +20,58 @@ use crate::components::MainLayout;
 // `theme_boot_script_contains_all_theme_slugs` (below) pins that.
 const THEME_BOOT_SCRIPT: &str = r#"(function(){try{var m=document.cookie.match(/(?:^|; )theme=([^;]*)/);var t=m?decodeURIComponent(m[1]):null;if(t&&["brdgme-light","brdgme-dark","dracula","alucard","solarized-dark","solarized-light","nord-dark","nord-light","one-dark","one-light","gruvbox-dark","gruvbox-light","catppuccin-mocha","catppuccin-latte","tokyo-night","tokyo-night-storm","tokyo-night-light","night-owl","light-owl","synthwave-84","papercolor-light","papercolor-dark","monokai","darcula","vs-code-dark-plus","vs-code-dark-modern","brdgme-light-deuteranopia","brdgme-light-protanopia","brdgme-light-tritanopia","brdgme-dark-deuteranopia","brdgme-dark-protanopia","brdgme-dark-tritanopia","modus-operandi-tritanopia","modus-vivendi-tritanopia"].indexOf(t)>=0){document.documentElement.dataset.theme=t;}else{delete document.documentElement.dataset.theme;}}catch(e){}})();"#;
 
+// Scrubs cookies and auth headers before an event leaves the browser -
+// defensive (doesn't throw if `event.request`/`headers` are absent) since
+// this runs on every captured error.
+const SENTRY_BEFORE_SEND_JS: &str = r#"function(event){try{if(event.request){delete event.request.cookies;if(event.request.headers){Object.keys(event.request.headers).forEach(function(k){if(k.toLowerCase()==="authorization"||k.toLowerCase()==="cookie"){delete event.request.headers[k];}});}}}catch(e){}return event;}"#;
+
+// `shell()` compiles into both the ssr-feature server binary and the
+// hydrate-feature wasm binary (the crate builds twice under cargo-leptos).
+// Client-side JS never calls `shell()` (see lib.rs's `hydrate()`, which
+// calls `hydrate_body` directly), so the hydrate build's `None` stub is dead
+// code - gating it explicitly keeps `std::env::var` reads confined to ssr,
+// matching every other env-var read in this crate (see e.g. auth/session.rs,
+// main.rs).
+#[cfg(feature = "ssr")]
+fn sentry_dsn_and_release() -> Option<(String, Option<String>)> {
+    let dsn = std::env::var("SENTRY_DSN_WEB").ok()?;
+    let release = std::env::var("SENTRY_RELEASE").ok();
+    Some((dsn, release))
+}
+
+#[cfg(not(feature = "ssr"))]
+fn sentry_dsn_and_release() -> Option<(String, Option<String>)> {
+    None
+}
+
+/// Escapes a string for embedding in a double-quoted JS string literal.
+/// DSNs/release strings are not expected to contain quotes, but this is
+/// cheap enough to apply unconditionally rather than assume that.
+fn js_string_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn sentry_init_snippet(dsn: &str, release: Option<&str>) -> String {
+    let release_field = release
+        .map(|r| format!(r#","release":"{}""#, js_string_escape(r)))
+        .unwrap_or_default();
+    // No `tracesSampleRate` key: omitting it (not setting it to 0) disables
+    // the tracing integration entirely, protecting the free-tier error
+    // quota - see docs/superpowers/specs/2026-07-15-wasm-prod-errors-design.md.
+    format!(
+        r#"window.Sentry.init({{"dsn":"{}","integrations":[window.SentryWasmIntegration()],"sendDefaultPii":false{},"beforeSend":{}}});"#,
+        js_string_escape(dsn),
+        release_field,
+        SENTRY_BEFORE_SEND_JS,
+    )
+}
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     let theme_css = crate::theme::THEME_STYLE_CSS.clone();
+    // Unset SENTRY_DSN_WEB -> neither script tag is emitted, so dev/Tilt is
+    // completely unaffected.
+    let sentry_snippet = sentry_dsn_and_release()
+        .map(|(dsn, release)| sentry_init_snippet(&dsn, release.as_deref()));
     view! {
         <!DOCTYPE html>
         <html lang="en">
@@ -33,6 +83,10 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
                 <style inner_html=theme_css></style>
                 <script inner_html=THEME_BOOT_SCRIPT></script>
+                {sentry_snippet.map(|snippet| view! {
+                    <script src="/sentry.js"></script>
+                    <script inner_html=snippet></script>
+                })}
                 <AutoReload options=options.clone() />
                 <HydrationScripts options/>
                 <MetaTags/>

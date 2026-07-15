@@ -190,7 +190,7 @@ jobs:
       # does, bypassing cargo-leptos's installer entirely.
       - name: Install dart-sass
         run: |
-          curl -L https://github.com/sass/dart-sass/releases/download/1.97.3/dart-sass-1.97.3-linux-x64.tar.gz | tar -xz
+          curl -L https://github.com/sass/dart-sass/releases/download/1.101.0/dart-sass-1.101.0-linux-x64.tar.gz | tar -xz
           sudo mv dart-sass /usr/local/lib/dart-sass
           sudo ln -s /usr/local/lib/dart-sass/sass /usr/local/bin/sass
           sudo chmod +x /usr/local/bin/sass
@@ -204,7 +204,7 @@ jobs:
           # PLAYWRIGHT_BROWSERS_PATH is unset here (unlike the devenv
           # sandbox), so CI downloads its own browser; key on the pinned
           # @playwright/test version (see end2end/package.json).
-          key: playwright-${{ runner.os }}-1.60.0
+          key: playwright-${{ runner.os }}-1.61.1
       - working-directory: rust/web/end2end
         run: npm ci
       - working-directory: rust/web/end2end

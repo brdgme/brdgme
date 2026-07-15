@@ -1,9 +1,16 @@
+# Short commit SHA, threaded into the web image as SENTRY_RELEASE
+# (sha-<SHORT_SHA>, matching the image tag scheme in docker-bake.hcl/ci.yml).
+# Must be re-declared with a bare `ARG SHORT_SHA` after each FROM that needs
+# it - Docker only carries ARG values forward within the stage they're
+# declared in.
+ARG SHORT_SHA=dev
+
 # Pinned to a specific bookworm-based tag (not `latest-rust-1`, which floats
 # onto whatever Debian release cargo-chef currently publishes). The runtime
 # stages below are `debian:bookworm-slim` - builder and runtime must stay on
 # the same Debian release or glibc symbol versions can mismatch (e.g. `web`
 # crashed with `GLIBC_2.38' not found` when the builder drifted to trixie).
-FROM lukemathwalker/cargo-chef:0.1.77-rust-1.94.0-bookworm AS chef
+FROM lukemathwalker/cargo-chef:0.1.77-rust-1.97.0-bookworm AS chef
 WORKDIR /app
 # Shared system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -28,8 +35,9 @@ RUN cargo build --release --workspace --exclude web
 
 # --- Builder for Web (Leptos) ---
 FROM chef AS web-builder
+ARG SHORT_SHA
 # Install Web Tools (Sass, binstall, cargo-leptos, wasm target)
-RUN curl -L https://github.com/sass/dart-sass/releases/download/1.97.3/dart-sass-1.97.3-linux-x64.tar.gz | tar -xz \
+RUN curl -L https://github.com/sass/dart-sass/releases/download/1.101.0/dart-sass-1.101.0-linux-x64.tar.gz | tar -xz \
     && mv dart-sass /usr/local/lib/dart-sass \
     && ln -s /usr/local/lib/dart-sass/sass /usr/local/bin/sass \
     && chmod +x /usr/local/bin/sass
@@ -37,9 +45,16 @@ RUN curl -L https://github.com/sass/dart-sass/releases/download/1.97.3/dart-sass
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-gnu.tgz | tar -xvz \
     && mv cargo-binstall /usr/local/cargo/bin/cargo-binstall
 
-RUN cargo binstall cargo-leptos --version 0.3.6 -y
+RUN cargo binstall cargo-leptos --version 0.3.7 -y
 RUN cargo binstall wasm-bindgen-cli --version 0.2.121 -y
 RUN rustup target add wasm32-unknown-unknown
+
+# wasm-split (getsentry/symbolicator release, pinned 26.6.0) - splits DWARF
+# debug info out of the shipped wasm into a separate companion file for
+# Sentry's Symbolicator to consume. Not a cargo tool; a single prebuilt
+# glibc-dynamic ELF binary (libgcc_s already present in this base image).
+RUN curl -L -o /usr/local/bin/wasm-split https://github.com/getsentry/symbolicator/releases/download/26.6.0/wasm-split-Linux-x86_64 \
+    && chmod +x /usr/local/bin/wasm-split
 
 COPY --from=planner /app/recipe.json recipe.json
 # Cook Web Dependencies (Host & WASM)
@@ -49,7 +64,23 @@ RUN cargo chef cook --release --target wasm32-unknown-unknown --recipe-path reci
 COPY rust .
 ENV SQLX_OFFLINE=true
 WORKDIR /app/web
-RUN cargo leptos build --release
+# Bundle the Sentry browser SDK to public/sentry.js before the leptos build,
+# so its assets-dir sync (Cargo.toml [package.metadata.leptos]) ships it to
+# site/sentry.js in the same pass.
+RUN cd js && npm ci && npm run build
+# --wasm-debug makes wasm-bindgen preserve DWARF debug info; without it,
+# wasm-bindgen strips DWARF before wasm-opt ever runs, so the wasm-opt-level
+# `-g` in Cargo.toml's wasm-opt-features is a no-op for DWARF (it only keeps
+# the name section, which -g would preserve either way).
+RUN cargo leptos build --release --wasm-debug
+# Split the DWARF out of the shipped wasm into a companion file for Sentry:
+# strips only .debug_* sections (preserves the name section) and injects a
+# build_id wasm-split also uses for Sentry's debug-file matching.
+RUN wasm-split /app/target/site/pkg/web.wasm -o /app/target/site/pkg/web.wasm --strip --debug-out=/app/target/site/pkg/web.debug
+
+# --- Debug companion for Web (DWARF for Sentry Symbolicator) ---
+FROM scratch AS web-debug
+COPY --from=web-builder /app/target/site/pkg/web.debug /web.debug
 
 # --- Builder for migrate ---
 FROM chef AS migrate-builder
@@ -66,6 +97,7 @@ CMD ["sqlx", "migrate", "run", "--source", "/migrations"]
 
 # --- Final Stage for Web ---
 FROM debian:bookworm-slim AS web
+ARG SHORT_SHA
 RUN apt-get -y update && apt-get install -y --no-install-recommends libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Copy the server binary from web-builder
@@ -74,6 +106,7 @@ COPY --from=web-builder /app/target/release/web ./brdgme_web
 COPY --from=web-builder /app/target/site ./site
 ENV LEPTOS_SITE_ADDR="0.0.0.0:3000"
 ENV LEPTOS_SITE_ROOT="site"
+ENV SENTRY_RELEASE="sha-${SHORT_SHA}"
 EXPOSE 3000
 CMD ["./brdgme_web"]
 

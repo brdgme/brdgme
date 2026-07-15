@@ -1,0 +1,13 @@
+{
+  "name": "web-sentry",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild sentry.js --bundle --format=iife --outfile=../public/sentry.js"
+  },
+  "devDependencies": {
+    "@sentry/browser": "^10.65.0",
+    "@sentry/wasm": "^10.65.0",
+    "esbuild": "^0.28.1"
+  }
+}
