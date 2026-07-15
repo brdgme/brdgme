@@ -126,7 +126,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
             <div class="game-meta-logs">
                 <h2>"Logs"</h2>
                 <div class="game-meta-logs-content">
-                    <GameLogs game_id=game_id player_style=player_style />
+                    <GameLogs player_style=player_style />
                 </div>
             </div>
         </div>
@@ -212,19 +212,15 @@ fn render_log_entries(
 }
 
 #[component]
-pub fn GameLogs(game_id: Uuid, player_style: String) -> impl IntoView {
-    use crate::game::server_fns::get_game_logs;
-
-    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
-    let seq_for_this_game = Memo::new(move |_| {
-        game_update
-            .get()
-            .and_then(|(id, seq)| (id == game_id).then_some(seq))
-    });
-    let logs = LocalResource::new(move || async move {
-        let _ = seq_for_this_game.get();
-        get_game_logs(game_id).await
-    });
+pub fn GameLogs(player_style: String) -> impl IntoView {
+    // Provided by GamePage in app.rs, above the <Transition> closure that
+    // remounts this component on every command submit - see the comment at
+    // its `provide_context` call site there. Reading it via context instead
+    // of creating a local LocalResource keeps the last logs visible across
+    // remounts instead of flashing blank.
+    let logs = expect_context::<
+        LocalResource<Result<Vec<crate::game::server_fns::GameLogEntry>, ServerFnError>>,
+    >();
 
     let logs_ref = NodeRef::<leptos::html::Div>::new();
 
@@ -252,19 +248,12 @@ pub fn GameLogs(game_id: Uuid, player_style: String) -> impl IntoView {
 }
 
 #[component]
-pub fn RecentGameLogs(game_id: Uuid, player_style: String) -> impl IntoView {
-    use crate::game::server_fns::get_game_logs;
-
-    let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
-    let seq_for_this_game = Memo::new(move |_| {
-        game_update
-            .get()
-            .and_then(|(id, seq)| (id == game_id).then_some(seq))
-    });
-    let logs = LocalResource::new(move || async move {
-        let _ = seq_for_this_game.get();
-        get_game_logs(game_id).await
-    });
+pub fn RecentGameLogs(player_style: String) -> impl IntoView {
+    // See the comment in `GameLogs` above - this reads the same
+    // GamePage-hoisted resource so it doesn't flash blank on remount.
+    let logs = expect_context::<
+        LocalResource<Result<Vec<crate::game::server_fns::GameLogEntry>, ServerFnError>>,
+    >();
 
     let recent_ref = NodeRef::<leptos::html::Div>::new();
 

@@ -837,6 +837,23 @@ fn GamePage() -> impl IntoView {
         },
     );
 
+    // Hoisted above the <Transition> closure below so it survives the
+    // remount that closure does on every `game_data` refetch (i.e. every
+    // command submit). GameLogs and RecentGameLogs used to each create their
+    // own LocalResource for this, so remounting reset them to None and the
+    // logs flashed blank until the refetch resolved. Shared via context
+    // instead so a fresh mount just reads the value already sitting here.
+    let logs: LocalResource<Result<Vec<crate::game::server_fns::GameLogEntry>, ServerFnError>> =
+        LocalResource::new(move || async move {
+            let id = game_id();
+            let _ = seq_for_this_game.get();
+            match id {
+                Some(id) => crate::game::server_fns::get_game_logs(id).await,
+                None => Err(ServerFnError::new("Invalid Game ID")),
+            }
+        });
+    provide_context(logs);
+
     // MainLayout is outside Transition so it is always in the initial SSR
     // HTML with no streaming placeholder risk. Transition (not Suspense)
     // wraps the game content: Suspense's fallback replaces its children on
@@ -868,7 +885,7 @@ fn GamePage() -> impl IntoView {
                                 <div class="game-container">
                                     <div class="game-main">
                                         <GameBoard html=html player_style=player_style.clone() />
-                                        <RecentGameLogs game_id=id player_style=player_style.clone() />
+                                        <RecentGameLogs player_style=player_style.clone() />
                                         <Show when=move || is_turn>
                                             <GameCommandInput
                                                 game_id=id
