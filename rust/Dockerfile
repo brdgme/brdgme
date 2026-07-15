@@ -56,6 +56,15 @@ RUN rustup target add wasm32-unknown-unknown
 RUN curl -L -o /usr/local/bin/wasm-split https://github.com/getsentry/symbolicator/releases/download/26.6.0/wasm-split-Linux-x86_64 \
     && chmod +x /usr/local/bin/wasm-split
 
+# binaryen wasm-opt (pinned 129, the locally validated version) - used below
+# to size-optimize the DWARF-stripped wasm. cargo-leptos downloads its own
+# binaryen for its internal (DWARF-free) pipeline; we need one on PATH for
+# the manual step. Only wasm-opt is copied out: binaryen ships an unrelated
+# `wasm-split` binary that must not clobber the getsentry one above.
+RUN curl -L https://github.com/WebAssembly/binaryen/releases/download/version_129/binaryen-version_129-x86_64-linux.tar.gz | tar -xz \
+    && mv binaryen-version_129/bin/wasm-opt /usr/local/bin/wasm-opt \
+    && rm -rf binaryen-version_129
+
 COPY --from=planner /app/recipe.json recipe.json
 # Cook Web Dependencies (Host & WASM)
 RUN cargo chef cook --release --recipe-path recipe.json -p web --features ssr --no-default-features
@@ -68,19 +77,34 @@ WORKDIR /app/web
 # so its assets-dir sync (Cargo.toml [package.metadata.leptos]) ships it to
 # site/sentry.js in the same pass.
 RUN cd js && npm ci && npm run build
-# --wasm-debug makes wasm-bindgen preserve DWARF debug info; without it,
-# wasm-bindgen strips DWARF before wasm-opt ever runs, so the wasm-opt-level
-# `-g` in Cargo.toml's wasm-opt-features is a no-op for DWARF (it only keeps
-# the name section, which -g would preserve either way).
-RUN cargo leptos build --release --wasm-debug
-# Split the DWARF out of the shipped wasm into a companion file for Sentry:
-# strips only .debug_* sections (preserves the name section) and injects a
-# build_id wasm-split also uses for Sentry's debug-file matching.
-RUN wasm-split /app/target/site/pkg/web.wasm -o /app/target/site/pkg/web.wasm --strip --debug-out=/app/target/site/pkg/web.debug
+# wasm-opt (binaryen) SIGABRTs on any wasm carrying DWARF from wasm-bindgen
+# --keep-debug (reproduced on binaryen 123 and 129, even at -O0), so
+# cargo-leptos's monolithic `--wasm-debug` build cannot produce the Sentry
+# debug companion. Instead: build WITHOUT --wasm-debug (the internal
+# wasm-bindgen/wasm-opt pipeline never sees DWARF), which still produces the
+# server binary, styles, assets and JS glue - then rebuild the shipped wasm
+# manually below, splitting the DWARF out BEFORE wasm-opt runs.
+RUN cargo leptos build --release
+# Re-run wasm-bindgen on the raw wasm with --keep-debug so the DWARF (from
+# `debug = true` on [profile.wasm-release]) survives into the output. Same
+# wasm-bindgen version and input wasm as cargo-leptos's own run, so the JS
+# glue already shipped to site/pkg matches; only the wasm is taken from here.
+RUN wasm-bindgen --target web --keep-debug --no-typescript \
+    --out-dir /tmp/wasm-dwarf --out-name web \
+    /app/target/front/wasm32-unknown-unknown/wasm-release/web.wasm
+# Split the DWARF into a companion file for Sentry before wasm-opt ever sees
+# it: strips only .debug_* sections (the name section survives) and injects a
+# build_id custom section for Sentry's debug-file matching (survives wasm-opt).
+RUN wasm-split /tmp/wasm-dwarf/web_bg.wasm -o /tmp/wasm-dwarf/web_stripped.wasm \
+    --strip --debug-out=/tmp/wasm-dwarf/web.debug
+# Size-optimize the now-DWARF-free wasm over the top of the shipped web.wasm.
+# Flags mirror wasm-opt-features in web/Cargo.toml; -g keeps the name section.
+RUN wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int -g \
+    /tmp/wasm-dwarf/web_stripped.wasm -o /app/target/site/pkg/web.wasm
 
 # --- Debug companion for Web (DWARF for Sentry Symbolicator) ---
 FROM scratch AS web-debug
-COPY --from=web-builder /app/target/site/pkg/web.debug /web.debug
+COPY --from=web-builder /tmp/wasm-dwarf/web.debug /web.debug
 
 # --- Builder for migrate ---
 FROM chef AS migrate-builder

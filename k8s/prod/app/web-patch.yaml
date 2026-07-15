@@ -6,6 +6,12 @@
 # rust/web/src/main.rs). 10% head sampling (OTEL_TRACES_SAMPLER_ARG) bounds
 # trace volume against the Grafana Cloud free-tier quota - the same
 # telemetry-volume concern the log/metric cuts in this same change address.
+#
+# Prod-only: Sentry error tracking DSNs, same rationale as the OTEL vars
+# above. SENTRY_DSN_WEB feeds the browser project via the SSR-embedded init
+# snippet; SENTRY_DSN_SERVER feeds the Rust server project via
+# sentry::init(). Unset in dev/Tilt means the Sentry wiring in rust/web is a
+# no-op. DSNs are public-by-design, submit-only credentials, not secrets.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,3 +26,7 @@ spec:
               value: http://alloy.brdgme.svc:4317
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            - name: SENTRY_DSN_WEB
+              value: https://9d0c02b1f53022489261350da4820fbb@o4511737783451648.ingest.us.sentry.io/4511737800032256
+            - name: SENTRY_DSN_SERVER
+              value: https://fdafb6fb57688645d1dd8dfee49304fc@o4511737783451648.ingest.us.sentry.io/4511737808551936

@@ -248,6 +248,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -270,6 +272,38 @@ jobs:
         env:
           PUSH_LATEST: ${{ github.ref == 'refs/heads/master' }}
           WRITE_CACHE: ${{ github.ref == 'refs/heads/master' }}
+      # Sentry debug-file upload (next two steps): runs only on master
+      # pushes when SENTRY_AUTH_TOKEN is configured; skipped cleanly
+      # otherwise (e.g. fork PRs, or before the secret exists).
+      #
+      # The web-debug bake must run in this same job, right after the main
+      # bake step above, so it hits the BuildKit cache from the web image
+      # just built - the wasm build_id is minted fresh per wasm-split
+      # invocation, and only the shared layer cache guarantees the
+      # extracted web.debug carries the same build_id as the pushed image.
+      - name: Extract wasm debug file
+        if: github.ref == 'refs/heads/master' && env.SENTRY_AUTH_TOKEN != ''
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: docker-bake.hcl
+          targets: web-debug
+      - name: Upload debug files to Sentry
+        if: github.ref == 'refs/heads/master' && env.SENTRY_AUTH_TOKEN != ''
+        env:
+          # TODO(michael): confirm Sentry org/project slugs before first master run.
+          # Org id from the DSN is o4511737783451648; the browser project is
+          # described in the design spec as `web-frontend`-style. Debug files
+          # belong to the BROWSER project (wasm symbolication), not the server one.
+          SENTRY_ORG: o4511737783451648
+          SENTRY_PROJECT: web-frontend
+        run: |
+          sudo curl -sL -o /usr/local/bin/sentry-cli \
+            https://downloads.sentry-cdn.com/sentry-cli/3.6.0/sentry-cli-Linux-x86_64
+          sudo chmod +x /usr/local/bin/sentry-cli
+          sentry-cli debug-files upload --project "$SENTRY_PROJECT" out/web-debug/web.debug
+          sentry-cli releases new --project "$SENTRY_PROJECT" "sha-${SHORT_SHA}"
+          sentry-cli releases finalize --project "$SENTRY_PROJECT" "sha-${SHORT_SHA}"
 
   build-go-games:
     needs: [changes, test-go]

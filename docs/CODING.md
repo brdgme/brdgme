@@ -18,6 +18,14 @@ existing Go game services and `brdgme-go` are legacy, being retired under #31
 - see `docs/decisions/GO_VS_RUST_PORTING.md` - not a precedent for new
 non-Rust work.)
 
+**Documented exception: Sentry.** The Sentry browser JS SDKs (`@sentry/browser`
++ `@sentry/wasm`, bundled with esbuild at Docker image build time) are the
+sole non-Rust runtime dependency in the codebase - no Rust alternative exists
+for capturing raw browser wasm addresses for server-side symbolication. A
+second, operational-tooling exception covers the hosted Sentry SaaS itself:
+it observes the platform but is not required to run or play brdgme. See
+`docs/decisions/SENTRY_SAAS_EXCEPTION.md` for the full record.
+
 **No bespoke code.** Prefer an existing, well-maintained crate over a
 hand-rolled implementation of a solved problem (parsing, hashing, retries,
 etc.) - see Dependency Management below for crates already in use.
