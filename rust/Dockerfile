@@ -6,9 +6,11 @@
 ARG SHORT_SHA=dev
 
 # Pinned to a specific bookworm-based tag (not `latest-rust-1`, which floats
-# onto whatever Debian release cargo-chef currently publishes). The runtime
-# stages below are `debian:bookworm-slim` - builder and runtime must stay on
-# the same Debian release or glibc symbol versions can mismatch (e.g. `web`
+# onto whatever Debian release cargo-chef currently publishes). Game runtime
+# stages below are `gcr.io/distroless/cc-debian12` (also Debian 12/bookworm,
+# glibc 2.36 family); web/migrate/bot/operator remain `debian:bookworm-slim`.
+# The builder must stay on a bookworm-based tag for the same reason - builder
+# and runtime glibc must match or symbol versions can mismatch (e.g. `web`
 # crashed with `GLIBC_2.38' not found` when the builder drifted to trixie).
 FROM lukemathwalker/cargo-chef:0.1.77-rust-1.97.0-bookworm AS chef
 WORKDIR /app
@@ -169,90 +171,112 @@ RUN apt-get -y update && apt-get install -y --no-install-recommends ca-certifica
 COPY --from=builder /app/target/release/operator .
 CMD ["./operator"]
 
-FROM debian:bookworm-slim AS battleship-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS battleship-2
 COPY --from=builder /app/target/release/battleship_2_http .
+USER 65532
 CMD ["./battleship_2_http"]
 
-FROM debian:bookworm-slim AS acquire-1
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS acquire-1
 COPY --from=builder /app/target/release/acquire_1_http .
+USER 65532
 CMD ["./acquire_1_http"]
 
-FROM debian:bookworm-slim AS category-5-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS category-5-2
 COPY --from=builder /app/target/release/category_5_2_http .
+USER 65532
 CMD ["./category_5_2_http"]
 
-FROM debian:bookworm-slim AS lost-cities-1
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS lost-cities-1
 COPY --from=builder /app/target/release/lost_cities_1_http .
+USER 65532
 CMD ["./lost_cities_1_http"]
 
-FROM debian:bookworm-slim AS lost-cities-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS lost-cities-2
 COPY --from=builder /app/target/release/lost_cities_2_http .
+USER 65532
 CMD ["./lost_cities_2_http"]
 
-FROM debian:bookworm-slim AS liars-dice-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS liars-dice-2
 COPY --from=builder /app/target/release/liars_dice_2_http .
+USER 65532
 CMD ["./liars_dice_2_http"]
 
-FROM debian:bookworm-slim AS no-thanks-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS no-thanks-2
 COPY --from=builder /app/target/release/no_thanks_2_http .
+USER 65532
 CMD ["./no_thanks_2_http"]
 
-FROM debian:bookworm-slim AS greed-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS greed-2
 COPY --from=builder /app/target/release/greed_2_http .
+USER 65532
 CMD ["./greed_2_http"]
 
-FROM debian:bookworm-slim AS farkle-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS farkle-2
 COPY --from=builder /app/target/release/farkle_2_http .
+USER 65532
 CMD ["./farkle_2_http"]
 
-FROM debian:bookworm-slim AS zombie-dice-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS zombie-dice-2
 COPY --from=builder /app/target/release/zombie_dice_2_http .
+USER 65532
 CMD ["./zombie_dice_2_http"]
 
-FROM debian:bookworm-slim AS for-sale-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS for-sale-2
 COPY --from=builder /app/target/release/for_sale_2_http .
+USER 65532
 CMD ["./for_sale_2_http"]
 
-FROM debian:bookworm-slim AS sushizock-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS sushizock-2
 COPY --from=builder /app/target/release/sushizock_2_http .
+USER 65532
 CMD ["./sushizock_2_http"]
 
-FROM debian:bookworm-slim AS sushi-go-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS sushi-go-2
 COPY --from=builder /app/target/release/sushi_go_2_http .
+USER 65532
 CMD ["./sushi_go_2_http"]
 
-FROM debian:bookworm-slim AS tic-tac-toe-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS tic-tac-toe-2
 COPY --from=builder /app/target/release/tic_tac_toe_2_http .
+USER 65532
 CMD ["./tic_tac_toe_2_http"]
 
-FROM debian:bookworm-slim AS jaipur-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS jaipur-2
 COPY --from=builder /app/target/release/jaipur_2_http .
+USER 65532
 CMD ["./jaipur_2_http"]
 
-FROM debian:bookworm-slim AS love-letter-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS love-letter-2
 COPY --from=builder /app/target/release/love_letter_2_http .
+USER 65532
 CMD ["./love_letter_2_http"]
 
-FROM debian:bookworm-slim AS age-of-war-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS age-of-war-2
 COPY --from=builder /app/target/release/age_of_war_2_http .
+USER 65532
 CMD ["./age_of_war_2_http"]
 
-FROM debian:bookworm-slim AS modern-art-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS modern-art-2
 COPY --from=builder /app/target/release/modern_art_2_http .
+USER 65532
 CMD ["./modern_art_2_http"]
 
-FROM debian:bookworm-slim AS cathedral-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS cathedral-2
 COPY --from=builder /app/target/release/cathedral_2_http .
+USER 65532
 CMD ["./cathedral_2_http"]
 
-FROM debian:bookworm-slim AS roll-through-the-ages-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS roll-through-the-ages-2
 COPY --from=builder /app/target/release/roll_through_the_ages_2_http .
+USER 65532
 CMD ["./roll_through_the_ages_2_http"]
 
-FROM debian:bookworm-slim AS splendor-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS splendor-2
 COPY --from=builder /app/target/release/splendor_2_http .
+USER 65532
 CMD ["./splendor_2_http"]
 
-FROM debian:bookworm-slim AS texas-holdem-2
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS texas-holdem-2
 COPY --from=builder /app/target/release/texas_holdem_2_http .
+USER 65532
 CMD ["./texas_holdem_2_http"]
