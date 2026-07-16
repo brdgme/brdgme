@@ -349,7 +349,7 @@ async fn confirm_login_inner(
         user_email.user_id
     } else {
         let new_user_id = Uuid::new_v4();
-        let username = crate::db::generate_unique_username(&mut *tx)
+        let username = crate::db::generate_unique_username(&mut tx)
             .await
             .map_err(internal("confirm_login: generate username"))?;
 
