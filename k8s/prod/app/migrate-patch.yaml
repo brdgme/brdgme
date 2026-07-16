@@ -1,0 +1,18 @@
+# Prod-only sizing for the short-lived sqlx migrate job (k8s/base/migrate/
+# job.yaml) - no usage sample available, so conservative defaults are used
+# instead of an observed value. backlog #41c. Dev keeps the unpatched base.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+spec:
+  template:
+    spec:
+      containers:
+        - name: migrate
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

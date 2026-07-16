@@ -21,6 +21,15 @@ spec:
     annotations:
       prometheus.io/scrape: "true"
       prometheus.io/port: "9187"
+  # Sized 2026-07-16 from observed ~190Mi workingSet (single sample via
+  # kubelet Summary API) - revisit after metrics-server (#41a) lands.
+  # backlog #41c.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
   storage:
     size: 10Gi
     storageClass: do-block-storage
