@@ -1,6 +1,6 @@
 use leptos::html;
 use leptos::prelude::*;
-use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_meta::{HashedStylesheet, MetaTags, Title, provide_meta_context};
 use leptos_router::{
     NavigateOptions, ParamSegment, StaticSegment,
     components::{A, Route, Router, Routes},
@@ -87,6 +87,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                     <script src="/sentry.js"></script>
                     <script inner_html=snippet></script>
                 })}
+                <HashedStylesheet options=options.clone() id="leptos"/>
                 <AutoReload options=options.clone() />
                 <HydrationScripts options/>
                 <MetaTags/>
@@ -186,7 +187,6 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
-        <Stylesheet id="leptos" href="/pkg/web.css"/>
         <Title text=title_text/>
 
         <Router>

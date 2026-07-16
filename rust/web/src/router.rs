@@ -72,17 +72,19 @@ fn record_response(response: &Response<axum::body::Body>, latency: Duration, spa
 /// year-long immutable cache, since a new deploy ships new filenames rather
 /// than mutating existing ones; other `text/html` responses get `no-cache`
 /// so deploys switch which hashed asset URLs a page references without a
-/// stale cached page pinning a client to old ones. See
-/// docs/decisions/ASSET_CACHING.md.
+/// stale cached page pinning a client to old ones. Error responses under
+/// `/pkg/` (e.g. a stale/missing hashed asset) are not cached as immutable.
+/// See docs/decisions/ASSET_CACHING.md.
 async fn set_cache_control(
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response<axum::body::Body> {
     let is_pkg = request.uri().path().starts_with("/pkg/");
     let mut response = next.run(request).await;
+    let is_success = response.status().is_success();
     let headers = response.headers_mut();
     if !headers.contains_key(CACHE_CONTROL) {
-        if is_pkg {
+        if is_pkg && is_success {
             headers.insert(
                 CACHE_CONTROL,
                 HeaderValue::from_static("public, max-age=31536000, immutable"),

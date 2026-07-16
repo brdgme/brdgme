@@ -5,6 +5,10 @@ pkg assets, plus a matching Cloudflare cache rule** - pending review, not
 yet accepted by Michael. Code changes are in the working tree; the
 Cloudflare rule has not been applied via `tofu apply` yet.
 
+**Updated 2026-07-16:** two follow-up fixes, after a hashed-CSS 404 was
+cached at the Cloudflare edge for a year (see "Piece 2" and "Hashed
+stylesheet link" below).
+
 ## The bug and root cause
 
 beta.brdg.me is proxied through Cloudflare (orange-cloud). Leptos pkg
@@ -31,10 +35,15 @@ production.
    filenames, hash.txt format, and md5sum+basenc-recomputed hashes.)
 
 2. **Cache-Control middleware** (`rust/web/src/router.rs`,
-   `set_cache_control`): `/pkg/*` responses get
+   `set_cache_control`): SUCCESSFUL `/pkg/*` responses get
    `public, max-age=31536000, immutable` (content-addressed, safe forever);
    `text/html` responses get `no-cache` (browsers revalidate, so a deploy
-   atomically switches which hashed URLs a page references).
+   atomically switches which hashed URLs a page references). A `/pkg/*`
+   404 must not be cached immutable - that exact failure was observed
+   2026-07-16: the hashed CSS 404'd once and Cloudflare cached the 404 at
+   the edge for the immutable max-age, so the stylesheet stayed broken
+   for every subsequent visitor until the cache was busted. The
+   middleware now only stamps the header on successful responses.
 
 3. **Cloudflare cache rule** (`infra/cloudflare.tf`,
    `cloudflare_ruleset.cache_rules`, phase
@@ -80,6 +89,13 @@ same warning comment.
 With hashing live, the JS glue and wasm are fetched as a matched,
 content-addressed pair - partial edge eviction can no longer mix versions
 from different deploys.
+
+## Hashed stylesheet link (2026-07-16)
+
+The stylesheet link in `rust/web/src/app.rs` now uses Leptos's
+`<HashedStylesheet>` instead of a hardcoded `/pkg/web.css` link, so the
+CSS URL is content-addressed the same way as the JS/wasm - closing the
+gap that let the stale-URL 404 above happen in the first place.
 
 ## Alternatives considered
 
