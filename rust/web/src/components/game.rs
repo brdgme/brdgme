@@ -4,6 +4,7 @@ use crate::game::server_fns::{
 use leptos::prelude::*;
 use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
+use web_sys::wasm_bindgen::JsCast;
 
 #[component]
 pub fn GameBoard(html: String, player_style: String) -> impl IntoView {
@@ -325,10 +326,13 @@ pub fn GameCommandInput(
         }
     });
 
-    // Type-anywhere-focuses-command-field: only single, unmodified,
-    // printable-character keystrokes are diverted, and only when nothing is
-    // already focused - so Tab-focused links/buttons keep their normal
-    // keyboard behaviour, especially Enter navigating a focused link.
+    // Type-anywhere-focuses-command-field: single, unmodified,
+    // printable-character keystrokes focus the command input unless a
+    // text-entry element (input/textarea/select/contenteditable) is
+    // focused. Enter and Tab are already excluded (not single chars), and
+    // Space is left alone whenever anything other than the body is
+    // focused, so Tab-focused links/buttons keep their normal keyboard
+    // behaviour (Space activating them, Enter navigating a focused link).
     let keydown_listener = window_event_listener(leptos::ev::keydown, move |ev| {
         if ev.ctrl_key() || ev.meta_key() || ev.alt_key() {
             return;
@@ -336,11 +340,24 @@ pub fn GameCommandInput(
         if ev.key().chars().count() != 1 {
             return;
         }
-        let nothing_focused = document()
-            .active_element()
+        let active_element = document().active_element();
+        let is_text_entry = active_element
+            .as_ref()
+            .map(|el| {
+                matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                    || el
+                        .dyn_ref::<web_sys::HtmlElement>()
+                        .map(|html_el| html_el.is_content_editable())
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if is_text_entry {
+            return;
+        }
+        let is_body = active_element
             .map(|el| el.tag_name() == "BODY")
             .unwrap_or(true);
-        if !nothing_focused {
+        if ev.key() == " " && !is_body {
             return;
         }
         if let Some(el) = input_ref.get_untracked() {
