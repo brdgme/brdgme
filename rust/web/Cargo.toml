@@ -38,6 +38,9 @@ thiserror = { version = "2.0.18", optional = true }
 # Email functionality
 resend-rs = { version = "0.28", default-features = false, features = ["rustls-tls"], optional = true }
 
+# Default-username generation (D3) - server-only
+petname = { version = "=3.1.0", default-features = false, features = ["default-words", "default-rng"], optional = true }
+
 # Environment variables
 dotenvy = { version = "0.15", optional = true }
 
@@ -96,6 +99,7 @@ ssr = [
     "dep:anyhow",
     "dep:thiserror",
     "dep:resend-rs",
+    "dep:petname",
     "dep:brdgme_cmd",
     "dep:brdgme_game",
     "dep:brdgme_color",

@@ -349,7 +349,9 @@ async fn confirm_login_inner(
         user_email.user_id
     } else {
         let new_user_id = Uuid::new_v4();
-        let username = email.split('@').next().unwrap_or("user").to_string();
+        let username = crate::db::generate_unique_username(&mut *tx)
+            .await
+            .map_err(internal("confirm_login: generate username"))?;
 
         sqlx::query!(
             "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)",
@@ -488,6 +490,91 @@ pub async fn get_user_theme() -> Result<Option<String>, ServerFnError> {
             .map_err(internal("get_user_theme: load")),
         None => Ok(None),
     }
+}
+
+/// Everything the settings page needs in one round trip. `pref_colors` is
+/// always exactly 3 entries: stored prefs normalized, or the palette-order
+/// default (Green, Red, Blue) when unset - behaviour-neutral since identical
+/// prefs resolve by rank with random tiebreak (see db.rs::choose_colors).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsData {
+    pub name: String,
+    pub email: String,
+    pub pref_colors: Vec<String>,
+}
+
+#[server(GetSettings, "/api")]
+pub async fn get_settings() -> Result<SettingsData, ServerFnError> {
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    let mut pref_colors = crate::db::get_user_pref_colors(&pool, user.id)
+        .await
+        .map_err(internal("get_settings: load pref colors"))?;
+    if !validate_pref_colors(&pref_colors) {
+        pref_colors = vec!["Green".to_string(), "Red".to_string(), "Blue".to_string()];
+    }
+
+    Ok(SettingsData {
+        name: user.name,
+        email: user.email,
+        pref_colors,
+    })
+}
+
+/// Renames the caller. `Ok(None)` on success; `Ok(Some(message))` is a field
+/// error to render inline (validation or uniqueness) - not a ServerFnError,
+/// so the form can distinguish expected rejections from transport failures.
+#[server(SetUsername, "/api")]
+pub async fn set_username(name: String) -> Result<Option<String>, ServerFnError> {
+    if !crate::db::validate_username(&name) {
+        return Ok(Some(
+            "1-16 characters: letters, numbers, - and _. Must be unique.".to_string(),
+        ));
+    }
+
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    match crate::db::set_user_name(&pool, user.id, &name)
+        .await
+        .map_err(internal("set_username: update"))?
+    {
+        true => Ok(None),
+        false => Ok(Some("That name is taken".to_string())),
+    }
+}
+
+/// Exactly 3 distinct canonical palette colour names, in preference order.
+/// Pure so it is unit-testable; `set_pref_colors` is the only caller.
+pub fn validate_pref_colors(colors: &[String]) -> bool {
+    colors.len() == 3
+        && colors
+            .iter()
+            .all(|c| crate::theme::PLAYER_COLOR_NAMES.contains(&c.as_str()))
+        && colors[0] != colors[1]
+        && colors[0] != colors[2]
+        && colors[1] != colors[2]
+}
+
+#[server(SetPrefColors, "/api")]
+pub async fn set_pref_colors(colors: Vec<String>) -> Result<(), ServerFnError> {
+    if !validate_pref_colors(&colors) {
+        return Err(ServerFnError::new("Invalid colour preferences"));
+    }
+
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    crate::db::set_user_pref_colors(&pool, user.id, &colors)
+        .await
+        .map_err(internal("set_pref_colors: update"))
 }
 
 #[cfg(test)]
@@ -924,7 +1011,15 @@ mod tests {
         let code = get_confirmation(&pool, email).await.unwrap().code;
 
         let confirmed = confirm_login_inner(&pool, email, &code).await.unwrap();
-        assert_eq!(confirmed.user.name, "brand-new", "username from localpart");
+        assert!(
+            crate::db::validate_username(&confirmed.user.name),
+            "default username satisfies D2: {}",
+            confirmed.user.name
+        );
+        assert_ne!(
+            confirmed.user.name, "brand-new",
+            "username no longer derived from email localpart"
+        );
         assert_eq!(confirmed.email, email);
         assert_eq!(user_count(&pool).await, 1);
         assert!(
@@ -984,5 +1079,21 @@ mod tests {
             .unwrap();
         assert_eq!(confirmed.user.id, user_id, "logs in the existing user");
         assert_eq!(user_count(&pool).await, 1, "no duplicate user created");
+    }
+
+    #[test]
+    fn validate_pref_colors_rules() {
+        let ok = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(validate_pref_colors(&ok(&["Green", "Red", "Blue"])));
+        assert!(validate_pref_colors(&ok(&["Pink", "Cyan", "Brown"])));
+        assert!(!validate_pref_colors(&ok(&["Green", "Red"])), "must be 3");
+        assert!(
+            !validate_pref_colors(&ok(&["Green", "Green", "Blue"])),
+            "must be distinct"
+        );
+        assert!(
+            !validate_pref_colors(&ok(&["Green", "Red", "Amber"])),
+            "legacy names are normalized on read, not accepted on write"
+        );
     }
 }

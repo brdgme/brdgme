@@ -59,9 +59,16 @@ pub const THEME_SLUGS: &[(&str, &str)] = &[
     ("modus-vivendi-tritanopia", "modus vivendi tritanopia"),
 ];
 
+/// Canonical palette colour names, in palette order - the values stored in
+/// `users.pref_colors`/`game_players.color`. Matches
+/// `brdgme_color::Palette::player_colors()` slot order.
+pub const PLAYER_COLOR_NAMES: [&str; 8] = [
+    "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
+];
+
 /// Groups `THEME_SLUGS` by `brdgme_color::themes()`'s per-theme category,
 /// sorted alphabetically by display name within each category, in category
-/// order Default, Light, Dark, DeutanProtan, Tritan (empty categories
+/// order Default, Light, Dark, Deutan, Protan, Tritan (empty categories
 /// omitted). Pure sort/group layer over the registry order that `themes()`/
 /// `THEME_SLUGS` otherwise preserve.
 pub fn grouped_themes() -> Vec<(ThemeCategory, Vec<(&'static str, &'static str)>)> {
@@ -69,7 +76,8 @@ pub fn grouped_themes() -> Vec<(ThemeCategory, Vec<(&'static str, &'static str)>
         ThemeCategory::Default,
         ThemeCategory::Light,
         ThemeCategory::Dark,
-        ThemeCategory::DeutanProtan,
+        ThemeCategory::Deutan,
+        ThemeCategory::Protan,
         ThemeCategory::Tritan,
     ];
     categories
@@ -191,33 +199,26 @@ pub fn player_style_vars(slots: &[&str]) -> String {
         .join(" ")
 }
 
-/// Sample players for the theme preview tiles.
-fn sample_players() -> Vec<brdgme_markup::SemanticPlayer> {
-    ["Alice", "Bo", "Cy"]
-        .into_iter()
-        .map(|n| brdgme_markup::SemanticPlayer {
-            name: n.to_string(),
-        })
-        .collect()
-}
-
-/// The `--mk-player-*` vars for the preview tiles' sample players (green/red/
-/// blue slots - arbitrary but distinct).
-pub fn sample_player_style() -> String {
-    player_style_vars(&["green", "red", "blue"])
-}
-
-const SAMPLE_MARKUP: &str = "{{fg red}}Red{{/fg}} {{fg blue}}Blue{{/fg}} {{fg grey}}Grey{{/fg}} {{player 0}} {{player 1}} {{bg soften(foreground, 90)}}{{fg foreground | contrast}}Surface{{/fg}}{{/bg}} {{b}}Bold{{/b}}";
+/// One chip per palette slot: colour name with a space of padding either
+/// side, slot colour as background, contrast colour as text.
+const SAMPLE_MARKUP: &str = "{{bg green}}{{fg green | contrast}} Green {{/fg}}{{/bg}} \
+{{bg red}}{{fg red | contrast}} Red {{/fg}}{{/bg}} \
+{{bg blue}}{{fg blue | contrast}} Blue {{/fg}}{{/bg}} \
+{{bg orange}}{{fg orange | contrast}} Orange {{/fg}}{{/bg}} \
+{{bg purple}}{{fg purple | contrast}} Purple {{/fg}}{{/bg}} \
+{{bg brown}}{{fg brown | contrast}} Brown {{/fg}}{{/bg}} \
+{{bg cyan}}{{fg cyan | contrast}} Cyan {{/fg}}{{/bg}} \
+{{bg pink}}{{fg pink | contrast}} Pink {{/fg}}{{/bg}}";
 
 fn build_sample_html() -> String {
     let (nodes, _) = brdgme_markup::from_string(SAMPLE_MARKUP).unwrap_or_default();
-    let tnodes = brdgme_markup::transform_semantic(&nodes, &sample_players());
+    let tnodes = brdgme_markup::transform_semantic(&nodes, &[]);
     brdgme_markup::html_class(&tnodes)
 }
 
-/// A contrived rendered sample (coloured words, a player name, a softened
-/// surface with contrast text, bold text), rendered once via
-/// `html_class`/`transform_semantic`; shown on every theme preview tile.
+/// One line of 8 colour chips (name on its own slot colour, contrast text),
+/// rendered once via `html_class`/`transform_semantic`; shown on every theme
+/// preview tile.
 pub static SAMPLE_HTML: LazyLock<String> = LazyLock::new(build_sample_html);
 
 #[cfg(test)]
@@ -240,7 +241,8 @@ mod tests {
             ThemeCategory::Default,
             ThemeCategory::Light,
             ThemeCategory::Dark,
-            ThemeCategory::DeutanProtan,
+            ThemeCategory::Deutan,
+            ThemeCategory::Protan,
             ThemeCategory::Tritan,
         ];
         expected_order.retain(|c| cats.contains(c));
@@ -288,36 +290,48 @@ mod tests {
         assert!(dark_group.iter().any(|(slug, _)| *slug == "gruvbox-dark"));
         assert!(!dark_group.iter().any(|(slug, _)| *slug == "gruvbox-light"));
 
-        let deutan_protan_group = groups
+        let deutan_group = groups
             .iter()
-            .find(|(c, _)| *c == ThemeCategory::DeutanProtan)
-            .expect("DeutanProtan category must be present")
+            .find(|(c, _)| *c == ThemeCategory::Deutan)
+            .expect("Deutan category must be present")
             .1
             .clone();
         assert!(
-            deutan_protan_group
+            deutan_group
                 .iter()
                 .any(|(slug, _)| *slug == "brdgme-light-deuteranopia")
         );
         assert!(
-            deutan_protan_group
-                .iter()
-                .any(|(slug, _)| *slug == "brdgme-light-protanopia")
-        );
-        assert!(
-            deutan_protan_group
+            deutan_group
                 .iter()
                 .any(|(slug, _)| *slug == "brdgme-dark-deuteranopia")
         );
         assert!(
-            deutan_protan_group
+            deutan_group
+                .iter()
+                .all(|(slug, _)| slug.contains("deuteranopia"))
+        );
+
+        let protan_group = groups
+            .iter()
+            .find(|(c, _)| *c == ThemeCategory::Protan)
+            .expect("Protan category must be present")
+            .1
+            .clone();
+        assert!(
+            protan_group
+                .iter()
+                .any(|(slug, _)| *slug == "brdgme-light-protanopia")
+        );
+        assert!(
+            protan_group
                 .iter()
                 .any(|(slug, _)| *slug == "brdgme-dark-protanopia")
         );
         assert!(
-            !deutan_protan_group
+            protan_group
                 .iter()
-                .any(|(slug, _)| slug.contains("tritanopia"))
+                .all(|(slug, _)| slug.contains("protanopia"))
         );
 
         let tritan_group = groups
@@ -402,9 +416,17 @@ mod tests {
     #[test]
     fn sample_html_renders_expected_pieces() {
         let html = &*SAMPLE_HTML;
-        assert!(html.contains("mk-fg-red"));
-        assert!(html.contains("mk-fg-player-0"));
-        assert!(html.contains("&lt;Alice&gt;"));
-        assert!(html.contains("<b>Bold</b>"));
+        for slot in [
+            "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink",
+        ] {
+            assert!(html.contains(&format!("mk-bg-{slot}")), "missing bg {slot}");
+            assert!(
+                html.contains(&format!("mk-fg-c-{slot}")),
+                "missing contrast fg {slot}"
+            );
+        }
+        assert!(html.contains(" Green "), "chip text padded with spaces");
+        assert!(!html.contains("<b>"), "no Bold in the sample");
+        assert!(!html.contains("&lt;"), "no player names in the sample");
     }
 }

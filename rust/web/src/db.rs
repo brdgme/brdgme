@@ -29,6 +29,8 @@ fn build_user_from_row(
         name: name.ok_or_else(|| anyhow::anyhow!("user {id}: name missing from LEFT JOIN row"))?,
         pref_colors: pref_colors
             .ok_or_else(|| anyhow::anyhow!("user {id}: pref_colors missing from LEFT JOIN row"))?,
+        theme: None,
+        is_admin: false,
     }))
 }
 
@@ -597,6 +599,47 @@ enum PlayerSlotInternal {
     Bot { name: String, difficulty: String },
 }
 
+/// D2 username rules (docs/superpowers/specs/2026-07-11-35-user-settings-design.md):
+/// `^[a-zA-Z0-9_-]{1,16}$`. Uniqueness is enforced separately by the
+/// `users_name_lower_key` index (migration 009). Pure and ungated so the
+/// client-side form and server fns share one definition.
+pub fn validate_username(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 16
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Generates a default username: a 2-word petname (e.g. "scary-walrus"),
+/// regenerated until it satisfies D2 (length; the crate's charset is already
+/// safe) and is case-insensitively unused. Long words make regeneration
+/// expected and cheap. The uuid fallback is unreachable in practice but keeps
+/// this total. Takes a connection so it can run inside callers' transactions.
+#[cfg(feature = "ssr")]
+pub async fn generate_unique_username(conn: &mut sqlx::PgConnection) -> Result<String> {
+    for _ in 0..100 {
+        let Some(candidate) = petname::petname(2, "-") else {
+            continue;
+        };
+        if !validate_username(&candidate) {
+            continue;
+        }
+        let taken: Option<(bool,)> =
+            sqlx::query_as("SELECT true FROM users WHERE lower(name) = lower($1)")
+                .bind(&candidate)
+                .fetch_optional(&mut *conn)
+                .await?;
+        if taken.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Ok(format!(
+        "user-{}",
+        &Uuid::new_v4().simple().to_string()[..11]
+    ))
+}
+
 /// Normalizes legacy stored preference names onto the current palette, so
 /// prefs saved before the 2026-07 palette change still match. See
 /// `theme::slot_from_color_name` for the same mapping applied to stored
@@ -777,7 +820,7 @@ pub async fn create_game_with_users_tx(
         } else {
             // Create new user for email
             let new_user_id = Uuid::new_v4();
-            let username = email.split('@').next().unwrap_or("user").to_string();
+            let username = generate_unique_username(&mut *tx).await?;
 
             let u = sqlx::query_as!(
                 crate::models::user::User,
@@ -1447,6 +1490,48 @@ pub async fn set_user_theme(pool: &PgPool, user_id: Uuid, theme: Option<&str>) -
     Ok(())
 }
 
+/// Renames a user. Returns `Ok(false)` when the name is already taken
+/// case-insensitively (unique violation on `users_name_lower_key`); the
+/// caller turns that into a field error. Plain query for the same reason as
+/// `get_user_theme`.
+#[cfg(feature = "ssr")]
+pub async fn set_user_name(pool: &PgPool, user_id: Uuid, name: &str) -> Result<bool> {
+    let res = sqlx::query("UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2")
+        .bind(name)
+        .bind(user_id)
+        .execute(pool)
+        .await;
+    match res {
+        Ok(_) => Ok(true),
+        Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("23505") => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// The user's stored colour preferences, legacy names ("Amber", "BlueGrey")
+/// normalized onto the current palette. May be empty (never set) - the
+/// settings server fn applies the palette-order default.
+#[cfg(feature = "ssr")]
+pub async fn get_user_pref_colors(pool: &PgPool, user_id: Uuid) -> Result<Vec<String>> {
+    let row: Option<(Vec<String>,)> = sqlx::query_as("SELECT pref_colors FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row
+        .map(|(colors,)| colors.iter().map(|c| normalize_pref_color(c)).collect())
+        .unwrap_or_default())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_user_pref_colors(pool: &PgPool, user_id: Uuid, colors: &[String]) -> Result<()> {
+    sqlx::query("UPDATE users SET pref_colors = $1, updated_at = NOW() WHERE id = $2")
+        .bind(colors)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
@@ -1459,6 +1544,43 @@ mod tests {
             .await?;
         assert_eq!(count, 0);
         Ok(())
+    }
+
+    // --- validate_username ---
+
+    #[test]
+    fn validate_username_accepts_valid_names() {
+        for name in ["Sam", "big-scary-walrus", "a", "user_1", "ABCDEFGHIJKLMNOP"] {
+            assert!(validate_username(name), "{name} should be valid");
+        }
+    }
+
+    #[test]
+    fn validate_username_rejects_invalid_names() {
+        for name in [
+            "",
+            "seventeen-letters!",
+            "with space",
+            "émile",
+            "toolongtoolongtoo",
+            "a.b",
+        ] {
+            assert!(!validate_username(name), "{name} should be invalid");
+        }
+    }
+
+    #[test]
+    fn petname_output_charset_is_username_safe() {
+        // Length can exceed 16 (generate_unique_username retries those away);
+        // the charset itself must always pass.
+        for _ in 0..20 {
+            let name = petname::petname(2, "-").expect("petname generates");
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                "unexpected char in {name}"
+            );
+        }
     }
 
     // --- Fixture helpers ---

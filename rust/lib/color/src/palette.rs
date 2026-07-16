@@ -3166,8 +3166,8 @@ pub static MODUS_VIVENDI_TRITANOPIA: Palette = Palette {
 };
 
 /// Grouping used by the web theme picker to sort/section the registry. Every
-/// theme has exactly one category - none of the five overlap in practice for
-/// this theme set (see `DeutanProtan`'s doc comment).
+/// theme has exactly one category - none of the six overlap in practice for
+/// this theme set.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ThemeCategory {
     /// The two brdgme base themes (light/dark). Renders first in the picker
@@ -3179,10 +3179,10 @@ pub enum ThemeCategory {
     /// Non-default, non-CVD themes with a dark background. Displayed as
     /// "Dark".
     Dark,
-    /// Deuteranopia- and protanopia-targeted themes (near-identical
-    /// palettes in practice), grouped together. Displayed as "Deuteranopia
-    /// / Protanopia".
-    DeutanProtan,
+    /// Deuteranopia-targeted themes. Displayed as "Deuteranopia".
+    Deutan,
+    /// Protanopia-targeted themes. Displayed as "Protanopia".
+    Protan,
     /// Tritanopia-targeted themes. Displayed as "Tritanopia".
     Tritan,
 }
@@ -3190,7 +3190,7 @@ pub enum ThemeCategory {
 /// The set of registered themes, in display order. Light/Dark is assigned by
 /// each palette's actual `background` lightness, not by theme name.
 pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
-    use ThemeCategory::{Dark, Default as DefaultCat, DeutanProtan, Light, Tritan};
+    use ThemeCategory::{Dark, Default as DefaultCat, Deutan, Light, Protan, Tritan};
     static THEMES: [(&str, ThemeCategory, &Palette); 34] = [
         ("brdgme light", DefaultCat, &LIGHT),
         ("brdgme dark", DefaultCat, &DARK),
@@ -3218,15 +3218,11 @@ pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
         ("darcula", Dark, &DARCULA),
         ("vs code dark plus", Dark, &VS_CODE_DARK_PLUS),
         ("vs code dark modern", Dark, &VS_CODE_DARK_MODERN),
-        (
-            "brdgme light deuteranopia",
-            DeutanProtan,
-            &LIGHT_DEUTERANOPIA,
-        ),
-        ("brdgme light protanopia", DeutanProtan, &LIGHT_PROTANOPIA),
+        ("brdgme light deuteranopia", Deutan, &LIGHT_DEUTERANOPIA),
+        ("brdgme light protanopia", Protan, &LIGHT_PROTANOPIA),
         ("brdgme light tritanopia", Tritan, &LIGHT_TRITANOPIA),
-        ("brdgme dark deuteranopia", DeutanProtan, &DARK_DEUTERANOPIA),
-        ("brdgme dark protanopia", DeutanProtan, &DARK_PROTANOPIA),
+        ("brdgme dark deuteranopia", Deutan, &DARK_DEUTERANOPIA),
+        ("brdgme dark protanopia", Protan, &DARK_PROTANOPIA),
         ("brdgme dark tritanopia", Tritan, &DARK_TRITANOPIA),
         (
             "modus operandi tritanopia",

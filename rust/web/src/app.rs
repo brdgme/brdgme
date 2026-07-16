@@ -195,7 +195,7 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("login") view=LoginPage/>
                 <Route path=StaticSegment("games") view=GamesPage/>
                 <Route path=StaticSegment("dashboard") view=DashboardPage/>
-                <Route path=StaticSegment("theme") view=ThemeSettingsPage/>
+                <Route path=StaticSegment("settings") view=crate::settings::SettingsPage/>
                 <Route path=(StaticSegment("games"), ParamSegment("id")) view=GamePage/>
             </Routes>
         </Router>
@@ -209,7 +209,7 @@ pub fn App() -> impl IntoView {
 /// refresh or a future visit boots into the same theme via `THEME_BOOT_SCRIPT`.
 /// No-op if `web_sys::window()` is unavailable (SSR - callers only invoke
 /// this from Effects/event handlers, which don't run during SSR).
-fn set_theme_client(slug: Option<&str>) {
+pub(crate) fn set_theme_client(slug: Option<&str>) {
     use web_sys::wasm_bindgen::JsCast;
 
     let Some(window) = web_sys::window() else {
@@ -240,91 +240,11 @@ fn set_theme_client(slug: Option<&str>) {
 /// Reads the current `data-theme` attribute set on `<html>` (by
 /// `THEME_BOOT_SCRIPT` pre-paint, or by a prior `set_theme_client` call this
 /// session). `None` if unset (SSR, or "system") or `web_sys` is unavailable.
-fn local_data_theme() -> Option<String> {
+pub(crate) fn local_data_theme() -> Option<String> {
     web_sys::window()?
         .document()?
         .document_element()?
         .get_attribute("data-theme")
-}
-
-#[component]
-fn ThemeSettingsPage() -> impl IntoView {
-    let current_user =
-        expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
-    let set_theme_action = ServerAction::<crate::auth::SetTheme>::new();
-
-    // `ServerAction`/`LocalResource` handles are `Copy`, so this can be
-    // called directly from any number of `move` closures below without
-    // needing an `Rc` wrapper.
-    fn select(
-        slug: Option<String>,
-        current_user: LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>,
-        set_theme_action: ServerAction<crate::auth::SetTheme>,
-    ) {
-        set_theme_client(slug.as_deref());
-        // Fire-and-forget profile sync; anonymous visitors only get the
-        // cookie/local behaviour above.
-        if matches!(current_user.get_untracked(), Some(Ok(Some(_)))) {
-            set_theme_action.dispatch(crate::auth::SetTheme { theme: slug });
-        }
-    }
-
-    fn tile(
-        slug: &'static str,
-        name: &'static str,
-        current_user: LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>,
-        set_theme_action: ServerAction<crate::auth::SetTheme>,
-    ) -> impl IntoView {
-        let sample_html = crate::theme::SAMPLE_HTML.clone();
-        let player_style = crate::theme::sample_player_style();
-        let on_click = move |_| select(Some(slug.to_string()), current_user, set_theme_action);
-        view! {
-            <div
-                class="theme-tile"
-                data-theme=slug
-                style=format!(
-                    "background-color: var(--mk-background); color: var(--mk-foreground); {}",
-                    player_style,
-                )
-                on:click=on_click
-            >
-                <div class="theme-tile-label">{name}</div>
-                <div class="theme-tile-sample" inner_html=sample_html></div>
-            </div>
-        }
-    }
-
-    view! {
-        <MainLayout>
-            <h1>"Theme"</h1>
-            <div class="theme-grid">
-                <div
-                    class="theme-tile"
-                    style="background-color: var(--mk-background); color: var(--mk-foreground);"
-                    on:click=move |_| select(None, current_user, set_theme_action)
-                >
-                    <div class="theme-tile-label">"System"</div>
-                </div>
-                {crate::theme::grouped_themes().into_iter().map(|(category, group)| {
-                    let heading = match category {
-                        brdgme_color::ThemeCategory::Default => None,
-                        brdgme_color::ThemeCategory::Light => Some("Light"),
-                        brdgme_color::ThemeCategory::Dark => Some("Dark"),
-                        brdgme_color::ThemeCategory::DeutanProtan => {
-                            Some("Deuteranopia / Protanopia")
-                        }
-                        brdgme_color::ThemeCategory::Tritan => Some("Tritanopia"),
-                    };
-                    view! {
-                        {heading.map(|h| view! { <h2 class="theme-category-heading">{h}</h2> })}
-                        {group.into_iter().map(|(slug, name)| {
-                            tile(slug, name, current_user, set_theme_action)
-                        }).collect_view()}
-                    }
-                }).collect_view()}
-            </div>
-        </MainLayout>
-    }
 }
 
 #[component]

@@ -273,6 +273,102 @@ sides start from the same empty state.
 
 ---
 
+## Leptos: Forms
+
+**Use `FormField` for every new form control.** `FormField`
+(`rust/web/src/components/form.rs`) renders a bold block label above the
+control, an optional muted help line, and an optional red error line -
+`.form-field` / `.form-label` / `.form-control` / `.form-help` / `.form-error`
+in `main.scss`. Don't hand-roll label/input markup for a new form; wrap the
+control in `<FormField>` instead. `.form-actions` (flex row, `gap: 0.5em`) is
+the class for a form's button row (see `UsernameSection` in
+`rust/web/src/settings.rs`).
+
+**Constrained-content pages cap width via a page-level class, not per-field.**
+`.settings` in `main.scss` sets `max-width: 40em; padding: 0 1em;`, with a
+sibling rule capping its `input`/`select` children at `max-width: 100%` so
+they never overflow the column. Add the same pair of rules for any new
+narrow-content page rather than constraining individual controls.
+
+**Save model: match the field's error surface, not one page-wide dirty
+state.** Fields that can be rejected server-side (e.g. username: format or
+uniqueness) get an explicit Save button and render the rejection inline via
+`FormField`'s `error` slot. Fields that are just a choice among valid options
+(theme, preferred colours) save immediately on change, fire-and-forget - no
+loading state, no page-wide "unsaved changes" banner. See `UsernameSection`
+vs `ColorsSection`/`ThemeSection` in `rust/web/src/settings.rs`.
+
+**`<option selected>` only sets `defaultSelected` - drive the value via
+`prop:value` on the `<select>`.** Setting the HTML `selected` attribute on an
+`<option>` inside a Leptos view only affects the initial render; it does not
+keep the select in sync when the backing signal changes later, and doing it
+per-`<option>` fights hydration. Bind `prop:value` on the `<select>` itself
+instead (see `ColorsSection` in `rust/web/src/settings.rs`).
+
+**`class:selected` is the reactive-highlight pattern for tile/chip pickers.**
+A boolean closure toggling one class on an always-present element (not a
+conditional element swap - see the Component Design section on structural
+hydration mismatches) is how the theme tiles and equivalent pickers show which
+option is active; see `ThemeSection`'s `class:selected=move || ...` in
+`rust/web/src/settings.rs`.
+
+**Redirect anonymous users from a logged-in-only page via an `Effect`, not a
+structural `if`.** `SettingsPage` reads the shared `current_user`
+`LocalResource` and calls `use_navigate()` inside an `Effect::new` once it
+resolves to `Ok(None)`; SSR and initial hydration render the page normally
+(the resource is `None` at that point), and the navigate only fires
+client-side once the anonymous state is known - no structural mismatch.
+
+**`PLAYER_COLOR_NAMES` (`rust/web/src/theme.rs`) is the single source of the
+player colour palette.** Anything offering a colour choice - selects,
+`ColorChip` previews - iterates this constant rather than hard-coding colour
+names. Values read back from storage go through `normalize_pref_color` first
+(legacy names like "Amber"/"BlueGrey" mapped onto their current slot names -
+`db.rs`), and distinctness/membership is validated *after* normalization, not
+before (`validate_pref_colors` in `auth/server.rs`).
+
+---
+
+## Server Functions
+
+**Guard logged-in-only server fns with `get_current_user`, inline.** There is
+no separate auth middleware layer for server fns - each one starts with
+`get_current_user().await?.ok_or_else(|| ServerFnError::new("Not
+authenticated"))?` and uses the returned user directly (see `get_settings`,
+`set_username`, `set_pref_colors`, `set_theme` in `rust/web/src/auth/server.rs`).
+
+**Expected rejections are data, not `ServerFnError`s.** `set_username`
+returns `Result<Option<String>, ServerFnError>`: `Ok(None)` is success,
+`Ok(Some(message))` is a field error to render inline (bad format, or "That
+name is taken"). `Err` is reserved for real failures - not authenticated, DB
+down, transport errors. This lets the calling form distinguish "please fix
+this field" from "something broke" (see `UsernameSection`'s two-armed
+`match` on the action result in `rust/web/src/settings.rs`).
+
+**Map a Postgres unique-violation SQLSTATE to a field result in the DB
+helper, not the server fn.** `set_user_name` (`db.rs`) matches
+`Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("23505")` and
+returns `Ok(false)`; the server fn turns `false` into the "That name is
+taken" field error. The server fn layer never inspects Postgres error codes
+directly.
+
+**Validation shared between client and server must be a plain, ungated
+function.** `validate_username` (`db.rs`) and `validate_pref_colors`
+(`auth/server.rs`) carry no `#[cfg(feature = "ssr")]` gate and touch only
+strings/vecs - so the identical rule compiles into both the wasm client (for
+immediate form feedback) and the server (for actual enforcement). The server
+copy is what's authoritative; never rely on the client-side check alone.
+
+**Plain (non-macro) sqlx queries avoid `.sqlx` offline-data regeneration.**
+`get_user_theme`/`set_user_theme`/`set_user_name`/`get_user_pref_colors`/
+`set_user_pref_colors` (`db.rs`) use `sqlx::query`/`sqlx::query_as` instead of
+`query!`/`query_as!` specifically so adding a new column read/write doesn't
+require regenerating the `.sqlx` cache against a live database (not always
+available). Follow this convention for any new query touching a column not
+already covered by an existing macro query.
+
+---
+
 ## Dependency Management
 
 **Stay on latest dependencies.** We aggressively track the latest releases of
@@ -378,6 +474,31 @@ now()` on every `UPDATE`, regardless of the `SET` clause. Consequences:
 - Tests that need to backdate `updated_at` must first run
   `ALTER TABLE games DISABLE TRIGGER update_games_updated_at` (safe inside a
   `#[sqlx::test]` per-test database).
+
+**One-off data migrations: sanitize + numeric suffix beats generating fancy
+names.** `009_username_rules.sql` backfills any `users.name` violating the D2
+charset by regex-stripping disallowed characters, truncating to 16 chars, and
+falling back to `'player'` if that leaves it empty; case-insensitive
+duplicates keep the name on the earliest-created holder (tie-broken by id)
+and get a random 4-digit numeric suffix appended on the others. Simpler and
+just as safe for a one-off backfill than generating unique replacement names
+from word lists.
+
+**A unique index created at the end of the migration is the safety net for
+the backfill.** `009_username_rules.sql`'s `CREATE UNIQUE INDEX
+users_name_lower_key ON users (lower(name))` runs only after every row has
+been sanitized and deduplicated above it - if the backfill logic missed a
+case, index creation itself fails the migration loudly rather than letting a
+duplicate slip through silently.
+
+**Never route a NOT NULL column through NULL mid-migration.** NOT NULL is
+enforced per-row immediately (unlike unique constraints, which can be checked
+at index creation), so an `UPDATE ... SET col = NULLIF(...)` followed by a
+second `UPDATE ... WHERE col IS NULL` cleanup aborts on the first row that
+hits NULL and the cleanup never runs. Collapse the fallback into the same
+statement with `CASE`/`COALESCE` (see the sanitize step of
+`009_username_rules.sql`, which was originally written the broken way and
+caught in review).
 
 ## Game Services
 

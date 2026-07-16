@@ -507,8 +507,23 @@ body {
   }
 }
 
+/* Settings page */
+.settings {
+  max-width: 40em;
+  padding: 0 1em;
+}
+
+.settings input,
+.settings select {
+  max-width: 100%;
+}
+
 /* Theme picker */
-.theme-grid {
+.theme-category {
+  margin-bottom: 1em;
+}
+
+.theme-tiles {
   display: flex;
   flex-wrap: wrap;
   gap: 1em;
@@ -531,8 +546,40 @@ body {
   font-size: 0.8em;
 }
 
-.theme-category-heading {
-  flex-basis: 100%;
-  margin: 0.5em 0 0;
+/* Same treatment as "active game / your turn" (.layout-game.my-turn). */
+.theme-tile .theme-tile-label.selected {
+  background-color: var(--mk-soften-orange-86);
+  font-weight: 700;
 }
 
+
+/* Reusable form template (settings spec 2026-07-16) */
+.form-field {
+  margin-bottom: 1em;
+}
+
+.form-label {
+  font-weight: 700;
+  display: block;
+}
+
+.form-help {
+  font-size: 0.8em;
+  color: var(--mk-grey);
+}
+
+.form-error {
+  color: var(--mk-red);
+}
+
+.form-actions {
+  margin-bottom: 1em;
+  display: flex;
+  gap: 0.5em;
+  align-items: center;
+}
+
+.color-chip {
+  margin-left: 0.5em;
+  white-space: pre;
+}

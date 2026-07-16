@@ -92,13 +92,13 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
 | 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - demoted to post-go-live 2026-07-10 (Michael: the Grafana Cloud quota must reset anyway, not a go-live blocker; was promoted pre-go-live 2026-07-09). Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
 | 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record (9 entries), the plan is the batch fix | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md) |
-| 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
-| 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Decided 2026-07-11 - pre-beta | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) | - |
+| 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta; partial 2026-07-16 - `is_admin` flag (migration 008) landed and bump-bot-to-play made admin-only (server enforcement + UI gating; uncommitted) | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
+| 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Implemented 2026-07-16 (uncommitted) | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) [spec](superpowers/specs/2026-07-16-35-settings-page-design.md) | [plan](superpowers/plans/2026-07-16-35-settings-page.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
 | 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - pre-beta-exit; added 2026-07-11 | - | - |
 | 39 | Accessibility themes + theme picker categories (added 2026-07-14, **top priority**): (a) colour-blind variants of the two default themes - brdgme light/dark each get variants for the major colour vision deficiency groups (deuteranopia, protanopia, tritanopia), derived from established CVD-safe palettes (Okabe-Ito / Paul Tol) and validated under CVD simulation per THEMING.md's contrast rules; (b) add a category to each registered theme and render the picker grouped: Default (the two brdgme themes, no heading, top), Light (non-default, non-CVD themes with a light background), Dark (non-default, non-CVD themes with a dark background), Deuteranopia / Protanopia (deutan- and protan-targeted CVD variants, combined), Tritanopia (tritan-targeted CVD variants); themes sorted alphabetically within each category; (c) evaluate adopting established colourblind-first third-party themes - candidates: GitHub Dark/Light Colorblind (official github-vscode-theme variants, orange/blue in place of red/green, widely used) and the Modus themes' deuteranopia/tritanopia variants (Emacs, WCAG AAA-focused) - verify against upstream before adopting | - | - |
 | 38 | Frontend cache busting on new deploys (investigate stale WASM/asset caching when a new version is bumped in brdgme-config; options: user-facing "new version released, please reload" messaging, or simply force a reload when a new version is deployed) | Pending - unscheduled; added 2026-07-11 | - | - |
-| 40 | DB tests run (and fail) by default (every local/agent test run hits DB test failures, repeatedly surprising agents; investigate whether DB-dependent tests should be opt-in - e.g. feature/env gated - instead of opt-out, or made to pass by default) | Pending - unscheduled; added 2026-07-15 | - | - |
+| 40 | DB tests run (and fail) by default (every local/agent test run hits DB test failures, repeatedly surprising agents; investigate whether DB-dependent tests should be opt-in - e.g. feature/env gated - instead of opt-out, or made to pass by default) | Pending - unscheduled; added 2026-07-15. Addendum 2026-07-16: `cargo sqlx prepare` currently fails because the `User` struct lacks the `theme` column from migration 007 - fix before the next `.sqlx` regen. | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -390,3 +390,17 @@ a reload in clients whenever a new version is deployed, or surface a "new
 version released, please reload" message to the user; the underlying
 cache-busting story (hashed asset filenames / cache headers) should be
 investigated as part of the same item.
+
+2026-07-16: #35 settings page implemented end-to-end (spec + plan same
+day, all uncommitted). #34 partial - migration 008 adds `users.is_admin`,
+bump-bot-to-play made admin-only. Preferred colours now honoured at game
+creation (`choose_colors` in `rust/web/src/db.rs`, with legacy
+Amber->Orange / BlueGrey->Cyan normalization). CSS-404 asset-caching fix:
+`<HashedStylesheet>` replaces the hardcoded `/pkg/web.css` link, and the
+immutable cache header is now only set on successful `/pkg/` responses -
+a Cloudflare-cached 404 for the hashed CSS was the symptom; see
+[docs/decisions/ASSET_CACHING.md](decisions/ASSET_CACHING.md). Game-page
+command-input auto-focus loosened - typing only skips focusing the
+command input when a text-entry element is focused, Space stays
+BODY-only. Also discovered `cargo sqlx prepare` fails on the missing
+`User.theme` field (recorded under #40).
