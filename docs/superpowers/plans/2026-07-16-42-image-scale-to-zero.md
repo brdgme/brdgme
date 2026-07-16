@@ -41,13 +41,13 @@
 - Consumes: existing `ADDR` env var support in each game binary's entrypoint (`rust/lib/cmd/src/http.rs`, defaults `0.0.0.0:80`); existing exec-form CMD and tcpSocket probes.
 - Produces: each of the 22 game images runs as `gcr.io/distroless/cc-debian12@sha256:<digest>`, non-root `USER 65532`, listening on `0.0.0.0:8080` (set via `ADDR` env in the Deployment), with matching containerPort/probe/Service targetPort of 8080.
 
-- [ ] **Step 1: Resolve and record the distroless digest**
+- [x] **Step 1: Resolve and record the distroless digest**
 
 Run: `docker pull gcr.io/distroless/cc-debian12 && docker inspect --format='{{index .RepoDigests 0}}' gcr.io/distroless/cc-debian12`
 
 Record the resulting `gcr.io/distroless/cc-debian12@sha256:...` digest for use in the Dockerfile.
 
-- [ ] **Step 2: Swap the runtime base image and add non-root USER in rust/Dockerfile**
+- [x] **Step 2: Swap the runtime base image and add non-root USER in rust/Dockerfile**
 
 For each of the 22 game runtime stages, replace:
 
@@ -63,7 +63,7 @@ FROM gcr.io/distroless/cc-debian12@sha256:<digest>
 
 Add `USER 65532` after the binary `COPY` and before the exec-form `CMD` in each stage. Remove the stale GLIBC_2.38 builder/runtime-drift comment if present (distroless/cc uses the same glibc family as the chef builder - the drift class this comment warns about no longer applies once base and builder track compatible glibc versions; verify this at build time in Step 4, don't just delete on faith - keep the comment if the builder/base glibc versions still diverge).
 
-- [ ] **Step 3: Update ADDR and port wiring in the k8s manifests**
+- [x] **Step 3: Update ADDR and port wiring in the k8s manifests**
 
 Across `k8s/base/game/<game>/deployment.yaml` (all ~22 games):
 - Set/confirm `ADDR=0.0.0.0:8080` env var.
@@ -79,7 +79,7 @@ Grep for any other port-80 references before considering this step done:
 grep -rln ":80\b\|port: 80\|containerPort: 80" k8s/base/game/
 ```
 
-- [ ] **Step 4: Build and verify locally**
+- [x] **Step 4: Build and verify locally**
 
 Run: `docker buildx bake <one or two game targets>` (pick two games with different characteristics, e.g. one simple and one with more dependencies).
 
@@ -88,13 +88,13 @@ Run the built image locally, confirm:
 - Listens on 8080: `docker run -p 8080:8080 <image>` then `curl` or POST a request against it and confirm a valid game response.
 - No shell present (expected) - if debugging is needed, use `kubectl debug` ephemeral containers against a running pod instead of `docker exec`.
 
-- [ ] **Step 5: Canary rollout**
+- [ ] **Step 5: Canary rollout** (deferred - deploy approval pending)
 
 Roll out one game's new image + manifests via brdgme-config's canary/staging path first. Confirm the pod starts, passes probes, and serves a real request end-to-end (submit a move against that game in a test game). Only after this passes, roll out the remaining 21 games.
 
 Rollback plan: revert the image tag/digest and the manifest port/ADDR changes for the affected game(s) via the same brdgme-config path; no data-layer changes are involved so rollback is a plain manifest revert.
 
-- [ ] **Step 6: Fleet rollout**
+- [ ] **Step 6: Fleet rollout** (deferred - deploy approval pending)
 
 Once canary is confirmed healthy for a full day (covering typical traffic patterns), roll out the remaining games' Dockerfile stages + manifests via brdgme-config to the full fleet.
 
@@ -113,20 +113,20 @@ Note: game requests are stateless computations (JSON in, JSON out, no DB/side ef
 
 This phase is valuable standalone (today's client has zero retry logic per the spec) and is also the named prerequisite for Phase 3's scale-to-zero (a cold 0->1 activation needs the caller to tolerate the activation window; this also covers transient interceptor hiccups once Phase 3's HTTP add-on is in the request path for non-latest versions).
 
-- [ ] **Step 1: Write failing unit tests for the retry policy**
+- [x] **Step 1: Write failing unit tests for the retry policy**
 
 Add unit tests in `rust/web/src/game/client.rs` covering: retries on connect-refused/timeout errors, does not retry on a valid non-2xx game response (an actual game-logic error, not a transport error), respects a max-attempts/max-elapsed bound, and backoff intervals grow (with jitter) rather than being fixed.
 
-- [ ] **Step 2: Implement retry-with-backoff**
+- [x] **Step 2: Implement retry-with-backoff**
 
 Wrap the existing request call with a bounded retry loop (e.g. 2-3 retries, exponential backoff with jitter, capped total elapsed time). Keep the existing per-attempt `connect_timeout`/`timeout` values from `rust/web/src/main.rs` unchanged; the retry loop governs attempts, not per-attempt timeouts.
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `SQLX_OFFLINE=true cargo test -p web --features ssr --lib game::client -j 2`
 Expected: PASS.
 
-- [ ] **Step 4: Manual verification against a scaled-to-zero worker**
+- [ ] **Step 4: Manual verification against a scaled-to-zero worker** (deferred - deploy approval pending)
 
 Manually scale one game deployment to 0 (`kubectl scale deployment/<game> --replicas=0`), submit a move in a test game against that version, confirm the web request either recovers once the deployment is manually scaled back up within the retry window, or fails gracefully with a clear error rather than hanging indefinitely. Scale the deployment back to 1 afterward.
 
