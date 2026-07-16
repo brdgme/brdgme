@@ -88,7 +88,7 @@ Run the built image locally, confirm:
 - Listens on 8080: `docker run -p 8080:8080 <image>` then `curl` or POST a request against it and confirm a valid game response.
 - No shell present (expected) - if debugging is needed, use `kubectl debug` ephemeral containers against a running pod instead of `docker exec`.
 
-- [ ] **Step 5: Canary rollout** (deferred - deploy approval pending)
+- [x] **Step 5: Canary rollout** (done 2026-07-16: canary tic-tac-toe-2 on sha-7f65580 via brdgme-config 3f81c60; fleet rollout awaits soak)
 
 Roll out one game's new image + manifests via brdgme-config's canary/staging path first. Confirm the pod starts, passes probes, and serves a real request end-to-end (submit a move against that game in a test game). Only after this passes, roll out the remaining 21 games.
 
@@ -126,7 +126,7 @@ Wrap the existing request call with a bounded retry loop (e.g. 2-3 retries, expo
 Run: `SQLX_OFFLINE=true cargo test -p web --features ssr --lib game::client -j 2`
 Expected: PASS.
 
-- [ ] **Step 4: Manual verification against a scaled-to-zero worker** (deferred - deploy approval pending)
+- [ ] **Step 4: Manual verification against a scaled-to-zero worker** (partially verified 2026-07-16: no unauthenticated web trigger found quickly against a leptos SSR route tree, so ran the reduced test instead - scaled tic-tac-toe-2 to 0, confirmed pod/endpoints fully removed, restored replicas=1, confirmed Ready and a direct POST against the Service works again. Owner separately confirmed manual end-to-end play through the web frontend post-deploy works. Did not directly observe web's retry/backoff logs against a live 0-endpoint target - that would need either an authenticated game session or a scratch debug pod in-cluster, the latter declined as out of scope for this pass)
 
 Manually scale one game deployment to 0 (`kubectl scale deployment/<game> --replicas=0`), submit a move in a test game against that version, confirm the web request either recovers once the deployment is manually scaled back up within the retry window, or fails gracefully with a clear error rather than hanging indefinitely. Scale the deployment back to 1 afterward.
 
