@@ -335,7 +335,12 @@ mod tests {
         };
         // attempt 10 would be 100 * 2^10 ms without a cap - far beyond `cap`.
         let d = backoff_delay(10, &config);
-        assert!(d <= config.cap, "delay {:?} exceeded cap {:?}", d, config.cap);
+        assert!(
+            d <= config.cap,
+            "delay {:?} exceeded cap {:?}",
+            d,
+            config.cap
+        );
         assert!(
             d >= config.cap / 2,
             "delay {:?} should be at least half the cap once capped",
