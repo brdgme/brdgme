@@ -1,0 +1,12 @@
+# Prod-only; the operator Deployment (k8s/base/operator/) runs as the
+# brdgme-operator ServiceAccount (k8s/base/operator/rbac.yaml), not the
+# namespace default one, so it needs the ghcr-pull imagePullSecrets wired
+# separately from default-serviceaccount.yaml. Same rationale/fallback
+# behaviour - see backlog #41d.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: brdgme-operator
+  namespace: brdgme
+imagePullSecrets:
+  - name: ghcr-pull

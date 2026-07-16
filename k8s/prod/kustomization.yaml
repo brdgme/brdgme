@@ -2,3 +2,5 @@ resources:
 - app
 - ../base/cert-manager
 - ../base/operator
+patches:
+- path: operator-sa-patch.yaml

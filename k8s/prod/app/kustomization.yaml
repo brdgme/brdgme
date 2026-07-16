@@ -5,6 +5,7 @@ bases:
 - ../alloy
 resources:
 - postgres-backup.yaml
+- default-serviceaccount.yaml
 patches:
 - path: postgres-patch.yaml
 - path: web-patch.yaml
