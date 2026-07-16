@@ -352,35 +352,9 @@ data:
       }
     }
 
-    // ---- Job 3: OTLP traces -> Tempo ---------------------------------------
-    // rust/web's OTEL_EXPORTER_OTLP_ENDPOINT points here at
-    // http://alloy.brdgme.svc:4317 (see service.yaml), set 2026-07-09 via
-    // k8s/prod/app/web-patch.yaml along with OTEL_TRACES_SAMPLER_ARG=0.1
-    // (10% head sampling) to bound trace volume against the free-tier quota.
-    // No sampling/filtering is applied here in Alloy - it's all at the SDK
-    // (head-sampling decision made once at span-start in rust/web).
-
-    otelcol.receiver.otlp "default" {
-      grpc {
-        endpoint = "0.0.0.0:4317"
-      }
-      http {
-        endpoint = "0.0.0.0:4318"
-      }
-
-      output {
-        traces = [otelcol.exporter.otlp.grafana_cloud.input]
-      }
-    }
-
-    otelcol.auth.basic "grafana_cloud" {
-      username = env("TEMPO_USER")
-      password = env("GC_TOKEN")
-    }
-
-    otelcol.exporter.otlp "grafana_cloud" {
-      client {
-        endpoint = env("TEMPO_URL")
-        auth     = otelcol.auth.basic.grafana_cloud.handler
-      }
-    }
+    // ---- Job 3: OTLP traces -> Tempo (disabled 2026-07-16, backlog #41b) --
+    // The Tempo/Grafana Cloud exporter was stuck in the #32 "last resolver
+    // error: produced zero addresses" retry-and-drop loop, backing up its
+    // sending queue and OOMKilling alloy at the 256Mi memory limit. Removed
+    // here rather than raising the limit. Revert this commit to re-enable
+    // once the #32 exporter issue / Grafana Cloud quota is resolved.

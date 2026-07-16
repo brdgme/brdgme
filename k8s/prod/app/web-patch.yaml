@@ -1,11 +1,11 @@
-# Prod-only: wire OTLP trace export from rust/web to the in-cluster Alloy
+# Prod-only: OTLP trace export from rust/web to the in-cluster Alloy
 # collector (k8s/prod/alloy/), added 2026-07-09 alongside Alloy's Job 3 OTLP
-# receiver (configmap.yaml). Not in k8s/base - dev has no Alloy running, so
-# OTEL_EXPORTER_OTLP_ENDPOINT stays unset there and rust/web's
-# init_tracing() simply skips installing the otel layer/exporter (see
-# rust/web/src/main.rs). 10% head sampling (OTEL_TRACES_SAMPLER_ARG) bounds
-# trace volume against the Grafana Cloud free-tier quota - the same
-# telemetry-volume concern the log/metric cuts in this same change address.
+# receiver (configmap.yaml). OTEL_EXPORTER_OTLP_ENDPOINT was removed
+# 2026-07-16 along with the alloy traces-pipeline disable (backlog #41b);
+# revert this commit to restore. With the endpoint unset, rust/web's
+# init_tracing() skips installing the otel layer/exporter (see
+# rust/web/src/main.rs), so OTEL_TRACES_SAMPLER_ARG below is currently
+# inert - left in place to keep the revert a one-line change.
 #
 # Prod-only: Sentry error tracking DSNs, same rationale as the OTEL vars
 # above. SENTRY_DSN_WEB feeds the browser project via the SSR-embedded init
@@ -22,8 +22,6 @@ spec:
       containers:
         - name: web
           env:
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://alloy.brdgme.svc:4317
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
             - name: SENTRY_DSN_WEB
