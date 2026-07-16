@@ -22,6 +22,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let can_restart = is_finished && restarted_game_id.is_none();
 
     let has_bot_waiting = data.players.iter().any(|p| p.is_bot && p.is_turn);
+    let viewer_is_admin = data.viewer_is_admin;
     let player_style = data.player_style.clone();
 
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
@@ -112,7 +113,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                                 </a>
                             </div>
                         </Show>
-                        <Show when=move || has_bot_waiting>
+                        <Show when=move || has_bot_waiting && viewer_is_admin>
                             <div>
                                 <a href="#" on:click=move |ev| {
                                     ev.prevent_default();

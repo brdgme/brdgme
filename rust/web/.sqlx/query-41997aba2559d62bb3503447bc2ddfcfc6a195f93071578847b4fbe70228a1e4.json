@@ -27,6 +27,16 @@
         "ordinal": 4,
         "name": "pref_colors",
         "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "theme",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_admin",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -41,6 +51,8 @@
       false,
       false,
       false,
+      false,
+      true,
       false
     ]
   },

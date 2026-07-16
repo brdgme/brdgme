@@ -47,6 +47,9 @@ pub struct GameViewData {
     /// container whose `html` (board or log) content uses the markup
     /// `mk-fg-player-{n}`/`mk-bg-player-{n}` classes.
     pub player_style: String,
+    /// Whether the current viewer is an admin - gates admin-only actions
+    /// like "Bump bot to play".
+    pub viewer_is_admin: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +157,10 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
     ));
     let player_style = ge.player_style();
 
+    let viewer_is_admin = crate::db::is_user_admin(&pool, user.id)
+        .await
+        .map_err(internal("get_game_details: check admin"))?;
+
     Ok(GameViewData {
         id: ge.game.id,
         type_name: ge.game_type.name,
@@ -180,6 +187,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             .collect(),
         command_spec: render_resp.command_spec,
         player_style,
+        viewer_is_admin,
     })
 }
 
@@ -668,6 +676,13 @@ pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
         .map_err(internal("bump_bot_turns: check player"))?;
     if !is_player {
         return Err(ServerFnError::new("You are not a player in this game"));
+    }
+
+    let is_admin = crate::db::is_user_admin(&pool, user.id)
+        .await
+        .map_err(internal("bump_bot_turns: check admin"))?;
+    if !is_admin {
+        return Err(ServerFnError::new("Admin access required"));
     }
 
     crate::game::trigger_bot_turns(&pool, &jetstream, game_id).await;

@@ -165,7 +165,7 @@ pub async fn get_user_by_email(pool: &PgPool, email: &str) -> Result<Option<User
     sqlx::query_as!(
         User,
         r#"
-        SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors
+        SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.theme, u.is_admin
         FROM users u
         JOIN user_emails ue ON u.id = ue.user_id
         WHERE ue.email = $1
@@ -182,7 +182,7 @@ pub async fn get_user(pool: &PgPool, id: Uuid) -> Result<Option<User>> {
     sqlx::query_as!(
         User,
         r#"
-        SELECT id, created_at, updated_at, name, pref_colors
+        SELECT id, created_at, updated_at, name, pref_colors, theme, is_admin
         FROM users
         WHERE id = $1
         "#,
@@ -497,6 +497,20 @@ pub async fn is_player_in_game(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> R
     .map_err(Into::into)
 }
 
+/// Whether `user_id` has admin privileges - `false` if the user row doesn't
+/// exist. Written as a plain (non-macro) query for the same reason as
+/// `get_user_theme`: macro queries touching `users.is_admin` would require
+/// regenerating `.sqlx` against a live database; plain queries need no cache
+/// entry.
+#[cfg(feature = "ssr")]
+pub async fn is_user_admin(pool: &PgPool, user_id: Uuid) -> sqlx::Result<bool> {
+    let row: Option<(bool,)> = sqlx::query_as("SELECT is_admin FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(a,)| a).unwrap_or(false))
+}
+
 /// Skinny projection for the sidebar: one row per (game, opponent), already
 /// sorted my-turn-first then most recently updated. Opponent rows are LEFT
 /// JOINed so games with no opponents still appear; exclusion of the
@@ -752,7 +766,7 @@ pub async fn create_game_with_users_tx(
     for email in opts.opponent_emails {
         let user = if let Some(u) = sqlx::query_as!(
             crate::models::user::User,
-            r#"SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors
+            r#"SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.theme, u.is_admin
                FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1"#,
             email
         )

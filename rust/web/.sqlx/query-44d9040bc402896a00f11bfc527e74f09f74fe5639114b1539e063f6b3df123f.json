@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, created_at, updated_at, name, pref_colors\n        FROM users\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.theme, u.is_admin\n        FROM users u\n        JOIN user_emails ue ON u.id = ue.user_id\n        WHERE ue.email = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -27,11 +27,21 @@
         "ordinal": 4,
         "name": "pref_colors",
         "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "theme",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_admin",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -39,8 +49,10 @@
       false,
       false,
       false,
+      false,
+      true,
       false
     ]
   },
-  "hash": "bc3e6f0b62f9cefb1d1038f4db74bcb9a66eb272b7ef37001db83c8fd3be0f6a"
+  "hash": "44d9040bc402896a00f11bfc527e74f09f74fe5639114b1539e063f6b3df123f"
 }

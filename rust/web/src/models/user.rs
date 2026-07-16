@@ -10,6 +10,8 @@ pub struct User {
     pub updated_at: PrimitiveDateTime,
     pub name: String,
     pub pref_colors: Vec<String>,
+    pub theme: Option<String>,
+    pub is_admin: bool,
 }
 
 /// A pending login code, keyed by email. See D2 in
