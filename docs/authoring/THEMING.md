@@ -326,7 +326,10 @@ colours anywhere in rust/, brdgme-go/, or brdg.me):
 Other migration touchpoints: `api/src/db/color.rs` mirrors the player
 palette as a DB enum for signup colour preferences - the AMBER->ORANGE
 rename, BLUE_GREY removal, and PINK addition need a data migration with
-old names mapped via the aliases.
+old names mapped via the aliases. As of 2026-07-16 this is handled in
+code instead - `choose_colors` in `rust/web/src/db.rs` normalizes legacy
+names (Amber->Orange, BlueGrey->Cyan) when reading preferences, so no
+data migration is required.
 
 ## Appendix B: colour audit summary (2026-07-11)
 

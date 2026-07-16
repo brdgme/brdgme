@@ -583,6 +583,127 @@ enum PlayerSlotInternal {
     Bot { name: String, difficulty: String },
 }
 
+/// Normalizes legacy stored preference names onto the current palette, so
+/// prefs saved before the 2026-07 palette change still match. See
+/// `theme::slot_from_color_name` for the same mapping applied to stored
+/// `game_players.color`/`users.pref_colors` values.
+#[cfg(feature = "ssr")]
+fn normalize_pref_color(name: &str) -> String {
+    match name {
+        "Amber" => "Orange".to_string(),
+        "BlueGrey" => "Cyan".to_string(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(feature = "ssr")]
+type LocPref = (usize, Vec<String>);
+
+/// Drops each remaining pref's highest-ranked entry, returning `None` once no
+/// pref has anything left (signals the caller to stop looping).
+#[cfg(feature = "ssr")]
+fn remove_highest_prefs(prefs: &[LocPref]) -> Option<Vec<LocPref>> {
+    let mut some_remain = false;
+    let new_prefs = prefs
+        .iter()
+        .map(|(pos, pref)| {
+            let new_pref = if pref.is_empty() {
+                vec![]
+            } else {
+                let p = pref[1..].to_owned();
+                if !some_remain && !p.is_empty() {
+                    some_remain = true;
+                }
+                p
+            };
+            (*pos, new_pref)
+        })
+        .collect::<Vec<LocPref>>();
+    if some_remain { Some(new_prefs) } else { None }
+}
+
+/// Chooses colors for players based on preferences. Ported from the old
+/// `api::db::color::choose` (see `git show ba975b5^:rust/api/src/db/color.rs`),
+/// but operating on plain strings against a caller-supplied palette rather
+/// than a fixed `Color` enum.
+///
+/// First tries to assign everyone's highest still-available preference, then
+/// everyone's next, and so on, until all players have a color or the palette
+/// runs out. When multiple players want the same color at the same rank, the
+/// preference order is shuffled up front so the winner is randomly tiebroken.
+/// Players with no remaining matching prefs get whatever's left of the
+/// palette, in palette order. Legacy pref names ("Amber", "BlueGrey") are
+/// normalized onto their current equivalents before matching. If there are
+/// more players than the palette holds, players beyond the palette length
+/// repeat the same assignment recursively (mirroring the old algorithm), and
+/// exhausting the palette entirely falls back to "Pink".
+#[cfg(feature = "ssr")]
+fn choose_colors(prefs: &[Vec<String>], palette: &[&str]) -> Vec<String> {
+    if palette.is_empty() || prefs.is_empty() {
+        return prefs.iter().map(|_| "Pink".to_string()).collect();
+    }
+
+    use rand::seq::SliceRandom;
+    use std::collections::HashMap;
+
+    let sub_len = prefs.len().min(palette.len());
+    let (sub_prefs, tail_prefs) = prefs.split_at(sub_len);
+
+    let mut rng = rand::rng();
+    let mut remaining: Vec<String> = palette.iter().map(|s| s.to_string()).collect();
+    let mut assigned: HashMap<usize, String> = HashMap::new();
+
+    let mut rem_prefs: Vec<LocPref> = sub_prefs
+        .iter()
+        .enumerate()
+        .map(|(pos, pref)| {
+            let normalized = pref
+                .iter()
+                .map(|s| normalize_pref_color(s))
+                .filter(|s| palette.contains(&s.as_str()))
+                .collect::<Vec<String>>();
+            (pos, normalized)
+        })
+        .collect();
+    rem_prefs.shuffle(&mut rng);
+
+    'outer: loop {
+        for (pos, pref) in rem_prefs.clone() {
+            if assigned.contains_key(&pos) || pref.is_empty() {
+                continue;
+            }
+            let want_color = &pref[0];
+            if let Some(idx) = remaining.iter().position(|c| c == want_color) {
+                assigned.insert(pos, remaining.remove(idx));
+            }
+            if remaining.is_empty() {
+                break 'outer;
+            }
+        }
+        if let Some(new_prefs) = remove_highest_prefs(&rem_prefs) {
+            rem_prefs = new_prefs;
+        } else {
+            break 'outer;
+        }
+    }
+
+    let mut left = remaining.into_iter();
+    let mut res = Vec::with_capacity(sub_prefs.len());
+    for pos in 0..sub_prefs.len() {
+        res.push(
+            assigned
+                .remove(&pos)
+                .unwrap_or_else(|| left.next().unwrap_or_else(|| "Pink".to_string())),
+        );
+    }
+
+    if !tail_prefs.is_empty() {
+        res.extend(choose_colors(tail_prefs, palette));
+    }
+
+    res
+}
+
 #[cfg(feature = "ssr")]
 pub async fn create_game_with_users(
     pool: &PgPool,
@@ -682,10 +803,16 @@ pub async fn create_game_with_users_tx(
         slots.shuffle(&mut rng);
     }
 
-    // 3. Assign colors
-    let colors = [
-        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
-    ];
+    // 3. Assign colors, honouring each user's preferred colors where possible.
+    let palette = crate::theme::PLAYER_COLOR_NAMES;
+    let prefs: Vec<Vec<String>> = slots
+        .iter()
+        .map(|slot| match slot {
+            PlayerSlotInternal::User(user) => user.pref_colors.clone(),
+            PlayerSlotInternal::Bot { .. } => vec![],
+        })
+        .collect();
+    let colors = choose_colors(&prefs, &palette);
 
     // 4. Create Game
     let is_finished = !opts.placings.is_empty();
@@ -714,7 +841,10 @@ pub async fn create_game_with_users_tx(
     .ok_or_else(|| anyhow::anyhow!("Game version not found"))?;
 
     for (pos, slot) in slots.iter().enumerate() {
-        let color = colors.get(pos).unwrap_or(&"Pink").to_string();
+        let color = colors
+            .get(pos)
+            .cloned()
+            .unwrap_or_else(|| "Pink".to_string());
         let is_turn = opts.whose_turn.contains(&pos);
         let is_eliminated = opts.eliminated.contains(&pos);
         let place = opts.placings.get(pos).map(|&p| p as i32);
@@ -2430,5 +2560,56 @@ mod tests {
 
         set_user_theme(&pool, user.id, None).await.unwrap();
         assert_eq!(get_user_theme(&pool, user.id).await.unwrap(), None);
+    }
+
+    // --- choose_colors ---
+
+    const PALETTE: [&str; 8] = [
+        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
+    ];
+
+    #[test]
+    fn choose_colors_honours_preference() {
+        let prefs = vec![vec!["Blue".to_string()]];
+        let result = choose_colors(&prefs, &PALETTE);
+        assert_eq!(result, vec!["Blue".to_string()]);
+    }
+
+    #[test]
+    fn choose_colors_same_rank_conflict_resolves_distinctly() {
+        // Both players want Blue as their first pref; only one can have it,
+        // the other falls back to a leftover palette color. All distinct.
+        let prefs = vec![vec!["Blue".to_string()], vec!["Blue".to_string()]];
+        let result = choose_colors(&prefs, &PALETTE);
+        assert_eq!(result.len(), 2);
+        assert_ne!(result[0], result[1]);
+        assert!(result.contains(&"Blue".to_string()));
+        for c in &result {
+            assert!(PALETTE.contains(&c.as_str()));
+        }
+    }
+
+    #[test]
+    fn choose_colors_normalizes_legacy_amber_to_orange() {
+        let prefs = vec![vec!["Amber".to_string()]];
+        let result = choose_colors(&prefs, &PALETTE);
+        assert_eq!(result, vec!["Orange".to_string()]);
+    }
+
+    #[test]
+    fn choose_colors_normalizes_legacy_bluegrey_to_cyan() {
+        let prefs = vec![vec!["BlueGrey".to_string()]];
+        let result = choose_colors(&prefs, &PALETTE);
+        assert_eq!(result, vec!["Cyan".to_string()]);
+    }
+
+    #[test]
+    fn choose_colors_no_prefs_fills_from_palette_order() {
+        let prefs = vec![vec![], vec![], vec![]];
+        let result = choose_colors(&prefs, &PALETTE);
+        assert_eq!(
+            result,
+            vec!["Green".to_string(), "Red".to_string(), "Blue".to_string()]
+        );
     }
 }
