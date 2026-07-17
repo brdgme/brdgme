@@ -260,3 +260,81 @@ git commit -m "docs: uniform scale-to-zero verification record
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 git push
 ```
+
+## Verification record (2026-07-17)
+
+All checks read-only, `--kubeconfig ~/.kube/brdgme-kubeconfig.yaml`.
+
+**Step 1: DB rows** - PASS
+
+```
+SELECT uri, count(*) FROM game_versions WHERE is_public GROUP BY uri
+                                  uri                                   | count
+------------------------------------------------------------------------+-------
+ http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080 |    39
+(1 row)
+```
+
+Single interceptor URI covering all 39 public versions, no direct `*.brdgme.svc.cluster.local` rows.
+
+**Step 2: HSOs and CR status** - PASS
+
+`get httpscaledobjects -n brdgme | grep -vc True` -> `1` (header line only; all HSOs READY=True).
+
+`gameversions` generation vs observedGeneration (39/39 rows, all equal):
+
+```
+acquire-1 1 1
+age-of-war-1 3 3
+age-of-war-2 1 1
+battleship-1 3 3
+battleship-2 1 1
+category-5-1 3 3
+category-5-2 1 1
+cathedral-1 3 3
+cathedral-2 1 1
+farkle-1 2 2
+farkle-2 1 1
+for-sale-1 3 3
+for-sale-2 1 1
+greed-1 2 2
+greed-2 1 1
+jaipur-2 1 1
+liars-dice-1 2 2
+liars-dice-2 1 1
+lost-cities-1 2 2
+lost-cities-2 1 1
+love-letter-1 3 3
+love-letter-2 1 1
+modern-art-1 3 3
+modern-art-2 1 1
+no-thanks-1 2 2
+no-thanks-2 1 1
+roll-through-the-ages-1 3 3
+roll-through-the-ages-2 1 1
+splendor-1 3 3
+splendor-2 1 1
+sushi-go-1 3 3
+sushi-go-2 1 1
+sushizock-1 3 3
+sushizock-2 1 1
+texas-holdem-1 3 3
+texas-holdem-2 1 1
+tic-tac-toe-2 2 2
+zombie-dice-1 3 3
+zombie-dice-2 1 1
+```
+
+**Step 3: Operator logs** - PASS
+
+`logs deploy/operator --tail=100`: 39 `Upserting game version` lines, one per CR, each with `uri="http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080"` (sample: `acquire-1`, `age-of-war-1`, `age-of-war-2`). Remaining lines are `Spec unchanged since last reconcile, skipping` (steady-state re-reconciles). No error/warn lines in the tail.
+
+**Step 4: Cold-start spot check** - SKIPPED (not applicable yet)
+
+```
+kubectl get deploy acquire-1 -n brdgme
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+acquire-1   1/1     1            1           10d
+```
+
+acquire-1 is still 1/1, so the wget cold-start probe would not be meaningful (nothing to wake). Scale-down pending 1800s idle - Michael to confirm later.
