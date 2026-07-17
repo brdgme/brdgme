@@ -30,7 +30,7 @@
 - Produces: `controller::interceptor_uri() -> String` (module-private; used only within controller.rs)
 - The reconcile loop behavior consumed by Task 3: on generation change, upserts `game_versions.uri` = interceptor URI for every CR.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `rust/operator/src/controller.rs`:
 
@@ -50,12 +50,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p operator`
 Expected: FAIL to compile with "cannot find function `interceptor_uri`"
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `rust/operator/src/controller.rs`, replace the URI branch (lines 119-127):
 
@@ -89,12 +89,12 @@ In `k8s/base/operator/crd.yaml`, delete the four `scaleToZero` lines (30-33):
                 description: "Whether the game version's deployment should scale to zero replicas when idle."
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `cargo fmt -p operator -- --check && cargo clippy -p operator -- -D warnings && cargo test -p operator`
 Expected: all pass; tests include `interceptor_uri_defaults_to_keda_proxy` and `healthz_returns_ok`.
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```bash
 git add rust/operator/src/crd.rs rust/operator/src/controller.rs k8s/base/operator/crd.yaml
@@ -135,7 +135,7 @@ kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml rollout status deploy/operat
 - Consumes: nothing from Task 1 at build time (independent files), but MUST NOT be pushed until the Task 1 gate has passed.
 - Produces: 39 uniform game dirs, each with deployment/service/game-version/http-scaled-object.
 
-- [ ] **Step 1: Remove the flag and bump scaledownPeriod in the 19 existing dirs**
+- [x] **Step 1: Remove the flag and bump scaledownPeriod in the 19 existing dirs**
 
 ```bash
 cd ~/Development/brdgme
@@ -149,7 +149,7 @@ grep -rn scaleToZero k8s/base/game/ ; grep -rln 'scaledownPeriod: 300' k8s/base/
 
 Expected: both greps print nothing.
 
-- [ ] **Step 2: Create HSOs in the 20 remaining dirs and register them**
+- [x] **Step 2: Create HSOs in the 20 remaining dirs and register them**
 
 ```bash
 new="acquire-1 age-of-war-2 battleship-2 category-5-2 cathedral-2 farkle-2 for-sale-2 greed-2 jaipur-2 liars-dice-2 lost-cities-2 love-letter-2 modern-art-2 no-thanks-2 roll-through-the-ages-2 splendor-2 sushi-go-2 sushizock-2 texas-holdem-2 zombie-dice-2"
@@ -180,17 +180,17 @@ done
 
 Note: some `kustomization.yaml` files lack a trailing newline (e.g. age-of-war-2); verify each ends with a well-formed resource list afterwards: `for n in $new; do tail -c 80 "k8s/base/game/$n/kustomization.yaml"; echo; done` - every file must list all four resources on separate lines. Fix any run-together lines by hand.
 
-- [ ] **Step 3: Verify the overlay builds**
+- [x] **Step 3: Verify the overlay builds**
 
 Run: `kubectl kustomize k8s/prod > /dev/null && kubectl kustomize k8s/prod | grep -c 'kind: HTTPScaledObject'`
 Expected: no error; count is 39.
 
-- [ ] **Step 4: Verify no game dir is missing anything**
+- [x] **Step 4: Verify no game dir is missing anything**
 
 Run: `for d in k8s/base/game/*/; do [ -f "$d/http-scaled-object.yaml" ] || echo "MISSING $d"; done`
 Expected: no output.
 
-- [ ] **Step 5: Commit and push (ONLY after Task 1 gate confirmed)**
+- [x] **Step 5: Commit and push (ONLY after Task 1 gate confirmed)**
 
 ```bash
 git add k8s/base/game/
@@ -229,27 +229,27 @@ done
 **Interfaces:**
 - Consumes: live cluster state after both gates.
 
-- [ ] **Step 1: DB rows**
+- [x] **Step 1: DB rows**
 
 Run: `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "SELECT uri, count(*) FROM game_versions WHERE is_public GROUP BY uri"`
 Expected: a single interceptor URI row covering all public versions (no direct `*.brdgme.svc.cluster.local` URIs).
 
-- [ ] **Step 2: HSOs and CR status**
+- [x] **Step 2: HSOs and CR status**
 
 Run: `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get httpscaledobjects -n brdgme | grep -vc True; kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get gameversions -n brdgme -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.generation} {.status.observedGeneration}{"\n"}{end}'`
 Expected: 39 HSOs all READY (grep -vc True prints 1, the header line); every CR has observedGeneration == generation.
 
-- [ ] **Step 3: Operator logs**
+- [x] **Step 3: Operator logs**
 
 Run: `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml logs deploy/operator -n brdgme --tail=100`
 Expected: `Upserting game version` lines with the interceptor URI, no errors.
 
-- [ ] **Step 4: Cold-start spot check on a previously always-on version**
+- [x] **Step 4: Cold-start spot check on a previously always-on version**
 
 Run: `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme nats-0 -- wget -S -O /dev/null --header 'Host: acquire-1.games.internal' http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/ 2>&1 | tail -5; kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get deploy acquire-1 -n brdgme`
 Expected: HTTP 405 (GET on JSON-RPC endpoint proves wake); deployment 1/1. (Only meaningful once acquire-1 has scaled to 0 - 1800s idle; if still 1/1 from rollout, note it and let Michael confirm scale-down later.)
 
-- [ ] **Step 5: Record evidence and commit**
+- [x] **Step 5: Record evidence and commit**
 
 Append a "Verification record" section to this plan doc with the actual outputs, then:
 
