@@ -74,6 +74,18 @@ body {
   }
 }
 
+/* Fill-height centered wrapper for the spinner (game area loading state). */
+.game-loading {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.game-loading .spinner {
+  margin: 0;
+}
+
 /* Login styles */
 .login {
   text-align: center;

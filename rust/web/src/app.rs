@@ -384,11 +384,7 @@ fn LoginPage() -> impl IntoView {
                             />
                         </div>
                         <Show when=move || login_action.pending().get()>
-                            <div class="spinner">
-                                <div class="bounce1"></div>
-                                <div class="bounce2"></div>
-                                <div class="bounce3"></div>
-                            </div>
+                            <crate::components::Spinner/>
                         </Show>
                         <div class="hasCode">
                             <a on:click=show_code_link style="cursor:pointer">"I already have a login code"</a>
@@ -748,6 +744,13 @@ fn GamePage() -> impl IntoView {
         track_game_seq(prev.copied(), game_id(), game_update.get())
     });
 
+    // Just the game id, deduped: changes only when navigating to a
+    // different game, never on seq-only WS/command refetches. Keying the
+    // <Transition> below on this remounts it per game, so its spinner
+    // fallback shows while a newly navigated-to game loads, while
+    // refetches of the current game keep the stale board (no spinner).
+    let current_game = Memo::new(move |_| game_id());
+
     // Call mark_read on mount and whenever the game ID changes.
     Effect::new(move |_| {
         if let Some(id) = game_id() {
@@ -814,10 +817,15 @@ fn GamePage() -> impl IntoView {
     // refetch and only shows `fallback` before the first load.
     view! {
         <MainLayout has_sub_menu=Signal::from(true)>
-            <Transition fallback=|| view! { <div></div> }>
-                {move || {
-                    let base = game_data.get();
-                    base.map(|res| match res {
+            {move || {
+                current_game.track();
+                view! {
+                    <Transition fallback=|| view! {
+                        <div class="game-loading"><crate::components::Spinner/></div>
+                    }>
+                        {move || {
+                            let base = game_data.get();
+                            base.map(|res| match res {
                         Err(e) => view! { <div class="error">"Error: " {e.to_string()}</div> }.into_any(),
                         Ok(data) => {
                             let is_turn = data.is_my_turn;
@@ -866,8 +874,10 @@ fn GamePage() -> impl IntoView {
                             }.into_any()
                         },
                     })
-                }}
-            </Transition>
+                        }}
+                    </Transition>
+                }
+            }}
         </MainLayout>
     }
 }

@@ -4,6 +4,8 @@
 pub mod form;
 pub mod game;
 pub mod layout;
+pub mod spinner;
 
 pub use form::*;
 pub use layout::*;
+pub use spinner::*;

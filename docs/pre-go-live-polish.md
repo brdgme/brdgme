@@ -459,3 +459,8 @@ superpowers spec/plan and fixed as one batch when scheduled.
   2026-07-17 command-input fix keys `game_data` on
   `(game_id, last seq)` - the spinner condition should distinguish a
   game_id change (show spinner) from a seq-only refetch (don't).
+- **Resolved:** Reusable `Spinner` component extracted from the login form
+  (`rust/web/src/components/spinner.rs`); `GamePage`'s `<Transition>` is
+  now remounted via a deduped `current_game` memo (game id only), so its
+  centered-spinner fallback shows on initial load and game-to-game
+  navigation, while seq-only WS/command refetches keep the stale board.
