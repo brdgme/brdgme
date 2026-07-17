@@ -4,6 +4,7 @@ metadata:
   name: lost-cities-1
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: Lost Cities
   weight: 1.5
   isDeprecated: true

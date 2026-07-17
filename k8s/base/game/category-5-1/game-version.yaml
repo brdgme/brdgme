@@ -4,6 +4,7 @@ metadata:
   name: category-5-1
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: Category 5
   weight: 1.0
   isDeprecated: true

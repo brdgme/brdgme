@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use brdgme_cmd::api::{Request, Response};
 use futures::StreamExt;
@@ -35,12 +35,30 @@ pub struct Ctx {
     pub http: reqwest::Client,
 }
 
+// Requeue interval plus jitter to avoid a thundering herd of reconciles all
+// firing at once. No `rand` dependency in this crate, so derive the jitter
+// from the current time instead of pulling one in for this alone.
+fn requeue_with_jitter() -> Action {
+    let jitter = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64 % 901)
+        .unwrap_or(0);
+    Action::requeue(Duration::from_secs(3600 + jitter))
+}
+
 async fn game_service_request(
     client: &reqwest::Client,
     uri: &str,
+    name: &str,
     request: &Request,
 ) -> Result<Response, Error> {
-    let resp = client.post(uri).json(request).send().await?;
+    let host = format!("{name}.games.internal");
+    let resp = client
+        .post(uri)
+        .header(reqwest::header::HOST, &host)
+        .json(request)
+        .send()
+        .await?;
     let response: Response = resp.json().await?;
     match response {
         Response::SystemError { message } => Err(Error::GameService(message)),
@@ -91,25 +109,39 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
         .await?;
     }
 
-    let uri = std::env::var("GAME_SERVICE_URI_TEMPLATE")
-        .map(|t| t.replace("{name}", &name).replace("{ns}", &ns))
-        .unwrap_or_else(|_| format!("http://{}.{}.svc.cluster.local", name, ns));
+    let generation = obj.metadata.generation;
+    let observed_generation = obj.status.as_ref().and_then(|s| s.observed_generation);
+    if generation.is_some() && generation == observed_generation {
+        info!(name, "Spec unchanged since last reconcile, skipping");
+        return Ok(requeue_with_jitter());
+    }
+
+    let uri = if obj.spec.scale_to_zero {
+        std::env::var("INTERCEPTOR_URI").unwrap_or_else(|_| {
+            "http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080".to_string()
+        })
+    } else {
+        std::env::var("GAME_SERVICE_URI_TEMPLATE")
+            .map(|t| t.replace("{name}", &name).replace("{ns}", &ns))
+            .unwrap_or_else(|_| format!("http://{}.{}.svc.cluster.local", name, ns))
+    };
     info!(name, uri, "Upserting game version");
 
-    let player_counts = match game_service_request(&ctx.http, &uri, &Request::PlayerCounts).await? {
-        Response::PlayerCounts { player_counts } => player_counts
-            .into_iter()
-            .map(|c| c as i32)
-            .collect::<Vec<_>>(),
-        other => {
-            return Err(Error::GameService(format!(
-                "unexpected response to PlayerCounts: {:?}",
-                other
-            )));
-        }
-    };
+    let player_counts =
+        match game_service_request(&ctx.http, &uri, &name, &Request::PlayerCounts).await? {
+            Response::PlayerCounts { player_counts } => player_counts
+                .into_iter()
+                .map(|c| c as i32)
+                .collect::<Vec<_>>(),
+            other => {
+                return Err(Error::GameService(format!(
+                    "unexpected response to PlayerCounts: {:?}",
+                    other
+                )));
+            }
+        };
 
-    let rules = match game_service_request(&ctx.http, &uri, &Request::Rules).await? {
+    let rules = match game_service_request(&ctx.http, &uri, &name, &Request::Rules).await? {
         Response::Rules { rules } => rules,
         other => {
             return Err(Error::GameService(format!(
@@ -131,7 +163,14 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
     )
     .await?;
 
-    Ok(Action::requeue(Duration::from_secs(3600)))
+    api.patch_status(
+        &name,
+        &PatchParams::default(),
+        &Patch::Merge(json!({ "status": { "ready": true, "observedGeneration": generation } })),
+    )
+    .await?;
+
+    Ok(requeue_with_jitter())
 }
 
 // Splitting these into a params struct would be a larger refactor than warranted here.

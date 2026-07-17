@@ -27,6 +27,10 @@ spec:
                 type: boolean
                 default: false
                 description: "Deprecated versions cannot start new games but remain running for in-progress games."
+              scaleToZero:
+                type: boolean
+                default: false
+                description: "Whether the game version's deployment should scale to zero replicas when idle."
           status:
             type: object
             properties:

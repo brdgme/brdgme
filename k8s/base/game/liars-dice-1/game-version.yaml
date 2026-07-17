@@ -4,6 +4,7 @@ metadata:
   name: liars-dice-1
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: Liar's Dice
   weight: 1.0
   isDeprecated: true

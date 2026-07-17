@@ -4,5 +4,6 @@ metadata:
   name: tic-tac-toe-2
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: Tic-tac-toe
   weight: 1.0

@@ -23,11 +23,16 @@ pub struct GameVersionSpec {
     /// to serve existing in-progress games.
     #[serde(default)]
     pub is_deprecated: bool,
+    #[serde(default)]
+    pub scale_to_zero: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct GameVersionStatus {
     pub ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_generation: Option<i64>,
 }

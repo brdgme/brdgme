@@ -4,6 +4,7 @@ metadata:
   name: texas-holdem-1
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: "Texas Hold'em"
   weight: 2.0
   isDeprecated: true

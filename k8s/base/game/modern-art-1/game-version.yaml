@@ -4,6 +4,7 @@ metadata:
   name: modern-art-1
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: Modern Art
   weight: 2.0
   isDeprecated: true

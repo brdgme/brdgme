@@ -4,6 +4,7 @@ metadata:
   name: sushizock-1
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: Sushizock im Gockelwok
   weight: 1.0
   isDeprecated: true

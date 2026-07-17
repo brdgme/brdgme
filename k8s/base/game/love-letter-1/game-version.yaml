@@ -4,6 +4,7 @@ metadata:
   name: love-letter-1
   namespace: brdgme
 spec:
+  scaleToZero: true
   typeName: Love Letter
   weight: 1.0
   isDeprecated: true
