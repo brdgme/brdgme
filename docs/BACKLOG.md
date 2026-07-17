@@ -103,7 +103,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
 | 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - demoted to post-go-live 2026-07-10 (Michael: the Grafana Cloud quota must reset anyway, not a go-live blocker; was promoted pre-go-live 2026-07-09). Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
-| 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record, the plan is the batch fix. **2026-07-17: second batch of 9 entries appended (settings scroll/width/theme-picker polish, stale username after change, ELO change at game end, command input self-clearing, sub menu button still missing on mobile game pages, invalid-command errors surfaced raw as HTTP 500) - IMMEDIATE NEXT TASKS**; continuation plan written 2026-07-17, ready to execute | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md), [plan 2](superpowers/plans/2026-07-17-33-pre-go-live-polish-2.md) |
+| 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record, the plan is the batch fix. **2026-07-17: second batch of 9 entries (settings scroll/width/theme-picker polish, stale username after change, ELO change at game end, command input self-clearing, sub menu button still missing on mobile game pages, invalid-command errors surfaced raw as HTTP 500) implemented end-to-end, all 9 tasks committed to master** - only Task 9 Step 6 (manual beta reproduction/verification) remains, for Michael on the deployed beta | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md), [plan 2](superpowers/plans/2026-07-17-33-pre-go-live-polish-2.md) |
 | 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta; partial 2026-07-16 - `is_admin` flag (migration 008) landed and bump-bot-to-play made admin-only (server enforcement + UI gating; uncommitted) | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
 | 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Implemented 2026-07-16 (uncommitted) | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) [spec](superpowers/specs/2026-07-16-35-settings-page-design.md) | [plan](superpowers/plans/2026-07-16-35-settings-page.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
@@ -476,3 +476,22 @@ command-input auto-focus loosened - typing only skips focusing the
 command input when a text-entry element is focused, Space stays
 BODY-only. Also discovered `cargo sqlx prepare` fails on the missing
 `User.theme` field (recorded under #40).
+
+2026-07-17 (later): second #33 polish batch implemented end-to-end, all
+9 tasks in `docs/superpowers/plans/2026-07-17-33-pre-go-live-polish-2.md`
+committed to master: header sub menu button now shows below 60em (missing
+CSS override added); settings/content pages scroll only the main content
+pane (app-shell pattern) and widened to a shared ~1220px centered layout;
+selected theme indicated by a thicker highlight-colour border instead of
+name highlight; theme previews are now 2x5 text-free swatch blocks
+(`NamedColor::ALL` accent order, fg/bg excluded); username no longer goes
+stale after a change (session copy refreshed in `set_username`, fresh read
+in `get_settings`); ELO rating change now renders next to the rating at
+game end (legacy-parity icon/sign); invalid-command rejections now return
+a typed `UserError` and render "Invalid command: <msg>" instead of a raw
+`ServerFnError`/HTTP 500; command input no longer self-clears on
+background game updates (root cause was a global `game_update` signal
+re-keying the `<Transition>` and remounting `GameCommandInput` on
+unrelated-game updates - fixed by hoisting command text above the
+remounting closure). Only Task 9 Step 6 (manual reproduction/verification
+on the deployed beta) is left, deliberately, for Michael.
