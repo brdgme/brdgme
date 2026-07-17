@@ -59,6 +59,15 @@ on demand when the task at hand references them.
   Accepted: the app self-heals once the rollout finishes, and beta traffic
   is low.
 
+## Resource constraints
+
+- Never start the `tilt` dev environment (or the kind cluster it manages) on
+  a machine with less than 32GB RAM - it exhausts host memory. If a task
+  seems to need it, stop and ask the user instead.
+- Target single packages for all cargo work: `cargo build/check/clippy/test
+  -p <crate>` (e.g. `-p web`). Never run workspace-wide builds or test runs;
+  they link ~30 binaries and spike RAM and disk.
+
 ## Working style
 
 - Never install packages on the host machine - all tooling comes from the

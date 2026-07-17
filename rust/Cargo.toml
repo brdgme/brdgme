@@ -37,6 +37,9 @@ members = [
 ]
 resolver = "2"
 
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.android-dev]
 inherits = "dev"
 
