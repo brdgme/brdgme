@@ -187,7 +187,7 @@ Latest versions: `game_versions.uri` keeps pointing directly at that game's Serv
 - **Cutover executed:** 2026-07-17 by Michael (`UPDATE 1`). **Verification (2026-07-17):** HTTPScaledObject Ready; new game created and played through beta.brdg.me via the interceptor path (working); deployment scaled 1->0 at 04:16:12Z (~300s after last activity); next UI request triggered 0->1 at 04:17:22Z, pod Ready at 04:17:27Z (~5s cold start; ~7s click-to-UI-response observed by Michael); no interceptor/scaler errors. Day-1 gate evidence - the multi-day stability window of Step 4 continues from here.
 - **Cold-start tuning (2026-07-17):** the ~5s was dominated by the readiness probe (`initialDelaySeconds: 2, periodSeconds: 5` - the Rust binary binds in milliseconds). Changed to `initialDelaySeconds: 0, periodSeconds: 1` for tic-tac-toe-2 (brdgme `1e6ff83`, deployed via config ref bump). Measured after: second clean scale-down at 04:25:55Z, cold-start wake 04:28:23.9Z -> Ready 04:28:26.1Z (~2.2s pod-ready, ~3s click-to-render observed by Michael, down from ~5s/~7s). `periodSeconds: 1` is the k8s floor; probe is a kubelet-local TCP check, negligible overhead fleet-wide. Apply the same probe settings fleet-wide during Step 5 rollout.
 
-- [ ] **Step 4: PoC acceptance gate on one non-latest version**
+- [x] **Step 4: PoC acceptance gate on one non-latest version** (SKIPPED - owner decision, Michael, 2026-07-17: the multi-day PoC stability gate is skipped because the product is in closed beta. The tic-tac-toe-2 PoC recorded above (Day-1 evidence: clean 1->0 and 0->1 cycling, no interceptor/scaler errors, cold-start tuned to ~2.2s) is accepted as sufficient to proceed directly to fleet rollout.)
 
 Before any fleet rollout: put exactly one non-latest game-version Deployment behind the interceptor (Steps 2-3 for that one version only). Submit moves against it and measure cold-start (0-replica) latency against the budget from the open questions below. Run it for several days under normal idle/active cycling and confirm: no interceptor errors, no interceptor/scaler/operator OOMs, the deployment reliably scales to 0 after `scaledownPeriod` and reliably reactivates on the next request, and the corresponding latest-version deployment never gets routed through the interceptor during this window. Only proceed to fleet rollout once this gate passes.
 
@@ -196,6 +196,74 @@ Rollback (if the PoC fails or fleet rollout needs to be undone): point the affec
 - [ ] **Step 5: Fleet rollout**
 
 Once the PoC gate passes, create `HTTPScaledObject`s and the corresponding `game_versions.uri` + Host-header wiring for the remaining non-latest versions, and roll out via brdgme-config.
+
+**Fleet-cutover record (2026-07-17, read-only query by Worker, cutover SQL to be executed by Michael):**
+
+Query used to enumerate all non-latest `game_versions` rows (read-only, peer-auth):
+
+```bash
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "SELECT gv.id, gv.name, gv.uri FROM game_versions gv WHERE gv.id NOT IN (SELECT DISTINCT ON (game_type_id) id FROM game_versions WHERE is_deprecated = false ORDER BY game_type_id, created_at DESC) ORDER BY gv.name;"
+```
+
+Result: exactly the 18 expected non-latest versions.
+
+| id | name | old uri |
+| --- | --- | --- |
+| `443db03d-be5c-4638-a9a9-b72a7ca3d773` | age-of-war-1 | `http://age-of-war-1.brdgme.svc.cluster.local` |
+| `6a7b297c-4bcf-4d28-93e5-30e4faeddb8f` | battleship-1 | `http://battleship-1.brdgme.svc.cluster.local` |
+| `13a7282e-4c07-4a1d-81f4-24a60d93cb87` | category-5-1 | `http://category-5-1.brdgme.svc.cluster.local` |
+| `6708718e-ee42-4530-9820-dd8e0162493d` | cathedral-1 | `http://cathedral-1.brdgme.svc.cluster.local` |
+| `e7c9c2ee-c716-4e5a-a576-dcaf19c9032f` | farkle-1 | `http://farkle-1.brdgme.svc.cluster.local` |
+| `738a9a09-c954-42ba-ad6c-eb0dcae1cb7d` | for-sale-1 | `http://for-sale-1.brdgme.svc.cluster.local` |
+| `aff688e7-37b3-4cd8-b3b9-fd205ccafdbe` | greed-1 | `http://greed-1.brdgme.svc.cluster.local` |
+| `a50bfe13-21b0-4264-8f05-f1559e8fa9aa` | liars-dice-1 | `http://liars-dice-1.brdgme.svc.cluster.local` |
+| `5a6b183a-0377-4285-9aa3-a7048ca3e4cf` | lost-cities-1 | `http://lost-cities-1.brdgme.svc.cluster.local` |
+| `d9762b22-1478-407e-a672-cd4cc4a33f1e` | love-letter-1 | `http://love-letter-1.brdgme.svc.cluster.local` |
+| `d15315fc-8c6f-42c1-8ec8-a790a321ced1` | modern-art-1 | `http://modern-art-1.brdgme.svc.cluster.local` |
+| `ba26bd57-90e6-4401-bc9b-cfe6ac06f60e` | no-thanks-1 | `http://no-thanks-1.brdgme.svc.cluster.local` |
+| `f80ab572-98f3-4638-9562-964a591eb19f` | roll-through-the-ages-1 | `http://roll-through-the-ages-1.brdgme.svc.cluster.local` |
+| `d11acc6d-3998-4f08-b21e-9d5ecfa20a33` | splendor-1 | `http://splendor-1.brdgme.svc.cluster.local` |
+| `ec7eeae7-2c51-42f2-8168-bc3fc7c323c7` | sushi-go-1 | `http://sushi-go-1.brdgme.svc.cluster.local` |
+| `8c93aa8d-2ae5-49fd-8b19-5d2f7d34bbae` | sushizock-1 | `http://sushizock-1.brdgme.svc.cluster.local` |
+| `818dbeff-a6c8-4f12-9ff7-09c37b6f6f7a` | texas-holdem-1 | `http://texas-holdem-1.brdgme.svc.cluster.local` |
+| `67f83a24-c753-4cd8-a8a3-8632de88e737` | zombie-dice-1 | `http://zombie-dice-1.brdgme.svc.cluster.local` |
+
+**Combined cutover SQL** (repoints all 18 rows at the interceptor proxy Service in one statement):
+
+```sql
+UPDATE game_versions SET uri = 'http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080' WHERE id IN ('443db03d-be5c-4638-a9a9-b72a7ca3d773', '6a7b297c-4bcf-4d28-93e5-30e4faeddb8f', '13a7282e-4c07-4a1d-81f4-24a60d93cb87', '6708718e-ee42-4530-9820-dd8e0162493d', 'e7c9c2ee-c716-4e5a-a576-dcaf19c9032f', '738a9a09-c954-42ba-ad6c-eb0dcae1cb7d', 'aff688e7-37b3-4cd8-b3b9-fd205ccafdbe', 'a50bfe13-21b0-4264-8f05-f1559e8fa9aa', '5a6b183a-0377-4285-9aa3-a7048ca3e4cf', 'd9762b22-1478-407e-a672-cd4cc4a33f1e', 'd15315fc-8c6f-42c1-8ec8-a790a321ced1', 'ba26bd57-90e6-4401-bc9b-cfe6ac06f60e', 'f80ab572-98f3-4638-9562-964a591eb19f', 'd11acc6d-3998-4f08-b21e-9d5ecfa20a33', 'ec7eeae7-2c51-42f2-8168-bc3fc7c323c7', '8c93aa8d-2ae5-49fd-8b19-5d2f7d34bbae', '818dbeff-a6c8-4f12-9ff7-09c37b6f6f7a', '67f83a24-c753-4cd8-a8a3-8632de88e737');
+```
+
+Exact wrapper Michael runs for the cutover:
+
+```bash
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080' WHERE id IN ('443db03d-be5c-4638-a9a9-b72a7ca3d773', '6a7b297c-4bcf-4d28-93e5-30e4faeddb8f', '13a7282e-4c07-4a1d-81f4-24a60d93cb87', '6708718e-ee42-4530-9820-dd8e0162493d', 'e7c9c2ee-c716-4e5a-a576-dcaf19c9032f', '738a9a09-c954-42ba-ad6c-eb0dcae1cb7d', 'aff688e7-37b3-4cd8-b3b9-fd205ccafdbe', 'a50bfe13-21b0-4264-8f05-f1559e8fa9aa', '5a6b183a-0377-4285-9aa3-a7048ca3e4cf', 'd9762b22-1478-407e-a672-cd4cc4a33f1e', 'd15315fc-8c6f-42c1-8ec8-a790a321ced1', 'ba26bd57-90e6-4401-bc9b-cfe6ac06f60e', 'f80ab572-98f3-4638-9562-964a591eb19f', 'd11acc6d-3998-4f08-b21e-9d5ecfa20a33', 'ec7eeae7-2c51-42f2-8168-bc3fc7c323c7', '8c93aa8d-2ae5-49fd-8b19-5d2f7d34bbae', '818dbeff-a6c8-4f12-9ff7-09c37b6f6f7a', '67f83a24-c753-4cd8-a8a3-8632de88e737');"
+```
+
+**Per-row revert list** (restores each row's own old uri by id, run individually if a rollback of only some versions is needed):
+
+```bash
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://age-of-war-1.brdgme.svc.cluster.local' WHERE id = '443db03d-be5c-4638-a9a9-b72a7ca3d773';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://battleship-1.brdgme.svc.cluster.local' WHERE id = '6a7b297c-4bcf-4d28-93e5-30e4faeddb8f';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://category-5-1.brdgme.svc.cluster.local' WHERE id = '13a7282e-4c07-4a1d-81f4-24a60d93cb87';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://cathedral-1.brdgme.svc.cluster.local' WHERE id = '6708718e-ee42-4530-9820-dd8e0162493d';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://farkle-1.brdgme.svc.cluster.local' WHERE id = 'e7c9c2ee-c716-4e5a-a576-dcaf19c9032f';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://for-sale-1.brdgme.svc.cluster.local' WHERE id = '738a9a09-c954-42ba-ad6c-eb0dcae1cb7d';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://greed-1.brdgme.svc.cluster.local' WHERE id = 'aff688e7-37b3-4cd8-b3b9-fd205ccafdbe';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://liars-dice-1.brdgme.svc.cluster.local' WHERE id = 'a50bfe13-21b0-4264-8f05-f1559e8fa9aa';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://lost-cities-1.brdgme.svc.cluster.local' WHERE id = '5a6b183a-0377-4285-9aa3-a7048ca3e4cf';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://love-letter-1.brdgme.svc.cluster.local' WHERE id = 'd9762b22-1478-407e-a672-cd4cc4a33f1e';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://modern-art-1.brdgme.svc.cluster.local' WHERE id = 'd15315fc-8c6f-42c1-8ec8-a790a321ced1';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://no-thanks-1.brdgme.svc.cluster.local' WHERE id = 'ba26bd57-90e6-4401-bc9b-cfe6ac06f60e';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://roll-through-the-ages-1.brdgme.svc.cluster.local' WHERE id = 'f80ab572-98f3-4638-9562-964a591eb19f';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://splendor-1.brdgme.svc.cluster.local' WHERE id = 'd11acc6d-3998-4f08-b21e-9d5ecfa20a33';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://sushi-go-1.brdgme.svc.cluster.local' WHERE id = 'ec7eeae7-2c51-42f2-8168-bc3fc7c323c7';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://sushizock-1.brdgme.svc.cluster.local' WHERE id = '8c93aa8d-2ae5-49fd-8b19-5d2f7d34bbae';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://texas-holdem-1.brdgme.svc.cluster.local' WHERE id = '818dbeff-a6c8-4f12-9ff7-09c37b6f6f7a';"
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://zombie-dice-1.brdgme.svc.cluster.local' WHERE id = '67f83a24-c753-4cd8-a8a3-8632de88e737';"
+```
+
+**Manifests SHA and brdgme-config note:** the fleet `HTTPScaledObject`/manifest changes for these 18 versions are on brdgme master at `96a87ed45a82a1e2f2901842b41aa798aa6b2f45` (verified via `git rev-parse master`). brdgme-config's prod ref bump to this SHA is currently staged uncommitted in `/home/beefsack/Development/brdgme-config` (left untouched per this Worker's constraints) - Michael must commit and push that bump, and confirm ArgoCD sync is healthy, before running the cutover SQL above, so the `HTTPScaledObject`s exist and are Ready before traffic is repointed at the interceptor.
 
 ---
 
