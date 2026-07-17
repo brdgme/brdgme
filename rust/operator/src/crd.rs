@@ -23,8 +23,6 @@ pub struct GameVersionSpec {
     /// to serve existing in-progress games.
     #[serde(default)]
     pub is_deprecated: bool,
-    #[serde(default)]
-    pub scale_to_zero: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

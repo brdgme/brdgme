@@ -66,6 +66,12 @@ async fn game_service_request(
     }
 }
 
+fn interceptor_uri() -> String {
+    std::env::var("INTERCEPTOR_URI").unwrap_or_else(|_| {
+        "http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080".to_string()
+    })
+}
+
 async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     let name = obj.name_any();
     let ns = obj.namespace().unwrap_or_else(|| "brdgme".to_string());
@@ -116,15 +122,7 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
         return Ok(requeue_with_jitter());
     }
 
-    let uri = if obj.spec.scale_to_zero {
-        std::env::var("INTERCEPTOR_URI").unwrap_or_else(|_| {
-            "http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080".to_string()
-        })
-    } else {
-        std::env::var("GAME_SERVICE_URI_TEMPLATE")
-            .map(|t| t.replace("{name}", &name).replace("{ns}", &ns))
-            .unwrap_or_else(|_| format!("http://{}.{}.svc.cluster.local", name, ns))
-    };
+    let uri = interceptor_uri();
     info!(name, uri, "Upserting game version");
 
     let player_counts =
@@ -243,4 +241,18 @@ pub async fn run(client: Client, pool: PgPool) {
             }
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interceptor_uri_defaults_to_keda_proxy() {
+        // INTERCEPTOR_URI is not set in the test environment.
+        assert_eq!(
+            interceptor_uri(),
+            "http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080"
+        );
+    }
 }
