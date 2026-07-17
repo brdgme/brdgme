@@ -325,6 +325,10 @@ superpowers spec/plan and fixed as one batch when scheduled.
   Green, Blue, Yellow, Purple; row 2 Cyan, Pink, Orange, Brown, Grey.
   Foreground/Background are excluded (the tile itself already shows
   them).
+- **Resolved:** Fixed same day - `SAMPLE_MARKUP` replaced with 10
+  text-free 5-space background swatches in `NamedColor::ALL` accent
+  order, packed in 2 rows of 5 via `white-space: pre` and
+  inline-block spans.
 
 ### 2026-07-17: Username change shows stale value when returning to settings
 

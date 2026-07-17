@@ -570,6 +570,14 @@ body {
 
 .theme-tile .theme-tile-sample {
   font-size: 0.8em;
+  /* Swatches are runs of spaces - keep them, and pack the two rows with
+     no vertical gap. */
+  white-space: pre;
+  line-height: 1;
+}
+
+.theme-tile .theme-tile-sample span {
+  display: inline-block;
 }
 
 

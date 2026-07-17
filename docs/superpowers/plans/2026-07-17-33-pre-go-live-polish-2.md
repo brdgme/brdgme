@@ -382,7 +382,7 @@ EOF
 
 The 10 swatches are the accent colours in `NamedColor::ALL` order (`rust/lib/color/src/palette.rs`): row 1 Red, Green, Blue, Yellow, Purple; row 2 Cyan, Pink, Orange, Brown, Grey. Foreground/Background are excluded (the tile background/text already show them). Each swatch is 5 spaces with only a `bg` tag - no text, no `fg`.
 
-- [ ] **Step 1: Update the test first**
+- [x] **Step 1: Update the test first**
 
 In `rust/web/src/theme.rs`, replace the `sample_html_renders_expected_pieces` test with:
 
@@ -412,12 +412,12 @@ In `rust/web/src/theme.rs`, replace the `sample_html_renders_expected_pieces` te
     }
 ```
 
-- [ ] **Step 2: Run it to confirm it fails**
+- [x] **Step 2: Run it to confirm it fails**
 
 Run: `cd rust && cargo test -p web --features ssr --lib sample_html_renders_expected_pieces`
 Expected: FAIL (the current sample has fg tags, colour names, no yellow/grey, and no newline).
 
-- [ ] **Step 3: Replace the sample markup**
+- [x] **Step 3: Replace the sample markup**
 
 In `rust/web/src/theme.rs`, replace the `SAMPLE_MARKUP` constant and its doc comment:
 
@@ -433,7 +433,7 @@ const SAMPLE_MARKUP: &str = "{{bg red}}     {{/bg}}{{bg green}}     {{/bg}}\
 
 Also update the `SAMPLE_HTML` doc comment ("One line of 8 colour chips...") to match: "Two rows of five solid colour swatches (see `SAMPLE_MARKUP`), rendered once via `html_class`/`transform_semantic`; shown on every theme preview tile."
 
-- [ ] **Step 4: Make the swatches render packed**
+- [x] **Step 4: Make the swatches render packed**
 
 Space-only spans collapse in normal HTML whitespace handling, so the sample container needs `white-space: pre`; `line-height: 1` plus `display: inline-block` on the spans removes the vertical line-box gap between the two rows. In `rust/web/style/main.scss`, replace:
 
@@ -459,19 +459,19 @@ with:
 }
 ```
 
-- [ ] **Step 5: Run the test to confirm it passes**
+- [x] **Step 5: Run the test to confirm it passes**
 
 Run: `cd rust && cargo test -p web --features ssr --lib sample_html_renders_expected_pieces`
 Expected: PASS.
 
-- [ ] **Step 6: Verify the crate still checks**
+- [x] **Step 6: Verify the crate still checks**
 
 Run: `cd rust && cargo fmt --all && cargo check -p web --features ssr --no-default-features`
 Expected: `Finished` with no errors.
 
 (beta) Each theme tile shows two packed rows of five solid colour blocks, no gaps and no text, in the order Red Green Blue Yellow Purple / Cyan Pink Orange Brown Grey.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/web/src/theme.rs rust/web/style/main.scss

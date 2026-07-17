@@ -199,16 +199,13 @@ pub fn player_style_vars(slots: &[&str]) -> String {
         .join(" ")
 }
 
-/// One chip per palette slot: colour name with a space of padding either
-/// side, slot colour as background, contrast colour as text.
-const SAMPLE_MARKUP: &str = "{{bg green}}{{fg green | contrast}} Green {{/fg}}{{/bg}} \
-{{bg red}}{{fg red | contrast}} Red {{/fg}}{{/bg}} \
-{{bg blue}}{{fg blue | contrast}} Blue {{/fg}}{{/bg}} \
-{{bg orange}}{{fg orange | contrast}} Orange {{/fg}}{{/bg}} \
-{{bg purple}}{{fg purple | contrast}} Purple {{/fg}}{{/bg}} \
-{{bg brown}}{{fg brown | contrast}} Brown {{/fg}}{{/bg}} \
-{{bg cyan}}{{fg cyan | contrast}} Cyan {{/fg}}{{/bg}} \
-{{bg pink}}{{fg pink | contrast}} Pink {{/fg}}{{/bg}}";
+/// Two rows of five 5-space background swatches - the 10 accent colours in
+/// `NamedColor::ALL` order (Foreground/Background excluded; the tile itself
+/// already shows them). No text: the swatch blocks read purely as colour.
+const SAMPLE_MARKUP: &str = "{{bg red}}     {{/bg}}{{bg green}}     {{/bg}}\
+{{bg blue}}     {{/bg}}{{bg yellow}}     {{/bg}}{{bg purple}}     {{/bg}}\n\
+{{bg cyan}}     {{/bg}}{{bg pink}}     {{/bg}}{{bg orange}}     {{/bg}}\
+{{bg brown}}     {{/bg}}{{bg grey}}     {{/bg}}";
 
 fn build_sample_html() -> String {
     let (nodes, _) = brdgme_markup::from_string(SAMPLE_MARKUP).unwrap_or_default();
@@ -216,9 +213,9 @@ fn build_sample_html() -> String {
     brdgme_markup::html_class(&tnodes)
 }
 
-/// One line of 8 colour chips (name on its own slot colour, contrast text),
-/// rendered once via `html_class`/`transform_semantic`; shown on every theme
-/// preview tile.
+/// Two rows of five solid colour swatches (see `SAMPLE_MARKUP`), rendered
+/// once via `html_class`/`transform_semantic`; shown on every theme preview
+/// tile.
 pub static SAMPLE_HTML: LazyLock<String> = LazyLock::new(build_sample_html);
 
 #[cfg(test)]
@@ -416,17 +413,24 @@ mod tests {
     #[test]
     fn sample_html_renders_expected_pieces() {
         let html = &*SAMPLE_HTML;
+        // The 10 accent colours from NamedColor::ALL, in order; Foreground
+        // and Background are excluded (the tile itself shows them).
         for slot in [
-            "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink",
+            "red", "green", "blue", "yellow", "purple", "cyan", "pink", "orange", "brown", "grey",
         ] {
             assert!(html.contains(&format!("mk-bg-{slot}")), "missing bg {slot}");
-            assert!(
-                html.contains(&format!("mk-fg-c-{slot}")),
-                "missing contrast fg {slot}"
-            );
         }
-        assert!(html.contains(" Green "), "chip text padded with spaces");
-        assert!(!html.contains("<b>"), "no Bold in the sample");
-        assert!(!html.contains("&lt;"), "no player names in the sample");
+        assert!(
+            !html.contains("mk-bg-foreground") && !html.contains("mk-bg-background"),
+            "foreground/background must be excluded"
+        );
+        assert!(html.contains("     "), "swatches are 5-space blocks");
+        assert!(!html.contains("mk-fg-"), "no text/fg in the sample");
+        assert!(!html.contains("Green"), "no colour names in the sample");
+        assert_eq!(
+            html.matches('\n').count(),
+            1,
+            "exactly two rows separated by one newline"
+        );
     }
 }
