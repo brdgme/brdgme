@@ -84,7 +84,7 @@ EOF
 
 This is the standard app-shell pattern the polish entry asks for: a full-viewport (`100dvh`) flex container with `overflow-y: auto` on the main pane only, body never scrolling. Game pages already fit this (their `.game-container` is `height: 100%` with internal `overflow-y: auto` panes, so `.content` never overflows there) - this change makes settings and other tall content pages scroll inside `.content` while the sidebar stays put. The login page is `position: fixed` outside `.layout` and is unaffected; `body { overflow: hidden }` is deliberately NOT set so a shorter-than-form viewport on the login page can still scroll.
 
-- [ ] **Step 1: Bound the layout to the viewport and scroll the content pane**
+- [x] **Step 1: Bound the layout to the viewport and scroll the content pane**
 
 In `rust/web/style/main.scss`, find:
 
@@ -131,13 +131,13 @@ Replace with:
 }
 ```
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 Eyeball the diff. Run `cd rust && cargo fmt --all` (no-op expected).
 
 (beta) Settings page: only the main content area scrolls, the sidebar stays static, the body has no scrollbar. Game pages: board/logs/meta panes scroll exactly as before.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add rust/web/style/main.scss

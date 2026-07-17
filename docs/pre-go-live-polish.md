@@ -285,6 +285,10 @@ superpowers spec/plan and fixed as one batch when scheduled.
   auto` on the main pane only, and the `body` itself never scrolling.
   Verify how the game pages handle this today and align the approach so
   all pages share one layout convention.
+- **Resolved:** Fixed same day - app-shell pattern: `.layout` bounded to
+  `100dvh` and `.content` given `overflow-y: auto`, so tall pages scroll
+  inside the content pane; game pages already fit the viewport and are
+  unaffected.
 
 ### 2026-07-17: Content pages too narrow (settings needs 3 theme columns)
 
