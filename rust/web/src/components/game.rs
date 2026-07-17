@@ -396,17 +396,22 @@ pub fn GameCommandInput(
     });
     on_cleanup(move || keydown_listener.remove());
 
-    // Clear command, refocus input, and trigger re-fetch on successful submit.
-    // Local bump makes the own action refetch even if the WS is down; the
-    // trigger bump is still needed for the layout header.
+    // On any submit outcome, refocus the input (disabling it while pending
+    // drops focus). On success additionally clear the text and trigger a
+    // re-fetch - the local bump makes the own action refetch even if the WS
+    // is down; the trigger bump is still needed for the layout header. On
+    // error the text signal is left alone so the user can correct it.
     Effect::new(move |_| {
-        if let Some(Ok(None)) = submit_action.value().get() {
+        let Some(result) = submit_action.value().get() else {
+            return;
+        };
+        if matches!(result, Ok(None)) {
             command.set(String::new());
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
-            if let Some(el) = input_ref.get() {
-                let _ = el.focus();
-            }
+        }
+        if let Some(el) = input_ref.get() {
+            let _ = el.focus();
         }
     });
 
@@ -509,9 +514,14 @@ pub fn GameCommandInput(
                         spellcheck="false"
                         node_ref=input_ref
                         prop:value=command
+                        disabled=move || submit_action.pending().get()
                         on:input=move |ev| command.set(event_target_value(&ev))
                     />
-                    <input type="submit" value="Send"/>
+                    <input
+                        type="submit"
+                        value="Send"
+                        disabled=move || submit_action.pending().get()
+                    />
                 </form>
             </div>
         </>

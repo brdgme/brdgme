@@ -209,6 +209,10 @@ superpowers spec/plan and fixed as one batch when scheduled.
   submitting. On success, clear the input (current behavior). On error,
   re-enable both but keep the submitted text in the input so the user can
   correct and resubmit.
+- **Resolved:** Input and Send button now `disabled` while
+  `submit_action.pending()`; the submit-outcome effect refocuses the input
+  on both success and error (disabling drops focus), still clearing the
+  text only on success so errors keep the submitted text for correction.
 
 ### 2026-07-11: Autocomplete click doesn't focus the command input
 
