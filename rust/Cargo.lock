@@ -782,6 +782,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "brdgme_game_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "brdgme_cmd",
+ "brdgme_game",
+ "rand 0.10.2",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "brdgme_markup"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,20 @@
+[package]
+name = "brdgme_game_client"
+version = "0.1.0"
+publish = false
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.103"
+brdgme_cmd = { path = "../cmd", default-features = false }
+brdgme_game = { path = "../game" }
+rand = "0.10.2"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+serde_json = "1.0.150"
+tokio = { version = "1", features = ["time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+axum = "0.8.9"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }

@@ -27,6 +27,7 @@ members = [
     "lib/cmd",
     "lib/color",
     "lib/game",
+    "lib/game_client",
     "lib/markup",
     "lib/rand_bot",
     "tools/fuzz",
