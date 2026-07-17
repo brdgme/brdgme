@@ -4,7 +4,6 @@ metadata:
   name: farkle-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Farkle
   weight: 1.0
   isDeprecated: true

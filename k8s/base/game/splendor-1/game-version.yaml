@@ -4,7 +4,6 @@ metadata:
   name: splendor-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Splendor
   weight: 2.0
   isDeprecated: true

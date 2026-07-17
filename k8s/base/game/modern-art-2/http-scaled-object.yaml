@@ -1,0 +1,17 @@
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: modern-art-2
+spec:
+  hosts:
+  - modern-art-2.games.internal
+  scaleTargetRef:
+    name: modern-art-2
+    kind: Deployment
+    apiVersion: apps/v1
+    service: modern-art-2
+    port: 80
+  replicas:
+    min: 0
+    max: 1
+  scaledownPeriod: 1800

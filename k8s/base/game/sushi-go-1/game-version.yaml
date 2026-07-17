@@ -4,7 +4,6 @@ metadata:
   name: sushi-go-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Sushi Go
   weight: 1.0
   isDeprecated: true

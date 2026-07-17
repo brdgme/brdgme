@@ -4,7 +4,6 @@ metadata:
   name: age-of-war-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Age of War
   weight: 1.0
   isDeprecated: true

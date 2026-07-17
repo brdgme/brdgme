@@ -4,7 +4,6 @@ metadata:
   name: cathedral-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Cathedral
   weight: 1.5
   isDeprecated: true

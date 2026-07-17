@@ -4,7 +4,6 @@ metadata:
   name: battleship-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Battleship
   weight: 1.0
   isDeprecated: true

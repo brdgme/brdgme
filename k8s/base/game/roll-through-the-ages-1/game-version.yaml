@@ -4,7 +4,6 @@ metadata:
   name: roll-through-the-ages-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Roll Through the Ages
   weight: 1.5
   isDeprecated: true

@@ -4,7 +4,6 @@ metadata:
   name: zombie-dice-1
   namespace: brdgme
 spec:
-  scaleToZero: true
   typeName: Zombie Dice
   weight: 1.0
   isDeprecated: true
