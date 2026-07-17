@@ -33,6 +33,7 @@
   - `cargo test -p web --features ssr` (needs dev Postgres for the ~41 DB tests)
 - `web` has no default features - it always needs `--features ssr` (plain `cargo check --workspace` fails by design).
 - The game interface JSON contract (`docs/ARCHITECTURE.md`) is stable and must not change.
+- **Execution mode: single batch, single push.** Work through the tasks in order in one session, committing per task locally, and push to `master` only once after Task 5 completes. This triggers one CI pipeline and one image build/deploy cycle for all three services together. There is no urgency requiring a staged rollout of the bot fix.
 - Do not edit applied sqlx migrations. No schema changes are needed in this plan (`game_versions.name` already exists).
 - Format with `cargo fmt --all` before each commit.
 
