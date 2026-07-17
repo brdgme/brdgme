@@ -23,8 +23,6 @@ pub enum Error {
     Kube(#[from] kube::Error),
     #[error("Database error: {0}")]
     Sql(#[from] sqlx::Error),
-    #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
     #[error("Game service error: {0}")]
     GameService(String),
 }
@@ -52,18 +50,9 @@ async fn game_service_request(
     name: &str,
     request: &Request,
 ) -> Result<Response, Error> {
-    let host = format!("{name}.games.internal");
-    let resp = client
-        .post(uri)
-        .header(reqwest::header::HOST, &host)
-        .json(request)
-        .send()
-        .await?;
-    let response: Response = resp.json().await?;
-    match response {
-        Response::SystemError { message } => Err(Error::GameService(message)),
-        other => Ok(other),
-    }
+    brdgme_game_client::request(client, uri, name, request)
+        .await
+        .map_err(|e| Error::GameService(format!("{e:#}")))
 }
 
 fn interceptor_uri() -> String {

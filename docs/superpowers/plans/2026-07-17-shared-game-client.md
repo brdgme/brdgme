@@ -405,7 +405,7 @@ waiting on bot turns."
 - Consumes: `brdgme_game_client::request` from Task 1.
 - Produces: `game_service_request` keeps its existing signature `(client, uri, name, request) -> Result<Response, Error>` so its call sites (~lines 129, 142) are untouched.
 
-- [ ] **Step 1: Add the dependency**
+- [x] **Step 1: Add the dependency**
 
 In `rust/operator/Cargo.toml`, next to `brdgme_cmd` (~line 18):
 
@@ -413,7 +413,7 @@ In `rust/operator/Cargo.toml`, next to `brdgme_cmd` (~line 18):
 brdgme_game_client = { path = "../lib/game_client" }
 ```
 
-- [ ] **Step 2: Delegate to the shared client**
+- [x] **Step 2: Delegate to the shared client**
 
 Replace the body of `game_service_request` in `rust/operator/src/controller.rs`:
 
@@ -434,7 +434,7 @@ async fn game_service_request(
 
 If this leaves the operator's `Error` enum with a now-unused reqwest error variant (compiler/clippy will say so), delete that variant and its `#[from]` impl in the same commit.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 ```bash
@@ -444,7 +444,7 @@ SQLX_OFFLINE=true cargo test --workspace --exclude web
 ```
 Expected: clippy clean, tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd rust && cargo fmt --all

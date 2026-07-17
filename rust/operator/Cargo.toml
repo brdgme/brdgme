@@ -16,6 +16,7 @@ kube = { version = "4", features = ["runtime", "derive", "client"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 brdgme_cmd = { path = "../lib/cmd", default-features = false }
+brdgme_game_client = { path = "../lib/game_client" }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 # The workspace enables both rustls backends (reqwest -> aws-lc-rs, sqlx/kube
 # defaults -> ring), so rustls can't auto-select a process-level provider.

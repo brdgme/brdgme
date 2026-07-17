@@ -708,6 +708,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "brdgme_cmd",
+ "brdgme_game_client",
  "futures",
  "k8s-openapi",
  "kube",
