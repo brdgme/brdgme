@@ -433,3 +433,20 @@ superpowers spec/plan and fixed as one batch when scheduled.
   `ServerFnError` text). Responds `200` rather than a literal `4xx`;
   a typed 4xx would need a custom Leptos server-fn error type and is
   left as a follow-up if ever required.
+
+### 2026-07-17: No loading indicator when navigating to a game
+
+- **Observed:** Clicking a link to a game (e.g. from the sidebar or
+  dashboard) gives no loading indication while the game loads.
+- **Expected:** Show the same loading indicator the login form uses,
+  centered in the game area, while the game is loading - but ONLY when
+  navigating to a game the user is not already viewing (initial load or
+  clicking through to a different game). It must NOT appear when the
+  currently visible game refreshes from a websocket update or a command
+  submission - those keep showing the current state until the update
+  swaps in (per the earlier flash-on-update fixes).
+- **Note:** Refines the 2026-07-11 "No loading indicator on initial game
+  page load" entry (reusable spinner component, login-page spinner). The
+  2026-07-17 command-input fix keys `game_data` on
+  `(game_id, last seq)` - the spinner condition should distinguish a
+  game_id change (show spinner) from a seq-only refetch (don't).

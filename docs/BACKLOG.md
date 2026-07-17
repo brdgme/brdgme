@@ -30,7 +30,9 @@ picker selected-border + swatch blocks, stale username after change, ELO
 rating change at game end, command input self-clearing on background
 updates, sub menu button still missing on mobile game pages,
 invalid-command errors surfaced raw as HTTP 500) - these are
-the immediate next tasks. Then #39 accessibility
+the immediate next tasks. A further immediate entry added later
+2026-07-17: loading indicator (login-form spinner) when navigating to a
+game, but never on webhook/command updates of the visible game. Then #39 accessibility
 themes (added 2026-07-14; CVD variants of brdgme light/dark) + theme
 picker categories
 (Default/Light/Dark/Deuteranopia-Protanopia/Tritanopia, alphabetical within
