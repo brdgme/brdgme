@@ -263,7 +263,7 @@ EOF
 
 **Interfaces:** none new - moves the existing `selected` class from `.theme-tile-label` to `.theme-tile`.
 
-- [ ] **Step 1: Move the class in the Rust view**
+- [x] **Step 1: Move the class in the Rust view**
 
 In `rust/web/src/settings.rs`, in the `tile` function, change:
 
@@ -323,7 +323,7 @@ to:
 
 Also update the `ThemeSection` doc comment line "selected tile's label highlighted like \"your turn\"" to "selected tile outlined with a thicker highlight border".
 
-- [ ] **Step 2: Swap the CSS**
+- [x] **Step 2: Swap the CSS**
 
 In `rust/web/style/main.scss`, find and delete:
 
@@ -346,14 +346,14 @@ And after the `.theme-tile` rule (the one with `border: 1px solid var(--mk-softe
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `cd rust && cargo fmt --all && cargo check -p web --features ssr --no-default-features`
 Expected: `Finished` with no errors.
 
 (beta) Clicking a theme tile moves a 3px orange border to that tile; no tile grows/shifts; the theme name is never highlighted.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add rust/web/src/settings.rs rust/web/style/main.scss

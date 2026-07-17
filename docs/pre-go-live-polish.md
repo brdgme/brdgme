@@ -310,6 +310,9 @@ superpowers spec/plan and fixed as one batch when scheduled.
   theme's name.
 - **Expected:** The selected theme's tile instead gets a thicker border
   in the highlight colour; the name is not highlighted.
+- **Resolved:** Fixed same day - the `selected` class moved from the tile
+  label to the tile itself, styled as a 3px highlight-colour border with
+  padding compensation; the name highlight is gone.
 
 ### 2026-07-17: Theme colour preview should be solid swatch blocks
 

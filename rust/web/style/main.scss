@@ -556,6 +556,13 @@ body {
   cursor: pointer;
 }
 
+/* Selected theme: thicker border in the highlight colour; padding
+   compensates the extra 2px so tiles don't shift. */
+.theme-tile.selected {
+  border: 3px solid var(--mk-orange);
+  padding: calc(0.63em - 2px);
+}
+
 .theme-tile .theme-tile-label {
   font-weight: 700;
   margin-bottom: 0.4em;
@@ -563,12 +570,6 @@ body {
 
 .theme-tile .theme-tile-sample {
   font-size: 0.8em;
-}
-
-/* Same treatment as "active game / your turn" (.layout-game.my-turn). */
-.theme-tile .theme-tile-label.selected {
-  background-color: var(--mk-soften-orange-86);
-  font-weight: 700;
 }
 
 

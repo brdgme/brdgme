@@ -195,7 +195,7 @@ fn EmailSection(
 }
 
 /// The theme picker: one block per category (h3 heading + wrapping tile
-/// row), selected tile's label highlighted like "your turn". Applies
+/// row), selected tile outlined with a thicker highlight border. Applies
 /// immediately on click; profile sync is fire-and-forget for logged-in
 /// users (same pattern as the old /theme page).
 #[component]
@@ -247,14 +247,12 @@ fn ThemeSection() -> impl IntoView {
         view! {
             <div
                 class="theme-tile"
+                class:selected=move || current_theme.get().as_deref() == Some(slug)
                 data-theme=slug
                 style="background-color: var(--mk-background); color: var(--mk-foreground);"
                 on:click=on_click
             >
-                <div
-                    class="theme-tile-label"
-                    class:selected=move || current_theme.get().as_deref() == Some(slug)
-                >{name}</div>
+                <div class="theme-tile-label">{name}</div>
                 <div class="theme-tile-sample" inner_html=sample_html></div>
             </div>
         }
@@ -266,13 +264,11 @@ fn ThemeSection() -> impl IntoView {
             <div class="theme-tiles">
                 <div
                     class="theme-tile"
+                    class:selected=move || current_theme.get().is_none()
                     style="background-color: var(--mk-background); color: var(--mk-foreground);"
                     on:click=move |_| select(None, current_theme, current_user, set_theme_action)
                 >
-                    <div
-                        class="theme-tile-label"
-                        class:selected=move || current_theme.get().is_none()
-                    >"System"</div>
+                    <div class="theme-tile-label">"System"</div>
                 </div>
                 {crate::theme::grouped_themes()
                     .into_iter()
