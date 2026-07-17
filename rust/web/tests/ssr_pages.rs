@@ -524,3 +524,101 @@ async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: Pg
     .unwrap();
     assert_eq!(new_game_version_id_used, new_game_version_id);
 }
+
+// --- admin export route (#34, spec D4) ---
+
+#[sqlx::test]
+async fn admin_export_route_requires_login(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, _, _) = get(
+        app,
+        &format!("/admin/games/{}/export", uuid::Uuid::new_v4()),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test]
+async fn admin_export_route_rejects_non_admin(pool: PgPool) {
+    let user = make_user(&pool, "pleb").await;
+    let cookie = login_cookie(&pool, &user, "pleb@example.com").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, _, _) = get(
+        app,
+        &format!("/admin/games/{}/export", uuid::Uuid::new_v4()),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test]
+async fn admin_export_route_returns_bundle_without_emails(pool: PgPool) {
+    let admin = make_user(&pool, "boss").await;
+    sqlx::query!("UPDATE users SET is_admin = true WHERE id = $1", admin.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let cookie = login_cookie(&pool, &admin, "boss@example.com").await;
+
+    let game_version_id = make_game_version(&pool, "http://localhost:0/mock").await;
+    let game = db::create_game_with_users(
+        &pool,
+        CreateGameOpts {
+            game_version_id,
+            whose_turn: &[0],
+            eliminated: &[],
+            placings: &[],
+            points: &[],
+            creator_id: admin.id,
+            opponent_ids: &[],
+            opponent_emails: &[],
+            bot_slots: &[BotSlot {
+                name: "Botty".to_string(),
+                difficulty: "easy".to_string(),
+            }],
+            chat_id: None,
+            game_state: "opaque_state_blob",
+        },
+    )
+    .await
+    .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(
+        app,
+        &format!("/admin/games/{}/export", game.id),
+        Some(&cookie),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(content_type.starts_with("application/json"));
+    let bundle: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(bundle["schema_version"], 1);
+    assert_eq!(bundle["game"]["game_state"], "opaque_state_blob");
+    assert_eq!(bundle["players"].as_array().unwrap().len(), 2);
+    assert_eq!(bundle["bots"][0]["name"], "Botty");
+    // Spec D4: no email addresses in the bundle, ever.
+    assert!(!body.contains("boss@example.com"));
+    assert!(!body.contains('@'));
+}
+
+#[sqlx::test]
+async fn admin_export_route_missing_game_404s(pool: PgPool) {
+    let admin = make_user(&pool, "boss2").await;
+    sqlx::query!("UPDATE users SET is_admin = true WHERE id = $1", admin.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let cookie = login_cookie(&pool, &admin, "boss2@example.com").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, _, _) = get(
+        app,
+        &format!("/admin/games/{}/export", uuid::Uuid::new_v4()),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

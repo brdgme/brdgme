@@ -143,6 +143,11 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                         </Show>
                         <Show when=move || viewer_is_admin>
                             <div>
+                                <a href=format!("/admin/games/{}/export", game_id)>
+                                    "Export JSON (admin)"
+                                </a>
+                            </div>
+                            <div>
                                 <a href="#" on:click=move |ev| {
                                     ev.prevent_default();
                                     let confirmed = web_sys::window()

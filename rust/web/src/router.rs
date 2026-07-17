@@ -127,6 +127,10 @@ pub async fn build_router(state: AppState) -> Router {
             },
         )
         .route("/ws", axum::routing::get(crate::websocket::ws_handler))
+        .route(
+            "/admin/games/{id}/export",
+            axum::routing::get(crate::game::export::admin_export_game),
+        )
         .fallback(leptos_axum::file_and_error_handler::<AppState, _>({
             let leptos_options = state.leptos_options.clone();
             move |_| shell(leptos_options.clone())
