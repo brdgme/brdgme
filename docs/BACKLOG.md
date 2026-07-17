@@ -23,26 +23,23 @@ attempted and dropped 2026-07-08),
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
 complete 2026-07-10), #28 WP4 Cloudflare edge (complete 2026-07-11).
-**Top of backlog (updated 2026-07-17):** #33 second polish batch - 9 new
-entries appended to [docs/pre-go-live-polish.md](pre-go-live-polish.md)
-2026-07-17 (settings page scroll containment + content width + theme
-picker selected-border + swatch blocks, stale username after change, ELO
-rating change at game end, command input self-clearing on background
-updates, sub menu button still missing on mobile game pages,
-invalid-command errors surfaced raw as HTTP 500) - these are
-the immediate next tasks. A further immediate entry added later
-2026-07-17: loading indicator (login-form spinner) when navigating to a
-game, but never on webhook/command updates of the visible game. Then #39 accessibility
-themes (added 2026-07-14; CVD variants of brdgme light/dark) + theme
-picker categories
-(Default/Light/Dark/Deuteranopia-Protanopia/Tritanopia, alphabetical within
-category).
-**Remaining pre-go-live:** #34 admin functions + #35 user settings
-(added 2026-07-11, wanted in place for the beta) -> #33 pre-go-live UI/UX
-polish batch -> #16 beta period (isolated DB) -> hard cutover + 1-week
-validation gate -> decommission. #32 demoted to post-go-live 2026-07-10
-(Michael: the Grafana Cloud quota must reset anyway - not a go-live
-blocker). (#20 external-dns retired 2026-07-05 - no viable DO
+**Top of backlog (updated 2026-07-17, post-cleanup):** the remaining #33
+polish entries in [docs/pre-go-live-polish.md](pre-go-live-polish.md):
+loading indicator when routing to a game for the first time (never on
+websocket/command rerenders of the visible game; consolidates the
+2026-07-11 initial-load-spinner entry), disable command input + send
+button while submitting, autocomplete click refocuses the command input.
+Batches 1 and 2 are otherwise done (batch 2 awaits Michael's manual beta
+verification); favicon grey and game-log flashing confirmed fixed
+2026-07-17.
+**Remaining pre-go-live:** #34 admin functions remainder (force-delete
+game, game JSON export + dev import CLI) + the #33 leftovers above, then
+go-live. 2026-07-17 (Michael): #35 and #39 are done (archived); #37 game
+verification is non-blocking; #16 is removed from the backlog - the
+cutover decision will be made directly once the play testers are
+comfortable, using the archived #16 runbooks. #32 demoted to post-go-live
+2026-07-10 (Michael: the Grafana Cloud quota must reset anyway - not a
+go-live blocker). (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
 **Post-go-live:** #32 Alloy OTLP export investigation (demoted from
 pre-go-live 2026-07-10), #22b-d (play-by-email, reminders, multi-email) →
@@ -93,7 +90,6 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | # | Title | Status | Spec | Plan |
 |---|---|---|---|---|
 | 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation, sync-failure drill (#16 beta) | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
-| 16 | Production Cutover (hard cutover + break-glass rollback; beta period on isolated DB + freeze/TTL runbook added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-08-16-production-cutover-validation-design.md) | [plan](superpowers/plans/2026-07-08-16-production-cutover-validation.md) |
 | 19 | CloudNativePG | Dev complete; prod Cluster + Barman Cloud backups running under ArgoCD (green 2026-07-08); remaining: PITR verify + import rehearsal (#16 beta), real import at cutover | [spec](superpowers/specs/2026-07-08-19-cloudnativepg-design.md) | [plan](superpowers/plans/2026-07-08-19-cloudnativepg.md) |
 | 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending. Scope note 2026-07-17 (Michael): the goal is brdgme fully available by email again - game creation, plays, AND updating player settings - so 22b's play-by-email design should cover (or explicitly split out) creation and settings, not just plays | [spec](superpowers/specs/2026-07-05-22-email-via-resend-design.md) | [plan](superpowers/plans/2026-07-05-22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [spec](superpowers/specs/2026-07-04-23-rust-game-ports-design.md) | [plan](superpowers/plans/2026-07-04-23-rust-game-ports.md) |
@@ -107,10 +103,8 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - demoted to post-go-live 2026-07-10 (Michael: the Grafana Cloud quota must reset anyway, not a go-live blocker; was promoted pre-go-live 2026-07-09). Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
 | 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record, the plan is the batch fix. **2026-07-17: second batch of 9 entries (settings scroll/width/theme-picker polish, stale username after change, ELO change at game end, command input self-clearing, sub menu button still missing on mobile game pages, invalid-command errors surfaced raw as HTTP 500) implemented end-to-end, all 9 tasks committed to master** - only Task 9 Step 6 (manual beta reproduction/verification) remains, for Michael on the deployed beta | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md), [plan 2](superpowers/plans/2026-07-17-33-pre-go-live-polish-2.md) |
 | 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta; partial 2026-07-16 - `is_admin` flag (migration 008) landed and bump-bot-to-play made admin-only (server enforcement + UI gating; uncommitted) | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
-| 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Implemented 2026-07-16 (uncommitted) | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) [spec](superpowers/specs/2026-07-16-35-settings-page-design.md) | [plan](superpowers/plans/2026-07-16-35-settings-page.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
-| 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - pre-beta-exit; added 2026-07-11 | - | - |
-| 39 | Accessibility themes + theme picker categories (added 2026-07-14, **top priority**): (a) colour-blind variants of the two default themes - brdgme light/dark each get variants for the major colour vision deficiency groups (deuteranopia, protanopia, tritanopia), derived from established CVD-safe palettes (Okabe-Ito / Paul Tol) and validated under CVD simulation per THEMING.md's contrast rules; (b) add a category to each registered theme and render the picker grouped: Default (the two brdgme themes, no heading, top), Light (non-default, non-CVD themes with a light background), Dark (non-default, non-CVD themes with a dark background), Deuteranopia / Protanopia (deutan- and protan-targeted CVD variants, combined), Tritanopia (tritan-targeted CVD variants); themes sorted alphabetically within each category; (c) evaluate adopting established colourblind-first third-party themes - candidates: GitHub Dark/Light Colorblind (official github-vscode-theme variants, orange/blue in place of red/green, widely used) and the Modus themes' deuteranopia/tritanopia variants (Emacs, WCAG AAA-focused) - verify against upstream before adopting | - | - |
+| 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - downgraded 2026-07-17 (Michael: games seem okay, does not block go-live) | - | - |
 | 38 | Frontend cache busting on new deploys (investigate stale WASM/asset caching when a new version is bumped in brdgme-config; options: user-facing "new version released, please reload" messaging, or simply force a reload when a new version is deployed) | Pending - unscheduled; added 2026-07-11 | - | - |
 | 40 | DB tests run (and fail) by default (every local/agent test run hits DB test failures, repeatedly surprising agents; investigate whether DB-dependent tests should be opt-in - e.g. feature/env gated - instead of opt-out, or made to pass by default) | Pending - unscheduled; added 2026-07-15. Addendum 2026-07-16: `cargo sqlx prepare` currently fails because the `User` struct lacks the `theme` column from migration 007 - fix before the next `.sqlx` regen. | - | - |
 | 41 | Cluster resource improvements (from 2026-07-16 prod resource analysis, read-only): (a) install metrics-server - `kubectl top` unavailable, right-sizing is blind without it; (b) alloy OOMKilling at 256Mi limit (4 restarts, exit 137) - revised 2026-07-16: trim FIRST, don't raise - disable the traces pipeline (Tempo exporter confirmed still stuck in the #32 retry-and-drop loop, zero value while broken) and remove `OTEL_EXPORTER_OTLP_ENDPOINT` from `k8s/prod/app/web-patch.yaml`; keep the healthy logs (Loki) and metrics (Prometheus remote_write, incl. CNPG backup metrics) pipelines; re-measure after (a) lands and only raise the limit if OOMs persist; re-enable traces via revert once Grafana Cloud quota resets; (c) postgres-1/migrate and the argocd/cert-manager stacks run with no requests/limits (BestEffort) on a node fleet 151% overcommitted on memory limits - set requests, protect the DB; (d) GHCR `pull QPS exceeded` causing ImagePullBackOff churn on `-2` game replicas - add authenticated GHCR pull secret; (e) cert-manager (167), cainjector (165), cnpg-controller (245) historic exit-1 restart loops - investigate via previous-container logs; (f) node1 carries all game workers + web (49 pods, 70% mem requested) while node2 has infra - consider topology spread or reduced game replicas (~50 x 32Mi = ~1.6Gi) | Prepared 2026-07-16 (local branches, not deployed): (a) metrics-server v0.9.0 addon commit b0cbe74 (brdgme-config); (b) confirmed live OOM loop from stuck #32 Tempo exporter, traces disabled in 77ab35c (revert to re-enable), limit not raised; (c) postgres/migrate resources 771359b + 11 addon workloads d581709, single-sample sized, revisit after (a); (d) ghcr-pull SA wiring 9f89ab8 + sealed-secret skeleton 2eacf90, needs Michael's read:packages PAT; (e) diagnosed historic control-plane-reachability crashes (leader-election lease loss / API EOF), no fix needed beyond (c); (f) no spread change - requests-skew artifact, defer to #42 + re-evaluate. Deployed 2026-07-16: metrics-server live, alloy traces disabled (mem 234->162Mi), addon+postgres resources applied (all Burstable), ghcr-pull secret + SA wiring live; remaining: post-deploy baseline capture + docs commit, revisit sizings after a week of metrics-server data | - | [plan](superpowers/plans/2026-07-16-41-cluster-resources.md) |

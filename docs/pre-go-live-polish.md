@@ -172,6 +172,7 @@ superpowers spec/plan and fixed as one batch when scheduled.
 - **Note:** Michael has already edited `rust/web/public/favicon.svg` in his
   working tree to use `#606060` for the grey. The work here is to land
   that edit and verify visibility after the next deploy.
+- **Resolved:** Confirmed fixed by Michael 2026-07-17.
 
 ### 2026-07-11: Game log sections still flash on command submit
 
@@ -183,6 +184,7 @@ superpowers spec/plan and fixed as one batch when scheduled.
 - **Expected:** Same fix class as the board: those log resources/
   components keep showing stale data while refetching instead of
   remounting or dropping to a loading state.
+- **Resolved:** Confirmed fixed by Michael 2026-07-17.
 
 ### 2026-07-11: No loading indicator on initial game page load
 
@@ -193,6 +195,10 @@ superpowers spec/plan and fixed as one batch when scheduled.
   and horizontally centered in the game area, while the game page loads.
 - **Note:** Make the spinner a reusable component so other pages that
   load data from the server can show it too.
+- **Resolved:** Consolidated 2026-07-17 into the "No loading indicator
+  when navigating to a game" entry below - same requirement, refined
+  there (spinner only when routing to a game for the first time, never
+  on websocket/command rerenders).
 
 ### 2026-07-11: Command input stays enabled while a command is submitting
 
@@ -445,8 +451,11 @@ superpowers spec/plan and fixed as one batch when scheduled.
   currently visible game refreshes from a websocket update or a command
   submission - those keep showing the current state until the update
   swaps in (per the earlier flash-on-update fixes).
-- **Note:** Refines the 2026-07-11 "No loading indicator on initial game
-  page load" entry (reusable spinner component, login-page spinner). The
+- **Note:** Consolidates/supersedes the 2026-07-11 "No loading indicator
+  on initial game page load" entry (reusable spinner component,
+  login-page spinner) - confirmed the same requirement by Michael
+  2026-07-17: a loading icon when routing to a game the first time, not
+  on rerenders after websocket updates or commands. The
   2026-07-17 command-input fix keys `game_data` on
   `(game_id, last seq)` - the spinner condition should distinguish a
   game_id change (show spinner) from a seq-only refetch (don't).
