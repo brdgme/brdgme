@@ -18,6 +18,9 @@ use uuid::Uuid;
 struct AppState {
     pool: PgPool,
     http: reqwest::Client,
+    /// Client for game service calls: shorter timeout than the LLM client,
+    /// but generous enough for KEDA scale-from-zero cold starts.
+    game_http: reqwest::Client,
     llm_url: String,
     llm_api_key: Option<String>,
     bot_model: String,
@@ -64,7 +67,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     // 1. Fetch game data from DB.
     let row = sqlx::query(
         r#"
-        SELECT g.game_state, gv.uri, gv.rules, gt.name as game_name, gb.name as bot_name, gp.is_turn, gp.id as game_player_id
+        SELECT g.game_state, gv.uri, gv.name as version_name, gv.rules, gt.name as game_name, gb.name as bot_name, gp.is_turn, gp.id as game_player_id
         FROM games g
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt ON gt.id = gv.game_type_id
@@ -92,6 +95,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
 
     let game_state: String = row.try_get("game_state").context("game_state")?;
     let game_service_uri: String = row.try_get("uri").context("uri")?;
+    let version_name: String = row.try_get("version_name").context("version_name")?;
     let rules: String = row.try_get("rules").unwrap_or_default();
     let game_player_id: Uuid = row.try_get("game_player_id").context("game_player_id")?;
     let game_name: String = row
@@ -147,6 +151,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     let mut bot_ctx = load_bot_context(
         state,
         &game_service_uri,
+        &version_name,
         req.game_id,
         req.player_position,
         game_player_id,
@@ -242,6 +247,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             bot_ctx = load_bot_context(
                 state,
                 &game_service_uri,
+                &version_name,
                 req.game_id,
                 req.player_position,
                 game_player_id,
@@ -257,9 +263,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         // Validate the command against the game service directly. `Play` is
         // stateless (returns the new state but doesn't persist), so this
         // retry loop never round-trips through the monolith.
-        let validate_result = call_game_service(
-            &state.http,
+        let validate_result = brdgme_game_client::request(
+            &state.game_http,
             &game_service_uri,
+            &version_name,
             &Request::Play {
                 player: req.player_position as usize,
                 game: bot_ctx.game_state.clone(),
@@ -354,18 +361,21 @@ struct BotContext {
     points: Vec<f32>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn load_bot_context(
     state: &AppState,
     game_service_uri: &str,
+    version_name: &str,
     game_id: uuid::Uuid,
     player_position: i32,
     game_player_id: uuid::Uuid,
     game_state: String,
     names: &[String],
 ) -> Result<BotContext> {
-    let status_resp = call_game_service(
-        &state.http,
+    let status_resp = brdgme_game_client::request(
+        &state.game_http,
         game_service_uri,
+        version_name,
         &Request::Status {
             game: game_state.clone(),
         },
@@ -435,30 +445,6 @@ fn build_messages(ctx: &PromptContext) -> Result<Vec<ChatMessage>> {
             content: "Please provide your command now.".to_string(),
         },
     ])
-}
-
-async fn call_game_service(
-    http: &reqwest::Client,
-    uri: &str,
-    request: &Request,
-) -> Result<Response> {
-    let resp = http
-        .post(uri)
-        .json(request)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .context("HTTP request to game service failed")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("Game service returned {}: {}", status, body));
-    }
-
-    resp.json::<Response>()
-        .await
-        .context("Failed to parse game service response")
 }
 
 /// Applies a JSON Merge Patch (RFC 7396) to `target` in place: keys set to
@@ -661,9 +647,15 @@ async fn main() -> Result<()> {
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .context("Failed to build HTTP client")?;
+    let game_http = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .context("Failed to build game service HTTP client")?;
     let state = AppState {
         pool,
         http,
+        game_http,
         llm_url,
         llm_api_key,
         bot_model,

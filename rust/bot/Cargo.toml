@@ -21,6 +21,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 brdgme_cmd = { path = "../lib/cmd", default-features = false }
 brdgme_color = { path = "../lib/color" }
 brdgme_game = { path = "../lib/game" }
+brdgme_game_client = { path = "../lib/game_client" }
 brdgme_markup = { path = "../lib/markup" }
 minijinja = "2"
 serde_yaml = "0.9"

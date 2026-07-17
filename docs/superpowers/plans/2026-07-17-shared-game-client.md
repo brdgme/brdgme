@@ -270,7 +270,7 @@ git commit -m "refactor: web uses shared brdgme_game_client"
 - Consumes: `brdgme_game_client::request` from Task 1.
 - Produces: nothing new - behavioral fix only. Bot game-service calls now send `Host: {version_name}.games.internal`.
 
-- [ ] **Step 1: Add the dependency**
+- [x] **Step 1: Add the dependency**
 
 In `rust/bot/Cargo.toml`, next to the other `brdgme_*` deps (around line 21):
 
@@ -278,7 +278,7 @@ In `rust/bot/Cargo.toml`, next to the other `brdgme_*` deps (around line 21):
 brdgme_game_client = { path = "../lib/game_client" }
 ```
 
-- [ ] **Step 2: Fetch the version name in the trigger query**
+- [x] **Step 2: Fetch the version name in the trigger query**
 
 In `rust/bot/src/main.rs` (~line 67), change the SELECT to also return the game version name:
 
@@ -292,7 +292,7 @@ and extract it next to the other row reads (~line 94):
     let version_name: String = row.try_get("version_name").context("version_name")?;
 ```
 
-- [ ] **Step 3: Add a dedicated game-service HTTP client**
+- [x] **Step 3: Add a dedicated game-service HTTP client**
 
 The bot's existing `state.http` has a 300s timeout sized for LLM calls, and the old `call_game_service` applied a 10s per-request timeout - too tight for KEDA scale-from-zero cold starts. Add a second client sized for game services.
 
@@ -316,7 +316,7 @@ In `main` (~line 659), after the existing `http` client is built:
 
 and add `game_http,` to the `AppState { ... }` initializer.
 
-- [ ] **Step 4: Route all game-service calls through the shared client**
+- [x] **Step 4: Route all game-service calls through the shared client**
 
 Thread `version_name` into `load_bot_context` - new signature:
 
@@ -371,7 +371,7 @@ The surrounding `match validate_result` arms are compatible as-is: `Ok(Response:
 
 Delete the now-unused local `async fn call_game_service` (~lines 440-460).
 
-- [ ] **Step 5: Verify the workspace builds and tests pass**
+- [x] **Step 5: Verify the workspace builds and tests pass**
 
 Run:
 ```bash
@@ -381,7 +381,7 @@ SQLX_OFFLINE=true cargo test --workspace --exclude web
 ```
 Expected: clippy clean, tests PASS. (The Host-header behavior itself is pinned by `test_sends_version_host_header` in the crate; the bot has no unit tests around `handle_bot_turn`, so correctness here is type-checked wiring plus the prod verification section below.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd rust && cargo fmt --all

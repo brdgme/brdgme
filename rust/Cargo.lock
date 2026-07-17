@@ -686,6 +686,7 @@ dependencies = [
  "brdgme_cmd",
  "brdgme_color",
  "brdgme_game",
+ "brdgme_game_client",
  "brdgme_markup",
  "futures-util",
  "minijinja",
