@@ -1,0 +1,17 @@
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: roll-through-the-ages-1
+spec:
+  hosts:
+  - roll-through-the-ages-1.games.internal
+  scaleTargetRef:
+    name: roll-through-the-ages-1
+    kind: Deployment
+    apiVersion: apps/v1
+    service: roll-through-the-ages-1
+    port: 80
+  replicas:
+    min: 0
+    max: 1
+  scaledownPeriod: 300
