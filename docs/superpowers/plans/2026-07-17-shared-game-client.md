@@ -461,7 +461,7 @@ git commit -m "refactor: operator uses shared brdgme_game_client"
 
 **Interfaces:** none (docs only).
 
-- [ ] **Step 1: Record the client rule in the architecture doc**
+- [x] **Step 1: Record the client rule in the architecture doc**
 
 In `docs/ARCHITECTURE.md`, directly after the paragraph ending "This contract is stable and must not change." (line 112), add:
 
@@ -474,7 +474,7 @@ call game services through it. Never hand-roll a game service HTTP call -
 a request without the Host header gets a 404 from the interceptor.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/ARCHITECTURE.md

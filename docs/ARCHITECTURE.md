@@ -111,6 +111,13 @@ Communication between the monolith and game services is strictly HTTP/JSON.
 The monolith sends a request object; the game service returns a response
 object. This contract is stable and must not change.
 
+All in-cluster callers reach game services through the KEDA HTTP
+interceptor, which routes on a `Host: {version_name}.games.internal`
+header. The shared crate `rust/lib/game_client` (`brdgme_game_client`)
+owns this convention plus retry/backoff; web, bot, and the operator all
+call game services through it. Never hand-roll a game service HTTP call -
+a request without the Host header gets a 404 from the interceptor.
+
 ### Common Structures
 
 **GameResponse:**
