@@ -193,9 +193,18 @@ Before any fleet rollout: put exactly one non-latest game-version Deployment beh
 
 Rollback (if the PoC fails or fleet rollout needs to be undone): point the affected `game_versions.uri` rows back at the direct Service, remove the `HTTPScaledObject`(s), and uninstall the add-on/KEDA core if abandoning the approach entirely. No data-layer changes beyond the `uri` column, so rollback is a plain revert.
 
-- [ ] **Step 5: Fleet rollout**
+- [x] **Step 5: Fleet rollout** (done 2026-07-17: operator redeployed on image sha-207d153 via brdgme-config prod/kustomization.yaml, verified healthy with all 19 scale-to-zero HTTPScaledObjects READY and idling to 0/0 as expected)
 
 Once the PoC gate passes, create `HTTPScaledObject`s and the corresponding `game_versions.uri` + Host-header wiring for the remaining non-latest versions, and roll out via brdgme-config.
+
+**Fleet rollout verification record (Michael, 2026-07-17):**
+
+- **Deploy:** operator redeployed on image `sha-207d153` (CI run 29556222630, rerun; brdgme-config `prod/kustomization.yaml` operator `newTag` set to `sha-207d153`, committed/pushed by Michael); operator scaled 0->1 by Michael.
+- **Operator health:** pod healthy, 0 restarts. Logs show one startup reconcile pass over all 39 `GameVersion`s, then `"Spec unchanged since last reconcile, skipping"` for every CR on the status-subresource re-trigger, then idle - confirms the `observedGeneration` skip and jittered-requeue fix (commit `e46c305`) is working as intended.
+- **DB state:** all 19 `scaleToZero` rows (`tic-tac-toe-2` + the 18 `*-1` versions) still point at `http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080` after reconciles (not reverted); `acquire-1`, `jaipur-2`, and all 20 non-`scaleToZero` `*-2` rows remain on direct service URLs.
+- **`observedGeneration`:** `status.observedGeneration == metadata.generation` on all 39 `GameVersion`s.
+- **HTTPScaledObjects:** all 19 READY (min 0 / max 1). The operator restart cycled all 19 backing pods (idle clock reset), after which all 19 deployments reached 0/0 once the 300s idle window elapsed: age-of-war-1, battleship-1, category-5-1, cathedral-1, farkle-1, for-sale-1, greed-1, liars-dice-1, lost-cities-1, love-letter-1, modern-art-1, no-thanks-1, roll-through-the-ages-1, splendor-1, sushi-go-1, sushizock-1, texas-holdem-1, zombie-dice-1, tic-tac-toe-2. `acquire-1` and `jaipur-2` (non-scale-to-zero) stayed 1/1 throughout.
+- **Cold-start spot check (tic-tac-toe-2):** `GET` via the interceptor with `Host: tic-tac-toe-2.games.internal` from `nats-0` (`wget`) returned HTTP 405 in 1.67s (405 expected - GET on a JSON-RPC endpoint); deployment transitioned 0/0 -> 1/1, pod age 10s at observation.
 
 **Fleet-cutover record (2026-07-17, read-only query by Worker, cutover SQL to be executed by Michael):**
 
@@ -281,9 +290,28 @@ kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c
 
 **Files:** none expected (measurement + a written decision, not code changes).
 
-- [ ] **Step 1: Measure freed memory**
+- [x] **Step 1: Measure freed memory** (done 2026-07-17: no measured pre-scale-down baseline exists to diff against - the spec's ~544Mi freed figure was always an estimate, and the only prior measured node numbers are Phase 1 Step 6's 74%/81%, taken before any scale-to-zero cutover. Recorded current post-scale-down node/pod/deployment numbers below; the freed-request estimate is corroborated (~576-608Mi vs. the spec's ~544Mi) but not independently measured against a pre-cutover baseline.)
 
 Compare actual freed memory requests against the spec's baseline (~1.25Gi current total, ~544Mi estimated freed from ~17 non-latest deployments scaling to 0, netting to roughly ~0.7Gi warm "latest" deployments + KEDA's ~70-160Mi overhead). Record actual vs. estimated.
+
+**Measurement record (2026-07-17, read-only kubectl pass, fleet scaled down):**
+
+No `kubectl top` baseline was captured while the full fleet was warm (pre-cutover), so an exact freed-memory delta cannot be computed. The only prior measured figures in this doc are Phase 1 Step 6 (2026-07-16, before any scale-to-zero cutover): node memory 74% and 81%. Current post-scale-down numbers are recorded below for comparison, with the caveat that node-level percentages reflect whole-node usage (system daemons, KEDA, monitoring, etc.), not just the `brdgme` namespace, and that Kubernetes scale-to-zero frees scheduled *requests*, not necessarily observed *usage*.
+
+`kubectl top nodes` (raw):
+
+| NAME | CPU(cores) | CPU% | MEMORY(bytes) | MEMORY% |
+| --- | --- | --- | --- | --- |
+| brdgme-pool-3c0il9 | 400m | 21% | 2617Mi | 87% |
+| brdgme-pool-3cv8wq | 348m | 18% | 2353Mi | 78% |
+
+Combined ~4970Mi used across both nodes. Versus Phase 1 Step 6's 74%/81% (2026-07-16, pre-cutover): current is 87%/78% - not a clean apples-to-apples comparison since Step 6 predates the scale-to-zero rollout and neither reading isolates `brdgme`-namespace requests from total node usage.
+
+`kubectl top pods -n brdgme` (summarized, ~28 pods, ~553Mi total actual usage): dominated by `alloy` (245Mi) and `postgres-1` (175Mi); `web` two pods 25Mi+22Mi; `operator` 6Mi; `bot` 7Mi; `nats-0` 13Mi; all running game-version pods at 0-4Mi each.
+
+`kubectl get deploy -n brdgme`: the 18 scale-to-zero `*-1` deployments at 0/0; `tic-tac-toe-2` at 1/1 at observation time (woken by the cold-start spot check / operator reconcile above, will idle back to 0/0 after the 300s window); the remaining 21 game deployments (latest `*-2` versions plus `acquire-1`, `jaipur-2`) at 1/1; `web` at 2/2.
+
+**Freed requests vs. spec estimate:** at the spec's per-game request figure (32Mi, from ~544Mi / ~17), the 18-19 scaled-to-zero deployments free roughly ~576-608Mi of scheduled memory *requests* when idle, in line with the spec's ~544Mi estimate. This is a requests-based estimate corroborating the spec, not a measured before/after delta - no warm-fleet `kubectl top` baseline exists in this doc to diff against.
 
 - [ ] **Step 2: Measure GHCR pull behavior and cold-start latency**
 
