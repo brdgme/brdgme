@@ -15,7 +15,7 @@ for all versions.
 ## Rationale
 
 - The flag's cost is not the if/else in the operator; it is two routing paths,
-  DB `uri` rows that diverge by class, HTTPScaledObjects for only 19 of 41
+  DB `uri` rows that diverge by class, HTTPScaledObjects for only 19 of 39
   versions, and an operator that reverts DB rows when config and manifests
   drift (the class of bug hit during the #42 rollout).
 - KEDA request-based scaling means a live match with slow-moving players will
@@ -42,17 +42,17 @@ for all versions.
 
 - Remove `scaleToZero: true` from the 19 `game-version.yaml` files that have
   it.
-- Add `http-scaled-object.yaml` to the 22 game dirs that lack one (min 0,
+- Add `http-scaled-object.yaml` to the 20 game dirs that lack one (min 0,
   max 1, host `{name}.games.internal`, port 80), and register it in each
   `kustomization.yaml`.
-- Set `scaledownPeriod: 1800` in all 41 HSOs (19 existing files currently say
+- Set `scaledownPeriod: 1800` in all 39 HSOs (19 existing files currently say
   300).
 
 ### Database
 
 No manual SQL. Removing `scaleToZero: true` bumps the generation of the 19
 CRs that carry it; the operator reconciles those and upserts the interceptor
-URI. The other 22 CRs get no spec change, so the observedGeneration skip
+URI. The other 20 CRs get no spec change, so the observedGeneration skip
 would leave their rows on direct URLs; Michael clears their status to force a
 reconcile (watch event fires immediately, no SQL needed):
 
@@ -63,7 +63,7 @@ for v in $(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get gameversions 
 done
 ```
 
-(Run over all 41 for simplicity; re-reconciling the 19 is a harmless no-op
+(Run over all 39 for simplicity; re-reconciling the 19 is a harmless no-op
 upsert.)
 
 ### Rollout ordering (critical)
@@ -79,14 +79,14 @@ cutover rows to direct service URLs.
 3. Land the manifest changes (k8s-only commit); Michael bumps the
    brdgme-config ref and syncs; ArgoCD applies CR + HSO changes; the operator
    reconciles the 19 generation-bumped CRs.
-4. Michael runs the status-clear loop (Database section) so the remaining 22
+4. Michael runs the status-clear loop (Database section) so the remaining 20
    CRs reconcile onto the interceptor URI.
 
 Between steps 2 and 3 the new operator reconciles existing CRs: 19 have
-`scaleToZero: true` (now an unknown field, ignored) and 22 have direct URLs
+`scaleToZero: true` (now an unknown field, ignored) and 20 have direct URLs
 in the DB. The new binary writes the interceptor URI for every version it
 reconciles, but only on generation change - rows stay as-is until steps 3-4.
-The 22 direct-URL rows keep working throughout (their Services remain).
+The 20 direct-URL rows keep working throughout (their Services remain).
 
 ### Out of scope
 
@@ -100,7 +100,7 @@ The 22 direct-URL rows keep working throughout (their Services remain).
 ## Verification
 
 - `cargo fmt --check`, `cargo clippy -p operator`, `cargo test -p operator`.
-- After rollout: all 41 `game_versions.uri` rows equal the interceptor URL;
-  41 HSOs READY; operator logs clean; spot-check cold-start wake on a
+- After rollout: all 39 `game_versions.uri` rows equal the interceptor URL;
+  39 HSOs READY; operator logs clean; spot-check cold-start wake on a
   previously non-scale-to-zero version (e.g. acquire-1); confirm scale-down
   after 1800s idle.
