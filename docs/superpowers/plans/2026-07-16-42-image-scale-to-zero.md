@@ -185,6 +185,7 @@ Latest versions: `game_versions.uri` keeps pointing directly at that game's Serv
   ```
 - **SQL access path:** `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "..."`
 - **Cutover executed:** 2026-07-17 by Michael (`UPDATE 1`). **Verification (2026-07-17):** HTTPScaledObject Ready; new game created and played through beta.brdg.me via the interceptor path (working); deployment scaled 1->0 at 04:16:12Z (~300s after last activity); next UI request triggered 0->1 at 04:17:22Z, pod Ready at 04:17:27Z (~5s cold start; ~7s click-to-UI-response observed by Michael); no interceptor/scaler errors. Day-1 gate evidence - the multi-day stability window of Step 4 continues from here.
+- **Cold-start tuning (2026-07-17):** the ~5s was dominated by the readiness probe (`initialDelaySeconds: 2, periodSeconds: 5` - the Rust binary binds in milliseconds). Changed to `initialDelaySeconds: 0, periodSeconds: 1` for tic-tac-toe-2 (brdgme `1e6ff83`, deployed via config ref bump). Measured after: second clean scale-down at 04:25:55Z, cold-start wake 04:28:23.9Z -> Ready 04:28:26.1Z (~2.2s pod-ready, ~3s click-to-render observed by Michael, down from ~5s/~7s). `periodSeconds: 1` is the k8s floor; probe is a kubelet-local TCP check, negligible overhead fleet-wide. Apply the same probe settings fleet-wide during Step 5 rollout.
 
 - [ ] **Step 4: PoC acceptance gate on one non-latest version**
 
