@@ -339,6 +339,10 @@ superpowers spec/plan and fixed as one batch when scheduled.
   settings form always shows the current value. Likely a
   resource/context holding the old user record that isn't invalidated
   on save; find and invalidate (or refetch) it.
+- **Resolved:** Fixed same day - `get_settings` now reads the name from
+  the `users` table (source of truth) instead of the session-cached
+  value, and `set_username` also refreshes the session copy so
+  `get_current_user` is immediately correct too.
 
 ### 2026-07-17: ELO rating change not shown when a game finishes
 

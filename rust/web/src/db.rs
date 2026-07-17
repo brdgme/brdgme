@@ -1495,6 +1495,18 @@ pub async fn set_user_theme(pool: &PgPool, user_id: Uuid, theme: Option<&str>) -
     Ok(())
 }
 
+/// The user's current name straight from the `users` table - the session's
+/// cached copy can be stale after a rename. Plain query for the same reason
+/// as `get_user_theme`.
+#[cfg(feature = "ssr")]
+pub async fn get_user_name(pool: &PgPool, user_id: Uuid) -> Result<String> {
+    let row: (String,) = sqlx::query_as("SELECT name FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
 /// Renames a user. Returns `Ok(false)` when the name is already taken
 /// case-insensitively (unique violation on `users_name_lower_key`); the
 /// caller turns that into a field error. Plain query for the same reason as

@@ -500,7 +500,7 @@ EOF
 
 **Root cause (read, not guessed):** the session (`SessionUser` in `auth/session.rs`) caches `name` at login; `get_current_user` returns it verbatim, and `get_settings` passes it through as `SettingsData.name`. `set_username` updates only the `users` row. The settings page's `LocalResource` is recreated per mount, so it does refetch on every visit - but the refetch returns the stale session copy. Fix both layers: `get_settings` reads the name from the DB (source of truth - covers other devices/sessions too), and `set_username` refreshes the session copy so `get_current_user` is also correct immediately.
 
-- [ ] **Step 1: Add the DB helper**
+- [x] **Step 1: Add the DB helper**
 
 In `rust/web/src/db.rs`, directly above `set_user_name`, add:
 
@@ -518,7 +518,7 @@ pub async fn get_user_name(pool: &PgPool, user_id: Uuid) -> Result<String> {
 }
 ```
 
-- [ ] **Step 2: Read the fresh name in `get_settings`**
+- [x] **Step 2: Read the fresh name in `get_settings`**
 
 In `rust/web/src/auth/server.rs`, in `get_settings`, change:
 
@@ -544,7 +544,7 @@ to:
     })
 ```
 
-- [ ] **Step 3: Refresh the session copy in `set_username`**
+- [x] **Step 3: Refresh the session copy in `set_username`**
 
 In `set_username`, change the success arm:
 
@@ -587,14 +587,14 @@ to:
 
 Note: other concurrently-logged-in sessions of the same user keep their old cached name until their next login, but their settings page now shows the fresh DB value - which is exactly the polish entry's requirement ("the settings form always shows the current value").
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `cd rust && cargo fmt --all && cargo check -p web --features ssr --no-default-features`
 Expected: `Finished` with no errors. (The `#[sqlx::test]` suites need a DB and fail locally by design - do not run them; CI covers them.)
 
 (beta) Change the username, navigate away, return to settings: the form shows the new name.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/web/src/db.rs rust/web/src/auth/server.rs

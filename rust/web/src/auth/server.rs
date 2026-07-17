@@ -1,7 +1,7 @@
 #[cfg(feature = "ssr")]
 use crate::auth::session::{
-    clear_user_session, get_user_from_session, invalidate_auth_token, set_user_session,
-    validate_session_token,
+    SESSION_USER_KEY, clear_user_session, get_user_from_session, invalidate_auth_token,
+    set_user_session, validate_session_token,
 };
 #[cfg(feature = "ssr")]
 use crate::error::internal;
@@ -518,7 +518,11 @@ pub async fn get_settings() -> Result<SettingsData, ServerFnError> {
     }
 
     Ok(SettingsData {
-        name: user.name,
+        // From the DB, not the session-cached AuthUser - the session copy
+        // is stale after a rename (see set_username's session refresh).
+        name: crate::db::get_user_name(&pool, user.id)
+            .await
+            .map_err(internal("get_settings: load name"))?,
         email: user.email,
         pref_colors,
     })
@@ -544,7 +548,20 @@ pub async fn set_username(name: String) -> Result<Option<String>, ServerFnError>
         .await
         .map_err(internal("set_username: update"))?
     {
-        true => Ok(None),
+        true => {
+            // The session caches the name from login time; refresh it so
+            // get_current_user (and anything else reading the session) sees
+            // the new name immediately. Best-effort: the DB rename already
+            // succeeded, and get_settings reads the DB directly anyway.
+            let session: Session = extract()
+                .await
+                .map_err(internal("set_username: extract session"))?;
+            if let Some(mut session_user) = get_user_from_session(&session).await {
+                session_user.name = name;
+                let _ = session.insert(SESSION_USER_KEY, session_user).await;
+            }
+            Ok(None)
+        }
         false => Ok(Some("That name is taken".to_string())),
     }
 }
