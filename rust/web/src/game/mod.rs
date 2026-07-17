@@ -1,5 +1,5 @@
 #[cfg(feature = "ssr")]
-pub mod client;
+pub use brdgme_game_client as client;
 pub mod server_fns;
 
 /// The fields of a game service `Status` used to update
@@ -405,7 +405,7 @@ mod tests {
     }
 
     /// Starts an in-process mock game service that answers every request with
-    /// whatever `handler` returns; mirrors the pattern in `game::client::tests`.
+    /// whatever `handler` returns; mirrors the pattern in `brdgme_game_client`'s tests.
     pub(crate) async fn spawn_mock_game_service<F>(handler: F) -> String
     where
         F: Fn(Request) -> Response + Send + Sync + 'static,

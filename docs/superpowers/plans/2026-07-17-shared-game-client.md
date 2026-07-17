@@ -54,7 +54,7 @@
   - `pub async fn pub_render(...)`, `pub async fn player_render(...)` as in the current file
   - `pub struct RenderResponse { pub render: String, pub state: String, pub command_spec: Option<CommandSpec> }`
 
-- [ ] **Step 1: Scaffold the crate with the moved code**
+- [x] **Step 1: Scaffold the crate with the moved code**
 
 Create `rust/lib/game_client/Cargo.toml`:
 
@@ -91,12 +91,12 @@ Copy `rust/web/src/game/client.rs` verbatim to `rust/lib/game_client/src/lib.rs`
 
 Add `"lib/game_client",` to the `members` list in `rust/Cargo.toml` (after `"lib/game"`, keeping the existing ordering style).
 
-- [ ] **Step 2: Run the moved tests to verify the crate stands alone**
+- [x] **Step 2: Run the moved tests to verify the crate stands alone**
 
 Run: `cd rust && cargo test -p brdgme_game_client`
 Expected: PASS (all tests moved across: retry, backoff, contract tests)
 
-- [ ] **Step 3: Add a Host-header regression test**
+- [x] **Step 3: Add a Host-header regression test**
 
 Append to the `tests` module in `rust/lib/game_client/src/lib.rs`:
 
@@ -140,12 +140,12 @@ async fn test_sends_version_host_header() {
 }
 ```
 
-- [ ] **Step 4: Run the new test**
+- [x] **Step 4: Run the new test**
 
 Run: `cd rust && cargo test -p brdgme_game_client test_sends_version_host_header`
 Expected: PASS (the moved code already sets the header; this test pins the contract so it can never silently regress again)
 
-- [ ] **Step 5: Write a failing test for non-2xx status errors**
+- [x] **Step 5: Write a failing test for non-2xx status errors**
 
 Today a non-2xx response (e.g. the interceptor's plain-text `404 Not Found`) surfaces as an opaque JSON parse error (`error parsing response: Not Found`). The client should report the HTTP status instead. Extend the existing `test_no_retry_on_http_error_response` test - after the existing `assert!(resp.is_err(), ...)` line, add:
 
@@ -157,12 +157,12 @@ Today a non-2xx response (e.g. the interceptor's plain-text `404 Not Found`) sur
         );
 ```
 
-- [ ] **Step 6: Run it to verify it fails**
+- [x] **Step 6: Run it to verify it fails**
 
 Run: `cd rust && cargo test -p brdgme_game_client test_no_retry_on_http_error_response`
 Expected: FAIL - the error is currently `error parsing response: boom`, which does not contain `500`
 
-- [ ] **Step 7: Implement the status check**
+- [x] **Step 7: Implement the status check**
 
 In `request_with_config` in `rust/lib/game_client/src/lib.rs`, replace:
 
@@ -182,12 +182,12 @@ with:
     }
 ```
 
-- [ ] **Step 8: Run the crate tests**
+- [x] **Step 8: Run the crate tests**
 
 Run: `cd rust && cargo test -p brdgme_game_client`
 Expected: PASS (all tests, including both new ones)
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd rust && cargo fmt --all
@@ -208,7 +208,7 @@ git commit -m "feat: extract shared brdgme_game_client crate for interceptor-awa
 - Consumes: `brdgme_game_client` public API from Task 1.
 - Produces: `crate::game::client::{request, render, pub_render, player_render, RenderResponse}` keeps resolving for all existing web call sites (`server_fns.rs`, `game/mod.rs`) - no call-site changes.
 
-- [ ] **Step 1: Swap the module for a re-export**
+- [x] **Step 1: Swap the module for a re-export**
 
 In `rust/web/src/game/mod.rs`, replace:
 
@@ -228,7 +228,7 @@ Delete `rust/web/src/game/client.rs` (its tests moved to the crate in Task 1).
 
 In the doc comment on `spawn_mock_game_service` (`rust/web/src/game/mod.rs:408`), update the reference `mirrors the pattern in `game::client::tests`` to `mirrors the pattern in `brdgme_game_client`'s tests`.
 
-- [ ] **Step 2: Wire the dependency**
+- [x] **Step 2: Wire the dependency**
 
 In `rust/web/Cargo.toml`:
 - Next to the other `brdgme_*` path deps (around line 48), add:
@@ -240,7 +240,7 @@ In `rust/web/Cargo.toml`:
       "dep:brdgme_game_client",
   ```
 
-- [ ] **Step 3: Verify web builds and tests pass**
+- [x] **Step 3: Verify web builds and tests pass**
 
 Run:
 ```bash
@@ -250,7 +250,7 @@ SQLX_OFFLINE=true cargo test -p web --features ssr
 ```
 Expected: clippy clean; tests PASS (DB-backed tests need the dev Postgres from `docs/DEV.md`; if it is unavailable, the ~41 DB tests fail with connection timeouts - that failure mode is pre-existing and not caused by this change, but prefer running with the DB up)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd rust && cargo fmt --all
