@@ -23,17 +23,16 @@ attempted and dropped 2026-07-08),
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
 complete 2026-07-10), #28 WP4 Cloudflare edge (complete 2026-07-11).
-**Top of backlog (updated 2026-07-17, post-cleanup):** the remaining #33
-polish entries in [docs/pre-go-live-polish.md](pre-go-live-polish.md):
-loading indicator when routing to a game for the first time (never on
-websocket/command rerenders of the visible game; consolidates the
+**Top of backlog (updated 2026-07-17, post-cleanup):** all three #33
+polish batches are now implemented and committed to master, including
+the loading indicator when routing to a game for the first time (never
+on websocket/command rerenders of the visible game; consolidates the
 2026-07-11 initial-load-spinner entry), disable command input + send
-button while submitting, autocomplete click refocuses the command input.
-Batches 1 and 2 are otherwise done (batch 2 awaits Michael's manual beta
-verification); favicon grey and game-log flashing confirmed fixed
-2026-07-17.
+button while submitting, and autocomplete click refocuses the command
+input; Michael's manual beta verification of batches 2 and 3 is still
+pending; favicon grey and game-log flashing confirmed fixed 2026-07-17.
 **Remaining pre-go-live:** #34 admin functions remainder (force-delete
-game, game JSON export + dev import CLI) + the #33 leftovers above, then
+game, game JSON export + dev import CLI), then
 go-live. 2026-07-17 (Michael): #35 and #39 are done (archived); #37 game
 verification is non-blocking; #16 is removed from the backlog - the
 cutover decision will be made directly once the play testers are
@@ -491,3 +490,19 @@ re-keying the `<Transition>` and remounting `GameCommandInput` on
 unrelated-game updates - fixed by hoisting command text above the
 remounting closure). Only Task 9 Step 6 (manual reproduction/verification
 on the deployed beta) is left, deliberately, for Michael.
+
+2026-07-17 (later still): third #33 polish batch implemented end-to-end,
+all 3 tasks in
+`docs/superpowers/plans/2026-07-17-33-pre-go-live-polish-3.md` committed
+to master: a reusable `Spinner` component extracted from the login form
+and used by `GamePage`, whose `<Transition>` is now remounted via a
+deduped game-id memo so a centered spinner shows on initial load and on
+game-to-game navigation but never on seq-only WS/command refetches of the
+already-visible game; the command input and Send button are disabled
+while a command is submitting, refocus the input on both success and
+error, and keep the typed text on error instead of clearing it; and the
+autocomplete suggestion click handler now refocuses the command input
+after inserting the word. Manual browser verification of all three,
+including the initial-load/navigation spinner behaviour, the
+disabled-while-submitting state, and the refocus-on-click behaviour, is
+left for Michael.
