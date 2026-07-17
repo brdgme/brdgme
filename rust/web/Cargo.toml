@@ -7,6 +7,13 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# #34 dev-only import CLI (spec D5): never deployed; requires ssr because it
+# links the server-side db/game modules.
+[[bin]]
+name = "import-game"
+path = "src/bin/import_game.rs"
+required-features = ["ssr"]
+
 [dependencies]
 leptos = { version = "0.8.20" }
 leptos_router = { version = "0.8.14" }
@@ -136,6 +143,7 @@ tokio-tungstenite = "0.30"
 
 [package.metadata.leptos]
 output-name = "web"
+bin-target = "web"
 site-root = "target/site"
 site-pkg-dir = "pkg"
 # Content-hash pkg/ asset filenames (web.<hash>.wasm/js/css) so Cloudflare

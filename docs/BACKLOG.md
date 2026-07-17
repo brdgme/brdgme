@@ -31,9 +31,10 @@ on websocket/command rerenders of the visible game; consolidates the
 button while submitting, and autocomplete click refocuses the command
 input; Michael's manual beta verification of batches 2 and 3 is still
 pending; favicon grey and game-log flashing confirmed fixed 2026-07-17.
-**Remaining pre-go-live:** #34 admin functions remainder (force-delete
-game, game JSON export + dev import CLI), then
-go-live. 2026-07-17 (Michael): #35 and #39 are done (archived); #37 game
+**Remaining pre-go-live:** #34 admin functions remainder implemented
+2026-07-17 (force-delete, export route, import CLI) - end-to-end
+dev-stack smoke test still pending manual verification; then go-live.
+2026-07-17 (Michael): #35 and #39 are done (archived); #37 game
 verification is non-blocking; #16 is removed from the backlog - the
 cutover decision will be made directly once the play testers are
 comfortable, using the archived #16 runbooks. #32 demoted to post-go-live
@@ -101,7 +102,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
 | 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - demoted to post-go-live 2026-07-10 (Michael: the Grafana Cloud quota must reset anyway, not a go-live blocker; was promoted pre-go-live 2026-07-09). Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
 | 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record, the plan is the batch fix. **2026-07-17: second batch of 9 entries (settings scroll/width/theme-picker polish, stale username after change, ELO change at game end, command input self-clearing, sub menu button still missing on mobile game pages, invalid-command errors surfaced raw as HTTP 500) implemented end-to-end, all 9 tasks committed to master** - only Task 9 Step 6 (manual beta reproduction/verification) remains, for Michael on the deployed beta | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md), [plan 2](superpowers/plans/2026-07-17-33-pre-go-live-polish-2.md) |
-| 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta; partial 2026-07-16 - `is_admin` flag (migration 008) landed and bump-bot-to-play made admin-only (server enforcement + UI gating; uncommitted) | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
+| 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Complete 2026-07-17 - `is_admin` flag (migration 008) and admin-only bump-bot-to-play landed 2026-07-16; force-delete game (transactional `db::delete_game` + confirm-dialog server fn), admin-guarded JSON export route (`GET /admin/games/{id}/export`, no emails), and the dev-only `import-game` CLI (maps bundle onto local game version by name, creates placeholder users) all implemented, gated, and committed | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | [plan](superpowers/plans/2026-07-17-34-admin-functions-remainder.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
 | 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - downgraded 2026-07-17 (Michael: games seem okay, does not block go-live) | - | - |
 | 38 | Frontend cache busting on new deploys (investigate stale WASM/asset caching when a new version is bumped in brdgme-config; options: user-facing "new version released, please reload" messaging, or simply force a reload when a new version is deployed) | Pending - unscheduled; added 2026-07-11 | - | - |
