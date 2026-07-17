@@ -1414,24 +1414,29 @@ pub async fn update_game_command_success(
         return Err(StaleStateConflict.into());
     }
 
-    let players = sqlx::query!(
-        "SELECT id, position, is_turn_at, last_turn_at FROM game_players WHERE game_id = $1",
-        game_id
-    )
-    .fetch_all(&mut *tx)
-    .await?;
+    // Plain (non-macro) query, not `query!`: adding `undo_game_state` to the
+    // column list here would require regenerating the `.sqlx` offline cache
+    // against a live database, which isn't available in this environment -
+    // see the `get_user_theme` doc comment above for the same convention.
+    let players: Vec<(Uuid, i32, time::PrimitiveDateTime, time::PrimitiveDateTime, Option<String>)> =
+        sqlx::query_as(
+            "SELECT id, position, is_turn_at, last_turn_at, undo_game_state FROM game_players WHERE game_id = $1",
+        )
+        .bind(game_id)
+        .fetch_all(&mut *tx)
+        .await?;
 
-    for p in players {
-        let pos = p.position as usize;
+    for (p_id, p_position, p_is_turn_at, p_last_turn_at, p_undo_game_state) in players {
+        let pos = p_position as usize;
         let is_turn = status.whose_turn.contains(&pos);
         let place = status.placings.get(pos).map(|&pl| pl as i32);
         let is_eliminated = status.eliminated.contains(&pos);
         let player_points = points.get(pos).copied();
-        let is_turn_at = if is_turn { now } else { p.is_turn_at };
-        let is_played = p.id == played_player_id;
-        let last_turn_at = if is_played { now } else { p.last_turn_at };
+        let is_turn_at = if is_turn { now } else { p_is_turn_at };
+        let is_played = p_id == played_player_id;
+        let last_turn_at = if is_played { now } else { p_last_turn_at };
         let undo_game_state: Option<&str> = if is_played && can_undo {
-            Some(prev_game_state)
+            p_undo_game_state.as_deref().or(Some(prev_game_state))
         } else {
             None
         };
@@ -1449,7 +1454,7 @@ pub async fn update_game_command_success(
             undo_game_state,
             last_turn_at,
             is_turn_at,
-            p.id
+            p_id
         )
         .execute(&mut *tx)
         .await?;
@@ -2075,6 +2080,237 @@ mod tests {
             ge_after_2.game.finished_at,
             Some(first_finished_at),
             "COALESCE preserves finished_at when the new value is NULL"
+        );
+    }
+
+    #[sqlx::test]
+    async fn update_game_command_success_keeps_first_undo_stash_in_a_run(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+
+        // First can_undo=true command by player 0.
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "state_0",
+            "state_1",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_1 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+
+        // Second can_undo=true command by the same player.
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "state_1",
+            "state_2",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge_after_1.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_2 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0 = ge_after_2
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        assert_eq!(
+            p0.game_player.undo_game_state,
+            Some("state_0".to_string()),
+            "the run's undo stash must stay pinned to the first command's prev_game_state"
+        );
+    }
+
+    #[sqlx::test]
+    async fn update_game_command_success_clears_stash_on_non_undoable_command(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+
+        // can_undo=true stashes state_0.
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "state_0",
+            "state_1",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_1 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+
+        // Same player plays a can_undo=false command; the stash must clear.
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "state_1",
+            "state_2",
+            false,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge_after_1.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_2 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0 = ge_after_2
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        assert_eq!(p0.game_player.undo_game_state, None);
+    }
+
+    #[sqlx::test]
+    async fn update_game_command_success_clears_stash_when_opponent_plays(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_id = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap()
+            .game_player
+            .id;
+        let p1_id = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap()
+            .game_player
+            .id;
+
+        // Player 0 plays a can_undo=true command, stashing state_0.
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_0",
+            "state_1",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![1],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_1 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_after_1 = ge_after_1
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        assert_eq!(
+            p0_after_1.game_player.undo_game_state,
+            Some("state_0".to_string())
+        );
+
+        // Opponent (player 1) plays next; player 0's stash must clear since
+        // player 0 is not the played player on this command.
+        update_game_command_success(
+            &pool,
+            game.id,
+            p1_id,
+            "state_1",
+            "state_2",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge_after_1.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_2 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_after_2 = ge_after_2
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let p1_after_2 = ge_after_2
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+        assert_eq!(
+            p0_after_2.game_player.undo_game_state, None,
+            "opponent's command must clear player 0's stash"
+        );
+        assert_eq!(
+            p1_after_2.game_player.undo_game_state,
+            Some("state_1".to_string())
         );
     }
 
