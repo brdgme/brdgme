@@ -1,0 +1,18 @@
+---
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: tic-tac-toe-2
+spec:
+  hosts:
+  - tic-tac-toe-2.games.internal
+  scaleTargetRef:
+    name: tic-tac-toe-2
+    kind: Deployment
+    apiVersion: apps/v1
+    service: tic-tac-toe-2
+    port: 80
+  replicas:
+    min: 0
+    max: 1
+  scaledownPeriod: 300
