@@ -911,7 +911,7 @@ EOF
 
 Fix both: (1) make the memo retain the last seq seen for the open game instead of collapsing to `None`, and (2) hoist the command text into `GamePage` so remounts re-read the typed value (the same hoist-above-the-closure pattern already used for the `logs` resource).
 
-- [ ] **Step 1: Reproduce with a failing test (the logic-level reproduction)**
+- [x] **Step 1: Reproduce with a failing test (the logic-level reproduction)**
 
 The full manual reproduction needs a running stack and a second actor (see Step 6); the memo bug itself is pure logic, so capture it in a unit test first. In `rust/web/src/app.rs`, add to the existing `mod tests` block:
 
@@ -941,12 +941,12 @@ The full manual reproduction needs a running stack and a second actor (see Step 
     }
 ```
 
-- [ ] **Step 2: Run to confirm they fail**
+- [x] **Step 2: Run to confirm they fail**
 
 Run: `cd rust && cargo test -p web --features ssr --lib track_game_seq`
 Expected: compile error - `track_game_seq` does not exist yet.
 
-- [ ] **Step 3: Implement the helper and rewire the memo**
+- [x] **Step 3: Implement the helper and rewire the memo**
 
 In `rust/web/src/app.rs`, next to `count_my_turn`, add:
 
@@ -1014,7 +1014,7 @@ The memo's value now already contains the game id, so simplify `game_data`'s key
 
 The `logs` `LocalResource` closure keeps its `let _ = seq_for_this_game.get();` subscription (now also dedup-stable) and its own `game_id()` read - no change needed there.
 
-- [ ] **Step 4: Hoist the command text above the remounting closure**
+- [x] **Step 4: Hoist the command text above the remounting closure**
 
 In `rust/web/src/components/game.rs`, add near the top (after the `use` lines):
 
@@ -1063,7 +1063,7 @@ In `rust/web/src/app.rs`, in `GamePage`, right after `provide_context(logs);`, a
     });
 ```
 
-- [ ] **Step 5: Run the tests and check both**
+- [x] **Step 5: Run the tests and check both**
 
 Run: `cd rust && cargo test -p web --features ssr --lib track_game_seq`
 Expected: 2 passed.
@@ -1080,7 +1080,7 @@ Before-fix reproduction (also the after-fix check), needs two games and a second
 4. Also verify the open-game case: while typing in a game where another player/bot then moves, the board updates but the typed text survives.
 5. Regression check: submit a valid command - input clears and refocuses; navigate game A -> game B - the input is empty (no text leak); undo/concede still refetch.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/web/src/app.rs rust/web/src/components/game.rs

@@ -740,13 +740,12 @@ fn GamePage() -> impl IntoView {
 
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
 
-    // Per-game sequence number, isolated from other games' WS updates so this
-    // page's resources don't refetch when a different game changes.
-    let seq_for_this_game = Memo::new(move |_| {
-        let current_id = game_id();
-        game_update
-            .get()
-            .and_then(|(id, seq)| (Some(id) == current_id).then_some(seq))
+    // Per-game sequence state, isolated from other games' WS updates so this
+    // page's resources don't refetch when a different game changes. Holds
+    // (game_id, last seq for it) so an update for another game leaves the
+    // memo value unchanged (PartialEq dedupe) instead of flipping to None.
+    let seq_for_this_game = Memo::new(move |prev: Option<&(Option<Uuid>, Option<u64>)>| {
+        track_game_seq(prev.copied(), game_id(), game_update.get())
     });
 
     // Call mark_read on mount and whenever the game ID changes.
@@ -763,7 +762,7 @@ fn GamePage() -> impl IntoView {
     // hard refresh. Re-keyed on the per-game WS sequence memo, which isolates
     // this page's refetches to this game's WS signals.
     let game_data = Resource::new_blocking(
-        move || (game_id(), seq_for_this_game.get()),
+        move || seq_for_this_game.get(),
         |(id, _)| async move {
             match id {
                 Some(id) => get_game_details(id).await,
@@ -788,6 +787,24 @@ fn GamePage() -> impl IntoView {
             }
         });
     provide_context(logs);
+
+    // Hoisted for the same reason as `logs` above: the <Transition> closure
+    // remounts GameCommandInput on every game_data refetch, and a local
+    // signal there would reset typed-but-unsent text to "" each time.
+    let command_text = crate::components::game::CommandInputText(RwSignal::new(String::new()));
+    provide_context(command_text);
+
+    // Typed text must not leak between games when navigating game-to-game
+    // (the route component is reused, so nothing else resets it).
+    Effect::new(move |prev: Option<Option<Uuid>>| {
+        let id = game_id();
+        if let Some(prev_id) = prev
+            && prev_id != id
+        {
+            command_text.0.set(String::new());
+        }
+        id
+    });
 
     // MainLayout is outside Transition so it is always in the initial SSR
     // HTML with no streaming placeholder risk. Transition (not Suspense)
@@ -861,6 +878,27 @@ fn count_my_turn(games: &[crate::game::server_fns::GameSummary]) -> usize {
     games.iter().filter(|g| g.is_turn).count()
 }
 
+/// State for GamePage's per-game WS-sequence memo: `(viewed game, last seq
+/// seen for it)`. Updates for other games keep the previous seq - the old
+/// closure returned None for them, which re-keyed the game resource and
+/// remounted the game view (clearing the command input mid-typing).
+/// Changing the viewed game resets the seq.
+fn track_game_seq(
+    prev: Option<(Option<Uuid>, Option<u64>)>,
+    current_id: Option<Uuid>,
+    update: Option<(Uuid, u64)>,
+) -> (Option<Uuid>, Option<u64>) {
+    let prev_seq = match prev {
+        Some((prev_id, seq)) if prev_id == current_id => seq,
+        _ => None,
+    };
+    let seq = match update {
+        Some((id, seq)) if Some(id) == current_id => Some(seq),
+        _ => prev_seq,
+    };
+    (current_id, seq)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -902,5 +940,29 @@ mod tests {
                 "THEME_BOOT_SCRIPT missing slug {slug}"
             );
         }
+    }
+
+    #[test]
+    fn track_game_seq_retains_seq_on_other_game_updates() {
+        let this_game = Uuid::new_v4();
+        let other_game = Uuid::new_v4();
+        // An update for this game sets the seq...
+        let state = track_game_seq(None, Some(this_game), Some((this_game, 3)));
+        assert_eq!(state, (Some(this_game), Some(3)));
+        // ...and an update for a DIFFERENT game must keep it (the old memo
+        // collapsed to None here, re-keying game_data and remounting the
+        // game view mid-typing).
+        let state = track_game_seq(Some(state), Some(this_game), Some((other_game, 4)));
+        assert_eq!(state, (Some(this_game), Some(3)));
+    }
+
+    #[test]
+    fn track_game_seq_resets_when_viewed_game_changes() {
+        let game_a = Uuid::new_v4();
+        let game_b = Uuid::new_v4();
+        let state = track_game_seq(None, Some(game_a), Some((game_a, 7)));
+        // Navigating to another game must not carry game A's seq over.
+        let state = track_game_seq(Some(state), Some(game_b), Some((game_a, 7)));
+        assert_eq!(state, (Some(game_b), None));
     }
 }

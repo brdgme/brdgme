@@ -372,6 +372,16 @@ superpowers spec/plan and fixed as one batch when scheduled.
   value-controlled reset) on the websocket-driven refetch - same family
   as the earlier flash-on-update entries. Fix so the input value
   survives updates.
+- **Resolved:** Fixed same day - two confirmed causes. (1) `GamePage`'s
+  per-game WS memo (`seq_for_this_game`) collapsed to `None` whenever an
+  update arrived for a DIFFERENT game, re-keying `game_data` and
+  remounting the whole game view mid-typing - it now tracks
+  `(game_id, last seq)` via a pure `track_game_seq` helper (unit-tested)
+  so other games' updates are no-ops. (2) `GameCommandInput`'s text lived
+  in a local signal inside the `<Transition>` closure, so even legitimate
+  refetches of the open game reset it - hoisted to `GamePage` via a new
+  `CommandInputText` context (same pattern as the `logs` resource),
+  cleared on game-to-game navigation.
 
 ### 2026-07-17: Sub menu button still not showing on mobile game pages
 

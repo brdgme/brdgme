@@ -6,6 +6,13 @@ use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
 use web_sys::wasm_bindgen::JsCast;
 
+/// The game command input's text, owned by `GamePage` (above the
+/// `<Transition>` closure that remounts `GameCommandInput` on every game
+/// refetch) so typed input survives background updates. Newtype so the
+/// context can't collide with other RwSignal<String> providers.
+#[derive(Clone, Copy)]
+pub struct CommandInputText(pub RwSignal<String>);
+
 #[component]
 pub fn GameBoard(html: String, player_style: String) -> impl IntoView {
     view! {
@@ -335,7 +342,7 @@ pub fn GameCommandInput(
     command_spec: Option<brdgme_game::command::Spec>,
     player_names: Vec<String>,
 ) -> impl IntoView {
-    let (command, set_command) = signal(String::new());
+    let command = expect_context::<CommandInputText>().0;
     let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
     let input_ref = NodeRef::<leptos::html::Input>::new();
@@ -394,7 +401,7 @@ pub fn GameCommandInput(
     // trigger bump is still needed for the layout header.
     Effect::new(move |_| {
         if let Some(Ok(None)) = submit_action.value().get() {
-            set_command.set(String::new());
+            command.set(String::new());
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
             if let Some(el) = input_ref.get() {
@@ -455,7 +462,7 @@ pub fn GameCommandInput(
                                         ev.prevent_default();
                                         let current = command.get_untracked();
                                         let prefix = word_prefix(&current);
-                                        set_command.set(format!("{}{} ", prefix, value2));
+                                        command.set(format!("{}{} ", prefix, value2));
                                     };
                                     view! { <a href="#" on:click=on_click>{value}</a> }
                                 };
@@ -502,7 +509,7 @@ pub fn GameCommandInput(
                         spellcheck="false"
                         node_ref=input_ref
                         prop:value=command
-                        on:input=move |ev| set_command.set(event_target_value(&ev))
+                        on:input=move |ev| command.set(event_target_value(&ev))
                     />
                     <input type="submit" value="Send"/>
                 </form>
