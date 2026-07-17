@@ -706,6 +706,50 @@ pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
     Ok(())
 }
 
+/// Admin-only hard delete, minus leptos context plumbing so tests can drive
+/// it. Admins need not be players in the game.
+#[cfg(feature = "ssr")]
+async fn force_delete_game_impl(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    game_id: Uuid,
+) -> Result<(), ServerFnError> {
+    let is_admin = crate::db::is_user_admin(pool, user_id)
+        .await
+        .map_err(internal("force_delete_game: check admin"))?;
+    if !is_admin {
+        return Err(ServerFnError::new("Admin access required"));
+    }
+
+    let deleted = crate::db::delete_game(pool, game_id)
+        .await
+        .map_err(internal("force_delete_game: delete game"))?;
+    if !deleted {
+        return Err(ServerFnError::new("Game not found"));
+    }
+    Ok(())
+}
+
+#[server(ForceDeleteGame, "/api")]
+pub async fn force_delete_game(game_id: Uuid) -> Result<(), ServerFnError> {
+    use crate::auth::server::get_current_user;
+    use crate::websocket::GameBroadcaster;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let broadcaster = expect_context::<GameBroadcaster>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    force_delete_game_impl(&pool, user.id, game_id).await?;
+
+    // Spec D3: broadcast the usual game-update signal so open clients
+    // refresh (their refetch will surface "Game not found"). No bot trigger.
+    broadcaster.broadcast_game_update(game_id).await;
+    Ok(())
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
@@ -1020,5 +1064,88 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(old_ge.game.restarted_game_id, None);
+    }
+
+    #[sqlx::test]
+    async fn force_delete_game_rejects_non_admin(pool: PgPool) {
+        let user_id = make_user(&pool, "notadmin").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: user_id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = force_delete_game_impl(&pool, user_id, game.id).await;
+        assert!(result.is_err());
+        // Game must still exist.
+        assert!(
+            crate::db::find_game(&pool, game.id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[sqlx::test]
+    async fn force_delete_game_deletes_for_admin(pool: PgPool) {
+        let admin_id = make_user(&pool, "admin").await;
+        sqlx::query!("UPDATE users SET is_admin = true WHERE id = $1", admin_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: admin_id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+            },
+        )
+        .await
+        .unwrap();
+
+        force_delete_game_impl(&pool, admin_id, game.id)
+            .await
+            .unwrap();
+        assert!(
+            crate::db::find_game(&pool, game.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn force_delete_game_missing_game_errors(pool: PgPool) {
+        let admin_id = make_user(&pool, "admin2").await;
+        sqlx::query!("UPDATE users SET is_admin = true WHERE id = $1", admin_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let result = force_delete_game_impl(&pool, admin_id, Uuid::new_v4()).await;
+        assert!(result.is_err());
     }
 }

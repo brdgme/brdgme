@@ -1,5 +1,6 @@
 use crate::game::server_fns::{
-    BumpBotTurns, ConcedeGame, GameViewData, PlayerViewData, RestartGame, SubmitCommand, UndoGame,
+    BumpBotTurns, ConcedeGame, ForceDeleteGame, GameViewData, PlayerViewData, RestartGame,
+    SubmitCommand, UndoGame,
 };
 use leptos::prelude::*;
 use leptos_router::{NavigateOptions, hooks::use_navigate};
@@ -39,6 +40,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let concede_action = ServerAction::<ConcedeGame>::new();
     let restart_action = ServerAction::<RestartGame>::new();
     let bump_bot_action = ServerAction::<BumpBotTurns>::new();
+    let force_delete_action = ServerAction::<ForceDeleteGame>::new();
 
     // Trigger re-fetch after undo/concede. Local bump makes the own action
     // refetch even if the WS is down; the trigger bump is still needed for
@@ -61,6 +63,16 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     Effect::new(move |_| {
         if let Some(Ok(new_id)) = restart_action.value().get() {
             navigate(&format!("/games/{}", new_id), NavigateOptions::default());
+        }
+    });
+
+    // Navigate away after force delete (spec D3); bump the sidebar trigger so
+    // the deleted game drops out of the active-games list.
+    let navigate_after_delete = use_navigate();
+    Effect::new(move |_| {
+        if let Some(Ok(())) = force_delete_action.value().get() {
+            trigger.set_last_update.update(|n| *n += 1);
+            navigate_after_delete("/", NavigateOptions::default());
         }
     });
 
@@ -127,6 +139,19 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                                     ev.prevent_default();
                                     bump_bot_action.dispatch(BumpBotTurns { game_id });
                                 }>"Bump bot to play"</a>
+                            </div>
+                        </Show>
+                        <Show when=move || viewer_is_admin>
+                            <div>
+                                <a href="#" on:click=move |ev| {
+                                    ev.prevent_default();
+                                    let confirmed = web_sys::window()
+                                        .and_then(|w| w.confirm_with_message("Permanently delete this game for all players? This cannot be undone.").ok())
+                                        .unwrap_or(false);
+                                    if confirmed {
+                                        force_delete_action.dispatch(ForceDeleteGame { game_id });
+                                    }
+                                }>"Delete game (admin)"</a>
                             </div>
                         </Show>
                     </div>
