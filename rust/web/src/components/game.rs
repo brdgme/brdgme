@@ -468,6 +468,12 @@ pub fn GameCommandInput(
                                         let current = command.get_untracked();
                                         let prefix = word_prefix(&current);
                                         command.set(format!("{}{} ", prefix, value2));
+                                        // The click focuses the <a>, so the
+                                        // type-anywhere guard won't help here -
+                                        // refocus the input directly.
+                                        if let Some(el) = input_ref.get_untracked() {
+                                            let _ = el.focus();
+                                        }
                                     };
                                     view! { <a href="#" on:click=on_click>{value}</a> }
                                 };

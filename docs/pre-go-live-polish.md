@@ -225,6 +225,9 @@ superpowers spec/plan and fixed as one batch when scheduled.
   the click lands on the suggestion element, so the type-anywhere keydown
   handler's "nothing focused" guard does not help here. The click handler
   itself should refocus the input.
+- **Resolved:** The suggestion `on_click` handler now calls
+  `input_ref.focus()` after inserting the word, so typing continues in the
+  command input immediately.
 
 ### 2026-07-11: Header "Sub menu" button does nothing
 
