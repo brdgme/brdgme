@@ -38,6 +38,9 @@ spec:
                 type: boolean
               message:
                 type: string
+              observedGeneration:
+                type: integer
+                format: int64
     subresources:
       status: {}
     additionalPrinterColumns:
