@@ -1089,6 +1089,45 @@ pub async fn concede_game(
     Ok(())
 }
 
+/// #34 admin force delete (spec D3): hard-deletes a game and all dependent
+/// rows in one transaction. Any game referencing the deleted one via
+/// `restarted_game_id` has that link nulled (making it restartable again).
+/// Ratings are deliberately NOT rewound. Returns false if the game did not
+/// exist.
+#[cfg(feature = "ssr")]
+pub async fn delete_game(pool: &PgPool, game_id: Uuid) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query!(
+        "UPDATE games SET restarted_game_id = NULL, updated_at = NOW() WHERE restarted_game_id = $1",
+        game_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM game_log_targets WHERE game_log_id IN (SELECT id FROM game_logs WHERE game_id = $1)",
+        game_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!("DELETE FROM game_logs WHERE game_id = $1", game_id)
+        .execute(&mut *tx)
+        .await?;
+    // game_players before game_bots: game_players.game_bot_id FK.
+    sqlx::query!("DELETE FROM game_players WHERE game_id = $1", game_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!("DELETE FROM game_bots WHERE game_id = $1", game_id)
+        .execute(&mut *tx)
+        .await?;
+    let result = sqlx::query!("DELETE FROM games WHERE id = $1", game_id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(result.rows_affected() > 0)
+}
+
 #[cfg(feature = "ssr")]
 pub async fn mark_game_read(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> Result<()> {
     sqlx::query!(
@@ -2995,5 +3034,99 @@ mod tests {
             result,
             vec!["Green".to_string(), "Red".to_string(), "Blue".to_string()]
         );
+    }
+
+    // --- delete_game (#34 force delete, spec D3) ---
+
+    #[sqlx::test]
+    async fn delete_game_removes_all_dependent_rows(pool: PgPool) {
+        let user = make_user(&pool, "deleter").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, game_version_id, user.id, &[], 1, &[0]).await;
+
+        // A log targeted at the human player, so game_log_targets is exercised.
+        let log_id: Uuid = sqlx::query_scalar!(
+            "INSERT INTO game_logs (game_id, body, is_public, logged_at)
+             VALUES ($1, 'hello', false, timezone('utc', now())) RETURNING id",
+            game.id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let player_id: Uuid = sqlx::query_scalar!(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+            game.id,
+            user.id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "INSERT INTO game_log_targets (game_log_id, game_player_id) VALUES ($1, $2)",
+            log_id,
+            player_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let deleted = delete_game(&pool, game.id).await.unwrap();
+        assert!(deleted);
+
+        for (table, count) in [
+            ("games", count_rows(&pool, "games").await),
+            ("game_players", count_rows(&pool, "game_players").await),
+            ("game_bots", count_rows(&pool, "game_bots").await),
+            ("game_logs", count_rows(&pool, "game_logs").await),
+            (
+                "game_log_targets",
+                count_rows(&pool, "game_log_targets").await,
+            ),
+        ] {
+            assert_eq!(count, 0, "expected no rows left in {}", table);
+        }
+        // The user survives the delete.
+        assert_eq!(count_rows(&pool, "users").await, 1);
+    }
+
+    #[sqlx::test]
+    async fn delete_game_nulls_restarted_game_id_references(pool: PgPool) {
+        let user = make_user(&pool, "restarter").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let old_game = make_game_with_players(&pool, game_version_id, user.id, &[], 0, &[]).await;
+        let new_game = make_game_with_players(&pool, game_version_id, user.id, &[], 0, &[0]).await;
+        sqlx::query!(
+            "UPDATE games SET restarted_game_id = $1 WHERE id = $2",
+            new_game.id,
+            old_game.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let deleted = delete_game(&pool, new_game.id).await.unwrap();
+        assert!(deleted);
+
+        let restarted: Option<Uuid> = sqlx::query_scalar!(
+            "SELECT restarted_game_id FROM games WHERE id = $1",
+            old_game.id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(restarted, None);
+    }
+
+    #[sqlx::test]
+    async fn delete_game_returns_false_for_missing_game(pool: PgPool) {
+        let deleted = delete_game(&pool, Uuid::new_v4()).await.unwrap();
+        assert!(!deleted);
+    }
+
+    async fn count_rows(pool: &PgPool, table: &str) -> i64 {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", table))
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
 }
