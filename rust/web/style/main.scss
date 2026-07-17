@@ -519,11 +519,18 @@ body {
   }
 }
 
-/* Settings page */
-.settings {
-  max-width: 40em;
+/* Shared wrapper for non-game content pages: centered, ~1220px max
+   (Wikipedia 1220px, MUI lg 1200px - squarely within best practice).
+   Wide enough for 3 theme-tile columns (3 x 14em + gaps = 44em = 704px)
+   on the settings page. Game pages don't use it. */
+.content-page {
+  max-width: 1220px;
+  margin: 0 auto;
   padding: 0 1em;
+  box-sizing: border-box;
 }
+
+/* Settings page */
 
 .settings input,
 .settings select {

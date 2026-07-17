@@ -166,7 +166,7 @@ EOF
 **Interfaces:**
 - Produces: `.content-page` CSS class - the shared wrapper for every non-game content page. Game pages (`GamePage`) do NOT get it.
 
-- [ ] **Step 1: Add the shared class and drop the settings-specific width**
+- [x] **Step 1: Add the shared class and drop the settings-specific width**
 
 In `rust/web/style/main.scss`, find:
 
@@ -197,7 +197,7 @@ Replace with:
 
 (The `.settings input, .settings select { max-width: 100%; }` rule that follows stays unchanged.)
 
-- [ ] **Step 2: Apply the class to the non-game pages**
+- [x] **Step 2: Apply the class to the non-game pages**
 
 In `rust/web/src/settings.rs`, change:
 
@@ -229,14 +229,14 @@ In `rust/web/src/app.rs`, `HomePage`: wrap the layout children in the new class:
 
 `GamePage` is left alone.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `cd rust && cargo fmt --all && cargo check -p web --features ssr --no-default-features`
 Expected: `Finished` with no errors.
 
 (beta) Settings page shows 3 theme tile columns; content is centered with even margins on a wide monitor; game pages unchanged.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add rust/web/style/main.scss rust/web/src/settings.rs rust/web/src/app.rs

@@ -299,6 +299,10 @@ superpowers spec/plan and fixed as one batch when scheduled.
   container is 1320px, MUI's lg is 1200px - ~1220px is squarely within
   best practice). Wide enough for 3 theme columns on the settings page.
   Game pages are unaffected.
+- **Resolved:** Fixed same day - new shared `.content-page` wrapper
+  (max-width 1220px, centered) applied to settings, home, dashboard and
+  new-game pages, replacing the settings page's 40em cap. Game pages
+  unaffected.
 
 ### 2026-07-17: Selected theme should be indicated by border, not name highlight
 

@@ -30,7 +30,7 @@ pub fn SettingsPage() -> impl IntoView {
 
     view! {
         <MainLayout>
-            <div class="settings">
+            <div class="settings content-page">
                 <h1>"Settings"</h1>
                 <UsernameSection settings=settings/>
                 <ColorsSection settings=settings/>

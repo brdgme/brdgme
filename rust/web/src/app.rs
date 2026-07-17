@@ -251,9 +251,11 @@ pub(crate) fn local_data_theme() -> Option<String> {
 fn HomePage() -> impl IntoView {
     view! {
         <MainLayout>
-            <h1>"Welcome to brdg.me"</h1>
-            <p>"Lo-fi board games by email and web."</p>
-            <A href="/dashboard">"Go to Dashboard"</A>
+            <div class="content-page">
+                <h1>"Welcome to brdg.me"</h1>
+                <p>"Lo-fi board games by email and web."</p>
+                <A href="/dashboard">"Go to Dashboard"</A>
+            </div>
         </MainLayout>
     }
 }
@@ -519,7 +521,7 @@ fn GamesPage() -> impl IntoView {
 
     view! {
         <MainLayout>
-            <div class="new-game">
+            <div class="new-game content-page">
                 <h1>"New Game"</h1>
                 {move || match game_types.get() {
                     None => view! { <p>"Loading..."</p> }.into_any(),
@@ -706,14 +708,16 @@ fn GamesPage() -> impl IntoView {
 fn DashboardPage() -> impl IntoView {
     view! {
         <MainLayout>
-            <h1>"Dashboard"</h1>
-            <p>"View your active games and statistics."</p>
+            <div class="content-page">
+                <h1>"Dashboard"</h1>
+                <p>"View your active games and statistics."</p>
 
-            <div class="dashboard-sections">
-                <section class="active-games">
-                    <h2>"Active Games"</h2>
-                    <p>"Use the sidebar to navigate your games."</p>
-                </section>
+                <div class="dashboard-sections">
+                    <section class="active-games">
+                        <h2>"Active Games"</h2>
+                        <p>"Use the sidebar to navigate your games."</p>
+                    </section>
+                </div>
             </div>
         </MainLayout>
     }
