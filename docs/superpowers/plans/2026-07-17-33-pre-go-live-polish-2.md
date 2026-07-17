@@ -725,7 +725,7 @@ EOF
 
 **Design note:** the polish entry asks for a 4xx "or ideally a typed/expected server fn error the client renders directly". This repo's established pattern for expected user-input rejections is `Ok(Some(message))` (see `set_username`), which removes both the HTTP 500 and the "error running server function" leakage in one move and needs no custom `ServerFnError` codec; it responds 200 rather than 4xx, which satisfies the entry's core requirement (user input error must not be a server fault). If a literal 4xx is ever required, that is a Leptos custom-error-type follow-up, out of scope here.
 
-- [ ] **Step 1: Add the `UserError` variant**
+- [x] **Step 1: Add the `UserError` variant**
 
 In `rust/web/src/game/mod.rs`, change:
 
@@ -753,7 +753,7 @@ pub enum ExecuteCommandError {
 }
 ```
 
-- [ ] **Step 2: Return it from `execute_command` for game-rejected input**
+- [x] **Step 2: Return it from `execute_command` for game-rejected input**
 
 In `execute_command`, change:
 
@@ -788,7 +788,7 @@ to:
 
 Leave "Not your turn" / "Game is already finished" / "Game not found" as `Other` - they are race/URL-tampering cases, not command-syntax feedback, and the bot/e-mail paths that also consume `ExecuteCommandError` treat them as failures today. Grep `ExecuteCommandError` consumers in `game/mod.rs` (the bot consumer around lines 289-320 and the undo/concede/restart paths) and confirm none match exhaustively on the enum in a way the new variant breaks (`Conflict` is matched specifically; everything else funnels into generic error handling) - adjust only if the compiler objects.
 
-- [ ] **Step 3: Map it in `submit_command`**
+- [x] **Step 3: Map it in `submit_command`**
 
 In `rust/web/src/game/server_fns.rs`, change `submit_command`'s signature and tail:
 
@@ -825,7 +825,7 @@ and replace the final `super::execute_command(...)` expression with:
 
 (`ExecuteCommandError` may need re-exporting or a `use` inside the ssr-gated fn body depending on its current visibility - it is `pub` in `game/mod.rs`.)
 
-- [ ] **Step 4: Render it in `GameCommandInput`**
+- [x] **Step 4: Render it in `GameCommandInput`**
 
 In `rust/web/src/components/game.rs`, the success effect currently matches any `Ok`:
 
@@ -866,14 +866,14 @@ with:
 
 The typed text stays in the input on `Ok(Some(_))` because the clear effect no longer fires - matching the entry's expectation that the user can correct and resubmit.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run: `cd rust && cargo fmt --all && cargo check -p web --features ssr --no-default-features`
 Expected: `Finished` with no errors.
 
 (beta) Submit an invalid command (e.g. gibberish, or `buy` out of phase in Acquire): the error area shows `Invalid command: <game message>`, the input keeps the text, and the network tab shows a 200 on `submit_command` - no 500, no "error running server function".
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add rust/web/src/game/mod.rs rust/web/src/game/server_fns.rs rust/web/src/components/game.rs

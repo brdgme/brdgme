@@ -393,7 +393,7 @@ pub fn GameCommandInput(
     // Local bump makes the own action refetch even if the WS is down; the
     // trigger bump is still needed for the layout header.
     Effect::new(move |_| {
-        if let Some(Ok(_)) = submit_action.value().get() {
+        if let Some(Ok(None)) = submit_action.value().get() {
             set_command.set(String::new());
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
@@ -424,8 +424,11 @@ pub fn GameCommandInput(
 
     let error_msg = move || {
         submit_action.value().get().and_then(|r| match r {
-            Err(e) => Some(e.to_string()),
-            Ok(_) => None,
+            // Game-rejected command: expected user-input feedback.
+            Ok(Some(msg)) => Some(format!("Invalid command: {}", msg)),
+            Ok(None) => None,
+            // Transport/server fault: never leak the raw ServerFnError text.
+            Err(_) => Some("Failed to submit command. Please try again.".to_string()),
         })
     };
 

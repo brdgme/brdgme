@@ -196,8 +196,14 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
     })
 }
 
+/// Ok(None) = success. Ok(Some(message)) = the game rejected the command -
+/// expected user-input feedback rendered inline by the command input (same
+/// pattern as set_username), NOT a transport/server error.
 #[server(SubmitCommand, "/api")]
-pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), ServerFnError> {
+pub async fn submit_command(
+    game_id: Uuid,
+    command: String,
+) -> Result<Option<String>, ServerFnError> {
     use crate::auth::server::get_current_user;
     use crate::websocket::GameBroadcaster;
     use sqlx::PgPool;
@@ -220,7 +226,7 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
     .map_err(internal("submit_command: find player position"))?
     .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
-    super::execute_command(
+    match super::execute_command(
         &pool,
         &http_client,
         &broadcaster,
@@ -230,7 +236,11 @@ pub async fn submit_command(game_id: Uuid, command: String) -> Result<(), Server
         command,
     )
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))
+    {
+        Ok(()) => Ok(None),
+        Err(crate::game::ExecuteCommandError::UserError(msg)) => Ok(Some(msg)),
+        Err(e) => Err(ServerFnError::new(e.to_string())),
+    }
 }
 
 #[server(GetAvailableGameTypes, "/api")]

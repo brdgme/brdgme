@@ -62,6 +62,10 @@ pub async fn broadcast_and_trigger(
 pub enum ExecuteCommandError {
     #[error("stale state conflict")]
     Conflict,
+    /// The game rejected the command (e.g. "expected buy or done") - user
+    /// input error, not a server fault. submit_command renders it inline.
+    #[error("{0}")]
+    UserError(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -123,12 +127,15 @@ pub async fn execute_command(
             remaining_input,
             ..
         } => (game, logs, can_undo, remaining_input),
-        Response::UserError { message } => return Err(anyhow::anyhow!("{}", message).into()),
+        Response::UserError { message } => return Err(ExecuteCommandError::UserError(message)),
         _ => return Err(anyhow::anyhow!("Unexpected response from game service").into()),
     };
 
     if !remaining_input.trim().is_empty() {
-        return Err(anyhow::anyhow!("Unexpected input: {}", remaining_input).into());
+        return Err(ExecuteCommandError::UserError(format!(
+            "Unexpected input: {}",
+            remaining_input.trim()
+        )));
     }
 
     let prev_game_state = ge.game.game_state.clone();
@@ -274,6 +281,17 @@ pub async fn run_bot_command_consumer(
                     tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
                 }
             }
+            Err(ExecuteCommandError::UserError(_)) => {
+                // A bot-issued command the game rejected as invalid will
+                // never succeed on redelivery - ack it so it doesn't loop.
+                tracing::warn!(
+                    game_id = %event.game_id,
+                    "Acking bot.command message rejected by the game (not transient)"
+                );
+                if let Err(e) = message.ack().await {
+                    tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
+                }
+            }
             Err(ExecuteCommandError::Other(_)) => {
                 tracing::warn!(
                     game_id = %event.game_id,
@@ -347,6 +365,15 @@ pub async fn handle_bot_command_event(
             // Conflict is re-published as a fresh bot.turn; the original
             // bot.command message is done, so ack it.
             Ok(())
+        }
+        Err(ExecuteCommandError::UserError(msg)) => {
+            tracing::warn!(
+                game_id = %event.game_id,
+                position = event.player_position,
+                "Bot command rejected by game: {}",
+                msg
+            );
+            Err(ExecuteCommandError::UserError(msg))
         }
         Err(ExecuteCommandError::Other(e)) => {
             tracing::warn!(

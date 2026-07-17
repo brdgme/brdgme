@@ -410,3 +410,16 @@ superpowers spec/plan and fixed as one batch when scheduled.
   `submit_command` for game-rejected commands and rendering it in the
   command input's error area, rather than letting it bubble as a
   generic server error.
+- **Resolved:** `execute_command` now returns a new
+  `ExecuteCommandError::UserError(String)` variant for game-rejected
+  commands (`Response::UserError` and non-empty `remaining_input`),
+  instead of folding them into `anyhow::Error`. `submit_command` changed
+  signature to `Result<Option<String>, ServerFnError>` -
+  `Ok(None)` = success, `Ok(Some(message))` = the game rejected the
+  command (same expected-rejection pattern as `set_username`), `Err`
+  only for real transport/server faults. `GameCommandInput` renders
+  `Ok(Some(msg))` as `Invalid command: {msg}` and `Err` as a generic
+  "Failed to submit command. Please try again." (never the raw
+  `ServerFnError` text). Responds `200` rather than a literal `4xx`;
+  a typed 4xx would need a custom Leptos server-fn error type and is
+  left as a follow-up if ever required.
