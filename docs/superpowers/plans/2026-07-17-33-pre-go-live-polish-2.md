@@ -35,7 +35,7 @@
 
 **Interfaces:** none - CSS only. The Rust side (`SubMenuOpen` context, `.header-sub-menu` icon button with `on:click`, `GameMeta`'s `.open`/underlay wiring) already works; only the display override is missing.
 
-- [ ] **Step 1: Add the missing display rule**
+- [x] **Step 1: Add the missing display rule**
 
 In `rust/web/style/main.scss`, inside the existing `@media only screen and (max-width: 60em)` block, after the `.game-meta-close-underlay` rule (the one ending `background-color: color-mix(in srgb, var(--mk-background) 63%, transparent);`), add:
 
@@ -50,13 +50,13 @@ In `rust/web/style/main.scss`, inside the existing `@media only screen and (max-
 
 The base rule at the top of the file (`.layout .layout-header .header-sub-menu { display: none; }`) stays as-is - equal specificity, the media-block rule appears later in the file so it wins below 60em.
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 Eyeball the diff (SCSS is not checked by cargo). Run `cd rust && cargo fmt --all` (no-op expected) to keep the tree clean.
 
 (beta) On a game page below 60em: the U+22EE button appears right-aligned in the title bar and opens the game meta panel; between 60em and 80em it stays hidden.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add rust/web/style/main.scss

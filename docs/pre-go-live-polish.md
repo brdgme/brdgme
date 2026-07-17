@@ -361,6 +361,9 @@ superpowers spec/plan and fixed as one batch when scheduled.
 - **Note:** Check whether the earlier `.header-sub-menu` display rules /
   `SubMenuOpen` wiring regressed or never actually shipped to the
   deployed build.
+- **Resolved:** Fixed same day - the 2026-07-11 `SubMenuOpen` wiring and
+  icon button shipped, but the CSS rule re-showing `.header-sub-menu`
+  inside the 60em media block was never written; added it.
 
 ### 2026-07-17: Invalid command errors surface as raw server function errors (and HTTP 500)
 

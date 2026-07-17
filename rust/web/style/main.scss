@@ -489,7 +489,14 @@ body {
     width: 100%;
     background-color: color-mix(in srgb, var(--mk-background) 63%, transparent);
   }
-  
+
+  /* Re-show the header sub menu button here: hidden by default (between
+     60em and 80em the game meta panel is still on screen), only useful
+     once the panel actually collapses. */
+  .layout .layout-header .header-sub-menu {
+    display: inline-block;
+  }
+
   .game-main .game-render {
     max-width: 99vw;
     overflow: auto;
