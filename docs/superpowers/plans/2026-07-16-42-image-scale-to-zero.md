@@ -265,6 +265,14 @@ kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c
 
 **Manifests SHA and brdgme-config note:** the fleet `HTTPScaledObject`/manifest changes for these 18 versions are on brdgme master at `96a87ed45a82a1e2f2901842b41aa798aa6b2f45` (verified via `git rev-parse master`). brdgme-config's prod ref bump to this SHA is currently staged uncommitted in `/home/beefsack/Development/brdgme-config` (left untouched per this Worker's constraints) - Michael must commit and push that bump, and confirm ArgoCD sync is healthy, before running the cutover SQL above, so the `HTTPScaledObject`s exist and are Ready before traffic is repointed at the interceptor.
 
+**Phase 3 record: operator reconcile hazard discovered post-cutover, fixed (2026-07-17)**
+
+- **Discovery:** the operator's hourly reconcile upserts `game_versions.uri` from `GAME_SERVICE_URI_TEMPLATE`, which would revert the 19 scale-to-zero versions' `uri` rows back to direct service URIs, breaking interceptor routing. It also called the game service without a `Host` header, so it could not reconcile through the KEDA interceptor either.
+- **Mitigation:** Michael scaled the operator Deployment to 0 replicas to prevent damage.
+- **Fix (commit `207d1536286838b67ac5319ebb230658d8ae6d9e`):** the `GameVersion` CRD gains an optional `spec` field `scaleToZero` (default `false`, both the Rust struct and the CRD YAML). The controller uses a new env var `INTERCEPTOR_URI` (default `http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080`) as the registered `uri` when `scaleToZero` is set, else the existing template. `game_service_request` now always sends `Host: {name}.games.internal` (mirrors the web client). `scaleToZero: true` was set on the 19 scaled-to-zero `GameVersion` CRs (tic-tac-toe-2 + the 18 `*-1` versions).
+- **Accepted trade-off:** hourly operator reconciles will wake scaled-to-zero versions via the interceptor (~5 min running per hour); accepted.
+- **Remaining manual steps for Michael:** bump the brdgme ref (and operator image tag if applicable) in brdgme-config, sync via ArgoCD, scale the operator back to 1 replica.
+
 ---
 
 ### Phase 4: Measure and iterate
