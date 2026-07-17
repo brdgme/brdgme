@@ -273,3 +273,112 @@ superpowers spec/plan and fixed as one batch when scheduled.
   when there is no such game or the player is already viewing it.
 - **Resolved:** Fixed same day - `is_turn_at` added to `GameSummary`, the
   target computed in `MainLayout` from the shared active-games resource.
+
+### 2026-07-17: Settings page scrolls the whole page
+
+- **Observed:** On the settings page the entire page scrolls, sidebar
+  included.
+- **Expected:** Only the main content area scrolls; the sidebar stays
+  static. Research current best practice before implementing - the
+  standard app-shell pattern is a full-viewport (`100dvh`) flex/grid
+  container with the sidebar and main pane as children, `overflow-y:
+  auto` on the main pane only, and the `body` itself never scrolling.
+  Verify how the game pages handle this today and align the approach so
+  all pages share one layout convention.
+
+### 2026-07-17: Content pages too narrow (settings needs 3 theme columns)
+
+- **Observed:** The settings page main content is too narrow - the theme
+  picker can't fit 3 columns.
+- **Expected:** Content-based (non-game) pages get a wider centered
+  max-width, around 1200-1220px (Wikipedia uses 1220px; Bootstrap xxl
+  container is 1320px, MUI's lg is 1200px - ~1220px is squarely within
+  best practice). Wide enough for 3 theme columns on the settings page.
+  Game pages are unaffected.
+
+### 2026-07-17: Selected theme should be indicated by border, not name highlight
+
+- **Observed:** The selected theme is indicated by highlighting the
+  theme's name.
+- **Expected:** The selected theme's tile instead gets a thicker border
+  in the highlight colour; the name is not highlighted.
+
+### 2026-07-17: Theme colour preview should be solid swatch blocks
+
+- **Observed:** Theme colours preview as coloured name blocks, e.g.
+  `<bg green>Green </bg><bg red>Red </bg>`.
+- **Expected:** No text at all - each colour is a swatch of 5 spaces
+  rendered with the background colour, packed with no gaps between
+  swatches, in 2 rows of 5. The 10 swatches are the accent colours in
+  `NamedColor::ALL` order (`rust/lib/color/src/palette.rs`): row 1 Red,
+  Green, Blue, Yellow, Purple; row 2 Cyan, Pink, Orange, Brown, Grey.
+  Foreground/Background are excluded (the tile itself already shows
+  them).
+
+### 2026-07-17: Username change shows stale value when returning to settings
+
+- **Observed:** After updating the username it applies immediately
+  (game pages show the new name), but navigating back to the settings
+  page shows the pre-save username.
+- **Expected:** The name is not cached anywhere after a change - the
+  settings form always shows the current value. Likely a
+  resource/context holding the old user record that isn't invalidated
+  on save; find and invalidate (or refetch) it.
+
+### 2026-07-17: ELO rating change not shown when a game finishes
+
+- **Observed:** rust/web renders the ELO rating at game end, but not the
+  rating change.
+- **Expected:** Match live brdg.me, which renders the ELO rating change
+  next to the ELO rating when a game finishes. Check the legacy
+  implementation (live brdg.me, github.com/beefsack/brdg.me) for the
+  exact presentation and make rust/web consistent with it.
+
+### 2026-07-17: Command input sometimes clears itself while typing
+
+- **Observed:** While typing into the game command input, the input
+  sometimes clears itself spontaneously. Gut feeling (Michael): it
+  happens when an update arrives for the currently open game or for one
+  of the other active games in the sidebar.
+- **Expected:** Typed input is never lost to background updates.
+- **Note:** Needs investigation + a reproduction first (e.g. trigger a
+  websocket game update while typing - a bot game or second account).
+  Likely cause class: a reactive re-render/remount of the input (or a
+  value-controlled reset) on the websocket-driven refetch - same family
+  as the earlier flash-on-update entries. Fix so the input value
+  survives updates.
+
+### 2026-07-17: Sub menu button still not showing on mobile game pages
+
+- **Observed:** When viewing a game on a mobile-width viewport, the sub
+  menu button does not appear at all - despite the 2026-07-11 fixes
+  above ("Sub menu button does nothing" / "visible at widths where the
+  panel is already shown" / "Header buttons should be icons"), which
+  were meant to leave it working below 60em.
+- **Expected:** On game pages below the 60em breakpoint the sub menu
+  button shows as the vertical-ellipsis character (U+22EE), aligned to
+  the right-hand side of the title bar, and opens the game meta panel.
+- **Note:** Check whether the earlier `.header-sub-menu` display rules /
+  `SubMenuOpen` wiring regressed or never actually shipped to the
+  deployed build.
+
+### 2026-07-17: Invalid command errors surface as raw server function errors (and HTTP 500)
+
+- **Observed:** Submitting an invalid game command (e.g. in Acquire's
+  buy phase) shows the user
+  `error running server function: expected buy or done`, and the
+  `submit_command` server fn responds `HTTP 500` with body
+  `ServerError|expected buy or done` (observed 2026-07-16 on
+  beta.brdg.me, cf-ray a1bd57e69883e7e2-SYD).
+- **Expected:**
+  - User-facing message: `Invalid command: expected buy or done` - no
+    "error running server function" leakage.
+  - An invalid command is user input error, not a server fault - it
+    should be a 4xx (and ideally a typed/expected server fn error the
+    client renders directly), not a 500.
+- **Note:** Leptos server fns default unhandled errors to
+  `ServerFnError::ServerError` (hence the 500 + generic prefix). The
+  fix class is returning a dedicated user-input error variant from
+  `submit_command` for game-rejected commands and rendering it in the
+  command input's error area, rather than letting it bubble as a
+  generic server error.

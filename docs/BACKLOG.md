@@ -23,8 +23,16 @@ attempted and dropped 2026-07-08),
 their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
 import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
 complete 2026-07-10), #28 WP4 Cloudflare edge (complete 2026-07-11).
-**Top of backlog (added 2026-07-14):** #39 accessibility themes (CVD
-variants of brdgme light/dark) + theme picker categories
+**Top of backlog (updated 2026-07-17):** #33 second polish batch - 9 new
+entries appended to [docs/pre-go-live-polish.md](pre-go-live-polish.md)
+2026-07-17 (settings page scroll containment + content width + theme
+picker selected-border + swatch blocks, stale username after change, ELO
+rating change at game end, command input self-clearing on background
+updates, sub menu button still missing on mobile game pages,
+invalid-command errors surfaced raw as HTTP 500) - these are
+the immediate next tasks. Then #39 accessibility
+themes (added 2026-07-14; CVD variants of brdgme light/dark) + theme
+picker categories
 (Default/Light/Dark/Deuteranopia-Protanopia/Tritanopia, alphabetical within
 category).
 **Remaining pre-go-live:** #34 admin functions + #35 user settings
@@ -36,9 +44,13 @@ blocker). (#20 external-dns retired 2026-07-05 - no viable DO
 provider; see 20-external-dns.md.)
 **Post-go-live:** #32 Alloy OTLP export investigation (demoted from
 pre-go-live 2026-07-10), #22b-d (play-by-email, reminders, multi-email) →
-#24 game invites → #25 rules rendering → #26 theming/dark mode →
+#24 game invites → #25 rules rendering → #43 bot efficacy
+(player/public data contracts, per-game doc split, difficulty-as-config;
+added 2026-07-17, coordinate with #25) → #26 theming/dark mode →
 #23 Rust game ports (ongoing) → (bottom of backlog) #36 Web Push turn
-notifications. #31 (Rust-only repo) spans both: WP1
+notifications. Unscheduled post-go-live captures (added 2026-07-17, need
+brainstorming): #44 new-game screen, #45 rich index page, #46 turn
+timer, #47 concede-with-bot-replacement, #48 basic moderation. #31 (Rust-only repo) spans both: WP1
 legacy-stack deletion can run pre-cutover (unblocked 2026-07-08 by the
 no-rollback decision; it simplifies #16); the rest follows #23.
 
@@ -81,7 +93,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation, sync-failure drill (#16 beta) | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
 | 16 | Production Cutover (hard cutover + break-glass rollback; beta period on isolated DB + freeze/TTL runbook added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-08-16-production-cutover-validation-design.md) | [plan](superpowers/plans/2026-07-08-16-production-cutover-validation.md) |
 | 19 | CloudNativePG | Dev complete; prod Cluster + Barman Cloud backups running under ArgoCD (green 2026-07-08); remaining: PITR verify + import rehearsal (#16 beta), real import at cutover | [spec](superpowers/specs/2026-07-08-19-cloudnativepg-design.md) | [plan](superpowers/plans/2026-07-08-19-cloudnativepg.md) |
-| 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending | [spec](superpowers/specs/2026-07-05-22-email-via-resend-design.md) | [plan](superpowers/plans/2026-07-05-22-email-via-resend.md) |
+| 22 | Email via Resend | 22a complete (code landed 77a2092; prod secret + live-inbox SPF/DKIM/DMARC check done 2026-07-05); 22b-22d pending. Scope note 2026-07-17 (Michael): the goal is brdgme fully available by email again - game creation, plays, AND updating player settings - so 22b's play-by-email design should cover (or explicitly split out) creation and settings, not just plays | [spec](superpowers/specs/2026-07-05-22-email-via-resend-design.md) | [plan](superpowers/plans/2026-07-05-22-email-via-resend.md) |
 | 23 | Rust Game Ports | Pending | [spec](superpowers/specs/2026-07-04-23-rust-game-ports-design.md) | [plan](superpowers/plans/2026-07-04-23-rust-game-ports.md) |
 | 24 | Game Invites | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-04-24-game-invites-design.md) | [plan](superpowers/plans/2026-07-04-24-game-invites.md) |
 | 25 | Rules Rendering for Humans (Web UI + Email) | Pending - post-go-live, non-blocking | [spec](superpowers/specs/2026-07-05-25-rules-rendering-design.md) | [plan](superpowers/plans/2026-07-05-25-rules-rendering.md) |
@@ -91,7 +103,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
 | 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Pending - demoted to post-go-live 2026-07-10 (Michael: the Grafana Cloud quota must reset anyway, not a go-live blocker; was promoted pre-go-live 2026-07-09). Observed 2026-07-09 in prod alloy pod logs - the OTLP exporter (Tempo traces endpoint, Grafana Cloud) is stuck in a retry loop with `resolver error: produced zero addresses`; traces are not being exported | - | - |
-| 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record (9 entries), the plan is the batch fix | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md) |
+| 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record, the plan is the batch fix. **2026-07-17: second batch of 9 entries appended (settings scroll/width/theme-picker polish, stale username after change, ELO change at game end, command input self-clearing, sub menu button still missing on mobile game pages, invalid-command errors surfaced raw as HTTP 500) - IMMEDIATE NEXT TASKS**; needs a continuation plan before execution | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md) |
 | 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Decided 2026-07-11 - pre-beta; partial 2026-07-16 - `is_admin` flag (migration 008) landed and bump-bot-to-play made admin-only (server enforcement + UI gating; uncommitted) | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | - |
 | 35 | User settings page (unique display names 1-16 `[a-zA-Z0-9_-]`, petname-generated defaults, ordered 3-colour prefs wired into game creation) | Implemented 2026-07-16 (uncommitted) | [spec](superpowers/specs/2026-07-11-35-user-settings-design.md) [spec](superpowers/specs/2026-07-16-35-settings-page-design.md) | [plan](superpowers/plans/2026-07-16-35-settings-page.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
@@ -101,6 +113,12 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 40 | DB tests run (and fail) by default (every local/agent test run hits DB test failures, repeatedly surprising agents; investigate whether DB-dependent tests should be opt-in - e.g. feature/env gated - instead of opt-out, or made to pass by default) | Pending - unscheduled; added 2026-07-15. Addendum 2026-07-16: `cargo sqlx prepare` currently fails because the `User` struct lacks the `theme` column from migration 007 - fix before the next `.sqlx` regen. | - | - |
 | 41 | Cluster resource improvements (from 2026-07-16 prod resource analysis, read-only): (a) install metrics-server - `kubectl top` unavailable, right-sizing is blind without it; (b) alloy OOMKilling at 256Mi limit (4 restarts, exit 137) - revised 2026-07-16: trim FIRST, don't raise - disable the traces pipeline (Tempo exporter confirmed still stuck in the #32 retry-and-drop loop, zero value while broken) and remove `OTEL_EXPORTER_OTLP_ENDPOINT` from `k8s/prod/app/web-patch.yaml`; keep the healthy logs (Loki) and metrics (Prometheus remote_write, incl. CNPG backup metrics) pipelines; re-measure after (a) lands and only raise the limit if OOMs persist; re-enable traces via revert once Grafana Cloud quota resets; (c) postgres-1/migrate and the argocd/cert-manager stacks run with no requests/limits (BestEffort) on a node fleet 151% overcommitted on memory limits - set requests, protect the DB; (d) GHCR `pull QPS exceeded` causing ImagePullBackOff churn on `-2` game replicas - add authenticated GHCR pull secret; (e) cert-manager (167), cainjector (165), cnpg-controller (245) historic exit-1 restart loops - investigate via previous-container logs; (f) node1 carries all game workers + web (49 pods, 70% mem requested) while node2 has infra - consider topology spread or reduced game replicas (~50 x 32Mi = ~1.6Gi) | Prepared 2026-07-16 (local branches, not deployed): (a) metrics-server v0.9.0 addon commit b0cbe74 (brdgme-config); (b) confirmed live OOM loop from stuck #32 Tempo exporter, traces disabled in 77ab35c (revert to re-enable), limit not raised; (c) postgres/migrate resources 771359b + 11 addon workloads d581709, single-sample sized, revisit after (a); (d) ghcr-pull SA wiring 9f89ab8 + sealed-secret skeleton 2eacf90, needs Michael's read:packages PAT; (e) diagnosed historic control-plane-reachability crashes (leader-election lease loss / API EOF), no fix needed beyond (c); (f) no spread change - requests-skew artifact, defer to #42 + re-evaluate. Deployed 2026-07-16: metrics-server live, alloy traces disabled (mem 234->162Mi), addon+postgres resources applied (all Burstable), ghcr-pull secret + SA wiring live; remaining: post-deploy baseline capture + docs commit, revisit sizings after a week of metrics-server data | - | [plan](superpowers/plans/2026-07-16-41-cluster-resources.md) |
 | 42 | Game container image + idle-resource optimisation: (a) viability of `FROM scratch` (or distroless) images for the static Rust game binaries - only if battle-hardened best practice (CA certs, TLS, non-root, signals/PID 1, healthchecks all accounted for); (b) scale-to-zero with fast cold starts for game workers (candidates: KEDA HTTP add-on / NATS-based KEDA scaler, Knative; game workers are NATS-driven which suits event-driven scaling) - motivated by many more game ports coming and multiple deployed versions per game where only the latest gets traffic, so idle replicas reserving 32Mi each will not scale | Research + plan complete 2026-07-16 - verdicts: (a) yes, swap game images to `gcr.io/distroless/cc-debian12` (digest-pinned, non-root; ~64% smaller, mainstream/low-risk; musl+scratch optional later); (b) KEDA HTTP add-on (pinned v0.15.x) chosen as primary scale-to-zero mechanism per Michael's 2026-07-16 decision (prefers official upstream component over owned demand-tracking code); core-KEDA metrics-api and a bespoke operator shim remain documented fallbacks; latest versions stay on the direct Service path, non-latest scale to zero via the interceptor after a PoC gate. Phases 1-2 complete locally 2026-07-16 on branch 42-image-scale-to-zero (distroless cc-debian12 + non-root + port 8080 across 22 games, -63% image size verified; web game-client retry with backoff, 7/7 tests): deploy/canary and Phase 3 (KEDA) pending approval | [spec](superpowers/specs/2026-07-16-42-image-scale-to-zero-viability.md) | [plan](superpowers/plans/2026-07-16-42-image-scale-to-zero.md) |
+| 43 | Bot efficacy: player/public data contracts, per-game doc split, difficulty-as-config (added 2026-07-17, **post-go-live**; primary goal bot quality, reduced AI API spend a welcome side benefit). Bots currently struggle to parse the full game render, and it is a large, noisy prompt payload. (a) **Player/public data contracts**: every game exposes documented player data (exactly what that player sees in the render - no more, no less) and public data (exactly what a non-player spectator sees - no more, no less); (b) **per-game doc split** - RULES.md is broken down since some content is for humans, some for bots: `RULES.md` becomes purely the rules of the game; a render-explanation doc (working name `EXAMPLES.md` - open question whether it's needed at all); a doc describing the player/public data; and a separate high-level `STRATEGY` doc which humans also get access to (interacts with #25 rules rendering - coordinate the split with its single-source render-time specialization design); (c) **bot prompts** get only: the rules, the player/public data documentation, and BOTH the player and public data payloads (both so the bot can distinguish public from hidden information) - never the full render; (d) **difficulty as bot configuration, not prompt wording**: each difficulty is a complete standalone bot config (model, provider, thinking budget, docs provided). Initial mapping: Easy = deepseek-v4-flash, no thinking, no strategy doc; Medium = deepseek-v4-flash, high thinking, no strategy doc; Hard = deepseek-v4-flash, high thinking, + strategy doc. Full per-difficulty config so different providers can back different bots; (e) **future work (design for it now, build later)**: admin GUI to add/remove/switch bot configs - multiple configs per difficulty with priority for failover, shared priority for load balancing, enable/disable. Unparks the bot model configuration discussion parked 2026-07-11 | - | - |
+| 44 | "New game" screen usability (keep it simple but with good usability) | Captured 2026-07-17 - post-go-live, needs brainstorming before any design | - | - |
+| 45 | Rich index page for new visitors (elevator pitch about what the site is; maybe show a public render of some game) | Captured 2026-07-17 - post-go-live, needs brainstorming; a public game render ties into #43's public data work | - | - |
+| 46 | Turn timer to prevent dead games (idea sketch: some timer before the easy bot makes a play on the player's behalf? 3 strikes before forced concede?) | Captured 2026-07-17 - post-go-live, needs brainstorming; interacts with #47 bot replacement and #43 bot configs | - | - |
+| 47 | Concede in games with >2 players - conceding player replaced by a bot | Captured 2026-07-17 - post-go-live, needs brainstorming; interacts with #46 turn timer | - | - |
+| 48 | Basic moderation - initially just usernames, may extend to more later | Captured 2026-07-17 - post-go-live, needs brainstorming | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 
 ---
@@ -392,6 +410,58 @@ a reload in clients whenever a new version is deployed, or surface a "new
 version released, please reload" message to the user; the underlying
 cache-busting story (hashed asset filenames / cache headers) should be
 investigated as part of the same item.
+
+2026-07-17: post-go-live one-liner captures from Michael, recorded for
+later brainstorming (not designed or scheduled): #44 "New game" screen
+usability, #45 rich index page for new visitors, #46 turn timer against
+dead games, #47 concede in >2-player games with bot replacement, #48
+basic moderation (usernames first). Of the same list, four were already
+captured and got no new item: full email availability folded into #22's
+scope as a 2026-07-17 note (22b must cover game creation and player
+settings, not just plays), game history and stats = #29, add-friend =
+#30, game invites instead of auto-starting = #24.
+
+2026-07-17: #43 bot efficacy added (post-go-live, slotted after #25 rules
+rendering since the per-game doc split must coordinate with #25's
+single-source RULES.md design). Motivation (Michael): bots have trouble
+parsing the full game render, and it is a large noisy prompt payload -
+lean on player and public data instead for more signal and less noise;
+reduced AI API spend is a welcome side benefit but bot quality is the
+main goal. Scope: documented player/public data contracts per game
+(player data = exactly what the player sees, public data = exactly what
+a spectator sees - no more, no less); RULES.md split into pure rules /
+optional render-explanation doc (EXAMPLES.md, need unconfirmed) /
+player-public data doc / human-accessible strategy doc; bots prompted
+with only the rules, the data documentation, and both data payloads (both
+so the bot can tell public from hidden information); difficulties become
+complete bot configs rather than prompt wording (Easy deepseek-v4-flash
+no thinking no strategy doc / Medium high thinking no strategy doc /
+Hard high thinking + strategy doc, full per-difficulty config so
+providers can vary per bot); future work flagged for admin GUI bot-config
+management (add/remove/switch, priority failover, shared-priority load
+balancing, enable/disable). This unparks the bot model configuration
+topic parked 2026-07-11.
+
+2026-07-17: second #33 polish batch recorded as the immediate next tasks -
+9 entries appended to docs/pre-go-live-polish.md from Michael's beta pass
+over the new settings page and gameplay: settings page should scroll only
+the main content (sidebar static, app-shell pattern); non-game content
+pages widened to ~1220px (Wikipedia-style, fits 3 theme columns); selected
+theme indicated by a thicker highlight-colour border instead of name
+highlight; theme previews become 2x5 text-free swatch blocks (5 spaces
+each, NamedColor::ALL accent order, fg/bg excluded); username shows stale
+value when returning to settings after a change (must not be cached
+anywhere); ELO rating change rendered next to the rating at game end
+(match legacy brdg.me); command input sometimes self-clears while typing
+(suspected websocket update on the open game or a sidebar game -
+investigate/reproduce/fix); sub menu button still not showing on mobile
+game pages despite the 2026-07-11 fixes (should be U+22EE, right-aligned
+in the title bar - check for regression or unshipped fix);
+invalid-command rejections surface as "error running server function:
+<msg>" with HTTP 500 (`ServerError|expected buy or done` observed on
+beta 2026-07-16) - should render as "Invalid command: <msg>" and be a
+4xx typed user-input error, not a generic ServerFnError. Documented
+only - not actioned; a #33 continuation plan is needed before execution.
 
 2026-07-16: #35 settings page implemented end-to-end (spec + plan same
 day, all uncommitted). #34 partial - migration 008 adds `users.is_admin`,
