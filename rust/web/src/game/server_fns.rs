@@ -139,6 +139,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
     let render_resp = client::render(
         &http_client,
         &ge.game_version.uri,
+        &ge.game_version.name,
         ge.game.game_state.clone(),
         player.map(|p| p.game_player.position as usize),
     )
@@ -287,6 +288,7 @@ async fn create_game_from_service(
     let resp = client::request(
         http_client,
         &game_version.uri,
+        &game_version.name,
         &Request::New {
             players: seed.player_count,
             seed: None,
@@ -484,6 +486,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
     let resp = client::request(
         &http_client,
         &ge.game_version.uri,
+        &ge.game_version.name,
         &Request::Status {
             game: undo_state.clone(),
         },

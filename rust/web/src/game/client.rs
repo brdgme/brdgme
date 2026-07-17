@@ -41,12 +41,20 @@ fn backoff_delay(attempt: u32, config: &RetryConfig) -> Duration {
 async fn send_with_retry(
     client: &reqwest::Client,
     uri: &str,
+    version_name: &str,
     request: &Request,
     config: &RetryConfig,
 ) -> reqwest::Result<reqwest::Response> {
+    let host = format!("{version_name}.games.internal");
     let mut attempt: u32 = 0;
     loop {
-        match client.post(uri).json(request).send().await {
+        match client
+            .post(uri)
+            .header(reqwest::header::HOST, &host)
+            .json(request)
+            .send()
+            .await
+        {
             Ok(res) => return Ok(res),
             Err(e) => {
                 attempt += 1;
@@ -64,10 +72,11 @@ async fn send_with_retry(
 async fn request_with_config(
     client: &reqwest::Client,
     uri: &str,
+    version_name: &str,
     request: &Request,
     config: &RetryConfig,
 ) -> Result<Response> {
-    let res = send_with_retry(client, uri, request, config).await?;
+    let res = send_with_retry(client, uri, version_name, request, config).await?;
     let body = res.text().await.context("error reading response body")?;
     let resp: Response =
         serde_json::from_str(&body).with_context(|| format!("error parsing response: {}", body))?;
@@ -78,8 +87,13 @@ async fn request_with_config(
 }
 
 #[tracing::instrument(name = "game_service_request", skip(client, request), fields(game.uri = %uri))]
-pub async fn request(client: &reqwest::Client, uri: &str, request: &Request) -> Result<Response> {
-    request_with_config(client, uri, request, &RetryConfig::default()).await
+pub async fn request(
+    client: &reqwest::Client,
+    uri: &str,
+    version_name: &str,
+    request: &Request,
+) -> Result<Response> {
+    request_with_config(client, uri, version_name, request, &RetryConfig::default()).await
 }
 
 #[derive(Debug, Clone)]
@@ -112,21 +126,23 @@ impl From<PlayerRender> for RenderResponse {
 pub async fn render(
     client: &reqwest::Client,
     uri: &str,
+    version_name: &str,
     game: String,
     player: Option<usize>,
 ) -> Result<RenderResponse> {
     match player {
-        Some(p) => player_render(client, uri, game, p).await,
-        None => pub_render(client, uri, game).await,
+        Some(p) => player_render(client, uri, version_name, game, p).await,
+        None => pub_render(client, uri, version_name, game).await,
     }
 }
 
 pub async fn pub_render(
     client: &reqwest::Client,
     uri: &str,
+    version_name: &str,
     game: String,
 ) -> Result<RenderResponse> {
-    match request(client, uri, &Request::PubRender { game }).await? {
+    match request(client, uri, version_name, &Request::PubRender { game }).await? {
         Response::PubRender { render } => Ok(render.into()),
         _ => Err(anyhow!("invalid response type")),
     }
@@ -135,10 +151,18 @@ pub async fn pub_render(
 pub async fn player_render(
     client: &reqwest::Client,
     uri: &str,
+    version_name: &str,
     game: String,
     player: usize,
 ) -> Result<RenderResponse> {
-    match request(client, uri, &Request::PlayerRender { player, game }).await? {
+    match request(
+        client,
+        uri,
+        version_name,
+        &Request::PlayerRender { player, game },
+    )
+    .await?
+    {
         Response::PlayerRender { render } => Ok(render.into()),
         _ => Err(anyhow!("invalid response type")),
     }
@@ -207,6 +231,7 @@ mod tests {
         let resp = request_with_config(
             &client,
             &uri,
+            "test-game-1",
             &Request::PubRender {
                 game: "g".to_string(),
             },
@@ -248,6 +273,7 @@ mod tests {
         let resp = request_with_config(
             &client,
             &uri,
+            "test-game-1",
             &Request::PubRender {
                 game: "g".to_string(),
             },
@@ -296,6 +322,7 @@ mod tests {
         let resp = request_with_config(
             &client,
             &uri,
+            "test-game-1",
             &Request::PubRender {
                 game: "g".to_string(),
             },
@@ -419,7 +446,9 @@ mod tests {
             seed: None,
         };
         let client = reqwest::Client::new();
-        let resp = request(&client, &uri, &req).await.expect("request failed");
+        let resp = request(&client, &uri, "test-game-1", &req)
+            .await
+            .expect("request failed");
 
         // 3. Verify Response
         match resp {

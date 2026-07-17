@@ -105,6 +105,7 @@ pub async fn execute_command(
     let resp = client::request(
         http_client,
         &ge.game_version.uri,
+        &ge.game_version.name,
         &Request::Play {
             player: player.game_player.position as usize,
             game: ge.game.game_state.clone(),
