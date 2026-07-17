@@ -624,7 +624,7 @@ EOF
 
 **Legacy presentation to replicate exactly** (recovered from git history: `web/src/components/game/show.tsx` at commit `ba975b5^`, the commit before "repo #31: delete legacy stack (WP1)"): `Rating: <rating> (<icon><abs(change)>)`, e.g. `Rating: 1216 (^16)` where `^` here stands for U+2197. Icon: U+2197 in `.rating-change-up` (green) for positive, U+2198 in `.rating-change-down` (red) for negative, literal `-` in `.rating-change-none` (blue) for zero. The number is always `abs(change)` - no `+`/`-` sign. Shown whenever `rating_change` is non-null (in practice: rated game finished; bot games never get one), no separate is_finished gate. The `.game-meta .rating-change` CSS (font-weight 700 + the three colour classes) already exists in `main.scss` lines 428-442, ported 1:1 from the legacy `game.less`.
 
-- [ ] **Step 1: Plumb the field**
+- [x] **Step 1: Plumb the field**
 
 In `rust/web/src/game/server_fns.rs`, add to `PlayerViewData`:
 
@@ -642,7 +642,7 @@ And in `get_game_details`'s construction:
                 rating_change: p.game_player.rating_change,
 ```
 
-- [ ] **Step 2: Render it in `PlayerInfo`**
+- [x] **Step 2: Render it in `PlayerInfo`**
 
 In `rust/web/src/components/game.rs`, replace `PlayerInfo`:
 
@@ -686,14 +686,14 @@ fn PlayerInfo(player: PlayerViewData) -> impl IntoView {
 }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `cd rust && cargo fmt --all && cargo check -p web --features ssr --no-default-features`
 Expected: `Finished` with no errors.
 
 (beta) Finish a rated game (or open an already-finished one between humans): each player's meta row reads `Rating: <n> (<arrow><abs change>)` with green/red/blue styling; unfinished and bot games show plain `Rating: <n>`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add rust/web/src/game/server_fns.rs rust/web/src/components/game.rs

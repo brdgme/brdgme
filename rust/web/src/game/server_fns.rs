@@ -59,6 +59,9 @@ pub struct PlayerViewData {
     /// resolved hex value, so display always follows the active theme.
     pub color: String,
     pub rating: i32,
+    /// ELO change applied when the game finished; `None` until then (and
+    /// always `None` for unrated/bot games).
+    pub rating_change: Option<i32>,
     pub points: f32,
     pub is_turn: bool,
     pub is_bot: bool,
@@ -181,6 +184,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 name: p.name().to_string(),
                 color: p.slot().to_string(),
                 rating: p.game_type_user.rating,
+                rating_change: p.game_player.rating_change,
                 points: p.game_player.points.unwrap_or(0.0),
                 is_turn: p.game_player.is_turn,
                 is_bot: p.game_bot.is_some(),

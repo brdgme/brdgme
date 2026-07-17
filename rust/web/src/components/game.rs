@@ -137,13 +137,36 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
 
 #[component]
 fn PlayerInfo(player: PlayerViewData) -> impl IntoView {
+    // Legacy presentation: "Rating: 1216 (<icon>16)" - icon U+2197 (up,
+    // green) / U+2198 (down, red) / "-" (zero, blue), number always the
+    // absolute value. Only rendered once a rating change exists.
+    let rating_change = player.rating_change.map(|amount| {
+        let (class, icon) = match amount {
+            a if a > 0 => ("rating-change-up", "\u{2197}"),
+            a if a < 0 => ("rating-change-down", "\u{2198}"),
+            _ => ("rating-change-none", "-"),
+        };
+        view! {
+            <span>
+                " ("
+                <span class="rating-change">
+                    <span class=class>{icon}</span>
+                    {amount.abs()}
+                </span>
+                ")"
+            </span>
+        }
+    });
     view! {
         <div class="player-info">
             <div class:brdgme-is-turn=player.is_turn>
                 <PlayerName name=player.name color=player.color />
             </div>
             <div style="margin-left: 1em;">
-                <div><abbr title="ELO rating" style="cursor: help;">"Rating"</abbr>": " {player.rating}</div>
+                <div>
+                    <abbr title="ELO rating" style="cursor: help;">"Rating"</abbr>
+                    ": " {player.rating} {rating_change}
+                </div>
                 <div>"Points: " {player.points}</div>
             </div>
         </div>

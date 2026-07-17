@@ -352,6 +352,12 @@ superpowers spec/plan and fixed as one batch when scheduled.
   next to the ELO rating when a game finishes. Check the legacy
   implementation (live brdg.me, github.com/beefsack/brdg.me) for the
   exact presentation and make rust/web consistent with it.
+- **Resolved:** Fixed same day - `PlayerViewData.rating_change` plumbed
+  from `game_players.rating_change` (already stored and queried) and
+  rendered next to the rating in the legacy brdg.me format
+  `Rating: <n> (<icon><abs change>)` with the existing
+  rating-change-up/down/none colour classes, shown only once a change
+  exists.
 
 ### 2026-07-17: Command input sometimes clears itself while typing
 
