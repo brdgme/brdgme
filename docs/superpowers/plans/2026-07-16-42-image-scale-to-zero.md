@@ -169,6 +169,22 @@ Concrete brdgme wiring: the game URI web actually calls comes from `game_version
 
 Latest versions: `game_versions.uri` keeps pointing directly at that game's Service, unchanged, never through the interceptor.
 
+**PoC record (Michael, 2026-07-17):**
+
+- **Target:** tic-tac-toe-2 - the LATEST tic-tac-toe version, deliberately deviating from the "non-latest only" framing above for the PoC (it is the only tic-tac-toe version in `game_versions`).
+- **Prepared artifacts (uncommitted in working trees):** `HTTPScaledObject` at `k8s/base/game/tic-tac-toe-2/http-scaled-object.yaml` (host `tic-tac-toe-2.games.internal`, `scaleTargetRef` Deployment/Service `tic-tac-toe-2` port 80, replicas min 0 max 1, `scaledownPeriod` 300), wired into that game's `kustomization.yaml`; brdgme-config `prod/kustomization.yaml` bumped to web `sha-6ec07fa` / ref `6ec07fa4bc289b27cfd5d7314cff81a6bc96cf47`.
+- **Web client Host header:** web sends `Host: {game_versions.name}.games.internal` on every game server request as of brdgme commit `c9c5d94`.
+- **`game_versions` row:** id `076f4633-ebf5-43da-bcd6-34c12eef6654`, name `tic-tac-toe-2`, current (old) uri `http://tic-tac-toe-2.brdgme.svc.cluster.local`.
+- **Cutover SQL:**
+  ```sql
+  UPDATE game_versions SET uri = 'http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080' WHERE id = '076f4633-ebf5-43da-bcd6-34c12eef6654';
+  ```
+- **Revert SQL:**
+  ```sql
+  UPDATE game_versions SET uri = 'http://tic-tac-toe-2.brdgme.svc.cluster.local' WHERE id = '076f4633-ebf5-43da-bcd6-34c12eef6654';
+  ```
+- **SQL access path:** `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "..."`
+
 - [ ] **Step 4: PoC acceptance gate on one non-latest version**
 
 Before any fleet rollout: put exactly one non-latest game-version Deployment behind the interceptor (Steps 2-3 for that one version only). Submit moves against it and measure cold-start (0-replica) latency against the budget from the open questions below. Run it for several days under normal idle/active cycling and confirm: no interceptor errors, no interceptor/scaler/operator OOMs, the deployment reliably scales to 0 after `scaledownPeriod` and reliably reactivates on the next request, and the corresponding latest-version deployment never gets routed through the interceptor during this window. Only proceed to fleet rollout once this gate passes.
