@@ -126,7 +126,7 @@ Wrap the existing request call with a bounded retry loop (e.g. 2-3 retries, expo
 Run: `SQLX_OFFLINE=true cargo test -p web --features ssr --lib game::client -j 2`
 Expected: PASS.
 
-- [ ] **Step 4: Manual verification against a scaled-to-zero worker** (partially verified 2026-07-16: no unauthenticated web trigger found quickly against a leptos SSR route tree, so ran the reduced test instead - scaled tic-tac-toe-2 to 0, confirmed pod/endpoints fully removed, restored replicas=1, confirmed Ready and a direct POST against the Service works again. Owner separately confirmed manual end-to-end play through the web frontend post-deploy works. Did not directly observe web's retry/backoff logs against a live 0-endpoint target - that would need either an authenticated game session or a scratch debug pod in-cluster, the latter declined as out of scope for this pass)
+- [x] **Step 4: Manual verification against a scaled-to-zero worker** (closed 2026-07-17 by the Phase 3 PoC: tic-tac-toe-2 served live web traffic through the interceptor, scaled to 0 after the idle window, and a real game request through web triggered a 0->1 cold start that succeeded end-to-end - the retry/activation path was exercised against a genuine 0-replica target. Earlier partial verification 2026-07-16: no unauthenticated web trigger found quickly against a leptos SSR route tree, so ran the reduced test instead - scaled tic-tac-toe-2 to 0, confirmed pod/endpoints fully removed, restored replicas=1, confirmed Ready and a direct POST against the Service works again. Owner separately confirmed manual end-to-end play through the web frontend post-deploy works. Did not directly observe web's retry/backoff logs against a live 0-endpoint target - that would need either an authenticated game session or a scratch debug pod in-cluster, the latter declined as out of scope for this pass)
 
 Manually scale one game deployment to 0 (`kubectl scale deployment/<game> --replicas=0`), submit a move in a test game against that version, confirm the web request either recovers once the deployment is manually scaled back up within the retry window, or fails gracefully with a clear error rather than hanging indefinitely. Scale the deployment back to 1 afterward.
 
@@ -145,7 +145,7 @@ Manually scale one game deployment to 0 (`kubectl scale deployment/<game> --repl
 - Consumes: `game_versions.uri` / `find_latest_non_deprecated_game_version` in `rust/web/src/db.rs` (distinguishes latest vs. non-latest versions); Phase 2's retry-with-backoff (buffers requests during a 0->1 activation window, including the add-on's own polling-floor latency).
 - Produces: KEDA core + HTTP add-on installed (pinned; estimated ~100-150Mi combined interceptor + external-scaler + operator footprint); an `HTTPScaledObject` per non-latest game-version Deployment with `scaleTargetRef` pointing at that Deployment/Service, `spec.hosts` matching a per-version host value, implicit `minReplicaCount: 0`, and `scaledownPeriod` 300s+; non-latest traffic routed through the interceptor proxy Service instead of directly at the game Service.
 
-- [ ] **Step 1: Install KEDA core + HTTP add-on**
+- [x] **Step 1: Install KEDA core + HTTP add-on** (done 2026-07-16/17: core v2.18.3 + add-on v0.15.0, applied manually with `kubectl apply --server-side --force-conflicts -k` per brdgme-config `keda/README.md`; all 6 deployments healthy; interceptor proxy Service confirmed at `keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080`)
 
 Install KEDA core, then the HTTP add-on Helm chart pinned to v0.15.x (spec estimates ~100-150Mi combined interceptor + scaler + operator overhead). Verify CRDs install cleanly (`HTTPScaledObject`) and the interceptor, external-scaler, and operator pods come up healthy. Confirm the interceptor's proxy Service exists (default `keda-add-ons-http-interceptor-proxy` in the `keda` namespace, port 8080 per the 0.15 install defaults - confirm exact name/namespace/port against the actual Helm release values used, since chart defaults can be overridden) (keda.sh http-add-on 0.15 docs, 2026).
 
@@ -159,7 +159,7 @@ For each non-latest game-version Deployment (spec: ~17 candidates today), create
 
 Exclude every game's latest version entirely - no `HTTPScaledObject`, direct Service path only, never proxied through the interceptor.
 
-- [ ] **Step 3: Wire routing - non-latest requests must flow through the interceptor with the matching Host**
+- [x] **Step 3: Wire routing - non-latest requests must flow through the interceptor with the matching Host** (done 2026-07-17: option (b) implemented - web sends `Host: {game_versions.name}.games.internal` on every game server request as of brdgme `c9c5d94`, deployed as web `sha-6ec07fa`; per-version host derived from the name, no schema change; routing for a given version is flipped purely by its `game_versions.uri` value)
 
 Verified against the 0.15 docs (keda.sh http-add-on 0.15 docs, 2026): the interceptor matches incoming requests against each `HTTPScaledObject`'s `spec.hosts` using the HTTP `Host` header (not the URL path by default - `pathPrefixes` is a separate, additional match dimension this plan does not need). Traffic must physically be sent to the interceptor's proxy Service address, with the `Host` header set to the value declared in that version's `spec.hosts`. These are two different things: the interceptor's own Service DNS name (e.g. `keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080`) is where the TCP connection goes; the per-version `spec.hosts` value is a separate Host-header match key, not required to be a real routable name.
 
@@ -172,7 +172,7 @@ Latest versions: `game_versions.uri` keeps pointing directly at that game's Serv
 **PoC record (Michael, 2026-07-17):**
 
 - **Target:** tic-tac-toe-2 - the LATEST tic-tac-toe version, deliberately deviating from the "non-latest only" framing above for the PoC (it is the only tic-tac-toe version in `game_versions`).
-- **Prepared artifacts (uncommitted in working trees):** `HTTPScaledObject` at `k8s/base/game/tic-tac-toe-2/http-scaled-object.yaml` (host `tic-tac-toe-2.games.internal`, `scaleTargetRef` Deployment/Service `tic-tac-toe-2` port 80, replicas min 0 max 1, `scaledownPeriod` 300), wired into that game's `kustomization.yaml`; brdgme-config `prod/kustomization.yaml` bumped to web `sha-6ec07fa` / ref `6ec07fa4bc289b27cfd5d7314cff81a6bc96cf47`.
+- **Artifacts (committed and deployed 2026-07-17):** `HTTPScaledObject` at `k8s/base/game/tic-tac-toe-2/http-scaled-object.yaml` (host `tic-tac-toe-2.games.internal`, `scaleTargetRef` Deployment/Service `tic-tac-toe-2` port 80, replicas min 0 max 1, `scaledownPeriod` 300), wired into that game's `kustomization.yaml` - brdgme commit `093918f`; brdgme-config `prod/kustomization.yaml` bumped to web `sha-6ec07fa` / ref `093918f4b12a96d02636cf5556b58b3bab1c3693`, synced by ArgoCD.
 - **Web client Host header:** web sends `Host: {game_versions.name}.games.internal` on every game server request as of brdgme commit `c9c5d94`.
 - **`game_versions` row:** id `076f4633-ebf5-43da-bcd6-34c12eef6654`, name `tic-tac-toe-2`, current (old) uri `http://tic-tac-toe-2.brdgme.svc.cluster.local`.
 - **Cutover SQL:**
@@ -184,6 +184,7 @@ Latest versions: `game_versions.uri` keeps pointing directly at that game's Serv
   UPDATE game_versions SET uri = 'http://tic-tac-toe-2.brdgme.svc.cluster.local' WHERE id = '076f4633-ebf5-43da-bcd6-34c12eef6654';
   ```
 - **SQL access path:** `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "..."`
+- **Cutover executed:** 2026-07-17 by Michael (`UPDATE 1`). **Verification (2026-07-17):** HTTPScaledObject Ready; new game created and played through beta.brdg.me via the interceptor path (working); deployment scaled 1->0 at 04:16:12Z (~300s after last activity); next UI request triggered 0->1 at 04:17:22Z, pod Ready at 04:17:27Z (~5s cold start; ~7s click-to-UI-response observed by Michael); no interceptor/scaler errors. Day-1 gate evidence - the multi-day stability window of Step 4 continues from here.
 
 - [ ] **Step 4: PoC acceptance gate on one non-latest version**
 
