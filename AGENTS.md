@@ -19,10 +19,13 @@ At the start of every session, read the following files in full:
 - `docs/DEV.md`
 - `docs/VISION.md`
 
-These are the only files directly under `docs/`. Everything else lives in a
-subdirectory (`docs/decisions/`, `docs/porting/`, `docs/authoring/`,
-`docs/superpowers/`) and is out of scope for this bootstrap step - read those
-on demand when the task at hand references them.
+Everything else under `docs/` is out of scope for this bootstrap step - read
+on demand when the task at hand references it. That includes the
+subdirectories (`docs/decisions/`, `docs/porting/`, `docs/authoring/`,
+`docs/superpowers/`) and the on-demand references directly under `docs/`,
+notably `docs/hydration.md` (Leptos SSR hydration mechanics, hazards, and
+troubleshooting - read it before touching Suspense/Transition/resource
+structure in `rust/web` or when debugging a hydration panic).
 
 ## Reference facts agents get wrong
 

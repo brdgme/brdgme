@@ -74,6 +74,10 @@ If server and client produce structurally different HTML, Leptos panics with an
 unrecoverable hydration error. These errors are silent during client-side
 navigation and only appear on hard refresh, making them easy to miss.
 
+For the underlying mechanics (hydration ids, incomplete chunks, the
+mounted-gate idiom), known upstream hazards, and a debugging playbook, see
+`docs/hydration.md`.
+
 ### Choosing a resource type
 
 | Type | SSR behaviour | When to use |
