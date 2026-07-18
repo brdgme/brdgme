@@ -703,13 +703,101 @@ fn GamesPage() -> impl IntoView {
 
 #[component]
 fn DashboardPage() -> impl IntoView {
+    use crate::friends::{RespondToFriendRequest, get_friend_activity, get_friends_overview};
+
+    let (refresh, set_refresh) = signal(0u32);
+    let overview = LocalResource::new(move || {
+        refresh.track();
+        get_friends_overview()
+    });
+    let activity = LocalResource::new(get_friend_activity);
+    let respond_action = ServerAction::<RespondToFriendRequest>::new();
+    Effect::new(move |_| {
+        if let Some(Ok(())) = respond_action.value().get() {
+            set_refresh.update(|n| *n += 1);
+        }
+    });
+
     view! {
         <MainLayout>
             <div class="content-page">
                 <h1>"Dashboard"</h1>
-                <p>"View your active games and statistics."</p>
 
                 <div class="dashboard-sections">
+                    <section class="friend-requests">
+                        <h2>"Friend requests"</h2>
+                        {move || match overview.get() {
+                            None => view! { <p>"Loading..."</p> }.into_any(),
+                            Some(Err(_)) => ().into_any(), // anonymous or error: hide
+                            Some(Ok(o)) if o.incoming.is_empty() =>
+                                view! { <p>"No pending requests."</p> }.into_any(),
+                            Some(Ok(o)) => o.incoming.iter().map(|r| {
+                                let id = r.request_id;
+                                let name = r.name.clone();
+                                view! {
+                                    <div class="friend-row">
+                                        <span>{name}</span>
+                                        " "
+                                        <a href="#" on:click=move |ev| {
+                                            ev.prevent_default();
+                                            respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: true, block: false });
+                                        }>"Accept"</a>
+                                        " | "
+                                        <a href="#" on:click=move |ev| {
+                                            ev.prevent_default();
+                                            respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: false, block: false });
+                                        }>"Decline"</a>
+                                        " | "
+                                        <a href="#" on:click=move |ev| {
+                                            ev.prevent_default();
+                                            let confirmed = web_sys::window()
+                                                .and_then(|w| w.confirm_with_message("Decline and block? They will no longer be able to send you friend requests or add you to games.").ok())
+                                                .unwrap_or(false);
+                                            if confirmed {
+                                                respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: false, block: true });
+                                            }
+                                        }>"Decline and block"</a>
+                                    </div>
+                                }
+                            }).collect_view().into_any(),
+                        }}
+                        <p><a href="/friends">"Manage friends"</a></p>
+                    </section>
+
+                    <section class="friends-active-games">
+                        <h2>"Friends' active games"</h2>
+                        {move || match activity.get() {
+                            None => view! { <p>"Loading..."</p> }.into_any(),
+                            Some(Err(_)) => ().into_any(),
+                            Some(Ok(a)) if a.active.is_empty() =>
+                                view! { <p>"No games to watch right now."</p> }.into_any(),
+                            Some(Ok(a)) => a.active.iter().map(|g| {
+                                let href = format!("/games/{}", g.game_id);
+                                let label = format!("{}: {}", g.game_type, g.player_names.join(", "));
+                                view! { <div><a href=href>{label}</a></div> }
+                            }).collect_view().into_any(),
+                        }}
+                    </section>
+
+                    <section class="friends-recent-results">
+                        <h2>"Friends' recent results"</h2>
+                        {move || match activity.get() {
+                            None => view! { <p>"Loading..."</p> }.into_any(),
+                            Some(Err(_)) => ().into_any(),
+                            Some(Ok(a)) if a.results.is_empty() =>
+                                view! { <p>"No recent results."</p> }.into_any(),
+                            Some(Ok(a)) => a.results.iter().map(|g| {
+                                let href = format!("/games/{}", g.game_id);
+                                let players = g.player_names.iter().zip(g.places.iter())
+                                    .map(|(n, p)| if *p > 0 { format!("{p}. {n}") } else { n.clone() })
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                let label = format!("{}: {}", g.game_type, players);
+                                view! { <div><a href=href>{label}</a></div> }
+                            }).collect_view().into_any(),
+                        }}
+                    </section>
+
                     <section class="active-games">
                         <h2>"Active Games"</h2>
                         <p>"Use the sidebar to navigate your games."</p>
