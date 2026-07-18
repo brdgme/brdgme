@@ -92,9 +92,12 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
             <div class="game-meta-main">
                 <div>
                     <h2>{data.type_name}</h2>
-                    {data.players.into_iter().map(|p| view! {
-                        <PlayerInfo player=p />
-                    }).collect_view()}
+                    {
+                        let viewer_user_id = data.viewer_user_id;
+                        data.players.into_iter().map(|p| view! {
+                            <PlayerInfo player=p viewer_user_id=viewer_user_id />
+                        }).collect_view()
+                    }
                     <div class="game-actions">
                         <h3>"Actions"</h3>
                         <Show when=move || can_undo>
@@ -173,7 +176,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
 }
 
 #[component]
-fn PlayerInfo(player: PlayerViewData) -> impl IntoView {
+fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl IntoView {
     // Legacy presentation: "Rating: 1216 (<icon>16)" - icon U+2197 (up,
     // green) / U+2198 (down, red) / "-" (zero, blue), number always the
     // absolute value. Only rendered once a rating change exists.
@@ -205,6 +208,28 @@ fn PlayerInfo(player: PlayerViewData) -> impl IntoView {
                     ": " {player.rating} {rating_change}
                 </div>
                 <div>"Points: " {player.points}</div>
+                {player.user_id
+                    .filter(|uid| viewer_user_id.is_some() && Some(*uid) != viewer_user_id)
+                    .map(|uid| {
+                        let add_friend = ServerAction::<crate::friends::SendFriendRequest>::new();
+                        view! {
+                            <div>
+                                {move || match add_friend.value().get() {
+                                    Some(Ok(())) => view! { <span>"Friend request sent"</span> }.into_any(),
+                                    Some(Err(e)) => view! { <span class="error">{e.to_string()}</span> }.into_any(),
+                                    None => view! {
+                                        <a href="#" on:click=move |ev| {
+                                            ev.prevent_default();
+                                            add_friend.dispatch(crate::friends::SendFriendRequest {
+                                                user_id: Some(uid),
+                                                name: None,
+                                            });
+                                        }>"Add friend"</a>
+                                    }.into_any(),
+                                }}
+                            </div>
+                        }
+                    })}
             </div>
         </div>
     }

@@ -50,6 +50,8 @@ pub struct GameViewData {
     /// Whether the current viewer is an admin - gates admin-only actions
     /// like "Bump bot to play".
     pub viewer_is_admin: bool,
+    /// None when the viewer is anonymous (public spectator perspective).
+    pub viewer_user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +67,8 @@ pub struct PlayerViewData {
     pub points: f32,
     pub is_turn: bool,
     pub is_bot: bool,
+    /// None for bots. Drives the game-page add-friend affordance (#30 D3).
+    pub user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,11 +192,13 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 points: p.game_player.points.unwrap_or(0.0),
                 is_turn: p.game_player.is_turn,
                 is_bot: p.game_bot.is_some(),
+                user_id: p.user.as_ref().map(|u| u.id),
             })
             .collect(),
         command_spec: render_resp.command_spec,
         player_style,
         viewer_is_admin,
+        viewer_user_id: Some(user.id),
     })
 }
 
