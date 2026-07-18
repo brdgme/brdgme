@@ -1534,6 +1534,205 @@ pub async fn set_user_theme(pool: &PgPool, user_id: Uuid, theme: Option<&str>) -
     Ok(())
 }
 
+// --- #30 friends (spec docs/superpowers/specs/2026-07-08-30-friends-design.md) ---
+// Plain (non-macro) queries throughout, for the same .sqlx-cache reason as
+// get_user_theme above.
+
+#[cfg(feature = "ssr")]
+#[derive(Debug, sqlx::FromRow)]
+struct FriendRow {
+    id: Uuid,
+    source_user_id: Uuid,
+    has_accepted: Option<bool>,
+}
+
+/// D1 lifecycle. Creates a pending request, treating a reverse pending row
+/// as mutual intent (auto-accept), a reverse declined row as the decliner
+/// changing their mind (flip to accepted), and everything else as a silent
+/// no-op. If the target has blocked the source, this is a silent no-op too
+/// (D7): the requester must not be able to distinguish any of these.
+#[cfg(feature = "ssr")]
+pub async fn send_friend_request(pool: &PgPool, source: Uuid, target: Uuid) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    let target_blocked_source: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2)",
+    )
+    .bind(target)
+    .bind(source)
+    .fetch_one(&mut *tx)
+    .await?;
+    if target_blocked_source {
+        return Ok(()); // tx dropped -> rollback; nothing written
+    }
+    let row: Option<FriendRow> = sqlx::query_as(
+        "SELECT id, source_user_id, has_accepted FROM friends
+         WHERE (source_user_id = $1 AND target_user_id = $2)
+            OR (source_user_id = $2 AND target_user_id = $1)",
+    )
+    .bind(source)
+    .bind(target)
+    .fetch_optional(&mut *tx)
+    .await?;
+    match row {
+        None => {
+            sqlx::query("INSERT INTO friends (source_user_id, target_user_id) VALUES ($1, $2)")
+                .bind(source)
+                .bind(target)
+                .execute(&mut *tx)
+                .await?;
+        }
+        // I already have an outgoing row (pending, declined, or accepted):
+        // silent no-op in every case.
+        Some(r) if r.source_user_id == source => {}
+        // Reverse row: they asked me (pending -> mutual intent) or they asked
+        // me and I declined (my own request now = both sides opted in).
+        Some(r) => {
+            if r.has_accepted != Some(true) {
+                sqlx::query(
+                    "UPDATE friends SET has_accepted = TRUE,
+                     updated_at = timezone('utc', now()) WHERE id = $1",
+                )
+                .bind(r.id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Returns false when no pending request with this id targets `responder`
+/// (already responded, wrong user, or unknown id).
+#[cfg(feature = "ssr")]
+pub async fn respond_to_friend_request(
+    pool: &PgPool,
+    request_id: Uuid,
+    responder: Uuid,
+    accept: bool,
+) -> Result<bool> {
+    let res = sqlx::query(
+        "UPDATE friends SET has_accepted = $1, updated_at = timezone('utc', now())
+         WHERE id = $2 AND target_user_id = $3 AND has_accepted IS NULL",
+    )
+    .bind(accept)
+    .bind(request_id)
+    .bind(responder)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
+}
+
+/// The requester behind a pending incoming request - used by the
+/// decline-and-block path (D7), which needs the source id to block.
+#[cfg(feature = "ssr")]
+pub async fn get_pending_request_source(
+    pool: &PgPool,
+    request_id: Uuid,
+    responder: Uuid,
+) -> Result<Option<Uuid>> {
+    Ok(sqlx::query_scalar(
+        "SELECT source_user_id FROM friends
+         WHERE id = $1 AND target_user_id = $2 AND has_accepted IS NULL",
+    )
+    .bind(request_id)
+    .bind(responder)
+    .fetch_optional(pool)
+    .await?)
+}
+
+/// Deletes only ACCEPTED rows: a requester must not be able to delete the
+/// declined row that shields the decliner from re-request spam.
+#[cfg(feature = "ssr")]
+pub async fn unfriend(pool: &PgPool, a: Uuid, b: Uuid) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM friends WHERE has_accepted = TRUE
+         AND ((source_user_id = $1 AND target_user_id = $2)
+           OR (source_user_id = $2 AND target_user_id = $1))",
+    )
+    .bind(a)
+    .bind(b)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn are_friends_conn(conn: &mut sqlx::PgConnection, a: Uuid, b: Uuid) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM friends WHERE has_accepted = TRUE
+         AND ((source_user_id = $1 AND target_user_id = $2)
+           OR (source_user_id = $2 AND target_user_id = $1)))",
+    )
+    .bind(a)
+    .bind(b)
+    .fetch_one(conn)
+    .await?)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn list_friends(pool: &PgPool, user_id: Uuid) -> Result<Vec<(Uuid, String)>> {
+    Ok(sqlx::query_as(
+        "SELECT u.id, u.name FROM friends f
+         JOIN users u ON u.id = CASE WHEN f.source_user_id = $1
+                                     THEN f.target_user_id ELSE f.source_user_id END
+         WHERE f.has_accepted = TRUE
+           AND (f.source_user_id = $1 OR f.target_user_id = $1)
+         ORDER BY lower(u.name)",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// (request_id, requester_user_id, requester_name), oldest first.
+#[cfg(feature = "ssr")]
+pub async fn list_incoming_friend_requests(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<(Uuid, Uuid, String)>> {
+    Ok(sqlx::query_as(
+        "SELECT f.id, u.id, u.name FROM friends f
+         JOIN users u ON u.id = f.source_user_id
+         WHERE f.target_user_id = $1 AND f.has_accepted IS NULL
+         ORDER BY f.created_at",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Outgoing requests shown as "pending". DELIBERATELY includes declined
+/// rows (has_accepted = FALSE): the requester must not be able to
+/// distinguish pending from declined (D1 silent shield).
+#[cfg(feature = "ssr")]
+pub async fn list_outgoing_friend_requests(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<(Uuid, String)>> {
+    Ok(sqlx::query_as(
+        "SELECT u.id, u.name FROM friends f
+         JOIN users u ON u.id = f.target_user_id
+         WHERE f.source_user_id = $1
+           AND (f.has_accepted IS NULL OR f.has_accepted = FALSE)
+         ORDER BY f.created_at",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Exact-name lookup, case-insensitive (users_name_lower_key, migration 009).
+#[cfg(feature = "ssr")]
+pub async fn get_user_by_name(pool: &PgPool, name: &str) -> Result<Option<(Uuid, String)>> {
+    Ok(
+        sqlx::query_as("SELECT id, name FROM users WHERE lower(name) = lower($1)")
+            .bind(name)
+            .fetch_optional(pool)
+            .await?,
+    )
+}
+
 /// The user's current name straight from the `users` table - the session's
 /// cached copy can be stale after a rename. Plain query for the same reason
 /// as `get_user_theme`.
@@ -1718,6 +1917,195 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    // --- #30 friends lifecycle ---
+
+    async fn friend_row_state(pool: &PgPool, a: Uuid, b: Uuid) -> Option<(Uuid, Option<bool>)> {
+        sqlx::query_as::<_, (Uuid, Option<bool>)>(
+            "SELECT source_user_id, has_accepted FROM friends
+             WHERE (source_user_id = $1 AND target_user_id = $2)
+                OR (source_user_id = $2 AND target_user_id = $1)",
+        )
+        .bind(a)
+        .bind(b)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn friend_request_creates_pending_row(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, None))
+        );
+    }
+
+    #[sqlx::test]
+    async fn reverse_pending_request_auto_accepts(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        send_friend_request(&pool, b.id, a.id).await.unwrap();
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, Some(true)))
+        );
+        let mut conn = pool.acquire().await.unwrap();
+        assert!(are_friends_conn(&mut conn, a.id, b.id).await.unwrap());
+    }
+
+    #[sqlx::test]
+    async fn accept_and_decline_update_pending_row(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        let (req_id, _, _) = list_incoming_friend_requests(&pool, b.id).await.unwrap()[0];
+        // wrong responder: the requester cannot accept their own request
+        assert!(
+            !respond_to_friend_request(&pool, req_id, a.id, true)
+                .await
+                .unwrap()
+        );
+        assert!(
+            respond_to_friend_request(&pool, req_id, b.id, true)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, Some(true)))
+        );
+        // already-responded request is no longer pending
+        assert!(
+            !respond_to_friend_request(&pool, req_id, b.id, false)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[sqlx::test]
+    async fn rerequest_after_decline_is_silent_noop(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        let (req_id, _, _) = list_incoming_friend_requests(&pool, b.id).await.unwrap()[0];
+        assert!(
+            respond_to_friend_request(&pool, req_id, b.id, false)
+                .await
+                .unwrap()
+        );
+        // silent shield: re-request succeeds but the row stays declined
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, Some(false)))
+        );
+        // and the requester still sees it as an outgoing "pending" request
+        let outgoing = list_outgoing_friend_requests(&pool, a.id).await.unwrap();
+        assert_eq!(outgoing, vec![(b.id, "bob".to_string())]);
+    }
+
+    #[sqlx::test]
+    async fn decliner_own_request_flips_to_accepted(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        let (req_id, _, _) = list_incoming_friend_requests(&pool, b.id).await.unwrap()[0];
+        respond_to_friend_request(&pool, req_id, b.id, false)
+            .await
+            .unwrap();
+        // b changed their mind: both sides have now expressed intent
+        send_friend_request(&pool, b.id, a.id).await.unwrap();
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, Some(true)))
+        );
+    }
+
+    #[sqlx::test]
+    async fn pair_unique_index_rejects_reverse_duplicate(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        sqlx::query("INSERT INTO friends (source_user_id, target_user_id) VALUES ($1, $2)")
+            .bind(a.id)
+            .bind(b.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let err =
+            sqlx::query("INSERT INTO friends (source_user_id, target_user_id) VALUES ($1, $2)")
+                .bind(b.id)
+                .bind(a.id)
+                .execute(&pool)
+                .await;
+        assert!(
+            err.is_err(),
+            "pair-unique index must reject B->A when A->B exists"
+        );
+    }
+
+    #[sqlx::test]
+    async fn self_request_rejected_by_db_check(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        assert!(send_friend_request(&pool, a.id, a.id).await.is_err());
+    }
+
+    #[sqlx::test]
+    async fn unfriend_deletes_accepted_but_not_declined(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        let (req_id, _, _) = list_incoming_friend_requests(&pool, b.id).await.unwrap()[0];
+        respond_to_friend_request(&pool, req_id, b.id, false)
+            .await
+            .unwrap();
+        // declined row survives unfriend (anti-harassment shield stays)
+        unfriend(&pool, a.id, b.id).await.unwrap();
+        assert!(friend_row_state(&pool, a.id, b.id).await.is_some());
+        // flip to accepted, then unfriend from the other side deletes it
+        send_friend_request(&pool, b.id, a.id).await.unwrap();
+        unfriend(&pool, b.id, a.id).await.unwrap();
+        assert!(friend_row_state(&pool, a.id, b.id).await.is_none());
+        // clean slate: fresh request allowed
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, None))
+        );
+    }
+
+    #[sqlx::test]
+    async fn friend_lists_and_name_lookup(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let c = make_user(&pool, "carol").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        send_friend_request(&pool, b.id, a.id).await.unwrap(); // accepted
+        send_friend_request(&pool, c.id, a.id).await.unwrap(); // incoming pending for a
+        assert_eq!(
+            list_friends(&pool, a.id).await.unwrap(),
+            vec![(b.id, "bob".to_string())]
+        );
+        let incoming = list_incoming_friend_requests(&pool, a.id).await.unwrap();
+        assert_eq!(incoming.len(), 1);
+        assert_eq!(
+            (incoming[0].1, incoming[0].2.clone()),
+            (c.id, "carol".to_string())
+        );
+        assert_eq!(
+            list_outgoing_friend_requests(&pool, c.id).await.unwrap(),
+            vec![(a.id, "alice".to_string())]
+        );
+        assert_eq!(
+            get_user_by_name(&pool, "ALICE").await.unwrap(),
+            Some((a.id, "alice".to_string()))
+        );
+        assert_eq!(get_user_by_name(&pool, "nobody").await.unwrap(), None);
     }
 
     // --- 1. create_game_with_users ---
