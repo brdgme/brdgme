@@ -1891,6 +1891,59 @@ pub async fn get_user_by_name(pool: &PgPool, name: &str) -> Result<Option<(Uuid,
     )
 }
 
+/// D6: friends tier (most recently played with first - resolved decision
+/// 2026-07-18 - then alphabetical), then distinct human co-players from the
+/// caller's last 20 games. Excludes self and any block in either direction.
+#[cfg(feature = "ssr")]
+pub async fn opponent_suggestions(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<(Uuid, String, bool)>> {
+    let friends: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT u.id, u.name FROM friends f
+         JOIN users u ON u.id = CASE WHEN f.source_user_id = $1
+                                     THEN f.target_user_id ELSE f.source_user_id END
+         WHERE f.has_accepted = TRUE
+           AND (f.source_user_id = $1 OR f.target_user_id = $1)
+         ORDER BY (SELECT max(g.updated_at) FROM games g
+                   JOIN game_players me ON me.game_id = g.id AND me.user_id = $1
+                   JOIN game_players them ON them.game_id = g.id AND them.user_id = u.id)
+                  DESC NULLS LAST,
+                  lower(u.name)",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let recent: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT u.id, u.name FROM
+           (SELECT g.id AS game_id, g.updated_at FROM games g
+            JOIN game_players me ON me.game_id = g.id AND me.user_id = $1
+            ORDER BY g.updated_at DESC LIMIT 20) recent
+         JOIN game_players op ON op.game_id = recent.game_id AND op.user_id <> $1
+         JOIN users u ON u.id = op.user_id
+         WHERE NOT EXISTS (SELECT 1 FROM blocks b
+                           WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = u.id)
+                              OR (b.blocker_user_id = u.id AND b.blocked_user_id = $1))
+         GROUP BY u.id, u.name
+         ORDER BY max(recent.updated_at) DESC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out: Vec<(Uuid, String, bool)> = friends
+        .into_iter()
+        .map(|(id, name)| (id, name, true))
+        .collect();
+    for (id, name) in recent {
+        if !out.iter().any(|(fid, _, _)| *fid == id) {
+            out.push((id, name, false));
+        }
+    }
+    Ok(out)
+}
+
 /// The user's current name straight from the `users` table - the session's
 /// cached copy can be stale after a rename. Plain query for the same reason
 /// as `get_user_theme`.
@@ -2410,6 +2463,64 @@ mod tests {
             check_roster(&pool, b.id, &[a.id], &[]).await,
             vec!["You have blocked alice".to_string()]
         );
+    }
+
+    // --- #30 opponent suggestions (D6) ---
+
+    #[sqlx::test]
+    async fn suggestions_friends_first_then_recent_coplayers(pool: PgPool) {
+        let me = make_user(&pool, "me").await;
+        let friend_old = make_user(&pool, "zed").await; // friend, played long ago
+        let friend_new = make_user(&pool, "amy").await; // friend, played recently
+        let stranger = make_user(&pool, "stranger").await; // co-player, not friend
+        for f in [friend_old.id, friend_new.id] {
+            send_friend_request(&pool, me.id, f).await.unwrap();
+            send_friend_request(&pool, f, me.id).await.unwrap();
+        }
+        let (_, version) = make_game_type_and_version(&pool).await;
+        let g1 = make_game_with_players(&pool, version, me.id, &[friend_old.id], 0, &[0]).await;
+        let g2 = make_game_with_players(&pool, version, me.id, &[friend_new.id], 0, &[0]).await;
+        let g3 = make_game_with_players(&pool, version, me.id, &[stranger.id], 0, &[0]).await;
+        // force distinct recency: g1 oldest, g3 newest
+        for (i, gid) in [g1.id, g2.id, g3.id].iter().enumerate() {
+            sqlx::query(
+                "UPDATE games SET updated_at = NOW() - make_interval(days => $1) WHERE id = $2",
+            )
+            .bind(3 - i as i32)
+            .bind(gid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let s = opponent_suggestions(&pool, me.id).await.unwrap();
+        assert_eq!(
+            s,
+            vec![
+                (friend_new.id, "amy".to_string(), true), // friends by recency
+                (friend_old.id, "zed".to_string(), true),
+                (stranger.id, "stranger".to_string(), false), // then co-players
+            ]
+        );
+    }
+
+    #[sqlx::test]
+    async fn suggestions_exclude_blocked_and_self(pool: PgPool) {
+        let me = make_user(&pool, "me").await;
+        let blocked_by_me = make_user(&pool, "villain").await;
+        let blocked_me = make_user(&pool, "hermit").await;
+        let (_, version) = make_game_type_and_version(&pool).await;
+        make_game_with_players(
+            &pool,
+            version,
+            me.id,
+            &[blocked_by_me.id, blocked_me.id],
+            0,
+            &[0],
+        )
+        .await;
+        block_user(&pool, me.id, blocked_by_me.id).await.unwrap();
+        block_user(&pool, blocked_me.id, me.id).await.unwrap();
+        assert!(opponent_suggestions(&pool, me.id).await.unwrap().is_empty());
     }
 
     // --- 1. create_game_with_users ---
