@@ -283,3 +283,186 @@ pub async fn get_friend_activity() -> Result<FriendActivity, ServerFnError> {
             .collect(),
     })
 }
+
+#[component]
+pub fn FriendsPage() -> impl IntoView {
+    use crate::components::layout::MainLayout;
+
+    let (refresh, set_refresh) = signal(0u32);
+    let overview = LocalResource::new(move || {
+        refresh.track();
+        get_friends_overview()
+    });
+
+    let add_action = ServerAction::<SendFriendRequest>::new();
+    let respond_action = ServerAction::<RespondToFriendRequest>::new();
+    let unfriend_action = ServerAction::<Unfriend>::new();
+    let unblock_action = ServerAction::<UnblockUser>::new();
+    let policy_action = ServerAction::<SetInvitePolicy>::new();
+
+    let (add_name, set_add_name) = signal(String::new());
+
+    // Any successful mutation refetches the overview.
+    Effect::new(move |_| {
+        if let Some(Ok(())) = add_action.value().get() {
+            set_add_name.set(String::new());
+            set_refresh.update(|n| *n += 1);
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(())) = respond_action.value().get() {
+            set_refresh.update(|n| *n += 1);
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(())) = unfriend_action.value().get() {
+            set_refresh.update(|n| *n += 1);
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(())) = unblock_action.value().get() {
+            set_refresh.update(|n| *n += 1);
+        }
+    });
+
+    view! {
+        <MainLayout>
+            <div class="friends content-page">
+                <h1>"Friends"</h1>
+                {move || match overview.get() {
+                    None => view! { <p>"Loading..."</p> }.into_any(),
+                    Some(Err(e)) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
+                    Some(Ok(o)) => view! {
+                        <section class="friends-add">
+                            <h2>"Add a friend"</h2>
+                            <form on:submit=move |ev: leptos::ev::SubmitEvent| {
+                                ev.prevent_default();
+                                let name = add_name.get_untracked();
+                                if !name.trim().is_empty() {
+                                    add_action.dispatch(SendFriendRequest { user_id: None, name: Some(name) });
+                                }
+                            }>
+                                <input
+                                    type="text"
+                                    placeholder="Exact username"
+                                    prop:value=add_name
+                                    on:input=move |ev| set_add_name.set(event_target_value(&ev))
+                                />
+                                <input type="submit" value="Send request"
+                                    disabled=move || add_action.pending().get() />
+                            </form>
+                            {move || add_action.value().get().and_then(|r| r.err()).map(|e| view! {
+                                <p class="error">{e.to_string()}</p>
+                            })}
+                        </section>
+
+                        <section class="friends-incoming">
+                            <h2>"Incoming requests"</h2>
+                            {if o.incoming.is_empty() {
+                                view! { <p>"No incoming requests."</p> }.into_any()
+                            } else {
+                                o.incoming.iter().map(|r| {
+                                    let id = r.request_id;
+                                    let name = r.name.clone();
+                                    view! {
+                                        <div class="friend-row">
+                                            <span>{name}</span>
+                                            " "
+                                            <a href="#" on:click=move |ev| {
+                                                ev.prevent_default();
+                                                respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: true, block: false });
+                                            }>"Accept"</a>
+                                            " | "
+                                            <a href="#" on:click=move |ev| {
+                                                ev.prevent_default();
+                                                respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: false, block: false });
+                                            }>"Decline"</a>
+                                            " | "
+                                            <a href="#" on:click=move |ev| {
+                                                ev.prevent_default();
+                                                let confirmed = web_sys::window()
+                                                    .and_then(|w| w.confirm_with_message("Decline and block? They will no longer be able to send you friend requests or add you to games.").ok())
+                                                    .unwrap_or(false);
+                                                if confirmed {
+                                                    respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: false, block: true });
+                                                }
+                                            }>"Decline and block"</a>
+                                        </div>
+                                    }
+                                }).collect_view().into_any()
+                            }}
+                        </section>
+
+                        <section class="friends-list">
+                            <h2>"Friends"</h2>
+                            {if o.friends.is_empty() {
+                                view! { <p>"No friends yet. Add the people you play with!"</p> }.into_any()
+                            } else {
+                                o.friends.iter().map(|f| {
+                                    let uid = f.user_id;
+                                    let name = f.name.clone();
+                                    view! {
+                                        <div class="friend-row">
+                                            <span>{name}</span>
+                                            " "
+                                            <a href="#" on:click=move |ev| {
+                                                ev.prevent_default();
+                                                unfriend_action.dispatch(Unfriend { user_id: uid });
+                                            }>"Unfriend"</a>
+                                        </div>
+                                    }
+                                }).collect_view().into_any()
+                            }}
+                        </section>
+
+                        <section class="friends-outgoing">
+                            <h2>"Sent requests"</h2>
+                            {if o.outgoing.is_empty() {
+                                view! { <p>"No pending sent requests."</p> }.into_any()
+                            } else {
+                                o.outgoing.iter().map(|f| {
+                                    let name = f.name.clone();
+                                    view! { <div class="friend-row"><span>{name}</span>" - pending"</div> }
+                                }).collect_view().into_any()
+                            }}
+                        </section>
+
+                        <section class="friends-blocked">
+                            <h2>"Blocked"</h2>
+                            {if o.blocked.is_empty() {
+                                view! { <p>"Nobody is blocked."</p> }.into_any()
+                            } else {
+                                o.blocked.iter().map(|f| {
+                                    let uid = f.user_id;
+                                    let name = f.name.clone();
+                                    view! {
+                                        <div class="friend-row">
+                                            <span>{name}</span>
+                                            " "
+                                            <a href="#" on:click=move |ev| {
+                                                ev.prevent_default();
+                                                unblock_action.dispatch(UnblockUser { user_id: uid });
+                                            }>"Unblock"</a>
+                                        </div>
+                                    }
+                                }).collect_view().into_any()
+                            }}
+                        </section>
+
+                        <section class="friends-policy">
+                            <h2>"Who can add me to games"</h2>
+                            <select on:change=move |ev| {
+                                policy_action.dispatch(SetInvitePolicy { policy: event_target_value(&ev) });
+                            }>
+                                {INVITE_POLICIES.iter().map(|(slug, label)| {
+                                    let selected = o.invite_policy == *slug;
+                                    view! { <option value=*slug selected=selected>{*label}</option> }
+                                }).collect_view()}
+                            </select>
+                        </section>
+                    }.into_any(),
+                }}
+            </div>
+        </MainLayout>
+    }
+}

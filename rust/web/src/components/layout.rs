@@ -161,6 +161,7 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
             </div>
             <div><A href="/games">"New game"</A></div>
             <div><A href="/settings">"Settings"</A></div>
+            <div><A href="/friends">"Friends"</A></div>
             <div>
                 <h2>"Active games"</h2>
                 {move || match active_games.get() {
