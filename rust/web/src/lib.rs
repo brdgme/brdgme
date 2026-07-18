@@ -2,6 +2,7 @@
 
 pub mod app;
 
+pub mod friends;
 pub mod settings;
 pub mod theme;
 
