@@ -168,7 +168,12 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
             <div class="game-meta-logs">
                 <h2>"Logs"</h2>
                 <div class="game-meta-logs-content">
-                    <GameLogs player_style=player_style />
+                    // logs is a LocalResource that never resolves on SSR; without its own
+                    // Suspense the outer Transition emits fallback HTML on the server while
+                    // the hydrating client renders children, causing a hydration mismatch panic.
+                    <Suspense fallback=|| ()>
+                        <GameLogs player_style=player_style />
+                    </Suspense>
                 </div>
             </div>
         </div>

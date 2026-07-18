@@ -975,6 +975,12 @@ fn GamePage() -> impl IntoView {
                             let base = game_data.get();
                             base.map(|res| match res {
                         Err(e) => view! { <div class="error">"Error: " {e.to_string()}</div> }.into_any(),
+                        // game_data is stale-while-revalidate: during a game-to-game
+                        // navigation refetch, .get() still returns the previous game's
+                        // data. Show the loading spinner instead of the stale board.
+                        Ok(data) if current_game.get() != Some(data.id) => {
+                            view! { <div class="game-loading"><crate::components::Spinner/></div> }.into_any()
+                        }
                         Ok(data) => {
                             let is_turn = data.is_my_turn;
                             let is_finished = data.is_finished;
@@ -993,7 +999,12 @@ fn GamePage() -> impl IntoView {
                                 <div class="game-container">
                                     <div class="game-main">
                                         <GameBoard html=html player_style=player_style.clone() />
-                                        <RecentGameLogs player_style=player_style.clone() />
+                                        // logs is a LocalResource that never resolves on SSR; without its own
+                                        // Suspense the outer Transition emits fallback HTML on the server while
+                                        // the hydrating client renders children, causing a hydration mismatch panic.
+                                        <Suspense fallback=|| ()>
+                                            <RecentGameLogs player_style=player_style.clone() />
+                                        </Suspense>
                                         <Show when=move || is_turn>
                                             <GameCommandInput
                                                 game_id=id
