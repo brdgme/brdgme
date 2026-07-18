@@ -1722,6 +1722,83 @@ pub async fn list_outgoing_friend_requests(
     .await?)
 }
 
+/// D7. Idempotent. Severs any friends row for the pair (accepted, pending,
+/// or declined, either direction) atomically with the block insert.
+#[cfg(feature = "ssr")]
+pub async fn block_user(pool: &PgPool, blocker: Uuid, blocked: Uuid) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO blocks (blocker_user_id, blocked_user_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(blocker)
+    .bind(blocked)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM friends
+         WHERE (source_user_id = $1 AND target_user_id = $2)
+            OR (source_user_id = $2 AND target_user_id = $1)",
+    )
+    .bind(blocker)
+    .bind(blocked)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Deletes the block only. Does not restore any friendship; a fresh friend
+/// request afterwards is allowed (D7).
+#[cfg(feature = "ssr")]
+pub async fn unblock_user(pool: &PgPool, blocker: Uuid, blocked: Uuid) -> Result<()> {
+    sqlx::query("DELETE FROM blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2")
+        .bind(blocker)
+        .bind(blocked)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn has_block(pool: &PgPool, blocker: Uuid, blocked: Uuid) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2)",
+    )
+    .bind(blocker)
+    .bind(blocked)
+    .fetch_one(pool)
+    .await?)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn has_block_conn(
+    conn: &mut sqlx::PgConnection,
+    blocker: Uuid,
+    blocked: Uuid,
+) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2)",
+    )
+    .bind(blocker)
+    .bind(blocked)
+    .fetch_one(conn)
+    .await?)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn list_blocked(pool: &PgPool, blocker: Uuid) -> Result<Vec<(Uuid, String)>> {
+    Ok(sqlx::query_as(
+        "SELECT u.id, u.name FROM blocks b
+         JOIN users u ON u.id = b.blocked_user_id
+         WHERE b.blocker_user_id = $1
+         ORDER BY b.created_at DESC",
+    )
+    .bind(blocker)
+    .fetch_all(pool)
+    .await?)
+}
+
 /// Exact-name lookup, case-insensitive (users_name_lower_key, migration 009).
 #[cfg(feature = "ssr")]
 pub async fn get_user_by_name(pool: &PgPool, name: &str) -> Result<Option<(Uuid, String)>> {
@@ -2106,6 +2183,49 @@ mod tests {
             Some((a.id, "alice".to_string()))
         );
         assert_eq!(get_user_by_name(&pool, "nobody").await.unwrap(), None);
+    }
+
+    // --- #30 blocks (D7) ---
+
+    #[sqlx::test]
+    async fn block_severs_friendship_and_pending(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        send_friend_request(&pool, b.id, a.id).await.unwrap(); // accepted
+        block_user(&pool, b.id, a.id).await.unwrap();
+        assert!(friend_row_state(&pool, a.id, b.id).await.is_none());
+        assert!(has_block(&pool, b.id, a.id).await.unwrap());
+        assert!(!has_block(&pool, a.id, b.id).await.unwrap()); // directed
+        assert_eq!(list_blocked(&pool, b.id).await.unwrap(), vec![(a.id, "alice".to_string())]);
+        // idempotent
+        block_user(&pool, b.id, a.id).await.unwrap();
+    }
+
+    #[sqlx::test]
+    async fn blocked_requester_is_silently_ignored(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        block_user(&pool, b.id, a.id).await.unwrap();
+        // a's request "succeeds" but writes nothing (silent shield)
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        assert!(friend_row_state(&pool, a.id, b.id).await.is_none());
+        assert!(list_incoming_friend_requests(&pool, b.id).await.unwrap().is_empty());
+    }
+
+    #[sqlx::test]
+    async fn unblock_allows_fresh_request_but_restores_nothing(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        send_friend_request(&pool, b.id, a.id).await.unwrap(); // accepted
+        block_user(&pool, b.id, a.id).await.unwrap();
+        unblock_user(&pool, b.id, a.id).await.unwrap();
+        assert!(!has_block(&pool, b.id, a.id).await.unwrap());
+        let mut conn = pool.acquire().await.unwrap();
+        assert!(!are_friends_conn(&mut conn, a.id, b.id).await.unwrap());
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        assert_eq!(friend_row_state(&pool, a.id, b.id).await, Some((a.id, None)));
     }
 
     // --- 1. create_game_with_users ---
