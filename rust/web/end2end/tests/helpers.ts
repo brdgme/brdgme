@@ -19,18 +19,16 @@ async function fetchLoginConfirmation(email: string): Promise<string> {
   try {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const result = await client.query(
-        `SELECT u.login_confirmation FROM users u
-         JOIN user_emails ue ON ue.user_id = u.id
-         WHERE ue.email = $1 AND u.login_confirmation IS NOT NULL`,
+        `SELECT code FROM login_confirmations WHERE email = $1`,
         [email],
       );
-      const code = result.rows[0]?.login_confirmation as string | undefined;
+      const code = result.rows[0]?.code as string | undefined;
       if (code) {
         return code;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    throw new Error(`Timed out waiting for login_confirmation for ${email}`);
+    throw new Error(`Timed out waiting for login_confirmations code for ${email}`);
   } finally {
     await client.end();
   }

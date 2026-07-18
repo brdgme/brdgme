@@ -168,9 +168,10 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
             <div class="game-meta-logs">
                 <h2>"Logs"</h2>
                 <div class="game-meta-logs-content">
-                    // logs is a LocalResource that never resolves on SSR; without its own
-                    // Suspense the outer Transition emits fallback HTML on the server while
-                    // the hydrating client renders children, causing a hydration mismatch panic.
+                    // logs is a LocalResource that never resolves on SSR: this Suspense keeps
+                    // the outer Transition from emitting fallback HTML on the server, and the
+                    // mounted-gate inside GameLogs keeps SSR and hydration output identical
+                    // (see the comment in GameLogs).
                     <Suspense fallback=|| ()>
                         <GameLogs player_style=player_style />
                     </Suspense>
@@ -314,12 +315,24 @@ pub fn GameLogs(player_style: String) -> impl IntoView {
         LocalResource<Result<Vec<crate::game::server_fns::GameLogEntry>, ServerFnError>>,
     >();
 
+    // Effects never run during SSR, so `mounted` is false in the server
+    // HTML and on the client's initial hydration pass - both sides render
+    // nothing, sidestepping a hydration-cursor mismatch (the Suspense
+    // boundaries around this component get different SerializedDataIds on
+    // the server vs the client, so the client hydrates against fallback
+    // HTML). Logs appear right after mount; the shared LocalResource has
+    // been fetching since GamePage created it, so there's no added delay.
+    let mounted = RwSignal::new(false);
+    Effect::new(move |_| mounted.set(true));
+
     let logs_ref = NodeRef::<leptos::html::Div>::new();
 
     Effect::new(move |_| {
         let _ = logs.get();
         leptos::prelude::request_animation_frame(move || {
-            if let Some(el) = logs_ref.get_untracked()
+            // try_: the raf can fire after this scope is disposed
+            // (navigation/unmount); get_untracked would panic then.
+            if let Some(el) = logs_ref.try_get_untracked().flatten()
                 && let Some(parent) = el.parent_element()
             {
                 parent.set_scroll_top(parent.scroll_height());
@@ -328,7 +341,7 @@ pub fn GameLogs(player_style: String) -> impl IntoView {
     });
 
     view! {
-        {move || logs.get().map(|result| match result {
+        {move || mounted.get().then(|| logs.get()).flatten().map(|result| match result {
             Err(_) => view! { <div>"Failed to load logs."</div> }.into_any(),
             Ok(entries) => view! {
                 <div class="game-logs" node_ref=logs_ref style=player_style.clone()>
@@ -347,19 +360,24 @@ pub fn RecentGameLogs(player_style: String) -> impl IntoView {
         LocalResource<Result<Vec<crate::game::server_fns::GameLogEntry>, ServerFnError>>,
     >();
 
+    // See the mounted-gate comment in GameLogs above.
+    let mounted = RwSignal::new(false);
+    Effect::new(move |_| mounted.set(true));
+
     let recent_ref = NodeRef::<leptos::html::Div>::new();
 
     Effect::new(move |_| {
         let _ = logs.get();
         leptos::prelude::request_animation_frame(move || {
-            if let Some(el) = recent_ref.get_untracked() {
+            // try_: see the comment in GameLogs above.
+            if let Some(el) = recent_ref.try_get_untracked().flatten() {
                 el.set_scroll_top(el.scroll_height());
             }
         });
     });
 
     view! {
-        {move || logs.get().map(|result| match result {
+        {move || mounted.get().then(|| logs.get()).flatten().map(|result| match result {
             Err(_) => None,
             Ok(entries) => {
                 let recent: Vec<_> = entries.into_iter().filter(|e| e.is_new).collect();

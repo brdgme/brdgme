@@ -1,14 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { collectConsoleErrors, login, uniqueEmail } from "./helpers";
 
-// Fails consistently (not flaky) on master as of 2026-07-07 - times out at
-// helpers.ts:54 waiting for `document.body.dataset.hydrated === "true"`
-// after navigation during login. Reproduced identically across three
-// consecutive master commits (57b5542, 41dedc8, 7a73f1f) including
-// per-run retries, which points to a real Plan 27 hydration regression
-// rather than test flake. See docs/plan/27-web-simplification.md
-// "Deferred work" for tracking; do not re-enable until root-caused.
-test.fixme("hard-loaded pages produce zero console errors", async ({ page }) => {
+test("hard-loaded pages produce zero console errors", async ({ page }) => {
   const errors = collectConsoleErrors(page);
 
   await page.goto("/");
@@ -36,11 +29,13 @@ test.fixme("hard-loaded pages produce zero console errors", async ({ page }) => 
   // Navigate away and hard-load the game page directly, exercising SSR + hydration.
   await page.goto("/dashboard");
   await page.goto(gameUrl);
+  await page.waitForFunction(() => document.body.dataset.hydrated === "true");
   await expect(page.locator(".game-render")).toBeVisible();
 
   // Hard reload mid-game is the highest-risk hydration scenario (real async
   // data + Suspense).
   await page.reload();
+  await page.waitForFunction(() => document.body.dataset.hydrated === "true");
   await expect(page.locator(".game-render")).toBeVisible();
 
   errors.assertNoErrors();

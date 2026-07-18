@@ -40,14 +40,13 @@ one mechanism per job.
    the same Tilt session as WP3's manual checklist.
 4. **Skipped e2e test `hard-loaded pages produce zero console errors`**
    (`rust/web/end2end/tests/page-loads.spec.ts`), `test.fixme`'d
-   2026-07-07 to unblock production deploys. Unlike the flaky tests above,
-   this one failed *consistently* on three consecutive master commits
-   (57b5542, 41dedc8, 7a73f1f), timing out on the `document.body.dataset
-   .hydrated === "true"` wait in `helpers.ts`'s `login()` during
-   navigation - a suspected real hydration regression introduced by the
-   Plan 27 work, not flake. Production images are pinned pre-Plan-27 at
-   `sha-5c037a2`, so prod is unaffected for now. This test must be
-   un-skipped and the regression root-caused before any web image bump.
+   2026-07-07 to unblock production deploys. **Resolved 2026-07-18**: the
+   regression was root-caused to a hydration panic in the game log
+   components (skewed Suspense hydration ids between SSR and the client);
+   GameLogs/RecentGameLogs now render only after a post-hydration mount
+   gate, and the test is re-enabled and strengthened with `data-hydrated`
+   waits. The pre-Plan-27 `sha-5c037a2` image pin can be lifted once this
+   commit is deployed.
 
 ## Structure and sequencing
 

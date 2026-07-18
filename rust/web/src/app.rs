@@ -999,9 +999,10 @@ fn GamePage() -> impl IntoView {
                                 <div class="game-container">
                                     <div class="game-main">
                                         <GameBoard html=html player_style=player_style.clone() />
-                                        // logs is a LocalResource that never resolves on SSR; without its own
-                                        // Suspense the outer Transition emits fallback HTML on the server while
-                                        // the hydrating client renders children, causing a hydration mismatch panic.
+                                        // logs is a LocalResource that never resolves on SSR: this Suspense
+                                        // keeps the outer Transition from emitting fallback HTML on the
+                                        // server, and the mounted-gate inside RecentGameLogs keeps SSR and
+                                        // hydration output identical (see the comment in GameLogs).
                                         <Suspense fallback=|| ()>
                                             <RecentGameLogs player_style=player_style.clone() />
                                         </Suspense>
