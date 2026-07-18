@@ -1799,6 +1799,87 @@ pub async fn list_blocked(pool: &PgPool, blocker: Uuid) -> Result<Vec<(Uuid, Str
     .await?)
 }
 
+/// Plain query for the same .sqlx reason as get_user_theme - invite_policy
+/// is deliberately NOT a field on models::user::User.
+#[cfg(feature = "ssr")]
+pub async fn get_invite_policy(pool: &PgPool, user_id: Uuid) -> Result<String> {
+    let row: (String,) = sqlx::query_as("SELECT invite_policy FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_invite_policy(pool: &PgPool, user_id: Uuid, policy: &str) -> Result<()> {
+    sqlx::query("UPDATE users SET invite_policy = $1, updated_at = NOW() WHERE id = $2")
+        .bind(policy)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// D4 + D7 enforcement choke point. Call after the roster is known but
+/// before players are attached: create_new_game and restart_game today,
+/// #24's create_proposal and any future matchmaking tomorrow.
+///
+/// Emails resolving to no account pass (the account is created at game
+/// creation with default 'open' and can have no blocks). Block-by-target
+/// uses wording identical to policy 'none' so a blocked creator cannot
+/// distinguish the two (D7 detectability).
+#[cfg(feature = "ssr")]
+pub async fn check_invite_policy_tx(
+    tx: &mut sqlx::PgConnection,
+    creator_id: Uuid,
+    opponent_ids: &[Uuid],
+    opponent_emails: &[String],
+) -> Result<Vec<String>> {
+    let mut targets: Vec<Uuid> = opponent_ids.to_vec();
+    for email in opponent_emails {
+        let existing: Option<Uuid> =
+            sqlx::query_scalar("SELECT user_id FROM user_emails WHERE email = $1")
+                .bind(email)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if let Some(id) = existing {
+            targets.push(id);
+        }
+    }
+    targets.sort();
+    targets.dedup();
+
+    let mut violations = Vec::new();
+    for target in targets {
+        if target == creator_id {
+            continue;
+        }
+        let row: Option<(String, String)> =
+            sqlx::query_as("SELECT name, invite_policy FROM users WHERE id = $1")
+                .bind(target)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some((name, policy)) = row else {
+            violations.push("Player not found".to_string());
+            continue;
+        };
+        if has_block_conn(&mut *tx, target, creator_id).await? {
+            violations.push(format!("{name} is not accepting game invitations"));
+            continue;
+        }
+        if has_block_conn(&mut *tx, creator_id, target).await? {
+            violations.push(format!("You have blocked {name}"));
+            continue;
+        }
+        if policy == "none" {
+            violations.push(format!("{name} is not accepting game invitations"));
+        } else if policy == "friends" && !are_friends_conn(&mut *tx, creator_id, target).await? {
+            violations.push(format!("{name} only accepts games from friends"));
+        } // 'open' passes
+    }
+    Ok(violations)
+}
+
 /// Exact-name lookup, case-insensitive (users_name_lower_key, migration 009).
 #[cfg(feature = "ssr")]
 pub async fn get_user_by_name(pool: &PgPool, name: &str) -> Result<Option<(Uuid, String)>> {
@@ -2197,7 +2278,10 @@ mod tests {
         assert!(friend_row_state(&pool, a.id, b.id).await.is_none());
         assert!(has_block(&pool, b.id, a.id).await.unwrap());
         assert!(!has_block(&pool, a.id, b.id).await.unwrap()); // directed
-        assert_eq!(list_blocked(&pool, b.id).await.unwrap(), vec![(a.id, "alice".to_string())]);
+        assert_eq!(
+            list_blocked(&pool, b.id).await.unwrap(),
+            vec![(a.id, "alice".to_string())]
+        );
         // idempotent
         block_user(&pool, b.id, a.id).await.unwrap();
     }
@@ -2210,7 +2294,12 @@ mod tests {
         // a's request "succeeds" but writes nothing (silent shield)
         send_friend_request(&pool, a.id, b.id).await.unwrap();
         assert!(friend_row_state(&pool, a.id, b.id).await.is_none());
-        assert!(list_incoming_friend_requests(&pool, b.id).await.unwrap().is_empty());
+        assert!(
+            list_incoming_friend_requests(&pool, b.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[sqlx::test]
@@ -2225,7 +2314,102 @@ mod tests {
         let mut conn = pool.acquire().await.unwrap();
         assert!(!are_friends_conn(&mut conn, a.id, b.id).await.unwrap());
         send_friend_request(&pool, a.id, b.id).await.unwrap();
-        assert_eq!(friend_row_state(&pool, a.id, b.id).await, Some((a.id, None)));
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, None))
+        );
+    }
+
+    // --- #30 invite policy (D4) + block enforcement (D7) ---
+
+    async fn check_roster(
+        pool: &PgPool,
+        creator: Uuid,
+        ids: &[Uuid],
+        emails: &[String],
+    ) -> Vec<String> {
+        let mut tx = pool.begin().await.unwrap();
+        let v = check_invite_policy_tx(&mut tx, creator, ids, emails)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        v
+    }
+
+    #[sqlx::test]
+    async fn invite_policy_default_open_allows_everyone(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        assert_eq!(get_invite_policy(&pool, b.id).await.unwrap(), "open");
+        assert!(check_roster(&pool, a.id, &[b.id], &[]).await.is_empty());
+    }
+
+    #[sqlx::test]
+    async fn invite_policy_none_blocks_with_generic_message(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        set_invite_policy(&pool, b.id, "none").await.unwrap();
+        assert_eq!(
+            check_roster(&pool, a.id, &[b.id], &[]).await,
+            vec!["bob is not accepting game invitations".to_string()]
+        );
+    }
+
+    #[sqlx::test]
+    async fn invite_policy_friends_requires_accepted_friendship(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        set_invite_policy(&pool, b.id, "friends").await.unwrap();
+        assert_eq!(
+            check_roster(&pool, a.id, &[b.id], &[]).await,
+            vec!["bob only accepts games from friends".to_string()]
+        );
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        // pending is not enough
+        assert!(!check_roster(&pool, a.id, &[b.id], &[]).await.is_empty());
+        send_friend_request(&pool, b.id, a.id).await.unwrap(); // accepted
+        assert!(check_roster(&pool, a.id, &[b.id], &[]).await.is_empty());
+    }
+
+    #[sqlx::test]
+    async fn policy_check_covers_email_of_existing_user(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)")
+            .bind(b.id)
+            .bind("bob@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        set_invite_policy(&pool, b.id, "none").await.unwrap();
+        assert_eq!(
+            check_roster(&pool, a.id, &[], &["bob@example.com".to_string()]).await,
+            vec!["bob is not accepting game invitations".to_string()]
+        );
+        // unknown email = account created later with default 'open': passes
+        assert!(
+            check_roster(&pool, a.id, &[], &["new@example.com".to_string()])
+                .await
+                .is_empty()
+        );
+    }
+
+    #[sqlx::test]
+    async fn blocks_stop_game_inclusion_both_ways(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        block_user(&pool, b.id, a.id).await.unwrap();
+        // b blocked a: a's attempt fails with wording identical to policy
+        // 'none' (deniability, D7)
+        assert_eq!(
+            check_roster(&pool, a.id, &[b.id], &[]).await,
+            vec!["bob is not accepting game invitations".to_string()]
+        );
+        // and b cannot rope a into a game either, with an honest message
+        assert_eq!(
+            check_roster(&pool, b.id, &[a.id], &[]).await,
+            vec!["You have blocked alice".to_string()]
+        );
     }
 
     // --- 1. create_game_with_users ---
