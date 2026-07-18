@@ -347,6 +347,7 @@ async fn create_game_from_service(
 #[server(CreateNewGame, "/api")]
 pub async fn create_new_game(
     game_version_id: Uuid,
+    opponent_ids: Option<Vec<Uuid>>,
     opponent_emails: Option<Vec<String>>,
     bot_slots: Option<Vec<BotSlot>>,
 ) -> Result<Uuid, ServerFnError> {
@@ -364,7 +365,8 @@ pub async fn create_new_game(
 
     let opponent_emails = opponent_emails.unwrap_or_default();
     let bot_slots = bot_slots.unwrap_or_default();
-    let player_count = 1 + opponent_emails.len() + bot_slots.len();
+    let opponent_ids = opponent_ids.unwrap_or_default();
+    let player_count = 1 + opponent_ids.len() + opponent_emails.len() + bot_slots.len();
 
     let game_version = crate::db::find_game_version(&pool, game_version_id)
         .await
@@ -376,6 +378,14 @@ pub async fn create_new_game(
         .await
         .map_err(internal("create_new_game: begin transaction"))?;
 
+    let violations =
+        crate::db::check_invite_policy_tx(&mut tx, user.id, &opponent_ids, &opponent_emails)
+            .await
+            .map_err(internal("create_new_game: check invite policy"))?;
+    if let Some(msg) = violations.into_iter().next() {
+        return Err(ServerFnError::new(msg));
+    }
+
     let game = create_game_from_service(
         &mut tx,
         &http_client,
@@ -383,7 +393,7 @@ pub async fn create_new_game(
         CreateGameSeed {
             player_count,
             creator_id: user.id,
-            opponent_ids: &[],
+            opponent_ids: &opponent_ids,
             opponent_emails: &opponent_emails,
             bot_slots: &bot_slots,
         },
@@ -619,6 +629,15 @@ async fn restart_game_impl(
         .begin()
         .await
         .map_err(internal("restart_game: begin transaction"))?;
+
+    // #30: a restart re-attaches every human player, so the same policy /
+    // block rules apply as for a fresh game.
+    let violations = crate::db::check_invite_policy_tx(&mut tx, user_id, &opponent_ids, &[])
+        .await
+        .map_err(internal("restart_game: check invite policy"))?;
+    if let Some(msg) = violations.into_iter().next() {
+        return Err(ServerFnError::new(msg));
+    }
 
     let new_game = create_game_from_service(
         &mut tx,

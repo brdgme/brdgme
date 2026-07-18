@@ -486,7 +486,7 @@ fn GamesPage() -> impl IntoView {
             } else {
                 Some(bots.clone())
             };
-            async move { create_new_game(version_id, emails, bots).await }
+            async move { create_new_game(version_id, None, emails, bots).await }
         },
     );
 
