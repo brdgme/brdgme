@@ -23,6 +23,11 @@
       including sensible rendering for tiny datasets (1-2 points).
 - [ ] `/players/:name` route + page.
 - [ ] `/players/:name/:game_type` route + page.
+- [ ] #30 tie-in: profile pages get an add-friend button
+      (`ServerAction<crate::friends::SendFriendRequest>` with the profile
+      user's id - same component pattern as the game-page player rows).
+      `GameViewData.viewer_user_id` and `PlayerViewData.user_id` (from #30
+      Task 10) are available for linking player names to profiles.
 - [ ] Form strips in the game meta panel.
 - [ ] One-off `peak_rating` backfill from reconstructed series.
 - [ ] Rating reconstruction sanity check (drift vs
