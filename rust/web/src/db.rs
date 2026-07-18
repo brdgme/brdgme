@@ -1944,6 +1944,84 @@ pub async fn opponent_suggestions(
     Ok(out)
 }
 
+/// D5: in-progress games containing >= 1 accepted friend where the caller
+/// is NOT a player (spectating links). Human player names only - bots live
+/// in game_bots and are omitted from this lightweight feed.
+#[cfg(feature = "ssr")]
+pub async fn friends_active_games(
+    pool: &PgPool,
+    user_id: Uuid,
+    limit: i64,
+) -> Result<Vec<(Uuid, String, Vec<String>)>> {
+    Ok(sqlx::query_as(
+        "SELECT g.id, gt.name, array_agg(u.name ORDER BY gp.position)
+         FROM games g
+         JOIN game_versions gv ON gv.id = g.game_version_id
+         JOIN game_types gt ON gt.id = gv.game_type_id
+         JOIN game_players gp ON gp.game_id = g.id
+         JOIN users u ON u.id = gp.user_id
+         WHERE g.is_finished = FALSE
+           AND NOT EXISTS (SELECT 1 FROM game_players me
+                           WHERE me.game_id = g.id AND me.user_id = $1)
+           AND EXISTS (
+               SELECT 1 FROM game_players fgp
+               JOIN friends f ON f.has_accepted = TRUE
+                    AND ((f.source_user_id = $1 AND f.target_user_id = fgp.user_id)
+                      OR (f.target_user_id = $1 AND f.source_user_id = fgp.user_id))
+               WHERE fgp.game_id = g.id)
+         GROUP BY g.id, gt.name, g.updated_at
+         ORDER BY g.updated_at DESC
+         LIMIT $2",
+    )
+    .bind(user_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// D5: last `limit` finished games involving >= 1 friend (the caller's own
+/// finished games qualify too). Names ordered by place (NULLS LAST), places
+/// COALESCEd to 0 for "not placed".
+#[cfg(feature = "ssr")]
+pub async fn friends_recent_results(
+    pool: &PgPool,
+    user_id: Uuid,
+    limit: i64,
+) -> Result<
+    Vec<(
+        Uuid,
+        String,
+        Option<time::PrimitiveDateTime>,
+        Vec<String>,
+        Vec<i32>,
+    )>,
+> {
+    Ok(sqlx::query_as(
+        "SELECT g.id, gt.name, g.finished_at,
+                array_agg(u.name ORDER BY gp.place ASC NULLS LAST, gp.position),
+                array_agg(COALESCE(gp.place, 0) ORDER BY gp.place ASC NULLS LAST, gp.position)
+         FROM games g
+         JOIN game_versions gv ON gv.id = g.game_version_id
+         JOIN game_types gt ON gt.id = gv.game_type_id
+         JOIN game_players gp ON gp.game_id = g.id
+         JOIN users u ON u.id = gp.user_id
+         WHERE g.is_finished = TRUE
+           AND EXISTS (
+               SELECT 1 FROM game_players fgp
+               JOIN friends f ON f.has_accepted = TRUE
+                    AND ((f.source_user_id = $1 AND f.target_user_id = fgp.user_id)
+                      OR (f.target_user_id = $1 AND f.source_user_id = fgp.user_id))
+               WHERE fgp.game_id = g.id)
+         GROUP BY g.id, gt.name, g.finished_at
+         ORDER BY g.finished_at DESC NULLS LAST
+         LIMIT $2",
+    )
+    .bind(user_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
+}
+
 /// The user's current name straight from the `users` table - the session's
 /// cached copy can be stale after a rename. Plain query for the same reason
 /// as `get_user_theme`.
@@ -2521,6 +2599,63 @@ mod tests {
         block_user(&pool, me.id, blocked_by_me.id).await.unwrap();
         block_user(&pool, blocked_me.id, me.id).await.unwrap();
         assert!(opponent_suggestions(&pool, me.id).await.unwrap().is_empty());
+    }
+
+    // --- #30 dashboard queries (D5) ---
+
+    #[sqlx::test]
+    async fn friends_active_games_excludes_own_and_nonfriend_games(pool: PgPool) {
+        let me = make_user(&pool, "me").await;
+        let friend = make_user(&pool, "friend").await;
+        let other = make_user(&pool, "other").await;
+        let bystander = make_user(&pool, "bystander").await;
+        send_friend_request(&pool, me.id, friend.id).await.unwrap();
+        send_friend_request(&pool, friend.id, me.id).await.unwrap();
+        let (_, version) = make_game_type_and_version(&pool).await;
+        // friend's game without me: should appear
+        let g = make_game_with_players(&pool, version, friend.id, &[other.id], 0, &[0]).await;
+        // my own game with the friend: excluded (I am in it)
+        make_game_with_players(&pool, version, friend.id, &[me.id], 0, &[0]).await;
+        // game with no friends in it: excluded
+        make_game_with_players(&pool, version, other.id, &[bystander.id], 0, &[0]).await;
+        let rows = friends_active_games(&pool, me.id, 10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, g.id);
+        let mut names = rows[0].2.clone();
+        names.sort();
+        assert_eq!(names, vec!["friend".to_string(), "other".to_string()]);
+    }
+
+    #[sqlx::test]
+    async fn friends_recent_results_return_places(pool: PgPool) {
+        let me = make_user(&pool, "me").await;
+        let friend = make_user(&pool, "friend").await;
+        let other = make_user(&pool, "other").await;
+        send_friend_request(&pool, me.id, friend.id).await.unwrap();
+        send_friend_request(&pool, friend.id, me.id).await.unwrap();
+        let (_, version) = make_game_type_and_version(&pool).await;
+        let g = make_game_with_players(&pool, version, friend.id, &[other.id], 0, &[0]).await;
+        sqlx::query("UPDATE games SET is_finished = TRUE, finished_at = timezone('utc', now()) WHERE id = $1")
+            .bind(g.id).execute(&pool).await.unwrap();
+        sqlx::query("UPDATE game_players SET place = 1 WHERE game_id = $1 AND user_id = $2")
+            .bind(g.id)
+            .bind(friend.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE game_players SET place = 2 WHERE game_id = $1 AND user_id = $2")
+            .bind(g.id)
+            .bind(other.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = friends_recent_results(&pool, me.id, 10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let (game_id, _type_name, finished_at, names, places) = rows[0].clone();
+        assert_eq!(game_id, g.id);
+        assert!(finished_at.is_some());
+        assert_eq!(names, vec!["friend".to_string(), "other".to_string()]);
+        assert_eq!(places, vec![1, 2]);
     }
 
     // --- 1. create_game_with_users ---
