@@ -4,7 +4,8 @@
 > migration). Content dates from 2026-07-08; this is a point-in-time decision
 > record, not a living document.
 
-**Status:** Draft - brainstormed and scoped 2026-07-08. Post-go-live,
+**Status:** Confirmed - brainstormed and scoped 2026-07-08; open
+decisions resolved 2026-07-18 (see end of doc). Post-go-live,
 non-blocking.
 
 **Problem:** the dominant brdg.me usage pattern is playing many games
@@ -76,8 +77,8 @@ addressee. `has_accepted`: `NULL` = pending, `TRUE` = accepted, `FALSE`
 = declined. A friendship is **one accepted row per pair** (direction
 irrelevant once accepted).
 
-New migration (next free number at implementation time - #28 WP1
-claims `005_login_confirmations.sql`):
+New migration (`010_friends.sql` - migrations 001-009 exist as of
+2026-07-18, so 010 is the next free number):
 
 - `UNIQUE (source_user_id, target_user_id)` (no duplicate requests).
 - Unique index on `(LEAST(source_user_id, target_user_id),
@@ -86,6 +87,11 @@ claims `005_login_confirmations.sql`):
   are impossible.
 - `users.invite_policy text NOT NULL DEFAULT 'open' CHECK
   (invite_policy IN ('open', 'friends', 'none'))` (D4).
+- `blocks` table (D7): `id`, `created_at`, `blocker_user_id`,
+  `blocked_user_id` (both FK `users`), `UNIQUE (blocker_user_id,
+  blocked_user_id)`, `CHECK (blocker_user_id <> blocked_user_id)`.
+  Directed and *not* pair-unique - A and B may each block the other
+  independently.
 
 Lifecycle rules (all enforced in the server fns, kept deliberately
 small):
@@ -139,10 +145,15 @@ Enforced by one helper (e.g. `check_invite_policy(tx, creator_id,
 target_user_ids)`) called from `create_new_game` after opponent
 emails/ids resolve to users - so it covers add-by-email of an existing
 account as well as picker selections - and later from #24's
-`create_proposal`. Violations return an honest error naming the
-blocked player ("X only accepts games from friends") so the creator
-can fix the roster; the roster is the creator's to see, this is not an
-information leak.
+`create_proposal`. The same helper also enforces blocks (D7): a game
+roster fails if any target has blocked the creator or the creator has
+blocked any target. Policy violations return an honest error naming
+the affected player ("X only accepts games from friends") so the
+creator can fix the roster; the roster is the creator's to see, this
+is not an information leak. Block violations instead return the same
+wording as the `none` policy ("X is not accepting game invitations")
+so a blocked creator cannot distinguish "blocked me" from "closed to
+everyone" - see D7 detectability notes.
 
 Broader privacy (game visibility, stats/profile visibility) is
 **deliberately out of scope for v1**: #29's profile pages are public
@@ -154,8 +165,9 @@ table if ever wanted. Scope creep here is the main risk to "simple".
 The dashboard (`DashboardPage` in `app.rs`) is currently a stub -
 these are its first real sections beyond #24's planned invites block:
 
-- **Pending friend requests** (incoming: accept/decline; outgoing
-  pending shown on the friends page only).
+- **Pending friend requests** (incoming: accept / decline /
+  decline-and-block (D7); outgoing pending shown on the friends page
+  only).
 - **Friends' active games:** in-progress games with >= 1 friend that
   *you are not in*, linking to the game page - spectating works today
   (`get_game_details` renders the public perspective for non-players).
@@ -177,7 +189,8 @@ email field:
   your last ~20 games) - covering the pre-friendship case the
   "frequent opponents" idea targets, while friends stay the explicit,
   controllable tier.
-- Deduped, excluding yourself and already-filled slots. Clicking a
+- Deduped, excluding yourself, already-filled slots, and anyone with a
+  block in either direction (D7). Clicking a
   chip fills the slot with the *user id*; the free-text email input
   remains for everyone else.
 - Server fn `get_opponent_suggestions()` returns `(user_id, name)`
@@ -186,12 +199,69 @@ email field:
   already plumb `opponent_ids` end-to-end (currently always empty), so
   the db layer needs no change.
 
+### D7 - blocking (added 2026-07-18)
+
+Block is a **separate directed relationship**, not a friend-edge state:
+the `blocks` table above. A blocks B means B cannot reach A through any
+social surface; it says nothing about A's visibility to others, and B
+may independently block A.
+
+Effects of A blocking B (all enforced server-side):
+
+- **Severs any existing edge:** on block, any `friends` row for the
+  pair (accepted, pending, or declined, either direction) is deleted
+  in the same transaction. No notification to B.
+- **Friend requests from B to A are silent no-ops:** the server fn
+  returns success without writing, exactly like a re-request after
+  decline - B sees the same "request sent" surface as everyone else
+  and cannot detect the block.
+- **Game inclusion is blocked both ways** via the `check_invite_policy`
+  helper (D4): B cannot add A to a game, and A cannot add B (A chose
+  not to interact; keeping it symmetric avoids "I blocked them but we
+  ended up in a game"). B's failure uses the `none`-policy wording;
+  A's failure is honest ("you have blocked X") since A knows their own
+  block list.
+- **Suggestions:** blocked users (either direction) never appear in
+  D6's suggestion chips.
+- **Friend requests from A to B error honestly** ("you have blocked
+  X - unblock them first"); no auto-unblock.
+
+**Detectability:** friend-request paths are perfectly silent. The game
+-inclusion path cannot be perfectly silent pre-#24 (a game either
+includes the player or it does not), so v1 settles for plausible
+deniability: block and `invite_policy = 'none'` produce identical
+errors. Post-#24, proposals let block become truly silent (the invite
+simply never arrives); #24 must call the same helper.
+
+**Entry points (v1):**
+
+- **Decline + block:** wherever an incoming friend request can be
+  declined (dashboard, friends page), a secondary "decline and block"
+  action performs both in one call
+  (`respond_to_friend_request(request_id, accept: false, block: true)`).
+- **Friends page:** a "Blocked" section listing blocks with an
+  unblock action. Unblock deletes the row; it does not restore any
+  friendship, and a fresh friend request afterwards is allowed.
+- When #24 lands, its invite-decline surface gets the same
+  decline-and-block affordance (noted for #24, not built here).
+
+**Matchmaking hook (v2 note):** no matchmaking exists today; the only
+"add to game" paths are game creation/restart, which the D4 helper
+covers. Any future matchmaking or auto-pairing feature MUST consult
+`blocks` (both directions) before pairing users - the helper is the
+intended choke point, so route roster assembly through it.
+
+Server fns: `block_user(user_id)`, `unblock_user(user_id)`,
+`list_blocked()`, plus the `block` flag on
+`respond_to_friend_request`.
+
 ### Friends page
 
 New route `/friends`: friend list (with unfriend), incoming/outgoing
-pending requests, add-by-username field, and the invite-policy
-selector (no settings page exists yet; this is its natural first
-home).
+pending requests (incoming with accept / decline / decline-and-block),
+add-by-username field, the blocked list with unblock (D7), and the
+invite-policy selector (a settings page now exists at `/settings`, but
+the policy lives here with the rest of the social controls).
 
 ## Brainstormed use cases deferred to v2
 
@@ -212,12 +282,13 @@ home).
   not.
 - **Turn-nudge a friend:** redundant with 22c turn reminders.
 
-## Open decisions (resolve before delegating)
+## Open decisions - RESOLVED 2026-07-18
 
-- Decline semantics: silent shield as specced (requester sees nothing)
-  vs notifying the requester - spec says silent, confirm.
-- Default `invite_policy` for new users: spec says `'open'` (matches
-  today's behavior); consider whether `'friends'` should become the
-  default once #24's consent flow exists.
-- Suggestion ordering: recency of shared games vs alphabetical within
-  the friends tier - spec says recency, cosmetic either way.
+All three resolved by the user, each as originally specced:
+
+- **Decline semantics:** silent shield. The requester sees nothing;
+  re-requests after a decline are silent no-ops.
+- **Default `invite_policy`:** `'open'` (matches today's behavior).
+  Revisit `'friends'`-by-default only after #24's consent flow exists.
+- **Suggestion ordering:** friends tier ordered by recency of shared
+  games (most recently played with first), then alphabetical.
