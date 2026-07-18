@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT name, difficulty, personality FROM game_bots WHERE game_id = $1 ORDER BY name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "personality",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "2130e892aaf23f30e76da6ac0a3fca42e0988976b419720e8363dccc38ba2b53"
+}

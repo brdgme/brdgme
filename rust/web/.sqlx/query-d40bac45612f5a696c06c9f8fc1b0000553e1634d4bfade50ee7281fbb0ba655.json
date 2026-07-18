@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"c!\" FROM game_log_targets glt\n             JOIN game_players gp ON gp.id = glt.game_player_id\n             WHERE gp.game_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "c!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d40bac45612f5a696c06c9f8fc1b0000553e1634d4bfade50ee7281fbb0ba655"
+}

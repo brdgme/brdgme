@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT glt.game_log_id, gp.position\n         FROM game_log_targets glt\n         JOIN game_players gp ON gp.id = glt.game_player_id\n         WHERE gp.game_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "game_log_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "position",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ccabf0d52c3a8422f462202e5c65a65c3a26e871e3f72f1ba8b62b2c6cf0fd2a"
+}

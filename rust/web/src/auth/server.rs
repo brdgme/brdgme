@@ -375,7 +375,11 @@ async fn confirm_login_inner(
         new_user_id
     };
 
-    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = $1", user_id)
+    let user = sqlx::query_as!(
+        User,
+        "SELECT id, created_at, updated_at, name, pref_colors, theme, is_admin FROM users WHERE id = $1",
+        user_id
+    )
         .fetch_one(&mut *tx)
         .await
         .map_err(internal("confirm_login: load user"))?;

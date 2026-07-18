@@ -91,7 +91,7 @@ where
 async fn make_user(pool: &PgPool, name: &str) -> User {
     sqlx::query_as!(
         User,
-        "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
+        "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING id, created_at, updated_at, name, pref_colors, theme, is_admin",
         Uuid::new_v4(),
         name,
         &Vec::<String>::new()

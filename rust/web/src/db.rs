@@ -500,10 +500,8 @@ pub async fn is_player_in_game(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> R
 }
 
 /// Whether `user_id` has admin privileges - `false` if the user row doesn't
-/// exist. Written as a plain (non-macro) query for the same reason as
-/// `get_user_theme`: macro queries touching `users.is_admin` would require
-/// regenerating `.sqlx` against a live database; plain queries need no cache
-/// entry.
+/// exist. Written as a plain (non-macro) query, matching `get_user_theme`
+/// below.
 #[cfg(feature = "ssr")]
 pub async fn is_user_admin(pool: &PgPool, user_id: Uuid) -> sqlx::Result<bool> {
     let row: Option<(bool,)> = sqlx::query_as("SELECT is_admin FROM users WHERE id = $1")
@@ -786,7 +784,7 @@ pub async fn create_game_with_users_tx(
     // Creator
     let creator = sqlx::query_as!(
         crate::models::user::User,
-        "SELECT * FROM users WHERE id = $1",
+        "SELECT id, created_at, updated_at, name, pref_colors, theme, is_admin FROM users WHERE id = $1",
         opts.creator_id
     )
     .fetch_one(&mut *tx)
@@ -797,7 +795,7 @@ pub async fn create_game_with_users_tx(
     for &id in opts.opponent_ids {
         let opponent = sqlx::query_as!(
             crate::models::user::User,
-            "SELECT * FROM users WHERE id = $1",
+            "SELECT id, created_at, updated_at, name, pref_colors, theme, is_admin FROM users WHERE id = $1",
             id
         )
         .fetch_one(&mut *tx)
@@ -824,7 +822,7 @@ pub async fn create_game_with_users_tx(
 
             let u = sqlx::query_as!(
                 crate::models::user::User,
-                "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
+                "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING id, created_at, updated_at, name, pref_colors, theme, is_admin",
                 new_user_id,
                 username,
                 &Vec::<String>::new()
@@ -1453,10 +1451,8 @@ pub async fn update_game_command_success(
         return Err(StaleStateConflict.into());
     }
 
-    // Plain (non-macro) query, not `query!`: adding `undo_game_state` to the
-    // column list here would require regenerating the `.sqlx` offline cache
-    // against a live database, which isn't available in this environment -
-    // see the `get_user_theme` doc comment above for the same convention.
+    // Plain (non-macro) query, not `query!`; see the `get_user_theme` doc
+    // comment above for the same convention.
     let players: Vec<(Uuid, i32, time::PrimitiveDateTime, time::PrimitiveDateTime, Option<String>)> =
         sqlx::query_as(
             "SELECT id, position, is_turn_at, last_turn_at, undo_game_state FROM game_players WHERE game_id = $1",
@@ -1509,12 +1505,9 @@ pub async fn update_game_command_success(
     Ok(())
 }
 
-/// Written as a plain (non-macro) query rather than `query_scalar!`: adding
-/// `users.theme` to the `sqlx::query_as!(User, "SELECT * FROM users ...")`
-/// macros elsewhere in this file would require regenerating `.sqlx` against a
-/// live database, which isn't available in this environment - see the
-/// `SQLX_OFFLINE` note in web/README or the phase notes. Plain queries need
-/// no cache entry.
+/// Written as a plain (non-macro) query rather than `query_scalar!`. See
+/// `docs/DEV.md` for the `cargo sqlx prepare` workflow if this is ever
+/// converted to a macro query.
 #[cfg(feature = "ssr")]
 pub async fn get_user_theme(pool: &PgPool, user_id: Uuid) -> Result<Option<String>> {
     let row: Option<(Option<String>,)> = sqlx::query_as("SELECT theme FROM users WHERE id = $1")
@@ -1535,8 +1528,7 @@ pub async fn set_user_theme(pool: &PgPool, user_id: Uuid, theme: Option<&str>) -
 }
 
 // --- #30 friends (spec docs/superpowers/specs/2026-07-08-30-friends-design.md) ---
-// Plain (non-macro) queries throughout, for the same .sqlx-cache reason as
-// get_user_theme above.
+// Plain (non-macro) queries throughout, matching get_user_theme above.
 
 #[cfg(feature = "ssr")]
 #[derive(Debug, sqlx::FromRow)]
@@ -1799,8 +1791,8 @@ pub async fn list_blocked(pool: &PgPool, blocker: Uuid) -> Result<Vec<(Uuid, Str
     .await?)
 }
 
-/// Plain query for the same .sqlx reason as get_user_theme - invite_policy
-/// is deliberately NOT a field on models::user::User.
+/// Plain query, matching get_user_theme - invite_policy is deliberately NOT
+/// a field on models::user::User.
 #[cfg(feature = "ssr")]
 pub async fn get_invite_policy(pool: &PgPool, user_id: Uuid) -> Result<String> {
     let row: (String,) = sqlx::query_as("SELECT invite_policy FROM users WHERE id = $1")
@@ -2023,8 +2015,8 @@ pub async fn friends_recent_results(
 }
 
 /// The user's current name straight from the `users` table - the session's
-/// cached copy can be stale after a rename. Plain query for the same reason
-/// as `get_user_theme`.
+/// cached copy can be stale after a rename. Plain query, matching
+/// `get_user_theme`.
 #[cfg(feature = "ssr")]
 pub async fn get_user_name(pool: &PgPool, user_id: Uuid) -> Result<String> {
     let row: (String,) = sqlx::query_as("SELECT name FROM users WHERE id = $1")
@@ -2132,7 +2124,7 @@ mod tests {
     async fn make_user(pool: &PgPool, name: &str) -> User {
         sqlx::query_as!(
             User,
-            "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING *",
+            "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING id, created_at, updated_at, name, pref_colors, theme, is_admin",
             Uuid::new_v4(),
             name,
             &Vec::<String>::new()

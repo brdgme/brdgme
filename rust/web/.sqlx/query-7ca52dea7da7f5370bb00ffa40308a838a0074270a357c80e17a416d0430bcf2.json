@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM users WHERE id = $1",
+  "query": "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3) RETURNING id, created_at, updated_at, name, pref_colors, theme, is_admin",
   "describe": {
     "columns": [
       {
@@ -41,7 +41,9 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -54,5 +56,5 @@
       false
     ]
   },
-  "hash": "843923b9a0257cf80f1dff554e7dc8fdfc05f489328e8376513124dfb42996e3"
+  "hash": "7ca52dea7da7f5370bb00ffa40308a838a0074270a357c80e17a416d0430bcf2"
 }

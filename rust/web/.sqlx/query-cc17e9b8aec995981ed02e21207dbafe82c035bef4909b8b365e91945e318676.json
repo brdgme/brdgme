@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE games SET restarted_game_id = NULL, updated_at = NOW() WHERE restarted_game_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cc17e9b8aec995981ed02e21207dbafe82c035bef4909b8b365e91945e318676"
+}
