@@ -643,7 +643,7 @@ pub async fn generate_unique_username(conn: &mut sqlx::PgConnection) -> Result<S
 /// `theme::slot_from_color_name` for the same mapping applied to stored
 /// `game_players.color`/`users.pref_colors` values.
 #[cfg(feature = "ssr")]
-fn normalize_pref_color(name: &str) -> String {
+pub(crate) fn normalize_pref_color(name: &str) -> String {
     match name {
         "Amber" => "Orange".to_string(),
         "BlueGrey" => "Cyan".to_string(),

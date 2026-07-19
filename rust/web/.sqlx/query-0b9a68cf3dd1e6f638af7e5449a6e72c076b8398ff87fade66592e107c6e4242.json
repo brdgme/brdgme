@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO game_type_users (id, game_type_id, user_id, rating, peak_rating)\n               VALUES (uuid_generate_v4(), $1, $2, $3, $4)\n               ON CONFLICT (game_type_id, user_id) DO UPDATE SET rating = $3, peak_rating = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0b9a68cf3dd1e6f638af7e5449a6e72c076b8398ff87fade66592e107c6e4242"
+}

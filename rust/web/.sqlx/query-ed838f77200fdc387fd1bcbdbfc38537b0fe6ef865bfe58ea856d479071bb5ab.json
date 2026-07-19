@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH qualifying AS (\n            SELECT\n                gt.id AS game_type_id,\n                gt.name AS game_type_name,\n                gp.place,\n                (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS n\n            FROM game_players gp\n            JOIN games g ON g.id = gp.game_id\n            JOIN game_versions gv ON gv.id = g.game_version_id\n            JOIN game_types gt ON gt.id = gv.game_type_id\n            WHERE gp.user_id = $1\n              AND g.is_finished = true\n              AND (\n                  SELECT count(*) FROM game_players gp3\n                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL\n              ) >= CASE WHEN $2 THEN 1 ELSE 2 END\n        ),\n        agg AS (\n            SELECT\n                game_type_id,\n                game_type_name,\n                count(*) AS games,\n                count(*) FILTER (WHERE place = 1) AS wins,\n                avg((n - place)::float8 / (n - 1))\n                    FILTER (WHERE place IS NOT NULL AND n >= 2) AS avg_place_percentile\n            FROM qualifying\n            GROUP BY game_type_id, game_type_name\n        )\n        SELECT\n            COALESCE(agg.game_type_name, gt.name) AS \"game_type_name!\",\n            COALESCE(agg.games, 0) AS \"games!\",\n            COALESCE(agg.wins, 0) AS \"wins!\",\n            agg.avg_place_percentile AS avg_place_percentile,\n            gtu.rating AS \"rating?\",\n            gtu.peak_rating AS \"peak_rating?\"\n        FROM agg\n        FULL OUTER JOIN (\n            SELECT game_type_id, rating, peak_rating FROM game_type_users WHERE user_id = $1\n        ) gtu ON gtu.game_type_id = agg.game_type_id\n        LEFT JOIN game_types gt ON gt.id = gtu.game_type_id\n        ORDER BY \"game_type_name!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "game_type_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "games!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "wins!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "avg_place_percentile",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "rating?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "peak_rating?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "ed838f77200fdc387fd1bcbdbfc38537b0fe6ef865bfe58ea856d479071bb5ab"
+}

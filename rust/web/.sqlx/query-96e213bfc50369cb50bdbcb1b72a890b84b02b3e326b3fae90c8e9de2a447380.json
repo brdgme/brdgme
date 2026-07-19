@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            gp.game_id,\n            u.id AS \"user_id?\",\n            COALESCE(u.name, gb.name, 'Bot') AS \"name!\"\n        FROM game_players gp\n        LEFT JOIN users u ON u.id = gp.user_id\n        LEFT JOIN game_bots gb ON gb.id = gp.game_bot_id\n        WHERE gp.game_id = ANY($1) AND gp.user_id IS DISTINCT FROM $2\n        ORDER BY gp.game_id, gp.position\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "game_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "96e213bfc50369cb50bdbcb1b72a890b84b02b3e326b3fae90c8e9de2a447380"
+}

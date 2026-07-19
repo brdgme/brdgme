@@ -4,6 +4,7 @@ pub mod app;
 
 pub mod friends;
 pub mod settings;
+pub mod stats;
 pub mod theme;
 
 #[cfg(feature = "ssr")]
