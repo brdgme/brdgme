@@ -30,7 +30,7 @@ fn rating_trend(current: Option<i32>, results: &[FormResult]) -> Vec<f64> {
 }
 
 /// Percent-encodes a string for use as a single URL path segment.
-fn encode_path_segment(s: &str) -> String {
+pub fn encode_path_segment(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
@@ -191,6 +191,31 @@ pub fn PlayersPage() -> impl IntoView {
                                         <p class="profile-member-since">
                                             "Member since " {d.user.created_at.date().to_string()}
                                         </p>
+                                        {
+                                            let profile_user_id = d.user.user_id;
+                                            d.viewer_user_id
+                                                .filter(|vid| *vid != profile_user_id)
+                                                .map(|_| {
+                                                    let add_friend = ServerAction::<crate::friends::SendFriendRequest>::new();
+                                                    view! {
+                                                        <div class="profile-add-friend">
+                                                            {move || match add_friend.value().get() {
+                                                                Some(Ok(())) => view! { <span>"Friend request sent"</span> }.into_any(),
+                                                                Some(Err(e)) => view! { <span class="error">{e.to_string()}</span> }.into_any(),
+                                                                None => view! {
+                                                                    <a href="#" on:click=move |ev| {
+                                                                        ev.prevent_default();
+                                                                        add_friend.dispatch(crate::friends::SendFriendRequest {
+                                                                            user_id: Some(profile_user_id),
+                                                                            name: None,
+                                                                        });
+                                                                    }>"Add friend"</a>
+                                                                }.into_any(),
+                                                            }}
+                                                        </div>
+                                                    }
+                                                })
+                                        }
                                     </header>
                                     <div class="profile-bots-toggle">
                                         {

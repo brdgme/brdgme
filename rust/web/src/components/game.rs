@@ -3,6 +3,7 @@ use crate::game::server_fns::{
     SubmitCommand, UndoGame,
 };
 use leptos::prelude::*;
+use leptos_router::components::A;
 use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
 use web_sys::wasm_bindgen::JsCast;
@@ -203,10 +204,18 @@ fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl Into
             </span>
         }
     });
+    let form = player.form;
     view! {
         <div class="player-info">
             <div class:brdgme-is-turn=player.is_turn>
-                <PlayerName name=player.name color=player.color />
+                <PlayerName
+                    name=player.name
+                    color=player.color
+                    profile_link=!player.is_bot
+                />
+                {(!form.is_empty()).then(|| view! {
+                    <span class="player-form">" "<crate::stats::viz::FormStrip results=form/></span>
+                })}
             </div>
             <div style="margin-left: 1em;">
                 <div>
@@ -401,9 +410,23 @@ pub fn RecentGameLogs(player_style: String) -> impl IntoView {
 /// `color` is a `--mk-{slot}` colour slot token (e.g. "green"), not a hex
 /// value - display always follows the active theme.
 #[component]
-pub fn PlayerName(name: String, color: String) -> impl IntoView {
-    view! {
-        <strong style=format!("color:var(--mk-{})", color)>"<" {name} ">"</strong>
+pub fn PlayerName(
+    name: String,
+    color: String,
+    #[prop(optional)] profile_link: bool,
+) -> impl IntoView {
+    let strong = view! {
+        <strong style=format!("color:var(--mk-{})", color)>"<" {name.clone()} ">"</strong>
+    };
+    if profile_link {
+        view! {
+            <A href=format!("/players/{}", crate::players::encode_path_segment(&name))>
+                {strong}
+            </A>
+        }
+        .into_any()
+    } else {
+        strong.into_any()
     }
 }
 

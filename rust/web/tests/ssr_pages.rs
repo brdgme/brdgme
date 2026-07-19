@@ -342,6 +342,44 @@ async fn game_page_logged_in_player_renders_game(pool: PgPool) {
     assert_clean_html_body(status, &content_type, &body, "mock render");
 }
 
+#[sqlx::test]
+async fn game_page_player_names_link_to_profiles_for_human_opponents(pool: PgPool) {
+    let uri = spawn_mock_game_service().await;
+    let game_version_id = make_game_version(&pool, &uri).await;
+    let user = make_user(&pool, "link-test-viewer").await;
+    let opponent = make_user(&pool, "link-test-opponent").await;
+    let email = "link-test-viewer@example.com";
+    let game = db::create_game_with_users(
+        &pool,
+        CreateGameOpts {
+            game_version_id,
+            whose_turn: &[0],
+            eliminated: &[],
+            placings: &[],
+            points: &[],
+            creator_id: user.id,
+            opponent_ids: &[opponent.id],
+            opponent_emails: &[],
+            bot_slots: &[],
+            chat_id: None,
+            game_state: "state",
+        },
+    )
+    .await
+    .unwrap();
+
+    let cookie = login_cookie(&pool, &user, email).await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) =
+        get(app, &format!("/games/{}", game.id), Some(&cookie)).await;
+
+    assert_clean_html_body(status, &content_type, &body, "mock render");
+    assert!(
+        body.contains(&format!("href=\"/players/{}\"", opponent.name)),
+        "expected human opponent profile link in game-meta player list: {body}"
+    );
+}
+
 /// Spawns an in-process mock game service answering `New` requests, for
 /// exercising `restart_game` without calling a real game service (per
 /// docs/CODING.md "Testing Conventions").
@@ -820,6 +858,81 @@ async fn players_page_bots_toggle_changes_inclusion(pool: PgPool) {
     let (status, content_type, body) =
         get(app, &format!("/players/{}?bots=1", user.name), None).await;
     assert_clean_html_body(status, &content_type, &body, "Bots Toggle Test Game");
+}
+
+#[sqlx::test]
+async fn players_page_add_friend_button_shown_to_other_logged_in_viewer(pool: PgPool) {
+    let user_a = make_user(&pool, "add-friend-target").await;
+    let user_b = make_user(&pool, "add-friend-viewer").await;
+    let cookie = login_cookie(&pool, &user_b, "add-friend-viewer@example.com").await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) =
+        get(app, &format!("/players/{}", user_a.name), Some(&cookie)).await;
+
+    assert_clean_html_body(status, &content_type, &body, "profile-add-friend");
+    assert!(
+        body.contains("Add friend"),
+        "expected add-friend affordance in body: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn players_page_add_friend_button_absent_for_own_profile(pool: PgPool) {
+    let user_a = make_user(&pool, "self-viewer").await;
+    let cookie = login_cookie(&pool, &user_a, "self-viewer@example.com").await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) =
+        get(app, &format!("/players/{}", user_a.name), Some(&cookie)).await;
+
+    assert_clean_html_body(status, &content_type, &body, "Member since");
+    assert!(
+        !body.contains("Add friend"),
+        "did not expect add-friend affordance on own profile: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn players_page_form_strip_renders_in_game_types_table(pool: PgPool) {
+    let (game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Form Strip Test Game").await;
+    let user_a = make_user(&pool, "form-strip-player-a").await;
+    let user_b = make_user(&pool, "form-strip-player-b").await;
+
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 2, -8), (user_b.id, 1, 8)],
+    )
+    .await;
+
+    sqlx::query!(
+        "INSERT INTO game_type_users (id, game_type_id, user_id, rating, peak_rating)
+         VALUES (uuid_generate_v4(), $1, $2, $3, $4)",
+        game_type_id,
+        user_a.id,
+        1208,
+        1216
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/players/{}", user_a.name), None).await;
+
+    assert_clean_html_body(status, &content_type, &body, "form-strip");
+    assert!(
+        body.contains("form-win") && body.contains("form-loss"),
+        "expected form-win/form-loss cells in body: {body}"
+    );
 }
 
 // --- per-game-type deep-dive page (#29) ---

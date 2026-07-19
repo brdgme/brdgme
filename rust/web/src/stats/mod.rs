@@ -99,6 +99,8 @@ pub struct PlayerProfileData {
     pub recent_form: Vec<GameTypeForm>,
     pub recent_finished: Vec<FinishedGameRow>,
     pub active_games: Vec<ActiveGameRow>,
+    /// None when the viewer is anonymous (profiles are public).
+    pub viewer_user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -126,8 +128,11 @@ pub async fn get_player_profile(
     name: String,
     include_single_human: bool,
 ) -> Result<Option<PlayerProfileData>, ServerFnError> {
+    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
     let pool = expect_context::<PgPool>();
+
+    let viewer_user_id = get_current_user().await?.map(|u| u.id);
 
     let user = match get_profile_user(&pool, &name)
         .await
@@ -161,6 +166,7 @@ pub async fn get_player_profile(
         recent_form,
         recent_finished,
         active_games,
+        viewer_user_id,
     }))
 }
 

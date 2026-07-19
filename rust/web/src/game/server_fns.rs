@@ -69,6 +69,9 @@ pub struct PlayerViewData {
     pub is_bot: bool,
     /// None for bots. Drives the game-page add-friend affordance (#30 D3).
     pub user_id: Option<Uuid>,
+    /// Recent form (this game's game type only), oldest-to-newest. Empty
+    /// for bots or players with no qualifying finished games (#29).
+    pub form: Vec<crate::stats::FormResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +172,20 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         .await
         .map_err(internal("get_game_details: check admin"))?;
 
+    let human_user_ids: Vec<Uuid> = ge
+        .game_players
+        .iter()
+        .filter_map(|p| p.user.as_ref().map(|u| u.id))
+        .collect();
+    let form_by_user = crate::stats::recent_form_for_game_type(
+        &pool,
+        &human_user_ids,
+        ge.game_version.game_type_id,
+        10,
+    )
+    .await
+    .map_err(internal("get_game_details: recent form"))?;
+
     Ok(GameViewData {
         id: ge.game.id,
         type_name: ge.game_type.name,
@@ -193,6 +210,11 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 is_turn: p.game_player.is_turn,
                 is_bot: p.game_bot.is_some(),
                 user_id: p.user.as_ref().map(|u| u.id),
+                form: p
+                    .user
+                    .as_ref()
+                    .and_then(|u| form_by_user.get(&u.id).cloned())
+                    .unwrap_or_default(),
             })
             .collect(),
         command_spec: render_resp.command_spec,

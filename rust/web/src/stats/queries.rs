@@ -463,6 +463,74 @@ pub async fn recent_form(
     Ok(forms)
 }
 
+/// Recent form for multiple users within a single game type - last
+/// `per_user` finished games each, oldest-to-newest, keyed by user id.
+pub async fn recent_form_for_game_type(
+    pool: &PgPool,
+    user_ids: &[Uuid],
+    game_type_id: Uuid,
+    per_user: i64,
+) -> Result<HashMap<Uuid, Vec<super::FormResult>>> {
+    let rows = sqlx::query!(
+        r#"
+        WITH qualifying AS (
+            SELECT
+                gp.user_id AS user_id,
+                g.id AS game_id,
+                g.finished_at,
+                gp.place,
+                gp.rating_change,
+                (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
+                row_number() OVER (
+                    PARTITION BY gp.user_id ORDER BY g.finished_at DESC, g.id
+                ) AS rn
+            FROM game_players gp
+            JOIN games g ON g.id = gp.game_id
+            JOIN game_versions gv ON gv.id = g.game_version_id
+            JOIN game_types gt ON gt.id = gv.game_type_id
+            WHERE gp.user_id = ANY($1)
+              AND gt.id = $2
+              AND g.is_finished = true
+              AND (
+                  SELECT count(*) FROM game_players gp3
+                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL
+              ) >= 2
+        )
+        SELECT
+            user_id AS "user_id!",
+            game_id AS "game_id!",
+            finished_at,
+            place,
+            rating_change,
+            player_count AS "player_count!"
+        FROM qualifying
+        WHERE rn <= $3
+        ORDER BY user_id, finished_at ASC, "game_id!"
+        "#,
+        user_ids,
+        game_type_id,
+        per_user
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut by_user: HashMap<Uuid, Vec<super::FormResult>> = HashMap::new();
+    for row in rows {
+        by_user
+            .entry(row.user_id)
+            .or_default()
+            .push(super::FormResult {
+                game_id: row.game_id,
+                finished_at: row.finished_at,
+                place: row.place,
+                player_count: row.player_count,
+                rating_change: row.rating_change,
+            });
+    }
+
+    Ok(by_user)
+}
+
 #[cfg(test)]
 pub(crate) mod fixtures {
     use super::*;
@@ -675,16 +743,12 @@ mod tests {
 
         insert_unfinished_game(&pool, gv, &[(Some(user), None, None)]).await;
 
-        let excluding = overall_totals(&pool, user, false)
-            .await
-            .expect("query ok");
+        let excluding = overall_totals(&pool, user, false).await.expect("query ok");
         assert_eq!(excluding.finished_games, 1);
         assert_eq!(excluding.wins, 1);
         assert_eq!(excluding.win_percent, 100.0);
 
-        let including = overall_totals(&pool, user, true)
-            .await
-            .expect("query ok");
+        let including = overall_totals(&pool, user, true).await.expect("query ok");
         assert_eq!(including.finished_games, 2);
         assert_eq!(including.wins, 1);
         assert_eq!(including.win_percent, 50.0);
@@ -704,9 +768,7 @@ mod tests {
         )
         .await;
 
-        let alice_totals = overall_totals(&pool, alice, false)
-            .await
-            .expect("query ok");
+        let alice_totals = overall_totals(&pool, alice, false).await.expect("query ok");
         assert_eq!(alice_totals.wins, 1);
         assert_eq!(alice_totals.win_percent, 100.0);
 
@@ -733,9 +795,7 @@ mod tests {
         set_game_type_rating(&pool, gt_zebra, user, 1300, 1350).await;
         set_game_type_rating(&pool, gt_camel, user, 1100, 1150).await;
 
-        let stats = game_type_stats(&pool, user, false)
-            .await
-            .expect("query ok");
+        let stats = game_type_stats(&pool, user, false).await.expect("query ok");
         assert_eq!(stats.len(), 2);
 
         assert_eq!(stats[0].game_type_name, "Camel Up");
@@ -795,9 +855,7 @@ mod tests {
         )
         .await;
 
-        let stats2 = game_type_stats(&pool, user, true)
-            .await
-            .expect("query ok");
+        let stats2 = game_type_stats(&pool, user, true).await.expect("query ok");
         let duel = stats2
             .iter()
             .find(|s| s.game_type_name == "Duel")
@@ -822,9 +880,7 @@ mod tests {
         let (gt_other, _gv_other) = make_game_type(&pool, "Zebra Game").await;
         set_game_type_rating(&pool, gt_other, other, 1400, 1450).await;
 
-        let stats = game_type_stats(&pool, user, false)
-            .await
-            .expect("query ok");
+        let stats = game_type_stats(&pool, user, false).await.expect("query ok");
 
         assert!(
             !stats.iter().any(|s| s.game_type_name == "Zebra Game"),
@@ -1257,7 +1313,10 @@ mod tests {
         .await
         .expect("query ok");
         assert_eq!(other_rating, 1250);
-        assert_eq!(other_peak, 1300, "already-correct higher peak must not be lowered");
+        assert_eq!(
+            other_peak, 1300,
+            "already-correct higher peak must not be lowered"
+        );
 
         // Idempotency: running again is a no-op.
         sqlx::raw_sql(MIGRATION)
@@ -1275,5 +1334,90 @@ mod tests {
         .expect("query ok");
         assert_eq!(rating2, 1206);
         assert_eq!(peak2, 1236);
+    }
+
+    #[sqlx::test]
+    async fn recent_form_for_game_type_keys_by_user_oldest_to_newest(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let g1 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+        let g2 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(alice), Some(2), None), (Some(bob), Some(1), None)],
+        )
+        .await;
+
+        // Bot-only-humans game (single human): excluded entirely.
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-03 00:00:00),
+            &[(Some(alice), Some(1), None), (None, Some(2), None)],
+        )
+        .await;
+
+        let form = recent_form_for_game_type(&pool, &[alice, bob], gt, 10)
+            .await
+            .expect("query ok");
+
+        let alice_results = form.get(&alice).expect("alice present");
+        assert_eq!(alice_results.len(), 2);
+        assert_eq!(alice_results[0].game_id, g1);
+        assert_eq!(alice_results[1].game_id, g2);
+
+        let bob_results = form.get(&bob).expect("bob present");
+        assert_eq!(bob_results.len(), 2);
+        assert_eq!(bob_results[0].game_id, g1);
+        assert_eq!(bob_results[1].game_id, g2);
+    }
+
+    #[sqlx::test]
+    async fn recent_form_for_game_type_respects_per_user_limit_and_type_scope(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (gt1, gv1) = make_game_type(&pool, "Camel Up").await;
+        let (_gt2, gv2) = make_game_type(&pool, "Duel").await;
+
+        insert_finished_game(
+            &pool,
+            gv1,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+        let g2 = insert_finished_game(
+            &pool,
+            gv1,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(alice), Some(2), None), (Some(bob), Some(1), None)],
+        )
+        .await;
+
+        // Different game type: excluded from Camel Up results.
+        insert_finished_game(
+            &pool,
+            gv2,
+            datetime!(2026-01-03 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+
+        let form = recent_form_for_game_type(&pool, &[alice, bob], gt1, 1)
+            .await
+            .expect("query ok");
+
+        let alice_results = form.get(&alice).expect("alice present");
+        assert_eq!(alice_results.len(), 1);
+        assert_eq!(alice_results[0].game_id, g2);
     }
 }

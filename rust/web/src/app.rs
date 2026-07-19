@@ -797,7 +797,11 @@ fn DashboardPage() -> impl IntoView {
                                 let name = r.name.clone();
                                 view! {
                                     <div class="friend-row">
-                                        <span>{name}</span>
+                                        <span>
+                                            <A href=format!("/players/{}", crate::players::encode_path_segment(&name))>
+                                                {name.clone()}
+                                            </A>
+                                        </span>
                                         " "
                                         <a href="#" on:click=move |ev| {
                                             ev.prevent_default();
@@ -994,7 +998,7 @@ fn GamePage() -> impl IntoView {
                             let waiting_on = StoredValue::new(
                                 data.players.iter()
                                     .filter(|p| p.is_turn)
-                                    .map(|p| (p.name.clone(), p.color.clone()))
+                                    .map(|p| (p.name.clone(), p.color.clone(), p.is_bot))
                                     .collect::<Vec<_>>()
                             );
                             view! {
@@ -1018,13 +1022,14 @@ fn GamePage() -> impl IntoView {
                                         <Show when=move || !is_turn && !is_finished>
                                             <div class="game-current-turn">
                                                 "Waiting on: "
-                                                {waiting_on.with_value(|w| w.iter().enumerate().map(|(i, (name, color))| {
+                                                {waiting_on.with_value(|w| w.iter().enumerate().map(|(i, (name, color, is_bot))| {
                                                     let name = name.clone();
                                                     let color = color.clone();
+                                                    let is_bot = *is_bot;
                                                     view! {
                                                         <span>
                                                             {if i > 0 { ", " } else { "" }}
-                                                            <PlayerName name=name color=color />
+                                                            <PlayerName name=name color=color profile_link=!is_bot />
                                                         </span>
                                                     }
                                                 }).collect_view())}

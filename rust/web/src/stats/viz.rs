@@ -7,8 +7,9 @@ use leptos::prelude::*;
 
 use crate::stats::{FormResult, RatingPoint};
 
-const SPARKLINE_BLOCKS: [char; 8] =
-    ['\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}'];
+const SPARKLINE_BLOCKS: [char; 8] = [
+    '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}',
+];
 
 /// Maps values onto Unicode block characters (U+2581..U+2588), scaled
 /// linearly across the series' min/max. Flat or single-value series render
@@ -42,11 +43,19 @@ pub fn Sparkline(values: Vec<f64>) -> impl IntoView {
 pub fn form_cell(place: Option<i32>, player_count: i64) -> (String, &'static str) {
     match place {
         Some(1) => {
-            let label = if player_count == 2 { "W".to_string() } else { "1".to_string() };
+            let label = if player_count == 2 {
+                "W".to_string()
+            } else {
+                "1".to_string()
+            };
             (label, "form-win")
         }
         Some(p) => {
-            let label = if player_count == 2 { "L".to_string() } else { p.to_string() };
+            let label = if player_count == 2 {
+                "L".to_string()
+            } else {
+                p.to_string()
+            };
             (label, "form-loss")
         }
         None => ("-".to_string(), "form-none"),

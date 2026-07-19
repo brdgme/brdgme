@@ -2,6 +2,7 @@
 //! Spec: docs/superpowers/specs/2026-07-08-30-friends-design.md
 
 use leptos::prelude::*;
+use leptos_router::components::A;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -366,7 +367,11 @@ pub fn FriendsPage() -> impl IntoView {
                                     let name = r.name.clone();
                                     view! {
                                         <div class="friend-row">
-                                            <span>{name}</span>
+                                            <span>
+                                                <A href=format!("/players/{}", crate::players::encode_path_segment(&name))>
+                                                    {name.clone()}
+                                                </A>
+                                            </span>
                                             " "
                                             <a href="#" on:click=move |ev| {
                                                 ev.prevent_default();
@@ -403,7 +408,11 @@ pub fn FriendsPage() -> impl IntoView {
                                     let name = f.name.clone();
                                     view! {
                                         <div class="friend-row">
-                                            <span>{name}</span>
+                                            <span>
+                                                <A href=format!("/players/{}", crate::players::encode_path_segment(&name))>
+                                                    {name.clone()}
+                                                </A>
+                                            </span>
                                             " "
                                             <a href="#" on:click=move |ev| {
                                                 ev.prevent_default();
@@ -422,7 +431,16 @@ pub fn FriendsPage() -> impl IntoView {
                             } else {
                                 o.outgoing.iter().map(|f| {
                                     let name = f.name.clone();
-                                    view! { <div class="friend-row"><span>{name}</span>" - pending"</div> }
+                                    view! {
+                                        <div class="friend-row">
+                                            <span>
+                                                <A href=format!("/players/{}", crate::players::encode_path_segment(&name))>
+                                                    {name.clone()}
+                                                </A>
+                                            </span>
+                                            " - pending"
+                                        </div>
+                                    }
                                 }).collect_view().into_any()
                             }}
                         </section>
@@ -437,7 +455,11 @@ pub fn FriendsPage() -> impl IntoView {
                                     let name = f.name.clone();
                                     view! {
                                         <div class="friend-row">
-                                            <span>{name}</span>
+                                            <span>
+                                                <A href=format!("/players/{}", crate::players::encode_path_segment(&name))>
+                                                    {name.clone()}
+                                                </A>
+                                            </span>
                                             " "
                                             <a href="#" on:click=move |ev| {
                                                 ev.prevent_default();
