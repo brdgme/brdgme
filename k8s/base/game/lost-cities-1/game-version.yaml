@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Lost Cities
   weight: 1.5
+  blurb: "Fund expeditions to five lost cities, committing cards to routes that must pay off before the deck runs out. A tense two-player card game of investment and restraint."
   isDeprecated: true

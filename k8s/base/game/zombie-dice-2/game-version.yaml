@@ -6,3 +6,4 @@ metadata:
 spec:
   typeName: Zombie Dice
   weight: 1.0
+  blurb: "Shake the dice cup and eat brains, but stop before you collect three shotgun blasts. A quick zombie-themed push-your-luck dice game."

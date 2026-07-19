@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Modern Art
   weight: 2.0
+  blurb: "Buy and sell paintings at auction, riding the market for the season's most fashionable artists. A classic auction game of valuation and salesmanship."
   isDeprecated: true

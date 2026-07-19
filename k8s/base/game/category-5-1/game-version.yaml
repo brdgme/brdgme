@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Category 5
   weight: 1.0
+  blurb: "Play numbered cards into rows and avoid picking up the sixth card, because every card you take costs you points. A simultaneous card game of risk and second-guessing."
   isDeprecated: true

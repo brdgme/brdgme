@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Love Letter
   weight: 1.0
+  blurb: "Get your love letter into the princess's hands by deducing and knocking out your rivals with a hand of just one card. A tiny game of deduction and luck."
   isDeprecated: true

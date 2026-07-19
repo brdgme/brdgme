@@ -6,3 +6,4 @@ metadata:
 spec:
   typeName: Tic-tac-toe
   weight: 1.0
+  blurb: "Take turns marking the grid and make three in a row before your opponent does. The old classic, for one quick game or ten."

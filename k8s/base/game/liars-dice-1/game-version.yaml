@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Liar's Dice
   weight: 1.0
+  blurb: "Bid on the dice hidden under everyone's cups, bluffing and calling bluffs until someone is caught out. Lose dice when you are wrong; the last player still rolling wins."
   isDeprecated: true

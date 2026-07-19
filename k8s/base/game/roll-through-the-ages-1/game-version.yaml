@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Roll Through the Ages
   weight: 1.5
+  blurb: "Roll dice to feed your people, raise monuments, and research developments through the Bronze Age. A quick civilization-building dice game."
   isDeprecated: true

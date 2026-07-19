@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Cathedral
   weight: 1.5
+  blurb: "Place your buildings to wall off districts of a medieval city and squeeze out your opponent's pieces. An abstract territory battle for two."
   isDeprecated: true

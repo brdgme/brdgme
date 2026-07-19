@@ -6,4 +6,5 @@ metadata:
 spec:
   typeName: Battleship
   weight: 1.0
+  blurb: "Hide your fleet on a secret grid and call shots to hunt down the enemy ships before yours are sunk. The classic naval guessing game."
   isDeprecated: true
