@@ -1469,7 +1469,7 @@ pub async fn update_game_command_success(
         let player_points = points.get(pos).copied();
         let is_turn_at = if is_turn { now } else { p_is_turn_at };
         let is_played = p_id == played_player_id;
-        let last_turn_at = if is_played { now } else { p_last_turn_at };
+        let last_turn_at = p_last_turn_at;
         let undo_game_state: Option<&str> = if is_played && can_undo {
             p_undo_game_state.as_deref().or(Some(prev_game_state))
         } else {
@@ -2976,10 +2976,62 @@ mod tests {
             Some("prev_state".to_string())
         );
         assert_eq!(p1.game_player.undo_game_state, None);
-        // last_turn_at only bumped for the played player.
+        // last_turn_at bumped by the DB trigger on the is_turn true->false
+        // transition (p0 leaves turn here), not by the played-player override.
         assert!(p0.game_player.last_turn_at > played_player.game_player.last_turn_at);
         // is_turn_at bumped for whoever's turn it now is (p1).
         assert!(p1.game_player.is_turn_at >= played_player.game_player.is_turn_at);
+    }
+
+    #[sqlx::test]
+    async fn update_game_command_success_mid_turn_keeps_last_turn_at(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+
+        let ge_before = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player = ge_before
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let played_player_id = played_player.game_player.id;
+        let last_turn_at_before = played_player.game_player.last_turn_at;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "new_state",
+            true, // can_undo
+            &StatusUpdate {
+                is_finished: false,  // -> Active
+                whose_turn: vec![0], // position 0 stays in turn (mid-turn command)
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[3.5, 1.5],
+            ge_before.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0 = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+
+        // No is_turn true->false transition occurred for p0, so the DB
+        // trigger does not fire and last_turn_at must be unchanged.
+        assert!(p0.game_player.is_turn);
+        assert_eq!(p0.game_player.last_turn_at, last_turn_at_before);
     }
 
     #[sqlx::test]
