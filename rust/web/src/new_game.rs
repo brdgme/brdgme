@@ -3,7 +3,7 @@ use leptos::prelude::*;
 use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
 
-use crate::friends::OpponentSuggestion;
+use crate::friends::{OpponentSuggestion, UserSearchResult};
 use crate::game::server_fns::{BotSlot, GameTypeInfo, create_new_game};
 
 /// Formats supported player counts, honoring non-contiguous sets:
@@ -249,9 +249,7 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                     return;
                 }
                 OpponentSlot::Email(email) => emails.push(email),
-                OpponentSlot::Bot { name, difficulty } => {
-                    bots.push(BotSlot { name, difficulty })
-                }
+                OpponentSlot::Bot { name, difficulty } => bots.push(BotSlot { name, difficulty }),
             }
         }
         set_form_error.set(None);
@@ -499,6 +497,41 @@ fn OpponentSlotEditor(
             .collect()
     };
 
+    let slot_query = move || match slot() {
+        OpponentSlot::Player { query, .. } => query,
+        _ => String::new(),
+    };
+
+    // One search action per slot; last completed response wins, which is
+    // fine for a human typing (out-of-order stale responses only ever show
+    // briefly and the next keystroke re-queries).
+    let search_action = Action::new(|q: &String| {
+        let q = q.clone();
+        async move { crate::friends::search_users(q).await }
+    });
+
+    let search_results = move || -> Vec<UserSearchResult> {
+        if slot_query().trim().chars().count() < 2 {
+            return Vec::new();
+        }
+        match search_action.value().get() {
+            Some(Ok(results)) => results,
+            _ => Vec::new(),
+        }
+    };
+
+    // Spec, error handling: search failure is inline under the slot; the
+    // slot stays usable via Email mode.
+    let search_error = move || -> Option<String> {
+        if slot_query().trim().chars().count() < 2 {
+            return None;
+        }
+        match search_action.value().get() {
+            Some(Err(e)) => Some(format!("Search failed: {e}")),
+            _ => None,
+        }
+    };
+
     view! {
         <div class="form-field opponent-slot">
             <label class="form-label">"Opponent " {i + 1}</label>
@@ -559,38 +592,94 @@ fn OpponentSlotEditor(
             <Show when=move || {
                 matches!(slot(), OpponentSlot::Player { selected: None, .. })
             }>
-                <div class="form-control chip-row">
-                    {move || {
-                        match suggestions.get() {
-                            Some(Ok(sugs)) if !sugs.is_empty() => {
-                                let tk = taken();
-                                sugs.iter()
-                                    .filter(|s| !tk.contains(&s.user_id))
-                                    .map(|s| {
-                                        let id = s.user_id;
-                                        let name = s.name.clone();
-                                        let label = s.name.clone();
-                                        view! {
-                                            <a
-                                                href="#"
-                                                class="chip"
-                                                class:chip-friend=s.is_friend
-                                                on:click=move |ev| {
-                                                    ev.prevent_default();
-                                                    pick_user(id, name.clone());
-                                                }
-                                            >
-                                                {label}
-                                            </a>
-                                        }
-                                    })
-                                    .collect_view()
-                                    .into_any()
+                <div class="form-control">
+                    <input
+                        type="text"
+                        placeholder="Search players"
+                        aria-label=format!("Search players for opponent {}", i + 1)
+                        prop:value=slot_query
+                        on:input=move |ev| {
+                            let val = event_target_value(&ev);
+                            set_slots.update(|v| {
+                                if let Some(s) = v.get_mut(i) {
+                                    *s = OpponentSlot::Player {
+                                        query: val.clone(),
+                                        selected: None,
+                                    };
+                                }
+                            });
+                            if val.trim().chars().count() >= 2 {
+                                search_action.dispatch(val);
                             }
-                            _ => ().into_any(),
                         }
-                    }}
+                    />
                 </div>
+                {move || {
+                    search_error()
+                        .map(|e| view! { <div class="form-error">{e}</div> })
+                }}
+                <ul class="typeahead-results">
+                    {move || {
+                        let tk = taken();
+                        search_results()
+                            .into_iter()
+                            .filter(|r| !tk.contains(&r.user_id))
+                            .map(|r| {
+                                let id = r.user_id;
+                                let name = r.name.clone();
+                                let label = r.name.clone();
+                                view! {
+                                    <li>
+                                        <a
+                                            href="#"
+                                            class="chip"
+                                            on:click=move |ev| {
+                                                ev.prevent_default();
+                                                pick_user(id, name.clone());
+                                            }
+                                        >
+                                            {label}
+                                        </a>
+                                    </li>
+                                }
+                            })
+                            .collect_view()
+                    }}
+                </ul>
+                <Show when=move || slot_query().is_empty()>
+                    <div class="form-control chip-row">
+                        {move || {
+                            match suggestions.get() {
+                                Some(Ok(sugs)) if !sugs.is_empty() => {
+                                    let tk = taken();
+                                    sugs.iter()
+                                        .filter(|s| !tk.contains(&s.user_id))
+                                        .map(|s| {
+                                            let id = s.user_id;
+                                            let name = s.name.clone();
+                                            let label = s.name.clone();
+                                            view! {
+                                                <a
+                                                    href="#"
+                                                    class="chip"
+                                                    class:chip-friend=s.is_friend
+                                                    on:click=move |ev| {
+                                                        ev.prevent_default();
+                                                        pick_user(id, name.clone());
+                                                    }
+                                                >
+                                                    {label}
+                                                </a>
+                                            }
+                                        })
+                                        .collect_view()
+                                        .into_any()
+                                }
+                                _ => ().into_any(),
+                            }
+                        }}
+                    </div>
+                </Show>
             </Show>
             <Show when=move || mode() == SlotMode::Email>
                 <div class="form-control">
@@ -695,7 +784,10 @@ mod tests {
     #[test]
     fn filter_by_player_count() {
         let types = vec![gt("Duel", &[2], 1.0), gt("Party", &[3, 4, 5], 1.0)];
-        assert_eq!(names(&filter_and_sort(&types, Some(2), "", "alpha")), ["Duel"]);
+        assert_eq!(
+            names(&filter_and_sort(&types, Some(2), "", "alpha")),
+            ["Duel"]
+        );
         assert_eq!(
             names(&filter_and_sort(&types, Some(4), "", "alpha")),
             ["Party"]
