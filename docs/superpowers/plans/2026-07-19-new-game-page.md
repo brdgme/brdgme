@@ -47,7 +47,7 @@
 - Consumes: existing `game_types` table; `crate::models::game::GameType`.
 - Produces: `game_types.blurb text NOT NULL DEFAULT ''` column; `GameType` struct gains `pub blurb: String`; `db::find_available_game_types` returns blurb-carrying `GameType`s. Tasks 2, 4 rely on the column and struct field.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `rust/web/migrations/012_game_type_blurb.sql`:
 
@@ -59,7 +59,7 @@ ALTER TABLE public.game_types
     ADD COLUMN blurb text NOT NULL DEFAULT '';
 ```
 
-- [ ] **Step 2: Apply the migration**
+- [x] **Step 2: Apply the migration**
 
 Run:
 ```bash
@@ -67,7 +67,7 @@ cd /home/beefsack/Development/brdgme/rust/web && sqlx migrate run
 ```
 Expected: `Applied 12/migrate game type blurb` (exact wording varies; it must list 012 as applied).
 
-- [ ] **Step 3: Write the failing test**
+- [x] **Step 3: Write the failing test**
 
 In `rust/web/src/db.rs`, inside the existing `#[cfg(all(test, feature = "ssr"))] mod tests` block (starts ~line 2072), add after the existing `migrations_apply_and_pool_connects` test:
 
@@ -107,7 +107,7 @@ In `rust/web/src/db.rs`, inside the existing `#[cfg(all(test, feature = "ssr"))]
     }
 ```
 
-- [ ] **Step 4: Run the test to verify it fails**
+- [x] **Step 4: Run the test to verify it fails**
 
 Run:
 ```bash
@@ -115,7 +115,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr fi
 ```
 Expected: FAIL to compile with `no field 'blurb' on type '&crate::models::game::GameType'`.
 
-- [ ] **Step 5: Add the field to the model**
+- [x] **Step 5: Add the field to the model**
 
 In `rust/web/src/models/game.rs`, change the `GameType` struct to:
 
@@ -132,7 +132,7 @@ pub struct GameType {
 }
 ```
 
-- [ ] **Step 6: Update the compile-checked queries that select `GameType`**
+- [x] **Step 6: Update the compile-checked queries that select `GameType`**
 
 In `rust/web/src/db.rs`, in `find_available_game_types` (~line 247), change the game_types query string to:
 
@@ -160,7 +160,7 @@ grep -n "crate::models::game::GameType," /home/beefsack/Development/brdgme/rust/
 ```
 Expected: only the two sites above (plus the struct-path mentions in `find_available_game_types`'s return type). If any other `query_as!(crate::models::game::GameType, ...)` call appears, add `, blurb` to its SELECT list the same way — the compile/prepare step below fails loudly on any missed site.
 
-- [ ] **Step 7: Regenerate the sqlx offline cache**
+- [x] **Step 7: Regenerate the sqlx offline cache**
 
 Run:
 ```bash
@@ -168,7 +168,7 @@ cd /home/beefsack/Development/brdgme/rust/web && cargo sqlx prepare -- --tests -
 ```
 Expected: `query data written to .sqlx in the current directory` and modified/added files under `rust/web/.sqlx/`.
 
-- [ ] **Step 8: Run the test to verify it passes**
+- [x] **Step 8: Run the test to verify it passes**
 
 Run:
 ```bash
@@ -176,7 +176,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr fi
 ```
 Expected: PASS (1 passed).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -198,7 +198,7 @@ git commit -m "feat(web): game_types blurb column, model and queries (#44)"
 - Consumes: `game_types.blurb` column from Task 1 (the operator test applies `rust/web/migrations`).
 - Produces: `GameVersionSpec.blurb: String` (serde default, camelCase `blurb` in YAML); `upsert_game_type_and_version(pool, type_name, player_counts, weight, blurb, version_name, uri, is_deprecated, rules)`. Task 3's YAML `blurb:` keys rely on this CRD field.
 
-- [ ] **Step 1: Enable `#[sqlx::test]` in the operator crate**
+- [x] **Step 1: Enable `#[sqlx::test]` in the operator crate**
 
 `rust/operator/Cargo.toml` currently has no `[dev-dependencies]` section. Append at the end of the file:
 
@@ -210,7 +210,7 @@ git commit -m "feat(web): game_types blurb column, model and queries (#44)"
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "macros", "migrate"] }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 In `rust/operator/src/controller.rs`, inside the existing `#[cfg(test)] mod tests` block (line 235, currently containing only `interceptor_uri_defaults_to_keda_proxy`), add:
 
@@ -272,7 +272,7 @@ In `rust/operator/src/controller.rs`, inside the existing `#[cfg(test)] mod test
     }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run:
 ```bash
@@ -280,7 +280,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p brdgme-operator upser
 ```
 Expected: FAIL to compile — `upsert_game_type_and_version` takes 8 arguments but 9 were supplied.
 
-- [ ] **Step 4: Add the CRD spec field**
+- [x] **Step 4: Add the CRD spec field**
 
 In `rust/operator/src/crd.rs`, add to `GameVersionSpec` after the `weight` field (line 21):
 
@@ -290,7 +290,7 @@ In `rust/operator/src/crd.rs`, add to `GameVersionSpec` after the `weight` field
     pub blurb: String,
 ```
 
-- [ ] **Step 5: Thread blurb through the upsert**
+- [x] **Step 5: Thread blurb through the upsert**
 
 In `rust/operator/src/controller.rs`, change `upsert_game_type_and_version` (line 165) to:
 
@@ -368,7 +368,7 @@ And in `reconcile` (call site at line 141), change the call to:
     .await?;
 ```
 
-- [ ] **Step 6: Mirror the field into `k8s/base/operator/crd.yaml`**
+- [x] **Step 6: Mirror the field into `k8s/base/operator/crd.yaml`**
 
 This file is hand-maintained (no generator). In the `spec.properties` block, after the `weight` property (lines 22-25) and before `isDeprecated`, add:
 
@@ -381,7 +381,7 @@ This file is hand-maintained (no generator). In the `spec.properties` block, aft
 
 The properties block then reads `typeName`, `weight`, `blurb`, `isDeprecated`.
 
-- [ ] **Step 7: Run the test to verify it passes**
+- [x] **Step 7: Run the test to verify it passes**
 
 Run:
 ```bash
@@ -389,7 +389,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p brdgme-operator
 ```
 Expected: PASS — `upsert_writes_weight_and_blurb` and `interceptor_uri_defaults_to_keda_proxy` both pass (2 passed; plus any tests in `main.rs`).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -408,7 +408,7 @@ git commit -m "feat(operator): blurb field through CRD and game_types upsert (#4
 - Consumes: `blurb` CRD field from Task 2.
 - Produces: content only. NOTE: these are Claude-drafted blurbs, flagged for user review/edit before merge.
 
-- [ ] **Step 1: Add a `blurb:` line to every game-version.yaml**
+- [x] **Step 1: Add a `blurb:` line to every game-version.yaml**
 
 In each file below, insert the `blurb:` line directly after the existing `weight:` line (same 2-space indent under `spec:`, before `isDeprecated:` where present). Where a game has `-1` and `-2` directories, both share a `typeName` and upsert the same `game_types` row, so both files get the identical blurb.
 
@@ -532,7 +532,7 @@ spec:
   isDeprecated: true
 ```
 
-- [ ] **Step 2: Verify all 39 files got a blurb**
+- [x] **Step 2: Verify all 39 files got a blurb**
 
 Run:
 ```bash
@@ -540,7 +540,7 @@ grep -rl "  blurb: \"" /home/beefsack/Development/brdgme/k8s/base/game --include
 ```
 Expected: `39`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -559,7 +559,7 @@ git commit -m "feat(k8s): draft blurbs for all 39 game versions (#44)"
 - Consumes: `GameType.blurb`/`GameType.weight` from Task 1.
 - Produces: `GameTypeInfo { id: Uuid, name: String, player_counts: Vec<i32>, weight: f32, blurb: String, versions: Vec<GameVersionInfo> }`, with `PartialEq` derived on `GameTypeInfo` and `GameVersionInfo` (needed by the `Memo` and unit tests in Task 8). Tasks 8-9 consume this struct.
 
-- [ ] **Step 1: Extend the structs**
+- [x] **Step 1: Extend the structs**
 
 In `rust/web/src/game/server_fns.rs`, replace the two structs at lines 77-89 with:
 
@@ -583,7 +583,7 @@ pub struct GameTypeInfo {
 }
 ```
 
-- [ ] **Step 2: Map the new fields**
+- [x] **Step 2: Map the new fields**
 
 In `get_available_game_types`, change the mapping closure to:
 
@@ -607,7 +607,7 @@ In `get_available_game_types`, change the mapping closure to:
         .collect())
 ```
 
-- [ ] **Step 3: Verify it compiles clean and existing tests pass**
+- [x] **Step 3: Verify it compiles clean and existing tests pass**
 
 Run:
 ```bash
@@ -615,7 +615,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets -
 ```
 Expected: clippy clean; test PASS. (The struct fields are exercised end-to-end by Task 1's DB test plus the UI unit tests in Task 8; the server fn body is a straight field copy checked at compile time.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -636,7 +636,7 @@ git commit -m "feat(web): expose weight and blurb in GameTypeInfo (#44)"
 - Consumes: `game_types.player_counts`, `create_new_game`'s existing `player_count` computation (`1 + opponent_ids + opponent_emails + bot_slots`).
 - Produces: `db::find_game_type_player_counts(pool: &PgPool, game_version_id: Uuid) -> Result<Option<Vec<i32>>>`; `server_fns::roster_error(player_counts: &[i32], player_count: usize) -> Option<String>`; `create_new_game` rejects invalid rosters with a `ServerFnError` whose message names the supported counts.
 
-- [ ] **Step 1: Write the failing unit tests for the validation rule**
+- [x] **Step 1: Write the failing unit tests for the validation rule**
 
 At the very end of `rust/web/src/game/server_fns.rs`, add:
 
@@ -665,7 +665,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run:
 ```bash
@@ -673,7 +673,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr ro
 ```
 Expected: FAIL to compile — `cannot find function 'roster_error' in this scope`.
 
-- [ ] **Step 3: Implement `roster_error`**
+- [x] **Step 3: Implement `roster_error`**
 
 In `rust/web/src/game/server_fns.rs`, immediately above `create_new_game` (line 375), add:
 
@@ -697,7 +697,7 @@ fn roster_error(player_counts: &[i32], player_count: usize) -> Option<String> {
 }
 ```
 
-- [ ] **Step 4: Run the unit tests to verify they pass**
+- [x] **Step 4: Run the unit tests to verify they pass**
 
 Run:
 ```bash
@@ -705,7 +705,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr ro
 ```
 Expected: PASS (2 passed).
 
-- [ ] **Step 5: Write the failing DB-lookup test**
+- [x] **Step 5: Write the failing DB-lookup test**
 
 In `rust/web/src/db.rs` tests mod, add (uses the existing `make_game_type_and_version` fixture helper, which creates `player_counts = [2, 3, 4]`):
 
@@ -734,7 +734,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr fi
 ```
 Expected: FAIL to compile — `cannot find function 'find_game_type_player_counts'`.
 
-- [ ] **Step 6: Implement the DB lookup**
+- [x] **Step 6: Implement the DB lookup**
 
 In `rust/web/src/db.rs`, after `find_latest_non_deprecated_game_version` (ends ~line 236), add:
 
@@ -755,7 +755,7 @@ pub async fn find_game_type_player_counts(
 }
 ```
 
-- [ ] **Step 7: Wire validation into `create_new_game`**
+- [x] **Step 7: Wire validation into `create_new_game`**
 
 In `rust/web/src/game/server_fns.rs`, in `create_new_game`, directly after the `find_game_version` block (the `let game_version = ...;` statement ending ~line 402) and before `let mut tx = ...`, insert:
 
@@ -769,7 +769,7 @@ In `rust/web/src/game/server_fns.rs`, in `create_new_game`, directly after the `
     }
 ```
 
-- [ ] **Step 8: Regenerate the sqlx cache and run the tests**
+- [x] **Step 8: Regenerate the sqlx cache and run the tests**
 
 Run:
 ```bash
@@ -778,7 +778,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr ro
 ```
 Expected: prepare writes `.sqlx` entries; both test filters PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -798,7 +798,7 @@ git commit -m "feat(web): server-side roster validation in create_new_game (#44)
 - Consumes: `users` table (`id`, `name`); `require_user()` helper in friends.rs.
 - Produces: `db::search_users(pool: &PgPool, user_id: Uuid, query: &str) -> Result<Vec<(Uuid, String)>>` (empty result under 2 trimmed chars, cap 10, excludes `user_id`, case-insensitive substring, LIKE wildcards escaped); `friends::UserSearchResult { user_id: Uuid, name: String }`; `#[server] friends::search_users(query: String) -> Result<Vec<UserSearchResult>, ServerFnError>` (login required). Task 9's typeahead calls `crate::friends::search_users`.
 
-- [ ] **Step 1: Write the failing DB tests**
+- [x] **Step 1: Write the failing DB tests**
 
 In `rust/web/src/db.rs` tests mod, add:
 
@@ -847,7 +847,7 @@ In `rust/web/src/db.rs` tests mod, add:
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run:
 ```bash
@@ -855,7 +855,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr se
 ```
 Expected: FAIL to compile — `cannot find function 'search_users' in this scope`.
 
-- [ ] **Step 3: Implement the DB function**
+- [x] **Step 3: Implement the DB function**
 
 In `rust/web/src/db.rs`, after `get_user_by_name` (ends ~line 1884), add:
 
@@ -892,7 +892,7 @@ pub async fn search_users(
 }
 ```
 
-- [ ] **Step 4: Run the DB tests to verify they pass**
+- [x] **Step 4: Run the DB tests to verify they pass**
 
 Run:
 ```bash
@@ -900,7 +900,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr se
 ```
 Expected: PASS (2 passed).
 
-- [ ] **Step 5: Add the server fn**
+- [x] **Step 5: Add the server fn**
 
 In `rust/web/src/friends.rs`, after the `OpponentSuggestion` struct (line 47), add:
 
@@ -933,7 +933,7 @@ pub async fn search_users(query: String) -> Result<Vec<UserSearchResult>, Server
 }
 ```
 
-- [ ] **Step 6: Verify compile and clippy**
+- [x] **Step 6: Verify compile and clippy**
 
 Run:
 ```bash
@@ -941,7 +941,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets -
 ```
 Expected: clean.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -960,7 +960,7 @@ git commit -m "feat(web): user search server fn for opponent typeahead (#44)"
 - Consumes: `--mk-*` variables (`--mk-foreground`, `--mk-blue`, `--mk-grey`, `--mk-soften-foreground-90`), existing `.form-field`/`.form-label`/`.form-control`/`.form-error`/`.form-actions` rules.
 - Produces: classes used by Tasks 8-9: `.new-game-layout`, `.new-game-browser`, `.new-game-panel`, `.new-game-panel-empty`, `.new-game-filters`, `.new-game-filter-players`, `.new-game-filter-search`, `.new-game-blurb`, `.game-card-grid`, `.game-card`, `.game-card-name`, `.game-card-meta`, `.game-card-blurb`, `.player-count-radios`, `.slot-modes`, `.chip`, `.chip-row`, `.chip-friend`, `.chip-selected`, `.typeahead-results`, `.sr-only`.
 
-- [ ] **Step 1: Append the styles**
+- [x] **Step 1: Append the styles**
 
 Add to `rust/web/style/main.scss`, after the `.form-strip` block:
 
@@ -1122,7 +1122,7 @@ Add to `rust/web/style/main.scss`, after the `.form-strip` block:
 }
 ```
 
-- [ ] **Step 2: Verify the stylesheet still builds**
+- [x] **Step 2: Verify the stylesheet still builds**
 
 Run:
 ```bash
@@ -1130,7 +1130,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets -
 ```
 Expected: clean (cargo-leptos compiles the SCSS at build time in dev/CI; clippy at minimum confirms nothing else broke — if a `just`/`cargo leptos` dev build is running, confirm no SCSS compile error in its output).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -1152,7 +1152,7 @@ git commit -m "feat(web): styles for new game page grid, panel and chips (#44)"
 - Consumes: `GameTypeInfo`/`GameVersionInfo` (Task 4), `create_new_game`/`BotSlot`, `get_opponent_suggestions`/`OpponentSuggestion`, SCSS classes (Task 7).
 - Produces: `pub fn NewGamePage` component at `/games`; module-privates consumed by Task 9: `enum OpponentSlot { Player { query: String, selected: Option<(Uuid, String)> }, Email(String), Bot { name: String, difficulty: String } }`, `enum SlotMode { Player, Email, Bot }`, `fn player_range(&[i32]) -> String`, `fn weight_text(f32) -> String`, `fn filter_and_sort(&[GameTypeInfo], Option<i32>, &str, &str) -> Vec<GameTypeInfo>`, `fn is_narrow() -> bool`, component `OpponentSlotEditor { i, slots, set_slots, suggestions }`. In this task, Player mode offers suggestion chips only; the typeahead input arrives in Task 9.
 
-- [ ] **Step 1: Add the `MediaQueryList` web-sys feature**
+- [x] **Step 1: Add the `MediaQueryList` web-sys feature**
 
 In `rust/web/Cargo.toml` line 65, change the web-sys line to:
 
@@ -1160,7 +1160,7 @@ In `rust/web/Cargo.toml` line 65, change the web-sys line to:
 web-sys = { version = "0.3.77", features = ["Location", "Window", "Document", "HtmlDocument", "Element", "MediaQueryList"] }
 ```
 
-- [ ] **Step 2: Write the failing unit tests**
+- [x] **Step 2: Write the failing unit tests**
 
 Create `rust/web/src/new_game.rs` containing (for now) only the pure helpers' tests and a module doc — the helpers themselves come next so the test run below fails first:
 
@@ -1249,7 +1249,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Register the module and run the tests to verify they fail**
+- [x] **Step 3: Register the module and run the tests to verify they fail**
 
 In `rust/web/src/lib.rs`, change:
 
@@ -1270,7 +1270,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr ne
 ```
 Expected: FAIL to compile — `cannot find function 'player_range' in this scope` (and the same for `weight_text`, `filter_and_sort`).
 
-- [ ] **Step 4: Write the page implementation**
+- [x] **Step 4: Write the page implementation**
 
 Fill in `rust/web/src/new_game.rs` above the tests mod with the complete implementation:
 
@@ -1935,7 +1935,7 @@ fn OpponentSlotEditor(
 }
 ```
 
-- [ ] **Step 5: Switch the route and delete the old page**
+- [x] **Step 5: Switch the route and delete the old page**
 
 In `rust/web/src/app.rs`:
 
@@ -1947,7 +1947,7 @@ In `rust/web/src/app.rs`:
    `/// Per-opponent slot state: a human (free-text email), a known user picked`
    through the closing `}` of `fn GamesPage`, stopping just before `#[component]\nfn DashboardPage`.
 
-- [ ] **Step 6: Clean up newly-unused imports**
+- [x] **Step 6: Clean up newly-unused imports**
 
 Run:
 ```bash
@@ -1956,7 +1956,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets -
 If clippy reports unused imports in `app.rs` (candidates: `Uuid`, `use_navigate`, `NavigateOptions` — only if no remaining component uses them), remove exactly the flagged ones and re-run until clean.
 Expected final result: clean.
 
-- [ ] **Step 7: Run the unit tests to verify they pass**
+- [x] **Step 7: Run the unit tests to verify they pass**
 
 Run:
 ```bash
@@ -1964,7 +1964,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr ne
 ```
 Expected: PASS (5 passed).
 
-- [ ] **Step 8: Verify in the browser**
+- [x] **Step 8: Verify in the browser**
 
 With the dev stack running (Postgres, NATS, `cargo leptos watch` or the project's usual dev command per `docs/DEV.md`), open `/games` and check:
 - Grid of game cards with name, player range, weight, blurb; empty-state panel prompt on the right.
@@ -1973,7 +1973,7 @@ With the dev stack running (Postgres, NATS, `cargo leptos watch` or the project'
 - Opponent slots: Player mode shows suggestion chips; Email and Bot modes work; Start game creates and redirects to `/games/{id}`.
 - Below 60em: single column, selecting a game scrolls the panel into view.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -1992,7 +1992,7 @@ git commit -m "feat(web): rebuild new game page as browsable grid with setup pan
 - Consumes: `crate::friends::search_users(query: String) -> Result<Vec<UserSearchResult>, ServerFnError>` and `crate::friends::UserSearchResult` (Task 6); `OpponentSlot::Player { query, selected }` state (Task 8); `.typeahead-results` styles (Task 7).
 - Produces: the final `OpponentSlotEditor` — Player mode gains a search input (min 2 chars client-side), a result-chip list, an inline search error, with suggestion chips shown only before typing.
 
-- [ ] **Step 1: Add the import**
+- [x] **Step 1: Add the import**
 
 In `rust/web/src/new_game.rs`, change the friends import line to:
 
@@ -2000,7 +2000,7 @@ In `rust/web/src/new_game.rs`, change the friends import line to:
 use crate::friends::{OpponentSuggestion, UserSearchResult};
 ```
 
-- [ ] **Step 2: Add search state and helpers to `OpponentSlotEditor`**
+- [x] **Step 2: Add search state and helpers to `OpponentSlotEditor`**
 
 Inside `OpponentSlotEditor`, after the `taken` closure, add:
 
@@ -2041,7 +2041,7 @@ Inside `OpponentSlotEditor`, after the `taken` closure, add:
     };
 ```
 
-- [ ] **Step 3: Replace the Player-unselected `<Show>` block**
+- [x] **Step 3: Replace the Player-unselected `<Show>` block**
 
 In `OpponentSlotEditor`'s view, replace the entire
 `<Show when=move || { matches!(slot(), OpponentSlot::Player { selected: None, .. }) }>` block (the one that currently contains only the chip-row) with:
@@ -2141,7 +2141,7 @@ In `OpponentSlotEditor`'s view, replace the entire
             </Show>
 ```
 
-- [ ] **Step 4: Verify compile, clippy, tests**
+- [x] **Step 4: Verify compile, clippy, tests**
 
 Run:
 ```bash
@@ -2149,7 +2149,7 @@ cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets -
 ```
 Expected: clippy clean; 5 unit tests PASS.
 
-- [ ] **Step 5: Verify in the browser**
+- [x] **Step 5: Verify in the browser**
 
 On `/games`, select a game with 3+ players, set a Player slot:
 - Before typing: suggestion chips (friends double-bordered) appear; clicking one fixes the slot and shows the removable selected chip.
@@ -2157,7 +2157,7 @@ On `/games`, select a game with 3+ players, set a Player slot:
 - A user already picked in another slot does not appear in chips or results.
 - Inline error path (best-effort manual): in devtools, block the `/api/search_users` request (or briefly stop the web server mid-typing) and confirm "Search failed: ..." renders under the input while Email mode stays usable.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/beefsack/Development/brdgme
@@ -2175,7 +2175,7 @@ git commit -m "feat(web): player typeahead with inline errors in opponent slots 
 - Consumes: everything above.
 - Produces: a green CI-equivalent run and a manual UI sign-off.
 
-- [ ] **Step 1: Run the full CI-equivalent check suite**
+- [x] **Step 1: Run the full CI-equivalent check suite**
 
 Run, from `/home/beefsack/Development/brdgme/rust` (Postgres + `DATABASE_URL` required):
 ```bash
