@@ -74,17 +74,21 @@ pub struct PlayerViewData {
     pub form: Vec<crate::stats::FormResult>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameVersionInfo {
     pub id: Uuid,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameTypeInfo {
     pub id: Uuid,
     pub name: String,
     pub player_counts: Vec<i32>,
+    /// Complexity, 0.0 (light) to 5.0 (heavy), from game_types.weight.
+    pub weight: f32,
+    /// 1-2 sentence description; empty string renders nothing.
+    pub blurb: String,
     pub versions: Vec<GameVersionInfo>,
 }
 
@@ -291,6 +295,8 @@ pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnErr
             id: gt.id,
             name: gt.name,
             player_counts: gt.player_counts,
+            weight: gt.weight,
+            blurb: gt.blurb,
             versions: versions
                 .into_iter()
                 .map(|gv| GameVersionInfo {
