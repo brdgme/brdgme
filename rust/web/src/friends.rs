@@ -47,6 +47,12 @@ pub struct OpponentSuggestion {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserSearchResult {
+    pub user_id: Uuid,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FriendActiveGame {
     pub game_id: Uuid,
     pub game_type: String,
@@ -247,6 +253,23 @@ pub async fn get_opponent_suggestions() -> Result<Vec<OpponentSuggestion>, Serve
             name,
             is_friend,
         })
+        .collect())
+}
+
+/// #44 new game page typeahead: display-name substring search. Login
+/// required; under 2 trimmed characters returns empty; capped at 10;
+/// excludes the caller (all enforced in db::search_users).
+#[server(SearchUsers, "/api")]
+pub async fn search_users(query: String) -> Result<Vec<UserSearchResult>, ServerFnError> {
+    use sqlx::PgPool;
+    let pool = expect_context::<PgPool>();
+    let user = require_user().await?;
+    let rows = crate::db::search_users(&pool, user.id, &query)
+        .await
+        .map_err(internal("search_users: query"))?;
+    Ok(rows
+        .into_iter()
+        .map(|(user_id, name)| UserSearchResult { user_id, name })
         .collect())
 }
 

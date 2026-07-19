@@ -1898,6 +1898,37 @@ pub async fn get_user_by_name(pool: &PgPool, name: &str) -> Result<Option<(Uuid,
     )
 }
 
+/// Display-name substring search for the new game page typeahead (#44):
+/// case-insensitive, excludes the searching user, capped at 10. Queries
+/// under 2 trimmed characters return nothing without touching the DB.
+#[cfg(feature = "ssr")]
+pub async fn search_users(
+    pool: &PgPool,
+    user_id: Uuid,
+    query: &str,
+) -> Result<Vec<(Uuid, String)>> {
+    let q = query.trim();
+    if q.chars().count() < 2 {
+        return Ok(Vec::new());
+    }
+    // Escape LIKE wildcards so users named "a%b" are findable and "%"
+    // queries cannot match everyone.
+    let escaped = q
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    Ok(sqlx::query_as(
+        "SELECT id, name FROM users
+         WHERE id <> $1 AND name ILIKE $2 ESCAPE '\\'
+         ORDER BY lower(name)
+         LIMIT 10",
+    )
+    .bind(user_id)
+    .bind(format!("%{escaped}%"))
+    .fetch_all(pool)
+    .await?)
+}
+
 /// D6: friends tier (most recently played with first - resolved decision
 /// 2026-07-18 - then alphabetical), then distinct human co-players from the
 /// caller's last 20 games. Excludes self and any block in either direction.
@@ -4169,6 +4200,57 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[sqlx::test]
+    async fn search_users_min_length_cap_and_excludes_self(pool: PgPool) {
+        let me = make_user(&pool, "searcher").await;
+        for i in 0..12 {
+            make_user(&pool, &format!("player{i:02}")).await;
+        }
+
+        // Under 2 trimmed characters: no results, no query.
+        assert!(search_users(&pool, me.id, "p").await.unwrap().is_empty());
+        assert!(search_users(&pool, me.id, " a ").await.unwrap().is_empty());
+        assert!(search_users(&pool, me.id, "").await.unwrap().is_empty());
+
+        // Results are capped at 10 of the 12 matches.
+        assert_eq!(
+            search_users(&pool, me.id, "player").await.unwrap().len(),
+            10
+        );
+
+        // The searching user is never in their own results.
+        assert!(
+            search_users(&pool, me.id, "search")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        // Case-insensitive substring match.
+        let hits = search_users(&pool, me.id, "PLAYER00").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1, "player00");
+    }
+
+    #[sqlx::test]
+    async fn search_users_escapes_like_wildcards(pool: PgPool) {
+        let me = make_user(&pool, "searcher").await;
+        make_user(&pool, "percent%name").await;
+        make_user(&pool, "underscore_name").await;
+
+        let hits = search_users(&pool, me.id, "percent%").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1, "percent%name");
+
+        // A raw "%%" query must not match everything.
+        assert!(search_users(&pool, me.id, "%%").await.unwrap().is_empty());
+
+        // "_" is a literal underscore, not a single-char wildcard.
+        let hits = search_users(&pool, me.id, "score_n").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1, "underscore_name");
     }
 
     async fn count_rows(pool: &PgPool, table: &str) -> i64 {
