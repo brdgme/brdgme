@@ -117,6 +117,7 @@ Review findings 2026-07-04, Development Workflow) have been moved to
 | 48 | Basic moderation - initially just usernames, may extend to more later | Captured 2026-07-17 - post-go-live, needs brainstorming | - | - |
 | 49 | Convert #30 friends plain sqlx queries to compile-time-checked macros now that the .sqlx prepare workflow is healthy (the friends-related queries in `rust/web/src/db.rs` currently use plain (runtime-checked) `sqlx::query`/`sqlx::query_as` calls by old convention; convert them to `query!`/`query_as!` macros and add cache entries via `cargo sqlx prepare` per docs/DEV.md) | Captured 2026-07-18 - unscheduled | - | - |
 | Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
+| 50 | Dev environment reassessment (kind/tilt host crash) | Captured 2026-07-19 - unscheduled | - | - |
 
 ---
 
