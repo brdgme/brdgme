@@ -1899,8 +1899,10 @@ pub async fn get_user_by_name(pool: &PgPool, name: &str) -> Result<Option<(Uuid,
 }
 
 /// Display-name substring search for the new game page typeahead (#44):
-/// case-insensitive, excludes the searching user, capped at 10. Queries
-/// under 2 trimmed characters return nothing without touching the DB.
+/// case-insensitive, excludes the searching user, capped at 10. Users who
+/// block the searcher or are blocked by the searcher (either direction) are
+/// also excluded. Queries under 2 trimmed characters return nothing without
+/// touching the DB.
 #[cfg(feature = "ssr")]
 pub async fn search_users(
     pool: &PgPool,
@@ -1918,9 +1920,12 @@ pub async fn search_users(
         .replace('%', "\\%")
         .replace('_', "\\_");
     Ok(sqlx::query_as(
-        "SELECT id, name FROM users
-         WHERE id <> $1 AND name ILIKE $2 ESCAPE '\\'
-         ORDER BY lower(name)
+        "SELECT u.id, u.name FROM users u
+         WHERE u.id <> $1 AND u.name ILIKE $2 ESCAPE '\\'
+           AND NOT EXISTS (SELECT 1 FROM blocks b
+                           WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = u.id)
+                              OR (b.blocker_user_id = u.id AND b.blocked_user_id = $1))
+         ORDER BY lower(u.name)
          LIMIT 10",
     )
     .bind(user_id)
@@ -4251,6 +4256,22 @@ mod tests {
         let hits = search_users(&pool, me.id, "score_n").await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].1, "underscore_name");
+    }
+
+    #[sqlx::test]
+    async fn search_users_excludes_blocked_in_either_direction(pool: PgPool) {
+        let me = make_user(&pool, "searcher").await;
+        let i_block = make_user(&pool, "player_iblock").await;
+        let blocks_me = make_user(&pool, "player_blocksme").await;
+        make_user(&pool, "player_open").await;
+        block_user(&pool, me.id, i_block.id).await.unwrap();
+        block_user(&pool, blocks_me.id, me.id).await.unwrap();
+
+        let hits = search_users(&pool, me.id, "player").await.unwrap();
+        let names: Vec<String> = hits.into_iter().map(|(_, n)| n).collect();
+        assert!(!names.contains(&"player_iblock".to_string()));
+        assert!(!names.contains(&"player_blocksme".to_string()));
+        assert!(names.contains(&"player_open".to_string()));
     }
 
     async fn count_rows(pool: &PgPool, table: &str) -> i64 {

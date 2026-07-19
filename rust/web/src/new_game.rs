@@ -1,3 +1,4 @@
+use gloo_timers::future::TimeoutFuture;
 use leptos::html;
 use leptos::prelude::*;
 use leptos_router::{NavigateOptions, hooks::use_navigate};
@@ -339,10 +340,13 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                             <div class="form-field">
                                 <label class="form-label">"Version"</label>
                                 <div class="form-control">
-                                    <select on:change=move |ev| {
-                                        set_selected_version_id
-                                            .set(event_target_value(&ev).parse::<Uuid>().ok());
-                                    }>
+                                    <select
+                                        aria-label="Version"
+                                        on:change=move |ev| {
+                                            set_selected_version_id
+                                                .set(event_target_value(&ev).parse::<Uuid>().ok());
+                                        }
+                                    >
                                         {versions
                                             .iter()
                                             .map(|v| {
@@ -376,7 +380,11 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                             {version_select}
                             <div class="form-field">
                                 <label class="form-label">"Players"</label>
-                                <div class="form-control player-count-radios">
+                                <div
+                                    class="form-control player-count-radios"
+                                    role="radiogroup"
+                                    aria-label="Number of players"
+                                >
                                     {counts
                                         .iter()
                                         .map(|&n| {
@@ -502,20 +510,22 @@ fn OpponentSlotEditor(
         _ => String::new(),
     };
 
-    // One search action per slot; last completed response wins, which is
-    // fine for a human typing (out-of-order stale responses only ever show
-    // briefly and the next keystroke re-queries).
+    // One search action per slot. Each response is tagged with the query that
+    // produced it; results and errors are only used when the tag matches the
+    // current query, so a slow stale response can never show wrong results.
     let search_action = Action::new(|q: &String| {
         let q = q.clone();
-        async move { crate::friends::search_users(q).await }
+        let tag = q.clone();
+        async move { (tag, crate::friends::search_users(q).await) }
     });
 
     let search_results = move || -> Vec<UserSearchResult> {
-        if slot_query().trim().chars().count() < 2 {
+        let current = slot_query();
+        if current.trim().chars().count() < 2 {
             return Vec::new();
         }
         match search_action.value().get() {
-            Some(Ok(results)) => results,
+            Some((tag, Ok(results))) if *tag == current => results,
             _ => Vec::new(),
         }
     };
@@ -523,19 +533,26 @@ fn OpponentSlotEditor(
     // Spec, error handling: search failure is inline under the slot; the
     // slot stays usable via Email mode.
     let search_error = move || -> Option<String> {
-        if slot_query().trim().chars().count() < 2 {
+        let current = slot_query();
+        if current.trim().chars().count() < 2 {
             return None;
         }
         match search_action.value().get() {
-            Some(Err(e)) => Some(format!("Search failed: {e}")),
+            Some((tag, Err(e))) if *tag == current => Some(format!("Search failed: {e}")),
             _ => None,
         }
     };
 
+    let (search_seq, set_search_seq) = signal(0u32);
+
     view! {
         <div class="form-field opponent-slot">
             <label class="form-label">"Opponent " {i + 1}</label>
-            <div class="form-control slot-modes">
+            <div
+                class="form-control slot-modes"
+                role="radiogroup"
+                aria-label=format!("Opponent {} type", i + 1)
+            >
                 <label>
                     <input
                         type="radio"
@@ -577,15 +594,13 @@ fn OpponentSlotEditor(
                             _ => String::new(),
                         }}
                         " "
-                        <a
-                            href="#"
-                            on:click=move |ev| {
-                                ev.prevent_default();
-                                set_mode(SlotMode::Player);
-                            }
+                        <button
+                            type="button"
+                            aria-label="Remove player"
+                            on:click=move |_| set_mode(SlotMode::Player)
                         >
                             "x"
-                        </a>
+                        </button>
                     </span>
                 </div>
             </Show>
@@ -608,9 +623,21 @@ fn OpponentSlotEditor(
                                     };
                                 }
                             });
-                            if val.trim().chars().count() >= 2 {
-                                search_action.dispatch(val);
-                            }
+                            let seq = set_search_seq
+                                .try_update(|s| {
+                                    *s += 1;
+                                    *s
+                                })
+                                .unwrap_or(0);
+                            let q = val.clone();
+                            leptos::task::spawn_local(async move {
+                                TimeoutFuture::new(300).await;
+                                if search_seq.get_untracked() == seq
+                                    && q.trim().chars().count() >= 2
+                                {
+                                    search_action.dispatch(q);
+                                }
+                            });
                         }
                     />
                 </div>
@@ -686,6 +713,7 @@ fn OpponentSlotEditor(
                     <input
                         type="email"
                         placeholder="Email address"
+                        aria-label="Email address"
                         required
                         prop:value=move || match slot() {
                             OpponentSlot::Email(e) => e,
@@ -707,6 +735,7 @@ fn OpponentSlotEditor(
                     <input
                         type="text"
                         placeholder="Bot name"
+                        aria-label="Bot name"
                         required
                         prop:value=move || match slot() {
                             OpponentSlot::Bot { name, .. } => name,

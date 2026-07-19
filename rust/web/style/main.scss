@@ -680,7 +680,7 @@ body {
   flex-direction: column;
   gap: 0.25em;
   border: 1px solid color-mix(in srgb, var(--mk-foreground) 25%, transparent);
-  border-radius: 4px;
+  border-radius: 0.63em;
   padding: 0.75em;
   cursor: pointer;
 }
@@ -721,7 +721,7 @@ body {
   position: sticky;
   top: 1em;
   border: 1px solid color-mix(in srgb, var(--mk-foreground) 25%, transparent);
-  border-radius: 4px;
+  border-radius: 0.63em;
   padding: 1em;
 }
 
@@ -763,6 +763,18 @@ body {
 .chip.chip-selected {
   border-color: var(--mk-blue);
   background-color: color-mix(in srgb, var(--mk-blue) 12%, transparent);
+  outline: 2px solid var(--mk-blue);
+  outline-offset: -2px;
+}
+
+.chip button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 .typeahead-results {

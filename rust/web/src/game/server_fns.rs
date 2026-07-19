@@ -378,6 +378,7 @@ async fn create_game_from_service(
     Ok(game)
 }
 
+#[cfg(feature = "ssr")]
 fn roster_error(player_counts: &[i32], player_count: usize) -> Option<String> {
     if player_counts.contains(&(player_count as i32)) {
         return None;
