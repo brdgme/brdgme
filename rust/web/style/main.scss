@@ -641,6 +641,162 @@ body {
   color: var(--mk-blue);
 }
 
+/* #44 new game page (spec 2026-07-19-new-game-page-design.md).
+   Two-pane >= 60em: grid left, sticky setup panel right. Colors only via
+   --mk-* vars; selection and friend markers carry a non-hue cue (outline
+   weight / border style) so no meaning rides on hue alone. */
+
+.new-game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18em, 24em);
+  gap: 1.5em;
+  align-items: start;
+}
+
+.new-game-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin-bottom: 1em;
+}
+
+.new-game-filter-players {
+  width: 6em;
+}
+
+.new-game-filter-search {
+  flex: 1 1 10em;
+  min-width: 8em;
+}
+
+.game-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14em, 1fr));
+  gap: 0.75em;
+}
+
+.game-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  border: 1px solid color-mix(in srgb, var(--mk-foreground) 25%, transparent);
+  border-radius: 4px;
+  padding: 0.75em;
+  cursor: pointer;
+}
+
+.game-card:hover {
+  background-color: color-mix(in srgb, var(--mk-soften-foreground-90) 60%, transparent);
+}
+
+/* Selected: hue plus outline weight, so it reads under every theme. */
+.game-card:has(input:checked) {
+  border-color: var(--mk-blue);
+  outline: 2px solid var(--mk-blue);
+  outline-offset: -2px;
+  background-color: color-mix(in srgb, var(--mk-blue) 12%, transparent);
+}
+
+/* The radio itself is visually hidden; surface keyboard focus on the card. */
+.game-card:has(input:focus-visible) {
+  outline: 2px solid var(--mk-foreground);
+  outline-offset: 2px;
+}
+
+.game-card-name {
+  font-weight: 700;
+}
+
+.game-card-meta {
+  font-size: 0.8em;
+  color: var(--mk-grey);
+}
+
+.game-card-blurb,
+.new-game-blurb {
+  font-size: 0.9em;
+}
+
+.new-game-panel {
+  position: sticky;
+  top: 1em;
+  border: 1px solid color-mix(in srgb, var(--mk-foreground) 25%, transparent);
+  border-radius: 4px;
+  padding: 1em;
+}
+
+.new-game-panel h2 {
+  margin-top: 0;
+}
+
+.new-game-panel-empty {
+  color: var(--mk-grey);
+}
+
+.player-count-radios,
+.slot-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75em;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em;
+}
+
+.chip {
+  display: inline-block;
+  border: 1px solid color-mix(in srgb, var(--mk-foreground) 35%, transparent);
+  border-radius: 1em;
+  padding: 0 0.6em;
+  text-decoration: none;
+}
+
+/* Friend chips: double border = non-hue cue. */
+.chip.chip-friend {
+  border-style: double;
+  border-width: 3px;
+}
+
+.chip.chip-selected {
+  border-color: var(--mk-blue);
+  background-color: color-mix(in srgb, var(--mk-blue) 12%, transparent);
+}
+
+.typeahead-results {
+  list-style: none;
+  margin: 0.35em 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em;
+}
+
+/* Visually hidden but accessible (the radio inside each game card). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media only screen and (max-width: 60em) {
+  .new-game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .new-game-panel {
+    position: static;
+  }
+}
+
 .rating-chart .rating-line {
   stroke: var(--mk-green);
   stroke-width: 2;
