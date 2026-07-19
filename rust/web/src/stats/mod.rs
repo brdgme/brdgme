@@ -81,6 +81,7 @@ pub struct FormResult {
     pub finished_at: Option<PrimitiveDateTime>,
     pub place: Option<i32>,
     pub player_count: i64,
+    pub rating_change: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

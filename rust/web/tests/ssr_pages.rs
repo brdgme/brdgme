@@ -542,6 +542,119 @@ async fn players_page_unknown_user_renders_not_found_200(pool: PgPool) {
     assert_clean_html_body(status, &content_type, &body, "No such player.");
 }
 
+#[sqlx::test]
+async fn players_page_no_games_shows_empty_state(pool: PgPool) {
+    let user = make_user(&pool, "no-games-guy").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/players/{}", user.name), None).await;
+    assert_clean_html_body(status, &content_type, &body, "No finished games yet.");
+}
+
+/// Inserts a game type with a fixed (non-random) name, plus a single game
+/// version for it - used by tests that assert on the game type name showing
+/// up in rendered HTML.
+async fn make_game_type_with_fixed_name(pool: &PgPool, name: &str) -> (Uuid, Uuid) {
+    let game_type_id = sqlx::query_scalar!(
+        "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        name,
+        &vec![2i32]
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let game_version_id = make_game_version_for_type(
+        pool,
+        game_type_id,
+        "1.0.0",
+        "http://localhost:0/mock",
+        false,
+    )
+    .await;
+    (game_type_id, game_version_id)
+}
+
+/// Inserts a finished 2-player game plus its `game_players` rows directly,
+/// per the SQL shape in `web::stats::queries::fixtures::insert_game` (not
+/// importable here since that module is `#[cfg(test)] pub(crate)` inside the
+/// `web` crate, not exported to integration tests).
+async fn insert_finished_two_player_game(
+    pool: &PgPool,
+    game_version_id: Uuid,
+    players: &[(Uuid, i32, i32)],
+) -> Uuid {
+    let game_id = sqlx::query_scalar!(
+        "INSERT INTO games (id, game_version_id, is_finished, finished_at, game_state)
+         VALUES (uuid_generate_v4(), $1, true, now(), '')
+         RETURNING id",
+        game_version_id
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    const COLORS: [&str; 2] = ["Green", "Red"];
+    for (i, (user_id, place, rating_change)) in players.iter().enumerate() {
+        sqlx::query!(
+            r#"INSERT INTO game_players
+                (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
+                 is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, rating_change)
+               VALUES (uuid_generate_v4(), $1, $2, NULL, $3, $4, true, false, now(), now(), false, true, $5, $6)"#,
+            game_id,
+            user_id,
+            i as i32,
+            COLORS[i % COLORS.len()],
+            place,
+            rating_change
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    game_id
+}
+
+#[sqlx::test]
+async fn players_page_renders_game_type_table(pool: PgPool) {
+    let (game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Profile Table Game").await;
+    let user_a = make_user(&pool, "table-player-a").await;
+    let user_b = make_user(&pool, "table-player-b").await;
+
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+
+    sqlx::query!(
+        "INSERT INTO game_type_users (id, game_type_id, user_id, rating, peak_rating)
+         VALUES (uuid_generate_v4(), $1, $2, $3, $4)",
+        game_type_id,
+        user_a.id,
+        1216,
+        1216
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/players/{}", user_a.name), None).await;
+
+    assert_clean_html_body(status, &content_type, &body, "profile-game-types");
+    assert!(
+        body.contains("Profile Table Game"),
+        "expected game type name in body: {body}"
+    );
+    assert!(body.contains("1216"), "expected rating in body: {body}");
+    assert!(
+        body.contains("By game type"),
+        "expected heading in body: {body}"
+    );
+}
+
 // --- admin export route (#34, spec D4) ---
 
 #[sqlx::test]

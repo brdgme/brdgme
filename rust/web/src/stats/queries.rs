@@ -404,6 +404,7 @@ pub async fn recent_form(
                 g.id AS game_id,
                 g.finished_at,
                 gp.place,
+                gp.rating_change,
                 (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
                 row_number() OVER (
                     PARTITION BY gt.id ORDER BY g.finished_at DESC, g.id
@@ -424,6 +425,7 @@ pub async fn recent_form(
             game_id AS "game_id!",
             finished_at,
             place,
+            rating_change,
             player_count AS "player_count!"
         FROM qualifying
         WHERE rn <= $2
@@ -443,6 +445,7 @@ pub async fn recent_form(
             finished_at: row.finished_at,
             place: row.place,
             player_count: row.player_count,
+            rating_change: row.rating_change,
         };
         match forms.last_mut() {
             Some(form) if form.game_type_name == row.game_type_name => {
@@ -1108,7 +1111,7 @@ mod tests {
             &pool,
             gv1,
             datetime!(2026-01-03 00:00:00),
-            &[(Some(user), Some(1), None), (None, Some(2), None)],
+            &[(Some(user), Some(1), Some(16)), (None, Some(2), None)],
         )
         .await;
         let g4 = insert_finished_game(
@@ -1140,6 +1143,8 @@ mod tests {
         assert_eq!(camel.results[0].place, Some(2));
         assert_eq!(camel.results[1].game_id, g3);
         assert_eq!(camel.results[1].place, Some(1));
+        assert_eq!(camel.results[1].rating_change, Some(16));
+        assert_eq!(camel.results[0].rating_change, None);
         assert_eq!(camel.results[2].game_id, g4);
         assert_eq!(camel.results[2].place, Some(3));
 

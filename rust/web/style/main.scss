@@ -663,3 +663,25 @@ body {
 .histogram .histogram-bar {
   fill: var(--mk-blue);
 }
+
+/* #29 profile page */
+.profile-game-types .table-scroll {
+  overflow-x: auto;
+}
+
+.profile-game-types table {
+  border-collapse: collapse;
+}
+
+.profile-game-types th,
+.profile-game-types td {
+  text-align: right;
+  padding: 0.2em 0.63em;
+  border-bottom: 1px solid var(--mk-soften-foreground-90);
+  white-space: nowrap;
+}
+
+.profile-game-types th:first-child,
+.profile-game-types td:first-child {
+  text-align: left;
+}
