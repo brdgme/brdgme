@@ -393,6 +393,11 @@ fn roster_error(player_counts: &[i32], player_count: usize) -> Option<String> {
     ))
 }
 
+#[server(GenerateBotName, "/api")]
+pub async fn generate_bot_name() -> Result<String, ServerFnError> {
+    Ok(petname::petname(1, "-").unwrap_or_else(|| "Bot".to_string()))
+}
+
 #[server(CreateNewGame, "/api")]
 pub async fn create_new_game(
     game_version_id: Uuid,

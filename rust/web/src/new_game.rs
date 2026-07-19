@@ -5,7 +5,7 @@ use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
 
 use crate::friends::{OpponentSuggestion, UserSearchResult};
-use crate::game::server_fns::{BotSlot, GameTypeInfo, create_new_game};
+use crate::game::server_fns::{BotSlot, GameTypeInfo, create_new_game, generate_bot_name};
 
 /// Formats supported player counts, honoring non-contiguous sets:
 /// [2,3,4] -> "2-4 players", [2] -> "2 players", [2,4,6] -> "2, 4, 6 players".
@@ -477,6 +477,17 @@ fn OpponentSlotEditor(
                 };
             }
         });
+        if m == SlotMode::Bot {
+            leptos::task::spawn_local(async move {
+                if let Ok(name) = generate_bot_name().await {
+                    set_slots.update(|v| {
+                        if let Some(OpponentSlot::Bot { name: bot_name, .. }) = v.get_mut(i) {
+                            *bot_name = name;
+                        }
+                    });
+                }
+            });
+        }
     };
 
     let pick_user = move |id: Uuid, name: String| {
@@ -732,24 +743,6 @@ fn OpponentSlotEditor(
             </Show>
             <Show when=move || mode() == SlotMode::Bot>
                 <div class="form-control">
-                    <input
-                        type="text"
-                        placeholder="Bot name"
-                        aria-label="Bot name"
-                        required
-                        prop:value=move || match slot() {
-                            OpponentSlot::Bot { name, .. } => name,
-                            _ => String::new(),
-                        }
-                        on:input=move |ev| {
-                            let val = event_target_value(&ev);
-                            set_slots.update(|v| {
-                                if let Some(OpponentSlot::Bot { name, .. }) = v.get_mut(i) {
-                                    *name = val;
-                                }
-                            });
-                        }
-                    />
                     <select
                         aria-label="Bot difficulty"
                         prop:value=move || match slot() {
