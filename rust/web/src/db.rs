@@ -236,6 +236,21 @@ pub async fn find_latest_non_deprecated_game_version(
 }
 
 #[cfg(feature = "ssr")]
+pub async fn find_game_type_player_counts(
+    pool: &PgPool,
+    game_version_id: Uuid,
+) -> Result<Option<Vec<i32>>> {
+    Ok(sqlx::query_scalar!(
+        "SELECT gt.player_counts FROM game_types gt
+         JOIN game_versions gv ON gv.game_type_id = gt.id
+         WHERE gv.id = $1",
+        game_version_id
+    )
+    .fetch_optional(pool)
+    .await?)
+}
+
+#[cfg(feature = "ssr")]
 pub async fn find_available_game_types(
     pool: &PgPool,
 ) -> Result<
@@ -4137,6 +4152,23 @@ mod tests {
     async fn delete_game_returns_false_for_missing_game(pool: PgPool) {
         let deleted = delete_game(&pool, Uuid::new_v4()).await.unwrap();
         assert!(!deleted);
+    }
+
+    #[sqlx::test]
+    async fn find_game_type_player_counts_by_version(pool: PgPool) {
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        assert_eq!(
+            find_game_type_player_counts(&pool, game_version_id)
+                .await
+                .unwrap(),
+            Some(vec![2, 3, 4])
+        );
+        assert_eq!(
+            find_game_type_player_counts(&pool, Uuid::new_v4())
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     async fn count_rows(pool: &PgPool, table: &str) -> i64 {

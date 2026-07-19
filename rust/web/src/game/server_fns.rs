@@ -378,6 +378,20 @@ async fn create_game_from_service(
     Ok(game)
 }
 
+fn roster_error(player_counts: &[i32], player_count: usize) -> Option<String> {
+    if player_counts.contains(&(player_count as i32)) {
+        return None;
+    }
+    let counts = player_counts
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "This game supports {counts} players, but the request has {player_count} (including you)"
+    ))
+}
+
 #[server(CreateNewGame, "/api")]
 pub async fn create_new_game(
     game_version_id: Uuid,
@@ -406,6 +420,14 @@ pub async fn create_new_game(
         .await
         .map_err(internal("create_new_game: find game version"))?
         .ok_or_else(|| ServerFnError::new("Game version not found"))?;
+
+    let player_counts = crate::db::find_game_type_player_counts(&pool, game_version_id)
+        .await
+        .map_err(internal("create_new_game: find player counts"))?
+        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
+    if let Some(msg) = roster_error(&player_counts, player_count) {
+        return Err(ServerFnError::new(msg));
+    }
 
     let mut tx = pool
         .begin()
@@ -1200,5 +1222,23 @@ mod tests {
             .unwrap();
         let result = force_delete_game_impl(&pool, admin_id, Uuid::new_v4()).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn roster_error_accepts_supported_counts() {
+        assert_eq!(roster_error(&[2, 3, 4], 2), None);
+        assert_eq!(roster_error(&[2, 3, 4], 3), None);
+        assert_eq!(roster_error(&[2, 3, 4], 4), None);
+    }
+
+    #[test]
+    fn roster_error_rejects_unsupported_counts() {
+        let err = roster_error(&[2, 3, 4], 5).expect("5 players rejected");
+        assert!(err.contains("2, 3, 4"), "message lists counts: {err}");
+        assert!(err.contains('5'), "message names the bad count: {err}");
+        // Non-contiguous counts: the gap is rejected.
+        assert!(roster_error(&[2, 4], 3).is_some());
+        // Solo (no opponents) rejected when unsupported.
+        assert!(roster_error(&[2, 3, 4], 1).is_some());
     }
 }
