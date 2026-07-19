@@ -246,7 +246,7 @@ pub async fn find_available_game_types(
 > {
     let types = sqlx::query_as!(
         crate::models::game::GameType,
-        "SELECT id, created_at, updated_at, name, player_counts, weight FROM game_types ORDER BY name"
+        "SELECT id, created_at, updated_at, name, player_counts, weight, blurb FROM game_types ORDER BY name"
     )
     .fetch_all(pool)
     .await?;
@@ -365,7 +365,7 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 
     let game_type = sqlx::query_as!(
         crate::models::game::GameType,
-        "SELECT id, created_at, updated_at, name, player_counts, weight FROM game_types WHERE id = $1",
+        "SELECT id, created_at, updated_at, name, player_counts, weight, blurb FROM game_types WHERE id = $1",
         game_version.game_type_id
     )
     .fetch_one(pool)
@@ -2080,6 +2080,40 @@ mod tests {
             .await?;
         assert_eq!(count, 0);
         Ok(())
+    }
+
+    #[sqlx::test]
+    async fn find_available_game_types_carries_weight_and_blurb(pool: PgPool) {
+        // Unchecked queries: `weight`/`blurb` are exercised through the
+        // function under test, not through compile-time macros here.
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts, weight, blurb)
+             VALUES ($1, $2, $3, $4) RETURNING id",
+        )
+        .bind("Blurby")
+        .bind(vec![2i32, 3])
+        .bind(2.5f64)
+        .bind("A short blurb.")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, 'blurby-1', 'http://localhost:0/mock', true, false)",
+        )
+        .bind(game_type_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let types = find_available_game_types(&pool).await.unwrap();
+        let (gt, versions) = types
+            .iter()
+            .find(|(gt, _)| gt.name == "Blurby")
+            .expect("Blurby game type present");
+        assert_eq!(gt.weight, 2.5);
+        assert_eq!(gt.blurb, "A short blurb.");
+        assert_eq!(versions.len(), 1);
     }
 
     // --- validate_username ---

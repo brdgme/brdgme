@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, created_at, updated_at, name, player_counts, weight FROM game_types ORDER BY name",
+  "query": "SELECT id, created_at, updated_at, name, player_counts, weight, blurb FROM game_types ORDER BY name",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "ordinal": 5,
         "name": "weight",
         "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
+        "name": "blurb",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -43,8 +48,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "cc66f4262d09ba7c90b8ffead334419cb00f767fc6a1c2fc2a0d4b3466d3e0aa"
+  "hash": "e0e2214fadcf1d01ad3aa5e3f1f106619de1aa0249d2c1886e2e4edbe242944d"
 }

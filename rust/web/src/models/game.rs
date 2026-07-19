@@ -11,6 +11,7 @@ pub struct GameType {
     pub name: String,
     pub player_counts: Vec<i32>,
     pub weight: f32,
+    pub blurb: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
