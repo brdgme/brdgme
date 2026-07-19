@@ -23,6 +23,10 @@ spec:
                 type: number
                 default: 0
                 description: "Game complexity weight: 0 = light, 5 = heavy."
+              blurb:
+                type: string
+                default: ""
+                description: Short 1-2 sentence description shown on the new game page.
               isDeprecated:
                 type: boolean
                 default: false

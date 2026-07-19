@@ -19,6 +19,9 @@ pub struct GameVersionSpec {
     /// Game complexity weight (0.0 = light, 5.0 = heavy).
     #[serde(default)]
     pub weight: f32,
+    /// Short 1-2 sentence description shown on the new game page.
+    #[serde(default)]
+    pub blurb: String,
     /// Deprecated versions cannot be used to start new games but remain running
     /// to serve existing in-progress games.
     #[serde(default)]

@@ -143,6 +143,7 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
         &obj.spec.type_name,
         &player_counts,
         obj.spec.weight,
+        &obj.spec.blurb,
         &name,
         &uri,
         obj.spec.is_deprecated,
@@ -167,6 +168,7 @@ async fn upsert_game_type_and_version(
     type_name: &str,
     player_counts: &[i32],
     weight: f32,
+    blurb: &str,
     version_name: &str,
     uri: &str,
     is_deprecated: bool,
@@ -174,11 +176,12 @@ async fn upsert_game_type_and_version(
 ) -> Result<(), sqlx::Error> {
     let game_type_id: Uuid = sqlx::query_scalar(
         r#"
-        INSERT INTO game_types (name, player_counts, weight)
-        VALUES ($1, $2, $3)
+        INSERT INTO game_types (name, player_counts, weight, blurb)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (name) DO UPDATE
             SET player_counts = EXCLUDED.player_counts,
                 weight        = EXCLUDED.weight,
+                blurb         = EXCLUDED.blurb,
                 updated_at    = NOW()
         RETURNING id
         "#,
@@ -186,6 +189,7 @@ async fn upsert_game_type_and_version(
     .bind(type_name)
     .bind(player_counts)
     .bind(weight as f64)
+    .bind(blurb)
     .fetch_one(pool)
     .await?;
 
@@ -243,5 +247,61 @@ mod tests {
             interceptor_uri(),
             "http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080"
         );
+    }
+
+    // Applies the web crate's migrations so the schema matches production.
+    // The operator itself never runs migrations (docs/DEV.md).
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn upsert_writes_weight_and_blurb(pool: PgPool) {
+        upsert_game_type_and_version(
+            &pool,
+            "Test Game",
+            &[2, 3],
+            2.5,
+            "A test blurb.",
+            "test-game-1",
+            "http://localhost:0/mock",
+            false,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        let (weight, blurb): (f32, String) =
+            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Test Game'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(weight, 2.5);
+        assert_eq!(blurb, "A test blurb.");
+
+        // Upsert path: a second reconcile updates the existing row in place.
+        upsert_game_type_and_version(
+            &pool,
+            "Test Game",
+            &[2, 3],
+            3.0,
+            "New blurb.",
+            "test-game-1",
+            "http://localhost:0/mock",
+            false,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        let (weight, blurb): (f32, String) =
+            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Test Game'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(weight, 3.0);
+        assert_eq!(blurb, "New blurb.");
+        let versions: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM game_versions WHERE name = 'test-game-1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(versions, 1);
     }
 }

@@ -31,3 +31,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+# Adds the test/migrate machinery for #[sqlx::test]; feature-unified with the
+# main sqlx dependency when building tests.
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "macros", "migrate"] }
