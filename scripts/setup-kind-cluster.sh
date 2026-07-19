@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Sets up a local Kind cluster with Cilium (CNI + Gateway API).
+# Sets up a local Kind cluster with Cilium (CNI + Gateway API), CloudNativePG,
+# KEDA + KEDA HTTP add-on, and the brdgme GameVersion CRD.
 #
 # Prerequisites: ctlptl, cilium-cli, kubectl, docker (all provided via
 # devenv.nix).
@@ -18,6 +19,12 @@
 GATEWAY_API_VERSION="1.3.0"
 #   CloudNativePG operator: https://github.com/cloudnative-pg/cloudnative-pg/releases
 CNPG_VERSION="1.30.0"
+#   KEDA: https://github.com/kedacore/keda/releases
+KEDA_VERSION="2.18.3"
+#   KEDA HTTP add-on: https://github.com/kedacore/http-add-on/releases
+#   These two pins are deliberately paired: http-add-on v0.15.0's go.mod pins
+#   keda/v2 at v2.18.3, so do not "upgrade" one without checking the other.
+KEDA_HTTP_ADDON_VERSION="0.15.0"
 
 set -euo pipefail
 
@@ -82,6 +89,30 @@ kubectl apply --server-side -f "https://raw.githubusercontent.com/cloudnative-pg
 
 echo "==> Waiting for CloudNativePG operator to be available..."
 kubectl wait --for=condition=Available --timeout=120s -n cnpg-system deployment/cnpg-controller-manager
+
+# --- KEDA + KEDA HTTP add-on ---
+# Installed here (rather than left to Tilt) because Tilt-applied manifests
+# (ScaledObjects, HTTPScaledObjects) need the KEDA CRDs established first.
+# --server-side --force-conflicts is required because the scaledjobs CRD
+# exceeds the 256KB last-applied-configuration annotation limit.
+echo "==> Installing KEDA ${KEDA_VERSION}..."
+kubectl apply --server-side --force-conflicts \
+  -f "https://github.com/kedacore/keda/releases/download/v${KEDA_VERSION}/keda-${KEDA_VERSION}.yaml"
+
+# The HTTP add-on needs the core KEDA CRDs established before it is applied;
+# wait for the core deployments (operator running is a bonus).
+echo "==> Waiting for KEDA to be available..."
+kubectl wait --for=condition=Available --timeout=120s -n keda \
+  deployment/keda-operator \
+  deployment/keda-metrics-apiserver \
+  deployment/keda-admission
+
+echo "==> Installing KEDA HTTP add-on ${KEDA_HTTP_ADDON_VERSION}..."
+kubectl apply --server-side --force-conflicts \
+  -f "https://github.com/kedacore/http-add-on/releases/download/v${KEDA_HTTP_ADDON_VERSION}/keda-add-ons-http-${KEDA_HTTP_ADDON_VERSION}.yaml"
+
+echo "==> Waiting for KEDA HTTP add-on operator to be available..."
+kubectl wait --for=condition=Available --timeout=120s -n keda deployment/keda-add-ons-http-operator
 
 # --- brdgme CRD ---
 # Installed here rather than managed by Tilt to avoid a deadlock: Tilt would
