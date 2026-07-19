@@ -3,6 +3,7 @@
 pub mod app;
 
 pub mod friends;
+pub mod new_game;
 pub mod players;
 pub mod settings;
 pub mod stats;
