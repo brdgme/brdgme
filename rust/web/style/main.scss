@@ -623,3 +623,43 @@ body {
   margin-left: 0.5em;
   white-space: pre;
 }
+
+// #29 stats viz
+.form-strip {
+  font-weight: 700;
+}
+
+.form-strip .form-win {
+  color: var(--mk-green);
+}
+
+.form-strip .form-loss {
+  color: var(--mk-red);
+}
+
+.form-strip .form-none {
+  color: var(--mk-blue);
+}
+
+.rating-chart .rating-line {
+  stroke: var(--mk-green);
+  stroke-width: 2;
+}
+
+.rating-chart .rating-point {
+  fill: var(--mk-green);
+}
+
+.chart-axis {
+  stroke: currentColor;
+  opacity: 0.4;
+}
+
+.chart-label {
+  fill: currentColor;
+  font-size: 10px;
+}
+
+.histogram .histogram-bar {
+  fill: var(--mk-blue);
+}

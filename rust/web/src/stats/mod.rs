@@ -118,6 +118,8 @@ mod queries;
 #[cfg(feature = "ssr")]
 pub use queries::*;
 
+pub mod viz;
+
 #[server(GetPlayerProfile, "/api")]
 pub async fn get_player_profile(
     name: String,
