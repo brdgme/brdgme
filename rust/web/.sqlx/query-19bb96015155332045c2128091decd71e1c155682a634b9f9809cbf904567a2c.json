@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO game_players\n            (id, game_id, user_id, game_bot_id, \"position\", color, has_accepted,\n             is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, rating_change)\n           VALUES (uuid_generate_v4(), $1, $2, NULL, 0, 'Green', true, false, now(), now(), false, true, 1, 16)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "19bb96015155332045c2128091decd71e1c155682a634b9f9809cbf904567a2c"
+}

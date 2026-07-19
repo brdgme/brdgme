@@ -42,6 +42,49 @@ fn encode_path_segment(s: &str) -> String {
     out
 }
 
+/// English ordinal suffix for a 1-based placing (1st, 2nd, 3rd, 4th, 11th..13th).
+fn ordinal_suffix(n: i32) -> &'static str {
+    if (11..=13).contains(&n.rem_euclid(100)) {
+        return "th";
+    }
+    match n.rem_euclid(10) {
+        1 => "st",
+        2 => "nd",
+        3 => "rd",
+        _ => "th",
+    }
+}
+
+/// Formats a finished-game placing as e.g. "1st of 4"; `None` place is "-".
+fn format_placing(place: Option<i32>, player_count: i64) -> String {
+    match place {
+        None => "-".to_string(),
+        Some(p) => format!("{}{} of {}", p, ordinal_suffix(p), player_count),
+    }
+}
+
+/// Renders a comma-separated opponent list; human opponents link to their
+/// profile, bots (no user_id) render as plain text. Never nests an <A> inside
+/// another <A> - each opponent gets its own inline span.
+fn opponents_view(opponents: Vec<crate::stats::Opponent>) -> impl IntoView {
+    let items = opponents
+        .into_iter()
+        .enumerate()
+        .map(|(i, o)| {
+            let prefix = if i > 0 { ", " } else { "" };
+            let name = match o.user_id {
+                Some(_) => {
+                    let href = format!("/players/{}", encode_path_segment(&o.name));
+                    view! { <A href=href>{o.name.clone()}</A> }.into_any()
+                }
+                None => view! { {o.name.clone()} }.into_any(),
+            };
+            view! { <span>{prefix}{name}</span> }
+        })
+        .collect_view();
+    view! { <span>{items}</span> }
+}
+
 #[component]
 pub fn PlayersPage() -> impl IntoView {
     use crate::components::layout::MainLayout;
@@ -94,6 +137,32 @@ pub fn PlayersPage() -> impl IntoView {
                                             "Member since " {d.user.created_at.date().to_string()}
                                         </p>
                                     </header>
+                                    <div class="profile-bots-toggle">
+                                        {
+                                            let toggle_name = d.user.name.clone();
+                                            move || {
+                                                if query.get().get("bots").as_deref() == Some("1") {
+                                                    let href = format!(
+                                                        "/players/{}",
+                                                        encode_path_segment(&toggle_name),
+                                                    );
+                                                    view! {
+                                                        <A href=href>
+                                                            "Showing bot-only games - exclude them"
+                                                        </A>
+                                                    }.into_any()
+                                                } else {
+                                                    let href = format!(
+                                                        "/players/{}?bots=1",
+                                                        encode_path_segment(&toggle_name),
+                                                    );
+                                                    view! {
+                                                        <A href=href>"Include bot-only games"</A>
+                                                    }.into_any()
+                                                }
+                                            }
+                                        }
+                                    </div>
                                     <section class="profile-overall-stats">
                                         <h2>"Overall"</h2>
                                         <p>"Finished games: " {d.totals.finished_games}</p>
@@ -190,10 +259,98 @@ pub fn PlayersPage() -> impl IntoView {
                                             }.into_any()
                                         }}
                                     </section>
-                                    // TODO(#29): recent form strips + recent finished games list - later unit.
-                                    <section class="profile-recent-games"></section>
-                                    // TODO(#29): active games list (own profile only) - later unit.
-                                    <section class="profile-active-games"></section>
+                                    <section class="profile-recent-games">
+                                        <h2>"Recent games"</h2>
+                                        {if d.recent_finished.is_empty() {
+                                            view! {
+                                                <p class="profile-no-games">"No finished games yet."</p>
+                                            }.into_any()
+                                        } else {
+                                            let recent_finished = d.recent_finished.clone();
+                                            let rows = recent_finished.into_iter().map(|row| {
+                                                let href = format!("/games/{}", row.game_id);
+                                                let finished = row
+                                                    .finished_at
+                                                    .map(|t| t.date().to_string())
+                                                    .unwrap_or_else(|| "-".to_string());
+                                                let placing = format_placing(row.place, row.player_count);
+                                                let rating = match row.rating_change {
+                                                    None => view! { "-" }.into_any(),
+                                                    Some(n) if n > 0 => view! {
+                                                        <span class="rating-change-up">{format!("+{n}")}</span>
+                                                    }.into_any(),
+                                                    Some(n) if n < 0 => view! {
+                                                        <span class="rating-change-down">{n.to_string()}</span>
+                                                    }.into_any(),
+                                                    Some(_) => view! {
+                                                        <span class="rating-change-none">"0"</span>
+                                                    }.into_any(),
+                                                };
+                                                let opponents = opponents_view(row.opponents);
+                                                view! {
+                                                    <tr>
+                                                        <td><A href=href>{row.game_type_name.clone()}</A></td>
+                                                        <td>{finished}</td>
+                                                        <td>{placing}</td>
+                                                        <td>{rating}</td>
+                                                        <td>{opponents}</td>
+                                                    </tr>
+                                                }
+                                            }).collect_view();
+                                            view! {
+                                                <div class="table-scroll">
+                                                    <table>
+                                                        <thead>
+                                                            <tr>
+                                                                <th>"Game"</th>
+                                                                <th>"Finished"</th>
+                                                                <th>"Placing"</th>
+                                                                <th>"Rating"</th>
+                                                                <th>"Opponents"</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>{rows}</tbody>
+                                                    </table>
+                                                </div>
+                                            }.into_any()
+                                        }}
+                                    </section>
+                                    <section class="profile-active-games">
+                                        <h2>"Active games"</h2>
+                                        {if d.active_games.is_empty() {
+                                            view! {
+                                                <p class="profile-no-games">"No active games."</p>
+                                            }.into_any()
+                                        } else {
+                                            let active_games = d.active_games.clone();
+                                            let rows = active_games.into_iter().map(|row| {
+                                                let href = format!("/games/{}", row.game_id);
+                                                let updated = row.updated_at.date().to_string();
+                                                let opponents = opponents_view(row.opponents.clone());
+                                                view! {
+                                                    <tr class:my-turn=row.is_turn>
+                                                        <td><A href=href>{row.game_type_name.clone()}</A></td>
+                                                        <td>{opponents}</td>
+                                                        <td>{updated}</td>
+                                                    </tr>
+                                                }
+                                            }).collect_view();
+                                            view! {
+                                                <div class="table-scroll">
+                                                    <table>
+                                                        <thead>
+                                                            <tr>
+                                                                <th>"Game"</th>
+                                                                <th>"Opponents"</th>
+                                                                <th>"Updated"</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>{rows}</tbody>
+                                                    </table>
+                                                </div>
+                                            }.into_any()
+                                        }}
+                                    </section>
                                 </div>
                             }.into_any()
                         }
@@ -249,6 +406,23 @@ mod tests {
     fn rating_trend_fewer_than_two_changes_is_empty() {
         let results = vec![fixture(Some(16)), fixture(None)];
         assert_eq!(rating_trend(Some(1228), &results), Vec::<f64>::new());
+    }
+
+    #[test]
+    fn format_placing_none_is_dash() {
+        assert_eq!(format_placing(None, 4), "-");
+    }
+
+    #[test]
+    fn format_placing_ordinals() {
+        assert_eq!(format_placing(Some(1), 4), "1st of 4");
+        assert_eq!(format_placing(Some(2), 4), "2nd of 4");
+        assert_eq!(format_placing(Some(3), 4), "3rd of 4");
+        assert_eq!(format_placing(Some(4), 4), "4th of 4");
+        assert_eq!(format_placing(Some(11), 20), "11th of 20");
+        assert_eq!(format_placing(Some(12), 20), "12th of 20");
+        assert_eq!(format_placing(Some(13), 20), "13th of 20");
+        assert_eq!(format_placing(Some(21), 21), "21st of 21");
     }
 
     #[test]

@@ -655,6 +655,173 @@ async fn players_page_renders_game_type_table(pool: PgPool) {
     );
 }
 
+/// Inserts an unfinished 2-player game plus its `game_players` rows directly,
+/// modeled on `insert_finished_two_player_game` but with `is_finished =
+/// false`, `finished_at` NULL, and no place/rating_change - the shape
+/// `stats::queries::active_games` selects on.
+async fn insert_unfinished_two_player_game(
+    pool: &PgPool,
+    game_version_id: Uuid,
+    players: &[Uuid],
+) -> Uuid {
+    let game_id = sqlx::query_scalar!(
+        "INSERT INTO games (id, game_version_id, is_finished, finished_at, game_state)
+         VALUES (uuid_generate_v4(), $1, false, NULL, '')
+         RETURNING id",
+        game_version_id
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    const COLORS: [&str; 2] = ["Green", "Red"];
+    for (i, user_id) in players.iter().enumerate() {
+        sqlx::query!(
+            r#"INSERT INTO game_players
+                (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
+                 is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, rating_change)
+               VALUES (uuid_generate_v4(), $1, $2, NULL, $3, $4, true, false, now(), now(), false, true, NULL, NULL)"#,
+            game_id,
+            user_id,
+            i as i32,
+            COLORS[i % COLORS.len()],
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    game_id
+}
+
+#[sqlx::test]
+async fn players_page_active_games_visible_to_anonymous_viewer(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Active Games Test Game").await;
+    let user_a = make_user(&pool, "active-player-a").await;
+    let user_b = make_user(&pool, "active-player-b").await;
+
+    insert_unfinished_two_player_game(&pool, game_version_id, &[user_a.id, user_b.id]).await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/players/{}", user_a.name), None).await;
+
+    assert_clean_html_body(status, &content_type, &body, "profile-active-games");
+    assert!(
+        body.contains("Active Games Test Game"),
+        "expected game type name in body: {body}"
+    );
+    assert!(
+        body.contains(&user_b.name),
+        "expected opponent name in body: {body}"
+    );
+    assert!(
+        !body.contains("No active games."),
+        "expected active games list, not empty state: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn players_page_recent_games_render_with_opponent_links(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Recent Games Test Game").await;
+    let user_a = make_user(&pool, "recent-player-a").await;
+    let user_b = make_user(&pool, "recent-player-b").await;
+
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/players/{}", user_a.name), None).await;
+
+    assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
+    assert!(
+        body.contains("1st of 2"),
+        "expected placing in body: {body}"
+    );
+    assert!(
+        body.contains(&format!("/players/{}", user_b.name)),
+        "expected opponent profile link in body: {body}"
+    );
+    assert!(
+        body.contains("+16"),
+        "expected rating change in body: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn players_page_bots_toggle_changes_inclusion(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Bots Toggle Test Game").await;
+    let user = make_user(&pool, "bots-toggle-player").await;
+
+    let game_id = sqlx::query_scalar!(
+        "INSERT INTO games (id, game_version_id, is_finished, finished_at, game_state)
+         VALUES (uuid_generate_v4(), $1, true, now(), '')
+         RETURNING id",
+        game_version_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let game_bot_id = sqlx::query_scalar!(
+        "INSERT INTO game_bots (id, game_id, name, difficulty)
+         VALUES (uuid_generate_v4(), $1, $2, 'medium')
+         RETURNING id",
+        game_id,
+        "Botty"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query!(
+        r#"INSERT INTO game_players
+            (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
+             is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, rating_change)
+           VALUES (uuid_generate_v4(), $1, $2, NULL, 0, 'Green', true, false, now(), now(), false, true, 1, 16)"#,
+        game_id,
+        user.id,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query!(
+        r#"INSERT INTO game_players
+            (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
+             is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, rating_change)
+           VALUES (uuid_generate_v4(), $1, NULL, $2, 1, 'Red', true, false, now(), now(), false, true, 2, NULL)"#,
+        game_id,
+        game_bot_id,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+
+    let (status, content_type, body) =
+        get(app.clone(), &format!("/players/{}", user.name), None).await;
+    assert_clean_html_body(status, &content_type, &body, "profile-bots-toggle");
+    assert!(
+        body.contains("No finished games yet."),
+        "expected empty state by default (single-human game excluded): {body}"
+    );
+    assert!(
+        body.contains("?bots=1"),
+        "expected bots toggle link in body: {body}"
+    );
+
+    let (status, content_type, body) =
+        get(app, &format!("/players/{}?bots=1", user.name), None).await;
+    assert_clean_html_body(status, &content_type, &body, "Bots Toggle Test Game");
+}
+
 // --- admin export route (#34, spec D4) ---
 
 #[sqlx::test]

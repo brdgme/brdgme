@@ -63,6 +63,7 @@ pub struct ActiveGameRow {
     pub game_type_name: String,
     pub is_turn: bool,
     pub opponents: Vec<Opponent>,
+    pub updated_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,7 +98,6 @@ pub struct PlayerProfileData {
     pub game_types: Vec<GameTypeStats>,
     pub recent_form: Vec<GameTypeForm>,
     pub recent_finished: Vec<FinishedGameRow>,
-    /// Only populated when the viewer is the profile user.
     pub active_games: Vec<ActiveGameRow>,
 }
 
@@ -150,14 +150,9 @@ pub async fn get_player_profile(
         .await
         .map_err(internal("get_player_profile: recent_finished"))?;
 
-    let viewer = crate::auth::server::get_current_user().await?;
-    let active_games = if viewer.map(|v| v.id) == Some(user.user_id) {
-        active_games(&pool, user.user_id)
-            .await
-            .map_err(internal("get_player_profile: active_games"))?
-    } else {
-        Vec::new()
-    };
+    let active_games = active_games(&pool, user.user_id)
+        .await
+        .map_err(internal("get_player_profile: active_games"))?;
 
     Ok(Some(PlayerProfileData {
         user,

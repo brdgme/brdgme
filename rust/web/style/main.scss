@@ -685,3 +685,19 @@ body {
 .profile-game-types td:first-child {
   text-align: left;
 }
+
+.profile .rating-change-up {
+  color: var(--mk-green);
+}
+
+.profile .rating-change-down {
+  color: var(--mk-red);
+}
+
+.profile .rating-change-none {
+  color: var(--mk-blue);
+}
+
+.profile-bots-toggle {
+  margin: 0.4em 0;
+}

@@ -289,7 +289,8 @@ pub async fn active_games(pool: &PgPool, user_id: Uuid) -> Result<Vec<super::Act
         SELECT
             g.id AS game_id,
             gt.name AS game_type_name,
-            me.is_turn AS is_turn
+            me.is_turn AS is_turn,
+            g.updated_at AS updated_at
         FROM games g
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt ON gt.id = gv.game_type_id
@@ -316,6 +317,7 @@ pub async fn active_games(pool: &PgPool, user_id: Uuid) -> Result<Vec<super::Act
             game_type_name: row.game_type_name,
             is_turn: row.is_turn,
             opponents: opponents.remove(&row.game_id).unwrap_or_default(),
+            updated_at: row.updated_at,
         })
         .collect())
 }

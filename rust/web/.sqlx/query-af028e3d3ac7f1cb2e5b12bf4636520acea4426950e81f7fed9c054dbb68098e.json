@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO games (id, game_version_id, is_finished, finished_at, game_state)\n         VALUES (uuid_generate_v4(), $1, false, NULL, '')\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "af028e3d3ac7f1cb2e5b12bf4636520acea4426950e81f7fed9c054dbb68098e"
+}
