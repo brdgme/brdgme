@@ -67,6 +67,9 @@ pub struct PlayerViewData {
     pub points: f32,
     pub is_turn: bool,
     pub is_bot: bool,
+    /// Bot difficulty (e.g. "medium"); `None` for humans. Drives the
+    /// `(bot: difficulty)` suffix in the game-page player card.
+    pub difficulty: Option<String>,
     /// None for bots. Drives the game-page add-friend affordance (#30 D3).
     pub user_id: Option<Uuid>,
     /// Recent form (this game's game type only), oldest-to-newest. Empty
@@ -213,6 +216,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 points: p.game_player.points.unwrap_or(0.0),
                 is_turn: p.game_player.is_turn,
                 is_bot: p.game_bot.is_some(),
+                difficulty: p.game_bot.as_ref().map(|b| b.difficulty.clone()),
                 user_id: p.user.as_ref().map(|u| u.id),
                 form: p
                     .user

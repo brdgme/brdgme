@@ -213,16 +213,23 @@ fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl Into
                     color=player.color
                     profile_link=!player.is_bot
                 />
-                {(!form.is_empty()).then(|| view! {
-                    <span class="player-form">" "<crate::stats::viz::FormStrip results=form/></span>
+                {player.is_bot.then(|| view! {
+                    <span class="player-bot-suffix">
+                        " (bot: " {player.difficulty.clone().unwrap_or_default()} ")"
+                    </span>
                 })}
             </div>
             <div style="margin-left: 1em;">
-                <div>
-                    <abbr title="ELO rating" style="cursor: help;">"Rating"</abbr>
-                    ": " {player.rating} {rating_change}
-                </div>
+                {(!player.is_bot).then(|| view! {
+                    <div>
+                        <abbr title="ELO rating" style="cursor: help;">"Rating"</abbr>
+                        ": " {player.rating} {rating_change}
+                    </div>
+                })}
                 <div>"Points: " {player.points}</div>
+                {(!player.is_bot && !form.is_empty()).then(|| view! {
+                    <div>"Form: " <crate::stats::viz::FormStrip results=form/></div>
+                })}
                 {player.user_id
                     .filter(|uid| viewer_user_id.is_some() && Some(*uid) != viewer_user_id)
                     .map(|uid| {
