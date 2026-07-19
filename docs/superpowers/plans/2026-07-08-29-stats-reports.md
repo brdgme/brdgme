@@ -13,25 +13,25 @@
 
 ## v1 tasks
 
-- [ ] DB queries (rust/web/src/db.rs or a new stats module): per-user
+- [x] DB queries (rust/web/src/db.rs or a new stats module): per-user
       totals, per-user-per-game-type aggregates, rating series,
       recent-games list, head-to-head - all parameterized by the D1
       inclusion rule (>= 2 humans, optional include-single-human flag).
-- [ ] Server fns + WASM-safe view types for the above.
-- [ ] Sparkline + form-strip components (text-based, D2 tiers 1-2).
-- [ ] SVG chart components (line chart, histogram - D2 tier 3),
+- [x] Server fns + WASM-safe view types for the above.
+- [x] Sparkline + form-strip components (text-based, D2 tiers 1-2).
+- [x] SVG chart components (line chart, histogram - D2 tier 3),
       including sensible rendering for tiny datasets (1-2 points).
-- [ ] `/players/:name` route + page.
-- [ ] `/players/:name/:game_type` route + page.
-- [ ] #30 tie-in: profile pages get an add-friend button
+- [x] `/players/:name` route + page.
+- [x] `/players/:name/:game_type` route + page.
+- [x] #30 tie-in: profile pages get an add-friend button
       (`ServerAction<crate::friends::SendFriendRequest>` with the profile
       user's id - same component pattern as the game-page player rows).
       `GameViewData.viewer_user_id` and `PlayerViewData.user_id` (from #30
       Task 10) are available for linking player names to profiles.
-- [ ] Form strips in the game meta panel.
-- [ ] One-off `peak_rating` backfill from reconstructed series.
-- [ ] Rating reconstruction sanity check (drift vs
+- [x] Form strips in the game meta panel.
+- [x] One-off `peak_rating` backfill from reconstructed series.
+- [x] Rating reconstruction sanity check (drift vs
       `game_type_users.rating`) as a test or admin query.
-- [ ] Tests: aggregate queries against seeded fixtures (D1 rule
+- [x] Tests: aggregate queries against seeded fixtures (D1 rule
       including the mixed human+bot case, tie placings, bot-only
       exclusion), rating series reconstruction, percentile placing.
