@@ -525,6 +525,23 @@ async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: Pg
     assert_eq!(new_game_version_id_used, new_game_version_id);
 }
 
+// --- player profile page (#29) ---
+
+#[sqlx::test]
+async fn players_page_existing_user_anonymous(pool: PgPool) {
+    let user = make_user(&pool, "profile-guy").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/players/{}", user.name), None).await;
+    assert_clean_html_body(status, &content_type, &body, "Member since");
+}
+
+#[sqlx::test]
+async fn players_page_unknown_user_renders_not_found_200(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/players/nosuchplayer", None).await;
+    assert_clean_html_body(status, &content_type, &body, "No such player.");
+}
+
 // --- admin export route (#34, spec D4) ---
 
 #[sqlx::test]
