@@ -1150,4 +1150,123 @@ mod tests {
         assert_eq!(duel.results.len(), 1);
         assert_eq!(duel.results[0].game_id, g5);
     }
+
+    // Reconstructed-final == rating drift is already covered at the fixture
+    // level by rating_series_reconstruction_matches_game_type_users_rating
+    // above; this test covers the #29 backfill migration itself (peak
+    // correction, idempotency, never lowering an already-correct peak).
+    #[sqlx::test]
+    async fn peak_rating_backfill_corrects_historical_peaks(pool: PgPool) {
+        const MIGRATION: &str = include_str!("../../migrations/011_peak_rating_backfill.sql");
+
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        // Rating goes up, up, then down: peak (1236) occurs mid-history,
+        // final (1206) is lower than peak.
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(user), Some(1), Some(16)),
+                (Some(opponent), Some(2), Some(-16)),
+            ],
+        )
+        .await;
+
+        // Bot game interleaved, rating_change NULL, must not affect peak.
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(1), None), (None, Some(2), None)],
+        )
+        .await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-03 00:00:00),
+            &[
+                (Some(user), Some(1), Some(20)),
+                (Some(opponent), Some(2), Some(-20)),
+            ],
+        )
+        .await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-04 00:00:00),
+            &[
+                (Some(user), Some(2), Some(-30)),
+                (Some(opponent), Some(1), Some(30)),
+            ],
+        )
+        .await;
+
+        // Historical-wrong state: peak never updated by legacy code.
+        set_game_type_rating(&pool, gt, user, 1206, 1200).await;
+
+        // A second user whose peak is already correctly above the
+        // reconstruction: must not be lowered.
+        let other = make_user(&pool, "carol").await;
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(other), Some(1), Some(50)),
+                (Some(opponent), Some(2), Some(-50)),
+            ],
+        )
+        .await;
+        set_game_type_rating(&pool, gt, other, 1250, 1300).await;
+
+        sqlx::raw_sql(MIGRATION)
+            .execute(&pool)
+            .await
+            .expect("run migration 011");
+
+        let (rating, peak): (i32, i32) = sqlx::query_as(
+            r#"SELECT rating, peak_rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2"#,
+        )
+        .bind(gt)
+        .bind(user)
+        .fetch_one(&pool)
+        .await
+        .expect("query ok");
+        assert_eq!(rating, 1206);
+        assert_eq!(peak, 1236);
+
+        let (other_rating, other_peak): (i32, i32) = sqlx::query_as(
+            r#"SELECT rating, peak_rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2"#,
+        )
+        .bind(gt)
+        .bind(other)
+        .fetch_one(&pool)
+        .await
+        .expect("query ok");
+        assert_eq!(other_rating, 1250);
+        assert_eq!(other_peak, 1300, "already-correct higher peak must not be lowered");
+
+        // Idempotency: running again is a no-op.
+        sqlx::raw_sql(MIGRATION)
+            .execute(&pool)
+            .await
+            .expect("run migration 011 again");
+
+        let (rating2, peak2): (i32, i32) = sqlx::query_as(
+            r#"SELECT rating, peak_rating FROM game_type_users WHERE game_type_id = $1 AND user_id = $2"#,
+        )
+        .bind(gt)
+        .bind(user)
+        .fetch_one(&pool)
+        .await
+        .expect("query ok");
+        assert_eq!(rating2, 1206);
+        assert_eq!(peak2, 1236);
+    }
 }

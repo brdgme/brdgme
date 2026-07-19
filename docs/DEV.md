@@ -197,6 +197,62 @@ cd rust/web && sqlx migrate run
 Migrations are idempotent and additive - safe to run on top of a restored
 production schema.
 
+### peak_rating backfill and rating drift check (#29)
+
+`game_type_users.peak_rating` was historically wrong: legacy code never
+maintained it (rows sit at the `1200` default), and current code only ever
+raises it as new games finish. `rust/web/migrations/011_peak_rating_backfill.sql`
+reconstructs true rating history as `1200 + running cumulative sum of
+game_players.rating_change` per `(user_id, game_type_id)`, ordered by
+`games.finished_at` then `games.id` (matches `rating_series()` in
+`rust/web/src/stats/queries.rs`), and raises `peak_rating` to
+`GREATEST(1200, max running value)` wherever the stored value is lower. It
+never lowers a peak, and the `peak_rating <` guard makes re-running the
+migration file a no-op - safe to apply more than once.
+
+Drift-check query to sanity-check the reconstruction against prod before
+trusting the backfill (any row returned means the stored `rating` doesn't
+match the reconstructed final rating and warrants investigation):
+
+```sql
+WITH series AS (
+    SELECT
+        gp.user_id,
+        gv.game_type_id,
+        1200 + sum(gp.rating_change) OVER (
+            PARTITION BY gp.user_id, gv.game_type_id
+            ORDER BY g.finished_at, g.id
+        ) AS running_rating,
+        row_number() OVER (
+            PARTITION BY gp.user_id, gv.game_type_id
+            ORDER BY g.finished_at DESC, g.id DESC
+        ) AS rn
+    FROM game_players gp
+    JOIN games g ON g.id = gp.game_id
+    JOIN game_versions gv ON gv.id = g.game_version_id
+    WHERE gp.user_id IS NOT NULL
+      AND gp.rating_change IS NOT NULL
+      AND g.finished_at IS NOT NULL
+),
+finals AS (
+    SELECT user_id, game_type_id, running_rating AS reconstructed_rating
+    FROM series WHERE rn = 1
+)
+SELECT u.name, gt.name AS game_type, f.reconstructed_rating, gtu.rating AS stored_rating
+FROM finals f
+JOIN game_type_users gtu ON gtu.user_id = f.user_id AND gtu.game_type_id = f.game_type_id
+JOIN users u ON u.id = f.user_id
+JOIN game_types gt ON gt.id = f.game_type_id
+WHERE f.reconstructed_rating <> gtu.rating;
+```
+
+Fixture-level coverage lives in `rust/web/src/stats/queries.rs`:
+`rating_series_reconstruction_matches_game_type_users_rating` covers the
+reconstructed-final-equals-`rating` invariant, and
+`peak_rating_backfill_corrects_historical_peaks` covers the migration itself
+(peak correction, idempotency on re-run, and that an already-correct higher
+peak is never lowered).
+
 ## Bot / LLM Configuration
 
 The bot reads LLM settings from `.env` in the project root (loaded by the Tilt
