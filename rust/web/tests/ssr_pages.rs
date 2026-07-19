@@ -822,6 +822,142 @@ async fn players_page_bots_toggle_changes_inclusion(pool: PgPool) {
     assert_clean_html_body(status, &content_type, &body, "Bots Toggle Test Game");
 }
 
+// --- per-game-type deep-dive page (#29) ---
+
+#[sqlx::test]
+async fn deep_dive_page_renders_chart_histogram_and_games(pool: PgPool) {
+    let (game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Deep Dive Game").await;
+    let user_a = make_user(&pool, "deep-dive-player-a").await;
+    let user_b = make_user(&pool, "deep-dive-player-b").await;
+
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 2, -8), (user_b.id, 1, 8)],
+    )
+    .await;
+
+    sqlx::query!(
+        "INSERT INTO game_type_users (id, game_type_id, user_id, rating, peak_rating)
+         VALUES (uuid_generate_v4(), $1, $2, $3, $4)",
+        game_type_id,
+        user_a.id,
+        1208,
+        1216
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(
+        app,
+        &format!("/players/{}/{}", user_a.name, "Deep%20Dive%20Game"),
+        None,
+    )
+    .await;
+
+    assert_clean_html_body(status, &content_type, &body, "gt-rating-chart");
+    assert!(
+        body.contains("rating-chart") && body.contains("<polyline"),
+        "expected rating chart svg in body: {body}"
+    );
+    assert!(
+        body.contains("gt-histograms"),
+        "expected gt-histograms marker: {body}"
+    );
+    assert!(
+        body.contains("histogram-bar") && body.contains("<rect"),
+        "expected histogram bars in body: {body}"
+    );
+    assert!(
+        body.contains("gt-finished-games"),
+        "expected gt-finished-games marker: {body}"
+    );
+    assert!(
+        body.contains("1st of 2"),
+        "expected placing in body: {body}"
+    );
+    assert!(
+        body.contains("+16"),
+        "expected rating change in body: {body}"
+    );
+    assert!(
+        body.contains(&format!("/players/{}", user_b.name)),
+        "expected opponent profile link in body: {body}"
+    );
+    assert!(
+        body.contains("profile-bots-toggle") && body.contains("?bots=1"),
+        "expected bots toggle link in body: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn deep_dive_page_unknown_game_type_renders_not_found_200(pool: PgPool) {
+    let user = make_user(&pool, "deep-dive-known-user").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) =
+        get(app, &format!("/players/{}/NoSuchGame", user.name), None).await;
+    assert_clean_html_body(status, &content_type, &body, "No such player or game type.");
+}
+
+#[sqlx::test]
+async fn deep_dive_page_unknown_player_renders_not_found_200(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/players/nosuchplayer/Whatever", None).await;
+    assert_clean_html_body(status, &content_type, &body, "No such player or game type.");
+}
+
+#[sqlx::test]
+async fn deep_dive_page_head_to_head_rows_render(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Head To Head Game").await;
+    let user_a = make_user(&pool, "h2h-player-a").await;
+    let user_b = make_user(&pool, "h2h-player-b").await;
+
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 2, -8), (user_b.id, 1, 8)],
+    )
+    .await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(
+        app,
+        &format!("/players/{}/{}", user_a.name, "Head%20To%20Head%20Game"),
+        None,
+    )
+    .await;
+
+    assert_clean_html_body(status, &content_type, &body, "gt-head-to-head");
+    assert!(
+        body.contains(&user_b.name),
+        "expected opponent name in body: {body}"
+    );
+    assert!(
+        body.contains(&format!("/players/{}", user_b.name)),
+        "expected opponent profile link in body: {body}"
+    );
+    assert!(
+        body.contains("Head-to-head"),
+        "expected section heading in body: {body}"
+    );
+}
+
 // --- admin export route (#34, spec D4) ---
 
 #[sqlx::test]
