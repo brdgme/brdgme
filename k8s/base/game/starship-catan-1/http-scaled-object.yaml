@@ -1,0 +1,17 @@
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: starship-catan-1
+spec:
+  hosts:
+  - starship-catan-1.games.internal
+  scaleTargetRef:
+    name: starship-catan-1
+    kind: Deployment
+    apiVersion: apps/v1
+    service: starship-catan-1
+    port: 80
+  replicas:
+    min: 0
+    max: 1
+  scaledownPeriod: 1800

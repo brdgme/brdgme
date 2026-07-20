@@ -1,0 +1,10 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: starship-catan-1
+  namespace: brdgme
+spec:
+  typeName: Starship Catan
+  weight: 2.0
+  blurb: "A two-player space exploration game set in the Catan universe. Build starships, explore sectors, and race to complete missions before your opponent."
+  interfaceVersion: 2
