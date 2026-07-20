@@ -18,7 +18,7 @@ use rand::prelude::*;
 use command::Command;
 
 const MIN_PLAYERS: usize = 2;
-const MAX_PLAYERS: usize = 10;
+const MAX_PLAYERS: usize = 8;
 pub const END_SCORE: i32 = 66;
 const ROWS: usize = 4;
 const ROW_MAX: usize = 5;
@@ -467,7 +467,7 @@ impl Gamer for Game {
     }
 
     fn player_counts() -> Vec<usize> {
-        vec![2, 3, 4, 5, 6, 7, 8, 9, 10]
+        vec![2, 3, 4, 5, 6, 7, 8]
     }
 
     fn player_count(&self) -> usize {
@@ -535,11 +535,11 @@ mod test {
 
     #[test]
     fn test_player_counts() {
-        assert_eq!(vec![2, 3, 4, 5, 6, 7, 8, 9, 10], Game::player_counts());
+        assert_eq!(vec![2, 3, 4, 5, 6, 7, 8], Game::player_counts());
         assert!(Game::start(1, 1).is_err());
-        assert!(Game::start(11, 1).is_err());
+        assert!(Game::start(9, 1).is_err());
         assert!(Game::start(2, 1).is_ok());
-        assert!(Game::start(10, 1).is_ok());
+        assert!(Game::start(8, 1).is_ok());
     }
 
     #[test]

@@ -30,7 +30,7 @@ const STARTING_MONEY: i32 = 100;
 const STARTING_MINIMUM_BET: i32 = 10;
 const HANDS_PER_BLINDS_INCREASE: i32 = 5;
 const MIN_PLAYERS: usize = 2;
-const MAX_PLAYERS: usize = 9;
+const MAX_PLAYERS: usize = 8;
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Game {
@@ -54,7 +54,7 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
-    /// Number of players in the game, 2 through 9.
+    /// Number of players in the game, 2 through 8.
     pub players: usize,
     /// Shared community cards dealt so far: 0 pre-flop, 3 after the flop, 4 after the turn, 5 after the river.
     pub community_cards: Deck,
