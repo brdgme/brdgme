@@ -249,6 +249,33 @@ pub async fn find_game_type_player_counts(
     .await?)
 }
 
+/// Rules text only - keeps the (potentially large) rules blob out of every
+/// `GameVersion` call site. Plain query (not `query_scalar!`) to avoid `.sqlx`
+/// cache churn; there is no local DB to `cargo sqlx prepare` against.
+#[cfg(feature = "ssr")]
+pub async fn find_game_version_rules(pool: &PgPool, id: Uuid) -> Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT rules FROM game_versions WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(rules,)| rules))
+}
+
+/// What the rules page needs to fetch strategy live: `(uri, name,
+/// interface_version)`. Plain query to avoid `.sqlx` churn (see
+/// `find_game_version_rules`).
+#[cfg(feature = "ssr")]
+pub async fn find_game_version_render_meta(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<(String, String, i32)>> {
+    sqlx::query_as("SELECT uri, name, interface_version FROM game_versions WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
 #[cfg(feature = "ssr")]
 pub async fn find_available_game_types(
     pool: &PgPool,

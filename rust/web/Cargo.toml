@@ -48,6 +48,10 @@ resend-rs = { version = "0.28", default-features = false, features = ["rustls-tl
 # Default-username generation (D3) - server-only
 petname = { version = "=3.1.0", default-features = false, features = ["default-words", "default-rng"], optional = true }
 
+# Markdown -> HTML for the rules/strategy render (#25). SSR-only: never in the
+# WASM bundle (gated under the `ssr` feature, NOT `hydrate`).
+pulldown-cmark = { version = "0.13.4", optional = true }
+
 # Environment variables
 dotenvy = { version = "0.15", optional = true }
 
@@ -110,6 +114,7 @@ ssr = [
     "dep:thiserror",
     "dep:resend-rs",
     "dep:petname",
+    "dep:pulldown-cmark",
     "dep:brdgme_cmd",
     "dep:brdgme_game",
     "dep:brdgme_game_client",

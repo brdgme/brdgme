@@ -37,6 +37,8 @@ pub mod auth;
 
 pub mod game;
 
+pub mod rules;
+
 pub mod websocket_client;
 
 pub mod components;
