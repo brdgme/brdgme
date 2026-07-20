@@ -35,6 +35,8 @@ spec:
                 name: postgres-config
             - secretRef:
                 name: email-config
+            - secretRef:
+                name: database-encryption-key
           env:
             - name: NATS_URL
               value: nats://nats:4222
