@@ -1,0 +1,9 @@
+[package]
+name = "brdgme_cost"
+version = "0.1.0"
+publish = false
+authors = ["Michael Alexander <beefsack@gmail.com>"]
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }

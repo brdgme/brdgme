@@ -26,6 +26,7 @@ members = [
     "game/zombie-dice-2",
     "lib/cmd",
     "lib/color",
+    "lib/cost",
     "lib/game",
     "lib/game_client",
     "lib/markup",
