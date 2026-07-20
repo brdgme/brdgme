@@ -7,6 +7,28 @@ use uuid::Uuid;
 type BotUpdateAction = Action<(Uuid, String, f32, bool, bool, bool), Result<(), ServerFnError>>;
 type ProviderUpdateAction =
     Action<(Uuid, String, String, Option<String>, bool), Result<(), ServerFnError>>;
+type BotProviderCreateAction = Action<
+    (
+        Uuid,
+        Uuid,
+        String,
+        Option<String>,
+        Option<serde_json::Value>,
+        i32,
+    ),
+    Result<BotProviderRow, ServerFnError>,
+>;
+type BotProviderUpdateAction = Action<
+    (
+        Uuid,
+        String,
+        Option<String>,
+        Option<serde_json::Value>,
+        i32,
+        bool,
+    ),
+    Result<(), ServerFnError>,
+>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotRow {
@@ -884,10 +906,13 @@ pub fn AdminPage() -> impl IntoView {
                                 view! { <p class="error">{e.to_string()}</p> }.into_any()
                             }
                             (Some(Ok(bot_list)), Some(Ok(provider_list))) => view! {
-                                <BotsSection bots=bot_list version=version/>
-                                <ProvidersSection providers=provider_list version=version/>
-                                <h2>"Bot-Provider Links"</h2>
-                                <p>"Coming soon"</p>
+                                <BotsSection bots=bot_list.clone() version=version/>
+                                <ProvidersSection providers=provider_list.clone() version=version/>
+                                <BotProvidersSection
+                                    bots=bot_list
+                                    providers=provider_list
+                                    version=version
+                                />
                             }.into_any(),
                             _ => view! { <p>"Loading..."</p> }.into_any(),
                         }
@@ -1421,6 +1446,427 @@ fn ProviderEditForm(
                     </FormField>
                     <FormField label="Enabled">
                         <input type="checkbox" node_ref=enabled_input prop:checked=provider_enabled/>
+                    </FormField>
+                    <div class="form-actions">
+                        <input type="submit" value="Save" disabled=move || update_action.pending().get()/>
+                    </div>
+                </form>
+            </td>
+        </tr>
+    }
+}
+
+#[component]
+fn BotProvidersSection(
+    bots: Vec<BotRow>,
+    providers: Vec<ProviderRow>,
+    version: RwSignal<u32>,
+) -> impl IntoView {
+    let show_create = RwSignal::new(false);
+    let editing_id = RwSignal::new(None::<Uuid>);
+    let error = RwSignal::new(None::<String>);
+
+    let links: LocalResource<Result<Vec<BotProviderRow>, ServerFnError>> =
+        LocalResource::new(move || {
+            version.track();
+            admin_list_bot_providers()
+        });
+
+    let create_action = Action::new(
+        |(bot_id, provider_id, model, reasoning_effort, extra_body, priority): &(
+            Uuid,
+            Uuid,
+            String,
+            Option<String>,
+            Option<serde_json::Value>,
+            i32,
+        )| {
+            let bot_id = *bot_id;
+            let provider_id = *provider_id;
+            let model = model.clone();
+            let reasoning_effort = reasoning_effort.clone();
+            let extra_body = extra_body.clone();
+            let priority = *priority;
+            async move {
+                admin_create_bot_provider(
+                    bot_id,
+                    provider_id,
+                    model,
+                    reasoning_effort,
+                    extra_body,
+                    priority,
+                )
+                .await
+            }
+        },
+    );
+
+    let update_action = Action::new(
+        |(id, model, reasoning_effort, extra_body, priority, enabled): &(
+            Uuid,
+            String,
+            Option<String>,
+            Option<serde_json::Value>,
+            i32,
+            bool,
+        )| {
+            let id = *id;
+            let model = model.clone();
+            let reasoning_effort = reasoning_effort.clone();
+            let extra_body = extra_body.clone();
+            let priority = *priority;
+            let enabled = *enabled;
+            async move {
+                admin_update_bot_provider(
+                    id,
+                    model,
+                    reasoning_effort,
+                    extra_body,
+                    priority,
+                    enabled,
+                )
+                .await
+            }
+        },
+    );
+
+    let delete_action = Action::new(|id: &Uuid| {
+        let id = *id;
+        async move { admin_delete_bot_provider(id).await }
+    });
+
+    Effect::new(move |_| {
+        if create_action.value().get().is_some() && !create_action.pending().get() {
+            match create_action.value().get().unwrap() {
+                Ok(_) => {
+                    show_create.set(false);
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if update_action.value().get().is_some() && !update_action.pending().get() {
+            match update_action.value().get().unwrap() {
+                Ok(_) => {
+                    editing_id.set(None);
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if delete_action.value().get().is_some() && !delete_action.pending().get() {
+            match delete_action.value().get().unwrap() {
+                Ok(_) => {
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    let bots = StoredValue::new(bots);
+    let providers = StoredValue::new(providers);
+
+    view! {
+        <h2>"Bot-Provider Links"</h2>
+        {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+        <Suspense fallback=|| view! { <p>"Loading..."</p> }>
+            {move || {
+                links.get().map(|res| match res {
+                    Err(e) => view! { <p class="error">{e.to_string()}</p> }.into_any(),
+                    Ok(link_list) => view! {
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>"Bot"</th>
+                                    <th>"Provider"</th>
+                                    <th>"Model"</th>
+                                    <th>"Reasoning"</th>
+                                    <th>"Priority"</th>
+                                    <th>"Extra Body"</th>
+                                    <th>"Enabled"</th>
+                                    <th>"Actions"</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {link_list.iter().map(|link| {
+                                    let id = link.id;
+                                    let bot_name = link.bot_name.clone();
+                                    let provider_name = link.provider_name.clone();
+                                    let model = link.model.clone();
+                                    let reasoning = link.reasoning_effort.clone().unwrap_or_default();
+                                    let priority = link.priority;
+                                    let has_extra = link.extra_body.is_some();
+                                    let enabled = link.enabled;
+                                    let link_model = link.model.clone();
+                                    let link_reasoning = link.reasoning_effort.clone();
+                                    let link_extra = link.extra_body.clone();
+                                    let link_priority = link.priority;
+                                    let link_enabled = link.enabled;
+                                    view! {
+                                        <tr>
+                                            <td>{bot_name}</td>
+                                            <td>{provider_name}</td>
+                                            <td>{model}</td>
+                                            <td>{reasoning}</td>
+                                            <td>{priority}</td>
+                                            <td>{if has_extra { "Yes" } else { "None" }}</td>
+                                            <td>{if enabled { "Yes" } else { "No" }}</td>
+                                            <td>
+                                                <div class="form-actions">
+                                                    <button on:click=move |_| editing_id.set(Some(id))>"Edit"</button>
+                                                    <button on:click=move |_| {
+                                                        let confirmed = web_sys::window()
+                                                            .and_then(|w| w.confirm_with_message("Delete this link?").ok())
+                                                            .unwrap_or(false);
+                                                        if confirmed {
+                                                            delete_action.dispatch(id);
+                                                        }
+                                                    }>"Delete"</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <Show when=move || editing_id.get() == Some(id)>
+                                            <BotProviderEditForm
+                                                link_id=id
+                                                link_model=link_model.clone()
+                                                link_reasoning=link_reasoning.clone()
+                                                link_extra=link_extra.clone()
+                                                link_priority=link_priority
+                                                link_enabled=link_enabled
+                                                update_action=update_action
+                                            />
+                                        </Show>
+                                    }
+                                }).collect_view()}
+                            </tbody>
+                        </table>
+                    }.into_any(),
+                })
+            }}
+        </Suspense>
+        <div class="form-actions">
+            <button on:click=move |_| show_create.update(|v| *v = !*v)>"Add Link"</button>
+        </div>
+        <Show when=move || show_create.get()>
+            <BotProviderCreateForm
+                bots=bots
+                providers=providers
+                create_action=create_action
+            />
+        </Show>
+    }
+}
+
+#[component]
+fn BotProviderCreateForm(
+    bots: StoredValue<Vec<BotRow>>,
+    providers: StoredValue<Vec<ProviderRow>>,
+    create_action: BotProviderCreateAction,
+) -> impl IntoView {
+    use crate::components::FormField;
+    use leptos::html;
+
+    let bot_select = NodeRef::<html::Select>::new();
+    let provider_select = NodeRef::<html::Select>::new();
+    let model_input = NodeRef::<html::Input>::new();
+    let reasoning_input = NodeRef::<html::Input>::new();
+    let extra_input = NodeRef::<html::Textarea>::new();
+    let priority_input = NodeRef::<html::Input>::new();
+    let json_error = RwSignal::new(None::<String>);
+
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let bot_id = bot_select
+            .get()
+            .and_then(|el| Uuid::parse_str(&el.value()).ok());
+        let provider_id = provider_select
+            .get()
+            .and_then(|el| Uuid::parse_str(&el.value()).ok());
+        let model = model_input.get().map(|el| el.value()).unwrap_or_default();
+        let reasoning_effort = reasoning_input
+            .get()
+            .map(|el| el.value())
+            .filter(|v| !v.trim().is_empty());
+        let extra_raw = extra_input.get().map(|el| el.value()).unwrap_or_default();
+        let extra_body = if extra_raw.trim().is_empty() {
+            json_error.set(None);
+            None
+        } else {
+            match serde_json::from_str::<serde_json::Value>(&extra_raw) {
+                Ok(v) => {
+                    json_error.set(None);
+                    Some(v)
+                }
+                Err(_) => {
+                    json_error.set(Some("Invalid JSON".to_string()));
+                    return;
+                }
+            }
+        };
+        let priority = priority_input
+            .get()
+            .and_then(|el| el.value().parse::<i32>().ok())
+            .unwrap_or(0);
+        if let (Some(bot_id), Some(provider_id)) = (bot_id, provider_id) {
+            create_action.dispatch((
+                bot_id,
+                provider_id,
+                model,
+                reasoning_effort,
+                extra_body,
+                priority,
+            ));
+        }
+    };
+
+    view! {
+        <form on:submit=on_submit>
+            <FormField label="Bot">
+                <select node_ref=bot_select required>
+                    <option value="" disabled selected>"Select a bot"</option>
+                    {bots.with_value(|bots| bots.iter().map(|b| {
+                        let id = b.id.to_string();
+                        let name = b.name.clone();
+                        view! { <option value=id>{name}</option> }
+                    }).collect_view())}
+                </select>
+            </FormField>
+            <FormField label="Provider">
+                <select node_ref=provider_select required>
+                    <option value="" disabled selected>"Select a provider"</option>
+                    {providers.with_value(|providers| providers.iter().map(|p| {
+                        let id = p.id.to_string();
+                        let name = p.name.clone();
+                        view! { <option value=id>{name}</option> }
+                    }).collect_view())}
+                </select>
+            </FormField>
+            <FormField label="Model" help="e.g. openai/gpt-4o-mini">
+                <input type="text" node_ref=model_input required/>
+            </FormField>
+            <FormField label="Reasoning effort" help="Optional: low, medium, high">
+                <input type="text" node_ref=reasoning_input/>
+            </FormField>
+            <FormField
+                label="Extra body"
+                help="Optional JSON"
+                error=Signal::derive(move || json_error.get())
+            >
+                <textarea node_ref=extra_input rows="3"></textarea>
+            </FormField>
+            <FormField label="Priority" help="Lower = tried first. Same = round-robin.">
+                <input type="number" node_ref=priority_input value="0"/>
+            </FormField>
+            <div class="form-actions">
+                <input type="submit" value="Create" disabled=move || create_action.pending().get()/>
+            </div>
+        </form>
+    }
+}
+
+#[component]
+fn BotProviderEditForm(
+    link_id: Uuid,
+    link_model: String,
+    link_reasoning: Option<String>,
+    link_extra: Option<serde_json::Value>,
+    link_priority: i32,
+    link_enabled: bool,
+    update_action: BotProviderUpdateAction,
+) -> impl IntoView {
+    use crate::components::FormField;
+    use leptos::html;
+
+    let model_input = NodeRef::<html::Input>::new();
+    let reasoning_input = NodeRef::<html::Input>::new();
+    let extra_input = NodeRef::<html::Textarea>::new();
+    let priority_input = NodeRef::<html::Input>::new();
+    let enabled_input = NodeRef::<html::Input>::new();
+    let json_error = RwSignal::new(None::<String>);
+
+    let extra_display = link_extra
+        .as_ref()
+        .map(|v| serde_json::to_string(v).unwrap_or_default())
+        .unwrap_or_default();
+
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let model = model_input.get().map(|el| el.value()).unwrap_or_default();
+        let reasoning_effort = reasoning_input
+            .get()
+            .map(|el| el.value())
+            .filter(|v| !v.trim().is_empty());
+        let extra_raw = extra_input.get().map(|el| el.value()).unwrap_or_default();
+        let extra_body = if extra_raw.trim().is_empty() {
+            json_error.set(None);
+            None
+        } else {
+            match serde_json::from_str::<serde_json::Value>(&extra_raw) {
+                Ok(v) => {
+                    json_error.set(None);
+                    Some(v)
+                }
+                Err(_) => {
+                    json_error.set(Some("Invalid JSON".to_string()));
+                    return;
+                }
+            }
+        };
+        let priority = priority_input
+            .get()
+            .and_then(|el| el.value().parse::<i32>().ok())
+            .unwrap_or(0);
+        let enabled = enabled_input.get().map(|el| el.checked()).unwrap_or(true);
+        update_action.dispatch((
+            link_id,
+            model,
+            reasoning_effort,
+            extra_body,
+            priority,
+            enabled,
+        ));
+    };
+
+    view! {
+        <tr>
+            <td colspan="8">
+                <form on:submit=on_submit>
+                    <FormField label="Model">
+                        <input type="text" node_ref=model_input required prop:value=link_model/>
+                    </FormField>
+                    <FormField label="Reasoning effort" help="Optional: low, medium, high">
+                        <input
+                            type="text"
+                            node_ref=reasoning_input
+                            prop:value=link_reasoning.unwrap_or_default()
+                        />
+                    </FormField>
+                    <FormField
+                        label="Extra body"
+                        help="Optional JSON"
+                        error=Signal::derive(move || json_error.get())
+                    >
+                        <textarea node_ref=extra_input rows="3" prop:value=extra_display></textarea>
+                    </FormField>
+                    <FormField label="Priority">
+                        <input
+                            type="number"
+                            node_ref=priority_input
+                            prop:value=link_priority.to_string()
+                        />
+                    </FormField>
+                    <FormField label="Enabled">
+                        <input type="checkbox" node_ref=enabled_input prop:checked=link_enabled/>
                     </FormField>
                     <div class="form-actions">
                         <input type="submit" value="Save" disabled=move || update_action.pending().get()/>
