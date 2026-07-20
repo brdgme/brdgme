@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seven-wonders-1
+spec:
+  selector:
+    matchLabels:
+      app: seven-wonders-1
+  template:
+    metadata:
+      labels:
+        app: seven-wonders-1
+    spec:
+      containers:
+      - name: seven-wonders-1
+        image: brdgme/seven-wonders-1
+        env:
+        - name: ADDR
+          value: "0.0.0.0:8080"
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 0
+          periodSeconds: 1
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi

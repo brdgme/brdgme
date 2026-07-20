@@ -1,0 +1,5 @@
+resources:
+- deployment.yaml
+- service.yaml
+- game-version.yaml
+- http-scaled-object.yaml
