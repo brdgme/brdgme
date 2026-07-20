@@ -1945,13 +1945,15 @@ mod tests {
 
     #[sqlx::test]
     async fn test_admin_list_bots_rejects_non_admin(pool: sqlx::PgPool) {
-        sqlx::query("INSERT INTO users (id, name, email, is_admin) VALUES ($1, $2, $3, false)")
-            .bind(Uuid::new_v4())
-            .bind("testuser")
-            .bind("test@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, name, pref_colors, is_admin) VALUES ($1, $2, $3, false)",
+        )
+        .bind(Uuid::new_v4())
+        .bind("testuser")
+        .bind(Vec::<String>::new())
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE name = 'testuser'")
             .fetch_one(&pool)
