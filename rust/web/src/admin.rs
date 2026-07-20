@@ -1258,6 +1258,13 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
         async move { admin_delete_provider(id).await }
     });
 
+    let test_action = Action::new(|id: &Uuid| {
+        let id = *id;
+        async move { admin_test_provider(id).await }
+    });
+
+    let test_result = RwSignal::new(None::<(Uuid, Result<String, String>)>);
+
     Effect::new(move |_| {
         if create_action.value().get().is_some() && !create_action.pending().get() {
             match create_action.value().get().unwrap() {
@@ -1296,6 +1303,19 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
         }
     });
 
+    Effect::new(move |_| {
+        if test_action.value().get().is_some()
+            && !test_action.pending().get()
+            && let Some(provider_id) = test_action.input().get()
+        {
+            let res = match test_action.value().get().unwrap() {
+                Ok(msg) => Ok(msg),
+                Err(e) => Err(e.to_string()),
+            };
+            test_result.set(Some((provider_id, res)));
+        }
+    });
+
     let providers = StoredValue::new(providers);
 
     view! {
@@ -1330,6 +1350,25 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
                             <td>
                                 <div class="form-actions">
                                     <button on:click=move |_| editing_id.set(Some(id))>"Edit"</button>
+                                    <button
+                                        disabled=move || {
+                                            test_action.pending().get()
+                                                && test_action.input().get() == Some(id)
+                                        }
+                                        on:click=move |_| {
+                                            test_action.dispatch(id);
+                                        }
+                                    >
+                                        {move || {
+                                            if test_action.pending().get()
+                                                && test_action.input().get() == Some(id)
+                                            {
+                                                "Testing..."
+                                            } else {
+                                                "Test"
+                                            }
+                                        }}
+                                    </button>
                                     <button on:click=move |_| {
                                         let confirmed = web_sys::window()
                                             .and_then(|w| w.confirm_with_message("Delete this provider?").ok())
@@ -1349,6 +1388,25 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
                                 provider_enabled=provider_enabled
                                 update_action=update_action
                             />
+                        </Show>
+                        <Show when=move || {
+                            test_result.with(|r| r.as_ref().is_some_and(|(pid, _)| *pid == id))
+                        }>
+                            <tr>
+                                <td colspan="5">
+                                    {move || {
+                                        test_result.with(|r| match r {
+                                            Some((_, Ok(msg))) => {
+                                                view! { <p>{msg.clone()}</p> }.into_any()
+                                            }
+                                            Some((_, Err(e))) => {
+                                                view! { <p class="error">{e.clone()}</p> }.into_any()
+                                            }
+                                            None => ().into_any(),
+                                        })
+                                    }}
+                                </td>
+                            </tr>
                         </Show>
                     }
                 }).collect_view())}
