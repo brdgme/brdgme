@@ -28,6 +28,9 @@ pub mod error;
 #[cfg(feature = "ssr")]
 pub mod nats;
 
+#[cfg(feature = "ssr")]
+pub mod email;
+
 pub mod websocket;
 
 #[cfg(feature = "ssr")]

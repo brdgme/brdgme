@@ -44,6 +44,9 @@ thiserror = { version = "2.0.18", optional = true }
 
 # Email functionality
 resend-rs = { version = "0.28", default-features = false, features = ["rustls-tls"], optional = true }
+# MJML -> email-safe HTML compiler for the #22b email render. SSR-only: never
+# in the WASM bundle (gated under the `ssr` feature, NOT `hydrate`).
+mrml = { version = "6.0.1", optional = true }
 
 # Default-username generation (D3) - server-only
 petname = { version = "=3.1.0", default-features = false, features = ["default-words", "default-rng"], optional = true }
@@ -113,6 +116,7 @@ ssr = [
     "dep:anyhow",
     "dep:thiserror",
     "dep:resend-rs",
+    "dep:mrml",
     "dep:petname",
     "dep:pulldown-cmark",
     "dep:brdgme_cmd",
