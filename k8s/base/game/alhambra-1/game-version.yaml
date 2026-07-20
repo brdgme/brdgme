@@ -1,0 +1,10 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: alhambra-1
+  namespace: brdgme
+spec:
+  typeName: alhambra-1
+  weight: 1.0
+  blurb: "A tile-laying game of architecture and finance. Collect money in four currencies, buy building tiles from the market, and arrange them on your grid to build the most impressive Alhambra. Exact change earns you extra actions."
+  interfaceVersion: 2

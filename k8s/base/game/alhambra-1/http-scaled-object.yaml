@@ -1,0 +1,17 @@
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: alhambra-1
+spec:
+  hosts:
+  - alhambra-1.games.internal
+  scaleTargetRef:
+    name: alhambra-1
+    kind: Deployment
+    apiVersion: apps/v1
+    service: alhambra-1
+    port: 80
+  replicas:
+    min: 0
+    max: 1
+  scaledownPeriod: 1800
