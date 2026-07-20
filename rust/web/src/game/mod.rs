@@ -245,6 +245,7 @@ pub async fn run_bot_command_consumer(
     http_client: reqwest::Client,
     broadcaster: crate::websocket::GameBroadcaster,
     jetstream: async_nats::jetstream::Context,
+    resend: Option<resend_rs::Resend>,
 ) -> anyhow::Result<()> {
     use futures_util::StreamExt;
 
@@ -272,8 +273,15 @@ pub async fn run_bot_command_consumer(
             }
         };
 
-        let outcome =
-            handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &event).await;
+        let outcome = handle_bot_command_event(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            &resend,
+            &event,
+        )
+        .await;
 
         match outcome {
             // `handle_bot_command_event` never actually returns
@@ -321,9 +329,14 @@ pub async fn handle_bot_command_event(
     http_client: &reqwest::Client,
     broadcaster: &crate::websocket::GameBroadcaster,
     jetstream: &async_nats::jetstream::Context,
+    resend: &Option<resend_rs::Resend>,
     event: &crate::nats::BotCommandEvent,
 ) -> Result<(), ExecuteCommandError> {
     let attempt = event.attempt;
+    let before = crate::db::find_game_extended(pool, event.game_id)
+        .await
+        .ok()
+        .flatten();
     let result = execute_command(
         pool,
         http_client,
@@ -338,6 +351,14 @@ pub async fn handle_bot_command_event(
     match result {
         Ok(()) => {
             tracing::info!(game_id = %event.game_id, position = event.player_position, "Bot command applied");
+            crate::email::notify::notify_game_emails(
+                resend.as_ref(),
+                pool,
+                http_client,
+                event.game_id,
+                before,
+            )
+            .await;
             Ok(())
         }
         Err(ExecuteCommandError::Conflict) => {

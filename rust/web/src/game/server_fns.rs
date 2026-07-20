@@ -268,6 +268,7 @@ pub async fn submit_command(
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = get_current_user()
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -282,6 +283,11 @@ pub async fn submit_command(
     .map_err(internal("submit_command: find player position"))?
     .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
+    let before = crate::db::find_game_extended(&pool, game_id)
+        .await
+        .ok()
+        .flatten();
+
     match super::execute_command(
         &pool,
         &http_client,
@@ -293,7 +299,17 @@ pub async fn submit_command(
     )
     .await
     {
-        Ok(()) => Ok(None),
+        Ok(()) => {
+            crate::email::notify::notify_game_emails(
+                resend.as_ref(),
+                &pool,
+                &http_client,
+                game_id,
+                before,
+            )
+            .await;
+            Ok(None)
+        }
         Err(crate::game::ExecuteCommandError::UserError(msg)) => Ok(Some(msg)),
         Err(e) => Err(ServerFnError::new(e.to_string())),
     }
@@ -454,6 +470,7 @@ pub async fn create_new_game(
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = get_current_user()
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -531,6 +548,9 @@ pub async fn create_new_game(
         .map_err(internal("create_new_game: commit transaction"))?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game.id).await;
+
+    crate::email::notify::notify_game_emails(resend.as_ref(), &pool, &http_client, game.id, None)
+        .await;
 
     Ok(game.id)
 }
@@ -612,6 +632,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = get_current_user()
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -620,6 +641,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await
         .map_err(internal("undo_game: find game"))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
+    let before = ge.clone();
 
     let player = ge
         .game_players
@@ -662,6 +684,15 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
     .map_err(internal("undo_game: apply undo"))?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
+
+    crate::email::notify::notify_game_emails(
+        resend.as_ref(),
+        &pool,
+        &http_client,
+        game_id,
+        Some(before),
+    )
+    .await;
     Ok(())
 }
 
@@ -673,6 +704,8 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
 
     let pool = expect_context::<PgPool>();
     let broadcaster = expect_context::<GameBroadcaster>();
+    let http_client = expect_context::<reqwest::Client>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = get_current_user()
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -681,6 +714,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await
         .map_err(internal("concede_game: find game"))?
         .ok_or_else(|| ServerFnError::new("Game not found"))?;
+    let before = ge.clone();
 
     if ge.game.is_finished {
         return Err(ServerFnError::new("Game is already finished"));
@@ -702,6 +736,15 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .map_err(internal("concede_game: concede"))?;
 
     broadcaster.broadcast_game_update(game_id).await;
+
+    crate::email::notify::notify_game_emails(
+        resend.as_ref(),
+        &pool,
+        &http_client,
+        game_id,
+        Some(before),
+    )
+    .await;
     Ok(())
 }
 
@@ -805,6 +848,7 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = get_current_user()
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
@@ -813,6 +857,15 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
 
     // Broadcast update for the new game.
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, new_game_id).await;
+
+    crate::email::notify::notify_game_emails(
+        resend.as_ref(),
+        &pool,
+        &http_client,
+        new_game_id,
+        None,
+    )
+    .await;
 
     // Broadcast update for the old game with restarted_game_id now set, so
     // the other player's game view updates to show the "Go to new game" link.

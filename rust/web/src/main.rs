@@ -45,25 +45,33 @@ async fn main() {
         .expect("Failed to create/get BOT stream and consumers");
     let broadcaster = GameBroadcaster::new(nats_client);
 
-    tokio::spawn({
-        let pool = pool.clone();
-        let http_client = http_client.clone();
-        let broadcaster = broadcaster.clone();
-        let jetstream = jetstream.clone();
-        async move {
-            if let Err(e) =
-                web::game::run_bot_command_consumer(pool, http_client, broadcaster, jetstream).await
-            {
-                tracing::error!("bot.command consumer exited: {}", e);
-            }
-        }
-    });
     let resend = std::env::var("RESEND_API_KEY")
         .ok()
         .map(|key| resend_rs::Resend::new(&key));
     if resend.is_none() {
         log!("RESEND_API_KEY not set; login emails will be logged instead of sent");
     }
+
+    tokio::spawn({
+        let pool = pool.clone();
+        let http_client = http_client.clone();
+        let broadcaster = broadcaster.clone();
+        let jetstream = jetstream.clone();
+        let resend = resend.clone();
+        async move {
+            if let Err(e) = web::game::run_bot_command_consumer(
+                pool,
+                http_client,
+                broadcaster,
+                jetstream,
+                resend,
+            )
+            .await
+            {
+                tracing::error!("bot.command consumer exited: {}", e);
+            }
+        }
+    });
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;

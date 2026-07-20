@@ -314,7 +314,8 @@ async fn bot_command_consumed_executes_and_commits(pool: PgPool) {
         command: "abc".to_string(),
         attempt: 0,
     };
-    let _ = handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &event).await;
+    let _ = handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &None, &event)
+        .await;
 
     let ge = db::find_game_extended(&pool, game_id)
         .await
@@ -381,7 +382,8 @@ async fn stale_conflict_republishes_bot_turn_with_incremented_attempt(pool: PgPo
         command: "abc".to_string(),
         attempt: 0,
     };
-    let _ = handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &event).await;
+    let _ = handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &None, &event)
+        .await;
 
     // The game must be untouched (the conflicting write was rejected)...
     let ge = db::find_game_extended(&pool, game_id)
@@ -477,7 +479,8 @@ async fn attempt_limit_exhaustion_gives_up(pool: PgPool) {
             attempt,
         };
         let _ =
-            handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &event).await;
+            handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &None, &event)
+                .await;
 
         if attempt >= nats::MAX_TURN_ATTEMPTS {
             // Final attempt: must give up, no further bot.turn published.

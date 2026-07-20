@@ -163,11 +163,11 @@ pub async fn is_recently_active(pool: &PgPool, user_id: Uuid) -> bool {
 /// logs the email instead of sending; otherwise it counts the send and posts to
 /// Resend, folding in the rendered threading/unsubscribe headers.
 pub async fn send_rendered_email(
-    state: &crate::state::AppState,
+    resend: Option<&resend_rs::Resend>,
     email: crate::email::render::RenderedEmail,
     to: &str,
 ) {
-    let Some(resend) = &state.resend else {
+    let Some(resend) = resend else {
         // No RESEND_API_KEY configured (dev default): log instead of sending.
         println!(
             "\n==> GAME EMAIL for {}\nSubject: {}\n\n{}\n",
