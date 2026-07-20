@@ -39,6 +39,22 @@ pub struct BotProviderRow {
 }
 
 #[cfg(feature = "ssr")]
+type ProviderDbRow = (Uuid, String, String, Option<Vec<u8>>, bool);
+#[cfg(feature = "ssr")]
+type BotProviderDbRow = (
+    Uuid,
+    Uuid,
+    Uuid,
+    String,
+    Option<String>,
+    Option<serde_json::Value>,
+    i32,
+    bool,
+    String,
+    String,
+);
+
+#[cfg(feature = "ssr")]
 pub async fn list_bots(pool: &sqlx::PgPool) -> Result<Vec<BotRow>, ServerFnError> {
     let rows: Vec<(Uuid, String, i32, bool, bool, bool, f32)> = sqlx::query_as(
         "SELECT id, name, display_order, enabled, include_basic_strategy, include_advanced_strategy, temperature FROM bots ORDER BY display_order",
@@ -158,7 +174,7 @@ pub async fn delete_bot(pool: &sqlx::PgPool, id: Uuid) -> Result<(), ServerFnErr
 
 #[cfg(feature = "ssr")]
 pub async fn list_providers(pool: &sqlx::PgPool) -> Result<Vec<ProviderRow>, ServerFnError> {
-    let rows: Vec<(Uuid, String, String, Option<Vec<u8>>, bool)> = sqlx::query_as(
+    let rows: Vec<ProviderDbRow> = sqlx::query_as(
         "SELECT id, name, url, api_key_encrypted, enabled FROM llm_providers ORDER BY name",
     )
     .fetch_all(pool)
@@ -302,7 +318,7 @@ pub async fn delete_provider(pool: &sqlx::PgPool, id: Uuid) -> Result<(), Server
 
 #[cfg(feature = "ssr")]
 pub async fn list_bot_providers(pool: &sqlx::PgPool) -> Result<Vec<BotProviderRow>, ServerFnError> {
-    let rows: Vec<(Uuid, Uuid, Uuid, String, Option<String>, Option<serde_json::Value>, i32, bool, String, String)> = sqlx::query_as(
+    let rows: Vec<BotProviderDbRow> = sqlx::query_as(
         "SELECT bp.id, bp.bot_id, bp.provider_id, bp.model, bp.reasoning_effort, bp.extra_body, bp.priority, bp.enabled, b.name, p.name \
          FROM bot_providers bp JOIN bots b ON bp.bot_id = b.id JOIN llm_providers p ON bp.provider_id = p.id \
          ORDER BY b.display_order, bp.priority",
@@ -353,7 +369,7 @@ pub async fn create_bot_provider(
     extra_body: Option<serde_json::Value>,
     priority: i32,
 ) -> Result<BotProviderRow, ServerFnError> {
-    let row: (Uuid, Uuid, Uuid, String, Option<String>, Option<serde_json::Value>, i32, bool, String, String) = sqlx::query_as(
+    let row: BotProviderDbRow = sqlx::query_as(
         "INSERT INTO bot_providers (bot_id, provider_id, model, reasoning_effort, extra_body, priority) \
          VALUES ($1, $2, $3, $4, $5, $6) \
          RETURNING id, bot_id, provider_id, model, reasoning_effort, extra_body, priority, enabled, \
