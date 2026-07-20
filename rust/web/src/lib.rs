@@ -2,6 +2,7 @@
 
 pub mod app;
 
+pub mod admin;
 pub mod friends;
 pub mod new_game;
 pub mod players;
@@ -14,6 +15,9 @@ pub mod state;
 
 #[cfg(feature = "ssr")]
 pub mod router;
+
+#[cfg(feature = "ssr")]
+pub mod crypto;
 
 #[cfg(feature = "ssr")]
 pub mod db;

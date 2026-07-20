@@ -7495,6 +7495,7 @@ dependencies = [
 name = "web"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "async-nats",
  "axum",
@@ -7511,6 +7512,7 @@ dependencies = [
  "getrandom 0.4.3",
  "gloo-net 0.7.0",
  "gloo-timers 0.4.0",
+ "hex",
  "js-sys",
  "leptos",
  "leptos-use",
