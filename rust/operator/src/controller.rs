@@ -147,6 +147,7 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
         &name,
         &uri,
         obj.spec.is_deprecated,
+        obj.spec.interface_version,
         &rules,
     )
     .await?;
@@ -172,6 +173,7 @@ async fn upsert_game_type_and_version(
     version_name: &str,
     uri: &str,
     is_deprecated: bool,
+    interface_version: i32,
     rules: &str,
 ) -> Result<(), sqlx::Error> {
     let game_type_id: Uuid = sqlx::query_scalar(
@@ -195,20 +197,22 @@ async fn upsert_game_type_and_version(
 
     sqlx::query(
         r#"
-        INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated, rules)
-        VALUES ($1, $2, $3, true, $4, $5)
+        INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated, interface_version, rules)
+        VALUES ($1, $2, $3, true, $4, $5, $6)
         ON CONFLICT (game_type_id, name) DO UPDATE
-            SET uri           = EXCLUDED.uri,
-                is_public     = true,
-                is_deprecated = EXCLUDED.is_deprecated,
-                rules         = EXCLUDED.rules,
-                updated_at    = NOW()
+            SET uri               = EXCLUDED.uri,
+                is_public         = true,
+                is_deprecated     = EXCLUDED.is_deprecated,
+                interface_version = EXCLUDED.interface_version,
+                rules             = EXCLUDED.rules,
+                updated_at        = NOW()
         "#,
     )
     .bind(game_type_id)
     .bind(version_name)
     .bind(uri)
     .bind(is_deprecated)
+    .bind(interface_version)
     .bind(rules)
     .execute(pool)
     .await?;
@@ -262,6 +266,7 @@ mod tests {
             "test-game-1",
             "http://localhost:0/mock",
             false,
+            1,
             "rules text",
         )
         .await
@@ -285,6 +290,7 @@ mod tests {
             "test-game-1",
             "http://localhost:0/mock",
             false,
+            1,
             "rules text",
         )
         .await

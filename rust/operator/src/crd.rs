@@ -2,6 +2,10 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn default_interface_version() -> i32 {
+    1
+}
+
 #[derive(CustomResource, Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[kube(
@@ -26,6 +30,9 @@ pub struct GameVersionSpec {
     /// to serve existing in-progress games.
     #[serde(default)]
     pub is_deprecated: bool,
+    /// Game interface version (1 = legacy, 2 = data docs + strategies).
+    #[serde(rename = "interfaceVersion", default = "default_interface_version")]
+    pub interface_version: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
