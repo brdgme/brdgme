@@ -42,6 +42,9 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
     out.push(N::text("\n"));
     out.push(N::Bold(vec![N::text("Current pot:      ")]));
     out.push(cash(pub_state.pot));
+    out.push(N::text("\n"));
+    out.push(N::Bold(vec![N::text("Current bet:      ")]));
+    out.push(cash(pub_state.bets.iter().copied().max().unwrap_or(0)));
     out.push(N::text("\n\n"));
 
     if let (Some(p), Some(h)) = (player, hand) {
@@ -50,6 +53,9 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
         out.push(N::text("\n"));
         out.push(N::Bold(vec![N::text("Your cash:   ")]));
         out.push(cash(pub_state.player_money[p]));
+        out.push(N::text("\n"));
+        out.push(N::Bold(vec![N::text("Your bet:    ")]));
+        out.push(cash(pub_state.bets[p]));
         out.push(N::text("\n\n"));
     }
 
