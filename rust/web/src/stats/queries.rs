@@ -11,14 +11,20 @@ pub async fn get_profile_user(pool: &PgPool, name: &str) -> Result<Option<super:
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|row| super::ProfileUser {
-        user_id: row.id,
-        name: row.name,
-        pref_color: row
+    Ok(row.map(|row| {
+        let pref_colors: Vec<String> = row
             .pref_colors
-            .first()
-            .map(|c| crate::db::normalize_pref_color(c)),
-        created_at: row.created_at,
+            .iter()
+            .map(|c| crate::db::normalize_pref_color(c))
+            .collect();
+        let pref_color = pref_colors.first().cloned();
+        super::ProfileUser {
+            user_id: row.id,
+            name: row.name,
+            pref_color,
+            pref_colors,
+            created_at: row.created_at,
+        }
     }))
 }
 
@@ -536,8 +542,8 @@ pub(crate) mod fixtures {
     use super::*;
     use time::PrimitiveDateTime;
 
-    const COLORS: [&str; 8] = [
-        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
+    const COLORS: [&str; 9] = [
+        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink", "Yellow",
     ];
 
     pub(crate) async fn make_user(pool: &PgPool, name: &str) -> Uuid {
@@ -622,7 +628,7 @@ pub(crate) mod fixtures {
             let game_bot_id = if user_id.is_none() {
                 Some(
                     sqlx::query_scalar!(
-                        r#"INSERT INTO game_bots (id, game_id, name, difficulty)
+                        r#"INSERT INTO game_bots (id, game_id, name, bot_name)
                            VALUES (uuid_generate_v4(), $1, $2, 'medium')
                            RETURNING id"#,
                         game_id,

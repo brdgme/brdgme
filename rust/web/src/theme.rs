@@ -62,9 +62,22 @@ pub const THEME_SLUGS: &[(&str, &str)] = &[
 /// Canonical palette colour names, in palette order - the values stored in
 /// `users.pref_colors`/`game_players.color`. Matches
 /// `brdgme_color::Palette::player_colors()` slot order.
-pub const PLAYER_COLOR_NAMES: [&str; 8] = [
-    "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
+pub const PLAYER_COLOR_NAMES: [&str; 9] = [
+    "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink", "Yellow",
 ];
+
+/// Three distinct preferred colours for a brand-new account: a Fisher-Yates
+/// shuffle of the full palette, truncated to 3 (so the trio is always valid
+/// and duplicate-free). Randomised so new users don't all share one default.
+pub fn random_pref_colors() -> Vec<String> {
+    let mut colors: Vec<String> = PLAYER_COLOR_NAMES.iter().map(|s| s.to_string()).collect();
+    for i in (1..colors.len()).rev() {
+        let j = rand::random::<u32>() as usize % (i + 1);
+        colors.swap(i, j);
+    }
+    colors.truncate(3);
+    colors
+}
 
 /// Groups `THEME_SLUGS` by `brdgme_color::themes()`'s per-theme category,
 /// sorted alphabetically by display name within each category, in category
@@ -178,6 +191,7 @@ pub fn slot_from_color_name(name: &str) -> &'static str {
         "Brown" => "brown",
         "Cyan" | "BlueGrey" => "cyan",
         "Pink" => "pink",
+        "Yellow" => "yellow",
         _ => "grey",
     }
 }
@@ -432,5 +446,21 @@ mod tests {
             1,
             "exactly two rows separated by one newline"
         );
+    }
+
+    #[test]
+    fn random_pref_colors_three_distinct_valid() {
+        for _ in 0..50 {
+            let colors = random_pref_colors();
+            assert_eq!(colors.len(), 3);
+            assert!(
+                colors
+                    .iter()
+                    .all(|c| PLAYER_COLOR_NAMES.contains(&c.as_str()))
+            );
+            assert_ne!(colors[0], colors[1]);
+            assert_ne!(colors[0], colors[2]);
+            assert_ne!(colors[1], colors[2]);
+        }
     }
 }

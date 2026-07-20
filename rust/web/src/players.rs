@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 
+use crate::components::ColorRibbon;
 use crate::stats::FinishedGameRow;
 use crate::stats::FormResult;
 use crate::stats::viz::{FormStrip, Histogram, HistogramBucket, RatingChart, Sparkline};
@@ -179,22 +180,18 @@ pub fn PlayersPage() -> impl IntoView {
                             } else {
                                 format!("{:.1}%", d.totals.win_percent)
                             };
-                            let name_style = d
-                                .user
-                                .pref_color
-                                .as_ref()
-                                .map(|c| format!("color:var(--mk-{})", c.to_lowercase()));
                             view! {
                                 <div class="profile content-page">
                                     <header class="profile-header">
-                                        <h1><span style=name_style>{d.user.name.clone()}</span></h1>
+                                        <h1>{d.user.name.clone()}</h1>
+                                        <ColorRibbon colors=d.user.pref_colors.clone()/>
                                         <p class="profile-member-since">
                                             "Member since " {d.user.created_at.date().to_string()}
                                         </p>
                                         {
                                             let profile_user_id = d.user.user_id;
                                             d.viewer_user_id
-                                                .filter(|vid| *vid != profile_user_id)
+                                                .filter(|vid| *vid != profile_user_id && d.can_add_friend)
                                                 .map(|_| {
                                                     let add_friend = ServerAction::<crate::friends::SendFriendRequest>::new();
                                                     view! {

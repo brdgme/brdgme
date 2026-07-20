@@ -82,25 +82,25 @@ fn UsernameSection(
                 help="1-16 characters: letters, numbers, - and _. Must be unique."
                 error=Signal::derive(move || error.get())
             >
-                <input
-                    type="text"
-                    node_ref=name_input
-                    pattern="[a-zA-Z0-9_-]{1,16}"
-                    required
-                    prop:value=move || {
-                        settings.get().and_then(|r| r.ok()).map(|s| s.name).unwrap_or_default()
-                    }
-                />
+                <div class="form-actions">
+                    <input
+                        type="text"
+                        node_ref=name_input
+                        pattern="[a-zA-Z0-9_-]{1,16}"
+                        required
+                        prop:value=move || {
+                            settings.get().and_then(|r| r.ok()).map(|s| s.name).unwrap_or_default()
+                        }
+                    />
+                    <input type="submit" value="Save" disabled=move || save_action.pending().get()/>
+                    <Show when=move || {
+                        save_action.value().get().is_some_and(|r| matches!(r, Ok(None)))
+                            && !save_action.pending().get()
+                    }>
+                        <span class="form-help">"Saved."</span>
+                    </Show>
+                </div>
             </FormField>
-            <div class="form-actions">
-                <input type="submit" value="Save" disabled=move || save_action.pending().get()/>
-                <Show when=move || {
-                    save_action.value().get().is_some_and(|r| matches!(r, Ok(None)))
-                        && !save_action.pending().get()
-                }>
-                    <span class="form-help">"Saved."</span>
-                </Show>
-            </div>
         </form>
     }
 }

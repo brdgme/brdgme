@@ -13,6 +13,7 @@ pub struct ProfileUser {
     pub user_id: Uuid,
     pub name: String,
     pub pref_color: Option<String>,
+    pub pref_colors: Vec<String>,
     pub created_at: PrimitiveDateTime,
 }
 
@@ -101,6 +102,8 @@ pub struct PlayerProfileData {
     pub active_games: Vec<ActiveGameRow>,
     /// None when the viewer is anonymous (profiles are public).
     pub viewer_user_id: Option<Uuid>,
+    /// False when already friends or viewer has an outgoing request.
+    pub can_add_friend: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -159,6 +162,15 @@ pub async fn get_player_profile(
         .await
         .map_err(internal("get_player_profile: active_games"))?;
 
+    let can_add_friend = match viewer_user_id {
+        Some(vid) if vid != user.user_id => {
+            !crate::db::should_hide_add_friend(&pool, vid, user.user_id)
+                .await
+                .map_err(internal("get_player_profile: friend status"))?
+        }
+        _ => false,
+    };
+
     Ok(Some(PlayerProfileData {
         user,
         totals,
@@ -167,6 +179,7 @@ pub async fn get_player_profile(
         recent_finished,
         active_games,
         viewer_user_id,
+        can_add_friend,
     }))
 }
 

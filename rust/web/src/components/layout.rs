@@ -123,9 +123,6 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
             navigate("/login", NavigateOptions::default());
         }
     });
-    let on_logout = move |_| {
-        logout_action.dispatch(crate::auth::Logout {});
-    };
 
     // Provided once in `App` (outside the router) so these resources survive
     // client-side navigation instead of being torn down and recreated by
@@ -153,7 +150,26 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
                 // hydration mismatch; LocalResource is always None during
                 // SSR/hydration so both render the "Login" branch there.
                 <div hidden=move || !logged_in()>
-                    <a on:click=on_logout style="cursor:pointer">"Logout"</a>
+                    {move || {
+                        let name = current_user
+                            .get()
+                            .and_then(|r| r.ok())
+                            .flatten()
+                            .map(|u| u.name)
+                            .unwrap_or_default();
+                        let href = format!("/players/{}", crate::players::encode_path_segment(&name));
+                        view! {
+                            <A href=href>{name}</A>
+                            " ("
+                            <a
+                                on:click=move |_| {
+                                    logout_action.dispatch(crate::auth::Logout {});
+                                }
+                                style="cursor:pointer"
+                            >"logout"</a>
+                            ")"
+                        }
+                    }}
                 </div>
                 <div hidden=logged_in>
                     <A href="/login">"Login"</A>

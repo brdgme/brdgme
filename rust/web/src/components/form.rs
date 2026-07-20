@@ -35,3 +35,22 @@ pub fn ColorChip(#[prop(into)] color: Signal<String>) -> impl IntoView {
         </span>
     }
 }
+
+/// A "favourite colour" ribbon bar: one 5-space background block per colour,
+/// packed with no gap between blocks (military-ribbon style). Reuses the
+/// `mk-bg-*` markup classes so it previews in the live theme, mirroring the
+/// theme picker's swatch blocks.
+#[component]
+pub fn ColorRibbon(colors: Vec<String>) -> impl IntoView {
+    view! {
+        <span class="color-ribbon">
+            {colors
+                .into_iter()
+                .map(|c| {
+                    let slot = crate::theme::slot_from_color_name(&c);
+                    view! { <span class=format!("mk-bg-{slot}")>"     "</span> }
+                })
+                .collect_view()}
+        </span>
+    }
+}

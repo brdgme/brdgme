@@ -628,6 +628,15 @@ body {
   white-space: pre;
 }
 
+.color-ribbon {
+  white-space: pre;
+  line-height: 1;
+}
+
+.color-ribbon span {
+  display: inline-block;
+}
+
 // #29 stats viz
 .form-strip {
   font-weight: 700;

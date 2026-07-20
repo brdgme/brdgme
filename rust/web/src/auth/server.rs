@@ -353,11 +353,12 @@ async fn confirm_login_inner(
             .await
             .map_err(internal("confirm_login: generate username"))?;
 
+        let pref_colors = crate::theme::random_pref_colors();
         sqlx::query!(
             "INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)",
             new_user_id,
             username,
-            &Vec::<String>::new()
+            &pref_colors
         )
         .execute(&mut *tx)
         .await
