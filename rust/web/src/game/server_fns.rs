@@ -8,7 +8,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotSlot {
     pub name: String,
-    pub difficulty: String,
+    pub bot_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,11 +67,14 @@ pub struct PlayerViewData {
     pub points: f32,
     pub is_turn: bool,
     pub is_bot: bool,
-    /// Bot difficulty (e.g. "medium"); `None` for humans. Drives the
-    /// `(bot: difficulty)` suffix in the game-page player card.
-    pub difficulty: Option<String>,
+    /// Bot name (e.g. "medium"); `None` for humans. Drives the
+    /// `(bot: bot_name)` suffix in the game-page player card.
+    pub bot_name: Option<String>,
     /// None for bots. Drives the game-page add-friend affordance (#30 D3).
     pub user_id: Option<Uuid>,
+    /// False when already friends or viewer has an outgoing request; hides
+    /// the "Add friend" link in the game sidebar.
+    pub can_add_friend: bool,
     /// Recent form (this game's game type only), oldest-to-newest. Empty
     /// for bots or players with no qualifying finished games (#29).
     pub form: Vec<crate::stats::FormResult>,
@@ -193,6 +196,17 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
     .await
     .map_err(internal("get_game_details: recent form"))?;
 
+    let mut hide_add_friend = std::collections::HashSet::new();
+    for uid in &human_user_ids {
+        if *uid != user.id
+            && crate::db::should_hide_add_friend(&pool, user.id, *uid)
+                .await
+                .map_err(internal("get_game_details: friend status"))?
+        {
+            hide_add_friend.insert(*uid);
+        }
+    }
+
     Ok(GameViewData {
         id: ge.game.id,
         type_name: ge.game_type.name,
@@ -216,8 +230,12 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 points: p.game_player.points.unwrap_or(0.0),
                 is_turn: p.game_player.is_turn,
                 is_bot: p.game_bot.is_some(),
-                difficulty: p.game_bot.as_ref().map(|b| b.difficulty.clone()),
+                bot_name: p.game_bot.as_ref().map(|b| b.bot_name.clone()),
                 user_id: p.user.as_ref().map(|u| u.id),
+                can_add_friend: p
+                    .user
+                    .as_ref()
+                    .is_some_and(|u| !hide_add_friend.contains(&u.id)),
                 form: p
                     .user
                     .as_ref()
@@ -402,6 +420,23 @@ pub async fn generate_bot_name() -> Result<String, ServerFnError> {
     Ok(petname::petname(1, "-").unwrap_or_else(|| "Bot".to_string()))
 }
 
+#[server(GetAvailableBots, "/api")]
+pub async fn get_available_bots() -> Result<Vec<String>, ServerFnError> {
+    use crate::auth::server::get_current_user;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let _ = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    let bots = crate::db::find_enabled_bots(&pool)
+        .await
+        .map_err(internal("get_available_bots: find enabled bots"))?;
+
+    Ok(bots)
+}
+
 #[server(CreateNewGame, "/api")]
 pub async fn create_new_game(
     game_version_id: Uuid,
@@ -450,6 +485,29 @@ pub async fn create_new_game(
             .map_err(internal("create_new_game: check invite policy"))?;
     if let Some(msg) = violations.into_iter().next() {
         return Err(ServerFnError::new(msg));
+    }
+
+    let mut all_player_ids: Vec<Uuid> = Vec::with_capacity(player_count);
+    all_player_ids.push(user.id);
+    all_player_ids.extend(&opponent_ids);
+    for email in &opponent_emails {
+        if let Some(id) =
+            sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM user_emails WHERE email = $1")
+                .bind(email)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(internal("create_new_game: resolve email"))?
+        {
+            all_player_ids.push(id);
+        }
+    }
+    all_player_ids.sort();
+    let before = all_player_ids.len();
+    all_player_ids.dedup();
+    if all_player_ids.len() != before {
+        return Err(ServerFnError::new(
+            "Please ensure each player in the game is unique",
+        ));
     }
 
     let game = create_game_from_service(
@@ -938,7 +996,7 @@ mod tests {
                 opponent_emails: &[],
                 bot_slots: &[BotSlot {
                     name: "Botty".to_string(),
-                    difficulty: "easy".to_string(),
+                    bot_name: "easy".to_string(),
                 }],
                 chat_id: None,
                 game_state: "state",
@@ -1050,7 +1108,7 @@ mod tests {
                 opponent_emails: &[],
                 bot_slots: &[BotSlot {
                     name: "Botty".to_string(),
-                    difficulty: "easy".to_string(),
+                    bot_name: "easy".to_string(),
                 }],
                 chat_id: None,
                 game_state: "state",

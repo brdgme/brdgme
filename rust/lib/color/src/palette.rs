@@ -116,7 +116,7 @@ impl Palette {
         }
     }
 
-    pub fn player_colors(&self) -> [Color; 8] {
+    pub fn player_colors(&self) -> [Color; 9] {
         [
             self.green,
             self.red,
@@ -126,6 +126,7 @@ impl Palette {
             self.brown,
             self.cyan,
             self.pink,
+            self.yellow,
         ]
     }
 
@@ -3402,9 +3403,9 @@ mod tests {
         NamedColor::Brown,
     ];
 
-    // Names for `Palette::player_colors()`'s 8 slots, in that method's order.
-    const PLAYER_NAMES: [&str; 8] = [
-        "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink",
+    // Names for `Palette::player_colors()`'s 9 slots, in that method's order.
+    const PLAYER_NAMES: [&str; 9] = [
+        "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink", "yellow",
     ];
 
     const TEXT_FLOOR: f64 = 3.0;

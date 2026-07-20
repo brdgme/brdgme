@@ -4,11 +4,11 @@ use crate::ast::TNode;
 use crate::semantic::{SemanticCol, SemanticColType};
 
 /// Number of player colour slots (matches `Palette::player_colors`).
-const PLAYER_COUNT: usize = 8;
+const PLAYER_COUNT: usize = 9;
 
 /// Generates the static structural CSS rules for every `mk-fg-*`/`mk-bg-*`
 /// class this renderer can emit: named colours, the in-use soften variants,
-/// their `c-` (contrast) counterparts, and player 0..7 slots. Rules reference
+/// their `c-` (contrast) counterparts, and player 0..8 slots. Rules reference
 /// the `--mk-*` custom properties produced by `brdgme_color::palette_css_vars`
 /// (players reference `--mk-player-{n}`, which the web layer defines itself
 /// on the board container).
