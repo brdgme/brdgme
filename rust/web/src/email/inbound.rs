@@ -213,6 +213,16 @@ pub fn no_command_header_text() -> String {
     "I could not find a command in your email.".to_string()
 }
 
+fn settings_response_header(error: Option<String>, last_status: Option<String>) -> String {
+    if let Some(err) = error {
+        err
+    } else if let Some(status) = last_status {
+        status
+    } else {
+        no_command_header_text()
+    }
+}
+
 pub fn error_reply_text(err: &crate::game::ExecuteCommandError) -> String {
     use crate::game::ExecuteCommandError;
     match err {
@@ -266,6 +276,19 @@ async fn from_matches_verified_email(
     .fetch_one(pool)
     .await?;
     Ok(exists)
+}
+
+async fn resolve_user_by_verified_from(
+    pool: &sqlx::PgPool,
+    from: &str,
+) -> anyhow::Result<Option<uuid::Uuid>> {
+    let row = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT user_id FROM user_emails WHERE verified_at IS NOT NULL AND LOWER(email) = LOWER($1) LIMIT 1",
+    )
+    .bind(from)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
 }
 
 /// Insert-or-skip idempotency marker. Returns true if THIS call inserted the row
@@ -339,22 +362,17 @@ pub async fn resend_webhook(
         return StatusCode::OK;
     }
 
-    let Some(route) = select_route(&event.data.to, &event.data.received_for) else {
-        return StatusCode::OK;
-    };
-    match route {
-        InboundRoute::Game(token) => {
+    match select_route(&event.data.to, &event.data.received_for) {
+        Some(InboundRoute::Game(token)) => {
             handle_game_reply(&state, &token, &event.data.from, &event.data.email_id).await;
         }
-        InboundRoute::Invite(token) => {
+        Some(InboundRoute::Invite(token)) => {
             tracing::info!(
                 "resend webhook: invite reply for token {token} handled by a later unit (#24)"
             );
         }
-        InboundRoute::Settings(token) => {
-            tracing::info!(
-                "resend webhook: settings reply for token {token} handled by a later unit (#22c)"
-            );
+        Some(InboundRoute::Settings(_)) | None => {
+            handle_settings_reply_route(&state, &event.data.from, &event.data.email_id).await;
         }
     }
     StatusCode::OK
@@ -596,6 +614,124 @@ async fn send_rules_reply_response(
         headers,
     };
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
+}
+
+async fn handle_settings_reply_route(state: &AppState, from: &str, email_id: &str) {
+    let api_key = match std::env::var("RESEND_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            tracing::error!(
+                "resend webhook: RESEND_API_KEY not configured; cannot fetch settings body"
+            );
+            return;
+        }
+    };
+    let source = ResendInbound {
+        api_key,
+        http: state.http_client.clone(),
+    };
+    let raw = match source.fetch_raw_email(email_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
+            return;
+        }
+    };
+    handle_settings_reply(&state.pool, state.resend.as_ref(), from, &raw).await;
+}
+
+async fn handle_settings_reply(
+    pool: &sqlx::PgPool,
+    resend: Option<&resend_rs::Resend>,
+    from: &str,
+    raw_body: &str,
+) {
+    let user_id = match resolve_user_by_verified_from(pool, from).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            tracing::info!(
+                "resend webhook: settings reply from unverified/unknown address; no response"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!("resend webhook: settings From resolution failed: {e}");
+            return;
+        }
+    };
+
+    let text = extract_plain_text(raw_body).unwrap_or_default();
+    let commands = parse_reply_commands(&text);
+
+    if commands.is_empty() {
+        send_settings_response(pool, resend, user_id, from, no_command_header_text()).await;
+        return;
+    }
+
+    let mut last_status: Option<String> = None;
+    let mut error_header: Option<String> = None;
+
+    for line in &commands {
+        match crate::email::commands::dispatch_settings_standalone(pool, user_id, line).await {
+            Ok(crate::email::commands::CommandReply::Status(msg)) => {
+                last_status = Some(msg);
+            }
+            Ok(_) => {}
+            Err(crate::email::commands::CommandError::User(msg)) => {
+                error_header = Some(msg);
+                break;
+            }
+            Err(crate::email::commands::CommandError::Internal(e)) => {
+                tracing::error!("resend webhook: settings command error: {e}");
+                error_header =
+                    Some("An unexpected error occurred while processing your command.".to_string());
+                break;
+            }
+        }
+    }
+
+    let header = settings_response_header(error_header, last_status);
+    send_settings_response(pool, resend, user_id, from, header).await;
+}
+
+async fn send_settings_response(
+    pool: &sqlx::PgPool,
+    resend: Option<&resend_rs::Resend>,
+    user_id: uuid::Uuid,
+    from: &str,
+    header: String,
+) {
+    let theme_slug = match crate::db::get_user_theme(pool, user_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("resend webhook: settings theme lookup failed: {e}");
+            None
+        }
+    };
+    let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
+    let reply_address = format!("s-{user_id}@play.brdg.me");
+    let thread_id = format!("settings-{user_id}");
+    let content = crate::email::render::EmailContent {
+        subject: "Your brdg.me settings".to_string(),
+        header: Some(header),
+        digest: None,
+        board: None,
+        you_can: None,
+        browser_url: None,
+        footer: Some(
+            "Reply to this email to change your settings, or send 'help' for the command list."
+                .to_string(),
+        ),
+    };
+    let rendered = crate::email::render::render_game_email(
+        &content,
+        palette,
+        &[],
+        &thread_id,
+        false,
+        &reply_address,
+    );
+    crate::email::outbound::send_rendered_email(resend, rendered, from).await;
 }
 
 #[cfg(all(test, feature = "ssr"))]
@@ -1023,6 +1159,137 @@ Just a plain body";
             !from_matches_verified_email(&pool, user_id, "nobody@brdg.me")
                 .await
                 .unwrap()
+        );
+    }
+
+    #[test]
+    fn settings_response_header_error_wins() {
+        assert_eq!(
+            settings_response_header(Some("err".to_string()), Some("status".to_string())),
+            "err"
+        );
+    }
+
+    #[test]
+    fn settings_response_header_status_when_no_error() {
+        assert_eq!(
+            settings_response_header(None, Some("status".to_string())),
+            "status"
+        );
+    }
+
+    #[test]
+    fn settings_response_header_fallback_when_both_none() {
+        assert_eq!(
+            settings_response_header(None, None),
+            no_command_header_text()
+        );
+    }
+
+    async fn seed_user(pool: &sqlx::PgPool, name: &str) -> uuid::Uuid {
+        sqlx::query_scalar("INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id")
+            .bind(name)
+            .bind(Vec::<String>::new())
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn resolve_user_by_verified_from_truth_table(pool: sqlx::PgPool) {
+        let user_a = seed_user(&pool, "user-a").await;
+        let user_b = seed_user(&pool, "user-b").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_a)
+        .bind("a@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NULL)",
+        )
+        .bind(user_a)
+        .bind("unv@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_b)
+        .bind("b@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resolve_user_by_verified_from(&pool, "a@brdg.me")
+                .await
+                .unwrap(),
+            Some(user_a)
+        );
+        assert_eq!(
+            resolve_user_by_verified_from(&pool, "A@brdg.me")
+                .await
+                .unwrap(),
+            Some(user_a)
+        );
+        assert_eq!(
+            resolve_user_by_verified_from(&pool, "unv@brdg.me")
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_user_by_verified_from(&pool, "nobody@brdg.me")
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[sqlx::test]
+    async fn settings_standalone_rejects_game_command(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "settings-user").await;
+        match crate::email::commands::dispatch_settings_standalone(&pool, user_id, "concede").await
+        {
+            Err(crate::email::commands::CommandError::User(msg)) => {
+                assert!(msg.contains("not available"));
+            }
+            _ => panic!("expected User error for game command"),
+        }
+        match crate::email::commands::dispatch_settings_standalone(&pool, user_id, "settings").await
+        {
+            Ok(crate::email::commands::CommandReply::Status(_)) => {}
+            _ => panic!("expected Status reply for settings command"),
+        }
+    }
+
+    #[sqlx::test]
+    async fn resolve_user_by_verified_from_is_the_should_respond_gate(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "gate-user").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("gate@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            resolve_user_by_verified_from(&pool, "gate@brdg.me")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            resolve_user_by_verified_from(&pool, "unknown@brdg.me")
+                .await
+                .unwrap()
+                .is_none()
         );
     }
 }

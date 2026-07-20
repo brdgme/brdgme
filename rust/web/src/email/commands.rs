@@ -61,18 +61,233 @@ pub fn help_text() -> String {
      unsubscribe - turn off turn-notification emails (account-wide)\n\
      help - show this message\n\
      \n\
-     Settings commands (name, colors, theme, emails) are also available."
+     Settings commands:\n\
+     name <display name> - set your display name\n\
+     colors <c1,c2,c3> - set your 3 preferred colours (alias: colours)\n\
+     theme <name> - set your theme (or 'theme system' for the default)\n\
+     emails on | emails off - toggle turn-notification emails\n\
+     settings - show your current settings"
         .to_string()
 }
 
-/// Extension point for unit c2 (settings commands: name/colours/theme/emails).
-/// Returns `Some(result)` when the line matches a settings command; `None`
-/// falls through to the game-command path.
-pub fn dispatch_settings_command(
-    _ctx: &EmailCommandCtx<'_>,
-    _line: &str,
+pub struct SettingsSummary {
+    pub name: String,
+    pub pref_colors: Vec<String>,
+    pub theme: Option<String>,
+    pub emails_enabled: bool,
+}
+
+pub fn format_settings_summary(s: &SettingsSummary) -> String {
+    let colors = if s.pref_colors.is_empty() {
+        "none set".to_string()
+    } else {
+        s.pref_colors.join(", ")
+    };
+    let theme = s.theme.as_deref().unwrap_or("system");
+    let emails = if s.emails_enabled { "on" } else { "off" };
+    format!(
+        "Current settings:\n\
+         \x20\x20Display name: {name}\n\
+         \x20\x20Preferred colours: {colors}\n\
+         \x20\x20Theme: {theme}\n\
+         \x20\x20Turn-notification emails: {emails}",
+        name = s.name,
+    )
+}
+
+/// Maps a line to its canonical settings verb, case-insensitively, or `None`
+/// when the line is not a settings command. `colours` normalises to `colors`.
+fn settings_verb(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim();
+    let verb = trimmed.split_once(' ').map(|(v, _)| v).unwrap_or(trimmed);
+    match verb.to_ascii_lowercase().as_str() {
+        "name" => Some("name"),
+        "colors" | "colours" => Some("colors"),
+        "theme" => Some("theme"),
+        "emails" => Some("emails"),
+        "settings" => Some("settings"),
+        _ => None,
+    }
+}
+
+/// Settings commands (name/colours/theme/emails/settings) that need only a
+/// pool + user, no game context. Returns `Some(result)` when the line matches
+/// a settings command; `None` falls through to the game-command path.
+pub async fn dispatch_settings_command_for_user(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    line: &str,
 ) -> Option<Result<CommandReply, CommandError>> {
-    None
+    let verb = settings_verb(line)?;
+    let trimmed = line.trim();
+    let arg = trimmed
+        .split_once(' ')
+        .map(|(_, a)| a.trim())
+        .filter(|a| !a.is_empty());
+
+    let result = match verb {
+        "name" => run_settings_name(pool, user_id, arg).await,
+        "colors" => run_settings_colors(pool, user_id, arg).await,
+        "theme" => run_settings_theme(pool, user_id, arg).await,
+        "emails" => run_settings_emails(pool, user_id, arg).await,
+        "settings" => run_settings_summary(pool, user_id).await,
+        _ => unreachable!("settings_verb only yields known verbs"),
+    };
+    Some(result)
+}
+
+pub async fn dispatch_settings_command(
+    ctx: &EmailCommandCtx<'_>,
+    line: &str,
+) -> Option<Result<CommandReply, CommandError>> {
+    dispatch_settings_command_for_user(ctx.pool, ctx.user_id, line).await
+}
+
+/// Standalone (no-game) settings path: handles settings commands, `help`, and
+/// rejects everything else as unavailable by email without a game.
+pub async fn dispatch_settings_standalone(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    line: &str,
+) -> Result<CommandReply, CommandError> {
+    if let Some(result) = dispatch_settings_command_for_user(pool, user_id, line).await {
+        return result;
+    }
+
+    let trimmed = line.trim();
+    let verb = trimmed.split_once(' ').map(|(v, _)| v).unwrap_or(trimmed);
+    if matches!(verb.to_ascii_lowercase().as_str(), "help" | "commands") {
+        return Ok(CommandReply::Status(help_text()));
+    }
+
+    Err(CommandError::User(
+        "That command is not available by email without a game. Available settings commands: name, colors, theme, emails on/off, settings, help.".to_string(),
+    ))
+}
+
+async fn run_settings_name(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    arg: Option<&str>,
+) -> Result<CommandReply, CommandError> {
+    let name = arg.ok_or_else(|| CommandError::User("Usage: name <display name>".to_string()))?;
+    if !crate::db::validate_username(name) {
+        return Err(CommandError::User(
+            "1-16 characters: letters, numbers, - and _. Must be unique.".to_string(),
+        ));
+    }
+    match crate::db::set_user_name(pool, user_id, name)
+        .await
+        .map_err(CommandError::Internal)?
+    {
+        true => Ok(CommandReply::Status(format!("Display name set to {name}."))),
+        false => Err(CommandError::User("That name is taken".to_string())),
+    }
+}
+
+async fn run_settings_colors(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    arg: Option<&str>,
+) -> Result<CommandReply, CommandError> {
+    let arg = arg.ok_or_else(|| CommandError::User("Usage: colors <c1,c2,c3>".to_string()))?;
+    let colors: Vec<String> = arg
+        .split([',', ' '])
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .map(crate::db::normalize_pref_color)
+        .collect();
+    if !crate::auth::server::validate_pref_colors(&colors) {
+        return Err(CommandError::User(
+            "Preferred colours must be 3 distinct colours from: Green, Red, Blue, Orange, Purple, Brown, Cyan, Pink.".to_string(),
+        ));
+    }
+    crate::db::set_user_pref_colors(pool, user_id, &colors)
+        .await
+        .map_err(CommandError::Internal)?;
+    Ok(CommandReply::Status(format!(
+        "Preferred colours set to {}.",
+        colors.join(", ")
+    )))
+}
+
+async fn run_settings_theme(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    arg: Option<&str>,
+) -> Result<CommandReply, CommandError> {
+    let arg = arg.ok_or_else(|| CommandError::User("Usage: theme <name>".to_string()))?;
+    let slug = arg.trim().to_ascii_lowercase();
+    if slug == "system" || slug == "none" {
+        crate::db::set_user_theme(pool, user_id, None)
+            .await
+            .map_err(CommandError::Internal)?;
+        return Ok(CommandReply::Status("Theme set to system.".to_string()));
+    }
+    if !crate::theme::is_known_slug(&slug) {
+        return Err(CommandError::User(
+            "Unknown theme. Send 'theme system' or one of the theme slugs (e.g. dracula, brdgme-dark).".to_string(),
+        ));
+    }
+    crate::db::set_user_theme(pool, user_id, Some(&slug))
+        .await
+        .map_err(CommandError::Internal)?;
+    Ok(CommandReply::Status(format!("Theme set to {slug}.")))
+}
+
+async fn run_settings_emails(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    arg: Option<&str>,
+) -> Result<CommandReply, CommandError> {
+    let enabled = match arg.map(|a| a.to_ascii_lowercase()) {
+        Some(ref a) if a == "on" => true,
+        Some(ref a) if a == "off" => false,
+        _ => {
+            return Err(CommandError::User(
+                "Usage: emails on | emails off".to_string(),
+            ));
+        }
+    };
+    set_turn_emails_enabled(pool, user_id, enabled)
+        .await
+        .map_err(CommandError::Internal)?;
+    let msg = if enabled {
+        "Turn-notification emails are now on."
+    } else {
+        "Turn-notification emails are now off."
+    };
+    Ok(CommandReply::Status(msg.to_string()))
+}
+
+async fn run_settings_summary(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+) -> Result<CommandReply, CommandError> {
+    let name = crate::db::get_user_name(pool, user_id)
+        .await
+        .map_err(CommandError::Internal)?;
+    let pref_colors = crate::db::get_user_pref_colors(pool, user_id)
+        .await
+        .map_err(CommandError::Internal)?;
+    let theme = crate::db::get_user_theme(pool, user_id)
+        .await
+        .map_err(CommandError::Internal)?;
+    let emails_enabled: bool =
+        sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| CommandError::Internal(anyhow::anyhow!("settings: fetch emails: {e}")))?;
+
+    Ok(CommandReply::Status(format_settings_summary(
+        &SettingsSummary {
+            name,
+            pref_colors,
+            theme,
+            emails_enabled,
+        },
+    )))
 }
 
 async fn set_turn_emails_enabled(
@@ -301,7 +516,7 @@ pub async fn dispatch_email_command(
         return Ok(CommandReply::Status(msg.to_string()));
     }
 
-    if let Some(result) = dispatch_settings_command(ctx, trimmed) {
+    if let Some(result) = dispatch_settings_command(ctx, trimmed).await {
         return result;
     }
 
@@ -391,6 +606,181 @@ mod tests {
         assert!(!enabled);
 
         set_turn_emails_enabled(&pool, user_id, true).await.unwrap();
+        let enabled: bool =
+            sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(enabled);
+    }
+
+    #[test]
+    fn settings_verb_is_case_insensitive_and_aliases() {
+        assert_eq!(settings_verb("NAME foo"), Some("name"));
+        assert_eq!(settings_verb("Name foo"), Some("name"));
+        assert_eq!(settings_verb("name foo"), Some("name"));
+        assert_eq!(settings_verb("colors green,red,blue"), Some("colors"));
+        assert_eq!(settings_verb("colours green,red,blue"), Some("colors"));
+        assert_eq!(settings_verb("COLOURS green red blue"), Some("colors"));
+        assert_eq!(settings_verb("theme system"), Some("theme"));
+        assert_eq!(settings_verb("theme dracula"), Some("theme"));
+        assert_eq!(settings_verb("emails on"), Some("emails"));
+        assert_eq!(settings_verb("settings"), Some("settings"));
+        assert_eq!(settings_verb("concede"), None);
+        assert_eq!(settings_verb("play e4"), None);
+    }
+
+    #[test]
+    fn format_settings_summary_renders_current_settings() {
+        let summary = SettingsSummary {
+            name: "alice".to_string(),
+            pref_colors: vec!["Green".to_string(), "Red".to_string(), "Blue".to_string()],
+            theme: Some("dracula".to_string()),
+            emails_enabled: true,
+        };
+        let text = format_settings_summary(&summary);
+        assert!(text.contains("Current settings:"));
+        assert!(text.contains("Display name: alice"));
+        assert!(text.contains("Preferred colours: Green, Red, Blue"));
+        assert!(text.contains("Theme: dracula"));
+        assert!(text.contains("Turn-notification emails: on"));
+    }
+
+    #[test]
+    fn format_settings_summary_defaults() {
+        let summary = SettingsSummary {
+            name: "bob".to_string(),
+            pref_colors: vec![],
+            theme: None,
+            emails_enabled: false,
+        };
+        let text = format_settings_summary(&summary);
+        assert!(text.contains("Preferred colours: none set"));
+        assert!(text.contains("Theme: system"));
+        assert!(text.contains("Turn-notification emails: off"));
+    }
+
+    async fn seed_user(pool: &sqlx::PgPool, name: &str) -> uuid::Uuid {
+        sqlx::query_scalar("INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id")
+            .bind(name)
+            .bind(Vec::<String>::new())
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    fn status_msg(reply: CommandReply) -> String {
+        match reply {
+            CommandReply::Status(s) => s,
+            _ => panic!("expected Status reply"),
+        }
+    }
+
+    fn expect_user_err(result: Option<Result<CommandReply, CommandError>>) -> String {
+        match result.expect("expected a settings result") {
+            Err(CommandError::User(s)) => s,
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+    }
+
+    #[sqlx::test]
+    async fn settings_name_valid_and_duplicate(pool: sqlx::PgPool) {
+        let u1 = seed_user(&pool, "test-player").await;
+        let u2 = seed_user(&pool, "other-player").await;
+
+        let ok = dispatch_settings_command_for_user(&pool, u1, "name alice")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status_msg(ok), "Display name set to alice.");
+
+        let taken =
+            expect_user_err(dispatch_settings_command_for_user(&pool, u2, "name alice").await);
+        assert_eq!(taken, "That name is taken");
+
+        let invalid =
+            expect_user_err(dispatch_settings_command_for_user(&pool, u1, "name has space").await);
+        assert!(invalid.contains("1-16 characters"));
+    }
+
+    #[sqlx::test]
+    async fn settings_colors_valid_and_invalid(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+
+        let ok = dispatch_settings_command_for_user(&pool, user_id, "colors green,red,blue")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status_msg(ok), "Preferred colours set to Green, Red, Blue.");
+
+        let stored: Vec<String> = sqlx::query_scalar("SELECT pref_colors FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, vec!["Green", "Red", "Blue"]);
+
+        let invalid = expect_user_err(
+            dispatch_settings_command_for_user(&pool, user_id, "colors green,notacolor,blue").await,
+        );
+        assert!(invalid.contains("3 distinct colours"));
+    }
+
+    #[sqlx::test]
+    async fn settings_theme_valid_invalid_and_system(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+
+        let ok = dispatch_settings_command_for_user(&pool, user_id, "theme dracula")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status_msg(ok), "Theme set to dracula.");
+        let theme: Option<String> = sqlx::query_scalar("SELECT theme FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(theme.as_deref(), Some("dracula"));
+
+        let invalid =
+            expect_user_err(dispatch_settings_command_for_user(&pool, user_id, "theme nope").await);
+        assert!(invalid.contains("Unknown theme"));
+
+        let system = dispatch_settings_command_for_user(&pool, user_id, "theme system")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status_msg(system), "Theme set to system.");
+        let theme: Option<String> = sqlx::query_scalar("SELECT theme FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(theme.is_none());
+    }
+
+    #[sqlx::test]
+    async fn settings_emails_on_off_toggle(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+
+        dispatch_settings_command_for_user(&pool, user_id, "emails off")
+            .await
+            .unwrap()
+            .unwrap();
+        let enabled: bool =
+            sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(!enabled);
+
+        dispatch_settings_command_for_user(&pool, user_id, "emails on")
+            .await
+            .unwrap()
+            .unwrap();
         let enabled: bool =
             sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
                 .bind(user_id)
