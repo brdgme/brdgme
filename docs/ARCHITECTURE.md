@@ -223,6 +223,29 @@ answer it. Note the serde encoding: unit requests like this and
 - **Request:** `"Rules"`
 - **Response:** `{"Rules": {"rules": "..."}}`
 
+#### Data Docs (V2)
+
+Get the field dictionary describing the structured YAML states returned
+in `pub_state` and `player_state`. Only served by V2 games; V1 games
+return an empty string.
+
+- **Request:** `"DataDocs"`
+- **Response:** `{"DataDocs": {"data_docs": "..."}}`
+
+#### Basic Strategy (V2)
+
+Get hard rules against obviously bad moves (short, absolute don'ts).
+
+- **Request:** `"BasicStrategy"`
+- **Response:** `{"BasicStrategy": {"basic_strategy": "..."}}`
+
+#### Advanced Strategy (V2)
+
+Get optimal-play heuristics (longer, contextual guidance).
+
+- **Request:** `"AdvancedStrategy"`
+- **Response:** `{"AdvancedStrategy": {"advanced_strategy": "..."}}`
+
 ## Database Schema
 
 Key tables in PostgreSQL:
@@ -230,9 +253,17 @@ Key tables in PostgreSQL:
 - **`users`**: User identities, credentials, and preferences.
 - **`game_types`**: Game type identities (e.g. "Lost Cities"). Managed by the operator.
 - **`game_versions`**: Deployed game versions. Managed by the operator. Includes
-  `is_public` and `is_deprecated` flags; unique constraint on `(game_type_id, name)`.
+  `is_public`, `is_deprecated`, and `interface_version` (1 or 2) flags;
+  unique constraint on `(game_type_id, name)`.
 - **`games`**: Active and finished game instances. Stores the serialized
   `game_state` blob.
 - **`game_players`**: Links `users` to `games`, storing player position and
   player-specific state.
 - **`game_logs`**: Immutable history of all actions and messages within a game.
+- **`bots`**: Bot configurations (name, model, provider, thinking budget,
+  temperature, docs flags). Three-layer enable gate (bot + provider +
+  binding). Seeded with easy/medium/hard.
+- **`llm_providers`**: LLM provider credentials (name, base_url,
+  api_key_encrypted via AES-256-GCM, model). Enable flag.
+- **`bot_providers`**: Join table binding bots to providers with priority
+  (round-robin within priority, failover across priorities). Enable flag.

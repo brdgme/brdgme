@@ -521,6 +521,38 @@ contain actual brdgme markup output from the game binary, not a hand-crafted
 ASCII approximation. See `docs/authoring/RULES_AUTHORING.md` for the
 extraction process.
 
+**V2 game interface pattern.** Games implementing the V2 interface expose
+three additional endpoints beyond V1 (Rules, PlayerCounts, New, Status,
+Play): `DataDocs` (field dictionary for the structured YAML states),
+`BasicStrategy` (hard rules against dumb moves - never do X), and
+`AdvancedStrategy` (optimal play guidance). The `Gamer` trait provides
+default empty implementations so V1 games compile unchanged; V2 games
+override them.
+
+**Per-game doc structure (V2).** Each V2 game directory contains:
+- `RULES.md` - pure game rules (no strategy, no render explanation)
+- `DATA_DOCS.md` - field dictionary describing every field in
+  `pub_state` and `player_state` YAML (what bots receive)
+- `BASIC_STRATEGY.md` - hard rules against obviously bad moves
+  (e.g. "never discard a winning card")
+- `ADVANCED_STRATEGY.md` - optimal play guidance (e.g. "prioritize
+  science sets over military in age 1")
+
+**Strategy doc conventions.** BASIC_STRATEGY is a short list of
+absolute don'ts - moves that are almost always wrong regardless of
+context. ADVANCED_STRATEGY is longer, contextual, and describes
+heuristics for strong play. Both are embedded at compile time via
+`include_str!` like RULES.md. Bots receive BASIC at all difficulty
+levels; ADVANCED only when the bot config includes it.
+
+**Game interface versioning.** The `interface_version` column in
+`game_versions` (set by the operator from the GameVersion CRD's
+`interfaceVersion` field) records whether a deployed game speaks V1 or
+V2. The shared `game_client` crate abstracts this: `fetch_game_data()`
+calls Status plus the V2 endpoints and returns placeholder empty
+strings for V1 games. Callers (bot, web) never check versions
+themselves.
+
 ---
 
 ## Testing Conventions

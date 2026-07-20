@@ -91,6 +91,14 @@ web/websocket services are deleted (plan #31). Until then Go code gets
 light-touch maintenance only. All new games are written in Rust against
 the shared `brdgme_game`/`brdgme_markup` libraries.
 
+All Rust games now implement the V2 game interface (2026-07-20): in
+addition to the V1 endpoints (Rules, PlayerCounts, New, Status, Play),
+V2 games serve DataDocs (field dictionary for the structured YAML
+states), BasicStrategy (hard rules against dumb moves), and
+AdvancedStrategy (optimal play heuristics). The `game_client` crate
+abstracts V1/V2 - callers never check versions. The operator stores
+`interface_version` from the GameVersion CRD.
+
 ### brdgme Kubernetes Operator
 
 A custom Kubernetes operator (Rust, `kube-rs`) bridges Kubernetes and the
@@ -179,13 +187,23 @@ only if sustained volume ever exceeds ~10k/mo.
 
 ### Bots
 
-- LLM-based. System prompt: brdgme context + game rules + command grammar.
-  User prompt: current game state + available command spec from the game
-  service.
+- LLM-based, structured data prompts (2026-07-20, #43). System prompt:
+  persona + game rules + strategy docs + data docs + parser docs. User
+  prompt: structured YAML player_state/pub_state (not the full render),
+  recent logs, failed commands. Static/dynamic split optimizes KV cache
+  reuse.
+- Bot configuration in the database (bots, llm_providers, bot_providers
+  tables). Each bot is a complete config: model, provider, thinking
+  budget, temperature, which strategy docs to include. bot_name is not
+  constrained to easy/medium/hard - arbitrary names allowed.
+- Provider routing: round-robin within a priority level, failover across
+  priorities. Three-layer enable gate (bot + provider + binding).
+- Provider credentials encrypted at rest (AES-256-GCM, key from
+  BOT_ENCRYPTION_KEY env var).
 - Runs as a small always-on Deployment (NATS-triggered; see PLAN Phase 13).
 - Constrained generation (grammar-based output) to ensure bot moves always
   produce valid commands.
-- Initial implementation: external LLM API (Groq or similar) for fast
-  iteration.
 - Long-term target: Ollama in-cluster on CPU inference. Latency of 30-60
   seconds per move is acceptable for async turn-based play.
+- Future: admin GUI for bot config management (add/remove/switch,
+  priority failover, shared-priority load balancing, enable/disable).
