@@ -39,7 +39,7 @@ allowed - the seeded easy/medium/hard are just the initial set.
 
 **Provider credentials: AES-256-GCM field encryption.**
 llm_providers.api_key_encrypted stores the AES-256-GCM ciphertext
-(nonce prepended). Key from BOT_ENCRYPTION_KEY env var (hex-encoded 32
+(nonce prepended). Key from DATABASE_ENCRYPTION_KEY env var (hex-encoded 32
 bytes). Chosen over sealed-secrets (per-field granularity needed) and
 Vault (operational overhead unjustified at this scale).
 

@@ -206,7 +206,7 @@ OpenRouter provider; prod: per the operator's desired config).
 ## D6: Credential Encryption
 
 `llm_providers.api_key_encrypted` stores AES-256-GCM ciphertext (bytea).
-The encryption key comes from `BOT_ENCRYPTION_KEY` env var (k8s
+The encryption key comes from `DATABASE_ENCRYPTION_KEY` env var (k8s
 sealed-secret in prod, plain env in dev).
 
 - Encrypt on write (admin GUI / seed script).

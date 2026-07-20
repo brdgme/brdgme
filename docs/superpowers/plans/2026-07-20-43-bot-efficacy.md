@@ -116,7 +116,7 @@ Note: The `game_bots.difficulty` -> `bot_name` rename will break existing sqlx m
 - Modify: `rust/bot/Cargo.toml` (add `aes-gcm`, `base64` deps)
 
 **Interfaces:**
-- Consumes: `BOT_ENCRYPTION_KEY` env var (32 bytes, base64-encoded)
+- Consumes: `DATABASE_ENCRYPTION_KEY` env var (32 bytes, base64-encoded)
 - Produces: `pub fn decrypt_api_key(encrypted: &[u8], key: &[u8; 32]) -> Result<String>` and `pub fn encrypt_api_key(plaintext: &str, key: &[u8; 32]) -> Result<Vec<u8>>`
 
 - [ ] **Step 1: Add dependencies to bot Cargo.toml**
@@ -141,16 +141,16 @@ use anyhow::{Context, Result, anyhow};
 const NONCE_LEN: usize = 12;
 
 pub fn load_key() -> Result<[u8; 32]> {
-    let raw = std::env::var("BOT_ENCRYPTION_KEY")
-        .context("BOT_ENCRYPTION_KEY must be set")?;
+    let raw = std::env::var("DATABASE_ENCRYPTION_KEY")
+        .context("DATABASE_ENCRYPTION_KEY must be set")?;
     let bytes = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
         &raw,
     )
-    .context("BOT_ENCRYPTION_KEY must be valid base64")?;
+    .context("DATABASE_ENCRYPTION_KEY must be valid base64")?;
     let key: [u8; 32] = bytes
         .try_into()
-        .map_err(|_| anyhow!("BOT_ENCRYPTION_KEY must decode to exactly 32 bytes"))?;
+        .map_err(|_| anyhow!("DATABASE_ENCRYPTION_KEY must decode to exactly 32 bytes"))?;
     Ok(key)
 }
 
@@ -1086,10 +1086,10 @@ Update `call_llm` to accept `temperature` as a parameter instead of hardcoding `
 Replace the env-var reading in `main()` with:
 
 ```rust
-    let encryption_key = match std::env::var("BOT_ENCRYPTION_KEY") {
+    let encryption_key = match std::env::var("DATABASE_ENCRYPTION_KEY") {
         Ok(_) => Some(crate::crypto::load_key()?),
         Err(_) => {
-            tracing::info!("BOT_ENCRYPTION_KEY not set, DB provider API keys will not be decrypted");
+            tracing::info!("DATABASE_ENCRYPTION_KEY not set, DB provider API keys will not be decrypted");
             None
         }
     };

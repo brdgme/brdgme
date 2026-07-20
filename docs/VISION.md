@@ -199,7 +199,7 @@ only if sustained volume ever exceeds ~10k/mo.
 - Provider routing: round-robin within a priority level, failover across
   priorities. Three-layer enable gate (bot + provider + binding).
 - Provider credentials encrypted at rest (AES-256-GCM, key from
-  BOT_ENCRYPTION_KEY env var).
+  DATABASE_ENCRYPTION_KEY env var).
 - Runs as a small always-on Deployment (NATS-triggered; see PLAN Phase 13).
 - Constrained generation (grammar-based output) to ensure bot moves always
   produce valid commands.

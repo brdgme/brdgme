@@ -10,7 +10,7 @@ pub enum CryptoError {
     EncryptionFailed,
     #[error("decryption failed")]
     DecryptionFailed,
-    #[error("missing BOT_ENCRYPTION_KEY environment variable")]
+    #[error("missing DATABASE_ENCRYPTION_KEY environment variable")]
     MissingEnvVar,
     #[error("invalid hex encoding")]
     InvalidHex,
@@ -42,7 +42,8 @@ pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
 }
 
 pub fn load_key() -> Result<[u8; 32], CryptoError> {
-    let hex_str = std::env::var("BOT_ENCRYPTION_KEY").map_err(|_| CryptoError::MissingEnvVar)?;
+    let hex_str =
+        std::env::var("DATABASE_ENCRYPTION_KEY").map_err(|_| CryptoError::MissingEnvVar)?;
     let bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
     let key: [u8; 32] = bytes
         .try_into()
@@ -97,32 +98,32 @@ mod tests {
     fn load_key_valid_hex() {
         let _guard = ENV_LOCK.lock().unwrap();
         let hex_key = "ab".repeat(32);
-        unsafe { std::env::set_var("BOT_ENCRYPTION_KEY", &hex_key) };
+        unsafe { std::env::set_var("DATABASE_ENCRYPTION_KEY", &hex_key) };
         let key = load_key().unwrap();
         assert_eq!(key, [0xAB; 32]);
-        unsafe { std::env::remove_var("BOT_ENCRYPTION_KEY") };
+        unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
     }
 
     #[test]
     fn load_key_missing_env() {
         let _guard = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::remove_var("BOT_ENCRYPTION_KEY") };
+        unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
         assert!(matches!(load_key(), Err(CryptoError::MissingEnvVar)));
     }
 
     #[test]
     fn load_key_invalid_hex() {
         let _guard = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("BOT_ENCRYPTION_KEY", "not-valid-hex!!") };
+        unsafe { std::env::set_var("DATABASE_ENCRYPTION_KEY", "not-valid-hex!!") };
         assert!(matches!(load_key(), Err(CryptoError::InvalidHex)));
-        unsafe { std::env::remove_var("BOT_ENCRYPTION_KEY") };
+        unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
     }
 
     #[test]
     fn load_key_wrong_length() {
         let _guard = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("BOT_ENCRYPTION_KEY", "abcd") };
+        unsafe { std::env::set_var("DATABASE_ENCRYPTION_KEY", "abcd") };
         assert!(matches!(load_key(), Err(CryptoError::InvalidKeyLength)));
-        unsafe { std::env::remove_var("BOT_ENCRYPTION_KEY") };
+        unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
     }
 }

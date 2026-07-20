@@ -1980,13 +1980,13 @@ mod tests {
         .unwrap();
 
         unsafe {
-            std::env::set_var("BOT_ENCRYPTION_KEY", hex::encode(key));
+            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
         }
 
         let providers = list_providers(&pool).await.unwrap();
 
         unsafe {
-            std::env::remove_var("BOT_ENCRYPTION_KEY");
+            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
         }
 
         assert_eq!(providers.len(), 1);
@@ -1999,7 +1999,7 @@ mod tests {
     async fn test_admin_create_provider_encrypts_key(pool: sqlx::PgPool) {
         let key = test_encryption_key();
         unsafe {
-            std::env::set_var("BOT_ENCRYPTION_KEY", hex::encode(key));
+            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
         }
 
         let api_key = "sk-another-secret-key-5678";
@@ -2013,7 +2013,7 @@ mod tests {
         .unwrap();
 
         unsafe {
-            std::env::remove_var("BOT_ENCRYPTION_KEY");
+            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
         }
 
         let raw: Vec<u8> =
@@ -2047,7 +2047,7 @@ mod tests {
         .unwrap();
 
         unsafe {
-            std::env::set_var("BOT_ENCRYPTION_KEY", hex::encode(key));
+            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
         }
 
         update_provider(
@@ -2062,7 +2062,7 @@ mod tests {
         .unwrap();
 
         unsafe {
-            std::env::remove_var("BOT_ENCRYPTION_KEY");
+            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
         }
 
         let raw: Vec<u8> =
@@ -2094,7 +2094,7 @@ mod tests {
         .unwrap();
 
         unsafe {
-            std::env::set_var("BOT_ENCRYPTION_KEY", hex::encode(key));
+            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
         }
 
         let new_key = "sk-new-key-2222";
@@ -2110,7 +2110,7 @@ mod tests {
         .unwrap();
 
         unsafe {
-            std::env::remove_var("BOT_ENCRYPTION_KEY");
+            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
         }
 
         let raw: Vec<u8> =

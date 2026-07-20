@@ -684,7 +684,7 @@ async fn main() -> Result<()> {
         Ok(key) => Some(key),
         Err(e) => {
             tracing::warn!(
-                "BOT_ENCRYPTION_KEY not loaded ({}); DB-stored provider API keys will be unavailable, env-var fallback only",
+                "DATABASE_ENCRYPTION_KEY not loaded ({}); DB-stored provider API keys will be unavailable, env-var fallback only",
                 e
             );
             None

@@ -10,7 +10,7 @@ pub enum CryptoError {
     EncryptionFailed,
     #[error("decryption failed")]
     DecryptionFailed,
-    #[error("missing BOT_ENCRYPTION_KEY environment variable")]
+    #[error("missing DATABASE_ENCRYPTION_KEY environment variable")]
     MissingEnvVar,
     #[error("invalid hex encoding")]
     InvalidHex,
@@ -42,7 +42,8 @@ pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
 }
 
 pub fn load_key() -> Result<[u8; 32], CryptoError> {
-    let hex_str = std::env::var("BOT_ENCRYPTION_KEY").map_err(|_| CryptoError::MissingEnvVar)?;
+    let hex_str =
+        std::env::var("DATABASE_ENCRYPTION_KEY").map_err(|_| CryptoError::MissingEnvVar)?;
     let bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
     let key: [u8; 32] = bytes
         .try_into()
