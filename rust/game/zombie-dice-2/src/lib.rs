@@ -184,20 +184,31 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in this game (2 to 8).
     pub players: usize,
+    /// Index of the player whose turn it is.
     pub current_turn: usize,
+    /// Banked brain scores for each player, indexed by player.
     pub scores: Vec<i32>,
+    /// Dice remaining in the cup, in draw order. Each die has a colour (Green, Yellow, Red).
     pub cup: Vec<Dice>,
+    /// Dice showing footprints from the latest roll; these will be re-rolled on the next roll.
     pub current_roll: DiceResultList,
+    /// Dice set aside this turn (brains eaten and shotguns taken).
     pub kept: DiceResultList,
+    /// Number of brains eaten this turn (not yet banked).
     pub round_brains: i32,
+    /// Number of shotguns taken this turn. Three shotguns busts the turn.
     pub round_shotguns: i32,
+    /// True when the game is over.
     pub finished: bool,
+    /// Final placings for each player. Only populated when the game is finished; empty during play.
     pub placings: Vec<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
 }
 
@@ -511,6 +522,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

@@ -53,23 +53,37 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in the game, 3 through 5.
     pub players: usize,
+    /// Current round number, 0 through 3 (add 1 for the human-facing round).
     pub round: usize,
+    /// True when all 4 rounds are complete and the game is over.
     pub finished: bool,
+    /// True while an auction is in progress, false when waiting for a player to play a card.
     pub is_auction: bool,
+    /// Index of the player whose turn it is; during an auction this is the auctioneer.
     pub current_player: usize,
+    /// Card or cards currently up for auction. One card normally, two for a Double auction with a card added. Empty when not in an auction.
     pub auctioning: Vec<Card>,
+    /// Auction type of the card being sold, which sets the bidding rules. None when not in an auction. For a Double auction this is the type of the added card once one is added.
     pub auction_type: Option<Rank>,
+    /// Current highest bid as (bidder index, amount). When nobody has bid yet this is the auctioneer at $0. None when not in an auction or for Sealed auctions, where bids stay secret.
     pub current_bid: Option<(usize, i32)>,
+    /// Cards purchased this round, indexed by player. Each inner vec holds that player's bought cards, sorted. Cleared at the start of each round.
     pub purchases: Vec<Vec<Card>>,
+    /// Artist value awarded per completed round. Each entry is one round's awards (a map of artist to the $30/$20/$10 it earned). Sum across rounds for an artist's total value.
     pub value_board: Vec<HashMap<Suit, i32>>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this private state belongs to.
     pub player: usize,
+    /// This player's current money. Private until the end of the game.
     pub money: i32,
+    /// Cards currently in this player's hand, sorted by artist then auction type.
     pub hand: Vec<Card>,
 }
 
@@ -730,6 +744,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

@@ -212,20 +212,31 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in the game
     pub players: usize,
+    /// Current phase - Placing or Shooting
     pub phase: Phase,
+    /// Index of the player whose turn it is
     pub current_player: usize,
+    /// Each player's board as seen by opponents (ships hidden until game ends)
     pub boards: Vec<Board>,
+    /// Number of ships each player still needs to place
     pub left_to_place_counts: Vec<usize>,
+    /// Whether the game has ended
     pub finished: bool,
+    /// Final standings once finished (empty while game is active)
     pub placings: Vec<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state
     pub public: PubState,
+    /// This player's seat index
     pub player: usize,
+    /// This player's own board including ship positions (private)
     pub board: Board,
+    /// Ships this player still needs to place during the Placing phase
     pub left_to_place: Vec<Ship>,
 }
 
@@ -515,6 +526,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

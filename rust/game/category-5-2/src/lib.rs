@@ -98,18 +98,27 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in the game.
     pub players: usize,
+    /// The four rows of cards on the table, each row is ascending cards.
     pub board: [Vec<Card>; ROWS],
+    /// Number of cards in each player's taken pile.
     pub player_cards_counts: Vec<usize>,
+    /// Accumulated bullhead points per player (lower is better).
     pub player_points: Vec<i32>,
+    /// Whether the game has ended.
     pub finished: bool,
+    /// Final standings once finished (1 = winner).
     pub placings: Vec<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// This player's seat index.
     pub player: usize,
+    /// Cards in this player's hand (private until played).
     pub hand: Vec<Card>,
 }
 
@@ -467,6 +476,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

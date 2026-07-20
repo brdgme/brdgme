@@ -38,11 +38,4 @@ Final score = total of your cheques + your remaining chips. Highest score wins. 
 | `pass` | Take the lowest building for half your bid | `pass` |
 | `play <building>` | Play a building during the selling phase | `play 12` |
 
-## Reading the Display
 
-- **Buildings/Cheques available** - the cards on the table this round
-- **Current bid** - the highest bid and who made it
-- **Your bid** - your current bid (buying) or the building you're playing (selling)
-- **Remaining players** - who is still in the auction
-- **Your chips / buildings / cheques** - your hand
-- **Rounds remaining** - how many buy/sell rounds are left

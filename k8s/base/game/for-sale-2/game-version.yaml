@@ -7,3 +7,4 @@ spec:
   typeName: For Sale
   weight: 1.0
   blurb: "Bid on properties from cardboard shacks to space stations, then flip them for the best cheques in a second round of sales. A fast, sharp auction filler."
+  interfaceVersion: 2

@@ -38,20 +38,31 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in this game (3 to 5).
     pub players: usize,
+    /// True when the deck is empty and the game is over.
     pub finished: bool,
+    /// The current card on the table, or None if the game is finished.
     pub current_card: Option<i32>,
+    /// Number of cards remaining in the deck after the current card.
     pub remaining_after: usize,
+    /// Number of chips accumulated on the current card.
     pub centre_chips: i32,
+    /// Cards collected by each player, indexed by player. Cards are numbered 3 to 35.
     pub hands: Vec<Vec<i32>>,
+    /// Chips held by each player. Only populated when the game is finished; empty during play.
     pub chips: Vec<i32>,
+    /// Final scores for each player. Only populated when the game is finished; empty during play.
     pub final_scores: Vec<i32>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this private state belongs to.
     pub player: usize,
+    /// Number of chips this player currently holds.
     pub chips: i32,
 }
 
@@ -327,6 +338,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

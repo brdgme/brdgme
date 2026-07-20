@@ -43,13 +43,21 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in this game (2 to 6).
     pub players: usize,
+    /// Index of the player whose turn it is.
     pub current_player: usize,
+    /// Whether each castle has been conquered, indexed by castle position.
     pub conquered: Vec<bool>,
+    /// Owner of each conquered castle (player index), or None if unconquered.
     pub castle_owners: Vec<Option<usize>>,
+    /// Index of the castle currently being attacked, or None if no attack is declared.
     pub currently_attacking: Option<usize>,
+    /// Line indices completed on the currently-attacked castle this turn.
     pub completed_lines: Vec<usize>,
+    /// Dice currently in the player's roll pool.
     pub current_roll: Vec<Die>,
+    /// Current scores for each player, calculated from castle and clan ownership.
     pub scores: Vec<u32>,
 }
 
@@ -57,7 +65,9 @@ pub struct PubState {
 /// the viewing player (mirrors Go's `PlayerRender` delegating to `PubRender`).
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this state belongs to.
     pub player: usize,
 }
 
@@ -491,6 +501,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

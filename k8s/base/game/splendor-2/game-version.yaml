@@ -7,3 +7,4 @@ spec:
   typeName: Splendor
   weight: 2.0
   blurb: "Collect gem chips and build a tableau of mines and merchants where every purchase discounts the next. An engine-building race for prestige."
+  interfaceVersion: 2

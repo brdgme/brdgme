@@ -56,14 +56,3 @@ The game ends when play returns to the first player and at least one player has 
 | `roll` | Re-roll the remaining dice | `roll` |
 | `done` | Bank your turn score | `done` |
 
-## Reading the Display
-
-- **Remaining dice** - the dice still in front of you this roll
-- **Score this turn** - points accumulated this turn, banked on `done`
-- **Player table** - each player's total score; the starting player is marked
-
-## Strategy
-
-- Single 1s (100) and 5s (50) make otherwise bad rolls worth something; grab them before re-rolling
-- Three of a kind is the big scorer - watch for it on full re-rolls, especially three 1s for 1000
-- Banking early locks in your points; pushing for one more roll risks busting and losing it all

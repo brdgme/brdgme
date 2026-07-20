@@ -39,24 +39,35 @@ pub static POINT_STOPS: &[usize] = &[
 
 #[derive(Serialize, Deserialize)]
 pub struct PubState {
+    /// Per-player public info (cash and points), indexed by player number.
     pub players: Vec<Player>,
+    /// Index of the player whose turn it is.
     pub current_player: usize,
+    /// Number of cards left in the draw deck.
     pub remaining_deck: usize,
+    /// Location cards that have been dealt so far. Each is a Loc card; the hidden GameEnd card is never shown here.
     pub played: Vec<Card>,
+    /// The state of every lot on the strip, keyed by location.
     pub board: Board,
+    /// True when the game is over.
     pub finished: bool,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct PlayerState {
+    /// Which player this private state belongs to.
     pub player: usize,
+    /// This player's own cash and points.
     pub state: Option<Player>,
+    /// The full public game state.
     pub pub_state: PubState,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Player {
+    /// Cash currently on hand, used to pay build costs.
     pub cash: usize,
+    /// Points index into POINT_STOPS. Currently always 0 as scoring is not yet implemented.
     pub points: usize,
 }
 
@@ -217,6 +228,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

@@ -95,23 +95,6 @@ next player in turn order.
 
 ---
 
-## Reading the display
-
-- **The Strip**: each lot is drawn as a tile. Unbuilt lots show their build
-  cost and die value (e.g. `$12` over `(4)`) on a neutral grey background.
-  Built lots are filled with their casino's colour and show the owning
-  player's die value on a background in that player's colour. The lot's
-  code (e.g. `C 8`) is printed along the bottom of every tile.
-- **Player table**: cash, dice remaining (12 minus dice currently placed on
-  the board), tokens remaining (10 minus lots currently owned), and points
-  (see below), one row per player, starting from the reader's own
-  perspective.
-- **Casino table**: for each of the five casinos, how many location cards
-  for that casino are still undealt out of 9, and how many of that casino's
-  9 lots are still unbuilt.
-
----
-
 ## Implementation status
 
 This version implements building and turn-passing only. It does not yet

@@ -104,12 +104,18 @@ impl Default for Game {
 /// matching Go's `PubRender() = PlayerRender(CurrentPlayer)` exactly.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct PubState {
+    /// The full game state: every player's board, the current dice, phase,
+    /// turn supplies, and round/finish flags. This game has no hidden
+    /// information, so the public state is a complete clone of the game.
     pub game: Game,
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full game state, identical to the public state since there is no
+    /// hidden information.
     pub game: Game,
+    /// Which player index (0 through players-1) this state is being shown to.
     pub player: usize,
 }
 
@@ -1629,6 +1635,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

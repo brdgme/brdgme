@@ -119,14 +119,3 @@ player with the most money wins.
 | `price <amount>` | Set the asking price in a Fixed Price auction | `price 15` |
 | `buy` | Buy at the asking price in a Fixed Price auction | `buy` |
 | `pass` | Pass on the current auction | `pass` |
-
-## Reading the Display
-
-While an auction is active, the display shows who is auctioning what, and
-(except for Sealed auctions, where bids stay secret) the current highest bid
-and bidder.
-
-Below that, your money and hand are shown (money and hand contents are
-private - only you can see them). A **Players / Purchases** table shows every
-player's public purchases so far this round. An **Artist** table shows each
-artist's value per round (`.` for rounds not yet scored) and running total.

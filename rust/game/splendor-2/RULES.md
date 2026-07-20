@@ -32,8 +32,7 @@ regardless of player count; gem supply depends on player count:
 **Board** - 4 face-up cards per level, drawn from a shuffled deck of the
 remaining cards in that level. When a face-up card is bought or reserved it is
 immediately replaced from that level's deck (or the slot disappears once the
-deck is empty - see "Reading the Display" for what this does to column
-letters).
+deck is empty, so the remaining cards in that level shift position).
 
 ## Turn Structure
 
@@ -110,77 +109,6 @@ triggering player wasn't player 0.
 Whoever has the most prestige wins. If tied, the tiebreaker is the number of
 development cards owned - **more cards wins the tie**, not fewer.
 
-## Reading the Display
-
-```brdgme
-                   1     2    3    4 
-Nobles (3 each)  3-3-3  4-4  4-4  4-4
-
-             A        B        C         D   
-Level 1    Ruby 1    Ruby     Saph     Emer  
-             4       2-1     1-2-2     1-3-1 
-                                             
-Level 2    Onyx 3   Emer 3   Saph 1   Onyx 1 
-             6        6      2-2-3     3-2-2 
-                                             
-Level 3    Saph 5   Onyx 4   Ruby 5   Onyx 3 
-            7-3       7       7-3     3-3-5-3
-                                             
-Level 4     Emer                             
-Reserved     3                               
-
-
-               Diam    Saph    Emer    Ruby    Onyx    Gold
-You have         1       0       2       0       0      0  
-(card+token)   (0+1)   (0+0)   (1+1)   (0+0)   (0+0)       
-Tokens left      1       1       1       2       1      5  
-
-
-            Diam  Saph  Emer  Ruby  Onyx  Gold  Tok  Res  VP  Dev
-<Player 0>  0+1   0+0   1+1   0+0   0+0    0     2    1   0    1 
-<Player 1>  0+1   0+1   0+2   0+2   0+3    0     9    0   0    0 
-<Player 2>  0+2   0+3   0+1   0+1   0+1    0     8    0   0    0 
-```
-
-(Captured from the Rust CLI mid-game, 3-player, as the viewing player.)
-
-- **Nobles row** - one column per noble currently in play, numbered 1 to
-  `players + 1`. Each cell shows that noble's cost as gem-count pairs
-  separated by `-` (e.g. `4-4` means 4 of one gem and 4 of another). All
-  nobles are worth 3 prestige (shown in the row label).
-- **Level 1/2/3 rows** - the 4 face-up board cards per level, in columns
-  `A`-`D`. Each card is a pair of lines: the top line shows the resource
-  bonus it grants (abbreviated, e.g. `Ruby`) and its prestige value if
-  non-zero (e.g. `Saph 5` = a Sapphire-bonus card worth 5 prestige); the
-  bottom line shows its cost as gem-count pairs joined by `-`, in fixed
-  resource order (Diamond, Sapphire, Emerald, Ruby, Onyx). A blank row
-  follows each level as a spacer. **Column letters are positional, not
-  fixed** - once a level's deck runs out, buying/reserving a card removes
-  that slot instead of refilling it, so every later card in that row shifts
-  left/up a letter. Always re-read the current board before issuing a
-  `buy`/`reserve` command.
-- **Level 4 / Reserved row** - your own reserved cards (up to 3), shown the
-  same way as board cards, in slots that are always referenced as row `4`
-  (e.g. `buy A4`). Other players' reserve card contents are never shown to
-  you - only their reserve *count* (see "Res" column below). Your own view
-  always shows your reserve cards in full.
-- **Token tables** - "You have" is your total of each gem (bonuses + held
-  tokens combined); "(card+token)" breaks that down as `(bonus+token)` per
-  gem (Gold has no bonus so this line is blank there); "Tokens left" is the
-  bank's remaining supply of each gem/Gold. The pub (spectator) view omits
-  the "You have"/"(card+token)" rows entirely, showing only "Tokens left".
-- **Player table** - one row per player, bold for the viewing player. Columns
-  `Diam`/`Saph`/`Emer`/`Ruby`/`Onyx` show that player's `bonus+token` count
-  for each gem. `Gold` is tokens only (no bonus exists). `Tok` is their total
-  held tokens (gems + Gold, no bonuses). `Res` is how many cards they have
-  reserved (contents hidden unless it's you). `VP` is their current prestige.
-  `Dev` is how many development cards they've bought.
-- An affordable card/noble is not marked with any special symbol in the pub
-  view; when viewed as a specific player, an affordable-with-bonuses-alone
-  card is marked with a green `X` and an affordable-only-with-tokens-too card
-  with a yellow `X` before its bonus/prestige line (not shown in the render
-  above since no affordable cards were on the board at capture time).
-
 ## Commands
 
 | Command | Action | Example |
@@ -191,7 +119,3 @@ Tokens left      1       1       1       2       1      5
 | `reserve <loc>` | Reserve a board card and take 1 Gold if available | `reserve B2` |
 | `discard <token>...` | Discard one or more tokens (Gold allowed) down to 10 | `discard Onyx Gold` |
 | `visit <number>` | Choose which affordable noble visits you (only when 2+ are affordable) | `visit 2` |
-
-## Strategy Tips
-
-Tips will be added here as they are provided.

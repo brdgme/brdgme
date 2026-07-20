@@ -147,18 +147,27 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in the game.
     pub players: usize,
+    /// Index of the player currently taking their turn.
     pub current_player: usize,
+    /// Index of the player who went first this game.
     pub first_player: usize,
+    /// Banked score for each player.
     pub scores: Vec<i32>,
+    /// Points accumulated in the current turn, not yet banked.
     pub turn_score: i32,
+    /// Dice still available to roll this turn (values 1-6).
     pub remaining_dice: Vec<Die>,
+    /// Whether the game has ended.
     pub finished: bool,
+    /// Final standings once finished (empty while active).
     pub placings: Vec<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state; Farkle has no hidden information.
     pub public: PubState,
 }
 
@@ -450,6 +459,15 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

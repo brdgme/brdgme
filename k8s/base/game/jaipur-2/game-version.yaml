@@ -7,3 +7,4 @@ spec:
   typeName: Jaipur
   weight: 1.0
   blurb: "Trade goods and camels in the markets of Jaipur, timing your sales for maximum rupees. A brisk two-player duel of set collection and tempo."
+  interfaceVersion: 2

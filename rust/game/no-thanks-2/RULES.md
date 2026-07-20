@@ -31,16 +31,3 @@ Final score = card score - chips remaining. Lowest final score wins. Ties share 
 | `pass` | Spend a chip to refuse the current card | `pass` |
 | `take` | Take the current card and all chips on it | `take` |
 
-## Reading the Display
-
-- **Current card** - the card on the table, with the number of cards left in the deck
-- **Current chips** - chips accumulated on the current card
-- **Your hand** - your cards grouped into runs; cards one away from the current card are bolded
-- **Your chips** - your remaining chips
-- **Player table** - each player's cards (and final score, once the game ends)
-
-## Strategy
-
-- Cards one apart from each other are nearly free if joined - the adjacency bolding in your hand hints at which cards would complete or extend a run
-- Don't pass a low card unless you can afford to fight for it; other players will gladly take a 3 with a single chip
-- Chips are a hedge - a hand full of high singletons is far worse than the same hand with one joining card and a pile of chips

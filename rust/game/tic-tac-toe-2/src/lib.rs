@@ -57,15 +57,21 @@ pub struct Game {
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players (always 2).
     pub players: usize,
+    /// Index (0 or 1) of the player whose turn it is.
     pub current_player: usize,
+    /// Index (0 or 1) of the player who goes first (plays as X).
     pub start_player: usize,
+    /// The 3x3 game board. Each cell is Empty, X, or O.
     pub board: Board,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player (0 or 1) this private state belongs to.
     pub player: usize,
 }
 
@@ -253,6 +259,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

@@ -51,16 +51,3 @@ The game ends when fewer than two players have dice. The last player with dice r
 | `bid <quantity> <value>` | Raise the bid | `bid 2 5`, `bid 6 1` |
 | `call` | Call the current bid a lie | `call` |
 
-## Reading the Display
-
-- **Current bid** - the standing bid, or "first bid" if no bid yet
-- **Your dice** - the dice under your cup (only you see this)
-- **Player table** - how many dice each player has remaining
-
-When a call is made, the reveal log shows every active player's dice with the dice matching the bid value (and wild 1s) highlighted.
-
-## Strategy
-
-- Track what dice you hold and infer probabilities - your own dice tell you which bids are likely safe or risky
-- A high quantity bid puts pressure on the next player; a high value bid leverages wilds
-- Don't call too eagerly early in a round - the odds often favour a high bid being correct, especially with many total dice in play

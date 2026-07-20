@@ -175,21 +175,33 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Index (0 or 1) of the player whose turn it is.
     pub current_player: usize,
+    /// Number of rounds each player has won. First to 2 wins the game.
     pub round_wins: [u8; 2],
+    /// Goods currently available in the market (up to 5 cards). Includes camels.
     pub market: Vec<Good>,
+    /// Number of cards remaining in the draw deck.
     pub deck_len: usize,
+    /// Number of camels each player holds, indexed by player.
     pub camels: [u32; 2],
+    /// Number of non-camel goods in each player's hand, indexed by player.
     pub hand_sizes: [usize; 2],
+    /// Total number of tokens (good + bonus) each player has collected, indexed by player.
     pub token_counts: [usize; 2],
+    /// Remaining token values for each trade good. Tokens are taken from the front (highest values first).
     pub goods: HashMap<Good, Vec<u32>>,
+    /// Number of bonus tokens remaining for each sale size (3, 4, or 5).
     pub bonuses: HashMap<usize, usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player (0 or 1) this private state belongs to.
     pub player: usize,
+    /// Non-camel goods in this player's hand.
     pub hand: Vec<Good>,
 }
 
@@ -781,6 +793,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

@@ -7,3 +7,4 @@ spec:
   typeName: Farkle
   weight: 1.0
   blurb: "Roll six dice, set aside scoring combinations, and decide whether to press on for more points or bank before a bust wipes out the turn. A classic push-your-luck dice game."
+  interfaceVersion: 2

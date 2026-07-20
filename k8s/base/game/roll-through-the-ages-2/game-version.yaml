@@ -7,3 +7,4 @@ spec:
   typeName: Roll Through the Ages
   weight: 1.0
   blurb: "Roll dice to feed your people, raise monuments, and research developments through the Bronze Age. A quick civilization-building dice game."
+  interfaceVersion: 2

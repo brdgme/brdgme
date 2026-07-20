@@ -54,20 +54,31 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in the game, 2 through 9.
     pub players: usize,
+    /// Shared community cards dealt so far: 0 pre-flop, 3 after the flop, 4 after the turn, 5 after the river.
     pub community_cards: Deck,
+    /// Total money currently in the pot, the sum of all players' bets this hand.
     pub pot: i32,
+    /// Index of the player who is the dealer for this hand.
     pub current_dealer: usize,
+    /// Index of the player whose turn it is to act.
     pub current_player: usize,
+    /// Money each player still has available (not currently bet), indexed by player.
     pub player_money: Vec<i32>,
+    /// Amount each player has bet in the current hand, indexed by player. The largest of these is the current bet to call.
     pub bets: Vec<i32>,
+    /// Whether each player has folded this hand, indexed by player. A folded player cannot win the pot.
     pub folded_players: Vec<bool>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this private state belongs to.
     pub player: usize,
+    /// This player's two private (hole) cards, visible only to them.
     pub hand: Deck,
 }
 
@@ -783,6 +794,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

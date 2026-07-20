@@ -43,10 +43,3 @@ The game ends at the end of a round where at least one player has 66 or more bul
 
 Rows are numbered 1 to 4.
 
-## Reading the Display
-
-- **Board** - the 4 rows, each with up to 5 cards and a running bullhead total
-- **Your hand** - the cards in your hand (only you see this)
-- **Legend** - bullhead values by colour
-- **Score table** - each player's taken card count and total bullheads
-- **Points to end** - how many more bullheads the leader needs to trigger game end

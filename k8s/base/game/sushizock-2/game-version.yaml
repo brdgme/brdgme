@@ -7,3 +7,4 @@ spec:
   typeName: Sushizock im Gockelwok
   weight: 1.0
   blurb: "Roll dice to grab tasty sushi tiles and dodge the fish bones, stealing from rivals when the dice allow. A push-your-luck tile-snatching dice game."
+  interfaceVersion: 2

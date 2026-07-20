@@ -7,3 +7,4 @@ spec:
   typeName: Sushi Go
   weight: 1.0
   blurb: "Draft sushi dishes from hands passed around the table, assembling combos before your neighbours snatch the pieces you need. A light, speedy drafting game."
+  interfaceVersion: 2

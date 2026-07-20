@@ -37,18 +37,27 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Total number of players in the game (including eliminated).
     pub players: usize,
+    /// Index of the player whose turn it is to bid or call.
     pub current_player: usize,
+    /// Quantity (number of dice) in the current bid; 0 if no bid yet.
     pub bid_quantity: i32,
+    /// Face value (1-6) in the current bid; 0 if no bid yet.
     pub bid_value: i32,
+    /// Index of the player who made the current bid.
     pub bid_player: usize,
+    /// Number of dice each player still has, by seat index.
     pub remaining_dice: Vec<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state visible to all players.
     pub public: PubState,
+    /// This player's seat index.
     pub player: usize,
+    /// Values of this player's dice (private, each 1-6).
     pub dice: Vec<u8>,
 }
 
@@ -327,6 +336,16 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

@@ -191,22 +191,35 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct PubState {
+    /// Number of real players in this game (2 to 5).
     pub players: usize,
+    /// Total number of player slots including dummy (3 in 2-player, otherwise same as players).
     pub all_players: usize,
+    /// Current round number, 1 through 3.
     pub round: usize,
+    /// Index of the player currently controlling the dummy (2-player only).
     pub controller: usize,
+    /// Cards played to each player's table, indexed by player slot. Puddings persist across rounds.
     pub played: Vec<Vec<Card>>,
+    /// Cumulative points for each player slot across all rounds.
     pub player_points: Vec<i32>,
+    /// True when all 3 rounds are complete and the game is over.
     pub finished: bool,
+    /// Final scores for each real player. Only populated when the game is finished; empty during play.
     pub final_scores: Vec<i32>,
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this private state belongs to.
     pub player: usize,
+    /// Cards currently in this player's hand. Card::Played marks slots already used this hand.
     pub hand: Vec<Card>,
+    /// Cards this player has chosen to play this hand, or None if they haven't played yet.
     pub playing: Option<Vec<Card>>,
+    /// Cards the dummy has been assigned this hand (2-player only, visible to controller).
     pub dummy_playing: Option<Vec<Card>>,
 }
 
@@ -871,6 +884,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

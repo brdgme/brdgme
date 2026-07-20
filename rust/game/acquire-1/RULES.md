@@ -157,30 +157,6 @@ dummy competes for bonuses at game end the same way.
 
 ---
 
-## Board rendering
-
-The board is drawn as a grid. Each cell is 5 characters wide, 2 lines tall.
-
-- **Empty cells**: alternating light grey shades (checkerboard pattern). The
-  cell name (e.g. `C4`) is shown in dark grey text.
-- **Your playable tiles**: highlighted in **pink**. The cell name is shown in
-  bold. These are the tiles you can legally play this turn.
-- **Unincorporated tiles** (placed but not yet part of a corporation): solid
-  dark grey background, no label.
-- **Corporation tiles**: filled with the corporation's color. The corporation
-  name abbreviation and current share price are shown in contrasting text
-  over the widest contiguous run of that corporation's tiles in each row.
-
-Below the board:
-- A status line showing whether the game end can be triggered.
-- Remaining draw tiles count.
-- A **corporation table**: Corporation | Size | Value | Shares (in bank) |
-  Minor bonus | Major bonus. Size 0 means the corporation is not yet founded.
-- A **player table**: Player | Cash | shares held per corporation (columns
-  in corporation order: WO, SA, FE, IM, AM, CO, TO).
-
----
-
 ## Command reference
 
 | Situation             | Command                          | Example                    |
@@ -200,33 +176,3 @@ American, `Co` for Continental, `To` for Tower, `Fe` for Festival, `Im` for
 Imperial, `Wo` for Worldwide, `Sa` for Sackson).
 
 Only the commands valid for the current game phase will be accepted.
-
----
-
-## Strategy notes
-
-- Owning the most shares in a corporation about to be acquired pays a large
-  primary bonus — worth more than holding shares in a large safe corporation.
-- Trading 2-for-1 into the surviving corporation after a merger is often
-  better than selling, since you gain a share in a now-larger corporation at
-  no cost.
-- The corporation table shows how many shares remain in the bank. If only 1-2
-  shares are left, others may be blocked from buying in.
-- Safe corporations (11+ tiles) cannot be acquired, so their bonuses only pay
-  at game end.
-- Each corporation has exactly 25 shares total. Owning 13 guarantees majority
-  bonus - once you have secured majority there is no need to buy more solely
-  for that purpose.
-- Buying into a small corporation early is a strong investment: as it grows,
-  share value increases, you benefit from shareholder bonuses if it is acquired,
-  and you can trade shares into the surviving corporation at a favourable rate.
-- Since players can only buy 3 shares per turn, a lead of 4 shares in a
-  corporation is generally safe majority. The exception is mergers, where
-  players may trade shares into the surviving corporation in bulk.
-- Running out of money is very dangerous. Without cash you cannot buy shares,
-  which locks you out of bonuses. If short on cash, prioritise triggering or
-  participating in a merger where you hold shares in the acquired corporation,
-  to earn a bonus and free up capital.
-- Concentrating all shares in one corporation is high risk. Aim to hold minor
-  or major shareholder position in as many corporations as possible to maximise
-  the number of bonuses you receive.

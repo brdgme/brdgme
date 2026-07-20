@@ -52,21 +52,33 @@ pub struct Game {
 /// public consequences (discards, points, elimination/protection) are.
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in the game, 2 through 4.
     pub players: usize,
+    /// Number of cards left in the draw pile. When 0, the round ends after the current turn.
     pub deck_remaining: usize,
+    /// Cards each player has discarded this round, indexed by player. Each inner vec is in discard order.
     pub discards: Vec<Vec<Card>>,
+    /// Points accumulated toward winning, indexed by player.
     pub player_points: Vec<usize>,
+    /// Index of the player whose turn it is.
     pub current_player: usize,
+    /// Whether each player is eliminated from the current round, indexed by player.
     pub eliminated: Vec<bool>,
+    /// Whether each player is protected by the Handmaid until their next turn, indexed by player.
     pub protected: Vec<bool>,
+    /// Points required to win the game, based on player count.
     pub end_score: usize,
+    /// The highest point total held by any player.
     pub leader_points: usize,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this private state belongs to.
     pub player: usize,
+    /// The cards currently in this player's hand.
     pub hand: Vec<Card>,
 }
 
@@ -799,6 +811,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

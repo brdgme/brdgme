@@ -7,3 +7,4 @@ spec:
   typeName: "Texas Hold'em"
   weight: 2.0
   blurb: "No-limit Texas hold'em poker: bet, bluff, and go all-in to take every chip at the table."
+  interfaceVersion: 2

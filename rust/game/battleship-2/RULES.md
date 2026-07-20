@@ -33,8 +33,4 @@ The game ends when one player has all of their ship cells hit (zero remaining). 
 
 Ship names can be abbreviated to any unambiguous prefix (e.g. "sub" for submarine, "bat" for battleship). Locations are a letter A-J followed by a number 1-10 (e.g. B3, J10). Directions can be abbreviated (e.g. "u" for up, "r" for right).
 
-## Reading the Display
 
-- **Your board** - your own grid with ships shown as grey blocks, hits as red, misses as grey XX
-- **Enemy board** - the opponent's grid with only hits and misses visible (ships hidden until the game ends)
-- **Ships left to place** - during setup, the ships you still need to place with their sizes in brackets

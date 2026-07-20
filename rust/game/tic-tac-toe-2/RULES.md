@@ -26,24 +26,8 @@ The game ends immediately when one player has three matching marks in a horizont
 
 The player with a line of three places first and receives 1 point. The other player places second and receives 0 points. In a draw, both players share first place and receive 0 points.
 
-## Reading the Display
-
-The three display rows are the three board rows from top to bottom. Blue letters show empty squares and are the values accepted by `play`. Played marks appear as bold lowercase `x` or `o`, with gray `|` separators between columns. The entire board is public; neither player has hidden information.
-
-Initial display:
-
-```brdgme
-{{fg rgb(25,118,210)}}a{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}{{fg rgb(25,118,210)}}b{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}{{fg rgb(25,118,210)}}c{{/fg}}
-{{fg rgb(25,118,210)}}d{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}{{fg rgb(25,118,210)}}e{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}{{fg rgb(25,118,210)}}f{{/fg}}
-{{fg rgb(25,118,210)}}g{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}{{fg rgb(25,118,210)}}h{{/fg}}{{fg rgb(97,97,97)}}|{{/fg}}{{fg rgb(25,118,210)}}i{{/fg}}
-```
-
 ## Commands
 
 | Command | Action | Example |
 |---|---|---|
 | `play <square>` | Place your mark in an empty square from `a` through `i` | `play e` |
-
-## Strategy Tips
-
-No approved strategy tips are available yet.

@@ -59,11 +59,17 @@ pub struct Game {
 /// contents (the game's one piece of hidden information).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PubPlayer {
+    /// Permanent gem bonuses from development cards this player owns, one per owned card of that gem. Discounts card costs and attracts nobles.
     pub bonuses: Cost,
+    /// Gem and Gold tokens this player is currently holding.
     pub tokens: Cost,
+    /// Nobles that have visited this player, each worth 3 prestige.
     pub nobles: Vec<Noble>,
+    /// Number of development cards this player has bought.
     pub card_count: usize,
+    /// Number of cards this player has reserved. The reserved cards themselves are hidden.
     pub reserve_count: usize,
+    /// This player's current prestige score.
     pub prestige: i32,
 }
 
@@ -72,13 +78,21 @@ pub struct PubPlayer {
 /// contents are never shown for any player in the pub view.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in the game, 2 through 4.
     pub players: usize,
+    /// Face-up development cards available to buy or reserve, indexed by level (0 = level 1, 1 = level 2, 2 = level 3). Each level holds up to 4 cards; a slot disappears once its deck is empty.
     pub board: Vec<Vec<Card>>,
+    /// Nobles currently available to visit, each worth 3 prestige and requiring a cost paid in permanent card bonuses.
     pub nobles: Vec<Noble>,
+    /// The bank's remaining supply of each gem and Gold token.
     pub tokens: Cost,
+    /// Public info for each player, indexed by player number (0-based).
     pub player_boards: Vec<PubPlayer>,
+    /// Index (0-based) of the player whose turn it is.
     pub current_player: usize,
+    /// Current turn phase: Main, Visit, or Discard.
     pub phase: Phase,
+    /// True once the game has ended.
     pub finished: bool,
 }
 
@@ -86,8 +100,11 @@ pub struct PubState {
 /// plan - the viewing player's own full reserve, the only hidden info.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player (0-based) this private state belongs to.
     pub player: usize,
+    /// This player's own reserved cards, up to 3. The only hidden information in the game; other players see only the count.
     pub reserve: Vec<Card>,
 }
 
@@ -678,6 +695,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

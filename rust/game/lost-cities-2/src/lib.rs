@@ -73,21 +73,33 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players in this game (2 or 3).
     pub players: usize,
+    /// Current round number, 1 through 3.
     pub round: usize,
+    /// True when all 3 rounds are complete and the game is over.
     pub is_finished: bool,
+    /// Current turn phase: PlayOrDiscard or DrawOrTake.
     pub phase: Phase,
+    /// Number of cards left in the draw pile. When 0, the round ends.
     pub deck_remaining: usize,
+    /// Top card value on each expedition's shared discard pile. Only expeditions with discards appear.
     pub discards: HashMap<Expedition, Value>,
+    /// Scores indexed by player, then by round. Sum across rounds for cumulative score.
     pub scores: Vec<Vec<isize>>,
+    /// Cards played to expeditions, indexed by player. Each card has an expedition and value.
     pub expeditions: Vec<Vec<Card>>,
+    /// Index of the player whose turn it is.
     pub current_player: usize,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this private state belongs to.
     pub player: usize,
+    /// Cards currently in this player's hand, sorted by expedition then value.
     pub hand: Vec<Card>,
 }
 
@@ -631,6 +643,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

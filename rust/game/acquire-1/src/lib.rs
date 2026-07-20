@@ -83,12 +83,19 @@ impl Default for Phase {
 
 #[derive(Default, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct PubState {
+    /// Current game phase determining what actions are available.
     pub phase: Phase,
+    /// Public information for each player: cash and share holdings.
     pub players: Vec<PubPlayer>,
+    /// The 9x12 tile grid showing placed tiles and corporation ownership.
     pub board: Board,
+    /// Number of unowned (bank) shares remaining per corporation.
     pub shares: HashMap<Corp, usize>,
+    /// Number of tiles left in the draw bag.
     pub remaining_tiles: usize,
+    /// Whether the final round has been triggered.
     pub last_turn: bool,
+    /// Whether the game has ended and final scoring is complete.
     pub finished: bool,
 }
 
@@ -129,8 +136,11 @@ impl PubState {
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state visible to all players.
     pub public: PubState,
+    /// This player's seat index.
     pub player: usize,
+    /// The player's private hand of tiles (board positions).
     pub tiles: Vec<Loc>,
 }
 
@@ -307,6 +317,18 @@ able to win the game.",
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 
@@ -1224,7 +1246,9 @@ impl From<Player> for PubPlayer {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PubPlayer {
+    /// The player's current cash on hand.
     pub money: usize,
+    /// Number of shares the player holds per corporation.
     pub shares: HashMap<Corp, usize>,
 }
 

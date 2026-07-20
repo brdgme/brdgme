@@ -44,18 +44,4 @@ Placings are by brain count, highest first; ties share a place.
 | `roll` | Push your luck and roll the dice |
 | `keep` | Be a coward and keep your brains |
 
-## Reading the Display
 
-- **Brains** - brains eaten this turn (banked on `keep`)
-- **Shots** - shotguns taken this turn (3 ends your turn)
-- **Runners** - dice showing footprints, re-rolled next `roll`
-- **Kept** - dice set aside this turn (brains and shotguns)
-- **In cup** - dice remaining in the cup, by colour
-- **Scores** - each player's banked brain total
-
-## Strategy
-
-- Green dice are your friend; reach for them when the cup is mixed
-- Three shotguns is the only way to bust - count them as you go
-- Banking at 10-12 brains is often safer than chasing 13 with red dice in the cup
-- The cup refill returns your shotguns too, so a long turn brings red dice back into play

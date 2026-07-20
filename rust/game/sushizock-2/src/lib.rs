@@ -82,22 +82,35 @@ pub struct Game {
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct PubState {
+    /// Number of players in this game (2 to 5).
     pub players: usize,
+    /// Index of the player whose turn it is.
     pub current_player: usize,
+    /// Blue tiles remaining in the central row, in order. Each tile has a positive value (1-6).
     pub blue_tiles: Vec<Tile>,
+    /// Red tiles remaining in the central row, in order. Each tile has a negative value (-1 to -4).
     pub red_tiles: Vec<Tile>,
+    /// Blue tiles collected by each player, indexed by player. Order matters for stealing.
     pub player_blue_tiles: Vec<Vec<Tile>>,
+    /// Red tiles collected by each player, indexed by player. Order matters for stealing.
     pub player_red_tiles: Vec<Vec<Tile>>,
+    /// Dice currently being rolled (not yet kept). Empty after final roll.
     pub rolled_dice: Vec<DieFace>,
+    /// Dice set aside (kept) during re-rolls. Combined with rolled_dice for final resolution.
     pub kept_dice: Vec<DieFace>,
+    /// Number of re-rolls remaining this turn (starts at 2).
     pub remaining_rolls: i32,
+    /// True when both tile piles are empty and the game is over.
     pub finished: bool,
+    /// Final scores for each player. Only populated when the game is finished; empty during play.
     pub final_scores: Vec<i32>,
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this private state belongs to.
     pub player: usize,
 }
 
@@ -761,6 +774,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

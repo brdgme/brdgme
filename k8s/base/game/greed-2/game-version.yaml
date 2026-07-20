@@ -7,3 +7,4 @@ spec:
   typeName: Greed
   weight: 1.0
   blurb: "Roll for cash and loot, banking your haul before a bad roll takes it all away. A push-your-luck dice game about knowing when to stop."
+  interfaceVersion: 2

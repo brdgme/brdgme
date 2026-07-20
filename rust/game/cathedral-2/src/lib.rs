@@ -42,11 +42,17 @@ pub struct Game {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PubState {
+    /// Number of players (always 2).
     pub players: usize,
+    /// Board state keyed by location string (e.g. "A1"). Each tile has a player, type, and owner.
     pub board: HashMap<String, Tile>,
+    /// Which pieces have been played, indexed by [player][piece_index].
     pub played_pieces: Vec<Vec<bool>>,
+    /// Index of the player whose turn it is.
     pub current_player: usize,
+    /// True when no open (unowned, unoccupied) tiles remain; simultaneous mode is active.
     pub no_open_tiles: bool,
+    /// True when neither player can place any more pieces and the game is over.
     pub finished: bool,
 }
 
@@ -55,7 +61,9 @@ pub struct PubState {
 /// `PubRender` verbatim).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
+    /// The full public game state.
     pub public: PubState,
+    /// Which player this state belongs to.
     pub player: usize,
 }
 
@@ -516,6 +524,18 @@ impl Gamer for Game {
 
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
+    }
+
+    fn data_docs() -> String {
+        include_str!("../DATA_DOCS.md").to_string()
+    }
+
+    fn basic_strategy() -> String {
+        include_str!("../BASIC_STRATEGY.md").to_string()
+    }
+
+    fn advanced_strategy() -> String {
+        include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
 }
 

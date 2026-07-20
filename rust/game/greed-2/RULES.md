@@ -58,14 +58,4 @@ The game ends when play returns to the first player and at least one player has 
 | `roll` | Re-roll the remaining dice | `roll` |
 | `done` | Bank your turn score (auto-scores the rest) | `done` |
 
-## Reading the Display
 
-- **Remaining dice** - the dice still in front of you this roll
-- **Score this turn** - points accumulated this turn, banked on `done`
-- **Player table** - each player's total score; the starting player is marked
-
-## Strategy
-
-- The single `D` (100) and single `G` (50) make otherwise bad rolls worth something; grab them before re-rolling
-- Six of a kind and the straight both clear at 5000 or 1000 - watch for them on full re-rolls
-- `done` auto-takes every remaining scoring combo, so banking late can yield more than you expect - but pushing for one more roll risks busting and losing it all
