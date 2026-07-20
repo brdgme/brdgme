@@ -49,6 +49,56 @@ pub fn browser_url(game_id: uuid::Uuid) -> String {
     format!("{base}/games/{game_id}")
 }
 
+/// The stable thread subject: "{Game type} with {opponent names}".
+pub fn game_subject(
+    ge: &crate::db::GameExtended,
+    recipient_player: &crate::db::GamePlayerExtended,
+) -> String {
+    let opponent_names = ge
+        .game_players
+        .iter()
+        .filter(|p| p.game_player.id != recipient_player.game_player.id)
+        .map(|p| p.name().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{} with {}", ge.game_type.name, opponent_names)
+}
+
+/// Renders the board markup + "You can" command usages for `position`'s view of
+/// `ge`, best-effort: a failed game-service render degrades to absent blocks
+/// rather than failing the caller.
+pub async fn render_board_and_you_can(
+    http_client: &reqwest::Client,
+    ge: &crate::db::GameExtended,
+    position: usize,
+) -> (Option<String>, Option<Vec<String>>) {
+    let render_resp = crate::game::client::render(
+        http_client,
+        &ge.game_version.uri,
+        &ge.game_version.name,
+        ge.game.game_state.clone(),
+        Some(position),
+    )
+    .await;
+    match render_resp {
+        Ok(resp) => {
+            let you_can = resp.command_spec.as_ref().map(|spec| {
+                let nodes = brdgme_game::command::doc::render(&spec.doc());
+                let s = brdgme_markup::to_string(&nodes);
+                s.split('\n')
+                    .filter(|l| !l.is_empty())
+                    .map(String::from)
+                    .collect()
+            });
+            (Some(resp.render), you_can)
+        }
+        Err(e) => {
+            tracing::error!("Failed to render game {}: {}", ge.game.id, e);
+            (None, None)
+        }
+    }
+}
+
 fn now_utc() -> time::PrimitiveDateTime {
     let t = time::OffsetDateTime::now_utc();
     time::PrimitiveDateTime::new(t.date(), t.time())
@@ -69,14 +119,7 @@ async fn build_content(
     recipient_player: &crate::db::GamePlayerExtended,
     kind: NotifyKind,
 ) -> crate::email::render::EmailContent {
-    let opponent_names = ge
-        .game_players
-        .iter()
-        .filter(|p| p.game_player.id != recipient_player.game_player.id)
-        .map(|p| p.name().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let subject = format!("{} with {}", ge.game_type.name, opponent_names);
+    let subject = game_subject(ge, recipient_player);
 
     let header = Some(match kind {
         NotifyKind::Turn => turn_header_text(recipient_player.name()),
@@ -110,32 +153,12 @@ async fn build_content(
             }
         };
 
-    let render_resp = crate::game::client::render(
+    let (board, you_can) = render_board_and_you_can(
         http_client,
-        &ge.game_version.uri,
-        &ge.game_version.name,
-        ge.game.game_state.clone(),
-        Some(recipient_player.game_player.position as usize),
+        ge,
+        recipient_player.game_player.position as usize,
     )
     .await;
-
-    let (board, you_can) = match render_resp {
-        Ok(resp) => {
-            let you_can = resp.command_spec.as_ref().map(|spec| {
-                let nodes = brdgme_game::command::doc::render(&spec.doc());
-                let s = brdgme_markup::to_string(&nodes);
-                s.split('\n')
-                    .filter(|l| !l.is_empty())
-                    .map(String::from)
-                    .collect()
-            });
-            (Some(resp.render), you_can)
-        }
-        Err(e) => {
-            tracing::error!("Failed to render game {}: {}", ge.game.id, e);
-            (None, None)
-        }
-    };
 
     crate::email::render::EmailContent {
         subject,

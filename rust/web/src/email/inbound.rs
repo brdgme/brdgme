@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+use axum::extract::State;
+
+use crate::state::AppState;
+
 pub fn parse_reply_commands(text: &str) -> Vec<String> {
     let mut commands = Vec::new();
     for line in text.lines() {
@@ -149,6 +153,360 @@ pub fn verify_webhook(
         svix::webhooks::WebhookError::InvalidTimestamp => VerifyError::InvalidTimestamp,
         other => VerifyError::Other(other.to_string()),
     })
+}
+
+#[derive(serde::Deserialize)]
+struct ResendEvent {
+    #[serde(rename = "type")]
+    event_type: String,
+    data: ResendInboundData,
+}
+
+#[derive(serde::Deserialize)]
+struct ResendInboundData {
+    email_id: String,
+    from: String,
+    #[serde(default)]
+    to: Vec<String>,
+    #[serde(default)]
+    received_for: Vec<String>,
+}
+
+/// First recipient address that parses to a routing token wins; `to` is checked
+/// before `received_for`.
+pub fn select_route(to: &[String], received_for: &[String]) -> Option<InboundRoute> {
+    to.iter()
+        .chain(received_for.iter())
+        .find_map(|addr| parse_reply_address(addr))
+}
+
+pub enum CommandLoopOutcome<E> {
+    AllExecuted(usize),
+    Failed { index: usize, error: E },
+}
+
+/// Runs `commands` in order through `execute`, stopping at the first error.
+pub async fn run_commands_in_order<F, Fut, E>(
+    commands: &[String],
+    mut execute: F,
+) -> CommandLoopOutcome<E>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<(), E>>,
+{
+    for (index, cmd) in commands.iter().enumerate() {
+        if let Err(error) = execute(cmd.clone()).await {
+            return CommandLoopOutcome::Failed { index, error };
+        }
+    }
+    CommandLoopOutcome::AllExecuted(commands.len())
+}
+
+pub fn confirmed_header_text(count: usize) -> String {
+    match count {
+        1 => "Move confirmed.".to_string(),
+        n => format!("{n} moves confirmed."),
+    }
+}
+
+pub fn no_command_header_text() -> String {
+    "I could not find a command in your email.".to_string()
+}
+
+pub fn error_reply_text(err: &crate::game::ExecuteCommandError) -> String {
+    use crate::game::ExecuteCommandError;
+    match err {
+        ExecuteCommandError::UserError(msg) => msg.clone(),
+        ExecuteCommandError::Conflict => {
+            "Your move could not be applied because the game changed; please try again.".to_string()
+        }
+        ExecuteCommandError::Other(_) => {
+            "An unexpected error occurred while processing your move.".to_string()
+        }
+    }
+}
+
+struct EmailPlayer {
+    game_player_id: uuid::Uuid,
+    game_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    position: i32,
+}
+
+async fn find_game_player_by_email_token(
+    pool: &sqlx::PgPool,
+    token: &str,
+) -> anyhow::Result<Option<EmailPlayer>> {
+    let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, uuid::Uuid, i32)>(
+        "SELECT id, game_id, user_id, position FROM game_players WHERE email_token = $1 AND user_id IS NOT NULL",
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await?;
+    Ok(
+        row.map(|(game_player_id, game_id, user_id, position)| EmailPlayer {
+            game_player_id,
+            game_id,
+            user_id,
+            position,
+        }),
+    )
+}
+
+async fn from_matches_verified_email(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    from: &str,
+) -> anyhow::Result<bool> {
+    let (exists,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM user_emails WHERE user_id = $1 AND verified_at IS NOT NULL AND LOWER(email) = LOWER($2))",
+    )
+    .bind(user_id)
+    .bind(from)
+    .fetch_one(pool)
+    .await?;
+    Ok(exists)
+}
+
+/// Insert-or-skip idempotency marker. Returns true if THIS call inserted the row
+/// (proceed); false if it already existed (a duplicate delivery -> skip).
+async fn mark_event_processed(pool: &sqlx::PgPool, event_id: &str) -> sqlx::Result<bool> {
+    let result = sqlx::query(
+        "INSERT INTO processed_webhook_events (event_id) VALUES ($1) ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(event_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+fn header_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+/// `POST /api/webhooks/resend` - Resend inbound-email webhook. Verifies the
+/// svix signature, dedupes on `svix-id`, then routes the reply by its token.
+pub async fn resend_webhook(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::http::StatusCode {
+    use axum::http::StatusCode;
+
+    let secret = match std::env::var("RESEND_WEBHOOK_SECRET") {
+        Ok(s) if !s.is_empty() => s,
+        _ => {
+            tracing::error!("resend webhook: RESEND_WEBHOOK_SECRET is not configured");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    let (Some(msg_id), Some(timestamp), Some(signature)) = (
+        header_value(&headers, "svix-id"),
+        header_value(&headers, "svix-timestamp"),
+        header_value(&headers, "svix-signature"),
+    ) else {
+        tracing::warn!("resend webhook: missing svix headers");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    if let Err(e) = verify_webhook(&secret, &msg_id, &signature, &timestamp, &body) {
+        tracing::warn!("resend webhook: signature verification failed: {e}");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    match mark_event_processed(&state.pool, &msg_id).await {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::OK,
+        Err(e) => {
+            tracing::error!("resend webhook: idempotency check failed: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    }
+
+    let event: ResendEvent = match serde_json::from_slice(&body) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("resend webhook: failed to parse event payload: {e}");
+            return StatusCode::OK;
+        }
+    };
+    if event.event_type != "email.received" {
+        tracing::info!("resend webhook: ignoring event type {}", event.event_type);
+        return StatusCode::OK;
+    }
+
+    let Some(route) = select_route(&event.data.to, &event.data.received_for) else {
+        return StatusCode::OK;
+    };
+    match route {
+        InboundRoute::Game(token) => {
+            handle_game_reply(&state, &token, &event.data.from, &event.data.email_id).await;
+        }
+        InboundRoute::Invite(token) => {
+            tracing::info!(
+                "resend webhook: invite reply for token {token} handled by a later unit (#24)"
+            );
+        }
+        InboundRoute::Settings(token) => {
+            tracing::info!(
+                "resend webhook: settings reply for token {token} handled by a later unit (#22c)"
+            );
+        }
+    }
+    StatusCode::OK
+}
+
+async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: &str) {
+    let pool = &state.pool;
+
+    let player = match find_game_player_by_email_token(pool, token).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            tracing::info!("resend webhook: unknown game token; no response");
+            return;
+        }
+        Err(e) => {
+            tracing::error!("resend webhook: token lookup failed: {e}");
+            return;
+        }
+    };
+
+    match from_matches_verified_email(pool, player.user_id, from).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!("resend webhook: From does not match a verified address; no response");
+            return;
+        }
+        Err(e) => {
+            tracing::error!("resend webhook: From verification failed: {e}");
+            return;
+        }
+    }
+
+    let api_key = match std::env::var("RESEND_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            tracing::error!("resend webhook: RESEND_API_KEY not configured; cannot fetch body");
+            return;
+        }
+    };
+    let source = ResendInbound {
+        api_key,
+        http: state.http_client.clone(),
+    };
+    let raw = match source.fetch_raw_email(email_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
+            return;
+        }
+    };
+    let text = extract_plain_text(&raw).unwrap_or_default();
+    let commands = parse_reply_commands(&text);
+
+    let header = if commands.is_empty() {
+        no_command_header_text()
+    } else {
+        let outcome = run_commands_in_order(&commands, |cmd| {
+            crate::game::execute_command(
+                &state.pool,
+                &state.http_client,
+                &state.broadcaster,
+                &state.jetstream,
+                player.game_id,
+                player.position as usize,
+                cmd,
+            )
+        })
+        .await;
+        match outcome {
+            CommandLoopOutcome::AllExecuted(n) => confirmed_header_text(n),
+            CommandLoopOutcome::Failed { error, .. } => error_reply_text(&error),
+        }
+    };
+
+    send_game_reply_response(state, &player, token, from, header).await;
+}
+
+async fn send_game_reply_response(
+    state: &AppState,
+    player: &EmailPlayer,
+    token: &str,
+    from: &str,
+    header: String,
+) {
+    let pool = &state.pool;
+    let ge = match crate::db::find_game_extended(pool, player.game_id).await {
+        Ok(Some(ge)) => ge,
+        Ok(None) => {
+            tracing::warn!(
+                "resend webhook: game {} not found for response",
+                player.game_id
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!(
+                "resend webhook: failed to load game {} for response: {e}",
+                player.game_id
+            );
+            return;
+        }
+    };
+    let recipient_player = match ge
+        .game_players
+        .iter()
+        .find(|p| p.game_player.id == player.game_player_id)
+    {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                "resend webhook: player {} not in game {}",
+                player.game_player_id,
+                player.game_id
+            );
+            return;
+        }
+    };
+    let (board, you_can) = crate::email::notify::render_board_and_you_can(
+        &state.http_client,
+        &ge,
+        player.position as usize,
+    )
+    .await;
+    let content = crate::email::render::EmailContent {
+        subject: crate::email::notify::game_subject(&ge, recipient_player),
+        header: Some(header),
+        digest: None,
+        board,
+        you_can,
+        browser_url: Some(crate::email::notify::browser_url(ge.game.id)),
+        footer: Some("Reply to this email to play, or unsubscribe anytime.".to_string()),
+    };
+    let theme_slug =
+        match crate::email::outbound::fetch_email_recipient(pool, player.game_player_id).await {
+            Ok(Some(r)) => r.theme_slug,
+            _ => None,
+        };
+    let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
+    let players: Vec<brdgme_markup::Player> = ge
+        .game_players
+        .iter()
+        .map(|p| crate::email::render::player_for_slot(p.name(), &p.game_player.color, palette))
+        .collect();
+    let rendered = crate::email::render::render_game_email(
+        &content,
+        palette,
+        &players,
+        &format!("game-{}", ge.game.id),
+        false,
+        &crate::email::notify::reply_address(token),
+    );
+    crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 
 #[cfg(all(test, feature = "ssr"))]
@@ -322,6 +680,260 @@ Just a plain body";
                 body
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn select_route_prefers_to_then_received_for() {
+        let to = vec!["g-aaa@play.brdg.me".to_string()];
+        let rf = vec!["g-bbb@play.brdg.me".to_string()];
+        assert_eq!(
+            select_route(&to, &rf),
+            Some(InboundRoute::Game("aaa".to_string()))
+        );
+        let to2 = vec!["hello@play.brdg.me".to_string()];
+        assert_eq!(
+            select_route(&to2, &rf),
+            Some(InboundRoute::Game("bbb".to_string()))
+        );
+    }
+
+    #[test]
+    fn select_route_none_when_unparseable() {
+        let to = vec!["nope@play.brdg.me".to_string()];
+        let rf = vec!["also-nope@example.com".to_string()];
+        assert_eq!(select_route(&to, &rf), None);
+        assert_eq!(select_route(&[], &[]), None);
+    }
+
+    #[test]
+    fn select_route_routes_invite_and_settings() {
+        assert_eq!(
+            select_route(&["i-xyz@play.brdg.me".to_string()], &[]),
+            Some(InboundRoute::Invite("xyz".to_string()))
+        );
+        assert_eq!(
+            select_route(&[], &["s-tok@play.brdg.me".to_string()]),
+            Some(InboundRoute::Settings("tok".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn run_commands_all_succeed() {
+        let cmds: Vec<String> = vec!["a".into(), "b".into(), "c".into()];
+        let outcome: CommandLoopOutcome<String> =
+            run_commands_in_order(&cmds, |_cmd| async { Ok::<(), String>(()) }).await;
+        match outcome {
+            CommandLoopOutcome::AllExecuted(n) => assert_eq!(n, 3),
+            CommandLoopOutcome::Failed { .. } => panic!("expected success"),
+        }
+    }
+
+    #[tokio::test]
+    async fn run_commands_stops_at_first_error() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cmds: Vec<String> = vec!["ok".into(), "bad".into(), "never".into()];
+        let seen = Arc::new(AtomicUsize::new(0));
+        let seen2 = seen.clone();
+        let outcome: CommandLoopOutcome<String> = run_commands_in_order(&cmds, move |cmd| {
+            let seen2 = seen2.clone();
+            async move {
+                seen2.fetch_add(1, Ordering::SeqCst);
+                if cmd == "bad" {
+                    Err("boom".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        match outcome {
+            CommandLoopOutcome::Failed { index, error } => {
+                assert_eq!(index, 1);
+                assert_eq!(error, "boom");
+            }
+            CommandLoopOutcome::AllExecuted(_) => panic!("expected failure"),
+        }
+        assert_eq!(seen.load(Ordering::SeqCst), 2); // stopped before "never"
+    }
+
+    #[tokio::test]
+    async fn run_commands_empty_list() {
+        let cmds: Vec<String> = vec![];
+        let outcome: CommandLoopOutcome<String> =
+            run_commands_in_order(&cmds, |_cmd| async { Ok::<(), String>(()) }).await;
+        match outcome {
+            CommandLoopOutcome::AllExecuted(n) => assert_eq!(n, 0),
+            CommandLoopOutcome::Failed { .. } => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn confirmed_header_text_singular_and_plural() {
+        assert_eq!(confirmed_header_text(1), "Move confirmed.");
+        assert_eq!(confirmed_header_text(3), "3 moves confirmed.");
+    }
+
+    #[test]
+    fn no_command_header_text_mentions_command() {
+        assert!(no_command_header_text().contains("command"));
+    }
+
+    #[test]
+    fn error_reply_text_maps_each_variant() {
+        use crate::game::ExecuteCommandError;
+        assert_eq!(
+            error_reply_text(&ExecuteCommandError::UserError("nope".to_string())),
+            "nope"
+        );
+        assert!(error_reply_text(&ExecuteCommandError::Conflict).contains("changed"));
+        assert!(
+            error_reply_text(&ExecuteCommandError::Other(anyhow::anyhow!("boom")))
+                .contains("unexpected")
+        );
+    }
+
+    // Runs only where a Postgres is available (CI); expected to fail to connect
+    // locally (backlog #40). Plain queries throughout to avoid `.sqlx` churn.
+    async fn seed_game_with_player(
+        pool: &sqlx::PgPool,
+        token: &str,
+    ) -> (uuid::Uuid, uuid::Uuid, uuid::Uuid) {
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Test Game {}", uuid::Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_version_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://localhost:0/mock', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO games (game_version_id, is_finished, game_state)
+             VALUES ($1, false, 'initial') RETURNING id",
+        )
+        .bind(game_version_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let user_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("player")
+        .bind(Vec::<String>::new())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_player_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_players
+             (game_id, user_id, position, color, has_accepted, is_turn,
+              is_turn_at, last_turn_at, is_eliminated, is_read, email_token)
+         VALUES ($1, $2, 0, 'Green', true, false, NOW(), NOW(), false, false, $3)
+         RETURNING id",
+        )
+        .bind(game_id)
+        .bind(user_id)
+        .bind(token)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        (game_id, user_id, game_player_id)
+    }
+
+    #[sqlx::test]
+    async fn find_game_player_by_email_token_lookup(pool: sqlx::PgPool) {
+        let (game_id, user_id, game_player_id) = seed_game_with_player(&pool, "tok-found").await;
+        let p = find_game_player_by_email_token(&pool, "tok-found")
+            .await
+            .unwrap()
+            .expect("expected a player");
+        assert_eq!(p.game_id, game_id);
+        assert_eq!(p.user_id, user_id);
+        assert_eq!(p.game_player_id, game_player_id);
+        assert_eq!(p.position, 0);
+        assert!(
+            find_game_player_by_email_token(&pool, "tok-missing")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn mark_event_processed_dedups(pool: sqlx::PgPool) {
+        assert!(mark_event_processed(&pool, "evt-1").await.unwrap());
+        assert!(!mark_event_processed(&pool, "evt-1").await.unwrap());
+        assert!(mark_event_processed(&pool, "evt-2").await.unwrap());
+    }
+
+    #[sqlx::test]
+    async fn from_matches_verified_email_truth_table(pool: sqlx::PgPool) {
+        let (_game_id, user_id, _gp) = seed_game_with_player(&pool, "tok-from").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("verified@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NULL)",
+        )
+        .bind(user_id)
+        .bind("unverified@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let other_user: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("other")
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(other_user)
+        .bind("other@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            from_matches_verified_email(&pool, user_id, "verified@brdg.me")
+                .await
+                .unwrap()
+        );
+        assert!(
+            from_matches_verified_email(&pool, user_id, "VERIFIED@brdg.me")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !from_matches_verified_email(&pool, user_id, "unverified@brdg.me")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !from_matches_verified_email(&pool, user_id, "other@brdg.me")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !from_matches_verified_email(&pool, user_id, "nobody@brdg.me")
+                .await
+                .unwrap()
         );
     }
 }
