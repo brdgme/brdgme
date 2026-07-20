@@ -39,7 +39,7 @@ fn build_game_bot_from_row(
     id: Option<Uuid>,
     game_id: Option<Uuid>,
     name: Option<String>,
-    difficulty: Option<String>,
+    bot_name: Option<String>,
 ) -> Result<Option<crate::models::game::GameBot>> {
     let Some(id) = id else { return Ok(None) };
     Ok(Some(crate::models::game::GameBot {
@@ -48,9 +48,8 @@ fn build_game_bot_from_row(
             .ok_or_else(|| anyhow::anyhow!("game_bot {id}: game_id missing from LEFT JOIN row"))?,
         name: name
             .ok_or_else(|| anyhow::anyhow!("game_bot {id}: name missing from LEFT JOIN row"))?,
-        difficulty: difficulty.ok_or_else(|| {
-            anyhow::anyhow!("game_bot {id}: difficulty missing from LEFT JOIN row")
-        })?,
+        bot_name: bot_name
+            .ok_or_else(|| anyhow::anyhow!("game_bot {id}: bot_name missing from LEFT JOIN row"))?,
     }))
 }
 
@@ -403,7 +402,7 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             gtu.last_game_finished_at as "gtu_last_game_finished_at?", gtu.rating as "gtu_rating?",
             gtu.peak_rating as "gtu_peak_rating?",
             gb.id as "gb_id?", gb.game_id as "gb_game_id?", gb.name as "gb_name?",
-            gb.difficulty as "gb_difficulty?"
+            gb.bot_name as "gb_bot_name?"
         FROM game_players gp
         LEFT JOIN users u ON gp.user_id = u.id
         LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = $2
@@ -439,7 +438,7 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             p.u_name,
             p.u_pref_colors,
         )?;
-        let game_bot = build_game_bot_from_row(p.gb_id, p.gb_game_id, p.gb_name, p.gb_difficulty)?;
+        let game_bot = build_game_bot_from_row(p.gb_id, p.gb_game_id, p.gb_name, p.gb_bot_name)?;
 
         game_players.push(GamePlayerExtended {
             game_player: build_game_player_from_row(
@@ -479,10 +478,10 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
 #[derive(Debug)]
 pub struct BotTurn {
     pub position: i32,
-    pub difficulty: String,
+    pub bot_name: String,
 }
 
-/// Returns the position/difficulty of every bot player whose turn it
+/// Returns the position/bot_name of every bot player whose turn it
 /// currently is. Empty for games with no bots or no bot on turn (including
 /// nonexistent games) - that's a normal outcome, not an error.
 #[cfg(feature = "ssr")]
@@ -490,7 +489,7 @@ pub async fn find_bot_turns(pool: &PgPool, game_id: Uuid) -> Result<Vec<BotTurn>
     sqlx::query_as!(
         BotTurn,
         r#"
-        SELECT gp.position, gb.difficulty
+        SELECT gp.position, gb.bot_name
         FROM game_players gp
         JOIN game_bots gb ON gp.game_bot_id = gb.id
         WHERE gp.game_id = $1 AND gp.is_turn = true
@@ -500,6 +499,14 @@ pub async fn find_bot_turns(pool: &PgPool, game_id: Uuid) -> Result<Vec<BotTurn>
     .fetch_all(pool)
     .await
     .map_err(Into::into)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn find_enabled_bots(pool: &PgPool) -> Result<Vec<String>> {
+    sqlx::query_scalar("SELECT name FROM bots WHERE enabled = true ORDER BY display_order")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("find_enabled_bots: {e}"))
 }
 
 #[cfg(feature = "ssr")]
@@ -609,7 +616,7 @@ pub struct CreateGameOpts<'a> {
 #[cfg(feature = "ssr")]
 enum PlayerSlotInternal {
     User(User),
-    Bot { name: String, difficulty: String },
+    Bot { name: String, bot_name: String },
 }
 
 /// D2 username rules (docs/superpowers/specs/2026-07-11-35-user-settings-design.md):
@@ -862,7 +869,7 @@ pub async fn create_game_with_users_tx(
     for bot in opts.bot_slots {
         slots.push(PlayerSlotInternal::Bot {
             name: bot.name.clone(),
-            difficulty: bot.difficulty.clone(),
+            bot_name: bot.bot_name.clone(),
         });
     }
 
@@ -950,12 +957,12 @@ pub async fn create_game_with_users_tx(
                 .execute(&mut *tx)
                 .await?;
             }
-            PlayerSlotInternal::Bot { name, difficulty } => {
+            PlayerSlotInternal::Bot { name, bot_name } => {
                 let bot_id = sqlx::query_scalar!(
-                    "INSERT INTO game_bots (game_id, name, difficulty) VALUES ($1, $2, $3) RETURNING id",
+                    "INSERT INTO game_bots (game_id, name, bot_name) VALUES ($1, $2, $3) RETURNING id",
                     game.id,
                     name,
-                    difficulty
+                    bot_name
                 )
                 .fetch_one(&mut *tx)
                 .await?;
@@ -1279,7 +1286,8 @@ fn elo_rating_change(a_rating: i32, b_rating: i32, a_score: f32) -> i32 {
 /// Applies ELO rating changes for a game that just transitioned to finished
 /// with placings. Must be called within the same transaction as the
 /// placings write. No-op if the idempotency guard trips (any player already
-/// has a rating_change) or if any player is a bot.
+/// has a rating_change). Bot players are excluded from the calculation;
+/// only human players are rated against each other.
 #[cfg(feature = "ssr")]
 async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Result<()> {
     struct PlayerRow {
@@ -1301,10 +1309,6 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
 
     if players.iter().any(|p| p.rating_change.is_some()) {
         // Idempotency guard: this game has already been rated.
-        return Ok(());
-    }
-    if players.iter().any(|p| p.game_bot_id.is_some()) {
-        // New rule (post-legacy): games with any bot player are never rated.
         return Ok(());
     }
     if players.iter().all(|p| p.place.is_none()) {
@@ -1331,6 +1335,9 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
 
     let mut rated_players = Vec::with_capacity(players.len());
     for p in &players {
+        if p.game_bot_id.is_some() {
+            continue;
+        }
         let user_id = p.user_id.ok_or_else(|| {
             anyhow::anyhow!("game_player {}: user_id missing for human player", p.id)
         })?;
@@ -1356,6 +1363,10 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
             user_id,
             rating,
         });
+    }
+
+    if rated_players.len() < 2 {
+        return Ok(());
     }
 
     let places: std::collections::HashMap<i32, i32> = players
@@ -1674,6 +1685,22 @@ pub async fn are_friends_conn(conn: &mut sqlx::PgConnection, a: Uuid, b: Uuid) -
     .bind(a)
     .bind(b)
     .fetch_one(conn)
+    .await?)
+}
+
+/// True when the "Add friend" affordance should be hidden: already friends
+/// (either direction) or viewer already has an outgoing row (pending/declined).
+#[cfg(feature = "ssr")]
+pub async fn should_hide_add_friend(pool: &PgPool, viewer: Uuid, target: Uuid) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1 FROM friends
+           WHERE (source_user_id = $1 AND target_user_id = $2)
+              OR (has_accepted = TRUE AND source_user_id = $2 AND target_user_id = $1))",
+    )
+    .bind(viewer)
+    .bind(target)
+    .fetch_one(pool)
     .await?)
 }
 
@@ -2261,7 +2288,7 @@ mod tests {
         let bot_slots: Vec<BotSlot> = (0..bot_count)
             .map(|i| BotSlot {
                 name: format!("Bot {}", i),
-                difficulty: "easy".to_string(),
+                bot_name: "easy".to_string(),
             })
             .collect();
 
@@ -2861,7 +2888,7 @@ mod tests {
         let turns = find_bot_turns(&pool, game.id).await.unwrap();
         assert!(turns.is_empty());
 
-        // Bot on turn: exactly one row with the bot's position and difficulty.
+        // Bot on turn: exactly one row with the bot's position and bot_name.
         sqlx::query!(
             "UPDATE game_players SET is_turn = (game_bot_id IS NOT NULL) WHERE game_id = $1",
             game.id
@@ -2879,7 +2906,7 @@ mod tests {
         let turns = find_bot_turns(&pool, game.id).await.unwrap();
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0].position, bot_position);
-        assert_eq!(turns[0].difficulty, "easy");
+        assert_eq!(turns[0].bot_name, "easy");
 
         // Nonexistent game id is an empty vec, not an error.
         let missing = find_bot_turns(&pool, Uuid::new_v4()).await.unwrap();
@@ -3895,7 +3922,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn game_with_bot_player_is_not_rated(pool: PgPool) {
+    async fn two_player_game_with_bot_is_not_rated(pool: PgPool) {
         let creator = make_user(&pool, "creator").await;
         let (_, game_version_id) = make_game_type_and_version(&pool).await;
         let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 1, &[0]).await;
@@ -3932,9 +3959,69 @@ mod tests {
         for p in &ge_after.game_players {
             assert_eq!(
                 p.game_player.rating_change, None,
-                "no player in a game with a bot should be rated"
+                "with only one human player, no pairwise rating is possible"
             );
         }
+    }
+
+    #[sqlx::test]
+    async fn three_player_game_with_bot_rates_humans_only(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 1, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+        let creator_pos = position_of(&ge, creator.id) as usize;
+        let opponent_pos = position_of(&ge, opponent.id) as usize;
+        let bot_pos = ge
+            .game_players
+            .iter()
+            .find(|p| p.user.is_none())
+            .unwrap()
+            .game_player
+            .position as usize;
+
+        let mut placings = vec![0usize; 3];
+        placings[creator_pos] = 1;
+        placings[opponent_pos] = 2;
+        placings[bot_pos] = 3;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let creator_change = find_rating_change(&pool, game.id, creator_pos as i32).await;
+        let opponent_change = find_rating_change(&pool, game.id, opponent_pos as i32).await;
+        let bot_change = find_rating_change(&pool, game.id, bot_pos as i32).await;
+
+        assert!(creator_change.is_some());
+        assert!(opponent_change.is_some());
+        assert_eq!(bot_change, None);
+        assert_eq!(creator_change.unwrap() + opponent_change.unwrap(), 0);
+
+        let (creator_rating, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        let (opponent_rating, _) = game_type_rating(&pool, game_type_id, opponent.id).await;
+        assert_eq!(creator_rating, 1200 + creator_change.unwrap());
+        assert_eq!(opponent_rating, 1200 + opponent_change.unwrap());
     }
 
     #[sqlx::test]
@@ -4054,8 +4141,8 @@ mod tests {
 
     // --- choose_colors ---
 
-    const PALETTE: [&str; 8] = [
-        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
+    const PALETTE: [&str; 9] = [
+        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink", "Yellow",
     ];
 
     #[test]

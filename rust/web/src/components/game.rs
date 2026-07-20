@@ -215,7 +215,7 @@ fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl Into
                 />
                 {player.is_bot.then(|| view! {
                     <span class="player-bot-suffix">
-                        " (bot: " {player.difficulty.clone().unwrap_or_default()} ")"
+                        " (bot: " {player.bot_name.clone().unwrap_or_default()} ")"
                     </span>
                 })}
             </div>
@@ -231,7 +231,7 @@ fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl Into
                     <div>"Form: " <crate::stats::viz::FormStrip results=form/></div>
                 })}
                 {player.user_id
-                    .filter(|uid| viewer_user_id.is_some() && Some(*uid) != viewer_user_id)
+                    .filter(|uid| player.can_add_friend && viewer_user_id.is_some() && Some(*uid) != viewer_user_id)
                     .map(|uid| {
                         let add_friend = ServerAction::<crate::friends::SendFriendRequest>::new();
                         view! {
