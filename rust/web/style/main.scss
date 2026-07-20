@@ -882,3 +882,25 @@ body {
 .profile-bots-toggle {
   margin: 0.4em 0;
 }
+
+.admin input,
+.admin select {
+  max-width: 100%;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0 1em;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 0.4em 0.6em;
+  border-bottom: 1px solid var(--mk-soften-foreground-90);
+}
+
+.admin-table th {
+  font-weight: bold;
+}

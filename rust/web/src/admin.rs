@@ -815,6 +815,366 @@ pub async fn admin_test_provider(provider_id: Uuid) -> Result<String, ServerFnEr
     test_provider(&pool, &http_client, provider_id).await
 }
 
+#[component]
+pub fn AdminPage() -> impl IntoView {
+    use crate::components::MainLayout;
+    use leptos_router::{NavigateOptions, hooks::use_navigate};
+
+    let current_user =
+        expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
+
+    let navigate = use_navigate();
+    let navigate2 = navigate.clone();
+    Effect::new(move |_| {
+        if matches!(current_user.get(), Some(Ok(None))) {
+            navigate("/login", NavigateOptions::default());
+        }
+    });
+
+    let version = RwSignal::new(0u32);
+    let bots: LocalResource<Result<Vec<BotRow>, ServerFnError>> = LocalResource::new(move || {
+        version.track();
+        admin_list_bots()
+    });
+
+    Effect::new(move |_| {
+        if let Some(Err(e)) = bots.get() {
+            let msg = e.to_string();
+            if msg.contains("Admin access required") {
+                navigate2("/", NavigateOptions::default());
+            }
+        }
+    });
+
+    view! {
+        <MainLayout>
+            <div class="admin content-page">
+                <h1>"Admin"</h1>
+                <Suspense fallback=|| view! { <p>"Loading..."</p> }>
+                    {move || {
+                        bots.get().map(|res| match res {
+                            Err(e) => view! { <p class="error">{e.to_string()}</p> }.into_any(),
+                            Ok(bot_list) => view! {
+                                <BotsSection bots=bot_list version=version/>
+                                <h2>"Providers"</h2>
+                                <p>"Coming soon"</p>
+                                <h2>"Bot-Provider Links"</h2>
+                                <p>"Coming soon"</p>
+                            }.into_any(),
+                        })
+                    }}
+                </Suspense>
+            </div>
+        </MainLayout>
+    }
+}
+
+#[component]
+fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
+    let show_create = RwSignal::new(false);
+    let editing_id = RwSignal::new(None::<Uuid>);
+    let error = RwSignal::new(None::<String>);
+
+    let create_action = Action::new(
+        |(name, temperature, basic, advanced): &(String, f32, bool, bool)| {
+            let name = name.clone();
+            let temperature = *temperature;
+            let basic = *basic;
+            let advanced = *advanced;
+            async move { admin_create_bot(name, temperature, basic, advanced).await }
+        },
+    );
+
+    let update_action = Action::new(
+        |(id, name, temperature, basic, advanced, enabled): &(
+            Uuid,
+            String,
+            f32,
+            bool,
+            bool,
+            bool,
+        )| {
+            let id = *id;
+            let name = name.clone();
+            let temperature = *temperature;
+            let basic = *basic;
+            let advanced = *advanced;
+            let enabled = *enabled;
+            async move { admin_update_bot(id, name, temperature, basic, advanced, enabled).await }
+        },
+    );
+
+    let delete_action = Action::new(|id: &Uuid| {
+        let id = *id;
+        async move { admin_delete_bot(id).await }
+    });
+
+    let reorder_action = Action::new(|ids: &Vec<Uuid>| {
+        let ids = ids.clone();
+        async move { admin_reorder_bots(ids).await }
+    });
+
+    Effect::new(move |_| {
+        if create_action.value().get().is_some() && !create_action.pending().get() {
+            match create_action.value().get().unwrap() {
+                Ok(_) => {
+                    show_create.set(false);
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if update_action.value().get().is_some() && !update_action.pending().get() {
+            match update_action.value().get().unwrap() {
+                Ok(_) => {
+                    editing_id.set(None);
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if delete_action.value().get().is_some() && !delete_action.pending().get() {
+            match delete_action.value().get().unwrap() {
+                Ok(_) => {
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if reorder_action.value().get().is_some() && !reorder_action.pending().get() {
+            match reorder_action.value().get().unwrap() {
+                Ok(_) => {
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    let bot_ids: Vec<Uuid> = bots.iter().map(|b| b.id).collect();
+    let bots = StoredValue::new(bots);
+
+    view! {
+        <h2>"Bots"</h2>
+        {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>"Name"</th>
+                    <th>"Enabled"</th>
+                    <th>"Temp"</th>
+                    <th>"Basic"</th>
+                    <th>"Advanced"</th>
+                    <th>"Actions"</th>
+                </tr>
+            </thead>
+            <tbody>
+                {bots.with_value(|bots| bots.iter().enumerate().map(|(i, bot)| {
+                    let id = bot.id;
+                    let name = bot.name.clone();
+                    let enabled = bot.enabled;
+                    let temperature = bot.temperature;
+                    let basic = bot.include_basic_strategy;
+                    let advanced = bot.include_advanced_strategy;
+                    let bot_name = bot.name.clone();
+                    let bot_temperature = bot.temperature;
+                    let bot_basic = bot.include_basic_strategy;
+                    let bot_advanced = bot.include_advanced_strategy;
+                    let bot_enabled = bot.enabled;
+                    let ids_up = bot_ids.clone();
+                    let ids_down = bot_ids.clone();
+                    let can_up = i > 0;
+                    let can_down = i < bot_ids.len() - 1;
+                    view! {
+                        <tr>
+                            <td>{name}</td>
+                            <td>{if enabled { "Yes" } else { "No" }}</td>
+                            <td>{format!("{:.1}", temperature)}</td>
+                            <td>{if basic { "Yes" } else { "No" }}</td>
+                            <td>{if advanced { "Yes" } else { "No" }}</td>
+                            <td>
+                                <div class="form-actions">
+                                    <button on:click=move |_| editing_id.set(Some(id))>"Edit"</button>
+                                    <button
+                                        disabled=move || !can_up
+                                        on:click=move |_| {
+                                            let mut new_order = ids_up.clone();
+                                            if i > 0 {
+                                                new_order.swap(i, i - 1);
+                                                reorder_action.dispatch(new_order);
+                                            }
+                                        }
+                                    >"Up"</button>
+                                    <button
+                                        disabled=move || !can_down
+                                        on:click=move |_| {
+                                            let mut new_order = ids_down.clone();
+                                            if i < new_order.len() - 1 {
+                                                new_order.swap(i, i + 1);
+                                                reorder_action.dispatch(new_order);
+                                            }
+                                        }
+                                    >"Down"</button>
+                                    <button on:click=move |_| {
+                                        let confirmed = web_sys::window()
+                                            .and_then(|w| w.confirm_with_message("Delete this bot?").ok())
+                                            .unwrap_or(false);
+                                        if confirmed {
+                                            delete_action.dispatch(id);
+                                        }
+                                    }>"Delete"</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <Show when=move || editing_id.get() == Some(id)>
+                            <BotEditForm
+                                bot_id=id
+                                bot_name=bot_name.clone()
+                                bot_temperature=bot_temperature
+                                bot_basic=bot_basic
+                                bot_advanced=bot_advanced
+                                bot_enabled=bot_enabled
+                                update_action=update_action
+                            />
+                        </Show>
+                    }
+                }).collect_view())}
+            </tbody>
+        </table>
+        <div class="form-actions">
+            <button on:click=move |_| show_create.update(|v| *v = !*v)>"Add Bot"</button>
+        </div>
+        <Show when=move || show_create.get()>
+            <BotCreateForm create_action=create_action/>
+        </Show>
+    }
+}
+
+#[component]
+fn BotCreateForm(
+    create_action: Action<(String, f32, bool, bool), Result<BotRow, ServerFnError>>,
+) -> impl IntoView {
+    use crate::components::FormField;
+    use leptos::html;
+
+    let name_input = NodeRef::<html::Input>::new();
+    let temp_input = NodeRef::<html::Input>::new();
+    let basic_input = NodeRef::<html::Input>::new();
+    let advanced_input = NodeRef::<html::Input>::new();
+
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let name = name_input.get().map(|el| el.value()).unwrap_or_default();
+        let temperature = temp_input
+            .get()
+            .and_then(|el| el.value().parse::<f32>().ok())
+            .unwrap_or(0.2);
+        let basic = basic_input.get().map(|el| el.checked()).unwrap_or(true);
+        let advanced = advanced_input.get().map(|el| el.checked()).unwrap_or(false);
+        create_action.dispatch((name, temperature, basic, advanced));
+    };
+
+    view! {
+        <form on:submit=on_submit>
+            <FormField label="Name">
+                <input type="text" node_ref=name_input required/>
+            </FormField>
+            <FormField label="Temperature" help="0.0 to 2.0">
+                <input type="number" node_ref=temp_input step="0.1" min="0" max="2" value="0.2"/>
+            </FormField>
+            <FormField label="Include basic strategy">
+                <input type="checkbox" node_ref=basic_input checked=true/>
+            </FormField>
+            <FormField label="Include advanced strategy">
+                <input type="checkbox" node_ref=advanced_input/>
+            </FormField>
+            <div class="form-actions">
+                <input type="submit" value="Create" disabled=move || create_action.pending().get()/>
+            </div>
+        </form>
+    }
+}
+
+#[component]
+fn BotEditForm(
+    bot_id: Uuid,
+    bot_name: String,
+    bot_temperature: f32,
+    bot_basic: bool,
+    bot_advanced: bool,
+    bot_enabled: bool,
+    update_action: Action<(Uuid, String, f32, bool, bool, bool), Result<(), ServerFnError>>,
+) -> impl IntoView {
+    use crate::components::FormField;
+    use leptos::html;
+
+    let name_input = NodeRef::<html::Input>::new();
+    let temp_input = NodeRef::<html::Input>::new();
+    let basic_input = NodeRef::<html::Input>::new();
+    let advanced_input = NodeRef::<html::Input>::new();
+    let enabled_input = NodeRef::<html::Input>::new();
+
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let name = name_input.get().map(|el| el.value()).unwrap_or_default();
+        let temperature = temp_input
+            .get()
+            .and_then(|el| el.value().parse::<f32>().ok())
+            .unwrap_or(0.2);
+        let basic = basic_input.get().map(|el| el.checked()).unwrap_or(true);
+        let advanced = advanced_input.get().map(|el| el.checked()).unwrap_or(false);
+        let enabled = enabled_input.get().map(|el| el.checked()).unwrap_or(true);
+        update_action.dispatch((bot_id, name, temperature, basic, advanced, enabled));
+    };
+
+    view! {
+        <tr>
+            <td colspan="6">
+                <form on:submit=on_submit>
+                    <FormField label="Name">
+                        <input type="text" node_ref=name_input required prop:value=bot_name/>
+                    </FormField>
+                    <FormField label="Temperature" help="0.0 to 2.0">
+                        <input
+                            type="number"
+                            node_ref=temp_input
+                            step="0.1"
+                            min="0"
+                            max="2"
+                            prop:value=format!("{:.1}", bot_temperature)
+                        />
+                    </FormField>
+                    <FormField label="Include basic strategy">
+                        <input type="checkbox" node_ref=basic_input prop:checked=bot_basic/>
+                    </FormField>
+                    <FormField label="Include advanced strategy">
+                        <input type="checkbox" node_ref=advanced_input prop:checked=bot_advanced/>
+                    </FormField>
+                    <FormField label="Enabled">
+                        <input type="checkbox" node_ref=enabled_input prop:checked=bot_enabled/>
+                    </FormField>
+                    <div class="form-actions">
+                        <input type="submit" value="Save" disabled=move || update_action.pending().get()/>
+                    </div>
+                </form>
+            </td>
+        </tr>
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
