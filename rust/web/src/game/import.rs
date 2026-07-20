@@ -71,11 +71,11 @@ pub async fn import_bundle(pool: &PgPool, bundle: &ExportBundle) -> anyhow::Resu
     let mut bot_ids: HashMap<String, Uuid> = HashMap::new();
     for bot in &bundle.bots {
         let id: Uuid = sqlx::query_scalar!(
-            "INSERT INTO game_bots (game_id, name, difficulty, personality)
+            "INSERT INTO game_bots (game_id, name, bot_name, personality)
              VALUES ($1, $2, $3, $4) RETURNING id",
             game_id,
             bot.name,
-            bot.difficulty,
+            bot.bot_name,
             bot.personality
         )
         .fetch_one(&mut *tx)
@@ -238,7 +238,7 @@ mod tests {
                 opponent_emails: &[],
                 bot_slots: &[BotSlot {
                     name: "Botty".to_string(),
-                    difficulty: "easy".to_string(),
+                    bot_name: "easy".to_string(),
                 }],
                 chat_id: None,
                 game_state: "prod_state_blob",

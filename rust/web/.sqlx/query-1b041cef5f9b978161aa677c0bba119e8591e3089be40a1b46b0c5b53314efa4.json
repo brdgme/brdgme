@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO game_bots (id, game_id, name, difficulty)\n                           VALUES (uuid_generate_v4(), $1, $2, 'medium')\n                           RETURNING id",
+  "query": "INSERT INTO game_bots (id, game_id, name, bot_name)\n                           VALUES (uuid_generate_v4(), $1, $2, 'medium')\n                           RETURNING id",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       false
     ]
   },
-  "hash": "261a154660cf2ed59d2aa57f549db6ab89a4f513708fd552fcae2b710adc8d68"
+  "hash": "1b041cef5f9b978161aa677c0bba119e8591e3089be40a1b46b0c5b53314efa4"
 }

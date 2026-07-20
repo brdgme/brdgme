@@ -44,7 +44,7 @@ pub struct GameBot {
     pub id: Uuid,
     pub game_id: Uuid,
     pub name: String,
-    pub difficulty: String,
+    pub bot_name: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

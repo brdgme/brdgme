@@ -2,7 +2,8 @@ use brdgme_game::command::Spec;
 use minijinja::{Environment, context};
 use serde::Serialize;
 
-const TEMPLATE: &str = include_str!("../system_prompt.md");
+const SYSTEM_TEMPLATE: &str = include_str!("../system_prompt.md");
+const USER_TEMPLATE: &str = include_str!("../user_prompt.md");
 
 #[derive(Debug, Serialize)]
 pub struct PlayerInfo {
@@ -11,22 +12,31 @@ pub struct PlayerInfo {
     pub score: f32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FailedCommand {
     pub command: String,
     pub error: String,
 }
 
 #[derive(Debug)]
-pub struct PromptContext {
+pub struct SystemContext {
     pub game_rules: String,
-    pub difficulty: String,
+    pub include_basic_strategy: bool,
+    pub basic_strategy: String,
+    pub include_advanced_strategy: bool,
+    pub advanced_strategy: String,
+    pub data_docs: String,
+}
+
+#[derive(Debug)]
+pub struct UserContext {
     pub my_name: String,
     pub my_colour: String,
     pub players: Vec<PlayerInfo>,
-    pub game_render: String,
-    pub recent_logs: Vec<String>,
+    pub pub_state_yaml: String,
+    pub player_state_yaml: String,
     pub command_spec: String,
+    pub recent_logs: Vec<String>,
     pub failed_commands: Vec<FailedCommand>,
 }
 
@@ -52,19 +62,32 @@ pub fn spec_to_yaml(spec: &Spec) -> String {
     serde_yaml::to_string(&json_val).unwrap_or_default()
 }
 
-pub fn render_prompt(ctx: &PromptContext) -> Result<String, minijinja::Error> {
+pub fn render_system(ctx: &SystemContext) -> Result<String, minijinja::Error> {
     let mut env = Environment::new();
-    env.add_template("prompt", TEMPLATE)?;
+    env.add_template("prompt", SYSTEM_TEMPLATE)?;
     let tmpl = env.get_template("prompt")?;
     tmpl.render(context! {
         game_rules => &ctx.game_rules,
-        difficulty => &ctx.difficulty,
+        include_basic_strategy => ctx.include_basic_strategy,
+        basic_strategy => &ctx.basic_strategy,
+        include_advanced_strategy => ctx.include_advanced_strategy,
+        advanced_strategy => &ctx.advanced_strategy,
+        data_docs => &ctx.data_docs,
+    })
+}
+
+pub fn render_user(ctx: &UserContext) -> Result<String, minijinja::Error> {
+    let mut env = Environment::new();
+    env.add_template("prompt", USER_TEMPLATE)?;
+    let tmpl = env.get_template("prompt")?;
+    tmpl.render(context! {
         my_name => &ctx.my_name,
         my_colour => &ctx.my_colour,
         players => &ctx.players,
-        game_render => &ctx.game_render,
-        recent_logs => &ctx.recent_logs,
+        pub_state_yaml => &ctx.pub_state_yaml,
+        player_state_yaml => &ctx.player_state_yaml,
         command_spec => &ctx.command_spec,
+        recent_logs => &ctx.recent_logs,
         failed_commands => &ctx.failed_commands,
     })
 }
@@ -73,10 +96,19 @@ pub fn render_prompt(ctx: &PromptContext) -> Result<String, minijinja::Error> {
 mod tests {
     use super::*;
 
-    fn base_ctx() -> PromptContext {
-        PromptContext {
+    fn system_ctx() -> SystemContext {
+        SystemContext {
             game_rules: "## Rules\n\nPlace tiles and buy shares.".to_string(),
-            difficulty: "medium".to_string(),
+            include_basic_strategy: true,
+            basic_strategy: "Buy cheap chains early.".to_string(),
+            include_advanced_strategy: false,
+            advanced_strategy: "Track tile counts.".to_string(),
+            data_docs: "board: the board grid".to_string(),
+        }
+    }
+
+    fn user_ctx() -> UserContext {
+        UserContext {
             my_name: "Alice".to_string(),
             my_colour: "#4caf50".to_string(),
             players: vec![
@@ -91,35 +123,92 @@ mod tests {
                     score: 4500.0,
                 },
             ],
-            game_render: "{{b}}Board state{{/b}}".to_string(),
+            pub_state_yaml: "board: empty\nround: 1".to_string(),
+            player_state_yaml: "hand:\n  - A\n  - K".to_string(),
+            command_spec: "Token: done".to_string(),
             recent_logs: vec![
                 "Alice placed {{b}}C4{{/b}}".to_string(),
                 "Bob bought 2 Sackson".to_string(),
             ],
-            command_spec: "Token: done".to_string(),
             failed_commands: vec![],
         }
     }
 
     #[test]
-    fn renders_difficulty() {
-        let output = render_prompt(&base_ctx()).unwrap();
+    fn render_system_includes_game_rules() {
+        let output = render_system(&system_ctx()).unwrap();
         assert!(
-            output.contains("**medium**"),
-            "difficulty not found in output"
+            output.contains("Place tiles and buy shares"),
+            "game rules missing"
         );
     }
 
     #[test]
-    fn renders_my_name_and_colour() {
-        let output = render_prompt(&base_ctx()).unwrap();
-        assert!(output.contains("Alice"), "my_name not found");
-        assert!(output.contains("#4caf50"), "my_colour not found");
+    fn render_system_omits_rules_section_when_empty() {
+        let mut ctx = system_ctx();
+        ctx.game_rules = String::new();
+        let output = render_system(&ctx).unwrap();
+        assert!(
+            !output.contains("Place tiles"),
+            "rules shown when they should be absent"
+        );
     }
 
     #[test]
-    fn renders_all_players_with_score_and_colour() {
-        let output = render_prompt(&base_ctx()).unwrap();
+    fn render_system_includes_basic_strategy_only_when_enabled() {
+        let mut ctx = system_ctx();
+        ctx.include_basic_strategy = true;
+        let output = render_system(&ctx).unwrap();
+        assert!(
+            output.contains("Buy cheap chains early"),
+            "basic strategy missing when enabled"
+        );
+
+        ctx.include_basic_strategy = false;
+        let output = render_system(&ctx).unwrap();
+        assert!(
+            !output.contains("Buy cheap chains early"),
+            "basic strategy shown when disabled"
+        );
+    }
+
+    #[test]
+    fn render_system_includes_advanced_strategy_only_when_enabled() {
+        let mut ctx = system_ctx();
+        ctx.include_advanced_strategy = true;
+        let output = render_system(&ctx).unwrap();
+        assert!(
+            output.contains("Track tile counts"),
+            "advanced strategy missing when enabled"
+        );
+
+        ctx.include_advanced_strategy = false;
+        let output = render_system(&ctx).unwrap();
+        assert!(
+            !output.contains("Track tile counts"),
+            "advanced strategy shown when disabled"
+        );
+    }
+
+    #[test]
+    fn render_system_includes_data_docs() {
+        let output = render_system(&system_ctx()).unwrap();
+        assert!(
+            output.contains("board: the board grid"),
+            "data docs missing"
+        );
+    }
+
+    #[test]
+    fn render_system_contains_command_parser_docs() {
+        let output = render_system(&system_ctx()).unwrap();
+        assert!(output.contains("OneOf"), "OneOf docs missing");
+        assert!(output.contains("Token"), "Token docs missing");
+    }
+
+    #[test]
+    fn render_user_renders_players_with_score_and_colour() {
+        let output = render_user(&user_ctx()).unwrap();
         assert!(output.contains("Alice"), "player 1 name missing");
         assert!(output.contains("6000"), "player 1 score missing");
         assert!(output.contains("#4caf50"), "player 1 colour missing");
@@ -129,8 +218,8 @@ mod tests {
     }
 
     #[test]
-    fn marks_self_in_player_list() {
-        let output = render_prompt(&base_ctx()).unwrap();
+    fn render_user_marks_self_in_player_list() {
+        let output = render_user(&user_ctx()).unwrap();
         assert!(output.contains("Alice (you)"), "self marker missing");
         assert!(
             !output.contains("Bob (you)"),
@@ -139,21 +228,27 @@ mod tests {
     }
 
     #[test]
-    fn renders_game_render_as_markup() {
-        let output = render_prompt(&base_ctx()).unwrap();
+    fn render_user_includes_state_in_yaml_fences() {
+        let output = render_user(&user_ctx()).unwrap();
         assert!(
-            output.contains("{{b}}Board state{{/b}}"),
-            "game render markup not present verbatim"
+            output.contains("```yaml\nboard: empty\nround: 1"),
+            "pub state not in yaml fence"
         );
         assert!(
-            output.contains("```text\n{{b}}Board state{{/b}}"),
-            "game render not in text fence"
+            output.contains("```yaml\nhand:\n  - A\n  - K"),
+            "player state not in yaml fence"
         );
     }
 
     #[test]
-    fn renders_logs() {
-        let output = render_prompt(&base_ctx()).unwrap();
+    fn render_user_includes_command_spec() {
+        let output = render_user(&user_ctx()).unwrap();
+        assert!(output.contains("Token: done"), "command spec missing");
+    }
+
+    #[test]
+    fn render_user_renders_recent_logs() {
+        let output = render_user(&user_ctx()).unwrap();
         assert!(
             output.contains("Alice placed {{b}}C4{{/b}}"),
             "log 1 missing"
@@ -162,34 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn renders_game_rules() {
-        let output = render_prompt(&base_ctx()).unwrap();
-        assert!(
-            output.contains("Place tiles and buy shares"),
-            "game rules missing"
-        );
-    }
-
-    #[test]
-    fn omits_game_rules_section_when_empty() {
-        let mut ctx = base_ctx();
-        ctx.game_rules = String::new();
-        let output = render_prompt(&ctx).unwrap();
-        assert!(
-            !output.contains("Place tiles"),
-            "rules shown when they should be absent"
-        );
-    }
-
-    #[test]
-    fn renders_command_spec() {
-        let output = render_prompt(&base_ctx()).unwrap();
-        assert!(output.contains("Token: done"), "command spec missing");
-    }
-
-    #[test]
-    fn omits_failed_commands_section_when_empty() {
-        let output = render_prompt(&base_ctx()).unwrap();
+    fn render_user_omits_failed_commands_section_when_empty() {
+        let output = render_user(&user_ctx()).unwrap();
         assert!(
             !output.contains("previously responded"),
             "failed commands section shown when there are none"
@@ -197,8 +266,8 @@ mod tests {
     }
 
     #[test]
-    fn renders_failed_commands_when_present() {
-        let mut ctx = base_ctx();
+    fn render_user_renders_failed_commands_when_present() {
+        let mut ctx = user_ctx();
         ctx.failed_commands = vec![
             FailedCommand {
                 command: "buy 5 sackson".to_string(),
@@ -209,7 +278,7 @@ mod tests {
                 error: "minimum 1 share".to_string(),
             },
         ];
-        let output = render_prompt(&ctx).unwrap();
+        let output = render_user(&ctx).unwrap();
         assert!(
             output.contains("previously responded"),
             "failed commands header missing"
@@ -221,6 +290,15 @@ mod tests {
         );
         assert!(output.contains("buy 0 tower"), "failed command 2 missing");
         assert!(output.contains("minimum 1 share"), "error 2 missing");
+    }
+
+    #[test]
+    fn render_user_ends_with_command_instruction() {
+        let output = render_user(&user_ctx()).unwrap();
+        assert!(
+            output.contains("Please provide your command now."),
+            "final instruction missing"
+        );
     }
 
     #[test]

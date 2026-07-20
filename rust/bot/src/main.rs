@@ -1,5 +1,13 @@
+// config.rs and crypto.rs expose a fuller API (e.g. encrypt, BotConfig.name,
+// ProviderConfig.priority) than the binary currently consumes at runtime; the
+// unused items are exercised by their own unit tests.
+#[allow(dead_code)]
+mod config;
+#[allow(dead_code)]
+mod crypto;
 mod nats;
 mod prompt;
+mod routing;
 
 use anyhow::{Context, Result, anyhow};
 use axum::{Router, extract::State as AxumState, http::StatusCode, routing::get};
@@ -8,8 +16,10 @@ use brdgme_color::LIGHT;
 use futures_util::StreamExt;
 use nats::{BotCommandEvent, BotTurnEvent};
 use prompt::{
-    FailedCommand, PlayerInfo, PromptContext, markup_resolve_players, render_prompt, spec_to_yaml,
+    FailedCommand, PlayerInfo, SystemContext, UserContext, markup_resolve_players, render_system,
+    render_user, spec_to_yaml,
 };
+use routing::ProviderRouter;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -21,11 +31,7 @@ struct AppState {
     /// Client for game service calls: shorter timeout than the LLM client,
     /// but generous enough for KEDA scale-from-zero cold starts.
     game_http: reqwest::Client,
-    llm_url: String,
-    llm_api_key: Option<String>,
-    bot_model: String,
-    reasoning_effort: Option<String>,
-    llm_extra_body: Option<serde_json::Value>,
+    encryption_key: Option<[u8; 32]>,
     jetstream: async_nats::jetstream::Context,
 }
 
@@ -67,7 +73,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     // 1. Fetch game data from DB.
     let row = sqlx::query(
         r#"
-        SELECT g.game_state, gv.uri, gv.name as version_name, gv.rules, gt.name as game_name, gb.name as bot_name, gp.is_turn, gp.id as game_player_id
+        SELECT g.game_state, gv.uri, gv.name as version_name, gv.rules, gv.interface_version, gt.name as game_name, gb.name as bot_name, gp.is_turn, gp.id as game_player_id
         FROM games g
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt ON gt.id = gv.game_type_id
@@ -96,7 +102,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     let game_state: String = row.try_get("game_state").context("game_state")?;
     let game_service_uri: String = row.try_get("uri").context("uri")?;
     let version_name: String = row.try_get("version_name").context("version_name")?;
-    let rules: String = row.try_get("rules").unwrap_or_default();
+    let interface_version: i32 = row.try_get("interface_version").unwrap_or(1);
     let game_player_id: Uuid = row.try_get("game_player_id").context("game_player_id")?;
     let game_name: String = row
         .try_get("game_name")
@@ -140,14 +146,62 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         game = %game_name,
         player = req.player_position,
         player_name = %bot_name,
-        difficulty = %req.difficulty,
+        bot_name = %req.bot_name,
         attempt = req.attempt,
         players = ?names,
         "Bot turn triggered"
     );
 
-    // 3. Load game context (state, render, logs). Extracted into a helper so it can be
-    //    refreshed mid-loop if the game state changes while the LLM is thinking.
+    let table_empty = config::bots_table_empty(&state.pool)
+        .await
+        .context("Failed to check bots table")?;
+    let bot_cfg = match config::load_bot_config(&state.pool, &req.bot_name)
+        .await
+        .context("Failed to load bot config")?
+    {
+        Some(c) => c,
+        None => {
+            if table_empty {
+                config::BotConfig {
+                    name: req.bot_name.clone(),
+                    include_basic_strategy: true,
+                    include_advanced_strategy: false,
+                    temperature: 0.2,
+                }
+            } else {
+                tracing::info!(
+                    trace_id = %trace_id,
+                    game_id = %req.game_id,
+                    bot_name = %req.bot_name,
+                    "Bot not found or disabled, skipping turn"
+                );
+                return Ok(());
+            }
+        }
+    };
+
+    let mut providers = match &state.encryption_key {
+        Some(key) => config::load_providers(&state.pool, &req.bot_name, key)
+            .await
+            .context("Failed to load providers")?,
+        None => Vec::new(),
+    };
+    if providers.is_empty()
+        && table_empty
+        && let Some(p) = config::env_fallback_provider()
+    {
+        providers = vec![p];
+    }
+    if providers.is_empty() {
+        return Err(anyhow!(
+            "No LLM providers configured for bot {}",
+            req.bot_name
+        ));
+    }
+    let mut router = ProviderRouter::new(providers);
+
+    // 3. Load game context (state, structured game data, logs). Extracted into a helper
+    //    so it can be refreshed mid-loop if the game state changes while the LLM is thinking.
     let mut bot_ctx = load_bot_context(
         state,
         &game_service_uri,
@@ -157,6 +211,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         game_player_id,
         game_state,
         &names,
+        interface_version,
     )
     .await
     .context("Failed to load initial bot context")?;
@@ -165,19 +220,24 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     let mut failed_commands: Vec<FailedCommand> = Vec::new();
 
     for attempt in 0..MAX_ATTEMPTS {
-        let prompt_ctx = build_prompt_context(
-            &rules,
-            &bot_name,
-            &req.difficulty,
+        let provider = router
+            .next()
+            .ok_or_else(|| anyhow!("All LLM providers exhausted"))?;
+        let url = provider.url.clone();
+        let model = provider.model.clone();
+        let api_key = provider.api_key.clone();
+        let reasoning_effort = provider.reasoning_effort.clone();
+        let extra_body = provider.extra_body.clone();
+
+        let messages = build_messages(
+            &bot_cfg,
+            &bot_ctx,
             &names,
             req.player_position as usize,
-            &bot_ctx,
-            std::mem::take(&mut failed_commands),
-        );
-        let messages = build_messages(&prompt_ctx)
-            .with_context(|| format!("Failed to build messages on attempt {}", attempt + 1))?;
-        // Restore failed_commands from the context (build_prompt_context consumed it).
-        failed_commands = prompt_ctx.failed_commands;
+            &bot_name,
+            failed_commands.clone(),
+        )
+        .with_context(|| format!("Failed to build messages on attempt {}", attempt + 1))?;
 
         tracing::trace!(
             trace_id = %trace_id,
@@ -186,17 +246,32 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             "Rendered prompt"
         );
 
-        let raw_response = call_llm(
+        let raw_response = match call_llm(
             &state.http,
-            &state.llm_url,
-            &state.bot_model,
+            &url,
+            &model,
             &messages,
-            state.llm_api_key.as_deref(),
-            state.reasoning_effort.clone(),
-            state.llm_extra_body.as_ref(),
+            api_key.as_deref(),
+            bot_cfg.temperature,
+            reasoning_effort,
+            extra_body.as_ref(),
         )
         .await
-        .with_context(|| format!("LLM call failed on attempt {}", attempt + 1))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    trace_id = %trace_id,
+                    game_id = %req.game_id,
+                    attempt,
+                    model = %model,
+                    error = %e,
+                    "LLM API error, failing over to next provider"
+                );
+                router.mark_failed();
+                continue;
+            }
+        };
 
         tracing::info!(
             trace_id = %trace_id,
@@ -253,6 +328,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
                 game_player_id,
                 current_game_state,
                 &names,
+                interface_version,
             )
             .await
             .context("Failed to refresh bot context")?;
@@ -355,10 +431,8 @@ async fn publish_bot_command(
 
 struct BotContext {
     game_state: String,
-    render: String,
-    command_spec_yaml: String,
+    game_data: brdgme_game_client::GameData,
     recent_logs: Vec<String>,
-    points: Vec<f32>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -371,35 +445,18 @@ async fn load_bot_context(
     game_player_id: uuid::Uuid,
     game_state: String,
     names: &[String],
+    interface_version: i32,
 ) -> Result<BotContext> {
-    let status_resp = brdgme_game_client::request(
+    let game_data = brdgme_game_client::fetch_game_data(
         &state.game_http,
         game_service_uri,
         version_name,
-        &Request::Status {
-            game: game_state.clone(),
-        },
+        game_state.clone(),
+        player_position as usize,
+        interface_version,
     )
     .await
-    .context("Game service Status call failed")?;
-
-    let (render_markup, command_spec, points) = match status_resp {
-        Response::Status {
-            game,
-            player_renders,
-            ..
-        } => {
-            let pr = player_renders
-                .into_iter()
-                .nth(player_position as usize)
-                .ok_or_else(|| anyhow!("Player position out of range"))?;
-            (pr.render, pr.command_spec, game.points)
-        }
-        _ => return Err(anyhow!("Unexpected response from game service")),
-    };
-
-    let render = markup_resolve_players(&render_markup, names);
-    let command_spec_yaml = command_spec.as_ref().map(spec_to_yaml).unwrap_or_default();
+    .context("Failed to fetch game data")?;
 
     let log_rows = sqlx::query(
         "SELECT body FROM game_logs \
@@ -426,23 +483,70 @@ async fn load_bot_context(
 
     Ok(BotContext {
         game_state,
-        render,
-        command_spec_yaml,
+        game_data,
         recent_logs,
-        points,
     })
 }
 
-fn build_messages(ctx: &PromptContext) -> Result<Vec<ChatMessage>> {
-    let content = render_prompt(ctx).context("Failed to render system prompt template")?;
+fn build_messages(
+    bot_cfg: &config::BotConfig,
+    bot_ctx: &BotContext,
+    names: &[String],
+    player_position: usize,
+    fallback_name: &str,
+    failed_commands: Vec<FailedCommand>,
+) -> Result<Vec<ChatMessage>> {
+    let system_ctx = SystemContext {
+        game_rules: bot_ctx.game_data.rules.clone(),
+        include_basic_strategy: bot_cfg.include_basic_strategy,
+        basic_strategy: bot_ctx.game_data.basic_strategy.clone(),
+        include_advanced_strategy: bot_cfg.include_advanced_strategy,
+        advanced_strategy: bot_ctx.game_data.advanced_strategy.clone(),
+        data_docs: bot_ctx.game_data.data_docs.clone(),
+    };
+    let system_content = render_system(&system_ctx).context("Failed to render system prompt")?;
+
+    let my_name = names
+        .get(player_position)
+        .map(|s| s.as_str())
+        .unwrap_or(fallback_name)
+        .to_string();
+    let my_colour = format!("{}", LIGHT.player_color(player_position));
+    let players = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| PlayerInfo {
+            name: name.clone(),
+            colour: format!("{}", LIGHT.player_color(i)),
+            score: bot_ctx.game_data.points.get(i).copied().unwrap_or(0.0),
+        })
+        .collect();
+    let command_spec = bot_ctx
+        .game_data
+        .command_spec
+        .as_ref()
+        .map(spec_to_yaml)
+        .unwrap_or_default();
+    let user_ctx = UserContext {
+        my_name,
+        my_colour,
+        players,
+        pub_state_yaml: bot_ctx.game_data.pub_state_yaml.clone(),
+        player_state_yaml: bot_ctx.game_data.player_state_yaml.clone(),
+        command_spec,
+        recent_logs: bot_ctx.recent_logs.clone(),
+        failed_commands,
+    };
+    let user_content = render_user(&user_ctx).context("Failed to render user prompt")?;
+
     Ok(vec![
         ChatMessage {
             role: "system".to_string(),
-            content,
+            content: system_content,
         },
         ChatMessage {
             role: "user".to_string(),
-            content: "Please provide your command now.".to_string(),
+            content: user_content,
         },
     ])
 }
@@ -477,12 +581,14 @@ fn merge_json_patch(target: &mut serde_json::Value, patch: &serde_json::Value) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn call_llm(
     http: &reqwest::Client,
     llm_url: &str,
     model: &str,
     messages: &[ChatMessage],
     api_key: Option<&str>,
+    temperature: f32,
     reasoning_effort: Option<String>,
     extra_body: Option<&serde_json::Value>,
 ) -> Result<String> {
@@ -491,7 +597,7 @@ async fn call_llm(
         model: model.to_string(),
         messages: messages.to_vec(),
         stream: false,
-        temperature: 0.2,
+        temperature,
         reasoning_effort,
     };
 
@@ -525,45 +631,6 @@ async fn call_llm(
         .message
         .content
         .ok_or_else(|| anyhow!("LLM returned null content (reasoning budget exhausted?)"))
-}
-
-fn build_prompt_context(
-    rules: &str,
-    bot_name: &str,
-    difficulty: &str,
-    names: &[String],
-    player_position: usize,
-    bot_ctx: &BotContext,
-    failed_commands: Vec<FailedCommand>,
-) -> PromptContext {
-    let my_name = names
-        .get(player_position)
-        .map(|s| s.as_str())
-        .unwrap_or(bot_name)
-        .to_string();
-    let my_colour = format!("{}", LIGHT.player_color(player_position));
-
-    let players = names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| PlayerInfo {
-            name: name.clone(),
-            colour: format!("{}", LIGHT.player_color(i)),
-            score: bot_ctx.points.get(i).copied().unwrap_or(0.0),
-        })
-        .collect();
-
-    PromptContext {
-        game_rules: rules.to_string(),
-        difficulty: difficulty.to_string(),
-        my_name,
-        my_colour,
-        players,
-        game_render: bot_ctx.render.clone(),
-        recent_logs: bot_ctx.recent_logs.clone(),
-        command_spec: bot_ctx.command_spec_yaml.clone(),
-        failed_commands,
-    }
 }
 
 async fn healthz(AxumState(state): AxumState<AppState>) -> StatusCode {
@@ -613,22 +680,17 @@ async fn wait_for_turn_consumer(
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let llm_url = std::env::var("LLM_URL").context("LLM_URL must be set")?;
-    let llm_api_key = std::env::var("LLM_API_KEY").ok();
-    let bot_model = std::env::var("BOT_MODEL").context("BOT_MODEL must be set")?;
-    let reasoning_effort = std::env::var("REASONING_EFFORT").ok();
-    let llm_extra_body = std::env::var("LLM_EXTRA_BODY")
-        .ok()
-        .map(|raw| -> Result<serde_json::Value> {
-            let value: serde_json::Value =
-                serde_json::from_str(&raw).context("LLM_EXTRA_BODY must be valid JSON")?;
-            if !value.is_object() {
-                return Err(anyhow!("LLM_EXTRA_BODY must be a JSON object"));
-            }
-            Ok(value)
-        })
-        .transpose()?;
-    tracing::info!(llm_url = %llm_url, bot_model = %bot_model, reasoning_effort = ?reasoning_effort, llm_extra_body = ?llm_extra_body, "Bot service starting");
+    let encryption_key = match crypto::load_key() {
+        Ok(key) => Some(key),
+        Err(e) => {
+            tracing::warn!(
+                "BOT_ENCRYPTION_KEY not loaded ({}); DB-stored provider API keys will be unavailable, env-var fallback only",
+                e
+            );
+            None
+        }
+    };
+    tracing::info!("Bot service starting");
 
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
     let pool = PgPool::connect(&database_url)
@@ -656,11 +718,7 @@ async fn main() -> Result<()> {
         pool,
         http,
         game_http,
-        llm_url,
-        llm_api_key,
-        bot_model,
-        reasoning_effort,
-        llm_extra_body,
+        encryption_key,
         jetstream: jetstream.clone(),
     };
 

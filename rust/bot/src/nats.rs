@@ -15,7 +15,7 @@ pub const CONSUMER_TURN: &str = "bot-turn";
 pub struct BotTurnEvent {
     pub game_id: Uuid,
     pub player_position: i32,
-    pub difficulty: String,
+    pub bot_name: String,
     pub attempt: i32,
 }
 

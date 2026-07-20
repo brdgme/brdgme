@@ -167,7 +167,7 @@ async fn make_game_with_human_and_bot(pool: &PgPool, uri: &str) -> Uuid {
             opponent_emails: &[],
             bot_slots: &[db::BotSlot {
                 name: "Bot 0".to_string(),
-                difficulty: "easy".to_string(),
+                bot_name: "easy".to_string(),
             }],
             chat_id: None,
             game_state: "initial_state",
@@ -295,7 +295,7 @@ async fn bot_turn_published_on_turn_change(pool: PgPool) {
     assert_eq!(events.len(), 1, "expected exactly one bot.turn event");
     assert_eq!(events[0].game_id, game_id);
     assert_eq!(events[0].player_position, bot_pos);
-    assert_eq!(events[0].difficulty, "easy");
+    assert_eq!(events[0].bot_name, "easy");
     assert_eq!(events[0].attempt, 0);
 }
 

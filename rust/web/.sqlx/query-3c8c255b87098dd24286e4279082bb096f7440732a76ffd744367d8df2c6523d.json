@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO game_bots (game_id, name, difficulty) VALUES ($1, $2, $3) RETURNING id",
+  "query": "INSERT INTO game_bots (game_id, name, bot_name) VALUES ($1, $2, $3) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       false
     ]
   },
-  "hash": "52b5c2deb15785c22f6c0e85698e3957fb23dcb81eb404ff431167ebb3207024"
+  "hash": "3c8c255b87098dd24286e4279082bb096f7440732a76ffd744367d8df2c6523d"
 }

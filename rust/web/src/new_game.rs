@@ -5,7 +5,9 @@ use leptos_router::{NavigateOptions, hooks::use_navigate};
 use uuid::Uuid;
 
 use crate::friends::{OpponentSuggestion, UserSearchResult};
-use crate::game::server_fns::{BotSlot, GameTypeInfo, create_new_game, generate_bot_name};
+use crate::game::server_fns::{
+    BotSlot, GameTypeInfo, create_new_game, generate_bot_name, get_available_bots,
+};
 
 /// Formats supported player counts, honoring non-contiguous sets:
 /// [2,3,4] -> "2-4 players", [2] -> "2 players", [2,4,6] -> "2, 4, 6 players".
@@ -84,8 +86,7 @@ enum SlotMode {
 }
 
 /// Per-opponent slot state. Player = a site user, picked via suggestion
-/// chip or typeahead; Email = invite by address; Bot = name + difficulty
-/// (difficulty stays a plain string pending the bots-in-DB work).
+/// chip or typeahead; Email = invite by address; Bot = name + bot_name.
 #[derive(Debug, Clone)]
 enum OpponentSlot {
     Player {
@@ -95,7 +96,7 @@ enum OpponentSlot {
     Email(String),
     Bot {
         name: String,
-        difficulty: String,
+        bot_name: String,
     },
 }
 
@@ -144,6 +145,7 @@ pub fn NewGamePage() -> impl IntoView {
 fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
     let types = StoredValue::new(types);
     let suggestions = LocalResource::new(crate::friends::get_opponent_suggestions);
+    let bot_names = LocalResource::new(get_available_bots);
 
     let (selected_type_id, set_selected_type_id) = signal(None::<Uuid>);
     let (selected_version_id, set_selected_version_id) = signal(None::<Uuid>);
@@ -250,7 +252,7 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                     return;
                 }
                 OpponentSlot::Email(email) => emails.push(email),
-                OpponentSlot::Bot { name, difficulty } => bots.push(BotSlot { name, difficulty }),
+                OpponentSlot::Bot { name, bot_name } => bots.push(BotSlot { name, bot_name }),
             }
         }
         set_form_error.set(None);
@@ -414,6 +416,7 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                                                 slots=opponent_slots
                                                 set_slots=set_opponent_slots
                                                 suggestions=suggestions
+                                                bot_names=bot_names
                                             />
                                         }
                                     })
@@ -460,6 +463,7 @@ fn OpponentSlotEditor(
     slots: ReadSignal<Vec<OpponentSlot>>,
     set_slots: WriteSignal<Vec<OpponentSlot>>,
     suggestions: LocalResource<Result<Vec<OpponentSuggestion>, ServerFnError>>,
+    bot_names: LocalResource<Result<Vec<String>, ServerFnError>>,
 ) -> impl IntoView {
     let slot = move || slots.get().get(i).cloned().unwrap_or_default();
     let mode = move || slot().mode();
@@ -472,7 +476,7 @@ fn OpponentSlotEditor(
                     SlotMode::Email => OpponentSlot::Email(String::new()),
                     SlotMode::Bot => OpponentSlot::Bot {
                         name: format!("Bot {}", i + 1),
-                        difficulty: "medium".to_string(),
+                        bot_name: "medium".to_string(),
                     },
                 };
             }
@@ -746,21 +750,37 @@ fn OpponentSlotEditor(
                     <select
                         aria-label="Bot difficulty"
                         prop:value=move || match slot() {
-                            OpponentSlot::Bot { difficulty, .. } => difficulty,
+                            OpponentSlot::Bot { bot_name, .. } => bot_name,
                             _ => "medium".to_string(),
                         }
                         on:change=move |ev| {
                             let val = event_target_value(&ev);
                             set_slots.update(|v| {
-                                if let Some(OpponentSlot::Bot { difficulty, .. }) = v.get_mut(i) {
-                                    *difficulty = val;
+                                if let Some(OpponentSlot::Bot { bot_name, .. }) = v.get_mut(i) {
+                                    *bot_name = val;
                                 }
                             });
                         }
                     >
-                        <option value="easy">"Easy"</option>
-                        <option value="medium">"Medium"</option>
-                        <option value="hard">"Hard"</option>
+                        {move || {
+                            let names = match bot_names.get() {
+                                Some(Ok(b)) if !b.is_empty() => b,
+                                _ => vec![
+                                    "easy".to_string(),
+                                    "medium".to_string(),
+                                    "hard".to_string(),
+                                ],
+                            };
+                            names
+                                .into_iter()
+                                .map(|n| {
+                                    let label = n.clone();
+                                    view! {
+                                        <option value=n>{label}</option>
+                                    }
+                                })
+                                .collect_view()
+                        }}
                     </select>
                 </div>
             </Show>

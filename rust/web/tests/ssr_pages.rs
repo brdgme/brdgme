@@ -281,7 +281,7 @@ async fn game_page_anonymous_visitor_gets_clean_error_not_panic(pool: PgPool) {
             opponent_emails: &[],
             bot_slots: &[BotSlot {
                 name: "Botty".to_string(),
-                difficulty: "easy".to_string(),
+                bot_name: "easy".to_string(),
             }],
             chat_id: None,
             game_state: "state",
@@ -319,7 +319,7 @@ async fn game_page_logged_in_player_renders_game(pool: PgPool) {
             opponent_emails: &[],
             bot_slots: &[BotSlot {
                 name: "Botty".to_string(),
-                difficulty: "easy".to_string(),
+                bot_name: "easy".to_string(),
             }],
             chat_id: None,
             game_state: "state",
@@ -469,7 +469,7 @@ async fn restart_game_on_finished_game_succeeds(pool: PgPool) {
             opponent_emails: &[],
             bot_slots: &[BotSlot {
                 name: "Botty".to_string(),
-                difficulty: "easy".to_string(),
+                bot_name: "easy".to_string(),
             }],
             chat_id: None,
             game_state: "state",
@@ -533,7 +533,7 @@ async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: Pg
             opponent_emails: &[],
             bot_slots: &[BotSlot {
                 name: "Botty".to_string(),
-                difficulty: "easy".to_string(),
+                bot_name: "easy".to_string(),
             }],
             chat_id: None,
             game_state: "state",
@@ -808,7 +808,7 @@ async fn players_page_bots_toggle_changes_inclusion(pool: PgPool) {
     .unwrap();
 
     let game_bot_id = sqlx::query_scalar!(
-        "INSERT INTO game_bots (id, game_id, name, difficulty)
+        "INSERT INTO game_bots (id, game_id, name, bot_name)
          VALUES (uuid_generate_v4(), $1, $2, 'medium')
          RETURNING id",
         game_id,
@@ -1122,7 +1122,7 @@ async fn admin_export_route_returns_bundle_without_emails(pool: PgPool) {
             opponent_emails: &[],
             bot_slots: &[BotSlot {
                 name: "Botty".to_string(),
-                difficulty: "easy".to_string(),
+                bot_name: "easy".to_string(),
             }],
             chat_id: None,
             game_state: "opaque_state_blob",

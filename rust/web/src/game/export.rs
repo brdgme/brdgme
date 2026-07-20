@@ -65,7 +65,7 @@ pub struct BundlePlayer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleBot {
     pub name: String,
-    pub difficulty: String,
+    pub bot_name: String,
     pub personality: Option<String>,
 }
 
@@ -89,7 +89,7 @@ pub async fn build_export_bundle(
 
     // game_bots.personality is not on the GameBot model; fetch directly.
     let bots = sqlx::query!(
-        "SELECT name, difficulty, personality FROM game_bots WHERE game_id = $1 ORDER BY name",
+        "SELECT name, bot_name, personality FROM game_bots WHERE game_id = $1 ORDER BY name",
         game_id
     )
     .fetch_all(pool)
@@ -97,7 +97,7 @@ pub async fn build_export_bundle(
     .into_iter()
     .map(|b| BundleBot {
         name: b.name,
-        difficulty: b.difficulty,
+        bot_name: b.bot_name,
         personality: b.personality,
     })
     .collect();

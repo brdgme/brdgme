@@ -22,7 +22,7 @@ pub const MAX_TURN_ATTEMPTS: i32 = 3;
 pub struct BotTurnEvent {
     pub game_id: Uuid,
     pub player_position: i32,
-    pub difficulty: String,
+    pub bot_name: String,
     pub attempt: i32,
 }
 
