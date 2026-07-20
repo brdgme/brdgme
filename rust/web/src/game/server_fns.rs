@@ -753,7 +753,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
 /// "already restarted" guard, the new game and the `restarted_game_id`
 /// write commit atomically.
 #[cfg(feature = "ssr")]
-async fn restart_game_impl(
+pub(crate) async fn restart_game_impl(
     pool: &sqlx::PgPool,
     http_client: &reqwest::Client,
     user_id: Uuid,

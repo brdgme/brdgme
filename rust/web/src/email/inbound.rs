@@ -408,25 +408,66 @@ async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: 
     let text = extract_plain_text(&raw).unwrap_or_default();
     let commands = parse_reply_commands(&text);
 
-    let header = if commands.is_empty() {
-        no_command_header_text()
-    } else {
-        let outcome = run_commands_in_order(&commands, |cmd| {
-            crate::game::execute_command(
-                &state.pool,
-                &state.http_client,
-                &state.broadcaster,
-                &state.jetstream,
-                player.game_id,
-                player.position as usize,
-                cmd,
-            )
-        })
-        .await;
-        match outcome {
-            CommandLoopOutcome::AllExecuted(n) => confirmed_header_text(n),
-            CommandLoopOutcome::Failed { error, .. } => error_reply_text(&error),
+    if commands.is_empty() {
+        send_game_reply_response(state, &player, token, from, no_command_header_text()).await;
+        return;
+    }
+
+    let ctx = crate::email::commands::EmailCommandCtx {
+        pool: &state.pool,
+        http_client: &state.http_client,
+        broadcaster: &state.broadcaster,
+        jetstream: &state.jetstream,
+        resend: state.resend.as_ref(),
+        game_id: player.game_id,
+        game_player_id: player.game_player_id,
+        user_id: player.user_id,
+        position: player.position as usize,
+    };
+
+    let mut move_count: usize = 0;
+    let mut last_status: Option<String> = None;
+    let mut full_content: Option<(String, String)> = None;
+    let mut error_header: Option<String> = None;
+
+    for line in &commands {
+        match crate::email::commands::dispatch_email_command(&ctx, line).await {
+            Ok(crate::email::commands::CommandReply::GameMove) => {
+                move_count += 1;
+            }
+            Ok(crate::email::commands::CommandReply::Status(msg)) => {
+                last_status = Some(msg);
+            }
+            Ok(crate::email::commands::CommandReply::FullContent { html, text }) => {
+                full_content = Some((html, text));
+                break;
+            }
+            Err(crate::email::commands::CommandError::User(msg)) => {
+                error_header = Some(msg);
+                break;
+            }
+            Err(crate::email::commands::CommandError::Internal(e)) => {
+                tracing::error!("resend webhook: command error: {e}");
+                error_header =
+                    Some("An unexpected error occurred while processing your command.".to_string());
+                break;
+            }
         }
+    }
+
+    if let Some((html, text)) = full_content {
+        send_rules_reply_response(state, &player, token, from, html, text).await;
+        return;
+    }
+
+    let header = if let Some(err) = error_header {
+        err
+    } else if move_count > 0 {
+        confirmed_header_text(move_count)
+    } else if let Some(status) = last_status {
+        status
+    } else {
+        no_command_header_text()
     };
 
     send_game_reply_response(state, &player, token, from, header).await;
@@ -506,6 +547,54 @@ async fn send_game_reply_response(
         false,
         &crate::email::notify::reply_address(token),
     );
+    crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
+}
+
+async fn send_rules_reply_response(
+    state: &AppState,
+    player: &EmailPlayer,
+    token: &str,
+    from: &str,
+    html: String,
+    text: String,
+) {
+    let pool = &state.pool;
+    let theme_slug =
+        match crate::email::outbound::fetch_email_recipient(pool, player.game_player_id).await {
+            Ok(Some(r)) => r.theme_slug,
+            _ => None,
+        };
+    let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
+    let bg = palette.background.hex();
+    let fg = palette.foreground.hex();
+
+    let full_html = format!(
+        "<html><body style=\"background-color:{bg};color:{fg};font-family:sans-serif;padding:16px;\">{html}</body></html>"
+    );
+
+    let mut headers = std::collections::BTreeMap::new();
+    let msg_id = format!("<game-{}@brdg.me>", player.game_id);
+    headers.insert("In-Reply-To".to_string(), msg_id.clone());
+    headers.insert("References".to_string(), msg_id);
+    headers.insert(
+        "Reply-To".to_string(),
+        crate::email::notify::reply_address(token),
+    );
+    headers.insert(
+        "List-Unsubscribe".to_string(),
+        "<mailto:unsubscribe@play.brdg.me?subject=unsubscribe>".to_string(),
+    );
+    headers.insert(
+        "List-Unsubscribe-Post".to_string(),
+        "List-Unsubscribe=One-Click".to_string(),
+    );
+
+    let rendered = crate::email::render::RenderedEmail {
+        subject: "Rules".to_string(),
+        text,
+        html: full_html,
+        headers,
+    };
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 

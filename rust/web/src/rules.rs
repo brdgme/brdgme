@@ -244,7 +244,7 @@ fn non_empty(s: String) -> Option<String> {
 /// matches `BasicStrategy { .. }` and never parses `game`), so an empty `game`
 /// string works - no throwaway `Request::New` state is needed.
 #[cfg(feature = "ssr")]
-async fn fetch_strategy(
+pub(crate) async fn fetch_strategy(
     http: &reqwest::Client,
     uri: &str,
     name: &str,
