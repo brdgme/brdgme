@@ -4,6 +4,10 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+type BotUpdateAction = Action<(Uuid, String, f32, bool, bool, bool), Result<(), ServerFnError>>;
+type ProviderUpdateAction =
+    Action<(Uuid, String, String, Option<String>, bool), Result<(), ServerFnError>>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotRow {
     pub id: Uuid,
@@ -852,6 +856,11 @@ pub fn AdminPage() -> impl IntoView {
         version.track();
         admin_list_bots()
     });
+    let providers: LocalResource<Result<Vec<ProviderRow>, ServerFnError>> =
+        LocalResource::new(move || {
+            version.track();
+            admin_list_providers()
+        });
 
     Effect::new(move |_| {
         if let Some(Err(e)) = bots.get() {
@@ -868,16 +877,20 @@ pub fn AdminPage() -> impl IntoView {
                 <h1>"Admin"</h1>
                 <Suspense fallback=|| view! { <p>"Loading..."</p> }>
                     {move || {
-                        bots.get().map(|res| match res {
-                            Err(e) => view! { <p class="error">{e.to_string()}</p> }.into_any(),
-                            Ok(bot_list) => view! {
+                        let bots_res = bots.get();
+                        let providers_res = providers.get();
+                        match (bots_res, providers_res) {
+                            (Some(Err(e)), _) | (_, Some(Err(e))) => {
+                                view! { <p class="error">{e.to_string()}</p> }.into_any()
+                            }
+                            (Some(Ok(bot_list)), Some(Ok(provider_list))) => view! {
                                 <BotsSection bots=bot_list version=version/>
-                                <h2>"Providers"</h2>
-                                <p>"Coming soon"</p>
+                                <ProvidersSection providers=provider_list version=version/>
                                 <h2>"Bot-Provider Links"</h2>
                                 <p>"Coming soon"</p>
                             }.into_any(),
-                        })
+                            _ => view! { <p>"Loading..."</p> }.into_any(),
+                        }
                     }}
                 </Suspense>
             </div>
@@ -1132,7 +1145,7 @@ fn BotEditForm(
     bot_basic: bool,
     bot_advanced: bool,
     bot_enabled: bool,
-    update_action: Action<(Uuid, String, f32, bool, bool, bool), Result<(), ServerFnError>>,
+    update_action: BotUpdateAction,
 ) -> impl IntoView {
     use crate::components::FormField;
     use leptos::html;
@@ -1181,6 +1194,233 @@ fn BotEditForm(
                     </FormField>
                     <FormField label="Enabled">
                         <input type="checkbox" node_ref=enabled_input prop:checked=bot_enabled/>
+                    </FormField>
+                    <div class="form-actions">
+                        <input type="submit" value="Save" disabled=move || update_action.pending().get()/>
+                    </div>
+                </form>
+            </td>
+        </tr>
+    }
+}
+
+#[component]
+fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl IntoView {
+    let show_create = RwSignal::new(false);
+    let editing_id = RwSignal::new(None::<Uuid>);
+    let error = RwSignal::new(None::<String>);
+
+    let create_action = Action::new(|(name, url, api_key): &(String, String, Option<String>)| {
+        let name = name.clone();
+        let url = url.clone();
+        let api_key = api_key.clone();
+        async move { admin_create_provider(name, url, api_key).await }
+    });
+
+    let update_action = Action::new(
+        |(id, name, url, api_key, enabled): &(Uuid, String, String, Option<String>, bool)| {
+            let id = *id;
+            let name = name.clone();
+            let url = url.clone();
+            let api_key = api_key.clone();
+            let enabled = *enabled;
+            async move { admin_update_provider(id, name, url, api_key, enabled).await }
+        },
+    );
+
+    let delete_action = Action::new(|id: &Uuid| {
+        let id = *id;
+        async move { admin_delete_provider(id).await }
+    });
+
+    Effect::new(move |_| {
+        if create_action.value().get().is_some() && !create_action.pending().get() {
+            match create_action.value().get().unwrap() {
+                Ok(_) => {
+                    show_create.set(false);
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if update_action.value().get().is_some() && !update_action.pending().get() {
+            match update_action.value().get().unwrap() {
+                Ok(_) => {
+                    editing_id.set(None);
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if delete_action.value().get().is_some() && !delete_action.pending().get() {
+            match delete_action.value().get().unwrap() {
+                Ok(_) => {
+                    error.set(None);
+                    version.update(|v| *v += 1);
+                }
+                Err(e) => error.set(Some(e.to_string())),
+            }
+        }
+    });
+
+    let providers = StoredValue::new(providers);
+
+    view! {
+        <h2>"Providers"</h2>
+        {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>"Name"</th>
+                    <th>"URL"</th>
+                    <th>"API Key"</th>
+                    <th>"Enabled"</th>
+                    <th>"Actions"</th>
+                </tr>
+            </thead>
+            <tbody>
+                {providers.with_value(|providers| providers.iter().map(|provider| {
+                    let id = provider.id;
+                    let name = provider.name.clone();
+                    let url = provider.url.clone();
+                    let api_key_masked = provider.api_key_masked.clone().unwrap_or_else(|| "None".to_string());
+                    let enabled = provider.enabled;
+                    let provider_name = provider.name.clone();
+                    let provider_url = provider.url.clone();
+                    let provider_enabled = provider.enabled;
+                    view! {
+                        <tr>
+                            <td>{name}</td>
+                            <td>{url}</td>
+                            <td>{api_key_masked}</td>
+                            <td>{if enabled { "Yes" } else { "No" }}</td>
+                            <td>
+                                <div class="form-actions">
+                                    <button on:click=move |_| editing_id.set(Some(id))>"Edit"</button>
+                                    <button on:click=move |_| {
+                                        let confirmed = web_sys::window()
+                                            .and_then(|w| w.confirm_with_message("Delete this provider?").ok())
+                                            .unwrap_or(false);
+                                        if confirmed {
+                                            delete_action.dispatch(id);
+                                        }
+                                    }>"Delete"</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <Show when=move || editing_id.get() == Some(id)>
+                            <ProviderEditForm
+                                provider_id=id
+                                provider_name=provider_name.clone()
+                                provider_url=provider_url.clone()
+                                provider_enabled=provider_enabled
+                                update_action=update_action
+                            />
+                        </Show>
+                    }
+                }).collect_view())}
+            </tbody>
+        </table>
+        <div class="form-actions">
+            <button on:click=move |_| show_create.update(|v| *v = !*v)>"Add Provider"</button>
+        </div>
+        <Show when=move || show_create.get()>
+            <ProviderCreateForm create_action=create_action/>
+        </Show>
+    }
+}
+
+#[component]
+fn ProviderCreateForm(
+    create_action: Action<(String, String, Option<String>), Result<ProviderRow, ServerFnError>>,
+) -> impl IntoView {
+    use crate::components::FormField;
+    use leptos::html;
+
+    let name_input = NodeRef::<html::Input>::new();
+    let url_input = NodeRef::<html::Input>::new();
+    let key_input = NodeRef::<html::Input>::new();
+
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let name = name_input.get().map(|el| el.value()).unwrap_or_default();
+        let url = url_input.get().map(|el| el.value()).unwrap_or_default();
+        let api_key = key_input
+            .get()
+            .map(|el| el.value())
+            .filter(|v| !v.is_empty());
+        create_action.dispatch((name, url, api_key));
+    };
+
+    view! {
+        <form on:submit=on_submit>
+            <FormField label="Name">
+                <input type="text" node_ref=name_input required/>
+            </FormField>
+            <FormField label="URL" help="e.g. https://openrouter.ai/api">
+                <input type="text" node_ref=url_input required/>
+            </FormField>
+            <FormField label="API Key" help="Optional">
+                <input type="password" node_ref=key_input/>
+            </FormField>
+            <div class="form-actions">
+                <input type="submit" value="Create" disabled=move || create_action.pending().get()/>
+            </div>
+        </form>
+    }
+}
+
+#[component]
+fn ProviderEditForm(
+    provider_id: Uuid,
+    provider_name: String,
+    provider_url: String,
+    provider_enabled: bool,
+    update_action: ProviderUpdateAction,
+) -> impl IntoView {
+    use crate::components::FormField;
+    use leptos::html;
+
+    let name_input = NodeRef::<html::Input>::new();
+    let url_input = NodeRef::<html::Input>::new();
+    let key_input = NodeRef::<html::Input>::new();
+    let enabled_input = NodeRef::<html::Input>::new();
+
+    let on_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let name = name_input.get().map(|el| el.value()).unwrap_or_default();
+        let url = url_input.get().map(|el| el.value()).unwrap_or_default();
+        let api_key = key_input
+            .get()
+            .map(|el| el.value())
+            .filter(|v| !v.is_empty());
+        let enabled = enabled_input.get().map(|el| el.checked()).unwrap_or(true);
+        update_action.dispatch((provider_id, name, url, api_key, enabled));
+    };
+
+    view! {
+        <tr>
+            <td colspan="5">
+                <form on:submit=on_submit>
+                    <FormField label="Name">
+                        <input type="text" node_ref=name_input required prop:value=provider_name/>
+                    </FormField>
+                    <FormField label="URL">
+                        <input type="text" node_ref=url_input required prop:value=provider_url/>
+                    </FormField>
+                    <FormField label="API Key" help="Leave blank to keep existing key">
+                        <input type="password" node_ref=key_input/>
+                    </FormField>
+                    <FormField label="Enabled">
+                        <input type="checkbox" node_ref=enabled_input prop:checked=provider_enabled/>
                     </FormField>
                     <div class="form-actions">
                         <input type="submit" value="Save" disabled=move || update_action.pending().get()/>
