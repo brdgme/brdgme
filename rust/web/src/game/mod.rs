@@ -199,14 +199,14 @@ async fn publish_bot_turns(
         tracing::info!(
             %game_id,
             position = turn.position,
-            difficulty = %turn.difficulty,
+            bot_name = %turn.bot_name,
             attempt,
             "Publishing bot.turn"
         );
         let event = crate::nats::BotTurnEvent {
             game_id,
             player_position: turn.position,
-            difficulty: turn.difficulty.clone(),
+            bot_name: turn.bot_name.clone(),
             attempt,
         };
         let payload = match serde_json::to_vec(&event) {
@@ -527,7 +527,7 @@ mod tests {
                 opponent_emails: &[],
                 bot_slots: &[db::BotSlot {
                     name: "Bot 0".to_string(),
-                    difficulty: "easy".to_string(),
+                    bot_name: "easy".to_string(),
                 }],
                 chat_id: None,
                 game_state: "initial_state",
@@ -1012,8 +1012,8 @@ mod tests {
             .unwrap();
         assert!(ge.game.is_finished);
 
-        // Games with a bot player are never rated: rating_change must stay
-        // NULL for every player, human and bot alike.
+        // Two-player game with a bot: only one human player, so no pairwise
+        // rating is possible. rating_change stays NULL for everyone.
         for p in &ge.game_players {
             assert_eq!(p.game_player.rating_change, None);
         }
