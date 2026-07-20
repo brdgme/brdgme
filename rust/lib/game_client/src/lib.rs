@@ -178,6 +178,116 @@ pub async fn player_render(
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct GameData {
+    pub pub_state_yaml: String,
+    pub player_state_yaml: String,
+    pub data_docs: String,
+    pub basic_strategy: String,
+    pub advanced_strategy: String,
+    pub command_spec: Option<CommandSpec>,
+    pub rules: String,
+    pub points: Vec<f32>,
+}
+
+fn json_to_yaml(json: &str) -> Result<String> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).context("invalid JSON in game state")?;
+    serde_yaml::to_string(&value).context("failed to serialize state as YAML")
+}
+
+pub async fn fetch_game_data(
+    client: &reqwest::Client,
+    uri: &str,
+    version_name: &str,
+    game: String,
+    player: usize,
+    interface_version: i32,
+) -> Result<GameData> {
+    let status_resp = request(
+        client,
+        uri,
+        version_name,
+        &Request::Status { game: game.clone() },
+    )
+    .await?;
+    let (public_render, player_renders, points) = match status_resp {
+        Response::Status {
+            game,
+            public_render,
+            player_renders,
+            ..
+        } => (public_render, player_renders, game.points),
+        _ => return Err(anyhow!("unexpected response to Status request")),
+    };
+    let player_render = player_renders
+        .get(player)
+        .ok_or_else(|| anyhow!("no player render for position {player}"))?;
+
+    let pub_state_yaml = json_to_yaml(&public_render.pub_state)?;
+    let player_state_yaml = json_to_yaml(&player_render.player_state)?;
+    let command_spec = player_render.command_spec.clone();
+
+    let (data_docs, basic_strategy, advanced_strategy) = if interface_version >= 2 {
+        let dd = match request(
+            client,
+            uri,
+            version_name,
+            &Request::DataDocs { game: game.clone() },
+        )
+        .await?
+        {
+            Response::DataDocs { data_docs } => data_docs,
+            _ => return Err(anyhow!("unexpected response to DataDocs request")),
+        };
+        let bs = match request(
+            client,
+            uri,
+            version_name,
+            &Request::BasicStrategy {
+                game: game.clone(),
+                player,
+            },
+        )
+        .await?
+        {
+            Response::BasicStrategy { strategy } => strategy,
+            _ => return Err(anyhow!("unexpected response to BasicStrategy request")),
+        };
+        let as_ = match request(
+            client,
+            uri,
+            version_name,
+            &Request::AdvancedStrategy { game, player },
+        )
+        .await?
+        {
+            Response::AdvancedStrategy { strategy } => strategy,
+            _ => return Err(anyhow!("unexpected response to AdvancedStrategy request")),
+        };
+        (dd, bs, as_)
+    } else {
+        let placeholder = "Not supported in game interface V1".to_string();
+        (placeholder.clone(), placeholder.clone(), placeholder)
+    };
+
+    let rules = match request(client, uri, version_name, &Request::Rules).await? {
+        Response::Rules { rules } => rules,
+        _ => return Err(anyhow!("unexpected response to Rules request")),
+    };
+
+    Ok(GameData {
+        pub_state_yaml,
+        player_state_yaml,
+        data_docs,
+        basic_strategy,
+        advanced_strategy,
+        command_spec,
+        rules,
+        points,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,5 +623,103 @@ mod tests {
             resp.state, "acquire-1.games.internal",
             "client must send Host {{version_name}}.games.internal for KEDA interceptor routing"
         );
+    }
+
+    fn mock_game_server() -> Router {
+        Router::new().route(
+            "/",
+            post(|Json(payload): Json<Request>| async move {
+                match payload {
+                    Request::Status { .. } => Json(Response::Status {
+                        game: brdgme_cmd::api::GameResponse {
+                            state: "{}".to_string(),
+                            points: vec![0.0, 0.0],
+                            status: brdgme_game::Status::Active {
+                                whose_turn: vec![0],
+                                eliminated: vec![],
+                            },
+                        },
+                        public_render: PubRender {
+                            pub_state: r#"{"board":"empty","round":1}"#.to_string(),
+                            render: "render".to_string(),
+                        },
+                        player_renders: vec![
+                            PlayerRender {
+                                player_state: r#"{"hand":["A","K"],"score":10}"#.to_string(),
+                                render: "p0".to_string(),
+                                command_spec: None,
+                            },
+                            PlayerRender {
+                                player_state: r#"{"hand":["Q"],"score":5}"#.to_string(),
+                                render: "p1".to_string(),
+                                command_spec: None,
+                            },
+                        ],
+                    }),
+                    Request::DataDocs { .. } => Json(Response::DataDocs {
+                        data_docs: "V2 data docs".to_string(),
+                    }),
+                    Request::BasicStrategy { .. } => Json(Response::BasicStrategy {
+                        strategy: "V2 basic strategy".to_string(),
+                    }),
+                    Request::AdvancedStrategy { .. } => Json(Response::AdvancedStrategy {
+                        strategy: "V2 advanced strategy".to_string(),
+                    }),
+                    Request::Rules => Json(Response::Rules {
+                        rules: "Game rules here".to_string(),
+                    }),
+                    _ => Json(Response::SystemError {
+                        message: "unsupported in mock".to_string(),
+                    }),
+                }
+            }),
+        )
+    }
+
+    async fn start_mock_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock_game_server()).await.unwrap();
+        });
+        format!("http://{}", addr)
+    }
+
+    #[tokio::test]
+    async fn test_fetch_game_data_v1_uses_placeholders() {
+        let uri = start_mock_server().await;
+        let client = reqwest::Client::new();
+        let data = fetch_game_data(&client, &uri, "test-v1", "{}".to_string(), 0, 1)
+            .await
+            .expect("fetch_game_data failed");
+        assert_eq!(data.data_docs, "Not supported in game interface V1");
+        assert_eq!(data.basic_strategy, "Not supported in game interface V1");
+        assert_eq!(data.advanced_strategy, "Not supported in game interface V1");
+        assert_eq!(data.rules, "Game rules here");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_game_data_v2_returns_real_content() {
+        let uri = start_mock_server().await;
+        let client = reqwest::Client::new();
+        let data = fetch_game_data(&client, &uri, "test-v2", "{}".to_string(), 0, 2)
+            .await
+            .expect("fetch_game_data failed");
+        assert_eq!(data.data_docs, "V2 data docs");
+        assert_eq!(data.basic_strategy, "V2 basic strategy");
+        assert_eq!(data.advanced_strategy, "V2 advanced strategy");
+        assert_eq!(data.rules, "Game rules here");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_game_data_yaml_serialization() {
+        let uri = start_mock_server().await;
+        let client = reqwest::Client::new();
+        let data = fetch_game_data(&client, &uri, "test-v1", "{}".to_string(), 0, 1)
+            .await
+            .expect("fetch_game_data failed");
+        assert!(data.pub_state_yaml.contains("board: empty"));
+        assert!(data.pub_state_yaml.contains("round: 1"));
+        assert!(data.player_state_yaml.contains("score: 10"));
     }
 }

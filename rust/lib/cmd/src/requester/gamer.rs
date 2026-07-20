@@ -46,6 +46,9 @@ impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for Game
                 Ok(handle_player_render::<G>(player, &game))
             }
             Request::Rules => Ok(handle_rules::<G>()),
+            Request::DataDocs { .. } => Ok(handle_data_docs::<G>()),
+            Request::BasicStrategy { .. } => Ok(handle_basic_strategy::<G>()),
+            Request::AdvancedStrategy { .. } => Ok(handle_advanced_strategy::<G>()),
         }
     }
 }
@@ -180,4 +183,22 @@ fn handle_player_render<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>
 
 fn handle_rules<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> Response {
     Response::Rules { rules: G::rules() }
+}
+
+fn handle_data_docs<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> Response {
+    Response::DataDocs {
+        data_docs: G::data_docs(),
+    }
+}
+
+fn handle_basic_strategy<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> Response {
+    Response::BasicStrategy {
+        strategy: G::basic_strategy(),
+    }
+}
+
+fn handle_advanced_strategy<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> Response {
+    Response::AdvancedStrategy {
+        strategy: G::advanced_strategy(),
+    }
 }

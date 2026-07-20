@@ -117,6 +117,18 @@ pub trait Gamer: Sized {
     fn rules() -> String {
         String::new()
     }
+
+    fn data_docs() -> String {
+        String::new()
+    }
+
+    fn basic_strategy() -> String {
+        String::new()
+    }
+
+    fn advanced_strategy() -> String {
+        String::new()
+    }
 }
 
 pub trait Renderer {

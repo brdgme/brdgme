@@ -31,6 +31,17 @@ pub enum Request {
         game: String,
     },
     Rules,
+    DataDocs {
+        game: String,
+    },
+    BasicStrategy {
+        game: String,
+        player: usize,
+    },
+    AdvancedStrategy {
+        game: String,
+        player: usize,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -109,6 +120,15 @@ pub enum Response {
     },
     Rules {
         rules: String,
+    },
+    DataDocs {
+        data_docs: String,
+    },
+    BasicStrategy {
+        strategy: String,
+    },
+    AdvancedStrategy {
+        strategy: String,
     },
     UserError {
         message: String,
