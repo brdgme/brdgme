@@ -10,8 +10,6 @@ pub enum CryptoError {
     EncryptionFailed,
     #[error("decryption failed")]
     DecryptionFailed,
-    #[error("missing DATABASE_ENCRYPTION_KEY environment variable")]
-    MissingEnvVar,
     #[error("invalid hex encoding")]
     InvalidHex,
 }
@@ -41,9 +39,22 @@ pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         .map_err(|_| CryptoError::DecryptionFailed)
 }
 
+pub fn default_key() -> [u8; 32] {
+    let mut key = [0u8; 32];
+    let seed = b"brdgme-dev-key-not-for-prod!!!";
+    key[..seed.len()].copy_from_slice(seed);
+    key
+}
+
+pub fn using_default_key() -> bool {
+    std::env::var("DATABASE_ENCRYPTION_KEY").is_err()
+}
+
 pub fn load_key() -> Result<[u8; 32], CryptoError> {
-    let hex_str =
-        std::env::var("DATABASE_ENCRYPTION_KEY").map_err(|_| CryptoError::MissingEnvVar)?;
+    let hex_str = match std::env::var("DATABASE_ENCRYPTION_KEY") {
+        Ok(v) => v,
+        Err(_) => return Ok(default_key()),
+    };
     let bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
     let key: [u8; 32] = bytes
         .try_into()
@@ -108,7 +119,7 @@ mod tests {
     fn load_key_missing_env() {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
-        assert!(matches!(load_key(), Err(CryptoError::MissingEnvVar)));
+        assert_eq!(load_key().unwrap(), default_key());
     }
 
     #[test]

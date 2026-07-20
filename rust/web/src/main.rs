@@ -22,6 +22,12 @@ async fn main() {
     // already-installed subscriber.
     let _sentry_guard = init_sentry();
 
+    if web::crypto::using_default_key() {
+        tracing::warn!(
+            "DATABASE_ENCRYPTION_KEY not set - using insecure default key, DO NOT USE IN PRODUCTION"
+        );
+    }
+
     let pool = create_pool().await.expect("Failed to create database pool");
     let http_client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))

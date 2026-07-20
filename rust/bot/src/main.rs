@@ -680,11 +680,16 @@ async fn wait_for_turn_consumer(
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    if crypto::using_default_key() {
+        tracing::warn!(
+            "DATABASE_ENCRYPTION_KEY not set - using insecure default key, DO NOT USE IN PRODUCTION"
+        );
+    }
     let encryption_key = match crypto::load_key() {
         Ok(key) => Some(key),
         Err(e) => {
             tracing::warn!(
-                "DATABASE_ENCRYPTION_KEY not loaded ({}); DB-stored provider API keys will be unavailable, env-var fallback only",
+                "DATABASE_ENCRYPTION_KEY invalid ({}); DB-stored provider API keys will be unavailable, env-var fallback only",
                 e
             );
             None

@@ -1940,7 +1940,7 @@ mod tests {
     use super::*;
 
     fn test_encryption_key() -> [u8; 32] {
-        [0xAB; 32]
+        crate::crypto::default_key()
     }
 
     #[sqlx::test]
@@ -1981,15 +1981,7 @@ mod tests {
         .await
         .unwrap();
 
-        unsafe {
-            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
-        }
-
         let providers = list_providers(&pool).await.unwrap();
-
-        unsafe {
-            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
-        }
 
         assert_eq!(providers.len(), 1);
         let masked = providers[0].api_key_masked.as_ref().unwrap();
@@ -2000,9 +1992,6 @@ mod tests {
     #[sqlx::test]
     async fn test_admin_create_provider_encrypts_key(pool: sqlx::PgPool) {
         let key = test_encryption_key();
-        unsafe {
-            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
-        }
 
         let api_key = "sk-another-secret-key-5678";
         let provider = create_provider(
@@ -2013,10 +2002,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        unsafe {
-            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
-        }
 
         let raw: Vec<u8> =
             sqlx::query_scalar("SELECT api_key_encrypted FROM llm_providers WHERE id = $1")
@@ -2048,10 +2033,6 @@ mod tests {
         .await
         .unwrap();
 
-        unsafe {
-            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
-        }
-
         update_provider(
             &pool,
             provider_id,
@@ -2062,10 +2043,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        unsafe {
-            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
-        }
 
         let raw: Vec<u8> =
             sqlx::query_scalar("SELECT api_key_encrypted FROM llm_providers WHERE id = $1")
@@ -2095,10 +2072,6 @@ mod tests {
         .await
         .unwrap();
 
-        unsafe {
-            std::env::set_var("DATABASE_ENCRYPTION_KEY", hex::encode(key));
-        }
-
         let new_key = "sk-new-key-2222";
         update_provider(
             &pool,
@@ -2110,10 +2083,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        unsafe {
-            std::env::remove_var("DATABASE_ENCRYPTION_KEY");
-        }
 
         let raw: Vec<u8> =
             sqlx::query_scalar("SELECT api_key_encrypted FROM llm_providers WHERE id = $1")
