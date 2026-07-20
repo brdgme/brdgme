@@ -79,6 +79,12 @@ structure in `rust/web` or when debugging a hydration panic).
 - Keep local verification light: `fmt` and a quick lint pass. Push and let CI
   run the full test/clippy suites rather than burning time re-running them
   locally.
+- Before committing any change that includes Rust code, run all of the
+  following and ensure they pass:
+  - `cargo fmt --all -- --check`
+  - `cargo clippy -p web --all-targets --features ssr -- -D warnings`
+  - `cargo clippy --workspace --exclude web --all-targets -- -D warnings`
+  Never commit or push with outstanding fmt or clippy errors.
 - Running the test suite locally always produces DB test failures - tests
   that need a database fail in a plain local/agent run. This is a known,
   pre-existing condition, not caused by your change; do not chase it or
