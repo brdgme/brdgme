@@ -181,6 +181,11 @@ COPY --from=builder /app/target/release/acquire_1_http .
 USER 65532
 CMD ["./acquire_1_http"]
 
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS alhambra-1
+COPY --from=builder /app/target/release/alhambra_1_http .
+USER 65532
+CMD ["./alhambra_1_http"]
+
 FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS category-5-2
 COPY --from=builder /app/target/release/category_5_2_http .
 USER 65532
@@ -280,3 +285,18 @@ FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c261840
 COPY --from=builder /app/target/release/texas_holdem_2_http .
 USER 65532
 CMD ["./texas_holdem_2_http"]
+
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS red7-1
+COPY --from=builder /app/target/release/red7_1_http .
+USER 65532
+CMD ["./red7_1_http"]
+
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS starship-catan-1
+COPY --from=builder /app/target/release/starship_catan_1_http .
+USER 65532
+CMD ["./starship_catan_1_http"]
+
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS seven-wonders-1
+COPY --from=builder /app/target/release/seven_wonders_1_http .
+USER 65532
+CMD ["./seven_wonders_1_http"]

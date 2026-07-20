@@ -1,0 +1,10 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: red7-1
+  namespace: brdgme
+spec:
+  typeName: Red7
+  weight: 1.0
+  blurb: "A fast-paced card game where the rules change every turn. Play cards to your palette to stay in the lead, or discard to change the rule in your favour. If you aren't winning at the end of your turn, you're out."
+  interfaceVersion: 2

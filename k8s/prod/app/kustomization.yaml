@@ -27,6 +27,9 @@ images:
 - name: brdgme/acquire-1
   newName: ghcr.io/brdgme/brdgme/acquire-1
   newTag: latest
+- name: brdgme/alhambra-1
+  newName: ghcr.io/brdgme/brdgme/alhambra-1
+  newTag: latest
 - name: brdgme/lost-cities-1
   newName: ghcr.io/brdgme/brdgme/lost-cities-1
   newTag: latest
@@ -102,17 +105,26 @@ images:
 - name: brdgme/no-thanks-2
   newName: ghcr.io/brdgme/brdgme/no-thanks-2
   newTag: latest
+- name: brdgme/red7-1
+  newName: ghcr.io/brdgme/brdgme/red7-1
+  newTag: latest
 - name: brdgme/roll-through-the-ages-1
   newName: ghcr.io/brdgme/brdgme/roll-through-the-ages-1
   newTag: latest
 - name: brdgme/roll-through-the-ages-2
   newName: ghcr.io/brdgme/brdgme/roll-through-the-ages-2
   newTag: latest
+- name: brdgme/seven-wonders-1
+  newName: ghcr.io/brdgme/brdgme/seven-wonders-1
+  newTag: latest
 - name: brdgme/splendor-1
   newName: ghcr.io/brdgme/brdgme/splendor-1
   newTag: latest
 - name: brdgme/splendor-2
   newName: ghcr.io/brdgme/brdgme/splendor-2
+  newTag: latest
+- name: brdgme/starship-catan-1
+  newName: ghcr.io/brdgme/brdgme/starship-catan-1
   newTag: latest
 - name: brdgme/sushi-go-1
   newName: ghcr.io/brdgme/brdgme/sushi-go-1

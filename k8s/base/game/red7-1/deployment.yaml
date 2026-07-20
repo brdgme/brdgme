@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: red7-1
+spec:
+  selector:
+    matchLabels:
+      app: red7-1
+  template:
+    metadata:
+      labels:
+        app: red7-1
+    spec:
+      containers:
+      - name: red7-1
+        image: brdgme/red7-1
+        env:
+        - name: ADDR
+          value: "0.0.0.0:8080"
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 0
+          periodSeconds: 1
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
