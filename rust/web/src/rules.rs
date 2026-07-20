@@ -2,6 +2,8 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::components::MainLayout;
+
 /// The three rendered HTML sections the rules page shows. `rules` is always
 /// present (the column is `NOT NULL DEFAULT ''`); `basic_strategy`/
 /// `advanced_strategy` are `None` when the game has no such doc (V1 interface,
@@ -11,6 +13,62 @@ pub struct RenderedDocs {
     pub rules: String,
     pub basic_strategy: Option<String>,
     pub advanced_strategy: Option<String>,
+}
+
+/// The `/rules/{version_id}` page: rules + strategy docs for a game version,
+/// pre-rendered to HTML by `get_rendered_rules`. Strategy sections are
+/// omitted entirely when the game has no such doc.
+#[component]
+pub fn RulesPage() -> impl IntoView {
+    let params = leptos_router::hooks::use_params_map();
+    let version_id = move || {
+        params
+            .get()
+            .get("version_id")
+            .as_deref()
+            .and_then(|id| Uuid::parse_str(id).ok())
+    };
+
+    let docs: LocalResource<Result<RenderedDocs, ServerFnError>> =
+        LocalResource::new(move || async move {
+            match version_id() {
+                Some(id) => get_rendered_rules(id).await,
+                None => Err(ServerFnError::new("Invalid version ID")),
+            }
+        });
+
+    view! {
+        <MainLayout>
+            <div class="rules-page content-page">
+                <h1>"Rules"</h1>
+                {move || match docs.get() {
+                    None => view! { <crate::components::Spinner/> }.into_any(),
+                    Some(Err(e)) => view! { <div class="error">"Error: " {e.to_string()}</div> }.into_any(),
+                    Some(Ok(docs)) => {
+                        let RenderedDocs { rules, basic_strategy, advanced_strategy } = docs;
+                        view! {
+                            <section class="rules-section">
+                                <h2 id="rules">"Rules"</h2>
+                                <div class="rules-doc" inner_html=rules></div>
+                            </section>
+                            {basic_strategy.map(|html| view! {
+                                <section class="rules-section">
+                                    <h2 id="basic-strategy">"Basic Strategy"</h2>
+                                    <div class="rules-doc" inner_html=html></div>
+                                </section>
+                            })}
+                            {advanced_strategy.map(|html| view! {
+                                <section class="rules-section">
+                                    <h2 id="advanced-strategy">"Advanced Strategy"</h2>
+                                    <div class="rules-doc" inner_html=html></div>
+                                </section>
+                            })}
+                        }.into_any()
+                    }
+                }}
+            </div>
+        </MainLayout>
+    }
 }
 
 #[cfg(feature = "ssr")]

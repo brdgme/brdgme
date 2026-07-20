@@ -32,6 +32,7 @@ pub struct GameSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameViewData {
     pub id: Uuid,
+    pub version_id: Uuid,
     pub type_name: String,
     pub version_name: String,
     pub html: String,
@@ -209,6 +210,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
 
     Ok(GameViewData {
         id: ge.game.id,
+        version_id: ge.game_version.id,
         type_name: ge.game_type.name,
         version_name: ge.game_version.name,
         html,

@@ -25,6 +25,7 @@ pub fn GameBoard(html: String, player_style: String) -> impl IntoView {
 #[component]
 pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let game_id = data.id;
+    let version_id = data.version_id;
     let can_undo = data.can_undo;
     let is_finished = data.is_finished;
     let is_2player = data.is_2player;
@@ -101,6 +102,9 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                     }
                     <div class="game-actions">
                         <h3>"Actions"</h3>
+                        <div>
+                            <A href=format!("/rules/{}", version_id)>"View rules"</A>
+                        </div>
                         <Show when=move || can_undo>
                             <div>
                                 <a href="#" on:click=move |ev| {

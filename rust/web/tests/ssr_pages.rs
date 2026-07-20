@@ -1168,3 +1168,12 @@ async fn admin_export_route_missing_game_404s(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// --- rules page (#25) ---
+
+#[sqlx::test]
+async fn rules_page_anonymous_renders_shell(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/rules/{}", Uuid::new_v4()), None).await;
+    assert_clean_html_body(status, &content_type, &body, "Rules");
+}

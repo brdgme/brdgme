@@ -1,7 +1,7 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::html;
 use leptos::prelude::*;
-use leptos_router::{NavigateOptions, hooks::use_navigate};
+use leptos_router::{NavigateOptions, components::A, hooks::use_navigate};
 use uuid::Uuid;
 
 use crate::friends::{OpponentSuggestion, UserSearchResult};
@@ -380,6 +380,15 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                             .then(|| view! { <p class="new-game-blurb">{gt.blurb.clone()}</p> })}
                         <form on:submit=on_submit>
                             {version_select}
+                            {move || {
+                                selected_version_id.get().map(|vid| {
+                                    view! {
+                                        <div class="form-field new-game-rules-link">
+                                            <A href=format!("/rules/{}", vid)>"View rules"</A>
+                                        </div>
+                                    }
+                                })
+                            }}
                             <div class="form-field">
                                 <label class="form-label">"Players"</label>
                                 <div

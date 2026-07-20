@@ -546,6 +546,16 @@ body {
   box-sizing: border-box;
 }
 
+/* Rules page: fence boards embedded in doc prose scroll horizontally
+   instead of overflowing the content column. */
+.rules-page .rules-doc .game-render {
+  overflow-x: auto;
+}
+
+.rules-page .rules-doc .game-render > pre {
+  margin: 1em 0;
+}
+
 /* Settings page */
 
 .settings input,
