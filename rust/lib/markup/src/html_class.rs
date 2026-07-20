@@ -4,7 +4,7 @@ use crate::ast::TNode;
 use crate::semantic::{SemanticCol, SemanticColType};
 
 /// Number of player colour slots (matches `Palette::player_colors`).
-const PLAYER_COUNT: usize = 9;
+const PLAYER_COUNT: usize = 8;
 
 /// Generates the static structural CSS rules for every `mk-fg-*`/`mk-bg-*`
 /// class this renderer can emit: named colours, the in-use soften variants,
