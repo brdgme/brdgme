@@ -20,6 +20,7 @@ mod ssr {
         response::IntoResponse,
     };
     use futures_util::{sink::SinkExt, stream::StreamExt};
+    use sqlx::PgPool;
 
     #[derive(Clone)]
     pub struct GameBroadcaster {
@@ -56,8 +57,13 @@ mod ssr {
     pub async fn ws_handler(
         ws: WebSocketUpgrade,
         State(broadcaster): State<GameBroadcaster>,
+        State(pool): State<PgPool>,
+        session: tower_sessions::Session,
     ) -> impl IntoResponse {
-        ws.on_upgrade(move |socket| handle_socket(socket, broadcaster))
+        let user_id = crate::auth::session::get_user_from_session(&session)
+            .await
+            .map(|u| u.id);
+        ws.on_upgrade(move |socket| handle_socket(socket, broadcaster, pool, user_id))
     }
 
     /// Decrements the `ws_connections` gauge on drop, so every exit path out of
@@ -79,7 +85,12 @@ mod ssr {
         }
     }
 
-    async fn handle_socket(socket: WebSocket, broadcaster: GameBroadcaster) {
+    async fn handle_socket(
+        socket: WebSocket,
+        broadcaster: GameBroadcaster,
+        pool: PgPool,
+        user_id: Option<Uuid>,
+    ) {
         let _ws_guard = WsConnectionGuard::new();
         let (mut sender, mut receiver) = socket.split();
 
@@ -95,6 +106,13 @@ mod ssr {
         let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
         ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         ping_interval.tick().await; // first tick fires immediately, skip it
+
+        // Stamp web presence on connect and on each ~30s ping tick; the throttle
+        // inside `record_web_activity` bounds this to ~1 DB write/minute (#22b
+        // active-web suppression).
+        if let Some(uid) = user_id {
+            crate::email::outbound::record_web_activity(&pool, uid).await;
+        }
 
         loop {
             tokio::select! {
@@ -112,6 +130,9 @@ mod ssr {
                     }
                 }
                 _ = ping_interval.tick() => {
+                    if let Some(uid) = user_id {
+                        crate::email::outbound::record_web_activity(&pool, uid).await;
+                    }
                     if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
                         break;
                     }
