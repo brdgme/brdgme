@@ -542,8 +542,8 @@ pub(crate) mod fixtures {
     use super::*;
     use time::PrimitiveDateTime;
 
-    const COLORS: [&str; 9] = [
-        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink", "Yellow",
+    const COLORS: [&str; 8] = [
+        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
     ];
 
     pub(crate) async fn make_user(pool: &PgPool, name: &str) -> Uuid {

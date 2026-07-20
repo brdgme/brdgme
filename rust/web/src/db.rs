@@ -4141,8 +4141,8 @@ mod tests {
 
     // --- choose_colors ---
 
-    const PALETTE: [&str; 9] = [
-        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink", "Yellow",
+    const PALETTE: [&str; 8] = [
+        "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
     ];
 
     #[test]

@@ -62,8 +62,8 @@ pub const THEME_SLUGS: &[(&str, &str)] = &[
 /// Canonical palette colour names, in palette order - the values stored in
 /// `users.pref_colors`/`game_players.color`. Matches
 /// `brdgme_color::Palette::player_colors()` slot order.
-pub const PLAYER_COLOR_NAMES: [&str; 9] = [
-    "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink", "Yellow",
+pub const PLAYER_COLOR_NAMES: [&str; 8] = [
+    "Green", "Red", "Blue", "Orange", "Purple", "Brown", "Cyan", "Pink",
 ];
 
 /// Three distinct preferred colours for a brand-new account: a Fisher-Yates
@@ -191,7 +191,6 @@ pub fn slot_from_color_name(name: &str) -> &'static str {
         "Brown" => "brown",
         "Cyan" | "BlueGrey" => "cyan",
         "Pink" => "pink",
-        "Yellow" => "yellow",
         _ => "grey",
     }
 }

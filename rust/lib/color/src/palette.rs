@@ -116,7 +116,7 @@ impl Palette {
         }
     }
 
-    pub fn player_colors(&self) -> [Color; 9] {
+    pub fn player_colors(&self) -> [Color; 8] {
         [
             self.green,
             self.red,
@@ -126,7 +126,6 @@ impl Palette {
             self.brown,
             self.cyan,
             self.pink,
-            self.yellow,
         ]
     }
 
@@ -3389,13 +3388,12 @@ mod tests {
         NamedColor::Brown,
     ];
 
-    // All 9 hues, used for the `contrast` transform check and the specific
+    // All 8 hues, used for the `contrast` transform check and the specific
     // hue-pair distinctness checks.
-    const ALL_HUES: [NamedColor; 9] = [
+    const ALL_HUES: [NamedColor; 8] = [
         NamedColor::Red,
         NamedColor::Green,
         NamedColor::Blue,
-        NamedColor::Yellow,
         NamedColor::Purple,
         NamedColor::Cyan,
         NamedColor::Pink,
@@ -3403,9 +3401,9 @@ mod tests {
         NamedColor::Brown,
     ];
 
-    // Names for `Palette::player_colors()`'s 9 slots, in that method's order.
-    const PLAYER_NAMES: [&str; 9] = [
-        "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink", "yellow",
+    // Names for `Palette::player_colors()`'s 8 slots, in that method's order.
+    const PLAYER_NAMES: [&str; 8] = [
+        "green", "red", "blue", "orange", "purple", "brown", "cyan", "pink",
     ];
 
     const TEXT_FLOOR: f64 = 3.0;
@@ -3590,8 +3588,6 @@ mod tests {
             // 3d: specific hue pairs games rely on staying distinct.
             let pairs = [
                 (NamedColor::Red, NamedColor::Orange),
-                (NamedColor::Orange, NamedColor::Yellow),
-                (NamedColor::Red, NamedColor::Yellow),
                 (NamedColor::Blue, NamedColor::Cyan),
                 (NamedColor::Grey, NamedColor::Foreground),
                 (NamedColor::Grey, NamedColor::Brown),
