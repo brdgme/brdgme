@@ -129,9 +129,11 @@ files).
   20) retired 2026-07-05 - no viable DigitalOcean provider.
 - **Secrets**: sealed-secrets - encrypted `SealedSecret` CRs committed to
   the config repo (PLAN Phase 15).
-- **Observability**: Grafana Cloud (logs/metrics/traces/alerting) via a
-  single in-cluster Alloy agent, plus OTLP-based APM (PLAN Phase 18);
-  decided 2026-07-05, superseding VictoriaLogs/vmalert.
+- **Observability**: Sentry (errors, performance tracing, distributed
+  traces, release health, uptime monitoring, metric alerts) for application
+  observability; `kubectl logs` for ad-hoc log inspection; DigitalOcean
+  droplet monitoring for node-level CPU/memory/disk; metrics-server for
+  `kubectl top`. Grafana Cloud and Alloy removed 2026-07-21.
 
 ### Domain routing
 
