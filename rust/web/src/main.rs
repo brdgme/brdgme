@@ -72,6 +72,12 @@ async fn main() {
             }
         }
     });
+    web::email::sweep::spawn_periodic_sweeps(
+        pool.clone(),
+        resend.clone(),
+        http_client.clone(),
+        broadcaster.clone(),
+    );
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;

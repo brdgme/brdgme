@@ -1120,13 +1120,14 @@ pub async fn concede_game(
     debug_assert!(players.len() == 2, "concede_game assumes exactly 2 players");
     for p in &players {
         let place: i32 = if p.id == conceding_player_id { 2 } else { 1 };
-        sqlx::query!(
+        sqlx::query(
             r#"UPDATE game_players
-               SET is_turn = false, place = $1, undo_game_state = NULL, updated_at = NOW()
+               SET is_turn = false, place = $1, undo_game_state = NULL,
+                   turn_reminder_sent_at = NULL, updated_at = NOW()
                WHERE id = $2"#,
-            place,
-            p.id
         )
+        .bind(place)
+        .bind(p.id)
         .execute(&mut *tx)
         .await?;
     }
@@ -1229,15 +1230,16 @@ pub async fn undo_game(
         let is_eliminated = status.eliminated.contains(&pos);
         let place: Option<i32> = status.placings.get(pos).map(|&pl| pl as i32);
 
-        sqlx::query!(
+        sqlx::query(
             r#"UPDATE game_players
-               SET is_turn = $1, is_eliminated = $2, place = $3, undo_game_state = NULL, updated_at = NOW()
+               SET is_turn = $1, is_eliminated = $2, place = $3, undo_game_state = NULL,
+                   turn_reminder_sent_at = NULL, updated_at = NOW()
                WHERE id = $4"#,
-            is_turn,
-            is_eliminated,
-            place,
-            p.id
         )
+        .bind(is_turn)
+        .bind(is_eliminated)
+        .bind(place)
+        .bind(p.id)
         .execute(&mut *tx)
         .await?;
     }
@@ -1539,21 +1541,22 @@ pub async fn update_game_command_success(
             None
         };
 
-        sqlx::query!(
+        sqlx::query(
             r#"UPDATE game_players
                SET is_turn = $1, place = $2, is_eliminated = $3, points = $4,
                    undo_game_state = $5, last_turn_at = $6, is_turn_at = $7,
+                   turn_reminder_sent_at = NULL,
                    updated_at = NOW()
                WHERE id = $8"#,
-            is_turn,
-            place,
-            is_eliminated,
-            player_points,
-            undo_game_state,
-            last_turn_at,
-            is_turn_at,
-            p_id
         )
+        .bind(is_turn)
+        .bind(place)
+        .bind(is_eliminated)
+        .bind(player_points)
+        .bind(undo_game_state)
+        .bind(last_turn_at)
+        .bind(is_turn_at)
+        .bind(p_id)
         .execute(&mut *tx)
         .await?;
     }

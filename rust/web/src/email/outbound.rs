@@ -162,24 +162,19 @@ pub async fn is_recently_active(pool: &PgPool, user_id: Uuid) -> bool {
 /// `auth::server::send_login_email`: with no `RESEND_API_KEY` (dev default) it
 /// logs the email instead of sending; otherwise it counts the send and posts to
 /// Resend, folding in the rendered threading/unsubscribe headers.
-pub async fn send_rendered_email(
+pub async fn try_send_rendered_email(
     resend: Option<&resend_rs::Resend>,
     email: crate::email::render::RenderedEmail,
     to: &str,
-) {
+) -> bool {
     let Some(resend) = resend else {
-        // No RESEND_API_KEY configured (dev default): log instead of sending.
         println!(
             "\n==> GAME EMAIL for {}\nSubject: {}\n\n{}\n",
             to, email.subject, email.text
         );
-        return;
+        return true;
     };
-
-    // Counts actual Resend API calls only (feeds the Resend quota alert), not
-    // the dev-mode logging fallback above which never touches Resend at all.
     axum_prometheus::metrics::counter!("game_emails_sent_total").increment(1);
-
     let from_addr = std::env::var("EMAIL_FROM").unwrap_or_else(|_| "noreply@brdg.me".to_string());
     let mut opts = resend_rs::types::CreateEmailBaseOptions::new(
         from_addr,
@@ -191,10 +186,21 @@ pub async fn send_rendered_email(
     for (k, v) in email.headers {
         opts = opts.with_header(&k, &v);
     }
-
-    if let Err(e) = resend.emails.send(opts).await {
-        tracing::error!("Failed to send email to {}: {}", to, e);
+    match resend.emails.send(opts).await {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::error!("Failed to send email to {}: {}", to, e);
+            false
+        }
     }
+}
+
+pub async fn send_rendered_email(
+    resend: Option<&resend_rs::Resend>,
+    email: crate::email::render::RenderedEmail,
+    to: &str,
+) {
+    try_send_rendered_email(resend, email, to).await;
 }
 
 /// 32-char `[a-zA-Z0-9]` (url-safe) reply token for the per-player Reply-To
