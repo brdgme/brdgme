@@ -349,12 +349,13 @@ pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnErr
 }
 
 #[cfg(feature = "ssr")]
-struct CreateGameSeed<'a> {
-    player_count: usize,
-    creator_id: Uuid,
-    opponent_ids: &'a [Uuid],
-    opponent_emails: &'a [String],
-    bot_slots: &'a [BotSlot],
+pub(crate) struct CreateGameSeed<'a> {
+    pub(crate) player_count: usize,
+    pub(crate) creator_id: Uuid,
+    pub(crate) opponent_ids: &'a [Uuid],
+    pub(crate) opponent_emails: &'a [String],
+    pub(crate) bot_slots: &'a [BotSlot],
+    pub(crate) all_accepted: bool,
 }
 
 /// Requests a fresh game from the game service and creates it (game row,
@@ -363,7 +364,7 @@ struct CreateGameSeed<'a> {
 /// the new game atomic with its `restarted_game_id` write, so callers own
 /// the commit and the post-commit notifications.
 #[cfg(feature = "ssr")]
-async fn create_game_from_service(
+pub(crate) async fn create_game_from_service(
     tx: &mut sqlx::PgConnection,
     http_client: &reqwest::Client,
     game_version: &crate::models::game::GameVersion,
@@ -406,6 +407,7 @@ async fn create_game_from_service(
             bot_slots: seed.bot_slots,
             chat_id: None,
             game_state: &game_info.state,
+            all_accepted: seed.all_accepted,
         },
     )
     .await
@@ -419,7 +421,7 @@ async fn create_game_from_service(
 }
 
 #[cfg(feature = "ssr")]
-fn roster_error(player_counts: &[i32], player_count: usize) -> Option<String> {
+pub(crate) fn roster_error(player_counts: &[i32], player_count: usize) -> Option<String> {
     if player_counts.contains(&(player_count as i32)) {
         return None;
     }
@@ -539,6 +541,7 @@ pub async fn create_new_game(
             opponent_ids: &opponent_ids,
             opponent_emails: &opponent_emails,
             bot_slots: &bot_slots,
+            all_accepted: false,
         },
     )
     .await?;

@@ -47,12 +47,117 @@ pub fn subscribe_toggle(verb: &str) -> Option<bool> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpponentToken {
+    Bot(String),
+    Human(String),
+}
+
+pub fn classify_opponent(token: &str, bot_names: &[String]) -> OpponentToken {
+    let t = token.trim();
+    let lower = t.to_ascii_lowercase();
+    if let Some(inner) = lower.strip_prefix("bot:") {
+        return OpponentToken::Bot(inner.trim().to_string());
+    }
+    if bot_names.iter().any(|b| b.to_ascii_lowercase() == lower) {
+        OpponentToken::Bot(lower)
+    } else {
+        OpponentToken::Human(t.to_string())
+    }
+}
+
+pub fn split_new_args(args: &str, known_keys: &[String]) -> Result<(String, Vec<String>), String> {
+    let tokens: Vec<&str> = args.split_whitespace().collect();
+    if tokens.is_empty() {
+        return Err(
+            "Usage: new <gametype> <opponent>... (send 'list' to see game types)".to_string(),
+        );
+    }
+    for end in (1..=tokens.len()).rev() {
+        let candidate = tokens[..end].join(" ").to_ascii_lowercase();
+        if let Some(key) = known_keys.iter().find(|k| **k == candidate) {
+            let opponents = tokens[end..].iter().map(|s| s.to_string()).collect();
+            return Ok((key.clone(), opponents));
+        }
+    }
+    Err(format!(
+        "Unknown game type '{}'. Send 'list' to see available games.",
+        tokens[0]
+    ))
+}
+
+pub struct GameTypeListEntry {
+    pub name: String,
+    pub player_counts: Vec<i32>,
+    pub blurb: String,
+}
+
+pub fn format_game_type_list(entries: &[GameTypeListEntry]) -> String {
+    if entries.is_empty() {
+        return "No game types are available.".to_string();
+    }
+    let mut out = String::from("Game types you can start:");
+    for e in entries {
+        let counts = e
+            .player_counts
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!("\n{} ({} players)", e.name, counts));
+        if !e.blurb.trim().is_empty() {
+            out.push_str(&format!("\n  {}", e.blurb.trim()));
+        }
+    }
+    out
+}
+
+pub fn check_duplicate_players(ids: &[uuid::Uuid]) -> Result<(), String> {
+    let mut sorted = ids.to_vec();
+    sorted.sort();
+    let before = sorted.len();
+    sorted.dedup();
+    if sorted.len() != before {
+        return Err("Please ensure each player in the game is unique".to_string());
+    }
+    Ok(())
+}
+
+pub fn resolve_game_type<'a>(
+    args: &str,
+    types: &'a [(
+        crate::models::game::GameType,
+        Vec<crate::models::game::GameVersion>,
+    )],
+) -> Result<(&'a crate::models::game::GameType, Vec<String>), String> {
+    let mut keys: Vec<String> = Vec::new();
+    for (gt, _) in types {
+        for k in [
+            gt.name.to_ascii_lowercase(),
+            crate::theme::slugify(&gt.name),
+        ] {
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+    }
+    let (key, opponents) = split_new_args(args, &keys)?;
+    let gt = types
+        .iter()
+        .map(|(gt, _)| gt)
+        .find(|gt| gt.name.to_ascii_lowercase() == key || crate::theme::slugify(&gt.name) == key)
+        .ok_or_else(|| "Unknown game type. Send 'list' to see available games.".to_string())?;
+    Ok((gt, opponents))
+}
+
 pub fn help_text() -> String {
     "Commands you can send by email:\n\
      \n\
      Game commands (played on your turn):\n\
      \n\
      Server commands:\n\
+     new <gametype> <opponent>... - start a new game (opponents: usernames or bot names like easy/medium/hard)\n\
+     list - list the game types you can start\n\
      concede - concede the current game\n\
      undo - undo your last move\n\
      restart - restart a finished game\n\
@@ -159,10 +264,158 @@ pub async fn dispatch_settings_standalone(
     if matches!(verb.to_ascii_lowercase().as_str(), "help" | "commands") {
         return Ok(CommandReply::Status(help_text()));
     }
+    if verb.eq_ignore_ascii_case("list") {
+        return run_list_command(pool).await;
+    }
 
     Err(CommandError::User(
-        "That command is not available by email without a game. Available settings commands: name, colors, theme, emails on/off, settings, help.".to_string(),
+        "That command is not available by email without a game. Available commands: new, list, name, colors, theme, emails on/off, settings, help.".to_string(),
     ))
+}
+
+pub struct StandaloneCommandCtx<'a> {
+    pub pool: &'a sqlx::PgPool,
+    pub http_client: &'a reqwest::Client,
+    pub broadcaster: &'a crate::websocket::GameBroadcaster,
+    pub jetstream: &'a async_nats::jetstream::Context,
+    pub resend: Option<&'a resend_rs::Resend>,
+    pub user_id: uuid::Uuid,
+}
+
+pub async fn dispatch_standalone_server_command(
+    ctx: &StandaloneCommandCtx<'_>,
+    line: &str,
+) -> Result<CommandReply, CommandError> {
+    let trimmed = line.trim();
+    let verb = trimmed.split_once(' ').map(|(v, _)| v).unwrap_or(trimmed);
+    if verb.eq_ignore_ascii_case("new") {
+        let args = trimmed.split_once(' ').map(|(_, a)| a.trim()).unwrap_or("");
+        return run_new_command(ctx, args).await;
+    }
+    dispatch_settings_standalone(ctx.pool, ctx.resend, ctx.user_id, trimmed).await
+}
+
+async fn run_list_command(pool: &sqlx::PgPool) -> Result<CommandReply, CommandError> {
+    let types = crate::db::find_available_game_types(pool)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("list: find game types: {e}")))?;
+    let entries: Vec<GameTypeListEntry> = types
+        .into_iter()
+        .map(|(gt, _)| GameTypeListEntry {
+            name: gt.name,
+            player_counts: gt.player_counts,
+            blurb: gt.blurb,
+        })
+        .collect();
+    Ok(CommandReply::Status(format_game_type_list(&entries)))
+}
+
+async fn run_new_command(
+    ctx: &StandaloneCommandCtx<'_>,
+    args: &str,
+) -> Result<CommandReply, CommandError> {
+    let types = crate::db::find_available_game_types(ctx.pool)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: find game types: {e}")))?;
+    let (game_type, opponent_tokens) =
+        resolve_game_type(args, &types).map_err(CommandError::User)?;
+    let type_name = game_type.name.clone();
+
+    let game_version = crate::db::find_latest_non_deprecated_game_version(ctx.pool, game_type.id)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: find game version: {e}")))?
+        .ok_or_else(|| {
+            CommandError::User("That game type has no available version.".to_string())
+        })?;
+
+    let bot_names = crate::db::find_enabled_bots(ctx.pool)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: find bots: {e}")))?;
+
+    let mut bot_slots: Vec<crate::game::server_fns::BotSlot> = Vec::new();
+    let mut bot_display_names: Vec<String> = Vec::new();
+    let mut human_ids: Vec<uuid::Uuid> = Vec::new();
+    let mut human_names: Vec<String> = Vec::new();
+    let mut bot_counter = 0usize;
+
+    for tok in &opponent_tokens {
+        match classify_opponent(tok, &bot_names) {
+            OpponentToken::Bot(difficulty) => {
+                bot_counter += 1;
+                let display =
+                    petname::petname(1, "-").unwrap_or_else(|| format!("Bot {bot_counter}"));
+                bot_display_names.push(format!("{display} (bot: {difficulty})"));
+                bot_slots.push(crate::game::server_fns::BotSlot {
+                    name: display,
+                    bot_name: difficulty,
+                });
+            }
+            OpponentToken::Human(username) => {
+                let id = crate::db::find_user_id_by_name(ctx.pool, &username)
+                    .await
+                    .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: find user: {e}")))?
+                    .ok_or_else(|| CommandError::User(format!("No user named '{username}'.")))?;
+                if id == ctx.user_id {
+                    continue;
+                }
+                human_ids.push(id);
+                human_names.push(username);
+            }
+        }
+    }
+
+    check_duplicate_players(&human_ids).map_err(CommandError::User)?;
+
+    let player_count = 1 + human_ids.len() + bot_slots.len();
+    let player_counts = crate::db::find_game_type_player_counts(ctx.pool, game_version.id)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: find player counts: {e}")))?
+        .ok_or_else(|| CommandError::User("Game type not found".to_string()))?;
+    if let Some(msg) = crate::game::server_fns::roster_error(&player_counts, player_count) {
+        return Err(CommandError::User(msg));
+    }
+
+    let mut tx = ctx
+        .pool
+        .begin()
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: begin tx: {e}")))?;
+    let game = crate::game::server_fns::create_game_from_service(
+        &mut tx,
+        ctx.http_client,
+        &game_version,
+        crate::game::server_fns::CreateGameSeed {
+            player_count,
+            creator_id: ctx.user_id,
+            opponent_ids: &human_ids,
+            opponent_emails: &[],
+            bot_slots: &bot_slots,
+            all_accepted: false,
+        },
+    )
+    .await
+    .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: create game: {e}")))?;
+    tx.commit()
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: commit: {e}")))?;
+
+    crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, game.id).await;
+    crate::email::notify::notify_game_emails(ctx.resend, ctx.pool, ctx.http_client, game.id, None)
+        .await;
+
+    let roster_parts: Vec<String> = human_names
+        .iter()
+        .cloned()
+        .chain(bot_display_names.iter().cloned())
+        .collect();
+    let roster = roster_parts.join(", ");
+    let link = crate::email::notify::browser_url(game.id);
+    let msg = if roster.is_empty() {
+        format!("Game created: {type_name} (solo). Play: {link}")
+    } else {
+        format!("Game created: {type_name} with {roster}. Play: {link}")
+    };
+    Ok(CommandReply::Status(msg))
 }
 
 async fn run_settings_name(
@@ -501,6 +754,18 @@ pub async fn dispatch_email_command(
         "restart" => return run_restart(ctx).await,
         "rules" => return run_rules(ctx, parse_rules_arg(arg)).await,
         "help" | "commands" => return Ok(CommandReply::Status(help_text())),
+        "new" => {
+            let sctx = StandaloneCommandCtx {
+                pool: ctx.pool,
+                http_client: ctx.http_client,
+                broadcaster: ctx.broadcaster,
+                jetstream: ctx.jetstream,
+                resend: ctx.resend,
+                user_id: ctx.user_id,
+            };
+            return run_new_command(&sctx, arg.unwrap_or("")).await;
+        }
+        "list" => return run_list_command(ctx.pool).await,
         _ => {}
     }
 
@@ -788,5 +1053,535 @@ mod tests {
                 .await
                 .unwrap();
         assert!(enabled);
+    }
+
+    #[test]
+    fn classify_opponent_detects_bots() {
+        let bn = vec!["easy".to_string(), "medium".to_string(), "hard".to_string()];
+        assert_eq!(
+            classify_opponent("easy", &bn),
+            OpponentToken::Bot("easy".to_string())
+        );
+        assert_eq!(
+            classify_opponent("HARD", &bn),
+            OpponentToken::Bot("hard".to_string())
+        );
+        assert_eq!(
+            classify_opponent("bot:medium", &bn),
+            OpponentToken::Bot("medium".to_string())
+        );
+        assert_eq!(
+            classify_opponent("BOT:easy", &bn),
+            OpponentToken::Bot("easy".to_string())
+        );
+        assert_eq!(
+            classify_opponent("alice", &bn),
+            OpponentToken::Human("alice".to_string())
+        );
+    }
+
+    #[test]
+    fn split_new_args_single_word_type() {
+        let known = vec!["chess".to_string()];
+        assert_eq!(
+            split_new_args("chess alice easy", &known),
+            Ok((
+                "chess".to_string(),
+                vec!["alice".to_string(), "easy".to_string()]
+            ))
+        );
+        assert_eq!(
+            split_new_args("CHESS alice", &known),
+            Ok(("chess".to_string(), vec!["alice".to_string()]))
+        );
+    }
+
+    #[test]
+    fn split_new_args_multi_word_type() {
+        let known = vec!["nine mens morris".to_string(), "chess".to_string()];
+        assert_eq!(
+            split_new_args("nine mens morris alice", &known),
+            Ok(("nine mens morris".to_string(), vec!["alice".to_string()]))
+        );
+    }
+
+    #[test]
+    fn split_new_args_unknown_type_errors() {
+        let known = vec!["chess".to_string()];
+        let err = split_new_args("nope alice", &known).unwrap_err();
+        assert!(err.contains("Unknown game type"));
+    }
+
+    #[test]
+    fn split_new_args_empty_errors() {
+        let known = vec!["chess".to_string()];
+        let err = split_new_args("", &known).unwrap_err();
+        assert!(err.contains("Usage"));
+    }
+
+    #[test]
+    fn format_game_type_list_renders() {
+        let entries = vec![
+            GameTypeListEntry {
+                name: "Chess".to_string(),
+                player_counts: vec![2],
+                blurb: "Classic strategy game.".to_string(),
+            },
+            GameTypeListEntry {
+                name: "Nine Mens Morris".to_string(),
+                player_counts: vec![2],
+                blurb: String::new(),
+            },
+        ];
+        let out = format_game_type_list(&entries);
+        assert!(out.contains("Game types you can start:"));
+        assert!(out.contains("Chess"));
+        assert!(out.contains("Nine Mens Morris"));
+        assert!(out.contains("(2 players)"));
+        assert!(out.contains("Classic strategy game."));
+
+        let empty = format_game_type_list(&[]);
+        assert!(empty.contains("No game types"));
+    }
+
+    #[test]
+    fn check_duplicate_players_detects_dupes() {
+        let a = uuid::Uuid::new_v4();
+        let b = uuid::Uuid::new_v4();
+        assert!(check_duplicate_players(&[a, b]).is_ok());
+
+        let err = check_duplicate_players(&[a, a]).unwrap_err();
+        assert!(err.contains("unique"));
+    }
+
+    fn game_type(name: &str) -> crate::models::game::GameType {
+        let ts = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+            time::Time::MIDNIGHT,
+        );
+        crate::models::game::GameType {
+            id: uuid::Uuid::new_v4(),
+            created_at: ts,
+            updated_at: ts,
+            name: name.to_string(),
+            player_counts: vec![2],
+            weight: 1.0,
+            blurb: String::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_game_type_matches_name_and_slug() {
+        let chess = game_type("Chess");
+        let morris = game_type("Nine Mens Morris");
+        let types = vec![(chess.clone(), vec![]), (morris.clone(), vec![])];
+
+        let (gt, opponents) = resolve_game_type("chess alice", &types).unwrap();
+        assert_eq!(gt.id, chess.id);
+        assert_eq!(opponents, vec!["alice".to_string()]);
+
+        let (gt, opponents) = resolve_game_type("NINE MENS MORRIS bob", &types).unwrap();
+        assert_eq!(gt.id, morris.id);
+        assert_eq!(opponents, vec!["bob".to_string()]);
+
+        let slug = crate::theme::slugify("Chess");
+        let (gt, _) = resolve_game_type(&format!("{slug} alice"), &types).unwrap();
+        assert_eq!(gt.id, chess.id);
+
+        assert!(resolve_game_type("nope alice", &types).is_err());
+    }
+
+    #[test]
+    fn help_text_lists_new_and_list() {
+        let text = help_text();
+        assert!(text.contains("new <gametype>"));
+        assert!(text.contains("list"));
+    }
+
+    #[test]
+    fn emails_subcommands_in_help_text() {
+        let text = help_text();
+        assert!(text.contains("emails add"));
+        assert!(text.contains("emails confirm"));
+        assert!(text.contains("emails active"));
+        assert!(text.contains("emails remove"));
+        assert!(text.contains("emails on"));
+        assert!(text.contains("emails off"));
+    }
+
+    #[test]
+    fn settings_verb_matches_emails_subcommands() {
+        assert_eq!(settings_verb("emails add foo@bar.com"), Some("emails"));
+        assert_eq!(settings_verb("emails confirm 123456"), Some("emails"));
+        assert_eq!(settings_verb("emails active foo@bar.com"), Some("emails"));
+        assert_eq!(settings_verb("emails use foo@bar.com"), Some("emails"));
+        assert_eq!(settings_verb("emails remove foo@bar.com"), Some("emails"));
+        assert_eq!(settings_verb("emails"), Some("emails"));
+        assert_eq!(settings_verb("EMAILS ADD foo@bar.com"), Some("emails"));
+    }
+
+    #[sqlx::test]
+    async fn emails_list_shows_addresses(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("primary@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NOW())")
+            .bind(user_id)
+            .bind("work@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
+            .bind(user_id)
+            .bind("pending@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reply = dispatch_settings_command_for_user(&pool, None, user_id, "emails")
+            .await
+            .unwrap()
+            .unwrap();
+        let text = status_msg(reply);
+        assert!(text.contains("* primary@example.com (active)"));
+        assert!(text.contains("work@example.com (verified)"));
+        assert!(text.contains("pending@example.com (unverified)"));
+    }
+
+    #[sqlx::test]
+    async fn emails_list_empty(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        let reply = dispatch_settings_command_for_user(&pool, None, user_id, "emails")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status_msg(reply), "No email addresses on your account.");
+    }
+
+    #[sqlx::test]
+    async fn emails_add_inserts_unverified(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        let reply =
+            dispatch_settings_command_for_user(&pool, None, user_id, "emails add new@example.com")
+                .await
+                .unwrap()
+                .unwrap();
+        let text = status_msg(reply);
+        assert!(text.contains("Confirmation code sent to new@example.com"));
+
+        let row: (bool, Option<time::PrimitiveDateTime>) = sqlx::query_as(
+            "SELECT is_primary, verified_at FROM user_emails WHERE user_id = $1 AND email = $2",
+        )
+        .bind(user_id)
+        .bind("new@example.com")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!row.0);
+        assert!(row.1.is_none());
+    }
+
+    #[sqlx::test]
+    async fn emails_add_rejects_invalid(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, user_id, "emails add notanemail").await,
+        );
+        assert!(err.contains("Usage: emails add"));
+    }
+
+    #[sqlx::test]
+    async fn emails_add_rejects_duplicate_on_same_account(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("existing@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(
+                &pool,
+                None,
+                user_id,
+                "emails add existing@example.com",
+            )
+            .await,
+        );
+        assert!(err.contains("already on your account"));
+    }
+
+    #[sqlx::test]
+    async fn emails_add_rejects_owned_by_other(pool: sqlx::PgPool) {
+        let u1 = seed_user(&pool, "player-one").await;
+        let u2 = seed_user(&pool, "player-two").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(u1)
+            .bind("taken@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, u2, "emails add taken@example.com")
+                .await,
+        );
+        assert!(err.contains("unavailable"));
+    }
+
+    #[sqlx::test]
+    async fn emails_confirm_verifies_address(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("primary@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
+            .bind(user_id)
+            .bind("pending@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO login_confirmations (email, code, sent_count, last_sent_at) VALUES ($1, $2, 1, NOW())")
+            .bind("pending@example.com")
+            .bind("123456")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reply =
+            dispatch_settings_command_for_user(&pool, None, user_id, "emails confirm 123456")
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(status_msg(reply), "Address pending@example.com confirmed.");
+
+        let verified: Option<time::PrimitiveDateTime> = sqlx::query_scalar(
+            "SELECT verified_at FROM user_emails WHERE user_id = $1 AND email = $2",
+        )
+        .bind(user_id)
+        .bind("pending@example.com")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(verified.is_some());
+    }
+
+    #[sqlx::test]
+    async fn emails_confirm_no_unverified(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("primary@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, user_id, "emails confirm 123456").await,
+        );
+        assert!(err.contains("No unverified address"));
+    }
+
+    #[sqlx::test]
+    async fn emails_confirm_wrong_code(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
+            .bind(user_id)
+            .bind("pending@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO login_confirmations (email, code, sent_count, last_sent_at) VALUES ($1, $2, 1, NOW())")
+            .bind("pending@example.com")
+            .bind("123456")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, user_id, "emails confirm 999999").await,
+        );
+        assert!(err.contains("Invalid or expired"));
+    }
+
+    #[sqlx::test]
+    async fn emails_active_switches_primary(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("old@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NOW())")
+            .bind(user_id)
+            .bind("new@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reply = dispatch_settings_command_for_user(
+            &pool,
+            None,
+            user_id,
+            "emails active new@example.com",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(status_msg(reply), "Active address set to new@example.com.");
+
+        let is_primary: bool = sqlx::query_scalar(
+            "SELECT is_primary FROM user_emails WHERE user_id = $1 AND email = $2",
+        )
+        .bind(user_id)
+        .bind("new@example.com")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(is_primary);
+    }
+
+    #[sqlx::test]
+    async fn emails_use_alias_works(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("old@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NOW())")
+            .bind(user_id)
+            .bind("new@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reply =
+            dispatch_settings_command_for_user(&pool, None, user_id, "emails use new@example.com")
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(status_msg(reply), "Active address set to new@example.com.");
+    }
+
+    #[sqlx::test]
+    async fn emails_active_rejects_unverified(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("primary@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
+            .bind(user_id)
+            .bind("unverified@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(
+                &pool,
+                None,
+                user_id,
+                "emails active unverified@example.com",
+            )
+            .await,
+        );
+        assert!(err.contains("not verified"));
+    }
+
+    #[sqlx::test]
+    async fn emails_remove_non_primary(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("primary@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NOW())")
+            .bind(user_id)
+            .bind("secondary@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reply = dispatch_settings_command_for_user(
+            &pool,
+            None,
+            user_id,
+            "emails remove secondary@example.com",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(status_msg(reply), "Address secondary@example.com removed.");
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_emails WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[sqlx::test]
+    async fn emails_remove_rejects_primary(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
+            .bind(user_id)
+            .bind("primary@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(
+                &pool,
+                None,
+                user_id,
+                "emails remove primary@example.com",
+            )
+            .await,
+        );
+        assert!(err.contains("Cannot remove your active address"));
+    }
+
+    #[sqlx::test]
+    async fn emails_on_off_still_works(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+
+        let reply = dispatch_settings_command_for_user(&pool, None, user_id, "emails off")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status_msg(reply), "Turn-notification emails are now off.");
+
+        let reply = dispatch_settings_command_for_user(&pool, None, user_id, "emails on")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status_msg(reply), "Turn-notification emails are now on.");
+    }
+
+    #[sqlx::test]
+    async fn emails_unknown_subcommand_errors(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        let err = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, user_id, "emails bogus").await,
+        );
+        assert!(err.contains("Usage:"));
     }
 }

@@ -637,16 +637,11 @@ async fn handle_settings_reply_route(state: &AppState, from: &str, email_id: &st
             return;
         }
     };
-    handle_settings_reply(&state.pool, state.resend.as_ref(), from, &raw).await;
+    handle_settings_reply(state, from, &raw).await;
 }
 
-async fn handle_settings_reply(
-    pool: &sqlx::PgPool,
-    resend: Option<&resend_rs::Resend>,
-    from: &str,
-    raw_body: &str,
-) {
-    let user_id = match resolve_user_by_verified_from(pool, from).await {
+async fn handle_settings_reply(state: &AppState, from: &str, raw_body: &str) {
+    let user_id = match resolve_user_by_verified_from(&state.pool, from).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             tracing::info!(
@@ -664,15 +659,31 @@ async fn handle_settings_reply(
     let commands = parse_reply_commands(&text);
 
     if commands.is_empty() {
-        send_settings_response(pool, resend, user_id, from, no_command_header_text()).await;
+        send_settings_response(
+            &state.pool,
+            state.resend.as_ref(),
+            user_id,
+            from,
+            no_command_header_text(),
+        )
+        .await;
         return;
     }
+
+    let sctx = crate::email::commands::StandaloneCommandCtx {
+        pool: &state.pool,
+        http_client: &state.http_client,
+        broadcaster: &state.broadcaster,
+        jetstream: &state.jetstream,
+        resend: state.resend.as_ref(),
+        user_id,
+    };
 
     let mut last_status: Option<String> = None;
     let mut error_header: Option<String> = None;
 
     for line in &commands {
-        match crate::email::commands::dispatch_settings_standalone(pool, user_id, line).await {
+        match crate::email::commands::dispatch_standalone_server_command(&sctx, line).await {
             Ok(crate::email::commands::CommandReply::Status(msg)) => {
                 last_status = Some(msg);
             }
@@ -691,7 +702,7 @@ async fn handle_settings_reply(
     }
 
     let header = settings_response_header(error_header, last_status);
-    send_settings_response(pool, resend, user_id, from, header).await;
+    send_settings_response(&state.pool, state.resend.as_ref(), user_id, from, header).await;
 }
 
 async fn send_settings_response(
@@ -1290,6 +1301,31 @@ Just a plain body";
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn find_user_id_by_name_resolves_case_insensitive(pool: sqlx::PgPool) {
+        let user_a = seed_user(&pool, "user-a").await;
+        let _user_b = seed_user(&pool, "user-b").await;
+
+        assert_eq!(
+            crate::db::find_user_id_by_name(&pool, "USER-A")
+                .await
+                .unwrap(),
+            Some(user_a)
+        );
+        assert_eq!(
+            crate::db::find_user_id_by_name(&pool, "user-a")
+                .await
+                .unwrap(),
+            Some(user_a)
+        );
+        assert_eq!(
+            crate::db::find_user_id_by_name(&pool, "nobody")
+                .await
+                .unwrap(),
+            None
         );
     }
 }

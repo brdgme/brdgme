@@ -560,11 +560,21 @@ pub async fn is_user_admin(pool: &PgPool, user_id: Uuid) -> sqlx::Result<bool> {
     Ok(row.map(|(a,)| a).unwrap_or(false))
 }
 
+#[cfg(feature = "ssr")]
+pub async fn find_user_id_by_name(pool: &PgPool, name: &str) -> Result<Option<Uuid>> {
+    sqlx::query_scalar("SELECT id FROM users WHERE LOWER(name) = LOWER($1)")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("find_user_id_by_name: {e}"))
+}
+
 /// Skinny projection for the sidebar: one row per (game, opponent), already
 /// sorted my-turn-first then most recently updated. Opponent rows are LEFT
 /// JOINed so games with no opponents still appear; exclusion of the
 /// requesting user's own seat is by player-row id, not user id.
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(user_id = %user_id))]
 pub async fn find_active_game_summaries(
     pool: &PgPool,
     user_id: Uuid,
