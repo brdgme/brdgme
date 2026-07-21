@@ -118,6 +118,12 @@ enum NotifyKind {
     Finished,
 }
 
+enum SendMode {
+    Normal,
+    BypassSuppression,
+    Forced,
+}
+
 /// Builds the content blocks for one notification, best-effort: a failed render
 /// or log load degrades to absent blocks rather than failing the send.
 async fn build_content(
@@ -196,7 +202,7 @@ async fn send_one(
     game_id: uuid::Uuid,
     game_player_id: uuid::Uuid,
     kind: NotifyKind,
-    bypass_suppression: bool,
+    mode: SendMode,
 ) {
     let ge = match crate::db::find_game_extended(pool, game_id).await {
         Ok(Some(g)) => g,
@@ -228,14 +234,16 @@ async fn send_one(
         _ => return,
     };
 
-    let should_send = if bypass_suppression {
-        recipient.email.is_some() && !recipient.is_bot && recipient.turn_emails_enabled
-    } else {
-        crate::email::outbound::should_email_recipient(
+    let should_send = match mode {
+        SendMode::Forced => recipient.email.is_some() && !recipient.is_bot,
+        SendMode::BypassSuppression => {
+            recipient.email.is_some() && !recipient.is_bot && recipient.turn_emails_enabled
+        }
+        SendMode::Normal => crate::email::outbound::should_email_recipient(
             &recipient,
             now_utc(),
             crate::email::outbound::suppress_window(),
-        )
+        ),
     };
     if !should_send {
         return;
@@ -296,7 +304,7 @@ pub async fn send_turn_notification(
         game_id,
         game_player_id,
         NotifyKind::Turn,
-        false,
+        SendMode::Normal,
     )
     .await;
 }
@@ -320,7 +328,30 @@ pub async fn send_turn_digest(
         game_id,
         game_player_id,
         NotifyKind::Turn,
-        true,
+        SendMode::BypassSuppression,
+    )
+    .await;
+}
+
+/// Sends a turn notification for one game, bypassing BOTH the active-web
+/// suppression window AND the account `turn_emails_enabled` opt-out. Used by
+/// the email `bump` command: an explicit user pull, so it always re-sends.
+/// Still requires a verified primary address and is never sent to a bot.
+pub async fn send_turn_digest_forced(
+    resend: Option<&resend_rs::Resend>,
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    game_id: uuid::Uuid,
+    game_player_id: uuid::Uuid,
+) {
+    send_one(
+        resend,
+        pool,
+        http_client,
+        game_id,
+        game_player_id,
+        NotifyKind::Turn,
+        SendMode::Forced,
     )
     .await;
 }
@@ -339,7 +370,7 @@ pub async fn send_elimination_notification(
         game_id,
         game_player_id,
         NotifyKind::Eliminated,
-        false,
+        SendMode::Normal,
     )
     .await;
 }
@@ -358,7 +389,7 @@ pub async fn send_game_finished_notification(
         game_id,
         game_player_id,
         NotifyKind::Finished,
-        false,
+        SendMode::Normal,
     )
     .await;
 }

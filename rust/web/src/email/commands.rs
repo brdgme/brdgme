@@ -160,6 +160,7 @@ pub fn help_text() -> String {
      list - list the game types you can start\n\
      concede - concede the current game\n\
      undo - undo your last move\n\
+     bump - re-send all games waiting on your turn to your active address\n\
      restart - restart a finished game\n\
      rules [basic|advanced] - email the game rules and strategy\n\
      subscribe - turn on turn-notification emails (account-wide)\n\
@@ -311,6 +312,9 @@ pub async fn dispatch_standalone_server_command(
         let args = trimmed.split_once(' ').map(|(_, a)| a.trim()).unwrap_or("");
         return run_new_command(ctx, args).await;
     }
+    if verb.eq_ignore_ascii_case("bump") {
+        return run_bump_command(ctx).await;
+    }
     dispatch_settings_standalone(ctx.pool, ctx.resend, ctx.user_id, trimmed).await
 }
 
@@ -435,6 +439,38 @@ async fn run_new_command(
         format!("Game created: {type_name} with {roster}. Play: {link}")
     };
     Ok(CommandReply::Status(msg))
+}
+
+async fn run_bump_command(ctx: &StandaloneCommandCtx<'_>) -> Result<CommandReply, CommandError> {
+    bump_reply(ctx.pool, ctx.http_client, ctx.resend, ctx.user_id).await
+}
+
+async fn bump_reply(
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    resend: Option<&resend_rs::Resend>,
+    user_id: uuid::Uuid,
+) -> Result<CommandReply, CommandError> {
+    let games = crate::db::find_active_turn_games(pool, user_id, crate::db::SWITCH_DIGEST_CAP)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("bump: find turn games: {e}")))?;
+    let capped = crate::db::cap_digest(games, crate::db::SWITCH_DIGEST_CAP);
+    let n = capped.len();
+    for (game_id, game_player_id) in capped {
+        crate::email::notify::send_turn_digest_forced(
+            resend,
+            pool,
+            http_client,
+            game_id,
+            game_player_id,
+        )
+        .await;
+    }
+    Ok(CommandReply::Status(match n {
+        0 => "No games are waiting on your turn.".to_string(),
+        1 => "Re-sent 1 game to your active address.".to_string(),
+        n => format!("Re-sent {n} games to your active address."),
+    }))
 }
 
 async fn run_settings_name(
@@ -1057,6 +1093,17 @@ pub async fn dispatch_email_command(
                 user_id: ctx.user_id,
             };
             return run_new_command(&sctx, arg.unwrap_or("")).await;
+        }
+        "bump" => {
+            let sctx = StandaloneCommandCtx {
+                pool: ctx.pool,
+                http_client: ctx.http_client,
+                broadcaster: ctx.broadcaster,
+                jetstream: ctx.jetstream,
+                resend: ctx.resend,
+                user_id: ctx.user_id,
+            };
+            return run_bump_command(&sctx).await;
         }
         "list" => return run_list_command(ctx.pool).await,
         _ => {}
@@ -1888,5 +1935,120 @@ mod tests {
             dispatch_settings_command_for_user(&pool, None, user_id, "emails bogus").await,
         );
         assert!(err.contains("Usage:"));
+    }
+
+    async fn make_game_version(pool: &sqlx::PgPool) -> uuid::Uuid {
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Test Game {}", uuid::Uuid::new_v4()))
+        .bind(vec![2, 3, 4])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .bind("1.0.0")
+        .bind("http://127.0.0.1:1")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn make_standalone_ctx_deps() -> (
+        crate::websocket::GameBroadcaster,
+        async_nats::jetstream::Context,
+    ) {
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let client = async_nats::connect(&nats_url).await.unwrap();
+        let js = async_nats::jetstream::new(client.clone());
+        (crate::websocket::GameBroadcaster::new(client), js)
+    }
+
+    #[sqlx::test]
+    async fn bump_verb_is_case_insensitive(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "bump-user").await;
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = StandaloneCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            user_id,
+        };
+        for line in ["bump", "Bump", "BUMP"] {
+            match dispatch_standalone_server_command(&ctx, line).await {
+                Ok(CommandReply::Status(msg)) => {
+                    assert_eq!(msg, "No games are waiting on your turn.");
+                }
+                Ok(_) => panic!("expected Status reply for {line}"),
+                Err(CommandError::User(m)) => {
+                    panic!("expected Status reply for {line}, got user error: {m}")
+                }
+                Err(CommandError::Internal(e)) => {
+                    panic!("expected Status reply for {line}, got internal error: {e}")
+                }
+            }
+        }
+    }
+
+    #[sqlx::test]
+    async fn bump_resends_only_my_turn_games(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "bump-player").await;
+        let opp1 = seed_user(&pool, "bump-opp-1").await;
+        let opp2 = seed_user(&pool, "bump-opp-2").await;
+        let opp3 = seed_user(&pool, "bump-opp-3").await;
+        let game_version_id = make_game_version(&pool).await;
+
+        for opp in [opp1, opp2] {
+            crate::db::create_game_with_users(
+                &pool,
+                crate::db::CreateGameOpts {
+                    game_version_id,
+                    whose_turn: &[0],
+                    eliminated: &[],
+                    placings: &[],
+                    points: &[],
+                    creator_id: user_id,
+                    opponent_ids: &[opp],
+                    opponent_emails: &[],
+                    bot_slots: &[],
+                    chat_id: None,
+                    game_state: "initial_state",
+                    all_accepted: false,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[1],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: user_id,
+                opponent_ids: &[opp3],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "initial_state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let reply = bump_reply(&pool, &reqwest::Client::new(), None, user_id)
+            .await
+            .unwrap();
+        assert_eq!(status_msg(reply), "Re-sent 2 games to your active address.");
     }
 }
