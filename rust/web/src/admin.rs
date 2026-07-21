@@ -1940,7 +1940,7 @@ mod tests {
     use super::*;
 
     fn test_encryption_key() -> [u8; 32] {
-        crate::crypto::default_key()
+        crate::crypto::load_key().unwrap()
     }
 
     #[sqlx::test]
