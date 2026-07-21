@@ -709,11 +709,17 @@ pub async fn generate_unique_username(conn: &mut sqlx::PgConnection) -> Result<S
 /// `game_players.color`/`users.pref_colors` values.
 #[cfg(feature = "ssr")]
 pub(crate) fn normalize_pref_color(name: &str) -> String {
-    match name {
-        "Amber" => "Orange".to_string(),
-        "BlueGrey" => "Cyan".to_string(),
-        other => other.to_string(),
+    if name.eq_ignore_ascii_case("Amber") {
+        return "Orange".to_string();
     }
+    if name.eq_ignore_ascii_case("BlueGrey") {
+        return "Cyan".to_string();
+    }
+    crate::theme::PLAYER_COLOR_NAMES
+        .iter()
+        .find(|c| c.eq_ignore_ascii_case(name))
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| name.to_string())
 }
 
 #[cfg(feature = "ssr")]
