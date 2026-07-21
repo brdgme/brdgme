@@ -851,7 +851,7 @@ async fn run_undo(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandErro
 }
 
 async fn run_restart(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
-    let new_game_id = crate::game::server_fns::restart_game_impl(
+    let outcome = crate::game::server_fns::restart_game_impl(
         ctx.pool,
         ctx.http_client,
         ctx.user_id,
@@ -860,18 +860,20 @@ async fn run_restart(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandE
     .await
     .map_err(|e| CommandError::User(e.to_string()))?;
 
-    crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, new_game_id).await;
-    crate::email::notify::notify_game_emails(
-        ctx.resend,
-        ctx.pool,
-        ctx.http_client,
-        new_game_id,
-        None,
-    )
-    .await;
-    ctx.broadcaster.broadcast_game_update(ctx.game_id).await;
+    if let Some(gid) = outcome.game_id {
+        crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, gid).await;
+        crate::email::notify::notify_game_emails(ctx.resend, ctx.pool, ctx.http_client, gid, None)
+            .await;
+        ctx.broadcaster.broadcast_game_update(ctx.game_id).await;
+        return Ok(CommandReply::Status("Game restarted.".to_string()));
+    }
 
-    Ok(CommandReply::Status("Game restarted.".to_string()))
+    if let Some(pid) = outcome.proposal_id {
+        ctx.broadcaster.broadcast_proposal_update(pid).await;
+    }
+    Ok(CommandReply::Status(
+        "Restart proposed; invitees must confirm before the game starts.".to_string(),
+    ))
 }
 
 async fn run_rules(
