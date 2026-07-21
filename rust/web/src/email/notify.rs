@@ -49,6 +49,14 @@ pub fn browser_url(game_id: uuid::Uuid) -> String {
     format!("{base}/games/{game_id}")
 }
 
+/// The "view rules" link for a game version.
+pub fn rules_url(version_id: uuid::Uuid) -> String {
+    let base =
+        std::env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let base = base.trim_end_matches('/');
+    format!("{base}/rules/{version_id}")
+}
+
 /// The stable thread subject: "{Game type} with {opponent names}".
 pub fn game_subject(
     ge: &crate::db::GameExtended,
@@ -167,6 +175,7 @@ async fn build_content(
         board,
         you_can,
         browser_url: Some(browser_url(ge.game.id)),
+        rules_url: Some(rules_url(ge.game_version.id)),
         footer: Some("Reply to this email to play, or unsubscribe anytime.".to_string()),
     }
 }

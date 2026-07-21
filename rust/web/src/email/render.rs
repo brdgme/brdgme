@@ -25,6 +25,8 @@ pub struct EmailContent {
     pub you_can: Option<Vec<String>>,
     /// "continue playing in your browser" link (plain URL).
     pub browser_url: Option<String>,
+    /// "View rules" link (plain URL to /rules/{version_id}).
+    pub rules_url: Option<String>,
     /// Footer / unsubscribe text.
     pub footer: Option<String>,
 }
@@ -149,6 +151,11 @@ pub fn render_game_email(
             "<a href=\"{url}\" style=\"color:{accent};\">Play in your browser</a>\n\n"
         ));
     }
+    if let Some(url) = &content.rules_url {
+        body.push_str(&format!(
+            "<a href=\"{url}\" style=\"color:{muted};font-size:12px;\">View rules</a>\n\n"
+        ));
+    }
     if let Some((f, _)) = &footer {
         body.push_str(&format!("<span style=\"color:{muted};\">{f}</span>"));
     }
@@ -193,6 +200,9 @@ pub fn render_game_email(
     }
     if let Some(url) = &content.browser_url {
         text.push_str(&format!("Play in your browser: {url}\n\n"));
+    }
+    if let Some(url) = &content.rules_url {
+        text.push_str(&format!("View rules: {url}\n\n"));
     }
     if let Some((_, p)) = &footer {
         text.push_str(p);
@@ -244,6 +254,7 @@ mod tests {
             board: None,
             you_can: None,
             browser_url: None,
+            rules_url: None,
             footer: None,
         }
     }
@@ -256,6 +267,7 @@ mod tests {
             board: Some("{{fg green}}board-here{{/fg}}".into()),
             you_can: Some(vec!["move ## ##".into()]),
             browser_url: Some("https://brdg.me/games/abc".into()),
+            rules_url: Some("https://brdg.me/rules/abc".into()),
             footer: Some("Reply to play. Unsubscribe anytime.".into()),
         }
     }
@@ -302,6 +314,7 @@ mod tests {
         assert!(email.html.contains("You can:"));
         assert!(email.html.contains("move ## ##"));
         assert!(email.html.contains("https://brdg.me/games/abc"));
+        assert!(email.html.contains("View rules"));
         assert!(email.html.contains("Reply to play"));
     }
 
@@ -314,6 +327,7 @@ mod tests {
             board: Some("{{player 0}} plays".into()),
             you_can: None,
             browser_url: None,
+            rules_url: None,
             footer: None,
         };
         let email = render_game_email(
@@ -327,6 +341,7 @@ mod tests {
         assert!(!email.html.contains("Since last time:"));
         assert!(!email.html.contains("You can:"));
         assert!(!email.html.contains("Play in your browser"));
+        assert!(!email.html.contains("View rules"));
         assert!(email.html.contains("Alice"));
         assert!(email.html.contains("plays"));
     }
@@ -348,6 +363,7 @@ mod tests {
         assert!(email.text.contains("Since last time:"));
         assert!(email.text.contains("You can:"));
         assert!(email.text.contains("https://brdg.me/games/abc"));
+        assert!(email.text.contains("View rules: https://brdg.me/rules/abc"));
     }
 
     #[test]

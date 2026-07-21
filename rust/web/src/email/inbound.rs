@@ -844,6 +844,7 @@ async fn send_game_reply_response(
         board,
         you_can,
         browser_url: Some(crate::email::notify::browser_url(ge.game.id)),
+        rules_url: Some(crate::email::notify::rules_url(ge.game_version.id)),
         footer: Some("Reply to this email to play, or unsubscribe anytime.".to_string()),
     };
     let theme_slug =
@@ -1029,6 +1030,7 @@ async fn send_settings_response(
         board: None,
         you_can: None,
         browser_url: None,
+        rules_url: None,
         footer: Some(
             "Reply to this email to change your settings, or send 'help' for the command list."
                 .to_string(),
