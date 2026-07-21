@@ -727,7 +727,27 @@ async fn wait_for_turn_consumer(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    let _sentry_guard = std::env::var("SENTRY_DSN_SERVER").ok().map(|dsn| {
+        sentry::init((
+            dsn,
+            sentry::ClientOptions {
+                release: std::env::var("SENTRY_RELEASE")
+                    .ok()
+                    .map(std::borrow::Cow::Owned),
+                send_default_pii: false,
+                traces_sample_rate: 0.1,
+                ..Default::default()
+            },
+        ))
+    });
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .with(sentry_tracing::layer())
+        .init();
 
     if crypto::using_default_key() {
         tracing::warn!(
@@ -811,7 +831,27 @@ async fn main() -> Result<()> {
         let state = state.clone();
         tokio::spawn(async move {
             let trace_id = Uuid::new_v4();
-            match run_bot_turn(&state, event, trace_id).await {
+
+            let header_pairs: Vec<(String, String)> = message
+                .headers
+                .iter()
+                .flat_map(|hm| hm.iter())
+                .flat_map(|(k, vs)| {
+                    vs.iter()
+                        .map(move |v| (k.to_string(), v.as_str().to_string()))
+                })
+                .collect();
+            let ctx = sentry::TransactionContext::continue_from_headers(
+                "bot.turn",
+                "queue.process",
+                header_pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+            );
+            let transaction = sentry::start_transaction(ctx);
+            sentry::configure_scope(|scope| scope.set_span(Some(transaction.clone().into())));
+
+            let result = run_bot_turn(&state, event, trace_id).await;
+            transaction.finish();
+            match result {
                 Ok(()) => {
                     if let Err(e) = message.ack().await {
                         tracing::warn!(trace_id = %trace_id, "Failed to ack bot.turn message: {}", e);
