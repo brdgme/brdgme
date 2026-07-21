@@ -242,6 +242,7 @@ mod tests {
                 }],
                 chat_id: None,
                 game_state: "prod_state_blob",
+                all_accepted: false,
             },
         )
         .await

@@ -285,6 +285,7 @@ async fn game_page_anonymous_visitor_gets_clean_error_not_panic(pool: PgPool) {
             }],
             chat_id: None,
             game_state: "state",
+            all_accepted: false,
         },
     )
     .await
@@ -323,6 +324,7 @@ async fn game_page_logged_in_player_renders_game(pool: PgPool) {
             }],
             chat_id: None,
             game_state: "state",
+            all_accepted: false,
         },
     )
     .await
@@ -363,6 +365,7 @@ async fn game_page_player_names_link_to_profiles_for_human_opponents(pool: PgPoo
             bot_slots: &[],
             chat_id: None,
             game_state: "state",
+            all_accepted: false,
         },
     )
     .await
@@ -473,6 +476,7 @@ async fn restart_game_on_finished_game_succeeds(pool: PgPool) {
             }],
             chat_id: None,
             game_state: "state",
+            all_accepted: false,
         },
     )
     .await
@@ -537,6 +541,7 @@ async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: Pg
             }],
             chat_id: None,
             game_state: "state",
+            all_accepted: false,
         },
     )
     .await
@@ -552,7 +557,10 @@ async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: Pg
     let (status, resp_text) = restart_game_via_http(app, game.id, &cookie).await;
     assert_eq!(status, StatusCode::OK, "body: {resp_text}");
 
-    let new_game_id: Uuid = serde_json::from_str(&resp_text).unwrap();
+    let outcome: web::proposals::ProposalOutcome = serde_json::from_str(&resp_text).unwrap();
+    let new_game_id = outcome
+        .game_id
+        .expect("solo-vs-bots restart creates a game directly");
     let new_game_version_id_used = sqlx::query_scalar!(
         "SELECT game_version_id FROM games WHERE id = $1",
         new_game_id
@@ -1126,6 +1134,7 @@ async fn admin_export_route_returns_bundle_without_emails(pool: PgPool) {
             }],
             chat_id: None,
             game_state: "opaque_state_blob",
+            all_accepted: false,
         },
     )
     .await

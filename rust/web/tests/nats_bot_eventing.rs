@@ -142,6 +142,7 @@ async fn make_two_player_game(pool: &PgPool, uri: &str) -> (Uuid, User, User) {
             bot_slots: &[],
             chat_id: None,
             game_state: "initial_state",
+            all_accepted: false,
         },
     )
     .await
@@ -171,6 +172,7 @@ async fn make_game_with_human_and_bot(pool: &PgPool, uri: &str) -> Uuid {
             }],
             chat_id: None,
             game_state: "initial_state",
+            all_accepted: false,
         },
     )
     .await

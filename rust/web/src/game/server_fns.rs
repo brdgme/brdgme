@@ -752,16 +752,17 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
 }
 
 /// The restart flow minus the leptos context plumbing and post-commit
-/// broadcasts, so tests can drive it against a mock game service. The
-/// "already restarted" guard, the new game and the `restarted_game_id`
-/// write commit atomically.
+/// broadcasts, so tests can drive it against a mock game service. A restart
+/// opens a proposal carrying the old roster (owner and bots accepted, humans
+/// pending); a solo-vs-bots restart bypasses the proposal and creates the game
+/// directly, atomically linking `restarted_game_id`.
 #[cfg(feature = "ssr")]
 pub(crate) async fn restart_game_impl(
     pool: &sqlx::PgPool,
     http_client: &reqwest::Client,
     user_id: Uuid,
     game_id: Uuid,
-) -> Result<Uuid, ServerFnError> {
+) -> Result<crate::proposals::ProposalOutcome, ServerFnError> {
     let ge = crate::db::find_game_extended(pool, game_id)
         .await
         .map_err(internal("restart_game: find game"))?
@@ -796,6 +797,25 @@ pub(crate) async fn restart_game_impl(
         .iter()
         .filter_map(|p| p.user.as_ref().filter(|u| u.id != user_id).map(|u| u.id))
         .collect();
+    let bot_slots: Vec<BotSlot> = ge
+        .game_players
+        .iter()
+        .filter_map(|p| {
+            p.game_bot.as_ref().map(|b| BotSlot {
+                name: b.name.clone(),
+                bot_name: b.bot_name.clone(),
+            })
+        })
+        .collect();
+    let player_count = ge.game_players.len();
+
+    let player_counts = crate::db::find_game_type_player_counts(pool, restart_game_version.id)
+        .await
+        .map_err(internal("restart_game: find player counts"))?
+        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
+    if let Some(msg) = roster_error(&player_counts, player_count) {
+        return Err(ServerFnError::new(msg));
+    }
 
     let mut tx = pool
         .begin()
@@ -811,39 +831,110 @@ pub(crate) async fn restart_game_impl(
         return Err(ServerFnError::new(msg));
     }
 
-    let new_game = create_game_from_service(
-        &mut tx,
-        http_client,
-        &restart_game_version,
-        CreateGameSeed {
-            player_count: ge.game_players.len(),
-            creator_id: user_id,
-            opponent_ids: &opponent_ids,
-            opponent_emails: &[],
-            bot_slots: &[],
-        },
-    )
-    .await?;
+    if opponent_ids.is_empty() {
+        let new_game = create_game_from_service(
+            &mut tx,
+            http_client,
+            &restart_game_version,
+            CreateGameSeed {
+                player_count,
+                creator_id: user_id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &bot_slots,
+                all_accepted: false,
+            },
+        )
+        .await?;
 
-    sqlx::query!(
-        "UPDATE games SET restarted_game_id = $1, updated_at = NOW() WHERE id = $2",
-        new_game.id,
-        game_id
+        sqlx::query!(
+            "UPDATE games SET restarted_game_id = $1, updated_at = NOW() WHERE id = $2",
+            new_game.id,
+            game_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(internal("restart_game: link restarted game"))?;
+
+        tx.commit()
+            .await
+            .map_err(internal("restart_game: commit transaction"))?;
+
+        return Ok(crate::proposals::ProposalOutcome {
+            proposal_id: None,
+            game_id: Some(new_game.id),
+        });
+    }
+
+    let proposal_id =
+        crate::proposals::insert_proposal(&mut tx, restart_game_version.id, user_id, Some(game_id))
+            .await
+            .map_err(internal("restart_game: insert proposal"))?;
+
+    let mut position = 0;
+    crate::proposals::insert_proposal_player(
+        &mut tx,
+        proposal_id,
+        position,
+        Some(user_id),
+        None,
+        None,
+        "accepted",
+        None,
     )
-    .execute(&mut *tx)
     .await
-    .map_err(internal("restart_game: link restarted game"))?;
+    .map_err(internal("restart_game: insert owner"))?;
+    position += 1;
+
+    for uid in &opponent_ids {
+        let token = Uuid::new_v4().simple().to_string();
+        crate::proposals::insert_proposal_player(
+            &mut tx,
+            proposal_id,
+            position,
+            Some(*uid),
+            None,
+            None,
+            "pending",
+            Some(token),
+        )
+        .await
+        .map_err(internal("restart_game: insert invitee"))?;
+        position += 1;
+    }
+
+    for bot in &bot_slots {
+        crate::proposals::insert_proposal_player(
+            &mut tx,
+            proposal_id,
+            position,
+            None,
+            Some(bot.name.clone()),
+            Some(bot.bot_name.clone()),
+            "accepted",
+            None,
+        )
+        .await
+        .map_err(internal("restart_game: insert bot"))?;
+        position += 1;
+    }
 
     tx.commit()
         .await
         .map_err(internal("restart_game: commit transaction"))?;
 
-    Ok(new_game.id)
+    Ok(crate::proposals::ProposalOutcome {
+        proposal_id: Some(proposal_id),
+        game_id: None,
+    })
 }
 
 #[server(RestartGame, "/api")]
-pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
+pub async fn restart_game(
+    game_id: Uuid,
+) -> Result<crate::proposals::ProposalOutcome, ServerFnError> {
     use crate::auth::server::get_current_user;
+    use crate::proposals::InviteMailer;
     use crate::websocket::GameBroadcaster;
     use sqlx::PgPool;
 
@@ -856,25 +947,34 @@ pub async fn restart_game(game_id: Uuid) -> Result<Uuid, ServerFnError> {
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    let new_game_id = restart_game_impl(&pool, &http_client, user.id, game_id).await?;
+    let outcome = restart_game_impl(&pool, &http_client, user.id, game_id).await?;
 
-    // Broadcast update for the new game.
-    crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, new_game_id).await;
+    if let Some(gid) = outcome.game_id {
+        crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, gid).await;
+        crate::email::notify::notify_game_emails(resend.as_ref(), &pool, &http_client, gid, None)
+            .await;
+    }
 
-    crate::email::notify::notify_game_emails(
-        resend.as_ref(),
-        &pool,
-        &http_client,
-        new_game_id,
-        None,
-    )
-    .await;
+    if let Some(pid) = outcome.proposal_id {
+        broadcaster.broadcast_proposal_update(pid).await;
+        if let Ok(players) = crate::proposals::find_proposal_players(&pool, pid).await {
+            for p in players
+                .iter()
+                .filter(|p| p.user_id.is_some() && p.response == "pending")
+            {
+                crate::proposals::mailer().send_invite(
+                    pid,
+                    p.user_id.unwrap(),
+                    p.email_token.clone(),
+                );
+            }
+        }
+    }
 
-    // Broadcast update for the old game with restarted_game_id now set, so
-    // the other player's game view updates to show the "Go to new game" link.
+    // Refresh the old game's view (restarted link / proposal banner).
     broadcaster.broadcast_game_update(game_id).await;
 
-    Ok(new_game_id)
+    Ok(outcome)
 }
 
 #[server(BumpBotTurns, "/api")]
@@ -1020,6 +1120,37 @@ mod tests {
                 bot_slots: &[],
                 chat_id: None,
                 game_state: "final_state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        (game.id, creator)
+    }
+
+    /// A finished solo-vs-bots game (1 human + 1 bot) whose game version points
+    /// at `uri`. Returns `(game_id, creator_id)`.
+    async fn make_finished_solo_bot_game(pool: &PgPool, uri: &str) -> (Uuid, Uuid) {
+        let creator = make_user(pool, "creator").await;
+        let game_version_id = make_game_version_at(pool, uri).await;
+        let game = crate::db::create_game_with_users(
+            pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[],
+                eliminated: &[],
+                placings: &[1, 2],
+                points: &[1.0, 0.0],
+                creator_id: creator,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[BotSlot {
+                    name: "Botty".to_string(),
+                    bot_name: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "final_state",
+                all_accepted: false,
             },
         )
         .await
@@ -1058,6 +1189,7 @@ mod tests {
                 }],
                 chat_id: None,
                 game_state: "state",
+                all_accepted: false,
             },
         )
         .await
@@ -1099,6 +1231,7 @@ mod tests {
                     bot_slots: &[],
                     chat_id: None,
                     game_state: "state",
+                    all_accepted: false,
                 },
             )
         };
@@ -1170,6 +1303,7 @@ mod tests {
                 }],
                 chat_id: None,
                 game_state: "state",
+                all_accepted: false,
             },
         )
         .await
@@ -1192,54 +1326,62 @@ mod tests {
         assert_eq!(opponent_names, vec!["Botty", "bob"]);
     }
 
-    // A successful restart must commit the new game and the old game's
-    // restarted_game_id link together.
+    // Restarting a finished two-player (human) game opens a proposal carrying
+    // the old roster; the old game stays finished and unlinked until the
+    // proposal starts, and no new game row is created yet.
     #[sqlx::test]
-    async fn restart_game_sets_restarted_game_id_and_creates_new_game(pool: PgPool) {
-        use brdgme_cmd::api::{GameResponse, PubRender, Response};
-
-        let uri = crate::game::tests::spawn_mock_game_service(|_req| Response::New {
-            game: GameResponse {
-                state: "restarted_state".to_string(),
-                points: vec![0.0, 0.0],
-                status: brdgme_game::Status::Active {
-                    whose_turn: vec![0],
-                    eliminated: vec![],
-                },
-            },
-            logs: vec![],
-            public_render: PubRender {
-                pub_state: "pub".to_string(),
-                render: "render".to_string(),
-            },
-            player_renders: vec![],
-            seed: 0,
-        })
-        .await;
-        let (game_id, creator_id) = make_finished_two_player_game(&pool, &uri).await;
+    async fn restart_game_with_human_opponent_creates_a_proposal(pool: PgPool) {
+        let (game_id, creator_id) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
         let http_client = reqwest::Client::new();
 
-        let new_game_id = restart_game_impl(&pool, &http_client, creator_id, game_id)
+        let outcome = restart_game_impl(&pool, &http_client, creator_id, game_id)
             .await
             .unwrap();
+
+        assert!(outcome.game_id.is_none());
+        let proposal_id = outcome.proposal_id.expect("proposal created");
+
+        let proposal = crate::proposals::find_proposal(&pool, proposal_id)
+            .await
+            .unwrap()
+            .expect("proposal row exists");
+        assert_eq!(proposal.status, "open");
+        assert_eq!(proposal.restarted_game_id, Some(game_id));
+        assert_eq!(proposal.owner_user_id, creator_id);
+
+        let players = crate::proposals::find_proposal_players(&pool, proposal_id)
+            .await
+            .unwrap();
+        assert_eq!(players.len(), 2);
+        let owner = players
+            .iter()
+            .find(|p| p.user_id == Some(creator_id))
+            .expect("owner row");
+        assert_eq!(owner.response, "accepted");
+        let pending: Vec<_> = players
+            .iter()
+            .filter(|p| p.user_id.is_some() && p.user_id != Some(creator_id))
+            .collect();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].response, "pending");
 
         let old_ge = crate::db::find_game_extended(&pool, game_id)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(old_ge.game.restarted_game_id, Some(new_game_id));
+        assert_eq!(old_ge.game.restarted_game_id, None);
 
-        let new_ge = crate::db::find_game_extended(&pool, new_game_id)
+        let games_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
             .await
-            .unwrap()
-            .expect("new game row exists");
-        assert_eq!(new_ge.game.game_state, "restarted_state");
-        assert!(!new_ge.game.is_finished);
-        assert_eq!(new_ge.game_players.len(), 2);
+            .unwrap();
+        assert_eq!(games_count, 1);
     }
 
-    // A failed game service call must leave no orphan game row and keep the
-    // old game restartable (restarted_game_id NULL).
+    // A failed game service call on the solo-vs-bots bypass must leave no
+    // orphan game row and keep the old game restartable (restarted_game_id
+    // NULL).
     #[sqlx::test]
     async fn restart_game_failed_service_call_leaves_no_new_game(pool: PgPool) {
         use brdgme_cmd::api::Response;
@@ -1248,7 +1390,7 @@ mod tests {
             message: "nope".to_string(),
         })
         .await;
-        let (game_id, creator_id) = make_finished_two_player_game(&pool, &uri).await;
+        let (game_id, creator_id) = make_finished_solo_bot_game(&pool, &uri).await;
         let http_client = reqwest::Client::new();
 
         let result = restart_game_impl(&pool, &http_client, creator_id, game_id).await;
@@ -1285,6 +1427,7 @@ mod tests {
                 bot_slots: &[],
                 chat_id: None,
                 game_state: "state",
+                all_accepted: false,
             },
         )
         .await
@@ -1323,6 +1466,7 @@ mod tests {
                 bot_slots: &[],
                 chat_id: None,
                 game_state: "state",
+                all_accepted: false,
             },
         )
         .await

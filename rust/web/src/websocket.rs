@@ -6,6 +6,11 @@ pub struct GameUpdateSignal {
     pub game_id: Uuid,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProposalUpdateSignal {
+    pub proposal_id: Uuid,
+}
+
 #[cfg(feature = "ssr")]
 pub use ssr::*;
 
@@ -50,6 +55,27 @@ mod ssr {
             }
             if let Err(e) = self.client.flush().await {
                 tracing::error!("NATS flush failed after game.{}: {}", game_id, e);
+            }
+        }
+
+        pub async fn broadcast_proposal_update(&self, proposal_id: Uuid) {
+            let signal = ProposalUpdateSignal { proposal_id };
+            let payload = match serde_json::to_vec(&signal) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("Failed to serialize ProposalUpdateSignal: {}", e);
+                    return;
+                }
+            };
+            if let Err(e) = self
+                .client
+                .publish(format!("proposal.{}", proposal_id), payload.into())
+                .await
+            {
+                tracing::error!("NATS publish failed on proposal.{}: {}", proposal_id, e);
+            }
+            if let Err(e) = self.client.flush().await {
+                tracing::error!("NATS flush failed after proposal.{}: {}", proposal_id, e);
             }
         }
     }

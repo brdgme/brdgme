@@ -76,7 +76,7 @@ pub struct FriendActivity {
 }
 
 #[cfg(feature = "ssr")]
-async fn require_user() -> Result<crate::auth::AuthUser, ServerFnError> {
+pub(crate) async fn require_user() -> Result<crate::auth::AuthUser, ServerFnError> {
     crate::auth::server::get_current_user()
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))

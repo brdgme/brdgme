@@ -60,11 +60,15 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
         }
     });
 
-    // Navigate to new game after restart.
+    // Navigate after restart: to the new game (solo bypass) or the proposal.
     let navigate = use_navigate();
     Effect::new(move |_| {
-        if let Some(Ok(new_id)) = restart_action.value().get() {
-            navigate(&format!("/games/{}", new_id), NavigateOptions::default());
+        if let Some(Ok(outcome)) = restart_action.value().get() {
+            if let Some(gid) = outcome.game_id {
+                navigate(&format!("/games/{}", gid), NavigateOptions::default());
+            } else if let Some(pid) = outcome.proposal_id {
+                navigate(&format!("/invites/{}", pid), NavigateOptions::default());
+            }
         }
     });
 

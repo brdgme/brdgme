@@ -59,6 +59,9 @@ Existing game queries, renders, and WS paths are untouched.
   slot; or cancel the whole proposal. Every action is validated against
   `game_types.player_counts` - the UI disables choices that would make
   the roster count invalid at start time.
+- **Bot naming on slot replacement:** when a human slot is replaced with a
+  bot, the bot keeps the user's display name with a " (bot: {difficulty})"
+  suffix (user decision, 2026-07-21).
 - **Start:** auto-start when the last pending invitee accepts (owner gets
   the normal your-turn/new-game notification instead of a separate
   "everyone accepted" mail). The owner may also **start early** while
@@ -100,10 +103,15 @@ Existing game queries, renders, and WS paths are untouched.
   reuse the same render module; all threaded on a per-proposal
   `Message-Id: <proposal-{id}@brdg.me>`.
 - **Nudge + expiry (uses the 22c sweep task):** pending invitees are
-  reminded once after `INVITE_REMINDER_AFTER` (default 3 days);
-  proposals still `open` after `INVITE_EXPIRE_AFTER` (default 14 days)
-  are auto-cancelled and the owner notified. Both env-configurable so
-  dev can test in minutes.
+  reminded once after `INVITE_REMINDER_AFTER` (default 24 hours);
+  pending invitees who have not responded after `INVITE_DECLINE_AFTER`
+  (default 48 hours) are auto-declined. Proposals still `open` after
+  `INVITE_EXPIRE_AFTER` (default 14 days) are auto-cancelled; accepted
+  invitees are notified, the owner is not. One nudge per proposal
+  (`nudged_at` on `game_proposals`, migration 016). All thresholds
+  env-configurable so dev can test in minutes.
+  **(Updated 2026-07-21: user changed from 3d nudge + 14d expiry to
+  24h reminder + 48h auto-decline; expiry retained at 14d.)**
 
 ### Out of scope (v1)
 
