@@ -1,17 +1,8 @@
-# Prod-only: OTLP trace export from rust/web to the in-cluster Alloy
-# collector (k8s/prod/alloy/), added 2026-07-09 alongside Alloy's Job 3 OTLP
-# receiver (configmap.yaml). OTEL_EXPORTER_OTLP_ENDPOINT was removed
-# 2026-07-16 along with the alloy traces-pipeline disable (backlog #41b);
-# revert this commit to restore. With the endpoint unset, rust/web's
-# init_tracing() skips installing the otel layer/exporter (see
-# rust/web/src/main.rs), so OTEL_TRACES_SAMPLER_ARG below is currently
-# inert - left in place to keep the revert a one-line change.
-#
-# Prod-only: Sentry error tracking DSNs, same rationale as the OTEL vars
-# above. SENTRY_DSN_WEB feeds the browser project via the SSR-embedded init
-# snippet; SENTRY_DSN_SERVER feeds the Rust server project via
-# sentry::init(). Unset in dev/Tilt means the Sentry wiring in rust/web is a
-# no-op. DSNs are public-by-design, submit-only credentials, not secrets.
+# Prod-only: Sentry error tracking DSNs. SENTRY_DSN_WEB feeds the browser
+# project via the SSR-embedded init snippet; SENTRY_DSN_SERVER feeds the Rust
+# server project via sentry::init(). Unset in dev/Tilt means the Sentry wiring
+# in rust/web is a no-op. DSNs are public-by-design, submit-only credentials,
+# not secrets.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,8 +13,6 @@ spec:
       containers:
         - name: web
           env:
-            - name: OTEL_TRACES_SAMPLER_ARG
-              value: "0.1"
             - name: SENTRY_DSN_WEB
               value: https://9d0c02b1f53022489261350da4820fbb@o4511737783451648.ingest.us.sentry.io/4511737800032256
             - name: SENTRY_DSN_SERVER
