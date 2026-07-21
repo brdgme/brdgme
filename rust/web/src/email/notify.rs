@@ -187,6 +187,7 @@ async fn send_one(
     game_id: uuid::Uuid,
     game_player_id: uuid::Uuid,
     kind: NotifyKind,
+    bypass_suppression: bool,
 ) {
     let ge = match crate::db::find_game_extended(pool, game_id).await {
         Ok(Some(g)) => g,
@@ -218,11 +219,16 @@ async fn send_one(
         _ => return,
     };
 
-    if !crate::email::outbound::should_email_recipient(
-        &recipient,
-        now_utc(),
-        crate::email::outbound::suppress_window(),
-    ) {
+    let should_send = if bypass_suppression {
+        recipient.email.is_some() && !recipient.is_bot && recipient.turn_emails_enabled
+    } else {
+        crate::email::outbound::should_email_recipient(
+            &recipient,
+            now_utc(),
+            crate::email::outbound::suppress_window(),
+        )
+    };
+    if !should_send {
         return;
     }
 
@@ -281,6 +287,31 @@ pub async fn send_turn_notification(
         game_id,
         game_player_id,
         NotifyKind::Turn,
+        false,
+    )
+    .await;
+}
+
+/// Sends a turn notification for one game, bypassing the active-web suppression
+/// window. Used by the 22d switch-digest: the user just changed their active
+/// address on the web (so they ARE recently active) yet explicitly wants their
+/// actionable games re-sent to the new address. Still respects the bot check
+/// and the account `turn_emails_enabled` opt-out.
+pub async fn send_turn_digest(
+    resend: Option<&resend_rs::Resend>,
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    game_id: uuid::Uuid,
+    game_player_id: uuid::Uuid,
+) {
+    send_one(
+        resend,
+        pool,
+        http_client,
+        game_id,
+        game_player_id,
+        NotifyKind::Turn,
+        true,
     )
     .await;
 }
@@ -299,6 +330,7 @@ pub async fn send_elimination_notification(
         game_id,
         game_player_id,
         NotifyKind::Eliminated,
+        false,
     )
     .await;
 }
@@ -317,6 +349,7 @@ pub async fn send_game_finished_notification(
         game_id,
         game_player_id,
         NotifyKind::Finished,
+        false,
     )
     .await;
 }
@@ -419,6 +452,13 @@ mod tests {
         let id = uuid::Uuid::new_v4();
         let url = browser_url(id);
         assert!(url.ends_with(&format!("/games/{id}")));
+    }
+
+    #[test]
+    fn rules_url_contains_rules_path() {
+        let id = uuid::Uuid::new_v4();
+        let url = rules_url(id);
+        assert!(url.ends_with(&format!("/rules/{id}")));
     }
 
     // Runs only where a Postgres is available (CI); expected to fail to connect

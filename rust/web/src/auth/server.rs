@@ -120,22 +120,17 @@ pub struct AuthUser {
     pub email: String,
 }
 
-#[server(Login, "/api")]
-pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
-    if email.is_empty() || !email.contains('@') {
-        return Ok(LoginResponse {
-            success: false,
-            message: "Invalid email address".to_string(),
-        });
-    }
-
-    let pool = expect_context::<PgPool>();
-
-    // Everything below - GC, the cap checks, and the upsert that bumps the
-    // counters they read - runs in one transaction guarded by a global
-    // advisory lock. Without it, concurrent requests can each pass the cap
-    // SELECTs before either upsert commits (TOCTOU), overshooting the
-    // per-email and global caps by roughly the concurrency level.
+/// Sends a confirmation code to `email`, reusing the login-code machinery:
+/// opportunistic GC, the per-email cooldown + cap and the global Resend-quota
+/// cap (all in one advisory-locked transaction), then the code upsert + send.
+/// Shared by `login` and the 22d "add address" flow.
+#[cfg(feature = "ssr")]
+#[tracing::instrument(skip_all)]
+pub(crate) async fn request_confirmation_code(
+    pool: &PgPool,
+    resend: Option<&resend_rs::Resend>,
+    email: &str,
+) -> Result<LoginResponse, ServerFnError> {
     let mut tx = pool
         .begin()
         .await
@@ -145,9 +140,6 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         .await
         .map_err(internal("login: acquire cap lock"))?;
 
-    // Opportunistic GC: rows are useless for confirm after 1 hour, but they
-    // still feed the 24h global send cap below, so only delete once they have
-    // aged out of that accounting window too. No cron/job needed.
     sqlx::query!(
         "DELETE FROM login_confirmations WHERE last_sent_at < NOW() - INTERVAL '24 hours'"
     )
@@ -155,9 +147,6 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
     .await
     .map_err(internal("login: gc stale confirmations"))?;
 
-    // The generic response returned whether we sent an email or a cooldown /
-    // per-email cap suppressed it - it must be indistinguishable so the
-    // endpoint is not an enumeration or behaviour oracle.
     let generic_success = LoginResponse {
         success: true,
         message: "Login email sent".to_string(),
@@ -192,11 +181,6 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         }
     }
 
-    // Global cap protecting the Resend 100/day quota. Unlike edge/per-process
-    // limits, these caps live in Postgres so they hold across replicas and
-    // deploys (the per-IP edge limit is Cloudflare's, see the 2026-07-10 WP4
-    // spec W6). This one affects legit users, so it is an honest refusal,
-    // not a pretend-success.
     let sent_last_24h = sqlx::query_scalar!(
         r#"SELECT COALESCE(SUM(sent_count), 0) AS "total!"
            FROM login_confirmations
@@ -216,10 +200,6 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         });
     }
 
-    // Fresh code (restarting the validity window and per-code attempt count)
-    // if the existing one expired, otherwise re-send the existing code.
-    // sent_count keeps accumulating across windows so the caps above stay
-    // honest; it only resets when the row is deleted (confirm or 24h GC).
     let fresh_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let code = sqlx::query_scalar!(
         r#"INSERT INTO login_confirmations (email, code, sent_count, last_sent_at)
@@ -245,10 +225,23 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         .await
         .map_err(internal("login: commit transaction"))?;
 
-    let resend = expect_context::<Option<resend_rs::Resend>>();
-    send_login_email(resend.as_ref(), &email, &code).await;
+    send_login_email(resend, email, &code).await;
 
     Ok(generic_success)
+}
+
+#[server(Login, "/api")]
+pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
+    if email.is_empty() || !email.contains('@') {
+        return Ok(LoginResponse {
+            success: false,
+            message: "Invalid email address".to_string(),
+        });
+    }
+
+    let pool = expect_context::<PgPool>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
+    request_confirmation_code(&pool, resend.as_ref(), &email).await
 }
 
 #[server(ConfirmLogin, "/api")]
@@ -285,16 +278,17 @@ struct ConfirmedLogin {
     auth_token_id: Uuid,
 }
 
-/// Everything `confirm_login` does apart from the per-IP rate limit and the
-/// session write, so tests can drive the confirm flow without HTTP request
-/// parts. The user row is created here - not in `login()` - so unconfirmed
-/// emails never touch the `users` table.
+/// Validates a confirmation code for `email`: it must exist, be within the
+/// 1-hour window, be under the per-code attempt cap, and match `token` (a
+/// mismatch bumps the attempt counter). Shared by `confirm_login_inner` and
+/// the 22d "confirm address" flow.
 #[cfg(feature = "ssr")]
-async fn confirm_login_inner(
+#[tracing::instrument(skip_all)]
+pub(crate) async fn validate_confirmation_code(
     pool: &PgPool,
     email: &str,
     token: &str,
-) -> Result<ConfirmedLogin, ServerFnError> {
+) -> Result<LoginConfirmation, ServerFnError> {
     let invalid = || ServerFnError::new("Invalid or expired token".to_string());
 
     let confirmation = sqlx::query_as!(
@@ -310,8 +304,6 @@ async fn confirm_login_inner(
     if confirmation.created_at <= OffsetDateTime::now_utc() - time::Duration::hours(1) {
         return Err(invalid());
     }
-    // The real brute-force control: 10 attempts per code, independent of
-    // source IP (per-IP limiting is a collective bucket on DOKS - see D6).
     if confirmation.attempts >= CONFIRM_MAX_ATTEMPTS_PER_CODE {
         axum_prometheus::metrics::counter!("login_confirm_attempt_cap_hit_total").increment(1);
         return Err(invalid());
@@ -327,6 +319,24 @@ async fn confirm_login_inner(
         return Err(invalid());
     }
 
+    Ok(confirmation)
+}
+
+/// Everything `confirm_login` does apart from the per-IP rate limit and the
+/// session write, so tests can drive the confirm flow without HTTP request
+/// parts. The user row is created here - not in `login()` - so unconfirmed
+/// emails never touch the `users` table.
+#[cfg(feature = "ssr")]
+#[tracing::instrument(skip_all)]
+async fn confirm_login_inner(
+    pool: &PgPool,
+    email: &str,
+    token: &str,
+) -> Result<ConfirmedLogin, ServerFnError> {
+    let invalid = || ServerFnError::new("Invalid or expired token".to_string());
+
+    let _confirmation = validate_confirmation_code(pool, email, token).await?;
+
     // Accepted race: two concurrent confirms with the same valid code can
     // both pass the pre-checks above; the loser hits the user_emails unique
     // constraint below and surfaces a generic internal error. Self-recovers
@@ -336,11 +346,11 @@ async fn confirm_login_inner(
         .await
         .map_err(internal("confirm_login: begin transaction"))?;
 
-    let user_email = sqlx::query_as!(
-        UserEmail,
-        "SELECT * FROM user_emails WHERE email = $1 AND is_primary = true",
-        email
+    let user_email = sqlx::query_as::<_, UserEmail>(
+        "SELECT id, created_at, updated_at, user_id, email, is_primary
+         FROM user_emails WHERE email = $1 AND verified_at IS NOT NULL",
     )
+    .bind(email)
     .fetch_optional(&mut *tx)
     .await
     .map_err(internal("confirm_login: look up user email"))?;
@@ -348,6 +358,16 @@ async fn confirm_login_inner(
     let user_id = if let Some(user_email) = user_email {
         user_email.user_id
     } else {
+        let pending: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_emails WHERE email = $1)")
+                .bind(email)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(internal("confirm_login: check pending email"))?;
+        if pending {
+            return Err(invalid());
+        }
+
         let new_user_id = Uuid::new_v4();
         let username = crate::db::generate_unique_username(&mut tx)
             .await
@@ -364,11 +384,12 @@ async fn confirm_login_inner(
         .await
         .map_err(internal("confirm_login: create user"))?;
 
-        sqlx::query!(
-            "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
-            new_user_id,
-            email
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
         )
+        .bind(new_user_id)
+        .bind(email)
         .execute(&mut *tx)
         .await
         .map_err(internal("confirm_login: create user email"))?;
@@ -1077,11 +1098,12 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query!(
-            "INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)",
-            user_id,
-            "existing@example.com"
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
         )
+        .bind(user_id)
+        .bind("existing@example.com")
         .execute(&pool)
         .await
         .unwrap();
@@ -1117,5 +1139,87 @@ mod tests {
             !validate_pref_colors(&ok(&["Green", "Red", "Amber"])),
             "legacy names are normalized on read, not accepted on write"
         );
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_resolves_non_primary_verified_address(pool: PgPool) {
+        let user_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind("multi")
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("primary@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, false, NOW())",
+        )
+        .bind(user_id)
+        .bind("work@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        seed_confirmation(
+            &pool,
+            "work@example.com",
+            "123456",
+            time::Duration::minutes(1),
+            0,
+            1,
+            time::Duration::minutes(1),
+        )
+        .await;
+
+        let confirmed = confirm_login_inner(&pool, "work@example.com", "123456")
+            .await
+            .unwrap();
+        assert_eq!(
+            confirmed.user.id, user_id,
+            "verified non-primary resolves to owner"
+        );
+        assert_eq!(confirmed.email, "work@example.com");
+        assert_eq!(user_count(&pool).await, 1, "no duplicate user");
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_rejects_pending_unverified_address(pool: PgPool) {
+        let user_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind("pending")
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
+            .bind(user_id)
+            .bind("unverified@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+        seed_confirmation(
+            &pool,
+            "unverified@example.com",
+            "123456",
+            time::Duration::minutes(1),
+            0,
+            1,
+            time::Duration::minutes(1),
+        )
+        .await;
+
+        let result = confirm_login_inner(&pool, "unverified@example.com", "123456").await;
+        assert!(result.is_err(), "unverified address cannot log in");
+        assert_eq!(user_count(&pool).await, 1, "no new user created");
     }
 }
