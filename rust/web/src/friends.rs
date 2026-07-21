@@ -429,6 +429,7 @@ pub fn FriendsPage() -> impl IntoView {
                                 o.friends.iter().map(|f| {
                                     let uid = f.user_id;
                                     let name = f.name.clone();
+                                    let unfriend_name = name.clone();
                                     view! {
                                         <div class="friend-row">
                                             <span>
@@ -439,7 +440,14 @@ pub fn FriendsPage() -> impl IntoView {
                                             " "
                                             <a href="#" on:click=move |ev| {
                                                 ev.prevent_default();
-                                                unfriend_action.dispatch(Unfriend { user_id: uid });
+                                                let confirmed = web_sys::window()
+                                                    .and_then(|w| w.confirm_with_message(
+                                                        &format!("Unfriend {}? You'll need to send a new friend request to add them again.", unfriend_name),
+                                                    ).ok())
+                                                    .unwrap_or(false);
+                                                if confirmed {
+                                                    unfriend_action.dispatch(Unfriend { user_id: uid });
+                                                }
                                             }>"Unfriend"</a>
                                         </div>
                                     }
