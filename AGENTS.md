@@ -76,11 +76,12 @@ structure in `rust/web` or when debugging a hydration panic).
 - Never install packages on the host machine - all tooling comes from the
   `devenv`/nix shell. If something's missing, report it rather than
   installing around it.
-- Keep local verification light: `fmt` and a quick lint pass. Push and let CI
-  run the full test/clippy suites rather than burning time re-running them
-  locally.
-- Before committing any change that includes Rust code, run all of the
-  following and ensure they pass:
+- Before committing any change that includes Rust code, run
+  `scripts/rust-test.sh` and ensure it passes. This script spins up temporary
+  Postgres and NATS containers, runs migrations, and executes the full CI
+  check suite (fmt, clippy, tests). It takes several minutes but catches
+  issues before the slow CI loop. See `docs/DEV.md` for details.
+- If you cannot run the full script, at minimum run:
   - `cargo fmt --all -- --check`
   - `cargo clippy -p web --all-targets --features ssr -- -D warnings`
   - `cargo clippy --workspace --exclude web --all-targets -- -D warnings`

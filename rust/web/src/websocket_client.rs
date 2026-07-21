@@ -38,15 +38,21 @@ pub fn bump_proposal_update(proposal_update: RwSignal<Option<(Uuid, u64)>>, prop
 pub fn use_websocket() {
     use crate::websocket::{GameUpdateSignal, ProposalUpdateSignal};
     use codee::string::FromToStringCodec;
+    use leptos::ev::visibilitychange;
     use leptos_use::{
-        DummyEncoder, ReconnectLimit, UseWebSocketOptions, use_websocket_with_options,
+        DummyEncoder, ReconnectLimit, UseWebSocketOptions, UseWebSocketReturn, use_document,
+        use_event_listener, use_websocket_with_options,
     };
 
     let trigger = expect_context::<WebSocketTrigger>();
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
     let proposal_update = expect_context::<ProposalUpdate>().0;
 
-    let _ = use_websocket_with_options::<String, String, FromToStringCodec, (), DummyEncoder>(
+    let UseWebSocketReturn {
+        ready_state: _,
+        open,
+        ..
+    } = use_websocket_with_options::<String, String, FromToStringCodec, (), DummyEncoder>(
         "/ws",
         UseWebSocketOptions::default()
             .reconnect_limit(ReconnectLimit::Infinite)
@@ -60,6 +66,22 @@ pub fn use_websocket() {
                 }
             }),
     );
+
+    let open_vis = open.clone();
+    use_event_listener(use_document(), visibilitychange, move |_| {
+        let doc = web_sys::window()
+            .and_then(|w| w.document())
+            .expect("no document");
+        if doc.visibility_state() == web_sys::VisibilityState::Visible {
+            open_vis();
+            trigger.set_last_update.update(|n| *n += 1);
+        }
+    });
+
+    window_event_listener(leptos::ev::online, move |_| {
+        open();
+        trigger.set_last_update.update(|n| *n += 1);
+    });
 }
 
 #[cfg(not(feature = "hydrate"))]

@@ -64,6 +64,14 @@ pub struct BotProviderRow {
     pub provider_name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestBotProviderResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: String,
+    pub elapsed_ms: u64,
+}
+
 #[cfg(feature = "ssr")]
 type ProviderDbRow = (Uuid, String, String, Option<Vec<u8>>, bool);
 #[cfg(feature = "ssr")]
@@ -520,6 +528,93 @@ pub async fn test_provider(
     Ok(content.to_string())
 }
 
+#[cfg(feature = "ssr")]
+pub async fn test_bot_provider(
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    bot_provider_id: Uuid,
+    prompt: &str,
+) -> Result<TestBotProviderResponse, ServerFnError> {
+    type BotProviderRow = (
+        String,
+        Option<Vec<u8>>,
+        String,
+        Option<String>,
+        Option<serde_json::Value>,
+    );
+    let row: Option<BotProviderRow> = sqlx::query_as(
+        "SELECT p.url, p.api_key_encrypted, bp.model, bp.reasoning_effort, bp.extra_body \
+             FROM bot_providers bp \
+             JOIN llm_providers p ON p.id = bp.provider_id \
+             WHERE bp.id = $1",
+    )
+    .bind(bot_provider_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(internal("admin_test_bot_provider: query"))?;
+
+    let (url, api_key_encrypted, model, reasoning_effort, extra_body) =
+        row.ok_or_else(|| ServerFnError::new("Bot provider not found"))?;
+
+    let key = crate::crypto::load_key().map_err(internal("admin_test_bot_provider: load key"))?;
+    let api_key = match api_key_encrypted {
+        Some(encrypted) => {
+            let decrypted = crate::crypto::decrypt(&key, &encrypted)
+                .map_err(internal("admin_test_bot_provider: decrypt"))?;
+            String::from_utf8(decrypted).map_err(internal("admin_test_bot_provider: utf8"))?
+        }
+        None => return Err(ServerFnError::new("Provider has no API key configured")),
+    };
+
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": false,
+    });
+    if let Some(ref effort) = reasoning_effort {
+        body["reasoning_effort"] = serde_json::json!(effort);
+    }
+    if let Some(ref patch) = extra_body
+        && let (Some(base), Some(patch_obj)) = (body.as_object_mut(), patch.as_object())
+    {
+        for (k, v) in patch_obj {
+            if v.is_null() {
+                base.remove(k);
+            } else {
+                base.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    let start = std::time::Instant::now();
+    let resp = http_client
+        .post(format!("{url}/v1/chat/completions"))
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(internal("admin_test_bot_provider: request"))?;
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    let status = resp.status().as_u16();
+    let headers: Vec<(String, String)> = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("<binary>").to_string()))
+        .collect();
+    let body = resp
+        .text()
+        .await
+        .unwrap_or_else(|_| "unable to read body".to_string());
+
+    Ok(TestBotProviderResponse {
+        status,
+        headers,
+        body,
+        elapsed_ms,
+    })
+}
+
 #[server(AdminListBots, "/api")]
 pub async fn admin_list_bots() -> Result<Vec<BotRow>, ServerFnError> {
     use crate::auth::server::get_current_user;
@@ -855,6 +950,29 @@ pub async fn admin_test_provider(provider_id: Uuid) -> Result<String, ServerFnEr
     }
 
     test_provider(&pool, &http_client, provider_id).await
+}
+
+#[server(AdminTestBotProvider, "/api")]
+pub async fn admin_test_bot_provider(
+    bot_provider_id: Uuid,
+    prompt: String,
+) -> Result<TestBotProviderResponse, ServerFnError> {
+    use crate::auth::server::get_current_user;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let http_client = expect_context::<reqwest::Client>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+    let is_admin = crate::db::is_user_admin(&pool, user.id)
+        .await
+        .map_err(internal("admin_test_bot_provider: check admin"))?;
+    if !is_admin {
+        return Err(ServerFnError::new("Admin access required"));
+    }
+
+    test_bot_provider(&pool, &http_client, bot_provider_id, &prompt).await
 }
 
 #[component]
@@ -1593,6 +1711,14 @@ fn BotProvidersSection(
         async move { admin_delete_bot_provider(id).await }
     });
 
+    let test_prompt = RwSignal::new("Say hello".to_string());
+    let test_action = Action::new(|(id, prompt): &(Uuid, String)| {
+        let id = *id;
+        let prompt = prompt.clone();
+        async move { admin_test_bot_provider(id, prompt).await }
+    });
+    let test_result = RwSignal::new(None::<(Uuid, Result<TestBotProviderResponse, String>)>);
+
     Effect::new(move |_| {
         if create_action.value().get().is_some() && !create_action.pending().get() {
             match create_action.value().get().unwrap() {
@@ -1631,12 +1757,33 @@ fn BotProvidersSection(
         }
     });
 
+    Effect::new(move |_| {
+        if test_action.value().get().is_some()
+            && !test_action.pending().get()
+            && let Some((bp_id, _)) = test_action.input().get()
+        {
+            let res = match test_action.value().get().unwrap() {
+                Ok(resp) => Ok(resp),
+                Err(e) => Err(e.to_string()),
+            };
+            test_result.set(Some((bp_id, res)));
+        }
+    });
+
     let bots = StoredValue::new(bots);
     let providers = StoredValue::new(providers);
 
     view! {
         <h2>"Bot-Provider Links"</h2>
         {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+        <div class="form-actions">
+            <label>"Test prompt: "</label>
+            <input
+                type="text"
+                prop:value=move || test_prompt.get()
+                on:input=move |ev| test_prompt.set(event_target_value(&ev))
+            />
+        </div>
         <Suspense fallback=|| view! { <p>"Loading..."</p> }>
             {move || {
                 links.get().map(|res| match res {
@@ -1682,6 +1829,27 @@ fn BotProvidersSection(
                                             <td>
                                                 <div class="form-actions">
                                                     <button on:click=move |_| editing_id.set(Some(id))>"Edit"</button>
+                                                    <button
+                                                        disabled=move || {
+                                                            test_action.pending().get()
+                                                                && test_action.input().get()
+                                                                    .is_some_and(|(tid, _)| tid == id)
+                                                        }
+                                                        on:click=move |_| {
+                                                            test_action.dispatch((id, test_prompt.get()));
+                                                        }
+                                                    >
+                                                        {move || {
+                                                            if test_action.pending().get()
+                                                                && test_action.input().get()
+                                                                    .is_some_and(|(tid, _)| tid == id)
+                                                            {
+                                                                "Testing..."
+                                                            } else {
+                                                                "Test"
+                                                            }
+                                                        }}
+                                                    </button>
                                                     <button on:click=move |_| {
                                                         let confirmed = web_sys::window()
                                                             .and_then(|w| w.confirm_with_message("Delete this link?").ok())
@@ -1693,6 +1861,39 @@ fn BotProvidersSection(
                                                 </div>
                                             </td>
                                         </tr>
+                                        <Show when=move || {
+                                            test_result.with(|r| r.as_ref().is_some_and(|(rid, _)| *rid == id))
+                                        }>
+                                            <tr>
+                                                <td colspan="8">
+                                                    {move || {
+                                                        test_result.with(|r| match r {
+                                                            Some((_, Ok(resp))) => view! {
+                                                                <div class="test-result">
+                                                                    <p><strong>"Status: "</strong>{resp.status}
+                                                                        " | "<strong>"Time: "</strong>{resp.elapsed_ms}"ms"</p>
+                                                                    <details>
+                                                                        <summary>"Headers"</summary>
+                                                                        <pre>{resp.headers.iter()
+                                                                            .map(|(k, v)| format!("{k}: {v}"))
+                                                                            .collect::<Vec<_>>()
+                                                                            .join("\n")}</pre>
+                                                                    </details>
+                                                                    <details>
+                                                                        <summary>"Body"</summary>
+                                                                        <pre>{resp.body.clone()}</pre>
+                                                                    </details>
+                                                                </div>
+                                                            }.into_any(),
+                                                            Some((_, Err(e))) => {
+                                                                view! { <p class="error">{e.clone()}</p> }.into_any()
+                                                            }
+                                                            None => ().into_any(),
+                                                        })
+                                                    }}
+                                                </td>
+                                            </tr>
+                                        </Show>
                                         <Show when=move || editing_id.get() == Some(id)>
                                             <BotProviderEditForm
                                                 link_id=id

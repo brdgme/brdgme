@@ -465,13 +465,6 @@ pub fn GameCommandInput(
 
     let submit_action = ServerAction::<SubmitCommand>::new();
 
-    // Focus input on mount (works for both hard refresh and client-side navigation).
-    Effect::new(move |_| {
-        if let Some(el) = input_ref.get() {
-            let _ = el.focus();
-        }
-    });
-
     // Type-anywhere-focuses-command-field: single, unmodified,
     // printable-character keystrokes focus the command input unless a
     // text-entry element (input/textarea/select/contenteditable) is

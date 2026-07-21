@@ -29,6 +29,8 @@ jobs:
           filters: |
             rust:
               - 'rust/**'
+              - 'scripts/rust-ci-commands.sh'
+              - 'scripts/rust-test.sh'
               - 'docker-bake.hcl'
               - '.github/workflows/ci.yml'
             go:
@@ -50,6 +52,7 @@ jobs:
       SQLX_OFFLINE: "true"
       DATABASE_URL: "postgres://postgres:postgres@localhost/brdgme"
       NATS_URL: "nats://localhost:4222"
+      RUST_MIN_STACK: "8388608"
     services:
       postgres:
         image: postgres:18
@@ -86,16 +89,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: sqlx-cli
-      - name: Run migrations
-        run: sqlx migrate run --source web/migrations
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --exclude web --all-targets -- -D warnings
-      - run: cargo clippy -p web --all-targets --features ssr -- -D warnings
-      - name: Check .sqlx cache is up to date
-        working-directory: rust/web
-        run: cargo sqlx prepare --check -- --tests --features ssr --all-targets
-      - run: cargo test --workspace --exclude web
-      - run: cargo test -p web --features ssr
+      - name: Run checks (fmt, clippy, sqlx, tests)
+        run: bash ../scripts/rust-ci-commands.sh
 
   cargo-deny:
     needs: [changes]

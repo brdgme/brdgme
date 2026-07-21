@@ -125,6 +125,27 @@ the Database section below and expects that DB to exist externally - devenv
 defines no postgres service). Without it the crate compiles but ~41 DB tests
 fail with connection timeouts.
 
+## Full Local Test Run
+
+`scripts/rust-test.sh` spins up temporary Postgres and NATS containers, sets
+environment variables, then delegates to `scripts/rust-ci-commands.sh` - the
+same script CI calls in `.github/workflows/ci.yml`. This guarantees the cargo
+commands (fmt, clippy, sqlx prepare check, tests) are identical between local
+and CI; changes only need to be made in one place.
+
+It takes several minutes (compilation + test time). It's optional but
+recommended before pushing, since it catches everything CI would catch without
+needing to wait for GitHub Actions.
+
+Usage (from repo root):
+```bash
+bash scripts/rust-test.sh
+```
+
+Containers are cleaned up automatically on exit (success or failure). Uses
+non-standard ports (15432, 14222) so it won't conflict with a running tilt dev
+environment.
+
 ## Rust Conventions
 
 - Edition: `2024` for all crates
