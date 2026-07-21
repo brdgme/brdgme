@@ -1264,14 +1264,16 @@ Just a plain body";
     #[sqlx::test]
     async fn settings_standalone_rejects_game_command(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "settings-user").await;
-        match crate::email::commands::dispatch_settings_standalone(&pool, user_id, "concede").await
+        match crate::email::commands::dispatch_settings_standalone(&pool, None, user_id, "concede")
+            .await
         {
             Err(crate::email::commands::CommandError::User(msg)) => {
                 assert!(msg.contains("not available"));
             }
             _ => panic!("expected User error for game command"),
         }
-        match crate::email::commands::dispatch_settings_standalone(&pool, user_id, "settings").await
+        match crate::email::commands::dispatch_settings_standalone(&pool, None, user_id, "settings")
+            .await
         {
             Ok(crate::email::commands::CommandReply::Status(_)) => {}
             _ => panic!("expected Status reply for settings command"),

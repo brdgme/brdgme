@@ -229,6 +229,13 @@ emails to the newly active address so their playable games follow them.
 - **Out of scope (v1):** per-address schedules/auto-switching by time of
   day - the manual switch is the feature; automation can come later if
   wanted.
+- **Email commands for address management (implemented 2026-07-21):**
+  `emails add <address>`, `emails confirm <code>` (targets most recently
+  created unverified address), `emails active` / `emails use <address>`
+  (make an address primary; skips the turn-digest on the email command
+  path - the web settings UI still sends it), `emails remove <address>`.
+  These complement the settings UI and complete the "everything by email"
+  goal for address management.
 
 **Sequencing within 22:** 22b → 22c (reuses the notification body and
 sweep pattern) → 22d (touches auth; largest UI surface). 22c and 22d are

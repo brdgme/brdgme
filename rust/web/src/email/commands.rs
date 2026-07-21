@@ -170,6 +170,11 @@ pub fn help_text() -> String {
      name <display name> - set your display name\n\
      colors <c1,c2,c3> - set your 3 preferred colours (alias: colours)\n\
      theme <name> - set your theme (or 'theme system' for the default)\n\
+     emails - list your email addresses\n\
+     emails add <address> - add a new email address\n\
+     emails confirm <code> - confirm a pending address\n\
+     emails active <address> - make an address your active one (alias: emails use)\n\
+     emails remove <address> - remove an address\n\
      emails on | emails off - toggle turn-notification emails\n\
      settings - show your current settings"
         .to_string()
@@ -220,6 +225,7 @@ fn settings_verb(line: &str) -> Option<&'static str> {
 /// a settings command; `None` falls through to the game-command path.
 pub async fn dispatch_settings_command_for_user(
     pool: &sqlx::PgPool,
+    resend: Option<&resend_rs::Resend>,
     user_id: uuid::Uuid,
     line: &str,
 ) -> Option<Result<CommandReply, CommandError>> {
@@ -234,7 +240,7 @@ pub async fn dispatch_settings_command_for_user(
         "name" => run_settings_name(pool, user_id, arg).await,
         "colors" => run_settings_colors(pool, user_id, arg).await,
         "theme" => run_settings_theme(pool, user_id, arg).await,
-        "emails" => run_settings_emails(pool, user_id, arg).await,
+        "emails" => run_settings_emails(pool, resend, user_id, arg).await,
         "settings" => run_settings_summary(pool, user_id).await,
         _ => unreachable!("settings_verb only yields known verbs"),
     };
@@ -245,17 +251,18 @@ pub async fn dispatch_settings_command(
     ctx: &EmailCommandCtx<'_>,
     line: &str,
 ) -> Option<Result<CommandReply, CommandError>> {
-    dispatch_settings_command_for_user(ctx.pool, ctx.user_id, line).await
+    dispatch_settings_command_for_user(ctx.pool, ctx.resend, ctx.user_id, line).await
 }
 
 /// Standalone (no-game) settings path: handles settings commands, `help`, and
 /// rejects everything else as unavailable by email without a game.
 pub async fn dispatch_settings_standalone(
     pool: &sqlx::PgPool,
+    resend: Option<&resend_rs::Resend>,
     user_id: uuid::Uuid,
     line: &str,
 ) -> Result<CommandReply, CommandError> {
-    if let Some(result) = dispatch_settings_command_for_user(pool, user_id, line).await {
+    if let Some(result) = dispatch_settings_command_for_user(pool, resend, user_id, line).await {
         return result;
     }
 
@@ -490,18 +497,74 @@ async fn run_settings_theme(
 
 async fn run_settings_emails(
     pool: &sqlx::PgPool,
+    resend: Option<&resend_rs::Resend>,
     user_id: uuid::Uuid,
     arg: Option<&str>,
 ) -> Result<CommandReply, CommandError> {
-    let enabled = match arg.map(|a| a.to_ascii_lowercase()) {
-        Some(ref a) if a == "on" => true,
-        Some(ref a) if a == "off" => false,
-        _ => {
-            return Err(CommandError::User(
-                "Usage: emails on | emails off".to_string(),
-            ));
-        }
+    let Some(arg) = arg else {
+        return run_emails_list(pool, user_id).await;
     };
+    let (sub, rest) = arg
+        .split_once(' ')
+        .map(|(s, r)| (s, Some(r.trim())))
+        .unwrap_or((arg, None));
+    match sub.to_ascii_lowercase().as_str() {
+        "on" => run_emails_toggle(pool, user_id, true).await,
+        "off" => run_emails_toggle(pool, user_id, false).await,
+        "add" => {
+            let addr = rest.unwrap_or("");
+            run_emails_add(pool, resend, user_id, addr).await
+        }
+        "confirm" => {
+            let code = rest.unwrap_or("");
+            run_emails_confirm(pool, user_id, code).await
+        }
+        "active" | "use" => {
+            let addr = rest.unwrap_or("");
+            run_emails_active(pool, user_id, addr).await
+        }
+        "remove" => {
+            let addr = rest.unwrap_or("");
+            run_emails_remove(pool, user_id, addr).await
+        }
+        _ => Err(CommandError::User(
+            "Usage: emails | emails on | emails off | emails add <address> | emails confirm <code> | emails active <address> | emails remove <address>".to_string(),
+        )),
+    }
+}
+
+async fn run_emails_list(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+) -> Result<CommandReply, CommandError> {
+    let rows = crate::db::list_user_emails(pool, user_id)
+        .await
+        .map_err(CommandError::Internal)?;
+    if rows.is_empty() {
+        return Ok(CommandReply::Status(
+            "No email addresses on your account.".to_string(),
+        ));
+    }
+    let mut lines = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let marker = if row.is_primary { "*" } else { " " };
+        let status = if row.is_primary {
+            "active"
+        } else if row.verified_at.is_some() {
+            "verified"
+        } else {
+            "unverified"
+        };
+        lines.push(format!("{marker} {} ({status})", row.email));
+    }
+    Ok(CommandReply::Status(lines.join("\n")))
+}
+
+async fn run_emails_toggle(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    enabled: bool,
+) -> Result<CommandReply, CommandError> {
     set_turn_emails_enabled(pool, user_id, enabled)
         .await
         .map_err(CommandError::Internal)?;
@@ -511,6 +574,140 @@ async fn run_settings_emails(
         "Turn-notification emails are now off."
     };
     Ok(CommandReply::Status(msg.to_string()))
+}
+
+async fn run_emails_add(
+    pool: &sqlx::PgPool,
+    resend: Option<&resend_rs::Resend>,
+    user_id: uuid::Uuid,
+    addr: &str,
+) -> Result<CommandReply, CommandError> {
+    let addr = addr.trim();
+    if addr.is_empty() || !addr.contains('@') {
+        return Err(CommandError::User(
+            "Usage: emails add <address>".to_string(),
+        ));
+    }
+    match crate::db::find_email_owner(pool, addr)
+        .await
+        .map_err(CommandError::Internal)?
+    {
+        Some(owner) if owner == user_id => {
+            return Err(CommandError::User(
+                "Address already on your account.".to_string(),
+            ));
+        }
+        Some(_) => {
+            return Err(CommandError::User("Address unavailable.".to_string()));
+        }
+        None => {}
+    }
+    if crate::db::insert_unverified_email(pool, user_id, addr)
+        .await
+        .map_err(CommandError::Internal)?
+        .is_none()
+    {
+        return Err(CommandError::User("Address unavailable.".to_string()));
+    }
+    crate::auth::server::request_confirmation_code(pool, resend, addr)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("emails add: send code: {e}")))?;
+    Ok(CommandReply::Status(format!(
+        "Confirmation code sent to {addr}. Reply 'emails confirm <code>' to verify."
+    )))
+}
+
+async fn run_emails_confirm(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    code: &str,
+) -> Result<CommandReply, CommandError> {
+    let code = code.trim();
+    if code.is_empty() {
+        return Err(CommandError::User(
+            "Usage: emails confirm <code>".to_string(),
+        ));
+    }
+    let email: Option<String> = sqlx::query_scalar(
+        "SELECT email FROM user_emails WHERE user_id = $1 AND verified_at IS NULL ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| CommandError::Internal(anyhow::anyhow!("emails confirm: find unverified: {e}")))?;
+    let Some(email) = email else {
+        return Err(CommandError::User(
+            "No unverified address to confirm. Add one first with 'emails add <address>'."
+                .to_string(),
+        ));
+    };
+    crate::auth::server::validate_confirmation_code(pool, &email, code)
+        .await
+        .map_err(|_| CommandError::User("Invalid or expired confirmation code.".to_string()))?;
+    crate::db::mark_email_verified(pool, user_id, &email)
+        .await
+        .map_err(CommandError::Internal)?;
+    sqlx::query("DELETE FROM login_confirmations WHERE email = $1")
+        .bind(&email)
+        .execute(pool)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("emails confirm: cleanup: {e}")))?;
+    Ok(CommandReply::Status(format!("Address {email} confirmed.")))
+}
+
+async fn run_emails_active(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    addr: &str,
+) -> Result<CommandReply, CommandError> {
+    let addr = addr.trim();
+    if addr.is_empty() {
+        return Err(CommandError::User(
+            "Usage: emails active <address>".to_string(),
+        ));
+    }
+    match crate::db::set_primary_email(pool, user_id, addr)
+        .await
+        .map_err(CommandError::Internal)?
+    {
+        crate::db::SetPrimaryOutcome::Switched => Ok(CommandReply::Status(format!(
+            "Active address set to {addr}."
+        ))),
+        crate::db::SetPrimaryOutcome::NotFound => Err(CommandError::User(format!(
+            "Address {addr} is not on your account."
+        ))),
+        crate::db::SetPrimaryOutcome::Unverified => Err(CommandError::User(format!(
+            "Address {addr} is not verified yet. Confirm it first with 'emails confirm <code>'."
+        ))),
+    }
+}
+
+async fn run_emails_remove(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    addr: &str,
+) -> Result<CommandReply, CommandError> {
+    let addr = addr.trim();
+    if addr.is_empty() {
+        return Err(CommandError::User(
+            "Usage: emails remove <address>".to_string(),
+        ));
+    }
+    match crate::db::remove_user_email(pool, user_id, addr)
+        .await
+        .map_err(CommandError::Internal)?
+    {
+        crate::db::RemoveEmailOutcome::Removed => {
+            Ok(CommandReply::Status(format!("Address {addr} removed.")))
+        }
+        crate::db::RemoveEmailOutcome::NotFound => Err(CommandError::User(format!(
+            "Address {addr} is not on your account."
+        ))),
+        crate::db::RemoveEmailOutcome::IsPrimary => Err(CommandError::User(
+            "Cannot remove your active address. Switch first with 'emails active <address>'."
+                .to_string(),
+        )),
+    }
 }
 
 async fn run_settings_summary(
@@ -955,18 +1152,20 @@ mod tests {
         let u1 = seed_user(&pool, "test-player").await;
         let u2 = seed_user(&pool, "other-player").await;
 
-        let ok = dispatch_settings_command_for_user(&pool, u1, "name alice")
+        let ok = dispatch_settings_command_for_user(&pool, None, u1, "name alice")
             .await
             .unwrap()
             .unwrap();
         assert_eq!(status_msg(ok), "Display name set to alice.");
 
-        let taken =
-            expect_user_err(dispatch_settings_command_for_user(&pool, u2, "name alice").await);
+        let taken = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, u2, "name alice").await,
+        );
         assert_eq!(taken, "That name is taken");
 
-        let invalid =
-            expect_user_err(dispatch_settings_command_for_user(&pool, u1, "name has space").await);
+        let invalid = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, u1, "name has space").await,
+        );
         assert!(invalid.contains("1-16 characters"));
     }
 
@@ -974,7 +1173,7 @@ mod tests {
     async fn settings_colors_valid_and_invalid(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "test-player").await;
 
-        let ok = dispatch_settings_command_for_user(&pool, user_id, "colors green,red,blue")
+        let ok = dispatch_settings_command_for_user(&pool, None, user_id, "colors green,red,blue")
             .await
             .unwrap()
             .unwrap();
@@ -988,7 +1187,8 @@ mod tests {
         assert_eq!(stored, vec!["Green", "Red", "Blue"]);
 
         let invalid = expect_user_err(
-            dispatch_settings_command_for_user(&pool, user_id, "colors green,notacolor,blue").await,
+            dispatch_settings_command_for_user(&pool, None, user_id, "colors green,notacolor,blue")
+                .await,
         );
         assert!(invalid.contains("3 distinct colours"));
     }
@@ -997,7 +1197,7 @@ mod tests {
     async fn settings_theme_valid_invalid_and_system(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "test-player").await;
 
-        let ok = dispatch_settings_command_for_user(&pool, user_id, "theme dracula")
+        let ok = dispatch_settings_command_for_user(&pool, None, user_id, "theme dracula")
             .await
             .unwrap()
             .unwrap();
@@ -1009,11 +1209,12 @@ mod tests {
             .unwrap();
         assert_eq!(theme.as_deref(), Some("dracula"));
 
-        let invalid =
-            expect_user_err(dispatch_settings_command_for_user(&pool, user_id, "theme nope").await);
+        let invalid = expect_user_err(
+            dispatch_settings_command_for_user(&pool, None, user_id, "theme nope").await,
+        );
         assert!(invalid.contains("Unknown theme"));
 
-        let system = dispatch_settings_command_for_user(&pool, user_id, "theme system")
+        let system = dispatch_settings_command_for_user(&pool, None, user_id, "theme system")
             .await
             .unwrap()
             .unwrap();
@@ -1030,7 +1231,7 @@ mod tests {
     async fn settings_emails_on_off_toggle(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "test-player").await;
 
-        dispatch_settings_command_for_user(&pool, user_id, "emails off")
+        dispatch_settings_command_for_user(&pool, None, user_id, "emails off")
             .await
             .unwrap()
             .unwrap();
@@ -1042,7 +1243,7 @@ mod tests {
                 .unwrap();
         assert!(!enabled);
 
-        dispatch_settings_command_for_user(&pool, user_id, "emails on")
+        dispatch_settings_command_for_user(&pool, None, user_id, "emails on")
             .await
             .unwrap()
             .unwrap();

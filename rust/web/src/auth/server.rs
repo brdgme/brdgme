@@ -620,6 +620,161 @@ pub async fn set_pref_colors(colors: Vec<String>) -> Result<(), ServerFnError> {
         .map_err(internal("set_pref_colors: update"))
 }
 
+/// One address row for the settings list (client-visible).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAddressView {
+    pub id: Uuid,
+    pub email: String,
+    pub is_primary: bool,
+    pub verified: bool,
+}
+
+/// Lists the signed-in user's addresses, primary first.
+#[server(ListEmailAddresses, "/api")]
+pub async fn list_email_addresses() -> Result<Vec<EmailAddressView>, ServerFnError> {
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+    let rows = crate::db::list_user_emails(&pool, user.id)
+        .await
+        .map_err(internal("list_email_addresses: load"))?;
+    Ok(rows
+        .into_iter()
+        .map(|r| EmailAddressView {
+            id: r.id,
+            email: r.email,
+            is_primary: r.is_primary,
+            verified: r.verified_at.is_some(),
+        })
+        .collect())
+}
+
+/// Adds a new address: inserts it UNVERIFIED and emails a confirmation code to
+/// it (reusing the login-code machinery). Usable only once confirmed.
+#[server(AddEmailAddress, "/api")]
+pub async fn add_email_address(email: String) -> Result<(), ServerFnError> {
+    if email.is_empty() || !email.contains('@') {
+        return Err(ServerFnError::new("Invalid email address"));
+    }
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    match crate::db::find_email_owner(&pool, &email)
+        .await
+        .map_err(internal("add_email_address: check owner"))?
+    {
+        Some(owner) if owner == user.id => {
+            return Err(ServerFnError::new("Address already on your account"));
+        }
+        Some(_) => return Err(ServerFnError::new("Address unavailable")),
+        None => {}
+    }
+
+    if crate::db::insert_unverified_email(&pool, user.id, &email)
+        .await
+        .map_err(internal("add_email_address: insert"))?
+        .is_none()
+    {
+        return Err(ServerFnError::new("Address unavailable"));
+    }
+
+    let resend = expect_context::<Option<resend_rs::Resend>>();
+    request_confirmation_code(&pool, resend.as_ref(), &email).await?;
+    Ok(())
+}
+
+/// Confirms a pending address the signed-in user added, using the code emailed
+/// to it. Sets `verified_at` and consumes the code.
+#[server(ConfirmEmailAddress, "/api")]
+pub async fn confirm_email_address(email: String, token: String) -> Result<(), ServerFnError> {
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    validate_confirmation_code(&pool, &email, &token).await?;
+
+    if !crate::db::mark_email_verified(&pool, user.id, &email)
+        .await
+        .map_err(internal("confirm_email_address: mark verified"))?
+    {
+        return Err(ServerFnError::new("No pending address for that code"));
+    }
+    sqlx::query!("DELETE FROM login_confirmations WHERE email = $1", email)
+        .execute(&pool)
+        .await
+        .map_err(internal("confirm_email_address: delete confirmation"))?;
+    Ok(())
+}
+
+/// Makes `email` the active (primary) address, then re-sends the user's
+/// outstanding-turn notifications to the new address (the 22d switch-digest,
+/// capped). Reminders are NOT reset - they track the turn, not the address.
+#[server(MakeEmailAddressActive, "/api")]
+pub async fn make_email_address_active(email: String) -> Result<(), ServerFnError> {
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    match crate::db::set_primary_email(&pool, user.id, &email)
+        .await
+        .map_err(internal("make_email_address_active: set primary"))?
+    {
+        crate::db::SetPrimaryOutcome::Switched => {}
+        crate::db::SetPrimaryOutcome::NotFound => {
+            return Err(ServerFnError::new("No such address on your account"));
+        }
+        crate::db::SetPrimaryOutcome::Unverified => {
+            return Err(ServerFnError::new(
+                "Verify the address before making it active",
+            ));
+        }
+    }
+
+    let resend = expect_context::<Option<resend_rs::Resend>>();
+    let http_client = expect_context::<reqwest::Client>();
+    let games = crate::db::find_active_turn_games(&pool, user.id, crate::db::SWITCH_DIGEST_CAP)
+        .await
+        .map_err(internal("make_email_address_active: find turn games"))?;
+    for (game_id, game_player_id) in crate::db::cap_digest(games, crate::db::SWITCH_DIGEST_CAP) {
+        crate::email::notify::send_turn_digest(
+            resend.as_ref(),
+            &pool,
+            &http_client,
+            game_id,
+            game_player_id,
+        )
+        .await;
+    }
+    Ok(())
+}
+
+/// Removes a non-primary address. The active address cannot be removed.
+#[server(RemoveEmailAddress, "/api")]
+pub async fn remove_email_address(email: String) -> Result<(), ServerFnError> {
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    match crate::db::remove_user_email(&pool, user.id, &email)
+        .await
+        .map_err(internal("remove_email_address: remove"))?
+    {
+        crate::db::RemoveEmailOutcome::Removed => Ok(()),
+        crate::db::RemoveEmailOutcome::NotFound => {
+            Err(ServerFnError::new("No such address on your account"))
+        }
+        crate::db::RemoveEmailOutcome::IsPrimary => {
+            Err(ServerFnError::new("Cannot remove your active address"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

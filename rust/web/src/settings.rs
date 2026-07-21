@@ -175,22 +175,228 @@ fn ColorsSection(
     }
 }
 
-/// Placeholder until #22d (multi-email management) lands: current login
-/// email read-only plus a muted coming-soon note.
 #[component]
 fn EmailSection(
     settings: LocalResource<Result<crate::auth::SettingsData, ServerFnError>>,
 ) -> impl IntoView {
     use crate::components::FormField;
+    let _ = settings;
+
+    let addresses: LocalResource<Result<Vec<crate::auth::EmailAddressView>, ServerFnError>> =
+        LocalResource::new(crate::auth::list_email_addresses);
+
+    let error = RwSignal::new(None::<String>);
+    let success = RwSignal::new(None::<String>);
+    let add_input = NodeRef::<leptos::html::Input>::new();
+    let confirm_input = NodeRef::<leptos::html::Input>::new();
+    let confirm_target = RwSignal::new(None::<String>);
+
+    let add_action = Action::new(|email: &String| {
+        let email = email.clone();
+        async move { crate::auth::add_email_address(email).await }
+    });
+    let confirm_action = Action::new(|(email, code): &(String, String)| {
+        let email = email.clone();
+        let code = code.clone();
+        async move { crate::auth::confirm_email_address(email, code).await }
+    });
+    let active_action = Action::new(|email: &String| {
+        let email = email.clone();
+        async move { crate::auth::make_email_address_active(email).await }
+    });
+    let remove_action = Action::new(|email: &String| {
+        let email = email.clone();
+        async move { crate::auth::remove_email_address(email).await }
+    });
+
+    Effect::new(move |_| {
+        if let Some(result) = add_action.value().get() {
+            match result {
+                Ok(()) => {
+                    success.set(Some("Confirmation code sent.".to_string()));
+                    error.set(None);
+                    addresses.refetch();
+                }
+                Err(e) => {
+                    error.set(Some(e.to_string()));
+                    success.set(None);
+                }
+            }
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(result) = confirm_action.value().get() {
+            match result {
+                Ok(()) => {
+                    success.set(Some("Address confirmed.".to_string()));
+                    error.set(None);
+                    confirm_target.set(None);
+                    addresses.refetch();
+                }
+                Err(e) => {
+                    error.set(Some(e.to_string()));
+                    success.set(None);
+                }
+            }
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(result) = active_action.value().get() {
+            match result {
+                Ok(()) => {
+                    success.set(Some("Active address updated.".to_string()));
+                    error.set(None);
+                    addresses.refetch();
+                }
+                Err(e) => {
+                    error.set(Some(e.to_string()));
+                    success.set(None);
+                }
+            }
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(result) = remove_action.value().get() {
+            match result {
+                Ok(()) => {
+                    success.set(Some("Address removed.".to_string()));
+                    error.set(None);
+                    addresses.refetch();
+                }
+                Err(e) => {
+                    error.set(Some(e.to_string()));
+                    success.set(None);
+                }
+            }
+        }
+    });
+
+    let on_add_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        if let Some(el) = add_input.get() {
+            let val = el.value();
+            if !val.is_empty() {
+                add_action.dispatch(val);
+            }
+        }
+    };
+
+    let on_confirm_submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        if let (Some(email), Some(el)) = (confirm_target.get_untracked(), confirm_input.get()) {
+            let code = el.value();
+            if !code.is_empty() {
+                confirm_action.dispatch((email, code));
+            }
+        }
+    };
 
     view! {
         <h2>"Email addresses"</h2>
-        <FormField label="Login email">
-            <div>{move || {
-                settings.get().and_then(|r| r.ok()).map(|s| s.email).unwrap_or_default()
-            }}</div>
-        </FormField>
-        <div class="form-help">"Additional email addresses are coming soon."</div>
+
+        <Show when=move || error.get().is_some()>
+            <div class="form-error">{move || error.get().unwrap_or_default()}</div>
+        </Show>
+        <Show when=move || success.get().is_some()>
+            <div class="form-help">{move || success.get().unwrap_or_default()}</div>
+        </Show>
+
+        {move || {
+            addresses.get().map(|result| {
+                match result {
+                    Ok(list) => list.into_iter().map(|addr| {
+                        let email = addr.email.clone();
+                        let email_for_active = email.clone();
+                        let email_for_remove = email.clone();
+                        let email_for_confirm = email.clone();
+                        let is_primary = addr.is_primary;
+                        let verified = addr.verified;
+                        view! {
+                            <div class="form-actions">
+                                <span>{addr.email.clone()}</span>
+                                {if is_primary {
+                                    view! { <span class="badge">"active"</span> }
+                                } else if verified {
+                                    view! { <span class="badge">"verified"</span> }
+                                } else {
+                                    view! { <span class="badge">"unverified"</span> }
+                                }}
+                                {if !is_primary && verified {
+                                    Some(view! {
+                                        <button
+                                            type="button"
+                                            on:click=move |_| { active_action.dispatch(email_for_active.clone()); }
+                                            disabled=move || active_action.pending().get()
+                                        >
+                                            "Make active"
+                                        </button>
+                                    })
+                                } else {
+                                    None
+                                }}
+                                {if !is_primary {
+                                    Some(view! {
+                                        <button
+                                            type="button"
+                                            on:click=move |_| { remove_action.dispatch(email_for_remove.clone()); }
+                                            disabled=move || remove_action.pending().get()
+                                        >
+                                            "Remove"
+                                        </button>
+                                    })
+                                } else {
+                                    None
+                                }}
+                                {if !verified {
+                                    Some(view! {
+                                        <button
+                                            type="button"
+                                            on:click=move |_| confirm_target.set(Some(email_for_confirm.clone()))
+                                        >
+                                            "Confirm"
+                                        </button>
+                                    })
+                                } else {
+                                    None
+                                }}
+                            </div>
+                        }
+                    }).collect_view().into_any(),
+                    Err(_) => {
+                        view! { <div class="form-help">"Failed to load addresses."</div> }.into_any()
+                    }
+                }
+            })
+        }}
+
+        <Show when=move || confirm_target.get().is_some()>
+            <form on:submit=on_confirm_submit>
+                <FormField label="Confirmation code">
+                    <div class="form-actions">
+                        <input
+                            type="text"
+                            node_ref=confirm_input
+                            required
+                        />
+                        <input type="submit" value="Confirm" disabled=move || confirm_action.pending().get()/>
+                        <button type="button" on:click=move |_| confirm_target.set(None)>"Cancel"</button>
+                    </div>
+                </FormField>
+            </form>
+        </Show>
+
+        <form on:submit=on_add_submit>
+            <FormField label="Add email address">
+                <div class="form-actions">
+                    <input
+                        type="email"
+                        node_ref=add_input
+                        required
+                    />
+                    <input type="submit" value="Add" disabled=move || add_action.pending().get()/>
+                </div>
+            </FormField>
+        </form>
     }
 }
 
