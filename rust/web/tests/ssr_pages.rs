@@ -1260,3 +1260,80 @@ async fn create_proposal_without_opponent_emails_succeeds(pool: PgPool) {
         "solo-vs-bots creates a game directly"
     );
 }
+
+// --- game information page (#7) ---
+
+#[sqlx::test]
+async fn game_info_page_renders_for_existing_game_type(pool: PgPool) {
+    let (game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Info Page Game").await;
+    let user_a = make_user(&pool, "info-player-a").await;
+    let user_b = make_user(&pool, "info-player-b").await;
+
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+
+    for (user_id, rating) in [(user_a.id, 1216i32), (user_b.id, 1184i32)] {
+        sqlx::query(
+            "INSERT INTO game_type_users (id, game_type_id, user_id, rating, peak_rating)
+             VALUES (uuid_generate_v4(), $1, $2, $3, $4)",
+        )
+        .bind(game_type_id)
+        .bind(user_id)
+        .bind(rating)
+        .bind(rating)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/games/type/Info%20Page%20Game", None).await;
+
+    assert_clean_html_body(status, &content_type, &body, "game-info");
+    assert!(
+        body.contains("Info Page Game"),
+        "expected game type name in body: {body}"
+    );
+    assert!(
+        body.contains("Top players"),
+        "expected ranking heading in body: {body}"
+    );
+    assert!(
+        body.contains("Start a game"),
+        "expected start-game link in body: {body}"
+    );
+    assert!(
+        body.contains("/games?game="),
+        "expected start-game href in body: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn game_info_page_unknown_game_type_renders_not_found_200(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/games/type/NoSuchGame", None).await;
+    assert_clean_html_body(status, &content_type, &body, "No such game type.");
+}
+
+#[sqlx::test]
+async fn game_info_page_case_insensitive_name(pool: PgPool) {
+    let (_game_type_id, _game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Info Page Game").await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/games/type/info%20page%20game", None).await;
+
+    assert_clean_html_body(status, &content_type, &body, "game-info");
+}
+
+#[sqlx::test]
+async fn new_game_page_with_game_query_param_renders_shell(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/games?game=Some%20Game", None).await;
+    assert_clean_html_body(status, &content_type, &body, "New Game");
+}

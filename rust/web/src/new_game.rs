@@ -157,6 +157,8 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
 
     let panel_ref = NodeRef::<html::Div>::new();
 
+    let query = leptos_router::hooks::use_query_map();
+
     let visible_types = Memo::new(move |_| {
         types.with_value(|t| {
             filter_and_sort(
@@ -198,6 +200,25 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
             el.scroll_into_view();
         }
     };
+
+    let (preselect_done, set_preselect_done) = signal(false);
+    Effect::new(move |_| {
+        if preselect_done.get() {
+            return;
+        }
+        let Some(wanted) = query.get().get("game").filter(|s| !s.is_empty()) else {
+            return;
+        };
+        let matched = types.with_value(|t| {
+            t.iter()
+                .find(|gt| gt.name.eq_ignore_ascii_case(&wanted))
+                .cloned()
+        });
+        if let Some(gt) = matched {
+            select_game(&gt);
+        }
+        set_preselect_done.set(true);
+    });
 
     let create_action = Action::new(
         |(version_id, ids, emails, bots): &(Uuid, Vec<Uuid>, Vec<String>, Vec<BotSlot>)| {

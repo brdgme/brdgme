@@ -12,7 +12,7 @@ use crate::stats::viz::{FormStrip, Histogram, HistogramBucket, RatingChart, Spar
 /// backward from the current rating over the rated games' rating changes.
 /// The last rated game in the window necessarily produced the current
 /// rating, so the series ends exactly at `current`.
-fn rating_trend(current: Option<i32>, results: &[FormResult]) -> Vec<f64> {
+pub(crate) fn rating_trend(current: Option<i32>, results: &[FormResult]) -> Vec<f64> {
     let changes: Vec<i32> = results.iter().filter_map(|r| r.rating_change).collect();
     let Some(current) = current else {
         return Vec::new();

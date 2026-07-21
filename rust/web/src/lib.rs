@@ -4,6 +4,7 @@ pub mod app;
 
 pub mod admin;
 pub mod friends;
+pub mod game_info;
 pub mod new_game;
 pub mod players;
 pub mod proposals;

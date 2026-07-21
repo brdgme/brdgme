@@ -200,6 +200,7 @@ pub fn App() -> impl IntoView {
                 <Route path=(StaticSegment("players"), ParamSegment("name")) view=crate::players::PlayersPage/>
                 <Route path=(StaticSegment("players"), ParamSegment("name"), StaticSegment("history")) view=crate::players::PlayerHistoryPage/>
                 <Route path=(StaticSegment("players"), ParamSegment("name"), ParamSegment("game_type")) view=crate::players::PlayerGameTypePage/>
+                <Route path=(StaticSegment("games"), StaticSegment("type"), ParamSegment("name")) view=crate::game_info::GameInfoPage/>
                 <Route path=(StaticSegment("games"), ParamSegment("id")) view=GamePage/>
                 <Route path=(StaticSegment("rules"), ParamSegment("version_id")) view=crate::rules::RulesPage/>
                 <Route path=(StaticSegment("invites"), ParamSegment("id")) view=crate::proposals::InvitePage/>

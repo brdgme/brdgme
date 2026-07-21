@@ -925,6 +925,32 @@ body {
   color: var(--mk-blue);
 }
 
+/* game information page (#7) */
+.game-info .table-scroll {
+  overflow-x: auto;
+}
+
+.game-info table {
+  border-collapse: collapse;
+}
+
+.game-info th,
+.game-info td {
+  text-align: right;
+  padding: 0.2em 0.63em;
+  border-bottom: 1px solid var(--mk-soften-foreground-90);
+  white-space: nowrap;
+}
+
+.game-info th:first-child,
+.game-info td:first-child {
+  text-align: left;
+}
+
+.game-info-blurb {
+  color: var(--mk-grey);
+}
+
 .history-filters {
   display: flex;
   flex-wrap: wrap;
