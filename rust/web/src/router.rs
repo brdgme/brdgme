@@ -75,6 +75,25 @@ fn record_response(response: &Response<axum::body::Body>, latency: Duration, spa
 /// stale cached page pinning a client to old ones. Error responses under
 /// `/pkg/` (e.g. a stale/missing hashed asset) are not cached as immutable.
 /// See docs/decisions/ASSET_CACHING.md.
+fn sentry_transaction_name(method: &str, route: &str) -> String {
+    format!("{} {}", method, route)
+}
+
+async fn set_sentry_transaction_name(
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Response<axum::body::Body> {
+    if let Some(route) = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+    {
+        let name = sentry_transaction_name(request.method().as_str(), route);
+        sentry::configure_scope(|scope| scope.set_transaction(Some(&name)));
+    }
+    next.run(request).await
+}
+
 async fn set_cache_control(
     request: Request<axum::body::Body>,
     next: Next,
@@ -190,11 +209,23 @@ pub async fn build_router(state: AppState) -> Router {
         // CI, and every call from `tests/ssr_pages.rs`, which never sets
         // `SENTRY_DSN_SERVER`), they only shuffle a no-op `Hub` around and
         // never send anything (sentry-tower 0.48.5 source).
-        .layer(SentryHttpLayer::new())
+        .layer(middleware::from_fn(set_sentry_transaction_name))
+        .layer(SentryHttpLayer::new().enable_transaction())
         .layer(NewSentryLayer::<Request<axum::body::Body>>::new_from_top())
         .with_state(state)
 }
 
 async fn healthz() -> &'static str {
     "OK"
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn transaction_name_format() {
+        assert_eq!(
+            super::sentry_transaction_name("GET", "/admin/games/{id}/export"),
+            "GET /admin/games/{id}/export"
+        );
+    }
 }

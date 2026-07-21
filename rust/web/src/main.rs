@@ -243,6 +243,7 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
             // sent to the hosted Sentry SaaS instance without a separate,
             // explicit future decision (WS3 plan, 2026-07-15).
             send_default_pii: false,
+            traces_sample_rate: 0.1,
             ..Default::default()
         },
     )))
