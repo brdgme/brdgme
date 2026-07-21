@@ -102,8 +102,18 @@ async fn set_cache_control(
     response
 }
 
+/// `generate_route_list` sets a process-global `IS_SUPPRESSING_RESOURCE_LOAD`
+/// flag while it walks the component tree (leptos-rs/leptos#4773). Calling it
+/// once per `build_router` invocation means parallel `#[sqlx::test]`s each
+/// open that window, and any concurrent SSR render whose `Resource` first-polls
+/// inside it commits to `pending().await` forever - hanging until the
+/// `TimeoutLayer` fires (408). Generating the list exactly once per process
+/// shrinks the window to a single, early, sub-millisecond event.
+static ROUTES: LazyLock<Vec<leptos_axum::AxumRouteListing>> =
+    LazyLock::new(|| generate_route_list(App));
+
 pub async fn build_router(state: AppState) -> Router {
-    let routes = generate_route_list(App);
+    let routes = ROUTES.clone();
     let session_layer = crate::auth::session::create_session_layer(&state.pool).await;
 
     Router::new()
