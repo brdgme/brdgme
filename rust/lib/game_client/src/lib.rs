@@ -54,13 +54,26 @@ async fn send_with_retry(
     let host = format!("{version_name}.games.internal");
     let mut attempt: u32 = 0;
     loop {
-        match client
+        #[cfg_attr(not(feature = "sentry"), allow(unused_mut))]
+        let mut request_builder = client
             .post(uri)
             .header(reqwest::header::HOST, &host)
-            .json(request)
-            .send()
-            .await
+            .json(request);
+
+        #[cfg(feature = "sentry")]
         {
+            let mut trace_headers: Vec<(&str, String)> = Vec::new();
+            sentry::configure_scope(|scope| {
+                if let Some(span) = scope.get_span() {
+                    trace_headers.extend(span.iter_headers());
+                }
+            });
+            for (k, v) in trace_headers {
+                request_builder = request_builder.header(k, v);
+            }
+        }
+
+        match request_builder.send().await {
             Ok(res) => return Ok(res),
             Err(e) => {
                 attempt += 1;
