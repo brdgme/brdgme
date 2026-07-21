@@ -12,7 +12,7 @@ async fn main() {
     use web::websocket::GameBroadcaster;
 
     dotenvy::dotenv().ok();
-    let _tracer_provider = init_tracing();
+    init_tracing();
     // Runs after `init_tracing` (matches sentry-rust's own tracing-demo.rs
     // example, which sets up the tracing_subscriber registry before calling
     // `sentry::init`): the `sentry_tracing::layer()` installed in
@@ -110,110 +110,24 @@ async fn main() {
     .unwrap();
 }
 
-/// Sets up the `tracing_subscriber` registry: JSON logs to stdout always, plus an
-/// OTLP trace export layer when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (dev needs no
-/// collector running - the layer is simply not installed if the env var is unset).
-/// `with_current_span(true)` is required so the `trace_id` field recorded on the
-/// root span (see `router.rs`'s `TraceLayer`) is copied onto every log line's JSON
-/// output while that span is active, giving Grafana a logs<->traces join key.
-/// Returns the `SdkTracerProvider` so `main` can keep it alive for the process
-/// lifetime (dropping it would trigger the SDK's shutdown/flush early).
 #[cfg(feature = "ssr")]
-fn init_tracing() -> Option<opentelemetry_sdk::trace::SdkTracerProvider> {
-    use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_otlp::WithExportConfig;
+fn init_tracing() {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
-
-    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
-
-    let mut bad_sampler_arg = None;
-    let ratio = std::env::var("OTEL_TRACES_SAMPLER_ARG")
-        .ok()
-        .and_then(|v| {
-            v.parse::<f64>().ok().or_else(|| {
-                bad_sampler_arg = Some(v);
-                None
-            })
-        })
-        .unwrap_or(1.0);
-
-    let mut exporter_error = None;
-    let (otel_layer, provider) = match &endpoint {
-        Some(endpoint) => {
-            let service_name =
-                std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "web".to_string());
-            match opentelemetry_otlp::SpanExporter::builder()
-                .with_tonic()
-                .with_endpoint(endpoint)
-                .build()
-            {
-                Ok(exporter) => {
-                    let resource = opentelemetry_sdk::Resource::builder()
-                        .with_service_name(service_name)
-                        .build();
-                    let sampler = opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(
-                        opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(ratio),
-                    ));
-                    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-                        .with_batch_exporter(exporter)
-                        .with_sampler(sampler)
-                        .with_resource(resource)
-                        .build();
-                    let tracer = provider.tracer("web");
-                    (
-                        Some(tracing_opentelemetry::layer().with_tracer(tracer)),
-                        Some(provider),
-                    )
-                }
-                Err(e) => {
-                    exporter_error = Some(e.to_string());
-                    (None, None)
-                }
-            }
-        }
-        None => (None, None),
-    };
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_current_span(true)
         .with_span_list(false);
 
-    // Governs both fmt_layer and otel_layer (RUST_LOG unset -> "info"
-    // default) - previously unfiltered, so web's log level wasn't
-    // controlled by RUST_LOG at all, unlike bot/operator's
-    // `tracing_subscriber::fmt::init()`.
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
     tracing_subscriber::registry()
         .with(env_filter)
         .with(fmt_layer)
-        .with(otel_layer)
-        // Unconditional: forwards `error`-level events as Sentry events and
-        // `warn`/`info` as breadcrumbs (sentry-tracing's default filter).
-        // Verified safe with no client initialized - it only calls
-        // `sentry_core::capture_event`/`add_breadcrumb`/`start_transaction`,
-        // which all check `Hub::current()`'s bound client and no-op when
-        // there isn't one (sentry-tracing 0.48.5 `layer/mod.rs` source).
         .with(sentry_tracing::layer())
         .init();
-
-    if let Some(bad_value) = bad_sampler_arg {
-        tracing::warn!(
-            value = %bad_value,
-            "invalid OTEL_TRACES_SAMPLER_ARG; falling back to sample ratio 1.0"
-        );
-    }
-    if let Some(e) = exporter_error {
-        tracing::warn!(
-            error = %e,
-            "failed to build OTLP span exporter; trace export disabled"
-        );
-    }
-
-    provider
 }
 
 /// Reads `SENTRY_DSN_SERVER` and, if set, initializes the Sentry Rust SDK

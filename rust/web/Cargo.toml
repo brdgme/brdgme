@@ -81,12 +81,6 @@ leptos-use = { version = "0.19", default-features = false, features = ["use_webs
 codee = { version = "0.3.5", default-features = false }
 axum-prometheus = { version = "0.10.0", default-features = false, features = ["prometheus"], optional = true }
 
-# Distributed tracing (OTLP export)
-opentelemetry = { version = "0.32", optional = true }
-opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"], optional = true }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["grpc-tonic", "trace"], optional = true }
-tracing-opentelemetry = { version = "0.33", optional = true }
-
 # Error tracking (Sentry). Default features (reqwest + native-tls transport) -
 # no rustls involvement, see CODING.md's rustls crypto-provider section.
 sentry = { version = "0.48", optional = true }
@@ -138,10 +132,7 @@ ssr = [
     "dep:async-nats",
     "leptos-use/ssr",
     "dep:axum-prometheus",
-    "dep:opentelemetry",
-    "dep:opentelemetry_sdk",
-    "dep:opentelemetry-otlp",
-    "dep:tracing-opentelemetry",
+
     # Error tracking (Sentry)
     "dep:sentry",
     "dep:sentry-tower",

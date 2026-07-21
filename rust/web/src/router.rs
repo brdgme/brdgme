@@ -12,13 +12,12 @@ use axum::http::{HeaderValue, Request, Response, StatusCode};
 use axum::middleware::{self, Next};
 use leptos::prelude::*;
 use leptos_axum::{LeptosRoutes, generate_route_list};
-use opentelemetry::trace::{TraceContextExt, TraceId};
 use sentry_tower::{NewSentryLayer, SentryHttpLayer};
+use std::sync::LazyLock;
 use std::time::Duration;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Server-fn payloads are small forms, so 256 KiB is generous headroom.
 const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
@@ -32,34 +31,19 @@ const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
 /// stalled leptos server-fn) is what this actually guards against.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Root span for every HTTP request, carrying route (matched path, not raw path -
-/// same low-cardinality reasoning as the `/metrics` labels), status, and latency.
-/// `trace_id` is recorded from the real OTel trace id (once the OTel layer in
-/// `main.rs::init_tracing` has attached a context to this span via its
-/// `on_new_span` hook, which runs synchronously as part of span creation) so
-/// JSON logs emitted while this span is active carry the same id Tempo uses,
-/// letting Grafana link logs <-> traces. If no OTel layer is installed (dev,
-/// no `OTEL_EXPORTER_OTLP_ENDPOINT`), the trace id is the noop `TraceId::INVALID`
-/// and is left unrecorded.
 fn make_root_span(request: &Request<axum::body::Body>) -> tracing::Span {
     let route = request
         .extensions()
         .get::<MatchedPath>()
         .map(MatchedPath::as_str)
         .unwrap_or_else(|| request.uri().path());
-    let span = tracing::info_span!(
+    tracing::info_span!(
         "http_request",
         method = %request.method(),
         route = %route,
         status = tracing::field::Empty,
         latency_ms = tracing::field::Empty,
-        trace_id = tracing::field::Empty,
-    );
-    let trace_id = span.context().span().span_context().trace_id();
-    if trace_id != TraceId::INVALID {
-        span.record("trace_id", trace_id.to_string());
-    }
-    span
+    )
 }
 
 fn record_response(response: &Response<axum::body::Body>, latency: Duration, span: &tracing::Span) {
