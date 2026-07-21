@@ -1054,6 +1054,68 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn rating_before_aggregates_exclude_nulls(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let game1 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(alice), Some(1), Some(16)),
+                (Some(bob), Some(2), Some(-16)),
+            ],
+        )
+        .await;
+
+        sqlx::query(
+            "UPDATE game_players SET rating_before = 1200 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game1)
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .expect("set alice rating_before");
+
+        sqlx::query(
+            "UPDATE game_players SET rating_before = 1300 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game1)
+        .bind(bob)
+        .execute(&pool)
+        .await
+        .expect("set bob rating_before");
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(alice), Some(1), None), (None, Some(2), None)],
+        )
+        .await;
+
+        let (min_rb, max_rb, avg_rb): (Option<i32>, Option<i32>, Option<i32>) = sqlx::query_as(
+            "SELECT min(rating_before), max(rating_before), avg(rating_before)::integer FROM game_players WHERE rating_before IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("query ok");
+
+        assert_eq!(min_rb, Some(1200));
+        assert_eq!(max_rb, Some(1300));
+        assert_eq!(avg_rb, Some(1250));
+
+        let null_count: (i64,) =
+            sqlx::query_as("SELECT count(*) FROM game_players WHERE rating_before IS NULL")
+                .fetch_one(&pool)
+                .await
+                .expect("query ok");
+        assert!(null_count.0 > 0);
+    }
+
+    #[sqlx::test]
     async fn active_games_lists_unfinished_with_opponents(pool: PgPool) {
         let user = make_user(&pool, "alice").await;
         let opponent = make_user(&pool, "bob").await;
@@ -1340,6 +1402,131 @@ mod tests {
         .expect("query ok");
         assert_eq!(rating2, 1206);
         assert_eq!(peak2, 1236);
+    }
+
+    #[sqlx::test]
+    async fn rating_before_backfill_computes_pre_game_ratings(pool: PgPool) {
+        const MIGRATION: &str = include_str!("../../migrations/017_game_player_rating_before.sql");
+
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(alice), Some(1), Some(16)),
+                (Some(bob), Some(2), Some(-16)),
+            ],
+        )
+        .await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[
+                (Some(alice), Some(1), Some(20)),
+                (Some(bob), Some(2), Some(-20)),
+            ],
+        )
+        .await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-03 00:00:00),
+            &[
+                (Some(alice), Some(2), Some(-30)),
+                (Some(bob), Some(1), Some(30)),
+            ],
+        )
+        .await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-04 00:00:00),
+            &[(Some(alice), Some(1), None), (None, Some(2), None)],
+        )
+        .await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-05 00:00:00),
+            &[(Some(alice), Some(1), None), (None, Some(2), None)],
+        )
+        .await;
+
+        sqlx::raw_sql(MIGRATION)
+            .execute(&pool)
+            .await
+            .expect("run migration 017");
+
+        let alice_rows: Vec<(Option<i32>,)> = sqlx::query_as(
+            "SELECT gp.rating_before FROM game_players gp JOIN games g ON g.id = gp.game_id WHERE gp.user_id = $1 ORDER BY g.finished_at, g.id",
+        )
+        .bind(alice)
+        .fetch_all(&pool)
+        .await
+        .expect("query ok");
+
+        assert_eq!(alice_rows[0], (Some(1200),));
+        assert_eq!(alice_rows[1], (Some(1216),));
+        assert_eq!(alice_rows[2], (Some(1236),));
+        assert_eq!(alice_rows[3], (None,));
+        assert_eq!(alice_rows[4], (None,));
+
+        let bob_rows: Vec<(Option<i32>,)> = sqlx::query_as(
+            "SELECT gp.rating_before FROM game_players gp JOIN games g ON g.id = gp.game_id WHERE gp.user_id = $1 ORDER BY g.finished_at, g.id",
+        )
+        .bind(bob)
+        .fetch_all(&pool)
+        .await
+        .expect("query ok");
+
+        assert_eq!(bob_rows[0], (Some(1200),));
+        assert_eq!(bob_rows[1], (Some(1184),));
+        assert_eq!(bob_rows[2], (Some(1164),));
+
+        sqlx::raw_sql(MIGRATION)
+            .execute(&pool)
+            .await
+            .expect("run migration 017 again");
+
+        let alice_rows2: Vec<(Option<i32>,)> = sqlx::query_as(
+            "SELECT gp.rating_before FROM game_players gp JOIN games g ON g.id = gp.game_id WHERE gp.user_id = $1 ORDER BY g.finished_at, g.id",
+        )
+        .bind(alice)
+        .fetch_all(&pool)
+        .await
+        .expect("query ok");
+        assert_eq!(alice_rows2, alice_rows);
+
+        sqlx::query(
+            "UPDATE game_players SET rating_before = 9999 WHERE id = (SELECT gp.id FROM game_players gp JOIN games g ON g.id = gp.game_id WHERE gp.user_id = $1 ORDER BY g.finished_at, g.id LIMIT 1)",
+        )
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .expect("update ok");
+
+        sqlx::raw_sql(MIGRATION)
+            .execute(&pool)
+            .await
+            .expect("run migration 017 third time");
+
+        let alice_rows3: Vec<(Option<i32>,)> = sqlx::query_as(
+            "SELECT gp.rating_before FROM game_players gp JOIN games g ON g.id = gp.game_id WHERE gp.user_id = $1 ORDER BY g.finished_at, g.id",
+        )
+        .bind(alice)
+        .fetch_all(&pool)
+        .await
+        .expect("query ok");
+        assert_eq!(alice_rows3[0], (Some(9999),));
     }
 
     #[sqlx::test]

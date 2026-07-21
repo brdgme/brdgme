@@ -1421,6 +1421,11 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
         });
     }
 
+    let rating_befores: std::collections::HashMap<i32, i32> = rated_players
+        .iter()
+        .map(|p| (p.position, p.rating))
+        .collect();
+
     if rated_players.len() < 2 {
         return Ok(());
     }
@@ -1474,13 +1479,13 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
         if change == 0 {
             continue;
         }
-        sqlx::query!(
-            "UPDATE game_players SET rating_change = $1 WHERE id = $2",
-            change,
-            p.id
-        )
-        .execute(&mut *tx)
-        .await?;
+        let rating_before = rating_befores.get(&p.position).copied();
+        sqlx::query("UPDATE game_players SET rating_change = $1, rating_before = $2 WHERE id = $3")
+            .bind(change)
+            .bind(rating_before)
+            .bind(p.id)
+            .execute(&mut *tx)
+            .await?;
     }
 
     Ok(())
@@ -4430,6 +4435,116 @@ mod tests {
         let (non_conceder_rating, _) =
             game_type_rating(&pool, game_type_id, non_conceder.user.as_ref().unwrap().id).await;
         assert_eq!(non_conceder_rating, 1216);
+    }
+
+    #[sqlx::test]
+    async fn finishing_a_game_captures_rating_before(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 1, &[0])
+                .await;
+
+        sqlx::query(
+            "UPDATE game_type_users SET rating = 1300 WHERE game_type_id = $1 AND user_id = $2",
+        )
+        .bind(game_type_id)
+        .bind(creator.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "UPDATE game_type_users SET rating = 1100 WHERE game_type_id = $1 AND user_id = $2",
+        )
+        .bind(game_type_id)
+        .bind(opponent.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_player_id = ge.game_players[0].game_player.id;
+        let creator_pos = position_of(&ge, creator.id) as usize;
+        let opponent_pos = position_of(&ge, opponent.id) as usize;
+        let bot_pos = ge
+            .game_players
+            .iter()
+            .find(|p| p.user.is_none())
+            .unwrap()
+            .game_player
+            .position as usize;
+
+        let mut placings = vec![0usize; 3];
+        placings[creator_pos] = 1;
+        placings[opponent_pos] = 2;
+        placings[bot_pos] = 3;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_player_id,
+            "prev_state",
+            "final_state",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let creator_rb: Option<i32> = sqlx::query_scalar(
+            "SELECT rating_before FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(creator_pos as i32)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(creator_rb, Some(1300));
+
+        let opponent_rb: Option<i32> = sqlx::query_scalar(
+            "SELECT rating_before FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(opponent_pos as i32)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(opponent_rb, Some(1100));
+
+        let bot_rb: Option<i32> = sqlx::query_scalar(
+            "SELECT rating_before FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(bot_pos as i32)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(bot_rb, None);
+
+        let creator_change = find_rating_change(&pool, game.id, creator_pos as i32).await;
+        let opponent_change = find_rating_change(&pool, game.id, opponent_pos as i32).await;
+
+        let (creator_rating_after, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        let (opponent_rating_after, _) = game_type_rating(&pool, game_type_id, opponent.id).await;
+
+        assert_eq!(
+            creator_rb.unwrap() + creator_change.unwrap(),
+            creator_rating_after
+        );
+        assert_eq!(
+            opponent_rb.unwrap() + opponent_change.unwrap(),
+            opponent_rating_after
+        );
     }
 
     #[sqlx::test]
