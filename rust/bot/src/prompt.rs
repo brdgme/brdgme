@@ -207,6 +207,12 @@ mod tests {
     }
 
     #[test]
+    fn render_system_states_time_limit() {
+        let output = render_system(&system_ctx()).unwrap();
+        assert!(output.contains("under 1 minute"), "time limit missing");
+    }
+
+    #[test]
     fn render_user_renders_players_with_score_and_colour() {
         let output = render_user(&user_ctx()).unwrap();
         assert!(output.contains("Alice"), "player 1 name missing");

@@ -148,7 +148,11 @@ fn render_fence(
 /// Renders a non-fence markdown chunk to HTML via pulldown-cmark.
 #[cfg(feature = "ssr")]
 fn render_markdown(markdown: &str, out: &mut String) {
-    let parser = pulldown_cmark::Parser::new(markdown);
+    let mut opts = pulldown_cmark::Options::empty();
+    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    opts.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+    opts.insert(pulldown_cmark::Options::ENABLE_TASKLISTS);
+    let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
     pulldown_cmark::html::push_html(out, parser);
 }
 
@@ -373,6 +377,15 @@ mod tests {
         assert!(html.contains("<h1>Title</h1>"), "got: {html}");
         assert!(html.contains("<strong>bold</strong>"), "got: {html}");
         assert!(!html.contains("game-render"), "no fence -> no board");
+    }
+
+    #[test]
+    fn gfm_table_renders_html_table() {
+        let md = "| Col A | Col B |\n| ----- | ----- |\n| a1 | b1 |";
+        let html = render_doc(md, &players(2), STYLE).unwrap();
+        assert!(html.contains("<table>"), "got: {html}");
+        assert!(html.contains("<th>Col A</th>"), "got: {html}");
+        assert!(html.contains("<td>a1</td>"), "got: {html}");
     }
 
     #[test]

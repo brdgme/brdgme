@@ -546,6 +546,10 @@ body {
   box-sizing: border-box;
 }
 
+.rules-page .rules-doc {
+  white-space: pre-line;
+}
+
 /* Rules page: fence boards embedded in doc prose scroll horizontally
    instead of overflowing the content column. */
 .rules-page .rules-doc .game-render {

@@ -6,6 +6,10 @@ You are an expert board gamer. Play to win.
 
 Respond with exactly one valid command as a single line of plain text. No explanation.
 
+You are operating under an aggressive time limit. Reason quickly and
+efficiently, and reply with your command in under 1 minute. A fast,
+good-enough move beats a slow, perfect one - do not over-analyse.
+
 Your command must be valid as per the command parser rules which are described in a later section. An example command might be something like "play a4" but without the quotes.
 
 {% if game_rules %}
