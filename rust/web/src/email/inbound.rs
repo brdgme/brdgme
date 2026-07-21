@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use axum::extract::State;
 
+use crate::proposals::InviteMailer;
 use crate::state::AppState;
 
 pub fn parse_reply_commands(text: &str) -> Vec<String> {
@@ -367,9 +368,7 @@ pub async fn resend_webhook(
             handle_game_reply(&state, &token, &event.data.from, &event.data.email_id).await;
         }
         Some(InboundRoute::Invite(token)) => {
-            tracing::info!(
-                "resend webhook: invite reply for token {token} handled by a later unit (#24)"
-            );
+            handle_invite_reply(&state, &token, &event.data.from, &event.data.email_id).await;
         }
         Some(InboundRoute::Settings(_)) | None => {
             handle_settings_reply_route(&state, &event.data.from, &event.data.email_id).await;
@@ -489,6 +488,307 @@ async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: 
     };
 
     send_game_reply_response(state, &player, token, from, header).await;
+}
+
+async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id: &str) {
+    let pool = &state.pool;
+
+    let player = match crate::proposals::find_proposal_player_by_email_token(pool, token).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            tracing::info!("resend webhook: unknown invite token; no response");
+            return;
+        }
+        Err(e) => {
+            tracing::error!("resend webhook: invite token lookup failed: {e}");
+            return;
+        }
+    };
+
+    let Some(user_id) = player.user_id else {
+        tracing::info!("resend webhook: invite token belongs to a bot slot; no response");
+        return;
+    };
+
+    match from_matches_verified_email(pool, user_id, from).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!(
+                "resend webhook: invite From does not match a verified address; no response"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!("resend webhook: invite From verification failed: {e}");
+            return;
+        }
+    }
+
+    let api_key = match std::env::var("RESEND_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            tracing::error!("resend webhook: RESEND_API_KEY not configured; cannot fetch body");
+            return;
+        }
+    };
+    let source = ResendInbound {
+        api_key,
+        http: state.http_client.clone(),
+    };
+    let raw = match source.fetch_raw_email(email_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
+            return;
+        }
+    };
+    let text = extract_plain_text(&raw).unwrap_or_default();
+    let commands = parse_reply_commands(&text);
+
+    let accept = commands.iter().any(|c| c.eq_ignore_ascii_case("accept"));
+    let decline = commands.iter().any(|c| c.eq_ignore_ascii_case("decline"));
+
+    if !accept && !decline {
+        send_invite_reply_response(
+            state,
+            &player,
+            user_id,
+            from,
+            no_command_header_text(),
+            None,
+        )
+        .await;
+        return;
+    }
+
+    let proposal_id = player.proposal_id;
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("resend webhook: invite begin tx failed: {e}");
+            return;
+        }
+    };
+
+    let proposal = match crate::proposals::lock_proposal_for_update(&mut tx, proposal_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            tracing::warn!("resend webhook: proposal {proposal_id} not found");
+            return;
+        }
+        Err(e) => {
+            tracing::error!("resend webhook: invite lock proposal failed: {e}");
+            return;
+        }
+    };
+
+    if proposal.status != "open" {
+        send_invite_reply_response(
+            state,
+            &player,
+            user_id,
+            from,
+            "This invite is no longer open.".to_string(),
+            None,
+        )
+        .await;
+        return;
+    }
+
+    let players = match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("resend webhook: invite players lookup failed: {e}");
+            return;
+        }
+    };
+
+    let me = match players.iter().find(|p| p.id == player.id) {
+        Some(p) => p,
+        None => return,
+    };
+
+    if me.response != "pending" {
+        send_invite_reply_response(
+            state,
+            &player,
+            user_id,
+            from,
+            "That invite has already been responded to.".to_string(),
+            None,
+        )
+        .await;
+        return;
+    }
+
+    let response = if accept { "accepted" } else { "declined" };
+    if let Err(e) =
+        crate::proposals::update_proposal_player_response(&mut tx, player.id, response).await
+    {
+        tracing::error!("resend webhook: invite update response failed: {e}");
+        return;
+    }
+
+    let mut started_game_id: Option<uuid::Uuid> = None;
+    let mut roster: Vec<crate::proposals::ProposalPlayer> = Vec::new();
+
+    if accept {
+        let pending =
+            match crate::proposals::count_pending_human_invitees_tx(&mut tx, proposal_id).await {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::error!("resend webhook: invite count pending failed: {e}");
+                    return;
+                }
+            };
+        if pending == 0 {
+            let game_version =
+                match crate::db::find_game_version(&state.pool, proposal.game_version_id).await {
+                    Ok(Some(gv)) => gv,
+                    Ok(None) => {
+                        tracing::error!("resend webhook: game version not found for proposal");
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::error!("resend webhook: invite game version lookup failed: {e}");
+                        return;
+                    }
+                };
+            roster = match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("resend webhook: invite roster lookup failed: {e}");
+                    return;
+                }
+            };
+            match crate::proposals::start_proposal_tx(
+                &mut tx,
+                &state.http_client,
+                &proposal,
+                &roster,
+                &game_version,
+            )
+            .await
+            {
+                Ok(gid) => started_game_id = Some(gid),
+                Err(e) => {
+                    tracing::error!("resend webhook: invite start proposal failed: {e}");
+                    return;
+                }
+            }
+        }
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("resend webhook: invite commit failed: {e}");
+        return;
+    }
+
+    state
+        .broadcaster
+        .broadcast_proposal_update(proposal_id)
+        .await;
+
+    if let Some(gid) = started_game_id {
+        crate::game::broadcast_and_trigger(&state.pool, &state.broadcaster, &state.jetstream, gid)
+            .await;
+        let invitee_ids: Vec<uuid::Uuid> = roster
+            .iter()
+            .filter(|p| p.response == "accepted")
+            .filter_map(|p| p.user_id)
+            .filter(|id| *id != proposal.owner_user_id)
+            .collect();
+        crate::proposals::mailer_from(state.pool.clone(), state.resend.clone()).notify_started(
+            proposal_id,
+            gid,
+            invitee_ids,
+        );
+    } else if !accept {
+        crate::proposals::mailer_from(state.pool.clone(), state.resend.clone())
+            .notify_owner_decline(proposal_id, user_id);
+    }
+
+    let header = if accept {
+        if started_game_id.is_some() {
+            "Invite accepted. The game has started!".to_string()
+        } else {
+            "Invite accepted.".to_string()
+        }
+    } else {
+        "Invite declined.".to_string()
+    };
+
+    send_invite_reply_response(state, &player, user_id, from, header, started_game_id).await;
+}
+
+async fn send_invite_reply_response(
+    state: &AppState,
+    player: &crate::proposals::ProposalPlayer,
+    user_id: uuid::Uuid,
+    from: &str,
+    header: String,
+    game_id: Option<uuid::Uuid>,
+) {
+    let pool = &state.pool;
+    let proposal_id = player.proposal_id;
+
+    let theme_slug = match crate::db::get_user_theme(pool, user_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("resend webhook: invite theme lookup failed: {e}");
+            None
+        }
+    };
+
+    let (game_type_name, game_version_id) =
+        match crate::proposals::find_proposal(pool, proposal_id).await {
+            Ok(Some(proposal)) => {
+                let gvid = proposal.game_version_id;
+                match crate::db::find_game_version(pool, proposal.game_version_id).await {
+                    Ok(Some(gv)) => (
+                        crate::proposals::find_game_type_name(pool, gv.game_type_id)
+                            .await
+                            .unwrap_or(None)
+                            .unwrap_or_default(),
+                        Some(gvid),
+                    ),
+                    _ => (String::new(), Some(gvid)),
+                }
+            }
+            _ => (String::new(), None),
+        };
+
+    let base =
+        std::env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let base = base.trim_end_matches('/');
+    let browser_url = match game_id {
+        Some(gid) => format!("{base}/games/{gid}"),
+        None => format!("{base}/invites/{proposal_id}"),
+    };
+
+    let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
+    let content = crate::email::render::EmailContent {
+        subject: format!("{game_type_name} invite"),
+        header: Some(header),
+        digest: None,
+        board: None,
+        you_can: None,
+        browser_url: Some(browser_url),
+        rules_url: game_version_id.map(crate::email::notify::rules_url),
+        footer: Some("Reply to this email to respond, or unsubscribe anytime.".to_string()),
+    };
+    let rendered = crate::email::render::render_game_email(
+        &content,
+        palette,
+        &[],
+        &format!("proposal-{proposal_id}"),
+        false,
+        &format!(
+            "i-{}@play.brdg.me",
+            player.email_token.as_deref().unwrap_or("")
+        ),
+    );
+    crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 
 async fn send_game_reply_response(
