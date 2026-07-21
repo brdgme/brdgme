@@ -2,7 +2,6 @@ namespace: brdgme
 bases:
 - ../../base/brdgme
 - ../../base/gateway
-- ../alloy
 resources:
 - postgres-backup.yaml
 - default-serviceaccount.yaml
