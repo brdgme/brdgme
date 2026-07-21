@@ -130,7 +130,7 @@ pub fn NewGamePage() -> impl IntoView {
                 <h1>"New Game"</h1>
                 {move || match game_types.get() {
                     None => view! { <p>"Loading..."</p> }.into_any(),
-                    Some(Err(e)) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
+                    Some(Err(e)) => view! { <p class="error">{crate::error::user_facing_server_error(&e)}</p> }.into_any(),
                     Some(Ok(t)) if t.is_empty() => view! { <p>"No games available."</p> }.into_any(),
                     Some(Ok(types)) => view! { <GameBrowser types=types/> }.into_any(),
                 }}
@@ -205,7 +205,10 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
             let ids = ids.clone();
             let emails = emails.clone();
             let bots = bots.clone();
-            async move { crate::proposals::create_proposal(version_id, ids, emails, bots).await }
+            async move {
+                crate::proposals::create_proposal(version_id, Some(ids), Some(emails), Some(bots))
+                    .await
+            }
         },
     );
 
@@ -442,7 +445,7 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                                             .value()
                                             .get()
                                             .and_then(|r| r.err())
-                                            .map(|e| e.to_string())
+                                            .map(|e| crate::error::user_facing_server_error(&e))
                                             .unwrap_or_default()
                                     }}
                                 </div>

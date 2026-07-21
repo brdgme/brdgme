@@ -1186,3 +1186,44 @@ async fn rules_page_anonymous_renders_shell(pool: PgPool) {
     let (status, content_type, body) = get(app, &format!("/rules/{}", Uuid::new_v4()), None).await;
     assert_clean_html_body(status, &content_type, &body, "Rules");
 }
+
+#[sqlx::test]
+async fn create_proposal_without_opponent_emails_succeeds(pool: PgPool) {
+    let uri = spawn_mock_new_game_service().await;
+    let game_version_id = make_game_version(&pool, &uri).await;
+    let user = make_user(&pool, "creator").await;
+    let cookie = login_cookie(&pool, &user, "creator@example.com").await;
+    let app = build_router(make_state(pool).await).await;
+
+    let path = <web::proposals::CreateProposal as leptos::server_fn::ServerFn>::PATH;
+    let body = format!(
+        "game_version_id={game_version_id}&bot_slots[0][name]=Botty&bot_slots[0][bot_name]=easy"
+    );
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header("cookie", cookie)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = resp.status();
+    let text = String::from_utf8_lossy(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .into_owned();
+    assert_eq!(status, StatusCode::OK, "body: {text}");
+    assert!(!text.contains("missing field"), "body: {text}");
+    let outcome: web::proposals::ProposalOutcome = serde_json::from_str(&text).unwrap();
+    assert!(
+        outcome.game_id.is_some(),
+        "solo-vs-bots creates a game directly"
+    );
+}

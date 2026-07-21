@@ -9,3 +9,7 @@ pub fn internal<E: std::fmt::Display>(context: &'static str) -> impl FnOnce(E) -
         ServerFnError::new("Internal server error")
     }
 }
+
+pub fn user_facing_server_error(_e: &ServerFnError) -> String {
+    "Something went wrong, please try again".to_string()
+}

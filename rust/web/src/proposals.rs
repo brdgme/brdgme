@@ -878,9 +878,9 @@ pub(crate) async fn start_proposal_tx(
 #[cfg_attr(feature = "ssr", tracing::instrument(skip_all))]
 pub async fn create_proposal(
     game_version_id: Uuid,
-    opponent_ids: Vec<Uuid>,
-    opponent_emails: Vec<String>,
-    bot_slots: Vec<crate::game::server_fns::BotSlot>,
+    opponent_ids: Option<Vec<Uuid>>,
+    opponent_emails: Option<Vec<String>>,
+    bot_slots: Option<Vec<crate::game::server_fns::BotSlot>>,
 ) -> Result<ProposalOutcome, ServerFnError> {
     use crate::game::server_fns::{CreateGameSeed, create_game_from_service};
     use crate::websocket::GameBroadcaster;
@@ -891,6 +891,10 @@ pub async fn create_proposal(
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
     let user = crate::friends::require_user().await?;
+
+    let opponent_ids = opponent_ids.unwrap_or_default();
+    let opponent_emails = opponent_emails.unwrap_or_default();
+    let bot_slots = bot_slots.unwrap_or_default();
 
     let player_count = 1 + opponent_ids.len() + opponent_emails.len() + bot_slots.len();
 
