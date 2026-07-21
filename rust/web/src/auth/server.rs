@@ -527,6 +527,9 @@ pub struct SettingsData {
     pub name: String,
     pub email: String,
     pub pref_colors: Vec<String>,
+    pub turn_emails_enabled: bool,
+    pub invite_emails_enabled: bool,
+    pub reminder_emails_enabled: bool,
 }
 
 #[server(GetSettings, "/api")]
@@ -543,6 +546,11 @@ pub async fn get_settings() -> Result<SettingsData, ServerFnError> {
         pref_colors = vec!["Green".to_string(), "Red".to_string(), "Blue".to_string()];
     }
 
+    let (turn_emails_enabled, invite_emails_enabled, reminder_emails_enabled) =
+        crate::db::get_user_email_prefs(&pool, user.id)
+            .await
+            .map_err(internal("get_settings: load email prefs"))?;
+
     Ok(SettingsData {
         // From the DB, not the session-cached AuthUser - the session copy
         // is stale after a rename (see set_username's session refresh).
@@ -551,6 +559,9 @@ pub async fn get_settings() -> Result<SettingsData, ServerFnError> {
             .map_err(internal("get_settings: load name"))?,
         email: user.email,
         pref_colors,
+        turn_emails_enabled,
+        invite_emails_enabled,
+        reminder_emails_enabled,
     })
 }
 
@@ -618,6 +629,48 @@ pub async fn set_pref_colors(colors: Vec<String>) -> Result<(), ServerFnError> {
     crate::db::set_user_pref_colors(&pool, user.id, &colors)
         .await
         .map_err(internal("set_pref_colors: update"))
+}
+
+#[server(SetEmailTurnEnabled, "/api")]
+pub async fn set_email_turn_enabled(enabled: bool) -> Result<(), ServerFnError> {
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    crate::db::set_user_turn_emails_enabled(&pool, user.id, enabled)
+        .await
+        .map_err(internal("set_email_turn_enabled: update"))
+}
+
+#[server(SetEmailInviteEnabled, "/api")]
+pub async fn set_email_invite_enabled(enabled: bool) -> Result<(), ServerFnError> {
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    crate::db::set_user_invite_emails_enabled(&pool, user.id, enabled)
+        .await
+        .map_err(internal("set_email_invite_enabled: update"))
+}
+
+#[server(SetEmailReminderEnabled, "/api")]
+pub async fn set_email_reminder_enabled(enabled: bool) -> Result<(), ServerFnError> {
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    crate::db::set_user_reminder_emails_enabled(&pool, user.id, enabled)
+        .await
+        .map_err(internal("set_email_reminder_enabled: update"))
 }
 
 /// One address row for the settings list (client-visible).

@@ -142,7 +142,7 @@ fn invite_browser_url(proposal_id: Uuid) -> String {
 struct InviteRecipient {
     email: Option<String>,
     theme_slug: Option<String>,
-    turn_emails_enabled: bool,
+    invite_emails_enabled: bool,
     name: String,
 }
 
@@ -152,7 +152,7 @@ async fn fetch_invite_recipient(
     user_id: Uuid,
 ) -> sqlx::Result<Option<InviteRecipient>> {
     sqlx::query_as::<_, InviteRecipient>(
-        "SELECT ue.email, u.theme AS theme_slug, COALESCE(u.turn_emails_enabled, false) AS turn_emails_enabled, u.name \
+        "SELECT ue.email, u.theme AS theme_slug, COALESCE(u.invite_emails_enabled, false) AS invite_emails_enabled, u.name \
          FROM users u \
          LEFT JOIN user_emails ue ON ue.user_id = u.id AND ue.is_primary AND ue.verified_at IS NOT NULL \
          WHERE u.id = $1",
@@ -184,7 +184,7 @@ impl InviteMailer for RealInviteMailer {
                 return;
             };
             let Some(email) = recip.email else { return };
-            if !recip.turn_emails_enabled {
+            if !recip.invite_emails_enabled {
                 return;
             }
             if crate::email::outbound::is_recently_active(&pool, invitee_user_id).await {
@@ -284,7 +284,7 @@ impl InviteMailer for RealInviteMailer {
                     continue;
                 };
                 let Some(email) = recip.email else { continue };
-                if !recip.turn_emails_enabled {
+                if !recip.invite_emails_enabled {
                     continue;
                 }
                 if crate::email::outbound::is_recently_active(&pool, user_id).await {
@@ -332,7 +332,7 @@ impl InviteMailer for RealInviteMailer {
                     continue;
                 };
                 let Some(email) = recip.email else { continue };
-                if !recip.turn_emails_enabled {
+                if !recip.invite_emails_enabled {
                     continue;
                 }
                 if crate::email::outbound::is_recently_active(&pool, user_id).await {

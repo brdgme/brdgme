@@ -2209,6 +2209,59 @@ pub async fn set_user_pref_colors(pool: &PgPool, user_id: Uuid, colors: &[String
     Ok(())
 }
 
+#[cfg(feature = "ssr")]
+pub async fn get_user_email_prefs(pool: &PgPool, user_id: Uuid) -> Result<(bool, bool, bool)> {
+    let row: (bool, bool, bool) = sqlx::query_as(
+        "SELECT turn_emails_enabled, invite_emails_enabled, reminder_emails_enabled FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_user_turn_emails_enabled(
+    pool: &PgPool,
+    user_id: Uuid,
+    enabled: bool,
+) -> Result<()> {
+    sqlx::query("UPDATE users SET turn_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+        .bind(enabled)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_user_invite_emails_enabled(
+    pool: &PgPool,
+    user_id: Uuid,
+    enabled: bool,
+) -> Result<()> {
+    sqlx::query("UPDATE users SET invite_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+        .bind(enabled)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_user_reminder_emails_enabled(
+    pool: &PgPool,
+    user_id: Uuid,
+    enabled: bool,
+) -> Result<()> {
+    sqlx::query("UPDATE users SET reminder_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+        .bind(enabled)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // --- #22d multiple emails per account (spec 2026-07-05-22, section 22d) ---
 // Plain (non-macro) queries throughout, matching get_user_theme above.
 
@@ -5077,5 +5130,62 @@ mod tests {
         assert!(rows.iter().any(|r| r.email == fresh));
         assert!(rows.iter().any(|r| r.email == verified_old));
         assert!(!rows.iter().any(|r| r.email == expired));
+    }
+
+    #[sqlx::test]
+    async fn email_prefs_default_all_true(pool: PgPool) {
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let (turn, invite, reminder) = get_user_email_prefs(&pool, user_id).await.unwrap();
+        assert!(turn);
+        assert!(invite);
+        assert!(reminder);
+    }
+
+    #[sqlx::test]
+    async fn set_email_prefs_toggles(pool: PgPool) {
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        set_user_turn_emails_enabled(&pool, user_id, false)
+            .await
+            .unwrap();
+        set_user_invite_emails_enabled(&pool, user_id, false)
+            .await
+            .unwrap();
+        set_user_reminder_emails_enabled(&pool, user_id, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_user_email_prefs(&pool, user_id).await.unwrap(),
+            (false, false, false)
+        );
+
+        set_user_turn_emails_enabled(&pool, user_id, true)
+            .await
+            .unwrap();
+        set_user_invite_emails_enabled(&pool, user_id, true)
+            .await
+            .unwrap();
+        set_user_reminder_emails_enabled(&pool, user_id, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_user_email_prefs(&pool, user_id).await.unwrap(),
+            (true, true, true)
+        );
     }
 }

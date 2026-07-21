@@ -34,8 +34,9 @@ pub fn SettingsPage() -> impl IntoView {
                 <h1>"Settings"</h1>
                 <UsernameSection settings=settings/>
                 <ColorsSection settings=settings/>
-                <ThemeSection/>
+                <EmailPreferencesSection settings=settings/>
                 <EmailSection settings=settings/>
+                <ThemeSection/>
             </div>
         </MainLayout>
     }
@@ -172,6 +173,69 @@ fn ColorsSection(
                 }
             })
             .collect_view()}
+    }
+}
+
+#[component]
+fn EmailPreferencesSection(
+    settings: LocalResource<Result<crate::auth::SettingsData, ServerFnError>>,
+) -> impl IntoView {
+    use crate::components::FormField;
+
+    let turn = RwSignal::new(true);
+    let invite = RwSignal::new(true);
+    let reminder = RwSignal::new(true);
+    let initialized = RwSignal::new(false);
+    Effect::new(move |_| {
+        if let Some(Ok(s)) = settings.get()
+            && !initialized.get_untracked()
+        {
+            initialized.set(true);
+            turn.set(s.turn_emails_enabled);
+            invite.set(s.invite_emails_enabled);
+            reminder.set(s.reminder_emails_enabled);
+        }
+    });
+
+    let turn_action = ServerAction::<crate::auth::SetEmailTurnEnabled>::new();
+    let invite_action = ServerAction::<crate::auth::SetEmailInviteEnabled>::new();
+    let reminder_action = ServerAction::<crate::auth::SetEmailReminderEnabled>::new();
+
+    view! {
+        <h2>"Email notifications"</h2>
+        <FormField label="Turn notifications">
+            <input
+                type="checkbox"
+                prop:checked=move || turn.get()
+                on:change=move |ev| {
+                    let val = event_target_checked(&ev);
+                    turn.set(val);
+                    turn_action.dispatch(crate::auth::SetEmailTurnEnabled { enabled: val });
+                }
+            />
+        </FormField>
+        <FormField label="Invite notifications">
+            <input
+                type="checkbox"
+                prop:checked=move || invite.get()
+                on:change=move |ev| {
+                    let val = event_target_checked(&ev);
+                    invite.set(val);
+                    invite_action.dispatch(crate::auth::SetEmailInviteEnabled { enabled: val });
+                }
+            />
+        </FormField>
+        <FormField label="Reminder notifications">
+            <input
+                type="checkbox"
+                prop:checked=move || reminder.get()
+                on:change=move |ev| {
+                    let val = event_target_checked(&ev);
+                    reminder.set(val);
+                    reminder_action.dispatch(crate::auth::SetEmailReminderEnabled { enabled: val });
+                }
+            />
+        </FormField>
     }
 }
 

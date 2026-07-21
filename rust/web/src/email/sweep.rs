@@ -68,8 +68,8 @@ async fn fetch_candidates(pool: &PgPool, threshold: std::time::Duration) -> Vec<
            AND gp.is_eliminated = false
            AND gp.turn_reminder_sent_at IS NULL
            AND gp.is_turn_at < NOW() - ($1 || ' seconds')::interval
-           AND gp.game_bot_id IS NULL
-           AND u.turn_emails_enabled = true
+            AND gp.game_bot_id IS NULL
+            AND u.reminder_emails_enabled = true
          FOR UPDATE SKIP LOCKED",
     )
     .bind(threshold_secs.to_string())
@@ -573,7 +573,7 @@ mod tests {
         .unwrap();
 
         let user_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO users (name, pref_colors, turn_emails_enabled) VALUES ($1, $2, true) RETURNING id",
+            "INSERT INTO users (name, pref_colors, reminder_emails_enabled) VALUES ($1, $2, true) RETURNING id",
         )
         .bind("sweep_player")
         .bind(Vec::<String>::new())
@@ -629,7 +629,7 @@ mod tests {
         .unwrap();
 
         let user_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO users (name, pref_colors, turn_emails_enabled) VALUES ($1, $2, true) RETURNING id",
+            "INSERT INTO users (name, pref_colors, reminder_emails_enabled) VALUES ($1, $2, true) RETURNING id",
         )
         .bind("sweep_player2")
         .bind(Vec::<String>::new())
@@ -643,6 +643,62 @@ mod tests {
                  is_turn_at, last_turn_at, is_eliminated, is_read, turn_reminder_sent_at)
              VALUES ($1, $2, 0, 'Green', true, true,
                      NOW() - interval '48 hours', NOW(), false, false, NOW())
+             RETURNING id",
+        )
+        .bind(game_id)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let candidates = fetch_candidates(&pool, std::time::Duration::from_secs(86400)).await;
+        assert!(!candidates.iter().any(|c| c.game_player_id == gp_id));
+    }
+
+    #[sqlx::test]
+    async fn fetch_candidates_excludes_reminder_disabled(pool: PgPool) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Sweep Test3 {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://localhost:0/mock', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let game_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO games (game_version_id, is_finished, game_state)
+             VALUES ($1, false, 'state') RETURNING id",
+        )
+        .bind(game_version_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, reminder_emails_enabled) VALUES ($1, $2, false) RETURNING id",
+        )
+        .bind("sweep_player3")
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let gp_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_players
+                (game_id, user_id, position, color, has_accepted, is_turn,
+                 is_turn_at, last_turn_at, is_eliminated, is_read)
+             VALUES ($1, $2, 0, 'Green', true, true,
+                     NOW() - interval '48 hours', NOW(), false, false)
              RETURNING id",
         )
         .bind(game_id)

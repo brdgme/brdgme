@@ -176,6 +176,8 @@ pub fn help_text() -> String {
      emails active <address> - make an address your active one (alias: emails use)\n\
      emails remove <address> - remove an address\n\
      emails on | emails off - toggle turn-notification emails\n\
+     emails invite on | emails invite off - toggle invite-notification emails\n\
+     emails reminder on | emails reminder off - toggle reminder-notification emails\n\
      settings - show your current settings"
         .to_string()
 }
@@ -185,6 +187,8 @@ pub struct SettingsSummary {
     pub pref_colors: Vec<String>,
     pub theme: Option<String>,
     pub emails_enabled: bool,
+    pub invite_emails_enabled: bool,
+    pub reminder_emails_enabled: bool,
 }
 
 pub fn format_settings_summary(s: &SettingsSummary) -> String {
@@ -195,12 +199,20 @@ pub fn format_settings_summary(s: &SettingsSummary) -> String {
     };
     let theme = s.theme.as_deref().unwrap_or("system");
     let emails = if s.emails_enabled { "on" } else { "off" };
+    let invite = if s.invite_emails_enabled { "on" } else { "off" };
+    let reminder = if s.reminder_emails_enabled {
+        "on"
+    } else {
+        "off"
+    };
     format!(
         "Current settings:\n\
          \x20\x20Display name: {name}\n\
          \x20\x20Preferred colours: {colors}\n\
          \x20\x20Theme: {theme}\n\
-         \x20\x20Turn-notification emails: {emails}",
+         \x20\x20Turn-notification emails: {emails}\n\
+         \x20\x20Invite-notification emails: {invite}\n\
+         \x20\x20Reminder-notification emails: {reminder}",
         name = s.name,
     )
 }
@@ -527,8 +539,28 @@ async fn run_settings_emails(
             let addr = rest.unwrap_or("");
             run_emails_remove(pool, user_id, addr).await
         }
+        "invite" => {
+            let sub_arg = rest.unwrap_or("");
+            match sub_arg.to_ascii_lowercase().as_str() {
+                "on" => run_emails_invite_toggle(pool, user_id, true).await,
+                "off" => run_emails_invite_toggle(pool, user_id, false).await,
+                _ => Err(CommandError::User(
+                    "Usage: emails invite on | emails invite off".to_string(),
+                )),
+            }
+        }
+        "reminder" => {
+            let sub_arg = rest.unwrap_or("");
+            match sub_arg.to_ascii_lowercase().as_str() {
+                "on" => run_emails_reminder_toggle(pool, user_id, true).await,
+                "off" => run_emails_reminder_toggle(pool, user_id, false).await,
+                _ => Err(CommandError::User(
+                    "Usage: emails reminder on | emails reminder off".to_string(),
+                )),
+            }
+        }
         _ => Err(CommandError::User(
-            "Usage: emails | emails on | emails off | emails add <address> | emails confirm <code> | emails active <address> | emails remove <address>".to_string(),
+            "Usage: emails | emails on | emails off | emails invite on | emails invite off | emails reminder on | emails reminder off | emails add <address> | emails confirm <code> | emails active <address> | emails remove <address>".to_string(),
         )),
     }
 }
@@ -572,6 +604,38 @@ async fn run_emails_toggle(
         "Turn-notification emails are now on."
     } else {
         "Turn-notification emails are now off."
+    };
+    Ok(CommandReply::Status(msg.to_string()))
+}
+
+async fn run_emails_invite_toggle(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    enabled: bool,
+) -> Result<CommandReply, CommandError> {
+    set_invite_emails_enabled(pool, user_id, enabled)
+        .await
+        .map_err(CommandError::Internal)?;
+    let msg = if enabled {
+        "Invite-notification emails are now on."
+    } else {
+        "Invite-notification emails are now off."
+    };
+    Ok(CommandReply::Status(msg.to_string()))
+}
+
+async fn run_emails_reminder_toggle(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    enabled: bool,
+) -> Result<CommandReply, CommandError> {
+    set_reminder_emails_enabled(pool, user_id, enabled)
+        .await
+        .map_err(CommandError::Internal)?;
+    let msg = if enabled {
+        "Reminder-notification emails are now on."
+    } else {
+        "Reminder-notification emails are now off."
     };
     Ok(CommandReply::Status(msg.to_string()))
 }
@@ -723,12 +787,14 @@ async fn run_settings_summary(
     let theme = crate::db::get_user_theme(pool, user_id)
         .await
         .map_err(CommandError::Internal)?;
-    let emails_enabled: bool =
-        sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| CommandError::Internal(anyhow::anyhow!("settings: fetch emails: {e}")))?;
+    let (emails_enabled, invite_emails_enabled, reminder_emails_enabled): (bool, bool, bool) =
+        sqlx::query_as(
+            "SELECT turn_emails_enabled, invite_emails_enabled, reminder_emails_enabled FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("settings: fetch emails: {e}")))?;
 
     Ok(CommandReply::Status(format_settings_summary(
         &SettingsSummary {
@@ -736,6 +802,8 @@ async fn run_settings_summary(
             pref_colors,
             theme,
             emails_enabled,
+            invite_emails_enabled,
+            reminder_emails_enabled,
         },
     )))
 }
@@ -746,6 +814,32 @@ async fn set_turn_emails_enabled(
     enabled: bool,
 ) -> anyhow::Result<()> {
     sqlx::query("UPDATE users SET turn_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+        .bind(enabled)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn set_invite_emails_enabled(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE users SET invite_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+        .bind(enabled)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn set_reminder_emails_enabled(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE users SET reminder_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
         .bind(enabled)
         .bind(user_id)
         .execute(pool)
@@ -1102,6 +1196,8 @@ mod tests {
             pref_colors: vec!["Green".to_string(), "Red".to_string(), "Blue".to_string()],
             theme: Some("dracula".to_string()),
             emails_enabled: true,
+            invite_emails_enabled: true,
+            reminder_emails_enabled: false,
         };
         let text = format_settings_summary(&summary);
         assert!(text.contains("Current settings:"));
@@ -1109,6 +1205,8 @@ mod tests {
         assert!(text.contains("Preferred colours: Green, Red, Blue"));
         assert!(text.contains("Theme: dracula"));
         assert!(text.contains("Turn-notification emails: on"));
+        assert!(text.contains("Invite-notification emails: on"));
+        assert!(text.contains("Reminder-notification emails: off"));
     }
 
     #[test]
@@ -1118,11 +1216,15 @@ mod tests {
             pref_colors: vec![],
             theme: None,
             emails_enabled: false,
+            invite_emails_enabled: false,
+            reminder_emails_enabled: false,
         };
         let text = format_settings_summary(&summary);
         assert!(text.contains("Preferred colours: none set"));
         assert!(text.contains("Theme: system"));
         assert!(text.contains("Turn-notification emails: off"));
+        assert!(text.contains("Invite-notification emails: off"));
+        assert!(text.contains("Reminder-notification emails: off"));
     }
 
     async fn seed_user(pool: &sqlx::PgPool, name: &str) -> uuid::Uuid {
