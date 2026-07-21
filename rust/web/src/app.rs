@@ -55,11 +55,8 @@ fn sentry_init_snippet(dsn: &str, release: Option<&str>) -> String {
     let release_field = release
         .map(|r| format!(r#","release":"{}""#, js_string_escape(r)))
         .unwrap_or_default();
-    // No `tracesSampleRate` key: omitting it (not setting it to 0) disables
-    // the tracing integration entirely, protecting the free-tier error
-    // quota - see docs/superpowers/specs/2026-07-15-wasm-prod-errors-design.md.
     format!(
-        r#"window.Sentry.init({{"dsn":"{}","integrations":[window.SentryWasmIntegration()],"sendDefaultPii":false{},"beforeSend":{}}});"#,
+        r#"window.Sentry.init({{"dsn":"{}","integrations":[window.SentryWasmIntegration(),window.Sentry.browserTracingIntegration()],"sendDefaultPii":false,"tracesSampleRate":0.1{},"beforeSend":{}}});"#,
         js_string_escape(dsn),
         release_field,
         SENTRY_BEFORE_SEND_JS,

@@ -162,6 +162,7 @@ pub async fn create_pool() -> Result<PgPool> {
 }
 
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool))]
 pub async fn get_user_by_email(pool: &PgPool, email: &str) -> Result<Option<User>> {
     sqlx::query_as!(
         User,
@@ -179,6 +180,7 @@ pub async fn get_user_by_email(pool: &PgPool, email: &str) -> Result<Option<User
 }
 
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(user_id = %id))]
 pub async fn get_user(pool: &PgPool, id: Uuid) -> Result<Option<User>> {
     sqlx::query_as!(
         User,
@@ -317,6 +319,7 @@ pub async fn find_available_game_types(
 }
 
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(game_id = %id))]
 pub async fn find_game(pool: &PgPool, id: Uuid) -> Result<Option<crate::models::game::Game>> {
     sqlx::query_as!(
         crate::models::game::Game,
@@ -393,6 +396,7 @@ impl GameExtended {
 }
 
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(game_id = %id))]
 pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameExtended>> {
     let game = find_game(pool, id).await?;
     let game = match game {
@@ -512,6 +516,7 @@ pub struct BotTurn {
 /// currently is. Empty for games with no bots or no bot on turn (including
 /// nonexistent games) - that's a normal outcome, not an error.
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(game_id = %game_id))]
 pub async fn find_bot_turns(pool: &PgPool, game_id: Uuid) -> Result<Vec<BotTurn>> {
     sqlx::query_as!(
         BotTurn,
@@ -834,6 +839,7 @@ pub async fn create_game_with_users(
 /// can commit them atomically alongside other writes (e.g. the restarted-game
 /// linkage in `restart_game`).
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip_all)]
 pub async fn create_game_with_users_tx(
     tx: &mut sqlx::PgConnection,
     opts: CreateGameOpts<'_>,
@@ -1095,6 +1101,7 @@ pub async fn create_game_logs(
 }
 
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(game_id = %game_id))]
 pub async fn concede_game(
     pool: &PgPool,
     game_id: Uuid,
@@ -1189,6 +1196,7 @@ pub async fn delete_game(pool: &PgPool, game_id: Uuid) -> Result<bool> {
 }
 
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(game_id = %game_id, user_id = %user_id))]
 pub async fn mark_game_read(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> Result<()> {
     sqlx::query!(
         "UPDATE game_players SET is_read = true, updated_at = NOW() WHERE game_id = $1 AND user_id = $2",
@@ -1201,6 +1209,7 @@ pub async fn mark_game_read(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> Resu
 }
 
 #[cfg(feature = "ssr")]
+#[tracing::instrument(skip_all, fields(game_id = %game_id))]
 pub async fn undo_game(
     pool: &PgPool,
     game_id: Uuid,
@@ -1482,6 +1491,7 @@ pub struct StaleStateConflict;
 #[cfg(feature = "ssr")]
 // Splitting these into a params struct would be a larger refactor than warranted here.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all, fields(game_id = %game_id))]
 pub async fn update_game_command_success(
     pool: &PgPool,
     game_id: Uuid,
