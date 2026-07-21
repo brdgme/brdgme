@@ -22,7 +22,11 @@ use prompt::{
 use routing::ProviderRouter;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use uuid::Uuid;
+
+use std::time::Instant;
 
 #[derive(Clone)]
 struct AppState {
@@ -66,10 +70,19 @@ struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
-/// Handles one `bot.turn` event: Status -> LLM -> game service `Play`
-/// (stateless validate) -> retry LLM on invalid -> publish `bot.command` when
-/// valid. The monolith owns the actual DB commit; this only validates.
+#[tracing::instrument(
+    name = "bot_turn",
+    skip(state, req),
+    fields(
+        trace_id = %trace_id,
+        game_id = %req.game_id,
+        player_position = req.player_position,
+        bot_name = %req.bot_name,
+        nat_attempt = req.attempt,
+    )
+)]
 async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Result<()> {
+    let turn_start = Instant::now();
     // 1. Fetch game data from DB.
     let row = sqlx::query(
         r#"
@@ -91,10 +104,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     let is_turn: bool = row.try_get("is_turn").unwrap_or(false);
     if !is_turn {
         tracing::info!(
-            trace_id = %trace_id,
-            game_id = %req.game_id,
-            player = req.player_position,
-            "Bot turn no longer active (game state changed), skipping"
+            elapsed_ms = turn_start.elapsed().as_millis() as u64,
+            outcome = "skipped",
+            reason = "turn no longer active",
+            "bot_turn_end"
         );
         return Ok(());
     }
@@ -141,15 +154,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         .collect();
 
     tracing::info!(
-        trace_id = %trace_id,
-        game_id = %req.game_id,
         game = %game_name,
-        player = req.player_position,
         player_name = %bot_name,
-        bot_name = %req.bot_name,
-        attempt = req.attempt,
         players = ?names,
-        "Bot turn triggered"
+        "bot_turn_start"
     );
 
     let table_empty = config::bots_table_empty(&state.pool)
@@ -170,10 +178,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
                 }
             } else {
                 tracing::info!(
-                    trace_id = %trace_id,
-                    game_id = %req.game_id,
-                    bot_name = %req.bot_name,
-                    "Bot not found or disabled, skipping turn"
+                    elapsed_ms = turn_start.elapsed().as_millis() as u64,
+                    outcome = "skipped",
+                    reason = "bot not found or disabled",
+                    "bot_turn_end"
                 );
                 return Ok(());
             }
@@ -193,6 +201,12 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         providers = vec![p];
     }
     if providers.is_empty() {
+        tracing::error!(
+            elapsed_ms = turn_start.elapsed().as_millis() as u64,
+            outcome = "failure",
+            reason = "no LLM providers configured",
+            "bot_turn_end"
+        );
         return Err(anyhow!(
             "No LLM providers configured for bot {}",
             req.bot_name
@@ -202,6 +216,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
 
     // 3. Load game context (state, structured game data, logs). Extracted into a helper
     //    so it can be refreshed mid-loop if the game state changes while the LLM is thinking.
+    let ctx_start = Instant::now();
     let mut bot_ctx = load_bot_context(
         state,
         &game_service_uri,
@@ -215,6 +230,11 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     )
     .await
     .context("Failed to load initial bot context")?;
+    tracing::info!(
+        elapsed_ms = ctx_start.elapsed().as_millis() as u64,
+        phase = "load_context",
+        "game_service_call"
+    );
 
     const MAX_ATTEMPTS: usize = 20;
     let mut failed_commands: Vec<FailedCommand> = Vec::new();
@@ -228,6 +248,13 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         let api_key = provider.api_key.clone();
         let reasoning_effort = provider.reasoning_effort.clone();
         let extra_body = provider.extra_body.clone();
+
+        tracing::info!(
+            provider_url = %url,
+            model = %model,
+            attempt,
+            "llm_request_start"
+        );
 
         let messages = build_messages(
             &bot_cfg,
@@ -246,6 +273,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             "Rendered prompt"
         );
 
+        let llm_start = Instant::now();
         let raw_response = match call_llm(
             &state.http,
             &url,
@@ -258,28 +286,31 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         )
         .await
         {
-            Ok(r) => r,
+            Ok(r) => {
+                tracing::info!(
+                    provider_url = %url,
+                    model = %model,
+                    attempt,
+                    elapsed_ms = llm_start.elapsed().as_millis() as u64,
+                    outcome = "success",
+                    "llm_request_end"
+                );
+                r
+            }
             Err(e) => {
                 tracing::warn!(
-                    trace_id = %trace_id,
-                    game_id = %req.game_id,
-                    attempt,
+                    provider_url = %url,
                     model = %model,
+                    attempt,
+                    elapsed_ms = llm_start.elapsed().as_millis() as u64,
+                    outcome = "error",
                     error = %e,
-                    "LLM API error, failing over to next provider"
+                    "llm_request_end"
                 );
                 router.mark_failed();
                 continue;
             }
         };
-
-        tracing::info!(
-            trace_id = %trace_id,
-            game_id = %req.game_id,
-            attempt,
-            response = %raw_response,
-            "LLM response received"
-        );
 
         let command = raw_response.trim().to_string();
 
@@ -299,11 +330,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         let is_still_turn: bool = recheck.try_get("is_turn").unwrap_or(false);
         if !is_still_turn {
             tracing::info!(
-                trace_id = %trace_id,
-                game_id = %req.game_id,
-                player = req.player_position,
-                attempt,
-                "Game state changed while the LLM was thinking, bot turn no longer active"
+                elapsed_ms = turn_start.elapsed().as_millis() as u64,
+                outcome = "skipped",
+                reason = "game state changed while LLM thinking",
+                "bot_turn_end"
             );
             return Ok(());
         }
@@ -319,6 +349,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
                 attempt,
                 "Game state changed while the LLM was thinking, refreshing context and retrying"
             );
+            let refresh_start = Instant::now();
             bot_ctx = load_bot_context(
                 state,
                 &game_service_uri,
@@ -332,6 +363,11 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             )
             .await
             .context("Failed to refresh bot context")?;
+            tracing::info!(
+                elapsed_ms = refresh_start.elapsed().as_millis() as u64,
+                phase = "refresh_context",
+                "game_service_call"
+            );
             failed_commands.clear();
             continue;
         }
@@ -339,6 +375,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         // Validate the command against the game service directly. `Play` is
         // stateless (returns the new state but doesn't persist), so this
         // retry loop never round-trips through the monolith.
+        let validate_start = Instant::now();
         let validate_result = brdgme_game_client::request(
             &state.game_http,
             &game_service_uri,
@@ -351,25 +388,28 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             },
         )
         .await;
+        tracing::info!(
+            elapsed_ms = validate_start.elapsed().as_millis() as u64,
+            phase = "validate_command",
+            "game_service_call"
+        );
 
         let error_body = match validate_result {
             Ok(Response::Play { .. }) => {
-                tracing::info!(
-                    trace_id = %trace_id,
-                    game_id = %req.game_id,
-                    player = req.player_position,
-                    attempt,
-                    command = %command,
-                    "Command validated, publishing bot.command"
-                );
                 publish_bot_command(
                     state,
                     req.game_id,
                     req.player_position,
-                    command,
+                    command.clone(),
                     req.attempt,
                 )
                 .await?;
+                tracing::info!(
+                    elapsed_ms = turn_start.elapsed().as_millis() as u64,
+                    outcome = "success",
+                    command = %command,
+                    "bot_turn_end"
+                );
                 return Ok(());
             }
             Ok(Response::UserError { message }) => message,
@@ -378,6 +418,15 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         };
 
         if attempt + 1 == MAX_ATTEMPTS {
+            let elapsed_ms = turn_start.elapsed().as_millis() as u64;
+            tracing::error!(
+                elapsed_ms,
+                outcome = "failure",
+                attempts = MAX_ATTEMPTS,
+                last_command = %command,
+                last_error = %error_body,
+                "bot_turn_end"
+            );
             return Err(anyhow!(
                 "Command rejected after {} attempts. Last command: {:?}. Last error: {}",
                 MAX_ATTEMPTS,
