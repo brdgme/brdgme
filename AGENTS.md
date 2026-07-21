@@ -25,7 +25,11 @@ subdirectories (`docs/decisions/`, `docs/porting/`, `docs/authoring/`,
 `docs/superpowers/`) and the on-demand references directly under `docs/`,
 notably `docs/hydration.md` (Leptos SSR hydration mechanics, hazards, and
 troubleshooting - read it before touching Suspense/Transition/resource
-structure in `rust/web` or when debugging a hydration panic).
+structure in `rust/web` or when debugging a hydration panic) and
+`docs/email.md` (outbound email rendering mechanics, the Gmail
+`font-size:0`/foster-parenting hazard, and a headless-Chromium verification
+playbook - read it before touching `rust/web/src/email/` or debugging a
+"the email looks wrong" report).
 
 ## Reference facts agents get wrong
 

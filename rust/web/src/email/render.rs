@@ -160,8 +160,15 @@ pub fn render_game_email(
         body.push_str(&format!("<span style=\"color:{muted};\">{f}</span>"));
     }
 
+    // The board lives in a single `<pre>`. It must be wrapped in a real
+    // `<tr><td>` cell: a bare `<pre>` as a direct child of `<tbody>` (what
+    // `<mj-raw>` otherwise emits) is invalid HTML, so mail clients
+    // foster-parent it into the column's `font-size:0px` wrapper div and every
+    // glyph collapses to 0px - only elements carrying their own font-size (the
+    // rules link) stay visible. The explicit `font-size` on the cell and the
+    // `<pre>` is defence in depth against that 0px inheritance.
     let mjml = format!(
-        r#"<mjml><mj-body background-color="{bg}"><mj-section><mj-column><mj-raw><pre style="background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;white-space:pre-wrap;padding:16px;margin:0;">{body}</pre></mj-raw></mj-column></mj-section></mj-body></mjml>"#,
+        r#"<mjml><mj-body background-color="{bg}"><mj-section><mj-column><mj-raw><tr><td style="padding:0;font-size:13px;"><pre style="background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;font-size:13px;white-space:pre-wrap;padding:16px;margin:0;">{body}</pre></td></tr></mj-raw></mj-column></mj-section></mj-body></mjml>"#,
     );
 
     let html = mrml::parse(&mjml)
@@ -316,6 +323,35 @@ mod tests {
         assert!(email.html.contains("https://brdg.me/games/abc"));
         assert!(email.html.contains("View rules"));
         assert!(email.html.contains("Reply to play"));
+    }
+
+    #[test]
+    fn render_game_email_html_pre_is_valid_table_content_with_font_size() {
+        let email = render_game_email(
+            &full_content(),
+            &DRACULA,
+            &two_players(&DRACULA),
+            "game-abc",
+            true,
+            "g-tok@play.brdg.me",
+        );
+        // A bare `<pre>` directly inside `<tbody>` is invalid HTML: mail
+        // clients foster-parent it into the column's `font-size:0px` wrapper
+        // div, collapsing every glyph to 0px (only elements with their own
+        // font-size, e.g. the rules link, stay visible). The board must sit in
+        // a real table cell and carry its own font-size.
+        assert!(
+            !email.html.contains("<tbody><pre"),
+            "<pre> must not be a bare child of <tbody>: {}",
+            email.html
+        );
+        let pre_start = email.html.find("<pre").expect("html has a <pre>");
+        let pre_tag_end = email.html[pre_start..].find('>').expect("<pre> closes");
+        let pre_tag = &email.html[pre_start..pre_start + pre_tag_end];
+        assert!(
+            pre_tag.contains("font-size"),
+            "<pre> must declare an explicit font-size so it does not inherit the column's 0px: {pre_tag}"
+        );
     }
 
     #[test]
