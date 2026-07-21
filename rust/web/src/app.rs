@@ -109,6 +109,8 @@ pub fn App() -> impl IntoView {
         set_last_update,
     });
     provide_context(RwSignal::<Option<(Uuid, u64)>>::new(None));
+    let proposal_update = RwSignal::<Option<(Uuid, u64)>>::new(None);
+    provide_context(crate::websocket_client::ProposalUpdate(proposal_update));
     crate::websocket_client::use_websocket();
 
     // Hoisted above <Router> so these survive client-side navigation instead
@@ -202,6 +204,7 @@ pub fn App() -> impl IntoView {
                 <Route path=(StaticSegment("players"), ParamSegment("name"), ParamSegment("game_type")) view=crate::players::PlayerGameTypePage/>
                 <Route path=(StaticSegment("games"), ParamSegment("id")) view=GamePage/>
                 <Route path=(StaticSegment("rules"), ParamSegment("version_id")) view=crate::rules::RulesPage/>
+                <Route path=(StaticSegment("invites"), ParamSegment("id")) view=crate::proposals::InvitePage/>
             </Routes>
         </Router>
     }
@@ -452,6 +455,16 @@ fn DashboardPage() -> impl IntoView {
             set_refresh.update(|n| *n += 1);
         }
     });
+    let invites = LocalResource::new(move || {
+        refresh.track();
+        crate::proposals::get_pending_invites()
+    });
+    let invite_respond_action = ServerAction::<crate::proposals::RespondProposal>::new();
+    Effect::new(move |_| {
+        if let Some(Ok(_)) = invite_respond_action.value().get() {
+            set_refresh.update(|n| *n += 1);
+        }
+    });
 
     view! {
         <MainLayout>
@@ -501,6 +514,39 @@ fn DashboardPage() -> impl IntoView {
                             }).collect_view().into_any(),
                         }}
                         <p><a href="/friends">"Manage friends"</a></p>
+                    </section>
+
+                    <section class="pending-invites">
+                        <h2>"Pending invites"</h2>
+                        {move || match invites.get() {
+                            None => view! { <p>"Loading..."</p> }.into_any(),
+                            Some(Err(_)) => ().into_any(),
+                            Some(Ok(inv)) if inv.is_empty() =>
+                                view! { <p>"No pending invites."</p> }.into_any(),
+                            Some(Ok(inv)) => inv.iter().map(|i| {
+                                let pid = i.proposal_id;
+                                let label = format!("{} ({}, {} players)", i.game_type_name, i.owner_name, i.player_count);
+                                view! {
+                                    <div class="friend-row">
+                                        <span>
+                                            <A href=format!("/invites/{}", pid)>
+                                                {label}
+                                            </A>
+                                        </span>
+                                        " "
+                                        <a href="#" on:click=move |ev| {
+                                            ev.prevent_default();
+                                            invite_respond_action.dispatch(crate::proposals::RespondProposal { proposal_id: pid, accept: true });
+                                        }>"Accept"</a>
+                                        " | "
+                                        <a href="#" on:click=move |ev| {
+                                            ev.prevent_default();
+                                            invite_respond_action.dispatch(crate::proposals::RespondProposal { proposal_id: pid, accept: false });
+                                        }>"Decline"</a>
+                                    </div>
+                                }
+                            }).collect_view().into_any(),
+                        }}
                     </section>
 
                     <section class="friends-active-games">

@@ -7,6 +7,9 @@ pub struct WebSocketTrigger {
     pub set_last_update: WriteSignal<u64>,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct ProposalUpdate(pub RwSignal<Option<(Uuid, u64)>>);
+
 /// Bumps the game-changed context to a fresh (game_id, seq) pair, deriving
 /// seq from the current context value (prev + 1) rather than a separate
 /// counter - a second independent counter could reproduce a seq already seen
@@ -24,9 +27,16 @@ pub fn bump_game_update(game_update: RwSignal<Option<(Uuid, u64)>>, game_id: Uui
     });
 }
 
+pub fn bump_proposal_update(proposal_update: RwSignal<Option<(Uuid, u64)>>, proposal_id: Uuid) {
+    proposal_update.update(|v| {
+        let next = v.map(|(_, s)| s + 1).unwrap_or(1);
+        *v = Some((proposal_id, next));
+    });
+}
+
 #[cfg(feature = "hydrate")]
 pub fn use_websocket() {
-    use crate::websocket::GameUpdateSignal;
+    use crate::websocket::{GameUpdateSignal, ProposalUpdateSignal};
     use codee::string::FromToStringCodec;
     use leptos_use::{
         DummyEncoder, ReconnectLimit, UseWebSocketOptions, use_websocket_with_options,
@@ -34,6 +44,7 @@ pub fn use_websocket() {
 
     let trigger = expect_context::<WebSocketTrigger>();
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
+    let proposal_update = expect_context::<ProposalUpdate>().0;
 
     let _ = use_websocket_with_options::<String, String, FromToStringCodec, (), DummyEncoder>(
         "/ws",
@@ -43,6 +54,9 @@ pub fn use_websocket() {
                 if let Ok(signal) = serde_json::from_str::<GameUpdateSignal>(text) {
                     trigger.set_last_update.update(|n| *n += 1);
                     bump_game_update(game_update, signal.game_id);
+                } else if let Ok(signal) = serde_json::from_str::<ProposalUpdateSignal>(text) {
+                    trigger.set_last_update.update(|n| *n += 1);
+                    bump_proposal_update(proposal_update, signal.proposal_id);
                 }
             }),
     );

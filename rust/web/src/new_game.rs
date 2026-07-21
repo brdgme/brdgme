@@ -5,9 +5,7 @@ use leptos_router::{NavigateOptions, components::A, hooks::use_navigate};
 use uuid::Uuid;
 
 use crate::friends::{OpponentSuggestion, UserSearchResult};
-use crate::game::server_fns::{
-    BotSlot, GameTypeInfo, create_new_game, generate_bot_name, get_available_bots,
-};
+use crate::game::server_fns::{BotSlot, GameTypeInfo, generate_bot_name, get_available_bots};
 
 /// Formats supported player counts, honoring non-contiguous sets:
 /// [2,3,4] -> "2-4 players", [2] -> "2 players", [2,4,6] -> "2, 4, 6 players".
@@ -204,29 +202,21 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
     let create_action = Action::new(
         |(version_id, ids, emails, bots): &(Uuid, Vec<Uuid>, Vec<String>, Vec<BotSlot>)| {
             let version_id = *version_id;
-            let ids = if ids.is_empty() {
-                None
-            } else {
-                Some(ids.clone())
-            };
-            let emails = if emails.is_empty() {
-                None
-            } else {
-                Some(emails.clone())
-            };
-            let bots = if bots.is_empty() {
-                None
-            } else {
-                Some(bots.clone())
-            };
-            async move { create_new_game(version_id, ids, emails, bots).await }
+            let ids = ids.clone();
+            let emails = emails.clone();
+            let bots = bots.clone();
+            async move { crate::proposals::create_proposal(version_id, ids, emails, bots).await }
         },
     );
 
     let navigate = use_navigate();
     Effect::new(move |_| {
-        if let Some(Ok(id)) = create_action.value().get() {
-            navigate(&format!("/games/{}", id), NavigateOptions::default());
+        if let Some(Ok(outcome)) = create_action.value().get() {
+            if let Some(gid) = outcome.game_id {
+                navigate(&format!("/games/{}", gid), NavigateOptions::default());
+            } else if let Some(pid) = outcome.proposal_id {
+                navigate(&format!("/invites/{}", pid), NavigateOptions::default());
+            }
         }
     });
 

@@ -120,7 +120,14 @@ mod ssr {
         let _ws_guard = WsConnectionGuard::new();
         let (mut sender, mut receiver) = socket.split();
 
-        let mut subscriber = match broadcaster.client.subscribe("game.>").await {
+        let mut game_sub = match broadcaster.client.subscribe("game.>").await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("NATS subscribe failed: {}", e);
+                return;
+            }
+        };
+        let mut proposal_sub = match broadcaster.client.subscribe("proposal.>").await {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!("NATS subscribe failed: {}", e);
@@ -142,7 +149,20 @@ mod ssr {
 
         loop {
             tokio::select! {
-                msg = subscriber.next() => {
+                msg = game_sub.next() => {
+                    let msg = match msg {
+                        Some(m) => m,
+                        None => break,
+                    };
+                    let payload = match std::str::from_utf8(&msg.payload) {
+                        Ok(p) => p.to_string(),
+                        Err(_) => continue,
+                    };
+                    if sender.send(Message::Text(payload.into())).await.is_err() {
+                        break;
+                    }
+                }
+                msg = proposal_sub.next() => {
                     let msg = match msg {
                         Some(m) => m,
                         None => break,
