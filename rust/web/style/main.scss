@@ -891,6 +891,59 @@ body {
   margin: 0.4em 0;
 }
 
+/* #29 player history page */
+.player-history .table-scroll {
+  overflow-x: auto;
+}
+
+.player-history table {
+  border-collapse: collapse;
+}
+
+.player-history th,
+.player-history td {
+  text-align: right;
+  padding: 0.2em 0.63em;
+  border-bottom: 1px solid var(--mk-soften-foreground-90);
+  white-space: nowrap;
+}
+
+.player-history th:first-child,
+.player-history td:first-child {
+  text-align: left;
+}
+
+.player-history .rating-change-up {
+  color: var(--mk-green);
+}
+
+.player-history .rating-change-down {
+  color: var(--mk-red);
+}
+
+.player-history .rating-change-none {
+  color: var(--mk-blue);
+}
+
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  align-items: center;
+  margin: 0.4em 0;
+}
+
+.history-filter-selected {
+  font-weight: bold;
+}
+
+.history-pagination {
+  display: flex;
+  gap: 0.5em;
+  align-items: center;
+  margin: 0.5em 0;
+}
+
 .admin input,
 .admin select {
   max-width: 100%;

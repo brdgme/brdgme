@@ -1,6 +1,7 @@
 use anyhow::Result;
 use sqlx::PgPool;
 use std::collections::HashMap;
+use time::PrimitiveDateTime;
 use uuid::Uuid;
 
 pub async fn get_profile_user(pool: &PgPool, name: &str) -> Result<Option<super::ProfileUser>> {
@@ -192,39 +193,49 @@ pub async fn rating_series(
         .collect())
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct OpponentRow {
+    game_id: Uuid,
+    user_id: Option<Uuid>,
+    name: String,
+    place: Option<i32>,
+}
+
 /// Other seats (not `user_id`'s own) for each game in `game_ids`, grouped by
 /// game id and ordered by seat position within each game.
 async fn opponents_by_game(
     pool: &PgPool,
     game_ids: &[Uuid],
     user_id: Uuid,
-) -> Result<HashMap<Uuid, Vec<super::Opponent>>> {
-    let rows = sqlx::query!(
+) -> Result<HashMap<Uuid, Vec<super::OpponentWithPlace>>> {
+    let rows: Vec<OpponentRow> = sqlx::query_as(
         r#"
         SELECT
             gp.game_id,
-            u.id AS "user_id?",
-            COALESCE(u.name, gb.name, 'Bot') AS "name!"
+            u.id AS user_id,
+            COALESCE(u.name, gb.name, 'Bot') AS name,
+            gp.place AS place
         FROM game_players gp
         LEFT JOIN users u ON u.id = gp.user_id
         LEFT JOIN game_bots gb ON gb.id = gp.game_bot_id
         WHERE gp.game_id = ANY($1) AND gp.user_id IS DISTINCT FROM $2
         ORDER BY gp.game_id, gp.position
         "#,
-        game_ids,
-        user_id
     )
+    .bind(game_ids)
+    .bind(user_id)
     .fetch_all(pool)
     .await?;
 
-    let mut by_game: HashMap<Uuid, Vec<super::Opponent>> = HashMap::new();
+    let mut by_game: HashMap<Uuid, Vec<super::OpponentWithPlace>> = HashMap::new();
     for row in rows {
         by_game
             .entry(row.game_id)
             .or_default()
-            .push(super::Opponent {
+            .push(super::OpponentWithPlace {
                 user_id: row.user_id,
                 name: row.name,
+                place: row.place,
             });
     }
     Ok(by_game)
@@ -284,7 +295,15 @@ pub async fn finished_games(
             place: row.place,
             player_count: row.player_count,
             rating_change: row.rating_change,
-            opponents: opponents.remove(&row.game_id).unwrap_or_default(),
+            opponents: opponents
+                .remove(&row.game_id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|o| super::Opponent {
+                    user_id: o.user_id,
+                    name: o.name,
+                })
+                .collect(),
         })
         .collect())
 }
@@ -322,10 +341,136 @@ pub async fn active_games(pool: &PgPool, user_id: Uuid) -> Result<Vec<super::Act
             game_id: row.game_id,
             game_type_name: row.game_type_name,
             is_turn: row.is_turn,
-            opponents: opponents.remove(&row.game_id).unwrap_or_default(),
+            opponents: opponents
+                .remove(&row.game_id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|o| super::Opponent {
+                    user_id: o.user_id,
+                    name: o.name,
+                })
+                .collect(),
             updated_at: row.updated_at,
         })
         .collect())
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct GameHistoryRow {
+    game_id: Uuid,
+    game_type_name: String,
+    is_finished: bool,
+    started_at: PrimitiveDateTime,
+    finished_at: Option<PrimitiveDateTime>,
+    my_place: Option<i32>,
+    my_rating_change: Option<i32>,
+    player_count: i64,
+    match_min: Option<i32>,
+    match_max: Option<i32>,
+    match_avg: Option<i32>,
+}
+
+pub async fn game_history(
+    pool: &PgPool,
+    user_id: Uuid,
+    status: Option<bool>,
+    game_type: Option<&str>,
+    include_single_human: bool,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<super::HistoryRow>> {
+    let rows: Vec<GameHistoryRow> = sqlx::query_as(
+        r#"
+        SELECT g.id AS game_id, gt.name AS game_type_name, g.is_finished AS is_finished,
+               g.created_at AS started_at, g.finished_at AS finished_at,
+               gp.place AS my_place, gp.rating_change AS my_rating_change,
+               (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
+               (SELECT min(r.rating_before) FROM game_players r WHERE r.game_id = g.id AND r.rating_before IS NOT NULL) AS match_min,
+               (SELECT max(r.rating_before) FROM game_players r WHERE r.game_id = g.id AND r.rating_before IS NOT NULL) AS match_max,
+               (SELECT avg(r.rating_before)::int FROM game_players r WHERE r.game_id = g.id AND r.rating_before IS NOT NULL) AS match_avg
+        FROM game_players gp
+        JOIN games g          ON g.id = gp.game_id
+        JOIN game_versions gv ON gv.id = g.game_version_id
+        JOIN game_types gt    ON gt.id = gv.game_type_id
+        WHERE gp.user_id = $1
+          AND ($2::boolean IS NULL OR g.is_finished = $2)
+          AND ($3::text    IS NULL OR gt.name = $3)
+          AND (SELECT count(*) FROM game_players gp3 WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL) >= CASE WHEN $4 THEN 1 ELSE 2 END
+        ORDER BY g.created_at DESC, g.id
+        LIMIT $5::bigint OFFSET $6::bigint
+        "#,
+    )
+    .bind(user_id)
+    .bind(status)
+    .bind(game_type)
+    .bind(include_single_human)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let game_ids: Vec<Uuid> = rows.iter().map(|row| row.game_id).collect();
+    let mut opponents = opponents_by_game(pool, &game_ids, user_id).await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let match_elo = match (row.match_min, row.match_max, row.match_avg) {
+                (Some(mn), Some(mx), Some(av)) => Some(super::MatchElo {
+                    min: mn,
+                    max: mx,
+                    avg: av,
+                }),
+                _ => None,
+            };
+            super::HistoryRow {
+                game_id: row.game_id,
+                game_type_name: row.game_type_name,
+                is_finished: row.is_finished,
+                started_at: row.started_at,
+                finished_at: row.finished_at,
+                my_place: row.my_place,
+                player_count: row.player_count,
+                my_rating_change: row.my_rating_change,
+                opponents: opponents.remove(&row.game_id).unwrap_or_default(),
+                match_elo,
+            }
+        })
+        .collect())
+}
+
+pub async fn game_history_count(
+    pool: &PgPool,
+    user_id: Uuid,
+    status: Option<bool>,
+    game_type: Option<&str>,
+    include_single_human: bool,
+) -> Result<i64> {
+    let (count,): (i64,) = sqlx::query_as(
+        r#"
+        SELECT count(*)
+        FROM game_players gp
+        JOIN games g          ON g.id = gp.game_id
+        JOIN game_versions gv ON gv.id = g.game_version_id
+        JOIN game_types gt    ON gt.id = gv.game_type_id
+        WHERE gp.user_id = $1
+          AND ($2::boolean IS NULL OR g.is_finished = $2)
+          AND ($3::text    IS NULL OR gt.name = $3)
+          AND (SELECT count(*) FROM game_players gp3 WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL) >= CASE WHEN $4 THEN 1 ELSE 2 END
+        "#,
+    )
+    .bind(user_id)
+    .bind(status)
+    .bind(game_type)
+    .bind(include_single_human)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count)
 }
 
 pub async fn head_to_head(
@@ -1612,5 +1757,320 @@ mod tests {
         let alice_results = form.get(&alice).expect("alice present");
         assert_eq!(alice_results.len(), 1);
         assert_eq!(alice_results[0].game_id, g2);
+    }
+
+    #[sqlx::test]
+    async fn game_history_pages_by_created_at_desc(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let g1 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+        let g2 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(2), None), (Some(opponent), Some(1), None)],
+        )
+        .await;
+        let g3 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-03 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        sqlx::query("UPDATE games SET created_at = $1 WHERE id = $2")
+            .bind(datetime!(2026-01-01 00:00:00))
+            .bind(g1)
+            .execute(&pool)
+            .await
+            .expect("set g1 created_at");
+        sqlx::query("UPDATE games SET created_at = $1 WHERE id = $2")
+            .bind(datetime!(2026-01-02 00:00:00))
+            .bind(g2)
+            .execute(&pool)
+            .await
+            .expect("set g2 created_at");
+        sqlx::query("UPDATE games SET created_at = $1 WHERE id = $2")
+            .bind(datetime!(2026-01-03 00:00:00))
+            .bind(g3)
+            .execute(&pool)
+            .await
+            .expect("set g3 created_at");
+
+        let page1 = game_history(&pool, user, None, None, true, 2, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(page1.len(), 2);
+        assert_eq!(page1[0].game_id, g3);
+        assert_eq!(page1[1].game_id, g2);
+
+        let page2 = game_history(&pool, user, None, None, true, 2, 2)
+            .await
+            .expect("query ok");
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2[0].game_id, g1);
+
+        let mut all_ids: Vec<Uuid> = page1
+            .iter()
+            .chain(page2.iter())
+            .map(|r| r.game_id)
+            .collect();
+        all_ids.sort();
+        let mut expected = vec![g1, g2, g3];
+        expected.sort();
+        assert_eq!(all_ids, expected);
+    }
+
+    #[sqlx::test]
+    async fn game_history_status_filter(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let finished = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+        let active = insert_unfinished_game(
+            &pool,
+            gv,
+            &[(Some(user), None, None), (Some(opponent), None, None)],
+        )
+        .await;
+
+        let only_finished = game_history(&pool, user, Some(true), None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(only_finished.len(), 1);
+        assert_eq!(only_finished[0].game_id, finished);
+        assert!(only_finished[0].is_finished);
+
+        let only_active = game_history(&pool, user, Some(false), None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(only_active.len(), 1);
+        assert_eq!(only_active[0].game_id, active);
+        assert!(!only_active[0].is_finished);
+
+        let all = game_history(&pool, user, None, None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(all.len(), 2);
+    }
+
+    #[sqlx::test]
+    async fn game_history_game_type_filter(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt1, gv1) = make_game_type(&pool, "Camel Up").await;
+        let (_gt2, gv2) = make_game_type(&pool, "Duel").await;
+
+        let camel_game = insert_finished_game(
+            &pool,
+            gv1,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+        insert_finished_game(
+            &pool,
+            gv2,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        let camel_only = game_history(&pool, user, None, Some("Camel Up"), true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(camel_only.len(), 1);
+        assert_eq!(camel_only[0].game_id, camel_game);
+        assert_eq!(camel_only[0].game_type_name, "Camel Up");
+
+        let all = game_history(&pool, user, None, None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(all.len(), 2);
+    }
+
+    #[sqlx::test]
+    async fn game_history_count_matches_rows(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(2), None), (Some(opponent), Some(1), None)],
+        )
+        .await;
+        insert_unfinished_game(
+            &pool,
+            gv,
+            &[(Some(user), None, None), (Some(opponent), None, None)],
+        )
+        .await;
+
+        let count_all = game_history_count(&pool, user, None, None, true)
+            .await
+            .expect("query ok");
+        assert_eq!(count_all, 3);
+
+        let count_finished = game_history_count(&pool, user, Some(true), None, true)
+            .await
+            .expect("query ok");
+        assert_eq!(count_finished, 2);
+
+        let rows = game_history(&pool, user, None, None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(rows.len() as i64, count_all);
+    }
+
+    #[sqlx::test]
+    async fn game_history_include_single_human_filter(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let bot_game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), Some(16)), (None, Some(2), Some(-16))],
+        )
+        .await;
+        let human_game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        let excluding = game_history(&pool, user, None, None, false, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(excluding.len(), 1);
+        assert_eq!(excluding[0].game_id, human_game);
+
+        let including = game_history(&pool, user, None, None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(including.len(), 2);
+        assert!(including.iter().any(|r| r.game_id == bot_game));
+    }
+
+    #[sqlx::test]
+    async fn game_history_opponents_carry_placing(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(user), Some(1), Some(16)),
+                (Some(opponent), Some(2), Some(-16)),
+            ],
+        )
+        .await;
+
+        let rows = game_history(&pool, user, None, None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].opponents.len(), 1);
+        assert_eq!(rows[0].opponents[0].user_id, Some(opponent));
+        assert_eq!(rows[0].opponents[0].name, "bob");
+        assert_eq!(rows[0].opponents[0].place, Some(2));
+    }
+
+    #[sqlx::test]
+    async fn game_history_match_elo_aggregate(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let rated_game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(alice), Some(1), Some(16)),
+                (Some(bob), Some(2), Some(-16)),
+            ],
+        )
+        .await;
+
+        sqlx::query(
+            "UPDATE game_players SET rating_before = $1 WHERE game_id = $2 AND user_id = $3",
+        )
+        .bind(1200)
+        .bind(rated_game)
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .expect("set alice rating_before");
+        sqlx::query(
+            "UPDATE game_players SET rating_before = $1 WHERE game_id = $2 AND user_id = $3",
+        )
+        .bind(1300)
+        .bind(rated_game)
+        .bind(bob)
+        .execute(&pool)
+        .await
+        .expect("set bob rating_before");
+
+        let unrated_game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+
+        let rows = game_history(&pool, alice, None, None, true, 50, 0)
+            .await
+            .expect("query ok");
+        assert_eq!(rows.len(), 2);
+
+        let rated_row = rows
+            .iter()
+            .find(|r| r.game_id == rated_game)
+            .expect("rated");
+        let elo = rated_row.match_elo.as_ref().expect("match_elo present");
+        assert_eq!(elo.min, 1200);
+        assert_eq!(elo.max, 1300);
+        assert_eq!(elo.avg, 1250);
+
+        let unrated_row = rows
+            .iter()
+            .find(|r| r.game_id == unrated_game)
+            .expect("unrated");
+        assert_eq!(unrated_row.match_elo, None);
     }
 }

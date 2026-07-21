@@ -1079,6 +1079,39 @@ async fn deep_dive_page_head_to_head_rows_render(pool: PgPool) {
     );
 }
 
+#[sqlx::test]
+async fn history_page_renders_games_placings_and_pagination(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "History Page Game").await;
+    let user_a = make_user(&pool, "history-player-a").await;
+    let user_b = make_user(&pool, "history-player-b").await;
+
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) =
+        get(app, &format!("/players/{}/history", user_a.name), None).await;
+
+    assert_clean_html_body(status, &content_type, &body, "player-history");
+    assert!(
+        body.contains("1st of 2"),
+        "expected viewer placing in body: {body}"
+    );
+    assert!(
+        body.contains("/games/"),
+        "expected clickable game link in body: {body}"
+    );
+    assert!(
+        body.contains("Page 1 of 1"),
+        "expected pagination marker in body: {body}"
+    );
+}
+
 // --- admin export route (#34, spec D4) ---
 
 #[sqlx::test]

@@ -48,6 +48,51 @@ pub struct Opponent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpponentWithPlace {
+    pub user_id: Option<Uuid>,
+    pub name: String,
+    pub place: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatchElo {
+    pub min: i32,
+    pub max: i32,
+    pub avg: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryRow {
+    pub game_id: Uuid,
+    pub game_type_name: String,
+    pub is_finished: bool,
+    pub started_at: PrimitiveDateTime,
+    pub finished_at: Option<PrimitiveDateTime>,
+    pub my_place: Option<i32>,
+    pub player_count: i64,
+    pub my_rating_change: Option<i32>,
+    pub opponents: Vec<OpponentWithPlace>,
+    pub match_elo: Option<MatchElo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryFilters {
+    pub status: Option<bool>,
+    pub game_type: Option<String>,
+    pub include_single_human: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlayerHistoryData {
+    pub user: ProfileUser,
+    pub rows: Vec<HistoryRow>,
+    pub page: i64,
+    pub page_size: i64,
+    pub total: i64,
+    pub filters: HistoryFilters,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FinishedGameRow {
     pub game_id: Uuid,
     pub game_type_name: String,
@@ -246,5 +291,63 @@ pub async fn get_player_game_type_stats(
         rating_series,
         finished_games,
         head_to_head,
+    }))
+}
+
+#[server(GetPlayerHistory, "/api")]
+pub async fn get_player_history(
+    name: String,
+    page: i64,
+    status: Option<bool>,
+    game_type: Option<String>,
+    include_single_human: bool,
+) -> Result<Option<PlayerHistoryData>, ServerFnError> {
+    use sqlx::PgPool;
+    let pool = expect_context::<PgPool>();
+
+    let user = match get_profile_user(&pool, &name)
+        .await
+        .map_err(internal("get_player_history: find user"))?
+    {
+        Some(user) => user,
+        None => return Ok(None),
+    };
+
+    let page_size: i64 = 50;
+    let page = page.max(1);
+    let offset = (page - 1) * page_size;
+
+    let total = game_history_count(
+        &pool,
+        user.user_id,
+        status,
+        game_type.as_deref(),
+        include_single_human,
+    )
+    .await
+    .map_err(internal("get_player_history: count"))?;
+    let rows = game_history(
+        &pool,
+        user.user_id,
+        status,
+        game_type.as_deref(),
+        include_single_human,
+        page_size,
+        offset,
+    )
+    .await
+    .map_err(internal("get_player_history: rows"))?;
+
+    Ok(Some(PlayerHistoryData {
+        user,
+        rows,
+        page,
+        page_size,
+        total,
+        filters: HistoryFilters {
+            status,
+            game_type,
+            include_single_human,
+        },
     }))
 }

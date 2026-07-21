@@ -87,6 +87,63 @@ fn opponents_view(opponents: Vec<crate::stats::Opponent>) -> impl IntoView {
     view! { <span>{items}</span> }
 }
 
+/// Like [`opponents_view`] but appends each opponent's placing, e.g.
+/// "name (2nd)"; the placing is rendered only when present.
+fn opponents_with_place_view(opponents: Vec<crate::stats::OpponentWithPlace>) -> impl IntoView {
+    let items = opponents
+        .into_iter()
+        .enumerate()
+        .map(|(i, o)| {
+            let prefix = if i > 0 { ", " } else { "" };
+            let placing = o
+                .place
+                .map(|p| format!(" ({}{})", p, ordinal_suffix(p)))
+                .unwrap_or_default();
+            let name = match o.user_id {
+                Some(_) => {
+                    let href = format!("/players/{}", encode_path_segment(&o.name));
+                    view! { <A href=href>{o.name.clone()}</A> }.into_any()
+                }
+                None => view! { {o.name.clone()} }.into_any(),
+            };
+            view! { <span>{prefix}{name}{placing}</span> }
+        })
+        .collect_view();
+    view! { <span>{items}</span> }
+}
+
+/// Builds a `/players/:name/history` href from the given filters, omitting
+/// any param that is unset. `page` is omitted when `None` or `<= 1`.
+fn history_href(
+    enc_name: &str,
+    status: Option<bool>,
+    game_type: Option<&str>,
+    bots: bool,
+    page: Option<i64>,
+) -> String {
+    let mut params: Vec<String> = Vec::new();
+    match status {
+        Some(true) => params.push("status=finished".to_string()),
+        Some(false) => params.push("status=active".to_string()),
+        None => {}
+    }
+    if let Some(t) = game_type {
+        params.push(format!("type={}", encode_path_segment(t)));
+    }
+    if bots {
+        params.push("bots=1".to_string());
+    }
+    if let Some(p) = page.filter(|p| *p > 1) {
+        params.push(format!("page={p}"));
+    }
+    let mut href = format!("/players/{enc_name}/history");
+    if !params.is_empty() {
+        href.push('?');
+        href.push_str(&params.join("&"));
+    }
+    href
+}
+
 /// A placing-distribution histogram for one player-count bucket ("2
 /// players" / "3 players" / "4+ players").
 #[derive(Debug, Clone, PartialEq)]
@@ -675,6 +732,204 @@ pub fn PlayerGameTypePage() -> impl IntoView {
                                             }.into_any()
                                         }}
                                     </section>
+                                </div>
+                            }.into_any()
+                        }
+                    })
+                }}
+            </Suspense>
+        </MainLayout>
+    }
+}
+
+#[component]
+pub fn PlayerHistoryPage() -> impl IntoView {
+    use crate::components::layout::MainLayout;
+
+    let params = leptos_router::hooks::use_params_map();
+    let query = leptos_router::hooks::use_query_map();
+    let history = Resource::new_blocking(
+        move || {
+            let p = params.get();
+            let q = query.get();
+            let name = p.get("name").unwrap_or_default();
+            let page: i64 = q.get("page").as_deref().unwrap_or("1").parse().unwrap_or(1);
+            let page = page.max(1);
+            let status = match q.get("status").as_deref() {
+                Some("finished") => Some(true),
+                Some("active") => Some(false),
+                _ => None,
+            };
+            let game_type = q.get("type").filter(|s| !s.is_empty());
+            let include_single_human = q.get("bots").as_deref() == Some("1");
+            (name, page, status, game_type, include_single_human)
+        },
+        |(name, page, status, game_type, include_single_human)| async move {
+            crate::stats::get_player_history(name, page, status, game_type, include_single_human)
+                .await
+        },
+    );
+
+    view! {
+        <MainLayout>
+            <Suspense fallback=|| view! { <div></div> }>
+                {move || {
+                    let data = history.get();
+                    data.map(|res| match res {
+                        Err(e) => view! {
+                            <div class="error">"Error: " {e.to_string()}</div>
+                        }.into_any(),
+                        Ok(None) => view! {
+                            <div class="player-history content-page">
+                                <h1>"Player not found"</h1>
+                                <p>"No such player."</p>
+                            </div>
+                        }.into_any(),
+                        Ok(Some(d)) => {
+                            let enc_name = encode_path_segment(&d.user.name);
+                            let cur_status = d.filters.status;
+                            let cur_type = d.filters.game_type.clone();
+                            let bots = d.filters.include_single_human;
+
+                            let back_href = {
+                                let mut h = format!("/players/{}", enc_name);
+                                if bots {
+                                    h.push_str("?bots=1");
+                                }
+                                h
+                            };
+
+                            let all_href = history_href(&enc_name, None, cur_type.as_deref(), bots, None);
+                            let finished_href = history_href(&enc_name, Some(true), cur_type.as_deref(), bots, None);
+                            let active_href = history_href(&enc_name, Some(false), cur_type.as_deref(), bots, None);
+                            let is_all = cur_status.is_none();
+                            let is_finished = cur_status == Some(true);
+                            let is_active = cur_status == Some(false);
+
+                            let bots_href = history_href(
+                                &enc_name,
+                                cur_status,
+                                cur_type.as_deref(),
+                                !bots,
+                                None,
+                            );
+
+                            let total_pages = ((d.total + d.page_size - 1) / d.page_size).max(1);
+                            let prev_href = history_href(
+                                &enc_name,
+                                cur_status,
+                                cur_type.as_deref(),
+                                bots,
+                                Some(d.page - 1),
+                            );
+                            let next_href = history_href(
+                                &enc_name,
+                                cur_status,
+                                cur_type.as_deref(),
+                                bots,
+                                Some(d.page + 1),
+                            );
+                            let hide_prev = d.page <= 1;
+                            let hide_next = d.page >= total_pages;
+
+                            let rows = d.rows.clone();
+                            let chip = d.filters.game_type.clone();
+
+                            view! {
+                                <div class="player-history content-page">
+                                    <p class="profile-back-link">
+                                        <A href=back_href>{format!("< back to {}", d.user.name)}</A>
+                                    </p>
+                                    <header class="profile-header">
+                                        <h1>{d.user.name.clone()} " - history"</h1>
+                                    </header>
+                                    <div class="history-filters">
+                                        <A href=all_href class:history-filter-selected=is_all>"All"</A>
+                                        <A href=finished_href class:history-filter-selected=is_finished>"Finished"</A>
+                                        <A href=active_href class:history-filter-selected=is_active>"Active"</A>
+                                        <A href=bots_href>
+                                            {if bots {
+                                                "Showing bot-only games - exclude them"
+                                            } else {
+                                                "Include bot-only games"
+                                            }}
+                                        </A>
+                                        {chip.map(|gt| {
+                                            let clear_href = history_href(&enc_name, cur_status, None, bots, None);
+                                            view! {
+                                                <span class="history-filter-chip">
+                                                    {format!("Filtered: {}", gt)} " "
+                                                    <A href=clear_href>"clear"</A>
+                                                </span>
+                                            }
+                                        })}
+                                    </div>
+                                    {if rows.is_empty() {
+                                        view! {
+                                            <p class="profile-no-games">"No games yet."</p>
+                                        }.into_any()
+                                    } else {
+                                        let table_rows = rows.into_iter().map(|row| {
+                                            let game_href = format!("/games/{}", row.game_id);
+                                            let opponents = opponents_with_place_view(row.opponents);
+                                            let placing = format_placing(row.my_place, row.player_count);
+                                            let match_elo = match row.match_elo {
+                                                Some(e) => format!("{}/{}/{}", e.min, e.max, e.avg),
+                                                None => "-".to_string(),
+                                            };
+                                            let rating = match row.my_rating_change {
+                                                None => view! { "-" }.into_any(),
+                                                Some(n) if n > 0 => view! {
+                                                    <span class="rating-change-up">{format!("+{n}")}</span>
+                                                }.into_any(),
+                                                Some(n) if n < 0 => view! {
+                                                    <span class="rating-change-down">{n.to_string()}</span>
+                                                }.into_any(),
+                                                Some(_) => view! {
+                                                    <span class="rating-change-none">"0"</span>
+                                                }.into_any(),
+                                            };
+                                            let started = row.started_at.date().to_string();
+                                            let ended = row
+                                                .finished_at
+                                                .map(|t| t.date().to_string())
+                                                .unwrap_or_else(|| "-".to_string());
+                                            view! {
+                                                <tr>
+                                                    <td><A href=game_href>{row.game_type_name.clone()}</A></td>
+                                                    <td>{opponents}</td>
+                                                    <td>{placing}</td>
+                                                    <td>{match_elo}</td>
+                                                    <td>{rating}</td>
+                                                    <td>{started}</td>
+                                                    <td>{ended}</td>
+                                                </tr>
+                                            }
+                                        }).collect_view();
+                                        view! {
+                                            <div class="table-scroll">
+                                                <table>
+                                                    <thead>
+                                                        <tr>
+                                                            <th>"Game"</th>
+                                                            <th>"Opponents"</th>
+                                                            <th>"Placing"</th>
+                                                            <th>"Match ELO"</th>
+                                                            <th>"Rating"</th>
+                                                            <th>"Started"</th>
+                                                            <th>"Ended"</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>{table_rows}</tbody>
+                                                </table>
+                                            </div>
+                                        }.into_any()
+                                    }}
+                                    <div class="history-pagination">
+                                        <span hidden=hide_prev><A href=prev_href>"Prev"</A></span>
+                                        <span>{format!("Page {} of {}", d.page, total_pages)}</span>
+                                        <span hidden=hide_next><A href=next_href>"Next"</A></span>
+                                    </div>
                                 </div>
                             }.into_any()
                         }
