@@ -10,9 +10,9 @@ use uuid::Uuid;
 use crate::error::internal;
 
 pub const INVITE_POLICIES: [(&str, &str); 3] = [
-    ("open", "Anyone can add me to a game"),
-    ("friends", "Only friends can add me to a game"),
-    ("none", "Nobody can add me to a game"),
+    ("open", "Anyone can invite me to a game"),
+    ("friends", "Only friends can invite me to a game"),
+    ("none", "Nobody can invite me to a game"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -409,7 +409,7 @@ pub fn FriendsPage() -> impl IntoView {
                                             <a href="#" on:click=move |ev| {
                                                 ev.prevent_default();
                                                 let confirmed = web_sys::window()
-                                                    .and_then(|w| w.confirm_with_message("Decline and block? They will no longer be able to send you friend requests or add you to games.").ok())
+                                                    .and_then(|w| w.confirm_with_message("Decline and block? They will no longer be able to send you friend requests or invite you to games.").ok())
                                                     .unwrap_or(false);
                                                 if confirmed {
                                                     respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: false, block: true });
@@ -503,7 +503,7 @@ pub fn FriendsPage() -> impl IntoView {
                         </section>
 
                         <section class="friends-policy">
-                            <h2>"Who can add me to games"</h2>
+                            <h2>"Who can invite me to games"</h2>
                             <select on:change=move |ev| {
                                 policy_action.dispatch(SetInvitePolicy { policy: event_target_value(&ev) });
                             }>
