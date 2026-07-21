@@ -216,8 +216,16 @@ async fn publish_bot_turns(
                 continue;
             }
         };
+        let mut headers = async_nats::HeaderMap::new();
+        sentry::configure_scope(|scope| {
+            if let Some(span) = scope.get_span() {
+                for (k, v) in span.iter_headers() {
+                    headers.insert(k, v);
+                }
+            }
+        });
         match jetstream
-            .publish(crate::nats::SUBJECT_TURN, payload.into())
+            .publish_with_headers(crate::nats::SUBJECT_TURN, headers, payload.into())
             .await
         {
             // The outer `.await` only confirms the message was sent; the
@@ -523,6 +531,7 @@ mod tests {
                 bot_slots: &[],
                 chat_id: None,
                 game_state: "initial_state",
+                all_accepted: false,
             },
         )
         .await
@@ -552,6 +561,7 @@ mod tests {
                 }],
                 chat_id: None,
                 game_state: "initial_state",
+                all_accepted: false,
             },
         )
         .await
