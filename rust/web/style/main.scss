@@ -656,17 +656,11 @@ body {
   font-weight: 700;
 }
 
-.form-strip .form-win {
-  color: var(--mk-green);
-}
-
-.form-strip .form-loss {
-  color: var(--mk-red);
-}
-
-.form-strip .form-none {
-  color: var(--mk-blue);
-}
+.form-strip .form-gold   { color: var(--mk-yellow); }
+.form-strip .form-silver { color: var(--mk-grey); }
+.form-strip .form-bronze { color: var(--mk-red); }
+.form-strip .form-other  { color: var(--mk-foreground); }
+.form-strip .form-none   { color: var(--mk-blue); }
 
 /* #44 new game page (spec 2026-07-19-new-game-page-design.md).
    Two-pane >= 60em: grid left, sticky setup panel right. Colors only via

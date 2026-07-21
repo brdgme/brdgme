@@ -39,25 +39,12 @@ pub fn Sparkline(values: Vec<f64>) -> impl IntoView {
     view! { <span class="sparkline">{text}</span> }
 }
 
-/// Selects the CSS class and single-character label for a form result cell.
-pub fn form_cell(place: Option<i32>, player_count: i64) -> (String, &'static str) {
+pub fn form_cell(place: Option<i32>) -> (String, &'static str) {
     match place {
-        Some(1) => {
-            let label = if player_count == 2 {
-                "W".to_string()
-            } else {
-                "1".to_string()
-            };
-            (label, "form-win")
-        }
-        Some(p) => {
-            let label = if player_count == 2 {
-                "L".to_string()
-            } else {
-                p.to_string()
-            };
-            (label, "form-loss")
-        }
+        Some(1) => ("1".to_string(), "form-gold"),
+        Some(2) => ("2".to_string(), "form-silver"),
+        Some(3) => ("3".to_string(), "form-bronze"),
+        Some(p) => (p.to_string(), "form-other"),
         None => ("-".to_string(), "form-none"),
     }
 }
@@ -69,7 +56,7 @@ pub fn FormStrip(results: Vec<FormResult>) -> impl IntoView {
             {results
                 .into_iter()
                 .map(|r| {
-                    let (label, class) = form_cell(r.place, r.player_count);
+                    let (label, class) = form_cell(r.place);
                     view! { <span class=class>{label}</span> }
                 })
                 .collect_view()}
@@ -313,27 +300,27 @@ mod tests {
     }
 
     #[test]
-    fn form_cell_win_two_player() {
-        assert_eq!(form_cell(Some(1), 2), ("W".to_string(), "form-win"));
+    fn form_cell_first_is_gold() {
+        assert_eq!(form_cell(Some(1)), ("1".to_string(), "form-gold"));
     }
 
     #[test]
-    fn form_cell_win_multiplayer() {
-        assert_eq!(form_cell(Some(1), 4), ("1".to_string(), "form-win"));
+    fn form_cell_second_is_silver() {
+        assert_eq!(form_cell(Some(2)), ("2".to_string(), "form-silver"));
     }
 
     #[test]
-    fn form_cell_loss_two_player() {
-        assert_eq!(form_cell(Some(2), 2), ("L".to_string(), "form-loss"));
+    fn form_cell_third_is_bronze() {
+        assert_eq!(form_cell(Some(3)), ("3".to_string(), "form-bronze"));
     }
 
     #[test]
-    fn form_cell_loss_multiplayer() {
-        assert_eq!(form_cell(Some(3), 4), ("3".to_string(), "form-loss"));
+    fn form_cell_fourth_and_beyond_is_other() {
+        assert_eq!(form_cell(Some(4)), ("4".to_string(), "form-other"));
     }
 
     #[test]
-    fn form_cell_none() {
-        assert_eq!(form_cell(None, 4), ("-".to_string(), "form-none"));
+    fn form_cell_none_is_dash() {
+        assert_eq!(form_cell(None), ("-".to_string(), "form-none"));
     }
 }

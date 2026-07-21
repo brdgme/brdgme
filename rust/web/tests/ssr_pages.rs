@@ -938,8 +938,8 @@ async fn players_page_form_strip_renders_in_game_types_table(pool: PgPool) {
 
     assert_clean_html_body(status, &content_type, &body, "form-strip");
     assert!(
-        body.contains("form-win") && body.contains("form-loss"),
-        "expected form-win/form-loss cells in body: {body}"
+        body.contains("form-gold") && body.contains("form-silver"),
+        "expected form-gold/form-silver cells in body: {body}"
     );
 }
 
