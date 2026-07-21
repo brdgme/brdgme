@@ -875,7 +875,7 @@ pub(crate) async fn start_proposal_tx(
 /// pending). With no human invitees (solo-vs-bots) it skips the proposal and
 /// creates the game directly.
 #[server(CreateProposal, "/api")]
-#[tracing::instrument(skip_all)]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all))]
 pub async fn create_proposal(
     game_version_id: Uuid,
     opponent_ids: Vec<Uuid>,
@@ -1034,7 +1034,7 @@ pub async fn create_proposal(
 /// terminal. On accept, when no human invitees remain pending the game starts
 /// automatically.
 #[server(RespondProposal, "/api")]
-#[tracing::instrument(skip_all, fields(proposal_id = %proposal_id))]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
 pub async fn respond_proposal(
     proposal_id: Uuid,
     accept: bool,
@@ -1138,7 +1138,7 @@ fn prospective_count(players: &[ProposalPlayer]) -> usize {
 /// Owner-only: resolve every pending slot per the supplied policies (drop or
 /// replace-with-bot), validate the final roster, and start the game early.
 #[server(StartProposalEarly, "/api")]
-#[tracing::instrument(skip_all, fields(proposal_id = %proposal_id))]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
 pub async fn start_proposal_early(
     proposal_id: Uuid,
     policies: Vec<SlotPolicy>,
@@ -1478,7 +1478,7 @@ pub async fn remove_proposal_slot(proposal_id: Uuid, player_id: Uuid) -> Result<
 /// Loads a proposal's full view: roster with resolved names, game-type/version
 /// names, valid player counts, and the caller's role.
 #[server(GetProposal, "/api")]
-#[tracing::instrument(skip_all, fields(proposal_id = %proposal_id))]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
 pub async fn get_proposal(proposal_id: Uuid) -> Result<ProposalView, ServerFnError> {
     use sqlx::PgPool;
 
