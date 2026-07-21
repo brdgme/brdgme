@@ -2006,11 +2006,11 @@ mod tests {
         let game_version_id = make_game_version(&pool).await;
 
         for opp in [opp1, opp2] {
-            crate::db::create_game_with_users(
+            let game = crate::db::create_game_with_users(
                 &pool,
                 crate::db::CreateGameOpts {
                     game_version_id,
-                    whose_turn: &[0],
+                    whose_turn: &[],
                     eliminated: &[],
                     placings: &[],
                     points: &[],
@@ -2025,12 +2025,19 @@ mod tests {
             )
             .await
             .unwrap();
+            sqlx::query!(
+                "UPDATE game_players SET is_turn = (user_id IS NOT NULL) WHERE game_id = $1",
+                game.id
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
         }
-        crate::db::create_game_with_users(
+        let game = crate::db::create_game_with_users(
             &pool,
             crate::db::CreateGameOpts {
                 game_version_id,
-                whose_turn: &[1],
+                whose_turn: &[],
                 eliminated: &[],
                 placings: &[],
                 points: &[],
@@ -2043,6 +2050,13 @@ mod tests {
                 all_accepted: false,
             },
         )
+        .await
+        .unwrap();
+        sqlx::query!(
+            "UPDATE game_players SET is_turn = (game_bot_id IS NOT NULL) WHERE game_id = $1",
+            game.id
+        )
+        .execute(&pool)
         .await
         .unwrap();
 
