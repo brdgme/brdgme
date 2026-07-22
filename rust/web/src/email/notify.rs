@@ -5,10 +5,10 @@
 //! logs-only - nothing here ever fails the game operation that triggered it.
 //! SSR-only like the rest of `email`.
 
-/// The per-player Reply-To address (`g-{token}@play.brdg.me`) the inbound
+/// The per-player Reply-To address (`g-{token}@brdg.me`) the inbound
 /// webhook routes on.
 pub fn reply_address(token: &str) -> String {
-    format!("g-{token}@play.brdg.me")
+    format!("g-{token}@brdg.me")
 }
 
 pub fn turn_header_text(player_name: &str) -> String {
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn reply_address_formats_token() {
-        assert_eq!(reply_address("tok"), "g-tok@play.brdg.me");
+        assert_eq!(reply_address("tok"), "g-tok@brdg.me");
     }
 
     #[test]

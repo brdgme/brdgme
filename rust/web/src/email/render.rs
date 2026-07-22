@@ -82,7 +82,7 @@ fn fallback_html(bg: &str, fg: &str, body: &str) -> String {
 /// via `palette_for_slug` + `player_for_slot`). `thread_id` is the Message-Id
 /// local part (e.g. "game-{id}", "proposal-{id}"); `is_first_message` selects
 /// Message-Id vs In-Reply-To+References; `reply_address` is the full Reply-To
-/// (e.g. "g-{token}@play.brdg.me").
+/// (e.g. "g-{token}@brdg.me").
 pub fn render_game_email(
     content: &EmailContent,
     palette: &Palette,
@@ -226,7 +226,7 @@ pub fn render_game_email(
     headers.insert("Reply-To".to_string(), reply_address.to_string());
     headers.insert(
         "List-Unsubscribe".to_string(),
-        "<mailto:unsubscribe@play.brdg.me?subject=unsubscribe>".to_string(),
+        "<mailto:unsubscribe@brdg.me?subject=unsubscribe>".to_string(),
     );
     headers.insert(
         "List-Unsubscribe-Post".to_string(),
@@ -309,7 +309,7 @@ mod tests {
             &two_players(&DRACULA),
             "game-abc",
             true,
-            "g-tok@play.brdg.me",
+            "g-tok@brdg.me",
         );
         assert!(!email.html.is_empty());
         assert!(email.html.contains("board-here"));
@@ -333,7 +333,7 @@ mod tests {
             &two_players(&DRACULA),
             "game-abc",
             true,
-            "g-tok@play.brdg.me",
+            "g-tok@brdg.me",
         );
         // A bare `<pre>` directly inside `<tbody>` is invalid HTML: mail
         // clients foster-parent it into the column's `font-size:0px` wrapper
@@ -372,7 +372,7 @@ mod tests {
             &two_players(&LIGHT),
             "game-abc",
             true,
-            "g-tok@play.brdg.me",
+            "g-tok@brdg.me",
         );
         assert!(!email.html.contains("Since last time:"));
         assert!(!email.html.contains("You can:"));
@@ -390,7 +390,7 @@ mod tests {
             &two_players(&DRACULA),
             "game-abc",
             true,
-            "g-tok@play.brdg.me",
+            "g-tok@brdg.me",
         );
         assert!(!email.text.contains(&DRACULA.green.hex()));
         assert!(!email.text.contains("<span"));
@@ -410,7 +410,7 @@ mod tests {
             &[],
             "game-abc",
             true,
-            "g-tok@play.brdg.me",
+            "g-tok@brdg.me",
         );
         assert_eq!(
             email.headers.get("Message-Id").map(String::as_str),
@@ -420,11 +420,11 @@ mod tests {
         assert_eq!(email.headers.get("References"), None);
         assert_eq!(
             email.headers.get("Reply-To").map(String::as_str),
-            Some("g-tok@play.brdg.me")
+            Some("g-tok@brdg.me")
         );
         assert_eq!(
             email.headers.get("List-Unsubscribe").map(String::as_str),
-            Some("<mailto:unsubscribe@play.brdg.me?subject=unsubscribe>")
+            Some("<mailto:unsubscribe@brdg.me?subject=unsubscribe>")
         );
         assert_eq!(
             email
@@ -443,7 +443,7 @@ mod tests {
             &[],
             "game-abc",
             false,
-            "g-tok@play.brdg.me",
+            "g-tok@brdg.me",
         );
         assert_eq!(email.headers.get("Message-Id"), None);
         assert_eq!(
@@ -464,7 +464,7 @@ mod tests {
             &[],
             "proposal-123",
             true,
-            "i-tok@play.brdg.me",
+            "i-tok@brdg.me",
         );
         assert_eq!(
             invite.headers.get("Message-Id").map(String::as_str),
@@ -472,7 +472,7 @@ mod tests {
         );
         assert_eq!(
             invite.headers.get("Reply-To").map(String::as_str),
-            Some("i-tok@play.brdg.me")
+            Some("i-tok@brdg.me")
         );
 
         let settings = render_game_email(
@@ -481,7 +481,7 @@ mod tests {
             &[],
             "settings-u1",
             false,
-            "s-tok@play.brdg.me",
+            "s-tok@brdg.me",
         );
         assert_eq!(
             settings.headers.get("In-Reply-To").map(String::as_str),
@@ -489,7 +489,7 @@ mod tests {
         );
         assert_eq!(
             settings.headers.get("Reply-To").map(String::as_str),
-            Some("s-tok@play.brdg.me")
+            Some("s-tok@brdg.me")
         );
     }
 }

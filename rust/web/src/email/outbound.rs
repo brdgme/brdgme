@@ -175,7 +175,8 @@ pub async fn try_send_rendered_email(
         return true;
     };
     axum_prometheus::metrics::counter!("game_emails_sent_total").increment(1);
-    let from_addr = std::env::var("EMAIL_FROM").unwrap_or_else(|_| "noreply@brdg.me".to_string());
+    let from_addr =
+        std::env::var("EMAIL_FROM").unwrap_or_else(|_| "brdg.me <mail@brdg.me>".to_string());
     let mut opts = resend_rs::types::CreateEmailBaseOptions::new(
         from_addr,
         [to.to_string()],
@@ -204,7 +205,7 @@ pub async fn send_rendered_email(
 }
 
 /// 32-char `[a-zA-Z0-9]` (url-safe) reply token for the per-player Reply-To
-/// address (`g-{token}@play.brdg.me`).
+/// address (`g-{token}@brdg.me`).
 fn generate_email_token() -> String {
     use rand::RngExt as _;
     rand::rng()

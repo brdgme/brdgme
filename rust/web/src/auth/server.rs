@@ -87,7 +87,8 @@ async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, to
     // the dev-mode logging fallback above which never touches Resend at all.
     axum_prometheus::metrics::counter!("login_emails_sent_total").increment(1);
 
-    let from_addr = std::env::var("EMAIL_FROM").unwrap_or_else(|_| "login@brdg.me".to_string());
+    let from_addr =
+        std::env::var("EMAIL_FROM").unwrap_or_else(|_| "brdg.me <mail@brdg.me>".to_string());
     let (text_body, html_body) = login_email_bodies(token);
     let email = resend_rs::types::CreateEmailBaseOptions::new(
         from_addr,

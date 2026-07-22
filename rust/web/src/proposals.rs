@@ -221,7 +221,7 @@ impl InviteMailer for RealInviteMailer {
                 &[],
                 &format!("proposal-{proposal_id}"),
                 true,
-                &format!("i-{token}@play.brdg.me"),
+                &format!("i-{token}@brdg.me"),
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
         });
@@ -265,7 +265,7 @@ impl InviteMailer for RealInviteMailer {
                 &[],
                 &format!("proposal-{proposal_id}"),
                 false,
-                &format!("i-{proposal_id}@play.brdg.me"),
+                &format!("i-{proposal_id}@brdg.me"),
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
         });
@@ -307,7 +307,7 @@ impl InviteMailer for RealInviteMailer {
                     &[],
                     &format!("proposal-{proposal_id}"),
                     false,
-                    &format!("i-{proposal_id}@play.brdg.me"),
+                    &format!("i-{proposal_id}@brdg.me"),
                 );
                 crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email)
                     .await;
@@ -355,7 +355,7 @@ impl InviteMailer for RealInviteMailer {
                     &[],
                     &format!("proposal-{proposal_id}"),
                     false,
-                    &format!("i-{proposal_id}@play.brdg.me"),
+                    &format!("i-{proposal_id}@brdg.me"),
                 );
                 crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email)
                     .await;

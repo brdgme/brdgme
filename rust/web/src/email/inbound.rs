@@ -783,10 +783,7 @@ async fn send_invite_reply_response(
         &[],
         &format!("proposal-{proposal_id}"),
         false,
-        &format!(
-            "i-{}@play.brdg.me",
-            player.email_token.as_deref().unwrap_or("")
-        ),
+        &format!("i-{}@brdg.me", player.email_token.as_deref().unwrap_or("")),
     );
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
@@ -901,7 +898,7 @@ async fn send_rules_reply_response(
     );
     headers.insert(
         "List-Unsubscribe".to_string(),
-        "<mailto:unsubscribe@play.brdg.me?subject=unsubscribe>".to_string(),
+        "<mailto:unsubscribe@brdg.me?subject=unsubscribe>".to_string(),
     );
     headers.insert(
         "List-Unsubscribe-Post".to_string(),
@@ -1021,7 +1018,7 @@ async fn send_settings_response(
         }
     };
     let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
-    let reply_address = format!("s-{user_id}@play.brdg.me");
+    let reply_address = format!("s-{user_id}@brdg.me");
     let thread_id = format!("settings-{user_id}");
     let content = crate::email::render::EmailContent {
         subject: "Your brdg.me settings".to_string(),
@@ -1105,7 +1102,7 @@ mod tests {
     #[test]
     fn parse_reply_address_game() {
         assert_eq!(
-            parse_reply_address("g-abc@play.brdg.me"),
+            parse_reply_address("g-abc@brdg.me"),
             Some(InboundRoute::Game("abc".to_string()))
         );
     }
@@ -1128,7 +1125,7 @@ mod tests {
 
     #[test]
     fn parse_reply_address_no_prefix() {
-        assert_eq!(parse_reply_address("hello@play.brdg.me"), None);
+        assert_eq!(parse_reply_address("hello@brdg.me"), None);
     }
 
     #[test]
@@ -1223,13 +1220,13 @@ Just a plain body";
 
     #[test]
     fn select_route_prefers_to_then_received_for() {
-        let to = vec!["g-aaa@play.brdg.me".to_string()];
-        let rf = vec!["g-bbb@play.brdg.me".to_string()];
+        let to = vec!["g-aaa@brdg.me".to_string()];
+        let rf = vec!["g-bbb@brdg.me".to_string()];
         assert_eq!(
             select_route(&to, &rf),
             Some(InboundRoute::Game("aaa".to_string()))
         );
-        let to2 = vec!["hello@play.brdg.me".to_string()];
+        let to2 = vec!["hello@brdg.me".to_string()];
         assert_eq!(
             select_route(&to2, &rf),
             Some(InboundRoute::Game("bbb".to_string()))
@@ -1238,7 +1235,7 @@ Just a plain body";
 
     #[test]
     fn select_route_none_when_unparseable() {
-        let to = vec!["nope@play.brdg.me".to_string()];
+        let to = vec!["nope@brdg.me".to_string()];
         let rf = vec!["also-nope@example.com".to_string()];
         assert_eq!(select_route(&to, &rf), None);
         assert_eq!(select_route(&[], &[]), None);
@@ -1247,11 +1244,11 @@ Just a plain body";
     #[test]
     fn select_route_routes_invite_and_settings() {
         assert_eq!(
-            select_route(&["i-xyz@play.brdg.me".to_string()], &[]),
+            select_route(&["i-xyz@brdg.me".to_string()], &[]),
             Some(InboundRoute::Invite("xyz".to_string()))
         );
         assert_eq!(
-            select_route(&[], &["s-tok@play.brdg.me".to_string()]),
+            select_route(&[], &["s-tok@brdg.me".to_string()]),
             Some(InboundRoute::Settings("tok".to_string()))
         );
     }
