@@ -73,7 +73,7 @@ fn render_block(markup: &str, players: &[Player], palette: &Palette) -> (String,
 
 fn fallback_html(bg: &str, fg: &str, body: &str) -> String {
     format!(
-        "<html><body style=\"background-color:{bg};\"><pre style=\"background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;white-space:pre-wrap;\">{body}</pre></body></html>",
+        "<html><body style=\"background-color:{bg};\"><pre style=\"background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;line-height:1.2em;white-space:pre;\">{body}</pre></body></html>",
     )
 }
 
@@ -160,6 +160,8 @@ pub fn render_game_email(
         body.push_str(&format!("<span style=\"color:{muted};\">{f}</span>"));
     }
 
+    let body = body.replace('\n', "<br>");
+
     // The board lives in a single `<pre>`. It must be wrapped in a real
     // `<tr><td>` cell: a bare `<pre>` as a direct child of `<tbody>` (what
     // `<mj-raw>` otherwise emits) is invalid HTML, so mail clients
@@ -168,7 +170,7 @@ pub fn render_game_email(
     // rules link) stay visible. The explicit `font-size` on the cell and the
     // `<pre>` is defence in depth against that 0px inheritance.
     let mjml = format!(
-        r#"<mjml><mj-body background-color="{bg}"><mj-section><mj-column><mj-raw><tr><td style="padding:0;font-size:13px;"><pre style="background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;font-size:13px;white-space:pre-wrap;padding:16px;margin:0;">{body}</pre></td></tr></mj-raw></mj-column></mj-section></mj-body></mjml>"#,
+        r#"<mjml><mj-body background-color="{bg}"><mj-section><mj-column><mj-raw><tr><td style="padding:0;font-size:13px;"><pre style="background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;font-size:13px;line-height:1.2em;white-space:pre;padding:16px;margin:0;">{body}</pre></td></tr></mj-raw></mj-column></mj-section></mj-body></mjml>"#,
     );
 
     let html = mrml::parse(&mjml)
@@ -351,6 +353,38 @@ mod tests {
         assert!(
             pre_tag.contains("font-size"),
             "<pre> must declare an explicit font-size so it does not inherit the column's 0px: {pre_tag}"
+        );
+    }
+
+    #[test]
+    fn render_game_email_html_uses_br_between_blocks() {
+        let email = render_game_email(
+            &full_content(),
+            &DRACULA,
+            &two_players(&DRACULA),
+            "game-abc",
+            true,
+            "g-tok@brdg.me",
+        );
+        assert!(
+            email.html.contains("It is your turn.<br /><br />"),
+            "header must be followed by <br /><br />: {}",
+            email.html
+        );
+        assert!(
+            email.html.contains("Since last time:</span><br />"),
+            "digest label must be followed by <br />: {}",
+            email.html
+        );
+        assert!(
+            email.html.contains("Bob moved e2-e4<br />"),
+            "digest line must end with <br />: {}",
+            email.html
+        );
+        assert!(
+            email.html.contains("You can:</span><br />"),
+            "you_can label must be followed by <br />: {}",
+            email.html
         );
     }
 
