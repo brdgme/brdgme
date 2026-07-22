@@ -123,6 +123,13 @@ impl Game {
         let mut parsers: Vec<Box<dyn Parser<T = Command>>> = vec![];
 
         if self.can_spend(player) {
+            let hand_cards: Vec<String> = self.boards[player]
+                .cards
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
             parsers.push(Box::new(Map::new(
                 Chain2::new(
                     Doc::name_desc(
@@ -130,7 +137,10 @@ impl Game {
                         "spend cards of a single currency to buy a tile, eg. spend r3 r4",
                         Token::new("spend"),
                     ),
-                    AfterSpace::new(Many::some_spaced(CardParser)),
+                    AfterSpace::new(Many::some_spaced(Map::new(
+                        Enum::exact(hand_cards),
+                        |s: String| Card::parse(&s).unwrap(),
+                    ))),
                 ),
                 |(_, cards): (String, Vec<Card>)| Command::Spend { cards },
             )));
