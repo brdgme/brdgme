@@ -21,6 +21,31 @@ pub fn render_dice(dice: &[Die], delim: &str) -> N {
     N::Group(nodes)
 }
 
+fn scoring_table() -> Vec<Row> {
+    let mut table: Vec<Row> = vec![vec![
+        (A::Left, vec![N::Bold(vec![N::text("Combination")])]),
+        (A::Right, vec![N::Bold(vec![N::text("Points")])]),
+    ]];
+    let entries: &[(&str, i32)] = &[
+        ("Six of any", 5000),
+        ("Four Ds", 1000),
+        ("Straight ($GeEeD)", 1000),
+        ("Three $", 600),
+        ("Three G", 500),
+        ("Three R", 400),
+        ("Three E/e", 300),
+        ("Single D", 100),
+        ("Single G", 50),
+    ];
+    for (name, pts) in entries {
+        table.push(vec![
+            (A::Left, vec![N::text(*name)]),
+            (A::Right, vec![N::text(pts.to_string())]),
+        ]);
+    }
+    table
+}
+
 impl Renderer for PubState {
     fn render(&self) -> Vec<N> {
         let mut out: Vec<N> = vec![];
@@ -55,6 +80,9 @@ impl Renderer for PubState {
             ]);
         }
         out.push(table_with_gap(&rows, 1));
+
+        out.push(N::text("\n\n"));
+        out.push(table_with_gap(&scoring_table(), 2));
 
         out
     }
