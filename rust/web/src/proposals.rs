@@ -115,6 +115,7 @@ pub trait InviteMailer: Send + Sync {
     fn notify_owner_decline(&self, proposal_id: Uuid, invitee_user_id: Uuid);
     fn notify_cancelled(&self, proposal_id: Uuid, accepted_user_ids: Vec<Uuid>);
     fn notify_started(&self, proposal_id: Uuid, game_id: Uuid, invitee_user_ids: Vec<Uuid>);
+    fn notify_owner_ready(&self, proposal_id: Uuid);
 }
 
 #[cfg(feature = "ssr")]
@@ -408,6 +409,54 @@ impl InviteMailer for RealInviteMailer {
                 crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email)
                     .await;
             }
+        });
+    }
+
+    fn notify_owner_ready(&self, proposal_id: Uuid) {
+        let pool = self.pool.clone();
+        let resend = self.resend.clone();
+        tokio::spawn(async move {
+            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
+                return;
+            };
+            let Ok(Some(owner_recip)) = fetch_invite_recipient(&pool, proposal.owner_user_id).await
+            else {
+                return;
+            };
+            let suppressed = crate::email::outbound::suppress_for_web_presence(
+                &pool,
+                Some(proposal.owner_user_id),
+            )
+            .await;
+            if !invite_recipient_should_send(&owner_recip, suppressed) {
+                return;
+            }
+            let Some(email) = owner_recip.email else {
+                return;
+            };
+            let game_type_name = proposal_game_type_name(&pool, &proposal).await;
+            let content = crate::email::render::EmailContent {
+                subject: format!("{game_type_name} invite"),
+                header: Some(format!(
+                    "Everyone has accepted - your {game_type_name} game is ready to start."
+                )),
+                digest: None,
+                board: None,
+                you_can: None,
+                browser_url: Some(invite_browser_url(proposal_id)),
+                rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
+                footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
+            };
+            let palette = crate::email::render::palette_for_slug(owner_recip.theme_slug.as_deref());
+            let rendered = crate::email::render::render_game_email(
+                &content,
+                palette,
+                &[],
+                Some(&format!("proposal-{proposal_id}")),
+                false,
+                &format!("i-{proposal_id}@brdg.me"),
+            );
+            crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
         });
     }
 }
@@ -963,6 +1012,19 @@ pub(crate) async fn start_proposal_tx(
     Ok(game.id)
 }
 
+#[cfg(feature = "ssr")]
+fn proposal_ready_to_start(players: &[ProposalPlayer], player_counts: &[i32]) -> bool {
+    let all_humans_accepted = players
+        .iter()
+        .filter(|p| p.user_id.is_some())
+        .all(|p| p.response == "accepted");
+    if !all_humans_accepted {
+        return false;
+    }
+    let count = players.iter().filter(|p| p.response != "declined").count();
+    crate::game::server_fns::roster_error(player_counts, count).is_none()
+}
+
 /// Creates an open game-invite proposal (owner and bots accepted, humans
 /// pending). With no human invitees (solo-vs-bots) it skips the proposal and
 /// creates the game directly.
@@ -1126,9 +1188,10 @@ pub async fn create_proposal(
     })
 }
 
-/// Records an invitee's accept/decline on an open proposal. Decline is
-/// terminal. On accept, when no human invitees remain pending the game starts
-/// automatically.
+/// Records an invitee's accept/decline on an open proposal. Allows
+/// pending->accepted, pending->declined, and accepted->declined. Declined is
+/// terminal. When the last human accepts and the roster is valid, the owner is
+/// emailed that the game is ready to start.
 #[server(RespondProposal, "/api")]
 #[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
 pub async fn respond_proposal(
@@ -1140,8 +1203,6 @@ pub async fn respond_proposal(
 
     let pool = expect_context::<PgPool>();
     let broadcaster = expect_context::<GameBroadcaster>();
-    let http_client = expect_context::<reqwest::Client>();
-    let jetstream = expect_context::<async_nats::jetstream::Context>();
     let user = crate::friends::require_user().await?;
 
     let mut tx = pool
@@ -1167,35 +1228,35 @@ pub async fn respond_proposal(
         .find(|p| p.user_id == Some(user.id))
         .ok_or_else(|| ServerFnError::new("You are not an invitee of this proposal."))?;
 
-    if me.response != "pending" {
-        return Err(ServerFnError::new(
-            "That invite has already been responded to.",
-        ));
+    let target = if accept { "accepted" } else { "declined" };
+    let allowed = matches!(
+        (me.response.as_str(), target),
+        ("pending", "accepted") | ("pending", "declined") | ("accepted", "declined")
+    );
+    if !allowed {
+        let msg = if me.response == "declined" {
+            "You have already declined this invite."
+        } else {
+            "You have already accepted this invite."
+        };
+        return Err(ServerFnError::new(msg));
     }
 
-    let response = if accept { "accepted" } else { "declined" };
-    update_proposal_player_response(&mut tx, me.id, response)
+    update_proposal_player_response(&mut tx, me.id, target)
         .await
         .map_err(internal("respond_proposal: update"))?;
 
-    let mut started_game_id: Option<Uuid> = None;
-    let mut roster: Vec<ProposalPlayer> = Vec::new();
+    let mut became_ready = false;
     if accept {
-        let pending = count_pending_human_invitees_tx(&mut tx, proposal_id)
+        let updated_players = find_proposal_players_tx(&mut tx, proposal_id)
             .await
-            .map_err(internal("respond_proposal: count"))?;
-        if pending == 0 {
-            let game_version = crate::db::find_game_version(&pool, proposal.game_version_id)
+            .map_err(internal("respond_proposal: updated players"))?;
+        let player_counts =
+            crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
                 .await
-                .map_err(internal("respond_proposal: game version"))?
-                .ok_or_else(|| ServerFnError::new("Game version not found"))?;
-            roster = find_proposal_players_tx(&mut tx, proposal_id)
-                .await
-                .map_err(internal("respond_proposal: roster"))?;
-            let gid =
-                start_proposal_tx(&mut tx, &http_client, &proposal, &roster, &game_version).await?;
-            started_game_id = Some(gid);
-        }
+                .map_err(internal("respond_proposal: player counts"))?
+                .unwrap_or_default();
+        became_ready = proposal_ready_to_start(&updated_players, &player_counts);
     }
 
     tx.commit()
@@ -1204,24 +1265,106 @@ pub async fn respond_proposal(
 
     broadcaster.broadcast_proposal_update(proposal_id).await;
 
-    if let Some(gid) = started_game_id {
-        crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, gid).await;
-        let invitee_ids: Vec<Uuid> = roster
-            .iter()
-            .filter(|p| p.response == "accepted")
-            .filter_map(|p| p.user_id)
-            .filter(|id| *id != proposal.owner_user_id)
-            .collect();
-        mailer().notify_started(proposal_id, gid, invitee_ids);
+    if became_ready {
+        mailer().notify_owner_ready(proposal_id);
     } else if !accept {
         mailer().notify_owner_decline(proposal_id, user.id);
     }
 
     Ok(RespondOutcome {
         accepted: accept,
-        started: started_game_id.is_some(),
-        game_id: started_game_id,
+        started: false,
+        game_id: None,
     })
+}
+
+/// Owner-only: explicitly start an open proposal. Requires all humans to have
+/// accepted, no declines, and a valid player count.
+#[server(StartProposal, "/api")]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
+pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
+    use crate::websocket::GameBroadcaster;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let broadcaster = expect_context::<GameBroadcaster>();
+    let http_client = expect_context::<reqwest::Client>();
+    let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let user = crate::friends::require_user().await?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(internal("start_proposal: begin transaction"))?;
+
+    let proposal = lock_proposal_for_update(&mut tx, proposal_id)
+        .await
+        .map_err(internal("start_proposal: lock"))?
+        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
+
+    if proposal.owner_user_id != user.id {
+        return Err(ServerFnError::new(
+            "Only the owner can start this proposal.",
+        ));
+    }
+    if proposal.status != "open" {
+        return Err(ServerFnError::new("This proposal is no longer open."));
+    }
+
+    let players = find_proposal_players_tx(&mut tx, proposal_id)
+        .await
+        .map_err(internal("start_proposal: players"))?;
+
+    let pending_humans = players
+        .iter()
+        .filter(|p| p.user_id.is_some() && p.response == "pending")
+        .count();
+    if pending_humans > 0 {
+        return Err(ServerFnError::new(format!(
+            "Cannot start: {pending_humans} players have not responded"
+        )));
+    }
+
+    let declined = players.iter().filter(|p| p.response == "declined").count();
+    if declined > 0 {
+        return Err(ServerFnError::new(format!(
+            "Cannot start: {declined} players have declined"
+        )));
+    }
+
+    let player_counts = crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
+        .await
+        .map_err(internal("start_proposal: player counts"))?
+        .unwrap_or_default();
+    let count = players.iter().filter(|p| p.response != "declined").count();
+    if let Some(msg) = crate::game::server_fns::roster_error(&player_counts, count) {
+        return Err(ServerFnError::new(msg));
+    }
+
+    let game_version = crate::db::find_game_version(&pool, proposal.game_version_id)
+        .await
+        .map_err(internal("start_proposal: game version"))?
+        .ok_or_else(|| ServerFnError::new("Game version not found"))?;
+
+    let game_id =
+        start_proposal_tx(&mut tx, &http_client, &proposal, &players, &game_version).await?;
+
+    tx.commit()
+        .await
+        .map_err(internal("start_proposal: commit transaction"))?;
+
+    broadcaster.broadcast_proposal_update(proposal_id).await;
+    crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
+
+    let invitee_ids: Vec<Uuid> = players
+        .iter()
+        .filter(|p| p.response == "accepted")
+        .filter_map(|p| p.user_id)
+        .filter(|id| *id != proposal.owner_user_id)
+        .collect();
+    mailer().notify_started(proposal_id, game_id, invitee_ids);
+
+    Ok(game_id)
 }
 
 /// Owner-only: add a single human (by id or email) or bot to an open proposal.
@@ -2288,5 +2431,362 @@ mod tests {
         let players = find_proposal_players(&pool, pid).await.unwrap();
         let positions: Vec<i32> = players.iter().map(|p| p.position).collect();
         assert_eq!(positions, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn ready_to_start_requires_all_humans_accepted_and_valid_count() {
+        let counts = vec![2, 3, 4];
+        let mk = |user_id: Option<Uuid>, response: &str| ProposalPlayer {
+            id: Uuid::new_v4(),
+            created_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            ),
+            updated_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            ),
+            proposal_id: Uuid::new_v4(),
+            position: 0,
+            user_id,
+            bot_name: None,
+            bot_difficulty: None,
+            response: response.to_string(),
+            responded_at: None,
+            email_token: None,
+        };
+        let owner = Uuid::new_v4();
+        let human = Uuid::new_v4();
+
+        let all_accepted = vec![mk(Some(owner), "accepted"), mk(Some(human), "accepted")];
+        assert!(proposal_ready_to_start(&all_accepted, &counts));
+
+        let with_pending = vec![mk(Some(owner), "accepted"), mk(Some(human), "pending")];
+        assert!(!proposal_ready_to_start(&with_pending, &counts));
+
+        let with_declined = vec![mk(Some(owner), "accepted"), mk(Some(human), "declined")];
+        assert!(!proposal_ready_to_start(&with_declined, &counts));
+
+        let with_bot = vec![
+            mk(Some(owner), "accepted"),
+            mk(Some(human), "accepted"),
+            mk(None, "accepted"),
+        ];
+        assert!(proposal_ready_to_start(&with_bot, &counts));
+
+        let invalid_count = vec![mk(Some(owner), "accepted")];
+        assert!(!proposal_ready_to_start(&invalid_count, &counts));
+
+        let bot_does_not_block = vec![
+            mk(Some(owner), "accepted"),
+            mk(Some(human), "accepted"),
+            mk(None, "accepted"),
+            mk(None, "accepted"),
+            mk(None, "accepted"),
+        ];
+        assert!(!proposal_ready_to_start(&bot_does_not_block, &counts));
+    }
+
+    #[sqlx::test]
+    async fn respond_accept_does_not_auto_start(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let invitee = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let inv_player = insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(invitee),
+            None,
+            None,
+            "pending",
+            Some("tok".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        update_proposal_player_response(&mut tx, inv_player, "accepted")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let proposal = find_proposal(&pool, pid).await.unwrap().unwrap();
+        assert_eq!(
+            proposal.status, "open",
+            "accepting must not auto-start the game"
+        );
+        assert!(proposal.started_game_id.is_none());
+    }
+
+    #[sqlx::test]
+    async fn ready_check_fires_only_when_last_human_accepts(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let b = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let pa = insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("ta".into()),
+        )
+        .await
+        .unwrap();
+        let pb = insert_proposal_player(
+            &mut tx,
+            pid,
+            2,
+            Some(b),
+            None,
+            None,
+            "pending",
+            Some("tb".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        update_proposal_player_response(&mut tx, pa, "accepted")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let counts = vec![2, 3, 4];
+        assert!(
+            !proposal_ready_to_start(&players, &counts),
+            "not ready while a human is still pending"
+        );
+
+        let mut tx = pool.begin().await.unwrap();
+        update_proposal_player_response(&mut tx, pb, "accepted")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        assert!(
+            proposal_ready_to_start(&players, &counts),
+            "ready once the last human accepts"
+        );
+    }
+
+    #[sqlx::test]
+    async fn start_guards_reject_pending_declined_invalid_count(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let b = seed_invite_user(&pool, true).await;
+        let counts = vec![2, 3, 4];
+
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("ta".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let pending_humans = players
+            .iter()
+            .filter(|p| p.user_id.is_some() && p.response == "pending")
+            .count();
+        assert!(pending_humans > 0, "pending guard should fire");
+
+        let pid2 = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid2, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid2, 1, Some(a), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid2, 2, Some(b), None, None, "declined", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid2).await.unwrap();
+        let declined = players.iter().filter(|p| p.response == "declined").count();
+        assert!(declined > 0, "declined guard should fire");
+
+        let pid3 = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid3, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid3).await.unwrap();
+        let count = players.iter().filter(|p| p.response != "declined").count();
+        assert!(
+            crate::game::server_fns::roster_error(&counts, count).is_some(),
+            "invalid count guard should fire for 1 player when counts are [2,3,4]"
+        );
+    }
+
+    #[sqlx::test]
+    async fn start_conditions_met_when_all_accepted_and_valid(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let counts = vec![2, 3, 4];
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(a), None, None, "accepted", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let pending_humans = players
+            .iter()
+            .filter(|p| p.user_id.is_some() && p.response == "pending")
+            .count();
+        let declined = players.iter().filter(|p| p.response == "declined").count();
+        let count = players.iter().filter(|p| p.response != "declined").count();
+        assert_eq!(pending_humans, 0);
+        assert_eq!(declined, 0);
+        assert!(crate::game::server_fns::roster_error(&counts, count).is_none());
+        assert!(proposal_ready_to_start(&players, &counts));
+    }
+
+    #[sqlx::test]
+    async fn accepted_to_declined_transition_works(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let pa = insert_proposal_player(&mut tx, pid, 1, Some(a), None, None, "accepted", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let current = "accepted";
+        let target = "declined";
+        let allowed = matches!(
+            (current, target),
+            ("pending", "accepted") | ("pending", "declined") | ("accepted", "declined")
+        );
+        assert!(allowed, "accepted -> declined must be allowed");
+
+        let mut tx = pool.begin().await.unwrap();
+        update_proposal_player_response(&mut tx, pa, "declined")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let player = players.iter().find(|p| p.user_id == Some(a)).unwrap();
+        assert_eq!(player.response, "declined");
+    }
+
+    #[sqlx::test]
+    async fn declined_to_accepted_is_rejected(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(a), None, None, "declined", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let current = "declined";
+        let target = "accepted";
+        let allowed = matches!(
+            (current, target),
+            ("pending", "accepted") | ("pending", "declined") | ("accepted", "declined")
+        );
+        assert!(!allowed, "declined -> accepted must be rejected");
+    }
+
+    #[sqlx::test]
+    async fn pending_to_accepted_still_works(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let pa = insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("tok".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let current = "pending";
+        let target = "accepted";
+        let allowed = matches!(
+            (current, target),
+            ("pending", "accepted") | ("pending", "declined") | ("accepted", "declined")
+        );
+        assert!(allowed, "pending -> accepted must be allowed");
+
+        let mut tx = pool.begin().await.unwrap();
+        update_proposal_player_response(&mut tx, pa, "accepted")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let player = players.iter().find(|p| p.user_id == Some(a)).unwrap();
+        assert_eq!(player.response, "accepted");
     }
 }
