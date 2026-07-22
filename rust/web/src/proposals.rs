@@ -63,18 +63,6 @@ pub struct RespondOutcome {
     pub game_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SlotAction {
-    Drop,
-    ReplaceWithBot { name: String, bot_name: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlotPolicy {
-    pub player_id: Uuid,
-    pub action: SlotAction,
-}
-
 #[cfg_attr(feature = "ssr", derive(FromRow))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposalPlayerView {
@@ -118,6 +106,12 @@ pub struct InviteSummary {
 #[cfg(feature = "ssr")]
 pub trait InviteMailer: Send + Sync {
     fn send_invite(&self, proposal_id: Uuid, invitee_user_id: Uuid, email_token: Option<String>);
+    fn notify_changed_reinvite(
+        &self,
+        proposal_id: Uuid,
+        invitee_user_id: Uuid,
+        email_token: Option<String>,
+    );
     fn notify_owner_decline(&self, proposal_id: Uuid, invitee_user_id: Uuid);
     fn notify_cancelled(&self, proposal_id: Uuid, accepted_user_ids: Vec<Uuid>);
     fn notify_started(&self, proposal_id: Uuid, game_id: Uuid, invitee_user_ids: Vec<Uuid>);
@@ -227,6 +221,58 @@ impl InviteMailer for RealInviteMailer {
                 &[],
                 Some(&format!("proposal-{proposal_id}")),
                 true,
+                &format!("i-{token}@brdg.me"),
+            );
+            crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
+        });
+    }
+
+    fn notify_changed_reinvite(
+        &self,
+        proposal_id: Uuid,
+        invitee_user_id: Uuid,
+        email_token: Option<String>,
+    ) {
+        let pool = self.pool.clone();
+        let resend = self.resend.clone();
+        tokio::spawn(async move {
+            let Some(token) = email_token else { return };
+            let Ok(Some(recip)) = fetch_invite_recipient(&pool, invitee_user_id).await else {
+                return;
+            };
+            let suppressed =
+                crate::email::outbound::suppress_for_web_presence(&pool, Some(invitee_user_id))
+                    .await;
+            if !invite_recipient_should_send(&recip, suppressed) {
+                return;
+            }
+            let Some(email) = recip.email else { return };
+            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
+                return;
+            };
+            let game_type_name = proposal_game_type_name(&pool, &proposal).await;
+            let content = crate::email::render::EmailContent {
+                subject: format!("{game_type_name} invite"),
+                header: Some(
+                    "The owner has made changes to the game. Accept again for the game to start."
+                        .into(),
+                ),
+                digest: None,
+                board: None,
+                you_can: Some(vec![
+                    "Reply \"accept\" to join, or \"decline\" to pass.".into(),
+                ]),
+                browser_url: Some(invite_browser_url(proposal_id)),
+                rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
+                footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
+            };
+            let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
+            let rendered = crate::email::render::render_game_email(
+                &content,
+                palette,
+                &[],
+                Some(&format!("proposal-{proposal_id}")),
+                false,
                 &format!("i-{token}@brdg.me"),
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
@@ -525,21 +571,65 @@ pub async fn delete_proposal_player(
 }
 
 #[cfg(feature = "ssr")]
-pub async fn convert_proposal_player_to_bot(
+pub async fn update_proposal_owner(
     tx: &mut sqlx::PgConnection,
-    player_id: Uuid,
-    bot_name: &str,
-    bot_difficulty: &str,
+    id: Uuid,
+    owner_user_id: Uuid,
 ) -> sqlx::Result<()> {
     sqlx::query(
-        "UPDATE game_proposal_players SET user_id = NULL, bot_name = $1, bot_difficulty = $2, response = 'accepted', responded_at = (now() AT TIME ZONE 'utc'), updated_at = (now() AT TIME ZONE 'utc') WHERE id = $3",
+        "UPDATE game_proposals SET owner_user_id = $1, updated_at = (now() AT TIME ZONE 'utc') WHERE id = $2",
     )
-    .bind(bot_name)
-    .bind(bot_difficulty)
-    .bind(player_id)
+    .bind(owner_user_id)
+    .bind(id)
     .execute(&mut *tx)
     .await
     .map(|_| ())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn normalize_proposal_positions(
+    tx: &mut sqlx::PgConnection,
+    proposal_id: Uuid,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE game_proposal_players AS pp SET \"position\" = sub.rn, updated_at = (now() AT TIME ZONE 'utc') \
+         FROM (SELECT id, (ROW_NUMBER() OVER (ORDER BY \"position\") - 1)::int AS rn FROM game_proposal_players WHERE proposal_id = $1) sub \
+         WHERE pp.id = sub.id AND pp.proposal_id = $1",
+    )
+    .bind(proposal_id)
+    .execute(&mut *tx)
+    .await
+    .map(|_| ())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn reset_accepted_humans_for_roster_change(
+    tx: &mut sqlx::PgConnection,
+    proposal_id: Uuid,
+    owner_user_id: Uuid,
+) -> sqlx::Result<Vec<(Uuid, String)>> {
+    let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, user_id FROM game_proposal_players \
+         WHERE proposal_id = $1 AND response = 'accepted' AND user_id IS NOT NULL AND user_id <> $2 \
+         ORDER BY \"position\"",
+    )
+    .bind(proposal_id)
+    .bind(owner_user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut out = Vec::new();
+    for (player_id, user_id) in rows {
+        let token = Uuid::new_v4().simple().to_string();
+        sqlx::query(
+            "UPDATE game_proposal_players SET response = 'pending', responded_at = NULL, email_token = $1, updated_at = (now() AT TIME ZONE 'utc') WHERE id = $2",
+        )
+        .bind(&token)
+        .bind(player_id)
+        .execute(&mut *tx)
+        .await?;
+        out.push((user_id, token));
+    }
+    Ok(out)
 }
 
 #[cfg(feature = "ssr")]
@@ -1134,65 +1224,51 @@ pub async fn respond_proposal(
     })
 }
 
-/// Number of proposal players that could be in the started game (accepted +
-/// pending; declined slots are excluded).
-#[cfg(feature = "ssr")]
-fn prospective_count(players: &[ProposalPlayer]) -> usize {
-    players.iter().filter(|p| p.response != "declined").count()
-}
-
-/// Owner-only: resolve every pending slot per the supplied policies (drop or
-/// replace-with-bot), validate the final roster, and start the game early.
-#[server(StartProposalEarly, "/api")]
+/// Owner-only: add a single human (by id or email) or bot to an open proposal.
+/// Re-normalizes positions and resets accepted humans to pending.
+#[server(AddProposalPlayer, "/api")]
 #[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
-pub async fn start_proposal_early(
+pub async fn add_proposal_player(
     proposal_id: Uuid,
-    policies: Vec<SlotPolicy>,
-) -> Result<Uuid, ServerFnError> {
+    user_id: Option<Uuid>,
+    email: Option<String>,
+    bot: Option<crate::game::server_fns::BotSlot>,
+) -> Result<(), ServerFnError> {
     use crate::websocket::GameBroadcaster;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
     let broadcaster = expect_context::<GameBroadcaster>();
-    let http_client = expect_context::<reqwest::Client>();
-    let jetstream = expect_context::<async_nats::jetstream::Context>();
     let user = crate::friends::require_user().await?;
+
+    let provided =
+        usize::from(user_id.is_some()) + usize::from(email.is_some()) + usize::from(bot.is_some());
+    if provided != 1 {
+        return Err(ServerFnError::new("Choose a player, email, or bot to add."));
+    }
 
     let proposal = find_proposal(&pool, proposal_id)
         .await
-        .map_err(internal("start_proposal_early: find"))?
+        .map_err(internal("add_proposal_player: find"))?
         .ok_or_else(|| ServerFnError::new("Invite not found"))?;
     if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new(
-            "Only the owner can start this proposal.",
-        ));
+        return Err(ServerFnError::new("Only the owner can edit this proposal."));
     }
     if proposal.status != "open" {
         return Err(ServerFnError::new("This proposal is no longer open."));
     }
 
-    let game_version = crate::db::find_game_version(&pool, proposal.game_version_id)
-        .await
-        .map_err(internal("start_proposal_early: game version"))?
-        .ok_or_else(|| ServerFnError::new("Game version not found"))?;
-    let player_counts = crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
-        .await
-        .map_err(internal("start_proposal_early: player counts"))?
-        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
-
     let mut tx = pool
         .begin()
         .await
-        .map_err(internal("start_proposal_early: begin transaction"))?;
+        .map_err(internal("add_proposal_player: begin transaction"))?;
 
     let proposal = lock_proposal_for_update(&mut tx, proposal_id)
         .await
-        .map_err(internal("start_proposal_early: lock"))?
+        .map_err(internal("add_proposal_player: lock"))?
         .ok_or_else(|| ServerFnError::new("Invite not found"))?;
     if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new(
-            "Only the owner can start this proposal.",
-        ));
+        return Err(ServerFnError::new("Only the owner can edit this proposal."));
     }
     if proposal.status != "open" {
         return Err(ServerFnError::new("This proposal is no longer open."));
@@ -1200,61 +1276,88 @@ pub async fn start_proposal_early(
 
     let players = find_proposal_players_tx(&mut tx, proposal_id)
         .await
-        .map_err(internal("start_proposal_early: players"))?;
+        .map_err(internal("add_proposal_player: players"))?;
 
-    for policy in &policies {
-        let target = players
-            .iter()
-            .find(|p| p.id == policy.player_id)
-            .ok_or_else(|| ServerFnError::new("Invalid slot policy."))?;
-        if !(target.user_id.is_some() && target.response == "pending") {
-            return Err(ServerFnError::new("Invalid slot policy."));
+    let human_id = if let Some(uid) = user_id {
+        Some(uid)
+    } else if let Some(email) = &email {
+        Some(find_or_create_user_by_email_tx(&mut tx, email).await?)
+    } else {
+        None
+    };
+
+    if let Some(hid) = human_id {
+        let policy_ids: Vec<Uuid> = user_id.into_iter().collect();
+        let policy_emails: Vec<String> = email.clone().into_iter().collect();
+        let violations =
+            crate::db::check_invite_policy_tx(&mut tx, user.id, &policy_ids, &policy_emails)
+                .await
+                .map_err(internal("add_proposal_player: check invite policy"))?;
+        if let Some(msg) = violations.into_iter().next() {
+            return Err(ServerFnError::new(msg));
         }
-        match &policy.action {
-            SlotAction::Drop => {
-                delete_proposal_player(&mut tx, policy.player_id)
-                    .await
-                    .map_err(internal("start_proposal_early: drop"))?;
-            }
-            SlotAction::ReplaceWithBot { name, bot_name } => {
-                convert_proposal_player_to_bot(&mut tx, policy.player_id, name, bot_name)
-                    .await
-                    .map_err(internal("start_proposal_early: replace"))?;
-            }
+        if players.iter().any(|p| p.user_id == Some(hid)) {
+            return Err(ServerFnError::new(
+                "Please ensure each player in the game is unique",
+            ));
         }
     }
 
-    let roster = find_proposal_players_tx(&mut tx, proposal_id)
+    let position = players.len() as i32;
+    let mut invite: Option<(Uuid, String)> = None;
+    if let Some(hid) = human_id {
+        let token = Uuid::new_v4().simple().to_string();
+        insert_proposal_player(
+            &mut tx,
+            proposal_id,
+            position,
+            Some(hid),
+            None,
+            None,
+            "pending",
+            Some(token.clone()),
+        )
         .await
-        .map_err(internal("start_proposal_early: roster"))?;
-    if roster.iter().any(|p| p.response == "pending") {
-        return Err(ServerFnError::new(
-            "Resolve every pending invite before starting early.",
-        ));
-    }
-    if let Some(msg) =
-        crate::game::server_fns::roster_error(&player_counts, prospective_count(&roster))
-    {
-        return Err(ServerFnError::new(msg));
+        .map_err(internal("add_proposal_player: insert human"))?;
+        invite = Some((hid, token));
+    } else if let Some(bot) = bot {
+        insert_proposal_player(
+            &mut tx,
+            proposal_id,
+            position,
+            None,
+            Some(bot.name),
+            Some(bot.bot_name),
+            "accepted",
+            None,
+        )
+        .await
+        .map_err(internal("add_proposal_player: insert bot"))?;
     }
 
-    let gid = start_proposal_tx(&mut tx, &http_client, &proposal, &roster, &game_version).await?;
+    let reset =
+        reset_accepted_humans_for_roster_change(&mut tx, proposal_id, proposal.owner_user_id)
+            .await
+            .map_err(internal("add_proposal_player: reset"))?;
+
+    normalize_proposal_positions(&mut tx, proposal_id)
+        .await
+        .map_err(internal("add_proposal_player: normalize"))?;
 
     tx.commit()
         .await
-        .map_err(internal("start_proposal_early: commit transaction"))?;
+        .map_err(internal("add_proposal_player: commit transaction"))?;
 
-    crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, gid).await;
     broadcaster.broadcast_proposal_update(proposal_id).await;
-    let invitee_ids: Vec<Uuid> = roster
-        .iter()
-        .filter(|p| p.response == "accepted")
-        .filter_map(|p| p.user_id)
-        .filter(|id| *id != proposal.owner_user_id)
-        .collect();
-    mailer().notify_started(proposal_id, gid, invitee_ids);
 
-    Ok(gid)
+    if let Some((uid, token)) = invite {
+        mailer().send_invite(proposal_id, uid, Some(token));
+    }
+    for (uid, tok) in reset {
+        mailer().notify_changed_reinvite(proposal_id, uid, Some(tok));
+    }
+
+    Ok(())
 }
 
 /// Owner-only: cancel an open proposal and notify accepted invitees.
@@ -1322,91 +1425,8 @@ pub async fn cancel_proposal(proposal_id: Uuid) -> Result<(), ServerFnError> {
     Ok(())
 }
 
-/// Owner-only: replace a declined/pending human slot with a bot, validating the
-/// resulting roster size.
-#[server(ReplaceProposalSlot, "/api")]
-pub async fn replace_proposal_slot(
-    proposal_id: Uuid,
-    player_id: Uuid,
-    bot_name: String,
-    bot_difficulty: String,
-) -> Result<(), ServerFnError> {
-    use crate::websocket::GameBroadcaster;
-    use sqlx::PgPool;
-
-    let pool = expect_context::<PgPool>();
-    let broadcaster = expect_context::<GameBroadcaster>();
-    let user = crate::friends::require_user().await?;
-
-    let proposal = find_proposal(&pool, proposal_id)
-        .await
-        .map_err(internal("replace_proposal_slot: find"))?
-        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
-    if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new("Only the owner can edit this proposal."));
-    }
-    if proposal.status != "open" {
-        return Err(ServerFnError::new("This proposal is no longer open."));
-    }
-
-    let player_counts = crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
-        .await
-        .map_err(internal("replace_proposal_slot: player counts"))?
-        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
-
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(internal("replace_proposal_slot: begin transaction"))?;
-
-    let proposal = lock_proposal_for_update(&mut tx, proposal_id)
-        .await
-        .map_err(internal("replace_proposal_slot: lock"))?
-        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
-    if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new("Only the owner can edit this proposal."));
-    }
-    if proposal.status != "open" {
-        return Err(ServerFnError::new("This proposal is no longer open."));
-    }
-
-    let players = find_proposal_players_tx(&mut tx, proposal_id)
-        .await
-        .map_err(internal("replace_proposal_slot: players"))?;
-    let target = players
-        .iter()
-        .find(|p| p.id == player_id)
-        .ok_or_else(|| ServerFnError::new("That slot can't be replaced."))?;
-    if !(target.user_id.is_some()
-        && (target.response == "declined" || target.response == "pending"))
-    {
-        return Err(ServerFnError::new("That slot can't be replaced."));
-    }
-
-    convert_proposal_player_to_bot(&mut tx, player_id, &bot_name, &bot_difficulty)
-        .await
-        .map_err(internal("replace_proposal_slot: convert"))?;
-
-    let roster = find_proposal_players_tx(&mut tx, proposal_id)
-        .await
-        .map_err(internal("replace_proposal_slot: roster"))?;
-    if let Some(msg) =
-        crate::game::server_fns::roster_error(&player_counts, prospective_count(&roster))
-    {
-        return Err(ServerFnError::new(msg));
-    }
-
-    tx.commit()
-        .await
-        .map_err(internal("replace_proposal_slot: commit transaction"))?;
-
-    broadcaster.broadcast_proposal_update(proposal_id).await;
-
-    Ok(())
-}
-
-/// Owner-only: remove a declined/pending slot, validating the resulting roster
-/// size.
+/// Owner-only: remove any slot (human or bot), allowing invalid player counts;
+/// re-normalizes positions and resets accepted humans to pending.
 #[server(RemoveProposalSlot, "/api")]
 pub async fn remove_proposal_slot(proposal_id: Uuid, player_id: Uuid) -> Result<(), ServerFnError> {
     use crate::websocket::GameBroadcaster;
@@ -1426,11 +1446,6 @@ pub async fn remove_proposal_slot(proposal_id: Uuid, player_id: Uuid) -> Result<
     if proposal.status != "open" {
         return Err(ServerFnError::new("This proposal is no longer open."));
     }
-
-    let player_counts = crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
-        .await
-        .map_err(internal("remove_proposal_slot: player counts"))?
-        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
 
     let mut tx = pool
         .begin()
@@ -1455,26 +1470,94 @@ pub async fn remove_proposal_slot(proposal_id: Uuid, player_id: Uuid) -> Result<
         .iter()
         .find(|p| p.id == player_id)
         .ok_or_else(|| ServerFnError::new("That slot can't be removed."))?;
-    if !(target.response == "declined" || target.response == "pending") {
-        return Err(ServerFnError::new("That slot can't be removed."));
+    if target.user_id == Some(proposal.owner_user_id) {
+        return Err(ServerFnError::new(
+            "The owner can't be removed from their own proposal.",
+        ));
     }
 
     delete_proposal_player(&mut tx, player_id)
         .await
         .map_err(internal("remove_proposal_slot: delete"))?;
 
-    let roster = find_proposal_players_tx(&mut tx, proposal_id)
+    let reset =
+        reset_accepted_humans_for_roster_change(&mut tx, proposal_id, proposal.owner_user_id)
+            .await
+            .map_err(internal("remove_proposal_slot: reset"))?;
+
+    normalize_proposal_positions(&mut tx, proposal_id)
         .await
-        .map_err(internal("remove_proposal_slot: roster"))?;
-    if let Some(msg) =
-        crate::game::server_fns::roster_error(&player_counts, prospective_count(&roster))
-    {
-        return Err(ServerFnError::new(msg));
-    }
+        .map_err(internal("remove_proposal_slot: normalize"))?;
 
     tx.commit()
         .await
         .map_err(internal("remove_proposal_slot: commit transaction"))?;
+
+    broadcaster.broadcast_proposal_update(proposal_id).await;
+
+    for (uid, tok) in reset {
+        mailer().notify_changed_reinvite(proposal_id, uid, Some(tok));
+    }
+
+    Ok(())
+}
+
+/// Owner-only: transfer ownership to another human player in the roster. Does
+/// not change any responses or trigger an acceptance reset.
+#[server(TransferProposalOwnership, "/api")]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
+pub async fn transfer_proposal_ownership(
+    proposal_id: Uuid,
+    target_user_id: Uuid,
+) -> Result<(), ServerFnError> {
+    use crate::websocket::GameBroadcaster;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let broadcaster = expect_context::<GameBroadcaster>();
+    let user = crate::friends::require_user().await?;
+
+    let proposal = find_proposal(&pool, proposal_id)
+        .await
+        .map_err(internal("transfer_proposal_ownership: find"))?
+        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
+    if proposal.owner_user_id != user.id {
+        return Err(ServerFnError::new("Only the owner can edit this proposal."));
+    }
+    if proposal.status != "open" {
+        return Err(ServerFnError::new("This proposal is no longer open."));
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(internal("transfer_proposal_ownership: begin transaction"))?;
+
+    let proposal = lock_proposal_for_update(&mut tx, proposal_id)
+        .await
+        .map_err(internal("transfer_proposal_ownership: lock"))?
+        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
+    if proposal.owner_user_id != user.id {
+        return Err(ServerFnError::new("Only the owner can edit this proposal."));
+    }
+    if proposal.status != "open" {
+        return Err(ServerFnError::new("This proposal is no longer open."));
+    }
+
+    let players = find_proposal_players_tx(&mut tx, proposal_id)
+        .await
+        .map_err(internal("transfer_proposal_ownership: players"))?;
+    if !players.iter().any(|p| p.user_id == Some(target_user_id)) {
+        return Err(ServerFnError::new("That player isn't in this proposal."));
+    }
+
+    update_proposal_owner(&mut tx, proposal_id, target_user_id)
+        .await
+        .map_err(internal("transfer_proposal_ownership: update owner"))?;
+
+    tx.commit()
+        .await
+        .map_err(internal("transfer_proposal_ownership: commit transaction"))?;
 
     broadcaster.broadcast_proposal_update(proposal_id).await;
 
@@ -1591,8 +1674,6 @@ pub fn InvitePage() -> impl IntoView {
 
     let respond_action = ServerAction::<RespondProposal>::new();
     let cancel_action = ServerAction::<CancelProposal>::new();
-    let start_early_action = ServerAction::<StartProposalEarly>::new();
-    let replace_action = ServerAction::<ReplaceProposalSlot>::new();
     let remove_action = ServerAction::<RemoveProposalSlot>::new();
 
     let navigate = use_navigate();
@@ -1611,13 +1692,6 @@ pub fn InvitePage() -> impl IntoView {
         }
     });
 
-    let nav2 = navigate.clone();
-    Effect::new(move |_| {
-        if let Some(Ok(gid)) = start_early_action.value().get() {
-            nav2(&format!("/games/{}", gid), NavigateOptions::default());
-        }
-    });
-
     let nav3 = navigate.clone();
     Effect::new(move |_| {
         if let Some(Ok(())) = cancel_action.value().get() {
@@ -1625,13 +1699,6 @@ pub fn InvitePage() -> impl IntoView {
         }
     });
 
-    Effect::new(move |_| {
-        if let Some(Ok(())) = replace_action.value().get()
-            && let Some(pid) = proposal_id()
-        {
-            crate::websocket_client::bump_proposal_update(proposal_update, pid);
-        }
-    });
     Effect::new(move |_| {
         if let Some(Ok(())) = remove_action.value().get()
             && let Some(pid) = proposal_id()
@@ -1651,8 +1718,6 @@ pub fn InvitePage() -> impl IntoView {
                             pv=pv
                             respond_action=respond_action
                             cancel_action=cancel_action
-                            start_early_action=start_early_action
-                            replace_action=replace_action
                             remove_action=remove_action
                         /> }.into_any()
                     }
@@ -1667,8 +1732,6 @@ fn ProposalDetail(
     pv: ProposalView,
     respond_action: ServerAction<RespondProposal>,
     cancel_action: ServerAction<CancelProposal>,
-    start_early_action: ServerAction<StartProposalEarly>,
-    replace_action: ServerAction<ReplaceProposalSlot>,
     remove_action: ServerAction<RemoveProposalSlot>,
 ) -> impl IntoView {
     let is_open = pv.proposal.status == "open";
@@ -1686,18 +1749,7 @@ fn ProposalDetail(
         .any(|p| p.user_id.is_some() && p.response == "pending")
         && is_invitee;
 
-    let has_pending = pv
-        .players
-        .iter()
-        .any(|p| p.response == "pending" && p.user_id.is_some());
     let has_declined = pv.players.iter().any(|p| p.response == "declined");
-
-    let pending_slots: Vec<ProposalPlayerView> = pv
-        .players
-        .iter()
-        .filter(|p| p.response == "pending" && p.user_id.is_some())
-        .cloned()
-        .collect();
 
     let declined_slots: Vec<ProposalPlayerView> = pv
         .players
@@ -1705,45 +1757,6 @@ fn ProposalDetail(
         .filter(|p| p.response == "declined")
         .cloned()
         .collect();
-
-    let (slot_actions, set_slot_actions) = signal(
-        pending_slots
-            .iter()
-            .map(|p| (p.id, "drop".to_string()))
-            .collect::<Vec<_>>(),
-    );
-
-    let pending_rows = StoredValue::new(
-        pending_slots
-            .iter()
-            .map(|p| {
-                let pid = p.id;
-                let pname = p.name.clone();
-                view! {
-                    <div class="friend-row">
-                        <span>{pname.clone()}</span>
-                        " "
-                        <select
-                            aria-label=format!("Action for {}", pname)
-                            on:change=move |ev| {
-                                let val = event_target_value(&ev);
-                                set_slot_actions.update(|v| {
-                                    if let Some(entry) = v.iter_mut().find(|(id, _)| *id == pid) {
-                                        entry.1 = val;
-                                    }
-                                });
-                            }
-                        >
-                            <option value="drop">"Drop"</option>
-                            <option value="bot-easy">"Replace with bot (easy)"</option>
-                            <option value="bot-medium">"Replace with bot (medium)"</option>
-                            <option value="bot-hard">"Replace with bot (hard)"</option>
-                        </select>
-                    </div>
-                }
-            })
-            .collect_view(),
-    );
 
     let declined_rows = StoredValue::new(
         declined_slots
@@ -1753,18 +1766,8 @@ fn ProposalDetail(
                 let pname = p.name.clone();
                 view! {
                     <div class="friend-row">
-                        <span>{pname.clone()}</span>
+                        <span>{pname}</span>
                         " - "
-                        <a href="#" on:click=move |ev| {
-                            ev.prevent_default();
-                            replace_action.dispatch(ReplaceProposalSlot {
-                                proposal_id,
-                                player_id: pid,
-                                bot_name: format!("{} (bot: medium)", pname),
-                                bot_difficulty: "medium".to_string(),
-                            });
-                        }>"Replace with bot"</a>
-                        " | "
                         <a href="#" on:click=move |ev| {
                             ev.prevent_default();
                             remove_action.dispatch(RemoveProposalSlot {
@@ -1776,13 +1779,6 @@ fn ProposalDetail(
                 }
             })
             .collect_view(),
-    );
-
-    let pending_names = StoredValue::new(
-        pending_slots
-            .iter()
-            .map(|p| (p.id, p.name.clone()))
-            .collect::<Vec<(Uuid, String)>>(),
     );
 
     view! {
@@ -1836,29 +1832,6 @@ fn ProposalDetail(
             <section>
                 <h2>"Owner actions"</h2>
 
-                <Show when=move || has_pending>
-                    <div>
-                        <h3>"Start early - resolve pending slots"</h3>
-                        {pending_rows.into_inner()}
-                        <div class="form-actions">
-                            <a href="#" on:click=move |ev| {
-                                ev.prevent_default();
-                                let policies: Vec<SlotPolicy> = slot_actions.get_untracked().into_iter().map(|(id, action)| {
-                                    let orig_name = pending_names.with_value(|names| names.iter().find(|(pid, _)| *pid == id).map(|(_, n)| n.clone()).unwrap_or_else(|| "Bot".to_string()));
-                                    let action = match action.as_str() {
-                                        "bot-easy" => SlotAction::ReplaceWithBot { name: format!("{} (bot: easy)", orig_name), bot_name: "easy".to_string() },
-                                        "bot-medium" => SlotAction::ReplaceWithBot { name: format!("{} (bot: medium)", orig_name), bot_name: "medium".to_string() },
-                                        "bot-hard" => SlotAction::ReplaceWithBot { name: format!("{} (bot: hard)", orig_name), bot_name: "hard".to_string() },
-                                        _ => SlotAction::Drop,
-                                    };
-                                    SlotPolicy { player_id: id, action }
-                                }).collect();
-                                start_early_action.dispatch(StartProposalEarly { proposal_id, policies });
-                            }>"Start early"</a>
-                        </div>
-                    </div>
-                </Show>
-
                 <Show when=move || has_declined>
                     <div>
                         <h3>"Declined slots"</h3>
@@ -1883,17 +1856,17 @@ fn ProposalDetail(
             </div>
         </Show>
         <Show when=move || {
-            start_early_action.value().get().is_some_and(|r| r.is_err())
-        }>
-            <div class="form-error">
-                {move || start_early_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
-            </div>
-        </Show>
-        <Show when=move || {
             cancel_action.value().get().is_some_and(|r| r.is_err())
         }>
             <div class="form-error">
                 {move || cancel_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
+            </div>
+        </Show>
+        <Show when=move || {
+            remove_action.value().get().is_some_and(|r| r.is_err())
+        }>
+            <div class="form-error">
+                {move || remove_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
             </div>
         </Show>
     }
@@ -1985,5 +1958,335 @@ mod tests {
             ..enabled.clone()
         };
         assert!(!invite_recipient_should_send(&no_email, false));
+    }
+
+    async fn seed_game_version(pool: &PgPool) -> Uuid {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Test Game {}", Uuid::new_v4()))
+        .bind(vec![2i32, 3, 4])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://localhost:0/mock', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn seed_proposal(pool: &PgPool, game_version_id: Uuid, owner_id: Uuid) -> Uuid {
+        sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status)
+             VALUES ($1, $2, 'open') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(owner_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn reset_flips_accepted_humans_preserves_others(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let b = seed_invite_user(&pool, true).await;
+        let c = seed_invite_user(&pool, true).await;
+        let d = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(a), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 2, Some(b), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            3,
+            None,
+            Some("Botty".into()),
+            Some("medium".into()),
+            "accepted",
+            None,
+        )
+        .await
+        .unwrap();
+        insert_proposal_player(&mut tx, pid, 4, Some(c), None, None, "declined", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            5,
+            Some(d),
+            None,
+            None,
+            "pending",
+            Some("orig-token-d".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let reset = reset_accepted_humans_for_roster_change(&mut tx, pid, owner)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(reset.len(), 2);
+        let reset_ids: Vec<Uuid> = reset.iter().map(|(u, _)| *u).collect();
+        assert!(reset_ids.contains(&a));
+        assert!(reset_ids.contains(&b));
+        assert!(!reset_ids.contains(&owner));
+        assert!(!reset_ids.contains(&c));
+        assert!(!reset_ids.contains(&d));
+        let tok_a = reset.iter().find(|(u, _)| *u == a).unwrap().1.clone();
+        let tok_b = reset.iter().find(|(u, _)| *u == b).unwrap().1.clone();
+        assert!(!tok_a.is_empty());
+        assert!(!tok_b.is_empty());
+        assert_ne!(tok_a, tok_b);
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let by_user = |u: Uuid| {
+            players
+                .iter()
+                .find(|p| p.user_id == Some(u))
+                .unwrap()
+                .clone()
+        };
+
+        let pa = by_user(a);
+        assert_eq!(pa.response, "pending");
+        assert!(pa.responded_at.is_none());
+        assert!(pa.email_token.as_deref().is_some_and(|t| !t.is_empty()));
+        let pb = by_user(b);
+        assert_eq!(pb.response, "pending");
+        assert!(pb.responded_at.is_none());
+        assert!(pb.email_token.as_deref().is_some_and(|t| !t.is_empty()));
+        assert_ne!(pa.email_token, pb.email_token);
+
+        assert_eq!(by_user(owner).response, "accepted");
+        let bot = players.iter().find(|p| p.user_id.is_none()).unwrap();
+        assert_eq!(bot.response, "accepted");
+        assert_eq!(by_user(c).response, "declined");
+        let pd = by_user(d);
+        assert_eq!(pd.response, "pending");
+        assert_eq!(pd.email_token.as_deref(), Some("orig-token-d"));
+    }
+
+    #[sqlx::test]
+    async fn add_player_inserts_pending_human_and_accepted_bot(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let uid = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(uid),
+            None,
+            None,
+            "pending",
+            Some("tok-1".into()),
+        )
+        .await
+        .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            2,
+            None,
+            Some("Bot".into()),
+            Some("medium".into()),
+            "accepted",
+            None,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let human = players.iter().find(|p| p.user_id == Some(uid)).unwrap();
+        assert_eq!(human.response, "pending");
+        assert_eq!(human.user_id, Some(uid));
+        assert_eq!(human.email_token.as_deref(), Some("tok-1"));
+        let bot = players.iter().find(|p| p.user_id.is_none()).unwrap();
+        assert_eq!(bot.response, "accepted");
+        assert_eq!(bot.user_id, None);
+        assert_eq!(bot.bot_name.as_deref(), Some("Bot"));
+        assert!(bot.email_token.is_none());
+    }
+
+    #[sqlx::test]
+    async fn remove_works_on_accepted_slot_and_allows_invalid_count(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let a_player =
+            insert_proposal_player(&mut tx, pid, 1, Some(a), None, None, "accepted", None)
+                .await
+                .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        delete_proposal_player(&mut tx, a_player).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        assert_eq!(players.len(), 1);
+        assert_eq!(players[0].user_id, Some(owner));
+        assert!(!players.iter().any(|p| p.user_id == Some(a)));
+    }
+
+    #[sqlx::test]
+    async fn transfer_rejects_bot_and_nonplayer_targets(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(a), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            2,
+            None,
+            Some("Botty".into()),
+            Some("medium".into()),
+            "accepted",
+            None,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let roster = find_proposal_players(&pool, pid).await.unwrap();
+        let bot = roster.iter().find(|p| p.bot_name.is_some()).unwrap();
+        assert_eq!(bot.user_id, None);
+        let random = Uuid::new_v4();
+        assert!(!roster.iter().any(|p| p.user_id == Some(random)));
+        assert!(roster.iter().any(|p| p.user_id == Some(a)));
+
+        let mut tx = pool.begin().await.unwrap();
+        update_proposal_owner(&mut tx, pid, a).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let proposal = find_proposal(&pool, pid).await.unwrap().unwrap();
+        assert_eq!(proposal.owner_user_id, a);
+    }
+
+    #[sqlx::test]
+    async fn normalize_positions_after_remove_and_add(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let h1 = seed_invite_user(&pool, true).await;
+        let h2 = seed_invite_user(&pool, true).await;
+        let h3 = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(h1), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let p2 = insert_proposal_player(
+            &mut tx,
+            pid,
+            2,
+            Some(h2),
+            None,
+            None,
+            "pending",
+            Some("t2".into()),
+        )
+        .await
+        .unwrap();
+        let p3 = insert_proposal_player(
+            &mut tx,
+            pid,
+            3,
+            Some(h3),
+            None,
+            None,
+            "pending",
+            Some("t3".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let h1_player = players.iter().find(|p| p.user_id == Some(h1)).unwrap().id;
+        let mut tx = pool.begin().await.unwrap();
+        delete_proposal_player(&mut tx, h1_player).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let positions: Vec<i32> = players.iter().map(|p| p.position).collect();
+        assert_eq!(positions, vec![0, 2, 3]);
+
+        let mut tx = pool.begin().await.unwrap();
+        normalize_proposal_positions(&mut tx, pid).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let positions: Vec<i32> = players.iter().map(|p| p.position).collect();
+        assert_eq!(positions, vec![0, 1, 2]);
+        assert_eq!(players[1].id, p2);
+        assert_eq!(players[2].id, p3);
+
+        let new_user = seed_invite_user(&pool, true).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            3,
+            Some(new_user),
+            None,
+            None,
+            "pending",
+            Some("t4".into()),
+        )
+        .await
+        .unwrap();
+        normalize_proposal_positions(&mut tx, pid).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let positions: Vec<i32> = players.iter().map(|p| p.position).collect();
+        assert_eq!(positions, vec![0, 1, 2, 3]);
     }
 }
