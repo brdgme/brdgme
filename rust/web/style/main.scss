@@ -584,8 +584,49 @@ body {
   padding: 0.2em 0;
 }
 
-.index-logged-in-placeholder {
-  padding: 2em 0;
+.index-logged-in {
+  padding: 1em 0;
+}
+
+.index-logged-in section {
+  margin-bottom: 2em;
+}
+
+.index-friend {
+  padding: 0.2em 0;
+}
+
+.index-friend-recent {
+  color: var(--mk-grey);
+}
+
+.index-game-types .table-scroll,
+.index-history .table-scroll {
+  overflow-x: auto;
+}
+
+.index-game-types table,
+.index-history table {
+  border-collapse: collapse;
+}
+
+.index-game-types th,
+.index-game-types td,
+.index-history th,
+.index-history td {
+  text-align: left;
+  padding: 0.2em 0.63em;
+  border-bottom: 1px solid var(--mk-soften-foreground-90);
+  white-space: nowrap;
+}
+
+.index-history tr.my-turn {
+  background-color: var(--mk-soften-orange-86);
+  font-weight: 700;
+}
+
+.index-history tr.finished {
+  color: var(--mk-grey);
 }
 
 .rules-page .rules-doc {

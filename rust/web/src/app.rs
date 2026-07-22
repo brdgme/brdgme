@@ -284,6 +284,7 @@ pub(crate) fn local_data_theme() -> Option<String> {
 #[component]
 fn HomePage() -> impl IntoView {
     use crate::components::game::GameBoard;
+    use crate::stats::viz::Sparkline;
 
     let current_user =
         expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
@@ -296,6 +297,9 @@ fn HomePage() -> impl IntoView {
         let _ = trigger.last_update.get();
         crate::game::server_fns::get_public_index().await
     });
+
+    let index_data: LocalResource<Result<crate::index::LoggedInIndexData, ServerFnError>> =
+        LocalResource::new(crate::index::get_logged_in_index);
 
     let mounted = RwSignal::new(false);
     Effect::new(move |_| mounted.set(true));
@@ -333,8 +337,119 @@ fn HomePage() -> impl IntoView {
                     }}
                 </div>
             </div>
-            <div class="content-page index-logged-in-placeholder" hidden=move || !logged_in()>
-                <p>"Loading..."</p>
+            <div class="content-page index-logged-in" hidden=move || !logged_in()>
+                <section class="index-friends">
+                    <h2>"Friends"</h2>
+                    {move || match index_data.get() {
+                        None => view! { <p>"Loading..."</p> }.into_any(),
+                        Some(Err(_)) => ().into_any(),
+                        Some(Ok(d)) if d.friends.is_empty() =>
+                            view! { <p>"No friends yet."</p> }.into_any(),
+                        Some(Ok(d)) => d.friends.iter().map(|f| {
+                            let name = f.friend_name.clone();
+                            let href = format!("/players/{}", crate::players::encode_path_segment(&name));
+                            let recent = match (f.game_id, f.game_type_name.clone()) {
+                                (Some(gid), Some(gtype)) => {
+                                    let game_href = format!("/games/{}", gid);
+                                    view! {
+                                        <span class="index-friend-recent">
+                                            " - " <A href=game_href>{gtype}</A>
+                                        </span>
+                                    }.into_any()
+                                }
+                                _ => ().into_any(),
+                            };
+                            view! {
+                                <div class="index-friend">
+                                    <A href=href>{name}</A>
+                                    {recent}
+                                </div>
+                            }
+                        }).collect_view().into_any(),
+                    }}
+                </section>
+
+                <section class="index-game-types">
+                    <h2>"Ratings"</h2>
+                    {move || match index_data.get() {
+                        None => view! { <p>"Loading..."</p> }.into_any(),
+                        Some(Err(_)) => ().into_any(),
+                        Some(Ok(d)) if d.game_types.is_empty() =>
+                            view! { <p>"No games played yet."</p> }.into_any(),
+                        Some(Ok(d)) => {
+                            let rows = d.game_types.iter().map(|gt| {
+                                let href = format!("/games/type/{}", crate::players::encode_path_segment(&gt.game_type_name));
+                                let rating = gt.rating.map(|r| r.to_string()).unwrap_or_else(|| "-".to_string());
+                                let trend = gt.trend.clone();
+                                let name = gt.game_type_name.clone();
+                                view! {
+                                    <tr>
+                                        <td><A href=href>{name}</A></td>
+                                        <td>{rating}</td>
+                                        <td>
+                                            {if trend.len() >= 2 {
+                                                view! { <Sparkline values=trend/> }.into_any()
+                                            } else {
+                                                view! { "-" }.into_any()
+                                            }}
+                                        </td>
+                                    </tr>
+                                }
+                            }).collect_view();
+                            view! {
+                                <div class="table-scroll">
+                                    <table>
+                                        <thead>
+                                            <tr><th>"Game"</th><th>"Rating"</th><th>"Trend"</th></tr>
+                                        </thead>
+                                        <tbody>{rows}</tbody>
+                                    </table>
+                                </div>
+                            }.into_any()
+                        }
+                    }}
+                </section>
+
+                <section class="index-history">
+                    <h2>"Recent games"</h2>
+                    {move || match index_data.get() {
+                        None => view! { <p>"Loading..."</p> }.into_any(),
+                        Some(Err(_)) => ().into_any(),
+                        Some(Ok(d)) if d.history.is_empty() =>
+                            view! { <p>"No games yet."</p> }.into_any(),
+                        Some(Ok(d)) => {
+                            let rows = d.history.iter().map(|h| {
+                                let href = format!("/games/{}", h.game_id);
+                                let my_turn = !h.is_finished && h.is_turn;
+                                let finished = h.is_finished;
+                                let status = if h.is_finished {
+                                    "Finished"
+                                } else if h.is_turn {
+                                    "Your turn"
+                                } else {
+                                    "Active"
+                                };
+                                let name = h.game_type_name.clone();
+                                view! {
+                                    <tr class:my-turn=my_turn class:finished=finished>
+                                        <td><A href=href>{name}</A></td>
+                                        <td>{status}</td>
+                                    </tr>
+                                }
+                            }).collect_view();
+                            view! {
+                                <div class="table-scroll">
+                                    <table>
+                                        <thead>
+                                            <tr><th>"Game"</th><th>"Status"</th></tr>
+                                        </thead>
+                                        <tbody>{rows}</tbody>
+                                    </table>
+                                </div>
+                            }.into_any()
+                        }
+                    }}
+                </section>
             </div>
         </MainLayout>
     }

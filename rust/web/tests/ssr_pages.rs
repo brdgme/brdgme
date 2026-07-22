@@ -243,6 +243,19 @@ async fn home_page_anonymous(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn home_page_logged_in_renders_index_shell(pool: PgPool) {
+    let user = make_user(&pool, "index-player").await;
+    let cookie = login_cookie(&pool, &user, "index-player@example.com").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/", Some(&cookie)).await;
+    // The logged-in index data is a LocalResource (None on SSR), so only the
+    // section headings render server-side; assert the shell is clean (200, no
+    // panic). "Recent games" is the history section heading, unique to the
+    // logged-in index (the sidebar uses "Active/Pending/Finished games").
+    assert_clean_html_body(status, &content_type, &body, "Recent games");
+}
+
+#[sqlx::test]
 async fn login_page_anonymous(pool: PgPool) {
     let app = build_router(make_state(pool).await).await;
     let (status, content_type, body) = get(app, "/login", None).await;
