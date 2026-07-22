@@ -1382,6 +1382,103 @@ mod tests {
         );
     }
 
+    // Regression: force-deleting a game that a proposal references via
+    // started_game_id (or restarted_game_id) used to fail the
+    // game_proposals FK and abort the delete. The links must be nulled so
+    // the delete succeeds and the proposal history survives.
+    #[sqlx::test]
+    async fn force_delete_game_deletes_game_with_proposal_references(pool: PgPool) {
+        let admin_id = make_user(&pool, "admin3").await;
+        sqlx::query!("UPDATE users SET is_admin = true WHERE id = $1", admin_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: admin_id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let started_proposal_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status, started_game_id)
+             VALUES ($1, $2, 'started', $3) RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(admin_id)
+        .bind(game.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_proposal_players (proposal_id, position, user_id, response)
+             VALUES ($1, 0, $2, 'accepted')",
+        )
+        .bind(started_proposal_id)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let restart_proposal_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status, restarted_game_id)
+             VALUES ($1, $2, 'open', $3) RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(admin_id)
+        .bind(game.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        force_delete_game_impl(&pool, admin_id, game.id)
+            .await
+            .unwrap();
+
+        assert!(
+            crate::db::find_game(&pool, game.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let started_ref: Option<Uuid> =
+            sqlx::query_scalar("SELECT started_game_id FROM game_proposals WHERE id = $1")
+                .bind(started_proposal_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(started_ref, None);
+        let restarted_ref: Option<Uuid> =
+            sqlx::query_scalar("SELECT restarted_game_id FROM game_proposals WHERE id = $1")
+                .bind(restart_proposal_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(restarted_ref, None);
+
+        let player_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM game_proposal_players WHERE proposal_id = $1")
+                .bind(started_proposal_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(player_count, 1);
+    }
+
     #[sqlx::test]
     async fn force_delete_game_missing_game_errors(pool: PgPool) {
         let admin_id = make_user(&pool, "admin2").await;

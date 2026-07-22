@@ -1164,9 +1164,10 @@ pub async fn concede_game(
 
 /// #34 admin force delete (spec D3): hard-deletes a game and all dependent
 /// rows in one transaction. Any game referencing the deleted one via
-/// `restarted_game_id` has that link nulled (making it restartable again).
-/// Ratings are deliberately NOT rewound. Returns false if the game did not
-/// exist.
+/// `restarted_game_id` has that link nulled (making it restartable again), and
+/// any proposal referencing it via `started_game_id`/`restarted_game_id` has
+/// that link nulled (preserving the proposal history). Ratings are deliberately
+/// NOT rewound. Returns false if the game did not exist.
 #[cfg(feature = "ssr")]
 pub async fn delete_game(pool: &PgPool, game_id: Uuid) -> Result<bool> {
     let mut tx = pool.begin().await?;
@@ -1175,6 +1176,20 @@ pub async fn delete_game(pool: &PgPool, game_id: Uuid) -> Result<bool> {
         "UPDATE games SET restarted_game_id = NULL, updated_at = NOW() WHERE restarted_game_id = $1",
         game_id
     )
+    .execute(&mut *tx)
+    .await?;
+    // game_proposals (migration 015) FK-reference games via started_game_id and
+    // restarted_game_id; null both or the game delete violates those FKs.
+    sqlx::query(
+        "UPDATE game_proposals SET started_game_id = NULL, updated_at = NOW() WHERE started_game_id = $1",
+    )
+    .bind(game_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE game_proposals SET restarted_game_id = NULL, updated_at = NOW() WHERE restarted_game_id = $1",
+    )
+    .bind(game_id)
     .execute(&mut *tx)
     .await?;
     sqlx::query!(
