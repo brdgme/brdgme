@@ -84,39 +84,40 @@ fn render(pub_state: &PubState, _player: Option<usize>) -> Vec<N> {
 
     // Dice section
     out.push(N::Bold(vec![N::text("Dice\n")]));
-    if !pub_state.rolled_dice.is_empty() || !pub_state.kept_dice.is_empty() {
-        let mut dice_nodes: Vec<N> = vec![];
-        for (i, d) in pub_state.rolled_dice.iter().enumerate() {
-            if i > 0 {
-                dice_nodes.push(N::text("  "));
-            }
-            dice_nodes.push(N::Bold(vec![die_node(*d)]));
-        }
-        if !pub_state.rolled_dice.is_empty() && !pub_state.kept_dice.is_empty() {
-            dice_nodes.push(N::text("  "));
-        }
+    if !pub_state.rolled_dice.is_empty() {
+        let dice_row: Row = pub_state
+            .rolled_dice
+            .iter()
+            .map(|d| (A::Center, vec![N::Bold(vec![die_node(*d)])]))
+            .collect();
+        let label_row: Row = pub_state
+            .rolled_dice
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                (
+                    A::Center,
+                    vec![N::Fg(
+                        NamedColor::Grey.into(),
+                        vec![N::text((i + 1).to_string())],
+                    )],
+                )
+            })
+            .collect();
+        out.push(table_with_gap(&[dice_row, label_row], 2));
+    }
+    if !pub_state.kept_dice.is_empty() {
+        let mut kept_nodes: Vec<N> = vec![];
         for (i, d) in pub_state.kept_dice.iter().enumerate() {
             if i > 0 {
-                dice_nodes.push(N::text("  "));
+                kept_nodes.push(N::text("  "));
             }
-            dice_nodes.push(die_node(*d));
+            kept_nodes.push(die_node(*d));
         }
-        out.push(N::Group(dice_nodes));
-        // Position numbers for rolled dice
-        if !pub_state.rolled_dice.is_empty() {
-            let mut pos_nodes: Vec<N> = vec![];
-            for (i, _) in pub_state.rolled_dice.iter().enumerate() {
-                if i > 0 {
-                    pos_nodes.push(N::text("  "));
-                }
-                pos_nodes.push(N::Fg(
-                    NamedColor::Grey.into(),
-                    vec![N::text((i + 1).to_string())],
-                ));
-            }
-            out.push(N::text("\n"));
-            out.push(N::Group(pos_nodes));
-        }
+        out.push(N::text("\n"));
+        out.push(N::Group(kept_nodes));
+    }
+    if !pub_state.rolled_dice.is_empty() || !pub_state.kept_dice.is_empty() {
         out.push(N::text("\n"));
     }
 
