@@ -2298,6 +2298,56 @@ pub async fn find_recent_game_log_lines(
     Ok(logs)
 }
 
+#[cfg(feature = "ssr")]
+pub async fn friend_recent_visible_game(
+    pool: &PgPool,
+    friend_user_id: Uuid,
+    viewer_id: Uuid,
+    scan_limit: i64,
+) -> Result<Option<(Uuid, String, time::PrimitiveDateTime)>> {
+    let candidates: Vec<(Uuid, String, time::PrimitiveDateTime)> = sqlx::query_as(
+        "SELECT g.id, gt.name, g.updated_at
+         FROM game_players gp
+         JOIN games g ON g.id = gp.game_id
+         JOIN game_versions gv ON gv.id = g.game_version_id
+         JOIN game_types gt ON gt.id = gv.game_type_id
+         WHERE gp.user_id = $1
+         ORDER BY g.updated_at DESC, g.id
+         LIMIT $2",
+    )
+    .bind(friend_user_id)
+    .bind(scan_limit)
+    .fetch_all(pool)
+    .await?;
+    for (game_id, type_name, updated_at) in candidates {
+        if is_game_visible_to_user(pool, game_id, viewer_id).await? {
+            return Ok(Some((game_id, type_name, updated_at)));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn recent_games_for_index(
+    pool: &PgPool,
+    user_id: Uuid,
+    limit: i64,
+) -> Result<Vec<(Uuid, String, bool, bool, time::PrimitiveDateTime)>> {
+    Ok(sqlx::query_as(
+        "SELECT g.id, gt.name, g.is_finished, me.is_turn, g.updated_at
+         FROM games g
+         JOIN game_versions gv ON gv.id = g.game_version_id
+         JOIN game_types gt ON gt.id = gv.game_type_id
+         JOIN game_players me ON me.game_id = g.id AND me.user_id = $1
+         ORDER BY g.updated_at DESC, g.id
+         LIMIT $2",
+    )
+    .bind(user_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
+}
+
 /// D4 + D7 enforcement choke point. Call after the roster is known but
 /// before players are attached: create_new_game and restart_game today,
 /// #24's create_proposal and any future matchmaking tomorrow.
@@ -3698,6 +3748,180 @@ mod tests {
             find_public_index_game_id(&pool).await.unwrap(),
             Some(game_a.id)
         );
+    }
+
+    // --- Unit B4 logged-in index ---
+
+    #[sqlx::test]
+    async fn friend_recent_visible_game_returns_most_recent(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let viewer = make_user(&pool, "viewer").await;
+        let friend = make_user(&pool, "friend").await;
+        let other = make_user(&pool, "other").await;
+        accept_friends(&pool, viewer.id, friend.id).await;
+
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let older = make_game_with_players(&pool, gv, friend.id, &[other.id], 0, &[0]).await;
+        sqlx::query("UPDATE games SET updated_at = '2026-01-01 00:00:00' WHERE id = $1")
+            .bind(older.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let newer = make_game_with_players(&pool, gv, friend.id, &[other.id], 0, &[0]).await;
+        sqlx::query("UPDATE games SET updated_at = '2026-01-02 00:00:00' WHERE id = $1")
+            .bind(newer.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result = friend_recent_visible_game(&pool, friend.id, viewer.id, 10)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let (game_id, _, _) = result.unwrap();
+        assert_eq!(game_id, newer.id);
+    }
+
+    #[sqlx::test]
+    async fn friend_recent_visible_game_skips_private_player(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let viewer = make_user(&pool, "viewer").await;
+        let friend = make_user(&pool, "friend").await;
+        let private_player = make_user(&pool, "privatep").await;
+        let other = make_user(&pool, "other").await;
+        accept_friends(&pool, viewer.id, friend.id).await;
+        set_game_visibility(&pool, private_player.id, "private")
+            .await
+            .unwrap();
+
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let older = make_game_with_players(&pool, gv, friend.id, &[other.id], 0, &[0]).await;
+        sqlx::query("UPDATE games SET updated_at = '2026-01-01 00:00:00' WHERE id = $1")
+            .bind(older.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let newer =
+            make_game_with_players(&pool, gv, friend.id, &[private_player.id], 0, &[0]).await;
+        sqlx::query("UPDATE games SET updated_at = '2026-01-02 00:00:00' WHERE id = $1")
+            .bind(newer.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result = friend_recent_visible_game(&pool, friend.id, viewer.id, 10)
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        let (game_id, _, _) = result.unwrap();
+        assert_eq!(
+            game_id, older.id,
+            "should skip the newer game with a private player"
+        );
+    }
+
+    #[sqlx::test]
+    async fn friend_recent_visible_game_returns_none_when_no_games(pool: PgPool) {
+        let viewer = make_user(&pool, "viewer").await;
+        let friend = make_user(&pool, "friend").await;
+        accept_friends(&pool, viewer.id, friend.id).await;
+
+        let result = friend_recent_visible_game(&pool, friend.id, viewer.id, 10)
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[sqlx::test]
+    async fn recent_games_for_index_returns_last_10_most_recent_first(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let user = make_user(&pool, "alice").await;
+        let opp = make_user(&pool, "bob").await;
+
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut game_ids = Vec::new();
+        for i in 0..12 {
+            let g = make_game_with_players(&pool, gv, user.id, &[opp.id], 0, &[0]).await;
+            let ts = format!("2026-01-{:02} 00:00:00", i + 1);
+            sqlx::query("UPDATE games SET updated_at = $1::timestamp WHERE id = $2")
+                .bind(ts)
+                .bind(g.id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            game_ids.push(g.id);
+        }
+
+        let rows = recent_games_for_index(&pool, user.id, 10).await.unwrap();
+        assert_eq!(rows.len(), 10);
+        assert_eq!(rows[0].0, game_ids[11], "most recent first");
+        assert_eq!(rows[9].0, game_ids[2]);
+    }
+
+    #[sqlx::test]
+    async fn recent_games_for_index_has_correct_turn_and_finished_flags(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let user = make_user(&pool, "alice").await;
+        let opp = make_user(&pool, "bob").await;
+
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let my_turn = make_game_with_players(&pool, gv, user.id, &[opp.id], 0, &[0, 1]).await;
+        sqlx::query("UPDATE games SET updated_at = '2026-01-03 00:00:00' WHERE id = $1")
+            .bind(my_turn.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let not_my_turn = make_game_with_players(&pool, gv, user.id, &[opp.id], 0, &[]).await;
+        sqlx::query("UPDATE games SET updated_at = '2026-01-02 00:00:00' WHERE id = $1")
+            .bind(not_my_turn.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let finished = make_game_with_players(&pool, gv, user.id, &[opp.id], 0, &[0, 1]).await;
+        sqlx::query(
+            "UPDATE games SET is_finished = true, finished_at = NOW(), updated_at = '2026-01-01 00:00:00' WHERE id = $1",
+        )
+        .bind(finished.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = recent_games_for_index(&pool, user.id, 10).await.unwrap();
+        assert_eq!(rows.len(), 3);
+
+        let r0 = &rows[0];
+        assert_eq!(r0.0, my_turn.id);
+        assert!(!r0.2, "not finished");
+        assert!(r0.3, "is my turn");
+
+        let r1 = &rows[1];
+        assert_eq!(r1.0, not_my_turn.id);
+        assert!(!r1.2, "not finished");
+        assert!(!r1.3, "not my turn");
+
+        let r2 = &rows[2];
+        assert_eq!(r2.0, finished.id);
+        assert!(r2.2, "is finished");
     }
 
     #[sqlx::test]
