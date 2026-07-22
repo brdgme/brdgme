@@ -2154,6 +2154,89 @@ pub async fn set_invite_policy(pool: &PgPool, user_id: Uuid, policy: &str) -> Re
     Ok(())
 }
 
+/// Plain query, matching get_invite_policy - game_visibility is deliberately
+/// NOT a field on models::user::User (Unit B / R4).
+#[cfg(feature = "ssr")]
+pub async fn get_game_visibility(pool: &PgPool, user_id: Uuid) -> Result<String> {
+    let row: (String,) = sqlx::query_as("SELECT game_visibility FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_game_visibility(pool: &PgPool, user_id: Uuid, visibility: &str) -> Result<()> {
+    sqlx::query("UPDATE users SET game_visibility = $1, updated_at = NOW() WHERE id = $2")
+        .bind(visibility)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Bulk lookup of (user_id, game_visibility) for the given users, for
+/// game-visibility checks across many players at once.
+#[cfg(feature = "ssr")]
+pub async fn find_game_visibility_for_users_tx(
+    tx: &mut sqlx::PgConnection,
+    user_ids: &[Uuid],
+) -> Result<Vec<(Uuid, String)>> {
+    Ok(
+        sqlx::query_as("SELECT id, game_visibility FROM users WHERE id = ANY($1)")
+            .bind(user_ids)
+            .fetch_all(tx)
+            .await?,
+    )
+}
+
+/// A game is publicly visible (eligible for the logged-out index) iff EVERY
+/// human player has game_visibility = 'public'. Bots (user_id IS NULL) are
+/// dropped by the JOIN and never block. Used by both the selection query and
+/// the render fn so they cannot drift (Unit B section 2c).
+#[cfg(feature = "ssr")]
+pub async fn is_game_publicly_visible(pool: &PgPool, game_id: Uuid) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT NOT EXISTS(
+            SELECT 1 FROM game_players gp
+            JOIN users u ON u.id = gp.user_id
+            WHERE gp.game_id = $1 AND u.game_visibility <> 'public')",
+    )
+    .bind(game_id)
+    .fetch_one(pool)
+    .await?)
+}
+
+/// A game is visible to `viewer_id` iff the viewer is one of its players, OR
+/// every human player is either 'public' or ('friends' AND friends with the
+/// viewer). A 'private' player blocks all non-self viewing. Bots never block.
+#[cfg(feature = "ssr")]
+pub async fn is_game_visible_to_user(
+    pool: &PgPool,
+    game_id: Uuid,
+    viewer_id: Uuid,
+) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM game_players WHERE game_id = $1 AND user_id = $2)
+           OR NOT EXISTS(
+             SELECT 1 FROM game_players gp
+             JOIN users u ON u.id = gp.user_id
+             WHERE gp.game_id = $1
+               AND NOT (
+                 u.game_visibility = 'public'
+                 OR (u.game_visibility = 'friends' AND EXISTS(
+                   SELECT 1 FROM friends f WHERE f.has_accepted = TRUE
+                     AND ((f.source_user_id = $2 AND f.target_user_id = u.id)
+                       OR (f.target_user_id = $2 AND f.source_user_id = u.id))
+                 ))
+               ))",
+    )
+    .bind(game_id)
+    .bind(viewer_id)
+    .fetch_one(pool)
+    .await?)
+}
+
 /// D4 + D7 enforcement choke point. Call after the roster is known but
 /// before players are attached: create_new_game and restart_game today,
 /// #24's create_proposal and any future matchmaking tomorrow.
@@ -3305,6 +3388,122 @@ mod tests {
         assert_eq!(
             check_roster(&pool, b.id, &[a.id], &[]).await,
             vec!["You have blocked alice".to_string()]
+        );
+    }
+
+    // --- Unit B / R4 game visibility ---
+
+    async fn accept_friends(pool: &PgPool, a: Uuid, b: Uuid) {
+        send_friend_request(pool, a, b).await.unwrap();
+        send_friend_request(pool, b, a).await.unwrap();
+    }
+
+    #[sqlx::test]
+    async fn game_visibility_defaults_to_public(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        assert_eq!(get_game_visibility(&pool, a.id).await.unwrap(), "public");
+    }
+
+    #[sqlx::test]
+    async fn set_game_visibility_round_trips_each_value(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        for v in ["friends", "private", "public"] {
+            set_game_visibility(&pool, a.id, v).await.unwrap();
+            assert_eq!(get_game_visibility(&pool, a.id).await.unwrap(), v);
+        }
+    }
+
+    #[sqlx::test]
+    async fn find_game_visibility_for_users_tx_bulk_lookup(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        set_game_visibility(&pool, b.id, "private").await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let mut rows = find_game_visibility_for_users_tx(&mut tx, &[a.id, b.id])
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        rows.sort_by_key(|(id, _)| *id);
+        let mut expected = vec![(a.id, "public".to_string()), (b.id, "private".to_string())];
+        expected.sort_by_key(|(id, _)| *id);
+        assert_eq!(rows, expected);
+    }
+
+    #[sqlx::test]
+    async fn is_game_publicly_visible_requires_all_public(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+
+        // both default 'public'
+        assert!(is_game_publicly_visible(&pool, game.id).await.unwrap());
+
+        set_game_visibility(&pool, b.id, "friends").await.unwrap();
+        assert!(!is_game_publicly_visible(&pool, game.id).await.unwrap());
+
+        set_game_visibility(&pool, b.id, "public").await.unwrap();
+        set_game_visibility(&pool, a.id, "private").await.unwrap();
+        assert!(!is_game_publicly_visible(&pool, game.id).await.unwrap());
+    }
+
+    #[sqlx::test]
+    async fn is_game_publicly_visible_ignores_bots(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        // one human (public) + one bot: bots never block
+        let game = make_game_with_players(&pool, gv, a.id, &[], 1, &[0]).await;
+        assert!(is_game_publicly_visible(&pool, game.id).await.unwrap());
+    }
+
+    #[sqlx::test]
+    async fn is_game_visible_to_user_friends_tier(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let friend = make_user(&pool, "cara").await;
+        let stranger = make_user(&pool, "dan").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+
+        set_game_visibility(&pool, a.id, "friends").await.unwrap();
+        // b is public; a is 'friends'
+        accept_friends(&pool, a.id, friend.id).await;
+
+        // a player in the game always sees it
+        assert!(is_game_visible_to_user(&pool, game.id, b.id).await.unwrap());
+        // a friend of the 'friends' player sees it
+        assert!(
+            is_game_visible_to_user(&pool, game.id, friend.id)
+                .await
+                .unwrap()
+        );
+        // a non-friend does not
+        assert!(
+            !is_game_visible_to_user(&pool, game.id, stranger.id)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[sqlx::test]
+    async fn is_game_visible_to_user_private_blocks_non_self(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let friend = make_user(&pool, "cara").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+
+        set_game_visibility(&pool, a.id, "private").await.unwrap();
+        accept_friends(&pool, a.id, friend.id).await;
+
+        // the private player (a self player) and the other player still see it
+        assert!(is_game_visible_to_user(&pool, game.id, a.id).await.unwrap());
+        assert!(is_game_visible_to_user(&pool, game.id, b.id).await.unwrap());
+        // even a friend of the private player does not
+        assert!(
+            !is_game_visible_to_user(&pool, game.id, friend.id)
+                .await
+                .unwrap()
         );
     }
 

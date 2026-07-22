@@ -15,6 +15,14 @@ pub const INVITE_POLICIES: [(&str, &str); 3] = [
     ("none", "Nobody can invite me to a game"),
 ];
 
+/// Unit B / R4 per-user game visibility (who can see my games on the home
+/// page). Mirrors INVITE_POLICIES; stored in users.game_visibility.
+pub const GAME_VISIBILITIES: [(&str, &str); 3] = [
+    ("public", "Anyone can see my games on the home page"),
+    ("friends", "Only friends can see my games"),
+    ("private", "Hide my games from the home page"),
+];
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FriendEntry {
     pub user_id: Uuid,
@@ -37,6 +45,7 @@ pub struct FriendsOverview {
     pub outgoing: Vec<FriendEntry>,
     pub blocked: Vec<FriendEntry>,
     pub invite_policy: String,
+    pub game_visibility: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,6 +111,9 @@ pub async fn get_friends_overview() -> Result<FriendsOverview, ServerFnError> {
     let invite_policy = crate::db::get_invite_policy(&pool, user.id)
         .await
         .map_err(internal("get_friends_overview: policy"))?;
+    let game_visibility = crate::db::get_game_visibility(&pool, user.id)
+        .await
+        .map_err(internal("get_friends_overview: visibility"))?;
     let entry = |(user_id, name): (Uuid, String)| FriendEntry { user_id, name };
     Ok(FriendsOverview {
         friends: friends.into_iter().map(entry).collect(),
@@ -116,6 +128,7 @@ pub async fn get_friends_overview() -> Result<FriendsOverview, ServerFnError> {
         outgoing: outgoing.into_iter().map(entry).collect(),
         blocked: blocked.into_iter().map(entry).collect(),
         invite_policy,
+        game_visibility,
     })
 }
 
@@ -238,6 +251,24 @@ pub async fn set_invite_policy(policy: String) -> Result<(), ServerFnError> {
         .map_err(internal("set_invite_policy: update"))
 }
 
+/// Unit B / R4: per-user game visibility (public/friends/private). Mirrors
+/// SetInvitePolicy - validates against GAME_VISIBILITIES before writing.
+#[server(SetGameVisibility, "/api")]
+pub async fn set_game_visibility(visibility: String) -> Result<(), ServerFnError> {
+    use sqlx::PgPool;
+    if !GAME_VISIBILITIES
+        .iter()
+        .any(|(slug, _)| *slug == visibility)
+    {
+        return Err(ServerFnError::new("Unknown game visibility"));
+    }
+    let pool = expect_context::<PgPool>();
+    let user = require_user().await?;
+    crate::db::set_game_visibility(&pool, user.id, &visibility)
+        .await
+        .map_err(internal("set_game_visibility: update"))
+}
+
 #[server(GetOpponentSuggestions, "/api")]
 pub async fn get_opponent_suggestions() -> Result<Vec<OpponentSuggestion>, ServerFnError> {
     use sqlx::PgPool;
@@ -323,6 +354,7 @@ pub fn FriendsPage() -> impl IntoView {
     let unfriend_action = ServerAction::<Unfriend>::new();
     let unblock_action = ServerAction::<UnblockUser>::new();
     let policy_action = ServerAction::<SetInvitePolicy>::new();
+    let visibility_action = ServerAction::<SetGameVisibility>::new();
 
     let (add_name, set_add_name) = signal(String::new());
 
@@ -345,6 +377,11 @@ pub fn FriendsPage() -> impl IntoView {
     });
     Effect::new(move |_| {
         if let Some(Ok(())) = unblock_action.value().get() {
+            set_refresh.update(|n| *n += 1);
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(())) = visibility_action.value().get() {
             set_refresh.update(|n| *n += 1);
         }
     });
@@ -509,6 +546,18 @@ pub fn FriendsPage() -> impl IntoView {
                             }>
                                 {INVITE_POLICIES.iter().map(|(slug, label)| {
                                     let selected = o.invite_policy == *slug;
+                                    view! { <option value=*slug selected=selected>{*label}</option> }
+                                }).collect_view()}
+                            </select>
+                        </section>
+
+                        <section class="friends-visibility">
+                            <h2>"Who can see my games"</h2>
+                            <select on:change=move |ev| {
+                                visibility_action.dispatch(SetGameVisibility { visibility: event_target_value(&ev) });
+                            }>
+                                {GAME_VISIBILITIES.iter().map(|(slug, label)| {
+                                    let selected = o.game_visibility == *slug;
                                     view! { <option value=*slug selected=selected>{*label}</option> }
                                 }).collect_view()}
                             </select>
