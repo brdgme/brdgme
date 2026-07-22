@@ -256,11 +256,34 @@ async fn dashboard_page_anonymous(pool: PgPool) {
     assert_clean_html_body(status, &content_type, &body, "Dashboard");
 }
 
+// G-route ranking proof: static "/games/new" must outrank parametric
+// "/games/:id" (GamePage would render "Error: Invalid Game ID" for "new").
 #[sqlx::test]
-async fn games_page_anonymous(pool: PgPool) {
+async fn new_game_type_page_anonymous(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/games/new", None).await;
+    assert_clean_html_body(status, &content_type, &body, "New Game");
+    assert!(
+        !body.contains("Invalid Game ID"),
+        "static /games/new ranked below parametric /games/:id: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn games_route_is_unused_returns_not_found(pool: PgPool) {
     let app = build_router(make_state(pool).await).await;
     let (status, content_type, body) = get(app, "/games", None).await;
-    assert_clean_html_body(status, &content_type, &body, "New Game");
+    // The Routes fallback renders "Page not found." with a 404 status.
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+    assert!(content_type.starts_with("text/html"), "content-type: {content_type}");
+    assert!(
+        body.contains("Page not found."),
+        "expected fallback marker in body: {body}"
+    );
+    assert!(
+        !body.to_lowercase().contains("panicked at"),
+        "SSR body contains a panic message: {body}"
+    );
 }
 
 #[sqlx::test]
@@ -1308,7 +1331,7 @@ async fn game_info_page_renders_for_existing_game_type(pool: PgPool) {
         "expected start-game link in body: {body}"
     );
     assert!(
-        body.contains("/games?game="),
+        body.contains("/games/new/"),
         "expected start-game href in body: {body}"
     );
 }
@@ -1332,8 +1355,15 @@ async fn game_info_page_case_insensitive_name(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn new_game_page_with_game_query_param_renders_shell(pool: PgPool) {
+async fn new_game_setup_page_renders_shell(pool: PgPool) {
     let app = build_router(make_state(pool).await).await;
-    let (status, content_type, body) = get(app, "/games?game=Some%20Game", None).await;
-    assert_clean_html_body(status, &content_type, &body, "New Game");
+    let (status, content_type, body) = get(app, "/games/new/Some%20Game", None).await;
+    assert_clean_html_body(status, &content_type, &body, "Back to games");
+}
+
+#[sqlx::test]
+async fn new_game_setup_page_unknown_type_renders_shell(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, "/games/new/NoSuchGame", None).await;
+    assert_clean_html_body(status, &content_type, &body, "Back to games");
 }

@@ -119,7 +119,7 @@ pub fn GameInfoPage() -> impl IntoView {
                         }.into_any(),
                         Ok(Some(d)) => {
                             let start_href = format!(
-                                "/games?game={}",
+                                "/games/new/{}",
                                 encode_path_segment(&d.name),
                             );
                             let ranking = d.ranking.clone();

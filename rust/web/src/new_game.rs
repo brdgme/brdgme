@@ -1,10 +1,14 @@
-use leptos::html;
 use leptos::prelude::*;
-use leptos_router::{NavigateOptions, components::A, hooks::use_navigate};
+use leptos_router::{
+    NavigateOptions,
+    components::A,
+    hooks::{use_navigate, use_params_map},
+};
 use uuid::Uuid;
 
 use crate::components::{OpponentSlot, OpponentSlotEditor};
 use crate::game::server_fns::{BotSlot, GameTypeInfo, get_available_bots};
+use crate::players::encode_path_segment;
 
 /// Formats supported player counts, honoring non-contiguous sets:
 /// [2,3,4] -> "2-4 players", [2] -> "2 players", [2,4,6] -> "2, 4, 6 players".
@@ -66,17 +70,8 @@ fn filter_and_sort(
     list
 }
 
-/// True below the 60em breakpoint (single-column layout), where selecting a
-/// game should scroll the setup panel into view.
-fn is_narrow() -> bool {
-    web_sys::window()
-        .and_then(|w| w.match_media("(max-width: 60em)").ok().flatten())
-        .map(|m| m.matches())
-        .unwrap_or(false)
-}
-
 #[component]
-pub fn NewGamePage() -> impl IntoView {
+pub fn NewGameTypePage() -> impl IntoView {
     use crate::components::layout::MainLayout;
     use crate::game::server_fns::get_available_game_types;
 
@@ -90,7 +85,7 @@ pub fn NewGamePage() -> impl IntoView {
                     None => view! { <p>"Loading..."</p> }.into_any(),
                     Some(Err(e)) => view! { <p class="error">{crate::error::user_facing_server_error(&e)}</p> }.into_any(),
                     Some(Ok(t)) if t.is_empty() => view! { <p>"No games available."</p> }.into_any(),
-                    Some(Ok(types)) => view! { <GameBrowser types=types/> }.into_any(),
+                    Some(Ok(types)) => view! { <GameTypeGrid types=types/> }.into_any(),
                 }}
             </div>
         </MainLayout>
@@ -98,15 +93,126 @@ pub fn NewGamePage() -> impl IntoView {
 }
 
 #[component]
-fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
+fn GameTypeGrid(types: Vec<GameTypeInfo>) -> impl IntoView {
     let types = StoredValue::new(types);
+    let (filter_players, set_filter_players) = signal(String::new());
+    let (filter_text, set_filter_text) = signal(String::new());
+    let (sort_key, set_sort_key) = signal("alpha".to_string());
+
+    let visible_types = Memo::new(move |_| {
+        types.with_value(|t| {
+            filter_and_sort(
+                t,
+                filter_players.get().trim().parse::<i32>().ok(),
+                &filter_text.get(),
+                &sort_key.get(),
+            )
+        })
+    });
+
+    view! {
+        <div class="new-game-browser">
+            <div class="new-game-filters">
+                <input
+                    type="number"
+                    min="1"
+                    class="new-game-filter-players"
+                    placeholder="Players"
+                    aria-label="Filter by player count"
+                    prop:value=filter_players
+                    on:input=move |ev| set_filter_players.set(event_target_value(&ev))
+                />
+                <input
+                    type="search"
+                    class="new-game-filter-search"
+                    placeholder="Search games"
+                    aria-label="Search games by name"
+                    prop:value=filter_text
+                    on:input=move |ev| set_filter_text.set(event_target_value(&ev))
+                />
+                <select
+                    aria-label="Sort games"
+                    on:change=move |ev| set_sort_key.set(event_target_value(&ev))
+                >
+                    <option value="alpha">"Alphabetical"</option>
+                    <option value="weight-asc">"Weight (low to high)"</option>
+                    <option value="weight-desc">"Weight (high to low)"</option>
+                </select>
+            </div>
+            <div class="game-card-grid">
+                <For
+                    each=move || visible_types.get()
+                    key=|gt| gt.id
+                    children=move |gt: GameTypeInfo| {
+                        let href = format!("/games/new/{}", encode_path_segment(&gt.name));
+                        let name = gt.name.clone();
+                        let meta = format!(
+                            "{} | {}",
+                            player_range(&gt.player_counts),
+                            weight_text(gt.weight)
+                        );
+                        let blurb = gt.blurb.clone();
+                        view! {
+                            <A href=href attr:class="game-card">
+                                <span class="game-card-name">{name}</span>
+                                <span class="game-card-meta">{meta}</span>
+                                {(!blurb.is_empty())
+                                    .then(|| view! { <span class="game-card-blurb">{blurb.clone()}</span> })}
+                            </A>
+                        }
+                    }
+                />
+            </div>
+        </div>
+    }
+}
+
+#[component]
+pub fn NewGameSetupPage() -> impl IntoView {
+    use crate::components::layout::MainLayout;
+    use crate::game::server_fns::get_available_game_types;
+
+    let params = use_params_map();
+    let game_types = LocalResource::new(get_available_game_types);
+
+    view! {
+        <MainLayout>
+            <div class="new-game content-page">
+                <p class="new-game-back">
+                    <A href="/games/new">"Back to games"</A>
+                </p>
+                {move || {
+                    let wanted = params.get().get("type").unwrap_or_default();
+                    match game_types.get() {
+                        None => view! { <p>"Loading..."</p> }.into_any(),
+                        Some(Err(e)) => view! { <p class="error">{crate::error::user_facing_server_error(&e)}</p> }.into_any(),
+                        Some(Ok(types)) => match types
+                            .iter()
+                            .find(|gt| gt.name.eq_ignore_ascii_case(&wanted))
+                        {
+                            None => view! {
+                                <h1>"Game not found"</h1>
+                                <p>"No such game type."</p>
+                            }
+                                .into_any(),
+                            Some(gt) => view! { <GameSetupPanel gt=gt.clone()/> }.into_any(),
+                        },
+                    }
+                }}
+            </div>
+        </MainLayout>
+    }
+}
+
+#[component]
+fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
     let suggestions = LocalResource::new(crate::friends::get_opponent_suggestions);
     let bot_names = LocalResource::new(get_available_bots);
 
-    let (selected_type_id, set_selected_type_id) = signal(None::<Uuid>);
-    let (selected_version_id, set_selected_version_id) = signal(None::<Uuid>);
-    let (player_count, set_player_count) = signal(0i32);
+    let (selected_version_id, set_selected_version_id) = signal(gt.versions.first().map(|v| v.id));
+    let (player_count, set_player_count) = signal(gt.player_counts.first().copied().unwrap_or(2));
     let (opponent_slots, set_opponent_slots) = signal(Vec::<OpponentSlot>::new());
+    let (form_error, set_form_error) = signal(None::<String>);
 
     // Users already taken by any slot never appear as chips again.
     let taken = Signal::derive(move || -> Vec<Uuid> {
@@ -123,74 +229,11 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
             .collect()
     });
 
-    let (filter_players, set_filter_players) = signal(String::new());
-    let (filter_text, set_filter_text) = signal(String::new());
-    let (sort_key, set_sort_key) = signal("alpha".to_string());
-    let (form_error, set_form_error) = signal(None::<String>);
-
-    let panel_ref = NodeRef::<html::Div>::new();
-
-    let query = leptos_router::hooks::use_query_map();
-
-    let visible_types = Memo::new(move |_| {
-        types.with_value(|t| {
-            filter_and_sort(
-                t,
-                filter_players.get().trim().parse::<i32>().ok(),
-                &filter_text.get(),
-                &sort_key.get(),
-            )
-        })
-    });
-
-    // Filtering out the selected game deselects it: the panel returns to
-    // its empty state.
-    Effect::new(move |_| {
-        if let Some(id) = selected_type_id.get()
-            && !visible_types.get().iter().any(|gt| gt.id == id)
-        {
-            set_selected_type_id.set(None);
-            set_selected_version_id.set(None);
-        }
-    });
-
     // Opponent slots track player_count - 1. Existing slot state survives
     // count changes where possible (resize, not rebuild).
     Effect::new(move |_| {
         let n = (player_count.get() - 1).max(0) as usize;
         set_opponent_slots.update(|v| v.resize_with(n, OpponentSlot::default));
-    });
-
-    let select_game = move |gt: &GameTypeInfo| {
-        set_selected_type_id.set(Some(gt.id));
-        set_selected_version_id.set(gt.versions.first().map(|v| v.id));
-        set_player_count.set(gt.player_counts.first().copied().unwrap_or(2));
-        set_form_error.set(None);
-        // Single-column layout: bring the setup panel into view.
-        if is_narrow()
-            && let Some(el) = panel_ref.get_untracked()
-        {
-            el.scroll_into_view();
-        }
-    };
-
-    let (preselect_done, set_preselect_done) = signal(false);
-    Effect::new(move |_| {
-        if preselect_done.get() {
-            return;
-        }
-        let Some(wanted) = query.get().get("game").filter(|s| !s.is_empty()) else {
-            return;
-        };
-        let matched = types.with_value(|t| {
-            t.iter()
-                .find(|gt| gt.name.eq_ignore_ascii_case(&wanted))
-                .cloned()
-        });
-        if let Some(gt) = matched {
-            select_game(&gt);
-        }
-        set_preselect_done.set(true);
     });
 
     let create_action = Action::new(
@@ -246,85 +289,23 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
         create_action.dispatch((version_id, ids, emails, bots));
     };
 
+    let gt = StoredValue::new(gt);
+
     view! {
-        <div class="new-game-layout">
-            <div class="new-game-browser">
-                <div class="new-game-filters">
-                    <input
-                        type="number"
-                        min="1"
-                        class="new-game-filter-players"
-                        placeholder="Players"
-                        aria-label="Filter by player count"
-                        prop:value=filter_players
-                        on:input=move |ev| set_filter_players.set(event_target_value(&ev))
-                    />
-                    <input
-                        type="search"
-                        class="new-game-filter-search"
-                        placeholder="Search games"
-                        aria-label="Search games by name"
-                        prop:value=filter_text
-                        on:input=move |ev| set_filter_text.set(event_target_value(&ev))
-                    />
-                    <select
-                        aria-label="Sort games"
-                        on:change=move |ev| set_sort_key.set(event_target_value(&ev))
-                    >
-                        <option value="alpha">"Alphabetical"</option>
-                        <option value="weight-asc">"Weight (low to high)"</option>
-                        <option value="weight-desc">"Weight (high to low)"</option>
-                    </select>
-                </div>
-                <div class="game-card-grid">
-                    <For
-                        each=move || visible_types.get()
-                        key=|gt| gt.id
-                        children=move |gt: GameTypeInfo| {
-                            let id = gt.id;
-                            let name = gt.name.clone();
-                            let meta = format!(
-                                "{} | {}",
-                                player_range(&gt.player_counts),
-                                weight_text(gt.weight)
-                            );
-                            let blurb = gt.blurb.clone();
-                            view! {
-                                <label class="game-card">
-                                    <input
-                                        type="radio"
-                                        name="game-type"
-                                        class="sr-only"
-                                        prop:checked=move || selected_type_id.get() == Some(id)
-                                        on:change=move |_| select_game(&gt)
-                                    />
-                                    <span class="game-card-name">{name}</span>
-                                    <span class="game-card-meta">{meta}</span>
-                                    {(!blurb.is_empty())
-                                        .then(|| view! { <span class="game-card-blurb">{blurb.clone()}</span> })}
-                                </label>
-                            }
-                        }
-                    />
-                </div>
-            </div>
-            <div class="new-game-panel" node_ref=panel_ref>
-                {move || {
-                    let Some(gt) = selected_type_id
-                        .get()
-                        .and_then(|id| {
-                            types.with_value(|t| t.iter().find(|g| g.id == id).cloned())
-                        })
-                    else {
-                        return view! {
-                            <p class="new-game-panel-empty">
-                                "Select a game on the left to set up a match."
-                            </p>
-                        }
-                        .into_any();
-                    };
-                    let version_select = (gt.versions.len() > 1).then(|| {
-                        let versions = gt.versions.clone();
+        <div class="new-game-panel">
+            <h2>{gt.with_value(|g| g.name.clone())}</h2>
+            <p class="game-card-meta">
+                {gt.with_value(|g| player_range(&g.player_counts))} " | "
+                {gt.with_value(|g| weight_text(g.weight))}
+            </p>
+            {gt.with_value(|g| {
+                (!g.blurb.is_empty())
+                    .then(|| view! { <p class="new-game-blurb">{g.blurb.clone()}</p> })
+            })}
+            <form on:submit=on_submit>
+                {gt.with_value(|g| {
+                    (g.versions.len() > 1).then(|| {
+                        let versions = g.versions.clone();
                         view! {
                             <div class="form-field">
                                 <label class="form-label">"Version"</label>
@@ -356,116 +337,103 @@ fn GameBrowser(types: Vec<GameTypeInfo>) -> impl IntoView {
                                 </div>
                             </div>
                         }
-                    });
-                    let counts = gt.player_counts.clone();
-                    view! {
-                        <h2>{gt.name.clone()}</h2>
-                        <p class="game-card-meta">
-                            {player_range(&gt.player_counts)} " | " {weight_text(gt.weight)}
-                        </p>
-                        {(!gt.blurb.is_empty())
-                            .then(|| view! { <p class="new-game-blurb">{gt.blurb.clone()}</p> })}
-                        <form on:submit=on_submit>
-                            {version_select}
-                            {move || {
-                                selected_version_id.get().map(|vid| {
-                                    view! {
-                                        <div class="form-field new-game-rules-link">
-                                            <A href=format!("/rules/{}", vid)>"View rules"</A>
-                                        </div>
-                                    }
-                                })
-                            }}
-                            <div class="form-field">
-                                <label class="form-label">"Players"</label>
-                                <div
-                                    class="form-control player-count-radios"
-                                    role="radiogroup"
-                                    aria-label="Number of players"
-                                >
-                                    {counts
-                                        .iter()
-                                        .map(|&n| {
-                                            view! {
-                                                <label>
-                                                    <input
-                                                        type="radio"
-                                                        name="player-count"
-                                                        prop:checked=move || player_count.get() == n
-                                                        on:change=move |_| set_player_count.set(n)
-                                                    />
-                                                    " "
-                                                    {n}
-                                                </label>
-                                            }
-                                        })
-                                        .collect_view()}
-                                </div>
+                    })
+                })}
+                {move || {
+                    selected_version_id.get().map(|vid| {
+                        view! {
+                            <div class="form-field new-game-rules-link">
+                                <A href=format!("/rules/{}", vid)>"View rules"</A>
                             </div>
-                            {move || {
-                                let n = (player_count.get() - 1).max(0) as usize;
-                                (0..n)
-                                    .map(|i| {
-                                        let get = Signal::derive(move || {
-                                            opponent_slots
-                                                .get()
-                                                .get(i)
-                                                .cloned()
-                                                .unwrap_or_default()
-                                        });
-                                        let set = Callback::new(move |s: OpponentSlot| {
-                                            set_opponent_slots.update(|v| {
-                                                if let Some(slot) = v.get_mut(i) {
-                                                    *slot = s;
-                                                }
-                                            });
-                                        });
-                                        view! {
-                                            <OpponentSlotEditor
-                                                label=format!("Opponent {}", i + 1)
-                                                radio_group=format!("slot-mode-{i}")
-                                                bot_default_name=format!("Bot {}", i + 1)
-                                                get=get
-                                                set=set
-                                                taken=taken
-                                                suggestions=suggestions
-                                                bot_names=bot_names
-                                            />
-                                        }
-                                    })
-                                    .collect_view()
-                            }}
-                            <div class="form-actions">
-                                <input
-                                    type="submit"
-                                    value="Start game"
-                                    disabled=move || create_action.pending().get()
-                                />
-                            </div>
-                            {move || {
-                                form_error
-                                    .get()
-                                    .map(|e| view! { <div class="form-error">{e}</div> })
-                            }}
-                            <Show when=move || {
-                                create_action.value().get().is_some_and(|r| r.is_err())
-                            }>
-                                <div class="form-error">
-                                    {move || {
-                                        create_action
-                                            .value()
-                                            .get()
-                                            .and_then(|r| r.err())
-                                            .map(|e| crate::error::user_facing_server_error(&e))
-                                            .unwrap_or_default()
-                                    }}
-                                </div>
-                            </Show>
-                        </form>
-                    }
-                    .into_any()
+                        }
+                    })
                 }}
-            </div>
+                <div class="form-field">
+                    <label class="form-label">"Players"</label>
+                    <div
+                        class="form-control player-count-radios"
+                        role="radiogroup"
+                        aria-label="Number of players"
+                    >
+                        {gt.with_value(|g| g.player_counts.clone())
+                            .into_iter()
+                            .map(|n| {
+                                view! {
+                                    <label>
+                                        <input
+                                            type="radio"
+                                            name="player-count"
+                                            prop:checked=move || player_count.get() == n
+                                            on:change=move |_| set_player_count.set(n)
+                                        />
+                                        " "
+                                        {n}
+                                    </label>
+                                }
+                            })
+                            .collect_view()}
+                    </div>
+                </div>
+                {move || {
+                    let n = (player_count.get() - 1).max(0) as usize;
+                    (0..n)
+                        .map(|i| {
+                            let get = Signal::derive(move || {
+                                opponent_slots
+                                    .get()
+                                    .get(i)
+                                    .cloned()
+                                    .unwrap_or_default()
+                            });
+                            let set = Callback::new(move |s: OpponentSlot| {
+                                set_opponent_slots.update(|v| {
+                                    if let Some(slot) = v.get_mut(i) {
+                                        *slot = s;
+                                    }
+                                });
+                            });
+                            view! {
+                                <OpponentSlotEditor
+                                    label=format!("Opponent {}", i + 1)
+                                    radio_group=format!("slot-mode-{i}")
+                                    bot_default_name=format!("Bot {}", i + 1)
+                                    get=get
+                                    set=set
+                                    taken=taken
+                                    suggestions=suggestions
+                                    bot_names=bot_names
+                                />
+                            }
+                        })
+                        .collect_view()
+                }}
+                <div class="form-actions">
+                    <input
+                        type="submit"
+                        value="Start game"
+                        disabled=move || create_action.pending().get()
+                    />
+                </div>
+                {move || {
+                    form_error
+                        .get()
+                        .map(|e| view! { <div class="form-error">{e}</div> })
+                }}
+                <Show when=move || {
+                    create_action.value().get().is_some_and(|r| r.is_err())
+                }>
+                    <div class="form-error">
+                        {move || {
+                            create_action
+                                .value()
+                                .get()
+                                .and_then(|r| r.err())
+                                .map(|e| crate::error::user_facing_server_error(&e))
+                                .unwrap_or_default()
+                        }}
+                    </div>
+                </Show>
+            </form>
         </div>
     }
 }

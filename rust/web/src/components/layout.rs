@@ -174,7 +174,7 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
                     <A href="/login">"Login"</A>
                 </div>
             </div>
-            <div><A href="/games">"New game"</A></div>
+            <div><A href="/games/new">"New game"</A></div>
             <div><A href="/settings">"Settings"</A></div>
             <div><A href="/friends">"Friends"</A></div>
             <div>

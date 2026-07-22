@@ -216,7 +216,8 @@ pub fn App() -> impl IntoView {
             <Routes fallback=|| "Page not found.".into_view()>
                 <Route path=StaticSegment("") view=HomePage/>
                 <Route path=StaticSegment("login") view=LoginPage/>
-                <Route path=StaticSegment("games") view=crate::new_game::NewGamePage/>
+                // "/games" is reserved (currently unused); the new-game flow lives at "/games/new".
+                // <Route path=StaticSegment("games") view=crate::new_game::NewGamePage/>
                 <Route path=StaticSegment("dashboard") view=DashboardPage/>
                 <Route path=StaticSegment("settings") view=crate::settings::SettingsPage/>
                 <Route path=StaticSegment("friends") view=crate::friends::FriendsPage/>
@@ -225,6 +226,8 @@ pub fn App() -> impl IntoView {
                 <Route path=(StaticSegment("players"), ParamSegment("name"), StaticSegment("history")) view=crate::players::PlayerHistoryPage/>
                 <Route path=(StaticSegment("players"), ParamSegment("name"), ParamSegment("game_type")) view=crate::players::PlayerGameTypePage/>
                 <Route path=(StaticSegment("games"), StaticSegment("type"), ParamSegment("name")) view=crate::game_info::GameInfoPage/>
+                <Route path=(StaticSegment("games"), StaticSegment("new")) view=crate::new_game::NewGameTypePage/>
+                <Route path=(StaticSegment("games"), StaticSegment("new"), ParamSegment("type")) view=crate::new_game::NewGameSetupPage/>
                 <Route path=(StaticSegment("games"), ParamSegment("id")) view=GamePage/>
                 <Route path=(StaticSegment("rules"), ParamSegment("version_id")) view=crate::rules::RulesPage/>
                 <Route path=(StaticSegment("invites"), ParamSegment("id")) view=crate::proposals::InvitePage/>
