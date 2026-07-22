@@ -1,6 +1,6 @@
 use crate::game::server_fns::{
-    BumpBotTurns, ConcedeGame, ForceDeleteGame, GameViewData, PlayerViewData, RestartGame,
-    SubmitCommand, UndoGame,
+    BumpBotTurns, ConcedeGame, ForceDeleteGame, GameViewData, PlayerViewData, SubmitCommand,
+    UndoGame,
 };
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -31,7 +31,13 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let is_2player = data.is_2player;
     let restarted_game_id = data.restarted_game_id;
     let previous_game_id = data.previous_game_id;
-    let can_restart = is_finished && restarted_game_id.is_none();
+    let restart_proposal_id = data.restart_proposal_id;
+    let can_restart = is_finished && restarted_game_id.is_none() && restart_proposal_id.is_none();
+    let restart_href = format!(
+        "/games/new/{}?restart={}",
+        crate::players::encode_path_segment(&data.type_name),
+        game_id
+    );
 
     let has_bot_waiting = data.players.iter().any(|p| p.is_bot && p.is_turn);
     let viewer_is_admin = data.viewer_is_admin;
@@ -41,7 +47,6 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
     let undo_action = ServerAction::<UndoGame>::new();
     let concede_action = ServerAction::<ConcedeGame>::new();
-    let restart_action = ServerAction::<RestartGame>::new();
     let bump_bot_action = ServerAction::<BumpBotTurns>::new();
     let force_delete_action = ServerAction::<ForceDeleteGame>::new();
 
@@ -58,18 +63,6 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
         if let Some(Ok(())) = concede_action.value().get() {
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
-        }
-    });
-
-    // Navigate after restart: to the new game (solo bypass) or the proposal.
-    let navigate = use_navigate();
-    Effect::new(move |_| {
-        if let Some(Ok(outcome)) = restart_action.value().get() {
-            if let Some(gid) = outcome.game_id {
-                navigate(&format!("/games/{}", gid), NavigateOptions::default());
-            } else if let Some(pid) = outcome.proposal_id {
-                navigate(&format!("/invites/{}", pid), NavigateOptions::default());
-            }
         }
     });
 
@@ -133,10 +126,14 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                         </Show>
                         <Show when=move || can_restart>
                             <div>
-                                <a href="#" on:click=move |ev| {
-                                    ev.prevent_default();
-                                    restart_action.dispatch(RestartGame { game_id });
-                                }>"Restart"</a>
+                                <A href=restart_href.clone()>"Restart"</A>
+                            </div>
+                        </Show>
+                        <Show when=move || restart_proposal_id.is_some()>
+                            <div>
+                                <a href=move || restart_proposal_id.map(|id| format!("/invites/{}", id)).unwrap_or_default()>
+                                    "Restart invite pending"
+                                </a>
                             </div>
                         </Show>
                         <Show when=move || restarted_game_id.is_some()>
