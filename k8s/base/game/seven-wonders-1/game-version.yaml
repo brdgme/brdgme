@@ -4,7 +4,7 @@ metadata:
   name: seven-wonders-1
   namespace: brdgme
 spec:
-  typeName: seven-wonders-1
+  typeName: Seven Wonders
   weight: 1.0
   blurb: "A card-drafting civilization game. Choose cards from each hand, pass the rest, and develop your city across three ages. Build military might, scientific breakthroughs, and your wonder to score the most victory points."
   interfaceVersion: 2
