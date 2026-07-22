@@ -8,7 +8,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use command::Command;
@@ -311,7 +311,17 @@ impl Gamer for Game {
                 value: Command::Call,
                 remaining,
                 ..
-            }) => self.call(player, remaining),
+            }) => {
+                let mut resp = self.call(player, remaining)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_dice[p].len() as i32))
+                        .collect();
+                    resp.logs
+                        .push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Err(e) => Err(GameError::invalid_input(e.to_string())),
         }
     }

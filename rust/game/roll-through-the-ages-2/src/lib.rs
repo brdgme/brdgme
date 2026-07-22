@@ -26,7 +26,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use development::DevelopmentId;
@@ -1534,57 +1534,222 @@ impl Gamer for Game {
                 value: Command::Next,
                 remaining,
                 ..
-            }) => self.next_command(player, remaining),
+            }) => {
+                let mut resp = self.next_command(player, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Roll { dice },
                 remaining,
                 ..
-            }) => self.roll_command(player, dice, remaining),
+            }) => {
+                let mut resp = self.roll_command(player, dice, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Preserve,
                 remaining,
                 ..
-            }) => self.preserve_command(player, remaining),
+            }) => {
+                let mut resp = self.preserve_command(player, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Build { amount, target },
                 remaining,
                 ..
-            }) => self.build_command(player, amount, target, remaining),
+            }) => {
+                let mut resp = self.build_command(player, amount, target, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Trade { amount },
                 remaining,
                 ..
-            }) => self.trade_command(player, amount, remaining),
+            }) => {
+                let mut resp = self.trade_command(player, amount, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Buy { development, goods },
                 remaining,
                 ..
-            }) => self.buy_command(player, development, goods, remaining),
+            }) => {
+                let mut resp = self.buy_command(player, development, goods, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Take { actions },
                 remaining,
                 ..
-            }) => self.take_command(player, actions, remaining),
+            }) => {
+                let mut resp = self.take_command(player, actions, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Discard { amount, good },
                 remaining,
                 ..
-            }) => self.discard_command(player, amount, good, remaining),
+            }) => {
+                let mut resp = self.discard_command(player, amount, good, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Invade { amount },
                 remaining,
                 ..
-            }) => self.invade_command(player, amount, remaining),
+            }) => {
+                let mut resp = self.invade_command(player, amount, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Sell { amount },
                 remaining,
                 ..
-            }) => self.sell_command(player, amount, remaining),
+            }) => {
+                let mut resp = self.sell_command(player, amount, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Swap { amount, from, to },
                 remaining,
                 ..
-            }) => self.swap_command(player, from, to, amount, remaining),
+            }) => {
+                let mut resp = self.swap_command(player, from, to, amount, remaining)?;
+                if self.finished {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s))
+                        .collect();
+                    let metrics: Vec<Vec<i32>> =
+                        self.scores().into_iter().map(|s| vec![s]).collect();
+                    resp.logs
+                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Err(e) => Err(GameError::invalid_input(e.to_string())),
         }
     }

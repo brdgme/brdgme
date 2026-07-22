@@ -19,7 +19,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use card::Deck;
@@ -715,47 +715,92 @@ impl Gamer for Game {
                 value: Command::AllIn,
                 remaining,
                 ..
-            }) => self.all_in(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.all_in(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_total_money(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Call,
                 remaining,
                 ..
-            }) => self.call(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.call(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_total_money(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Check,
                 remaining,
                 ..
-            }) => self.check(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.check(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_total_money(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Fold,
                 remaining,
                 ..
-            }) => self.fold(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.fold(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_total_money(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Raise(amount),
                 remaining,
                 ..
-            }) => self.raise(player, amount).map(|logs| CommandResponse {
-                logs,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.raise(player, amount)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_total_money(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: true,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Err(e) => Err(e),
         }
     }

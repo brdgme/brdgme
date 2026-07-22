@@ -1,5 +1,5 @@
 pub use crate::game::{CommandResponse, Gamer, Renderer, Stat, Status};
-pub use crate::game_log::Log;
+pub use crate::game_log::{Log, placings_log};
 
 pub mod bot;
 pub mod command;

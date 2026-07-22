@@ -11,7 +11,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
 
@@ -435,7 +435,13 @@ impl Gamer for Game {
                 value: Command::Play(card),
                 ..
             }) => {
-                let logs = self.play(player, card)?;
+                let mut logs = self.play(player, card)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, -self.player_points[p]))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -447,7 +453,13 @@ impl Gamer for Game {
                 value: Command::Choose(row),
                 ..
             }) => {
-                let logs = self.choose(player, row)?;
+                let mut logs = self.choose(player, row)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, -self.player_points[p]))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,

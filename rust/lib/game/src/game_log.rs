@@ -32,3 +32,40 @@ impl Log {
         }
     }
 }
+
+pub fn placings_log(placings: &[usize], scores: Option<&[(usize, i32)]>) -> Log {
+    let winners: Vec<usize> = placings
+        .iter()
+        .enumerate()
+        .filter(|&(_, &p)| p == 1)
+        .map(|(i, _)| i)
+        .collect();
+
+    let mut content: Vec<Node> = match winners.len() {
+        1 => vec![
+            Node::Player(winners[0]),
+            Node::Bold(vec![Node::text(" wins!")]),
+        ],
+        2 => vec![
+            Node::Player(winners[0]),
+            Node::text(" and "),
+            Node::Player(winners[1]),
+            Node::Bold(vec![Node::text(" tie!")]),
+        ],
+        _ => vec![Node::Bold(vec![Node::text("It's a tie!")])],
+    };
+
+    if let Some(scores) = scores {
+        content.push(Node::text(" Final scores: "));
+        for (i, &(player, score)) in scores.iter().enumerate() {
+            if i > 0 {
+                content.push(Node::text(", "));
+            }
+            content.push(Node::Player(player));
+            content.push(Node::text(": "));
+            content.push(Node::Bold(vec![Node::text(score.to_string())]));
+        }
+    }
+
+    Log::public(content)
+}

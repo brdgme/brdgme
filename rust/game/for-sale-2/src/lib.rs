@@ -8,7 +8,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use command::Command;
@@ -445,7 +445,13 @@ impl Gamer for Game {
                 value: Command::Bid(amount),
                 ..
             }) => {
-                let logs = self.bid(player, amount)?;
+                let mut logs = self.bid(player, amount)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: true,
@@ -457,7 +463,13 @@ impl Gamer for Game {
                 value: Command::Pass,
                 ..
             }) => {
-                let logs = self.pass(player)?;
+                let mut logs = self.pass(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -469,7 +481,13 @@ impl Gamer for Game {
                 value: Command::Play(building),
                 ..
             }) => {
-                let logs = self.play(player, building)?;
+                let mut logs = self.play(player, building)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,

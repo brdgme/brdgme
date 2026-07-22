@@ -8,7 +8,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 pub mod castle;
@@ -468,17 +468,56 @@ impl Gamer for Game {
                 value: Command::Attack { castle },
                 remaining,
                 ..
-            }) => self.attack(player, castle, remaining),
+            }) => {
+                let mut resp = self.attack(player, castle, remaining)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s as i32))
+                        .collect();
+                    resp.logs
+                        .push(placings_log(&self.calc_placings(), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Line { line },
                 remaining,
                 ..
-            }) => self.line_action(player, line, remaining),
+            }) => {
+                let mut resp = self.line_action(player, line, remaining)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s as i32))
+                        .collect();
+                    resp.logs
+                        .push(placings_log(&self.calc_placings(), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Ok(ParseOutput {
                 value: Command::Roll,
                 remaining,
                 ..
-            }) => self.roll_action(player, remaining),
+            }) => {
+                let mut resp = self.roll_action(player, remaining)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = self
+                        .scores()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &s)| (i, s as i32))
+                        .collect();
+                    resp.logs
+                        .push(placings_log(&self.calc_placings(), Some(&scores)));
+                }
+                Ok(resp)
+            }
             Err(e) => Err(GameError::invalid_input(e.to_string())),
         }
     }
