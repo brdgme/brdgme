@@ -525,6 +525,9 @@ fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
                         value=if restart.is_some() { "Restart game" } else { "Start game" }
                         disabled=move || create_action.pending().get() || restart_action.pending().get()
                     />
+                    <Show when=move || create_action.pending().get() || restart_action.pending().get()>
+                        <crate::components::Spinner/>
+                    </Show>
                 </div>
                 {move || {
                     form_error

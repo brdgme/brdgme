@@ -2124,6 +2124,9 @@ fn ProposalDetail(
                             start_action.dispatch(StartProposal { proposal_id });
                         }
                     >"Start game"</button>
+                    <Show when=move || start_action.pending().get()>
+                        <crate::components::Spinner/>
+                    </Show>
                     " "
                     <a href="#" on:click=move |ev| {
                         ev.prevent_default();

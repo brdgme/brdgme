@@ -285,10 +285,12 @@ body {
   text-align: center;
   width: 100%;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .game-main .game-render > pre {
-  margin: 1em;
+  margin: auto;
 }
 
 .game-main .recent-logs-container {
@@ -718,6 +720,10 @@ body {
   display: flex;
   gap: 0.5em;
   align-items: center;
+}
+
+.form-actions .spinner {
+  margin: 0;
 }
 
 .color-chip {
