@@ -1,73 +1,9 @@
-//! #22b email outbound plumbing: web-activity tracking (for active-web
-//! suppression of turn emails), the single send choke point, per-player reply
+//! #22b email outbound plumbing: the single send choke point, per-player reply
 //! tokens, and recipient resolution. Turn-transition call sites wire into these
 //! helpers; nothing here sends on its own. SSR-only like the rest of `email`.
 
-use axum::extract::{Request, State};
-use axum::middleware::Next;
-use axum::response::Response;
 use sqlx::PgPool;
 use uuid::Uuid;
-
-/// v1 in-memory throttle, per-process: write `users.last_seen_at` at most once
-/// per minute per user per process, so a busy authenticated user does not cost
-/// a DB write per request. Per-process (not replica-safe) by design - presence
-/// only needs to be approximate, and a restart or a second pod merely allows
-/// one extra stamp per window.
-pub const ACTIVITY_WRITE_THROTTLE: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// Per-user last-stamp map backing `throttle_allows`.
-static ACTIVITY_RECORDED: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<Uuid, std::time::Instant>>,
-> = std::sync::OnceLock::new();
-
-/// Whether a `last_seen_at` write is allowed for `user_id` right now: true (and
-/// records the stamp) only when the user has no entry or theirs is older than
-/// `ACTIVITY_WRITE_THROTTLE`. Critical section is the map lookup/insert only.
-fn throttle_allows(user_id: Uuid) -> bool {
-    let map =
-        ACTIVITY_RECORDED.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    let mut guard = map.lock().unwrap_or_else(|e| e.into_inner());
-    let now = std::time::Instant::now();
-    match guard.get(&user_id) {
-        Some(last) if now.duration_since(*last) < ACTIVITY_WRITE_THROTTLE => false,
-        _ => {
-            guard.insert(user_id, now);
-            true
-        }
-    }
-}
-
-/// Stamps `users.last_seen_at = NOW()` for the user, throttled by
-/// `ACTIVITY_WRITE_THROTTLE`. Never fails a request: a DB error is logged and
-/// swallowed. No `updated_at` bump - this is a lightweight presence stamp.
-pub async fn record_web_activity(pool: &PgPool, user_id: Uuid) {
-    if !throttle_allows(user_id) {
-        return;
-    }
-    if let Err(e) = sqlx::query("UPDATE users SET last_seen_at = NOW() WHERE id = $1")
-        .bind(user_id)
-        .execute(pool)
-        .await
-    {
-        tracing::error!("Failed to record web activity for {}: {}", user_id, e);
-    }
-}
-
-/// Axum middleware recording web activity for the authenticated user (throttled)
-/// on every request. Must sit inside `session_layer` so the `Session` is already
-/// in extensions when this runs; anonymous requests are a no-op.
-pub async fn track_activity(
-    State(pool): State<PgPool>,
-    session: tower_sessions::Session,
-    request: Request,
-    next: Next,
-) -> Response {
-    if let Some(user) = crate::auth::session::get_user_from_session(&session).await {
-        record_web_activity(&pool, user.id).await;
-    }
-    next.run(request).await
-}
 
 /// Parses a human duration like `"1 hour"`, `"30m"`, `"3600"`, `"2 days"` into
 /// a `Duration`. A bare number is seconds; units (case-insensitive) are

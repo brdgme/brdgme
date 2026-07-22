@@ -152,15 +152,6 @@ pub async fn build_router(state: AppState) -> Router {
             let leptos_options = state.leptos_options.clone();
             move |_| shell(leptos_options.clone())
         }))
-        // Records `users.last_seen_at` for the authenticated user (throttled),
-        // powering active-web suppression of turn emails (#22b). Added before
-        // `session_layer` so it sits INSIDE it (axum applies `.layer()` calls
-        // outermost-first) and can read the `Session` from extensions.
-        // `/healthz` is registered below this layer, so it is not affected.
-        .layer(middleware::from_fn_with_state(
-            state.pool.clone(),
-            crate::email::outbound::track_activity,
-        ))
         .layer(session_layer)
         .layer(middleware::from_fn(set_cache_control))
         // Added after `session_layer` so the DB-backed session middleware
