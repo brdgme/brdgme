@@ -124,6 +124,31 @@ enum SendMode {
     Forced,
 }
 
+/// The "Since last time" digest lines for one recipient: `get_game_logs` already
+/// filters to public + this player's targeted logs, so we keep only those newer
+/// than the recipient's `last_turn_at`. Best-effort: `None` on error or when
+/// there are no new lines.
+async fn digest_since_last_turn(
+    pool: &sqlx::PgPool,
+    ge: &crate::db::GameExtended,
+    recipient_player: &crate::db::GamePlayerExtended,
+) -> Option<Vec<String>> {
+    match crate::db::get_game_logs(pool, ge.game.id, recipient_player.game_player.id).await {
+        Ok(logs) => {
+            let lines: Vec<String> = logs
+                .into_iter()
+                .filter(|l| l.logged_at > recipient_player.game_player.last_turn_at)
+                .map(|l| l.body)
+                .collect();
+            if lines.is_empty() { None } else { Some(lines) }
+        }
+        Err(e) => {
+            tracing::error!("Failed to load game logs for {}: {}", ge.game.id, e);
+            None
+        }
+    }
+}
+
 /// Builds the content blocks for one notification, best-effort: a failed render
 /// or log load degrades to absent blocks rather than failing the send.
 async fn build_content(
@@ -148,23 +173,7 @@ async fn build_content(
         }
     });
 
-    // v1 digest: get_game_logs already filters to public + this player's targeted
-    // logs; we keep only those newer than the recipient's last_turn_at.
-    let digest =
-        match crate::db::get_game_logs(pool, ge.game.id, recipient_player.game_player.id).await {
-            Ok(logs) => {
-                let lines: Vec<String> = logs
-                    .into_iter()
-                    .filter(|l| l.logged_at > recipient_player.game_player.last_turn_at)
-                    .map(|l| l.body)
-                    .collect();
-                if lines.is_empty() { None } else { Some(lines) }
-            }
-            Err(e) => {
-                tracing::error!("Failed to load game logs for {}: {}", ge.game.id, e);
-                None
-            }
-        };
+    let digest = digest_since_last_turn(pool, ge, recipient_player).await;
 
     let (board, you_can) = render_board_and_you_can(
         http_client,
@@ -176,6 +185,38 @@ async fn build_content(
     crate::email::render::EmailContent {
         subject,
         header,
+        digest,
+        board,
+        you_can,
+        browser_url: Some(browser_url(ge.game.id)),
+        rules_url: Some(rules_url(ge.game_version.id)),
+        footer: Some("Reply to this email to play, or unsubscribe anytime.".to_string()),
+    }
+}
+
+/// Builds the content for an inbound command-failure report: the standard turn
+/// email body (current render, "Since last time" logs, command spec, footers)
+/// reflecting the game state AFTER the successfully-applied commands, with the
+/// caller's failure `header` on top. Uses the per-turn de-threaded subject
+/// scheme (`turn_subject`) so clients do not collapse the render into a thread.
+pub async fn failure_report_content(
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    ge: &crate::db::GameExtended,
+    recipient_player: &crate::db::GamePlayerExtended,
+    header: String,
+) -> crate::email::render::EmailContent {
+    let digest = digest_since_last_turn(pool, ge, recipient_player).await;
+    let (board, you_can) = render_board_and_you_can(
+        http_client,
+        ge,
+        recipient_player.game_player.position as usize,
+    )
+    .await;
+    let log_count = game_log_count(pool, ge.game.id).await;
+    crate::email::render::EmailContent {
+        subject: turn_subject(&ge.game_type.name, ge.game.id, log_count),
+        header: Some(header),
         digest,
         board,
         you_can,

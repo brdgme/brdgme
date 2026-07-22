@@ -237,6 +237,117 @@ pub fn error_reply_text(err: &crate::game::ExecuteCommandError) -> String {
     }
 }
 
+/// Builds the header block for a command-failure report email. Layout (each a
+/// line, rendered above the board):
+///
+/// ```text
+/// Your command failed: <reason>
+/// Commands applied:        <- whole section omitted when `applied` is empty
+///   <command>...
+/// Failed command: <failed>
+/// Reason: <reason>
+/// Commands not applied:    <- whole section omitted when `not_applied` is empty
+///   <command>...
+/// ```
+pub fn failure_report_header(
+    applied: &[String],
+    failed: &str,
+    reason: &str,
+    not_applied: &[String],
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("Your command failed: {reason}"));
+    if !applied.is_empty() {
+        lines.push("Commands applied:".to_string());
+        for c in applied {
+            lines.push(format!("  {c}"));
+        }
+    }
+    lines.push(format!("Failed command: {failed}"));
+    lines.push(format!("Reason: {reason}"));
+    if !not_applied.is_empty() {
+        lines.push("Commands not applied:".to_string());
+        for c in not_applied {
+            lines.push(format!("  {c}"));
+        }
+    }
+    lines.join("\n")
+}
+
+/// Outcome of running a reply's commands through the game-command dispatch.
+pub enum GameCommandLoopOutcome {
+    /// Every command processed without error: `move_count` game moves applied
+    /// plus the last non-move status message (if any).
+    Done {
+        move_count: usize,
+        last_status: Option<String>,
+    },
+    /// A command produced full content (e.g. rules) that short-circuits the loop.
+    FullContent { html: String, text: String },
+    /// A command failed: the commands applied before it, the failing command, the
+    /// user-facing error message, and the commands after it that were never
+    /// attempted.
+    Failed {
+        applied: Vec<String>,
+        failed: String,
+        error: String,
+        not_applied: Vec<String>,
+    },
+}
+
+/// Runs `commands` in order through `dispatch`, applying each until one fails
+/// (earlier commands stay applied), stopping at the first failure. A
+/// `FullContent` reply (rules) short-circuits the loop.
+pub async fn run_game_reply_commands<F, Fut>(
+    commands: &[String],
+    mut dispatch: F,
+) -> GameCommandLoopOutcome
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<
+            Output = Result<
+                crate::email::commands::CommandReply,
+                crate::email::commands::CommandError,
+            >,
+        >,
+{
+    use crate::email::commands::{CommandError, CommandReply};
+
+    let mut move_count: usize = 0;
+    let mut last_status: Option<String> = None;
+    for (index, line) in commands.iter().enumerate() {
+        match dispatch(line.clone()).await {
+            Ok(CommandReply::GameMove) => move_count += 1,
+            Ok(CommandReply::Status(msg)) => last_status = Some(msg),
+            Ok(CommandReply::FullContent { html, text }) => {
+                return GameCommandLoopOutcome::FullContent { html, text };
+            }
+            Err(CommandError::User(msg)) => {
+                return GameCommandLoopOutcome::Failed {
+                    applied: commands[..index].to_vec(),
+                    failed: line.clone(),
+                    error: msg,
+                    not_applied: commands[index + 1..].to_vec(),
+                };
+            }
+            Err(CommandError::Internal(e)) => {
+                tracing::error!("resend webhook: command error: {e}");
+                return GameCommandLoopOutcome::Failed {
+                    applied: commands[..index].to_vec(),
+                    failed: line.clone(),
+                    error: "An unexpected error occurred while processing your command."
+                        .to_string(),
+                    not_applied: commands[index + 1..].to_vec(),
+                };
+            }
+        }
+    }
+    GameCommandLoopOutcome::Done {
+        move_count,
+        last_status,
+    }
+}
+
 struct EmailPlayer {
     game_player_id: uuid::Uuid,
     game_id: uuid::Uuid,
@@ -442,52 +553,39 @@ async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: 
         position: player.position as usize,
     };
 
-    let mut move_count: usize = 0;
-    let mut last_status: Option<String> = None;
-    let mut full_content: Option<(String, String)> = None;
-    let mut error_header: Option<String> = None;
+    let ctx_ref = &ctx;
+    let outcome = run_game_reply_commands(&commands, |line| async move {
+        crate::email::commands::dispatch_email_command(ctx_ref, &line).await
+    })
+    .await;
 
-    for line in &commands {
-        match crate::email::commands::dispatch_email_command(&ctx, line).await {
-            Ok(crate::email::commands::CommandReply::GameMove) => {
-                move_count += 1;
-            }
-            Ok(crate::email::commands::CommandReply::Status(msg)) => {
-                last_status = Some(msg);
-            }
-            Ok(crate::email::commands::CommandReply::FullContent { html, text }) => {
-                full_content = Some((html, text));
-                break;
-            }
-            Err(crate::email::commands::CommandError::User(msg)) => {
-                error_header = Some(msg);
-                break;
-            }
-            Err(crate::email::commands::CommandError::Internal(e)) => {
-                tracing::error!("resend webhook: command error: {e}");
-                error_header =
-                    Some("An unexpected error occurred while processing your command.".to_string());
-                break;
-            }
+    match outcome {
+        GameCommandLoopOutcome::FullContent { html, text } => {
+            send_rules_reply_response(state, &player, token, from, html, text).await;
+        }
+        GameCommandLoopOutcome::Failed {
+            applied,
+            failed,
+            error,
+            not_applied,
+        } => {
+            let header = failure_report_header(&applied, &failed, &error, &not_applied);
+            send_game_failure_report(state, &player, token, from, header).await;
+        }
+        GameCommandLoopOutcome::Done {
+            move_count,
+            last_status,
+        } => {
+            let header = if move_count > 0 {
+                confirmed_header_text(move_count)
+            } else if let Some(status) = last_status {
+                status
+            } else {
+                no_command_header_text()
+            };
+            send_game_reply_response(state, &player, token, from, header).await;
         }
     }
-
-    if let Some((html, text)) = full_content {
-        send_rules_reply_response(state, &player, token, from, html, text).await;
-        return;
-    }
-
-    let header = if let Some(err) = error_header {
-        err
-    } else if move_count > 0 {
-        confirmed_header_text(move_count)
-    } else if let Some(status) = last_status {
-        status
-    } else {
-        no_command_header_text()
-    };
-
-    send_game_reply_response(state, &player, token, from, header).await;
 }
 
 async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id: &str) {
@@ -864,6 +962,83 @@ async fn send_game_reply_response(
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 
+/// Emails the player a failure report after a multi-command reply stops at a
+/// failing command. Reuses the turn-email rendering path (current render,
+/// "Since last time" logs, command spec, footers) reflecting the game state
+/// AFTER the successfully-applied commands, with the failure breakdown on top.
+/// De-threaded like a turn email (unique `turn_subject`, no stable refs chain)
+/// and `reply_to` set to the player's `g-{token}@brdg.me` so they can reply
+/// again with corrected commands.
+async fn send_game_failure_report(
+    state: &AppState,
+    player: &EmailPlayer,
+    token: &str,
+    from: &str,
+    header: String,
+) {
+    let pool = &state.pool;
+    let ge = match crate::db::find_game_extended(pool, player.game_id).await {
+        Ok(Some(ge)) => ge,
+        Ok(None) => {
+            tracing::warn!(
+                "resend webhook: game {} not found for failure report",
+                player.game_id
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!(
+                "resend webhook: failed to load game {} for failure report: {e}",
+                player.game_id
+            );
+            return;
+        }
+    };
+    let recipient_player = match ge
+        .game_players
+        .iter()
+        .find(|p| p.game_player.id == player.game_player_id)
+    {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                "resend webhook: player {} not in game {}",
+                player.game_player_id,
+                player.game_id
+            );
+            return;
+        }
+    };
+    let content = crate::email::notify::failure_report_content(
+        pool,
+        &state.http_client,
+        &ge,
+        recipient_player,
+        header,
+    )
+    .await;
+    let theme_slug =
+        match crate::email::outbound::fetch_email_recipient(pool, player.game_player_id).await {
+            Ok(Some(r)) => r.theme_slug,
+            _ => None,
+        };
+    let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
+    let players: Vec<brdgme_markup::Player> = ge
+        .game_players
+        .iter()
+        .map(|p| crate::email::render::player_for_slot(p.name(), &p.game_player.color, palette))
+        .collect();
+    let rendered = crate::email::render::render_game_email(
+        &content,
+        palette,
+        &players,
+        None,
+        false,
+        &crate::email::notify::reply_address(token),
+    );
+    crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
+}
+
 async fn send_rules_reply_response(
     state: &AppState,
     player: &EmailPlayer,
@@ -1075,6 +1250,23 @@ mod tests {
         assert_eq!(
             parse_reply_commands(input),
             vec!["play e4", "play d5", "resign"]
+        );
+    }
+
+    #[test]
+    fn parse_reply_commands_realistic_reply_body_strips_quote_block() {
+        let input = "play f10\n\
+                     buy 1 sa\n\
+                     buy 1 wo\n\
+                     buy 1 to\n\
+                     done\n\
+                     \n\
+                     On Wed, 22 Jul 2026 at 13:16, brdg.me <mail@brdg.me> wrote:\n\
+                     > ...quoted original email...\n\
+                     > more quoted text";
+        assert_eq!(
+            parse_reply_commands(input),
+            vec!["play f10", "buy 1 sa", "buy 1 wo", "buy 1 to", "done"]
         );
     }
 
@@ -1299,6 +1491,146 @@ Just a plain body";
         }
     }
 
+    #[tokio::test]
+    async fn game_reply_loop_all_succeed_counts_moves() {
+        use crate::email::commands::CommandReply;
+        let cmds: Vec<String> = vec!["play f10".into(), "buy 1 sa".into(), "done".into()];
+        let outcome =
+            run_game_reply_commands(&cmds, |_line| async { Ok(CommandReply::GameMove) }).await;
+        match outcome {
+            GameCommandLoopOutcome::Done {
+                move_count,
+                last_status,
+            } => {
+                assert_eq!(move_count, 3);
+                assert!(last_status.is_none());
+            }
+            _ => panic!("expected Done"),
+        }
+    }
+
+    #[tokio::test]
+    async fn game_reply_loop_stops_at_first_failure_with_earlier_applied() {
+        use crate::email::commands::{CommandError, CommandReply};
+        let cmds: Vec<String> = vec![
+            "play f10".into(),
+            "buy 1 sa".into(),
+            "buy 1 wo".into(),
+            "buy 1 to".into(),
+            "done".into(),
+        ];
+        let outcome = run_game_reply_commands(&cmds, |line| async move {
+            if line == "buy 1 wo" {
+                Err(CommandError::User("not enough resources".to_string()))
+            } else {
+                Ok(CommandReply::GameMove)
+            }
+        })
+        .await;
+        match outcome {
+            GameCommandLoopOutcome::Failed {
+                applied,
+                failed,
+                error,
+                not_applied,
+            } => {
+                assert_eq!(applied, vec!["play f10", "buy 1 sa"]);
+                assert_eq!(failed, "buy 1 wo");
+                assert_eq!(error, "not enough resources");
+                assert_eq!(not_applied, vec!["buy 1 to", "done"]);
+            }
+            _ => panic!("expected Failed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn game_reply_loop_first_command_failure_has_empty_applied() {
+        use crate::email::commands::{CommandError, CommandReply};
+        let cmds: Vec<String> = vec!["bad".into(), "done".into()];
+        let outcome = run_game_reply_commands(&cmds, |line| async move {
+            if line == "bad" {
+                Err(CommandError::User("nope".to_string()))
+            } else {
+                Ok(CommandReply::GameMove)
+            }
+        })
+        .await;
+        match outcome {
+            GameCommandLoopOutcome::Failed {
+                applied,
+                failed,
+                not_applied,
+                ..
+            } => {
+                assert!(applied.is_empty());
+                assert_eq!(failed, "bad");
+                assert_eq!(not_applied, vec!["done"]);
+            }
+            _ => panic!("expected Failed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn game_reply_loop_full_content_short_circuits() {
+        use crate::email::commands::CommandReply;
+        let cmds: Vec<String> = vec!["rules".into(), "play f10".into()];
+        let outcome = run_game_reply_commands(&cmds, |line| async move {
+            if line == "rules" {
+                Ok(CommandReply::FullContent {
+                    html: "<p>rules</p>".to_string(),
+                    text: "rules".to_string(),
+                })
+            } else {
+                Ok(CommandReply::GameMove)
+            }
+        })
+        .await;
+        match outcome {
+            GameCommandLoopOutcome::FullContent { html, text } => {
+                assert_eq!(html, "<p>rules</p>");
+                assert_eq!(text, "rules");
+            }
+            _ => panic!("expected FullContent"),
+        }
+    }
+
+    #[test]
+    fn failure_report_header_omits_empty_sections() {
+        let h = failure_report_header(&[], "buy 1 wo", "not enough resources", &[]);
+        assert!(!h.contains("Commands applied:"));
+        assert!(h.contains("Failed command: buy 1 wo"));
+        assert!(h.contains("Reason: not enough resources"));
+        assert!(!h.contains("Commands not applied:"));
+    }
+
+    #[test]
+    fn failure_report_header_includes_applied_and_not_applied() {
+        let applied = vec!["play f10".to_string(), "buy 1 sa".to_string()];
+        let not_applied = vec!["buy 1 to".to_string(), "done".to_string()];
+        let h = failure_report_header(&applied, "buy 1 wo", "not enough resources", &not_applied);
+        assert!(h.contains("Commands applied:"));
+        assert!(h.contains("play f10"));
+        assert!(h.contains("buy 1 sa"));
+        assert!(h.contains("Failed command: buy 1 wo"));
+        assert!(h.contains("Reason: not enough resources"));
+        assert!(h.contains("Commands not applied:"));
+        assert!(h.contains("buy 1 to"));
+        assert!(h.contains("done"));
+        // Applied section precedes the failed command; not-applied follows it.
+        let applied_pos = h.find("Commands applied:").unwrap();
+        let failed_pos = h.find("Failed command:").unwrap();
+        let not_applied_pos = h.find("Commands not applied:").unwrap();
+        assert!(applied_pos < failed_pos);
+        assert!(failed_pos < not_applied_pos);
+    }
+
+    #[test]
+    fn failure_report_header_first_line_states_failure_with_error() {
+        let h = failure_report_header(&[], "done", "it is not your turn", &[]);
+        let first = h.lines().next().expect("header has a first line");
+        assert!(first.contains("it is not your turn"));
+    }
+
     #[test]
     fn confirmed_header_text_singular_and_plural() {
         assert_eq!(confirmed_header_text(1), "Move confirmed.");
@@ -1395,6 +1727,61 @@ Just a plain body";
                 .unwrap()
                 .is_none()
         );
+    }
+
+    // Runs only where a Postgres is available (CI); expected to fail to connect
+    // locally (backlog #40). The game-service render degrades to absent blocks
+    // (no service running), which is fine: this asserts the subject scheme, the
+    // reply_to field, and the de-threading (no threading headers).
+    #[sqlx::test]
+    async fn failure_report_is_dethreaded_and_sets_reply_to(pool: sqlx::PgPool) {
+        let (game_id, _user_id, game_player_id) = seed_game_with_player(&pool, "tok-fail").await;
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        let recipient_player = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id == game_player_id)
+            .expect("player in game");
+
+        let content = crate::email::notify::failure_report_content(
+            &pool,
+            &reqwest::Client::new(),
+            &ge,
+            recipient_player,
+            failure_report_header(&[], "buy 1 wo", "not enough resources", &[]),
+        )
+        .await;
+
+        // De-threaded subject scheme, same as turn emails (fresh game => turn 0).
+        assert_eq!(
+            content.subject,
+            crate::email::notify::turn_subject(&ge.game_type.name, game_id, 0)
+        );
+        assert!(
+            content
+                .header
+                .as_deref()
+                .unwrap()
+                .contains("Failed command: buy 1 wo")
+        );
+        assert!(content.footer.is_some());
+
+        let palette = crate::email::render::palette_for_slug(None);
+        let rendered = crate::email::render::render_game_email(
+            &content,
+            palette,
+            &[],
+            None,
+            false,
+            &crate::email::notify::reply_address("tok-fail"),
+        );
+        assert_eq!(rendered.reply_to, "g-tok-fail@brdg.me");
+        assert_eq!(rendered.headers.get("Message-Id"), None);
+        assert_eq!(rendered.headers.get("In-Reply-To"), None);
+        assert_eq!(rendered.headers.get("References"), None);
     }
 
     #[sqlx::test]
