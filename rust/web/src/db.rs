@@ -778,6 +778,37 @@ pub async fn find_predecessor_game_id(pool: &PgPool, game_id: Uuid) -> Result<Op
     Ok(id)
 }
 
+/// The open restart proposal for a game, if any: a proposal carrying
+/// `restarted_game_id = old_game_id` still in the `open` state. An open restart
+/// proposal is an in-flight restart that blocks a second one - the old->new game
+/// link is only written when the proposal STARTS, so checking
+/// `games.restarted_game_id` alone would miss this case. Earliest first for a
+/// deterministic winner. Plain query to avoid `.sqlx` churn.
+#[cfg(feature = "ssr")]
+pub async fn find_open_restart_proposal_tx(
+    tx: &mut sqlx::PgConnection,
+    old_game_id: Uuid,
+) -> Result<Option<Uuid>> {
+    sqlx::query_scalar(
+        "SELECT id FROM game_proposals WHERE restarted_game_id = $1 AND status = 'open' ORDER BY created_at LIMIT 1",
+    )
+    .bind(old_game_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(Into::into)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn find_open_restart_proposal(pool: &PgPool, old_game_id: Uuid) -> Result<Option<Uuid>> {
+    sqlx::query_scalar(
+        "SELECT id FROM game_proposals WHERE restarted_game_id = $1 AND status = 'open' ORDER BY created_at LIMIT 1",
+    )
+    .bind(old_game_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
 #[cfg(feature = "ssr")]
 pub struct CreateGameOpts<'a> {
     pub game_version_id: Uuid,

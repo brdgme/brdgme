@@ -883,7 +883,7 @@ pub async fn count_pending_human_invitees_tx(
 }
 
 #[cfg(feature = "ssr")]
-async fn find_or_create_user_by_email_tx(
+pub(crate) async fn find_or_create_user_by_email_tx(
     tx: &mut sqlx::PgConnection,
     email: &str,
 ) -> Result<Uuid, ServerFnError> {

@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use web::auth::session::set_user_session;
 use web::db::{self, CreateGameOpts};
-use web::game::server_fns::{BotSlot, RestartGame};
+use web::game::server_fns::{BotSlot, RestartGameWithRoster, RestartOutcome};
 use web::models::user::User;
 use web::router::build_router;
 use web::state::AppState;
@@ -275,7 +275,10 @@ async fn games_route_is_unused_returns_not_found(pool: PgPool) {
     let (status, content_type, body) = get(app, "/games", None).await;
     // The Routes fallback renders "Page not found." with a 404 status.
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
-    assert!(content_type.starts_with("text/html"), "content-type: {content_type}");
+    assert!(
+        content_type.starts_with("text/html"),
+        "content-type: {content_type}"
+    );
     assert!(
         body.contains("Page not found."),
         "expected fallback marker in body: {body}"
@@ -445,12 +448,19 @@ async fn spawn_mock_new_game_service() -> String {
     format!("http://{}", addr)
 }
 
-/// POSTs to the real `RestartGame` server-fn route. Args for this server-fn
-/// shape are encoded as a url-encoded POST body, not JSON (unlike a
-/// hand-rolled `reqwest` request to the game service).
-async fn restart_game_via_http(app: Router, game_id: Uuid, cookie: &str) -> (StatusCode, String) {
-    let path = <RestartGame as leptos::server_fn::ServerFn>::PATH;
-    let body = format!("game_id={}", game_id);
+/// POSTs to the real `RestartGameWithRoster` server-fn route. Args for this
+/// server-fn shape are encoded as a url-encoded POST body, not JSON (unlike a
+/// hand-rolled `reqwest` request to the game service). `roster_suffix` carries
+/// the `opponent_ids[..]`/`bot_slots[..]` fields.
+async fn restart_game_with_roster_via_http(
+    app: Router,
+    game_id: Uuid,
+    game_version_id: Uuid,
+    roster_suffix: &str,
+    cookie: &str,
+) -> (StatusCode, String) {
+    let path = <RestartGameWithRoster as leptos::server_fn::ServerFn>::PATH;
+    let body = format!("game_id={game_id}&game_version_id={game_version_id}{roster_suffix}");
     let resp = app
         .oneshot(
             Request::builder()
@@ -512,16 +522,31 @@ async fn restart_game_on_finished_game_succeeds(pool: PgPool) {
     let cookie = login_cookie(&pool, &user, email).await;
     let app = build_router(make_state(pool).await).await;
 
-    let (status, resp_text) = restart_game_via_http(app, game.id, &cookie).await;
+    let (status, resp_text) = restart_game_with_roster_via_http(
+        app,
+        game.id,
+        game_version_id,
+        "&bot_slots[0][name]=Botty&bot_slots[0][bot_name]=easy",
+        &cookie,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "body: {resp_text}");
+
+    let outcome: RestartOutcome = serde_json::from_str(&resp_text).unwrap();
+    match outcome {
+        RestartOutcome::Created(po) => assert!(
+            po.game_id.is_some(),
+            "solo-vs-bots restart creates a game directly"
+        ),
+        other => panic!("expected Created, got {other:?}"),
+    }
 }
 
-// Regression test for the restart-onto-latest-version behaviour: when a
-// newer, non-deprecated game_version exists for the same game type,
-// restarting a finished game (played on an older/deprecated version) should
-// create the new game on the newer version, not the original.
+// `restart_game_with_roster` does not auto-resolve the latest version - it
+// restarts onto the `game_version_id` passed (validated to belong to the game
+// type). Passing the newer, non-deprecated version creates the new game on it.
 #[sqlx::test]
-async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: PgPool) {
+async fn restart_game_with_roster_uses_passed_version(pool: PgPool) {
     let old_uri = spawn_mock_new_game_service().await;
     let new_uri = spawn_mock_new_game_service().await;
 
@@ -577,11 +602,21 @@ async fn restart_game_creates_new_game_on_latest_non_deprecated_version(pool: Pg
     let cookie = login_cookie(&pool, &user, email).await;
     let app = build_router(make_state(pool.clone()).await).await;
 
-    let (status, resp_text) = restart_game_via_http(app, game.id, &cookie).await;
+    let (status, resp_text) = restart_game_with_roster_via_http(
+        app,
+        game.id,
+        new_game_version_id,
+        "&bot_slots[0][name]=Botty&bot_slots[0][bot_name]=easy",
+        &cookie,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "body: {resp_text}");
 
-    let outcome: web::proposals::ProposalOutcome = serde_json::from_str(&resp_text).unwrap();
-    let new_game_id = outcome
+    let outcome: RestartOutcome = serde_json::from_str(&resp_text).unwrap();
+    let RestartOutcome::Created(po) = outcome else {
+        panic!("expected Created, got {outcome:?}")
+    };
+    let new_game_id = po
         .game_id
         .expect("solo-vs-bots restart creates a game directly");
     let new_game_version_id_used = sqlx::query_scalar!(

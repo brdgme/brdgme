@@ -981,29 +981,95 @@ async fn run_undo(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandErro
 }
 
 async fn run_restart(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
-    let outcome = crate::game::server_fns::restart_game_impl(
+    use crate::game::server_fns::{BotSlot, RestartOutcome, restart_core};
+
+    let ge = crate::db::find_game_extended(ctx.pool, ctx.game_id)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("restart: find game: {e}")))?
+        .ok_or_else(|| CommandError::User("Game not found".to_string()))?;
+
+    if !ge.game.is_finished {
+        return Err(CommandError::User("Game is not finished".to_string()));
+    }
+    if !ge
+        .game_players
+        .iter()
+        .any(|p| p.user.as_ref().is_some_and(|u| u.id == ctx.user_id))
+    {
+        return Err(CommandError::User(
+            "You are not a player in this game".to_string(),
+        ));
+    }
+
+    let version =
+        crate::db::find_latest_non_deprecated_game_version(ctx.pool, ge.game_version.game_type_id)
+            .await
+            .map_err(|e| {
+                CommandError::Internal(anyhow::anyhow!("restart: find latest game version: {e}"))
+            })?
+            .unwrap_or_else(|| ge.game_version.clone());
+
+    let opponent_ids: Vec<uuid::Uuid> = ge
+        .game_players
+        .iter()
+        .filter_map(|p| {
+            p.user
+                .as_ref()
+                .filter(|u| u.id != ctx.user_id)
+                .map(|u| u.id)
+        })
+        .collect();
+    let bot_slots: Vec<BotSlot> = ge
+        .game_players
+        .iter()
+        .filter_map(|p| {
+            p.game_bot.as_ref().map(|b| BotSlot {
+                name: b.name.clone(),
+                bot_name: b.bot_name.clone(),
+            })
+        })
+        .collect();
+
+    let outcome = restart_core(
         ctx.pool,
         ctx.http_client,
         ctx.user_id,
         ctx.game_id,
+        &version,
+        &opponent_ids,
+        &[],
+        &bot_slots,
     )
     .await
     .map_err(|e| CommandError::User(e.to_string()))?;
 
-    if let Some(gid) = outcome.game_id {
-        crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, gid).await;
-        crate::email::notify::notify_game_emails(ctx.resend, ctx.pool, ctx.http_client, gid, None)
-            .await;
-        ctx.broadcaster.broadcast_game_update(ctx.game_id).await;
-        return Ok(CommandReply::Status("Game restarted.".to_string()));
+    match outcome {
+        RestartOutcome::Created(created) => {
+            if let Some(gid) = created.game_id {
+                crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, gid)
+                    .await;
+                crate::email::notify::notify_game_emails(
+                    ctx.resend,
+                    ctx.pool,
+                    ctx.http_client,
+                    gid,
+                    None,
+                )
+                .await;
+                ctx.broadcaster.broadcast_game_update(ctx.game_id).await;
+                return Ok(CommandReply::Status("Game restarted.".to_string()));
+            }
+            if let Some(pid) = created.proposal_id {
+                ctx.broadcaster.broadcast_proposal_update(pid).await;
+            }
+            Ok(CommandReply::Status(
+                "Restart proposed; invitees must confirm before the game starts.".to_string(),
+            ))
+        }
+        RestartOutcome::AlreadyRestarted { .. } => Err(CommandError::User(
+            "Game has already been restarted".to_string(),
+        )),
     }
-
-    if let Some(pid) = outcome.proposal_id {
-        ctx.broadcaster.broadcast_proposal_update(pid).await;
-    }
-    Ok(CommandReply::Status(
-        "Restart proposed; invitees must confirm before the game starts.".to_string(),
-    ))
 }
 
 async fn run_rules(
