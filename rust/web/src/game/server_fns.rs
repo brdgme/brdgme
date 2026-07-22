@@ -66,6 +66,10 @@ pub struct GameViewData {
     pub restarted_game_id: Option<Uuid>,
     /// The game this one was restarted from (reverse of `restarted_game_id`).
     pub previous_game_id: Option<Uuid>,
+    /// The open restart proposal for this game, if any. While present, a
+    /// restart is already in flight; the UI shows a "Restart invite pending"
+    /// link to `/invites/{id}` instead of offering a fresh restart.
+    pub restart_proposal_id: Option<Uuid>,
     pub is_2player: bool,
     pub players: Vec<PlayerViewData>,
     pub command_spec: Option<brdgme_game::command::Spec>,
@@ -289,6 +293,10 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         .await
         .map_err(internal("get_game_details: predecessor"))?;
 
+    let restart_proposal_id = crate::db::find_open_restart_proposal(&pool, game_id)
+        .await
+        .map_err(internal("get_game_details: restart proposal"))?;
+
     Ok(GameViewData {
         id: ge.game.id,
         version_id: ge.game_version.id,
@@ -302,6 +310,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             .is_some(),
         restarted_game_id: ge.game.restarted_game_id,
         previous_game_id,
+        restart_proposal_id,
         is_2player: ge.game_players.len() == 2,
         players: ge
             .game_players
@@ -2171,5 +2180,89 @@ mod tests {
 
         let result = get_restart_prefill_impl(&pool, creator, game.id).await;
         assert!(result.is_err());
+    }
+
+    #[sqlx::test]
+    async fn restart_proposal_id_present_when_open_restart_proposal_exists(pool: PgPool) {
+        let (game_id, creator_id) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+        let game_version_id: Uuid =
+            sqlx::query_scalar("SELECT game_version_id FROM games WHERE id = $1")
+                .bind(game_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let proposal_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status, restarted_game_id)
+             VALUES ($1, $2, 'open', $3) RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(creator_id)
+        .bind(game_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            crate::db::find_open_restart_proposal(&pool, game_id)
+                .await
+                .unwrap(),
+            Some(proposal_id)
+        );
+    }
+
+    #[sqlx::test]
+    async fn restart_proposal_id_none_when_no_open_restart_proposal(pool: PgPool) {
+        let (game_id, _creator_id) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+
+        assert_eq!(
+            crate::db::find_open_restart_proposal(&pool, game_id)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[sqlx::test]
+    async fn restart_proposal_id_clears_after_cancel(pool: PgPool) {
+        let (game_id, creator_id) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+        let game_version_id: Uuid =
+            sqlx::query_scalar("SELECT game_version_id FROM games WHERE id = $1")
+                .bind(game_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let proposal_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status, restarted_game_id)
+             VALUES ($1, $2, 'open', $3) RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(creator_id)
+        .bind(game_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            crate::db::find_open_restart_proposal(&pool, game_id)
+                .await
+                .unwrap(),
+            Some(proposal_id)
+        );
+
+        sqlx::query("UPDATE game_proposals SET status = 'cancelled' WHERE id = $1")
+            .bind(proposal_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::db::find_open_restart_proposal(&pool, game_id)
+                .await
+                .unwrap(),
+            None
+        );
     }
 }
