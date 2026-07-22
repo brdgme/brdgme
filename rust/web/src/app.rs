@@ -283,12 +283,58 @@ pub(crate) fn local_data_theme() -> Option<String> {
 
 #[component]
 fn HomePage() -> impl IntoView {
+    use crate::components::game::GameBoard;
+
+    let current_user =
+        expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
+    let logged_in = move || matches!(current_user.get(), Some(Ok(Some(_))));
+
+    let trigger = expect_context::<crate::websocket_client::WebSocketTrigger>();
+    let public_index: LocalResource<
+        Result<Option<crate::game::server_fns::PublicIndexGame>, ServerFnError>,
+    > = LocalResource::new(move || async move {
+        let _ = trigger.last_update.get();
+        crate::game::server_fns::get_public_index().await
+    });
+
+    let mounted = RwSignal::new(false);
+    Effect::new(move |_| mounted.set(true));
+
+    let title = move || {
+        public_index
+            .get()
+            .and_then(|r| r.ok())
+            .flatten()
+            .map(|g| g.type_name)
+            .unwrap_or_else(|| "brdg.me".to_string())
+    };
+
+    let has_game = move || mounted.get() && matches!(public_index.get(), Some(Ok(Some(_))));
+
     view! {
         <MainLayout>
-            <div class="content-page">
-                <h1>"Welcome to brdg.me"</h1>
-                <p>"Lo-fi board games by email and web."</p>
-                <A href="/dashboard">"Go to Dashboard"</A>
+            <div class="content-page index-logged-out" hidden=logged_in>
+                <h1>{title}</h1>
+                <p class="index-subheading">"Lo-fi board games by email and web"</p>
+                <A href="/login" attr:class="index-cta">"Start a game"</A>
+                <div class="index-game-section" hidden=move || !has_game()>
+                    {move || {
+                        public_index.get().and_then(|r| r.ok()).flatten().map(|game| {
+                            let logs: Vec<_> = game.logs.iter().take(3).cloned().collect();
+                            view! {
+                                <GameBoard html=game.html player_style=game.player_style />
+                                <div class="index-logs">
+                                    {logs.into_iter().map(|entry| {
+                                        view! { <div class="game-log-entry" inner_html=entry.body_html></div> }
+                                    }).collect::<Vec<_>>()}
+                                </div>
+                            }
+                        })
+                    }}
+                </div>
+            </div>
+            <div class="content-page index-logged-in-placeholder" hidden=move || !logged_in()>
+                <p>"Loading..."</p>
             </div>
         </MainLayout>
     }

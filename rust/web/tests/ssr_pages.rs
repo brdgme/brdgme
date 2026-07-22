@@ -234,7 +234,12 @@ async fn oversized_post_body_rejected_with_413(pool: PgPool) {
 async fn home_page_anonymous(pool: PgPool) {
     let app = build_router(make_state(pool).await).await;
     let (status, content_type, body) = get(app, "/", None).await;
-    assert_clean_html_body(status, &content_type, &body, "Welcome to brdg.me");
+    assert_clean_html_body(
+        status,
+        &content_type,
+        &body,
+        "Lo-fi board games by email and web",
+    );
 }
 
 #[sqlx::test]
