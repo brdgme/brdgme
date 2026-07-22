@@ -25,6 +25,11 @@ const THEME_BOOT_SCRIPT: &str = r#"(function(){try{var m=document.cookie.match(/
 // this runs on every captured error.
 const SENTRY_BEFORE_SEND_JS: &str = r#"function(event){try{if(event.request){delete event.request.cookies;if(event.request.headers){Object.keys(event.request.headers).forEach(function(k){if(k.toLowerCase()==="authorization"||k.toLowerCase()==="cookie"){delete event.request.headers[k];}});}}}catch(e){}return event;}"#;
 
+/// Presence ping cadence: while a page is open the client tells the server
+/// it's active this often. The server's recency window is 2x this (see
+/// `db::RECENTLY_ACTIVE_WINDOW`).
+const PRESENCE_PING_INTERVAL_MS: u32 = 5 * 60 * 1000;
+
 // `shell()` compiles into both the ssr-feature server binary and the
 // hydrate-feature wasm binary (the crate builds twice under cargo-leptos).
 // Client-side JS never calls `shell()` (see lib.rs's `hydrate()`, which
@@ -161,6 +166,26 @@ pub fn App() -> impl IntoView {
                         }
                     }
                     Err(_) => {}
+                }
+            });
+        }
+    });
+
+    // Presence ping: while logged in with any page open, tell the server we're
+    // active every 5 min. No Page Visibility gating - an open page counts.
+    // Runs only on hydrate (Effects are inert during SSR). The loop breaks once
+    // the user is no longer logged in, so it can't outlive the session.
+    let presence_started = RwSignal::new(false);
+    Effect::new(move |_| {
+        if matches!(current_user.get(), Some(Ok(Some(_)))) && !presence_started.get_untracked() {
+            presence_started.set(true);
+            leptos::task::spawn_local(async move {
+                loop {
+                    if !matches!(current_user.get_untracked(), Some(Ok(Some(_)))) {
+                        break;
+                    }
+                    let _ = crate::auth::ping_active().await;
+                    gloo_timers::future::TimeoutFuture::new(PRESENCE_PING_INTERVAL_MS).await;
                 }
             });
         }

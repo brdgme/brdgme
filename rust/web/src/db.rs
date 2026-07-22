@@ -1769,6 +1769,59 @@ pub async fn set_user_theme(pool: &PgPool, user_id: Uuid, theme: Option<&str>) -
     Ok(())
 }
 
+/// Window within which a presence ping counts as "recently active on the web".
+/// 2x the client ping interval (5 min) for slack.
+#[cfg(feature = "ssr")]
+pub const RECENTLY_ACTIVE_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+
+#[cfg(feature = "ssr")]
+pub async fn set_user_last_active(pool: &PgPool, user_id: Uuid) -> Result<()> {
+    sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Pure predicate: was the user last active within `window` of `now`? `None`
+/// (never pinged) => false.
+#[cfg(feature = "ssr")]
+pub fn active_within_window(
+    last_active_at: Option<time::OffsetDateTime>,
+    now: time::OffsetDateTime,
+    window: std::time::Duration,
+) -> bool {
+    let Some(last_active_at) = last_active_at else {
+        return false;
+    };
+    let window = time::Duration::try_from(window).unwrap_or(time::Duration::minutes(10));
+    (now - last_active_at) < window
+}
+
+/// Whether the user pinged the server within `RECENTLY_ACTIVE_WINDOW`. Fails
+/// open (false) on a DB error or a missing user row.
+#[cfg(feature = "ssr")]
+pub async fn is_user_recently_active(pool: &PgPool, user_id: Uuid) -> bool {
+    let row = sqlx::query_as::<_, (Option<time::OffsetDateTime>,)>(
+        "SELECT last_active_at FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await;
+    let row = match row {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("Failed to read last_active_at for {}: {}", user_id, e);
+            return false;
+        }
+    };
+    active_within_window(
+        row.and_then(|(l,)| l),
+        time::OffsetDateTime::now_utc(),
+        RECENTLY_ACTIVE_WINDOW,
+    )
+}
+
 // --- #30 friends (spec docs/superpowers/specs/2026-07-08-30-friends-design.md) ---
 // Plain (non-macro) queries throughout, matching get_user_theme above.
 
@@ -2678,6 +2731,62 @@ mod tests {
             .await?;
         assert_eq!(count, 0);
         Ok(())
+    }
+
+    #[sqlx::test]
+    async fn last_active_at_column_exists_and_defaults_null(pool: PgPool) -> sqlx::Result<()> {
+        let user = make_user(&pool, "presence").await;
+        let last: Option<time::OffsetDateTime> =
+            sqlx::query_scalar("SELECT last_active_at FROM users WHERE id = $1")
+                .bind(user.id)
+                .fetch_one(&pool)
+                .await?;
+        assert!(last.is_none());
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn set_user_last_active_stamps_column(pool: PgPool) {
+        let user = make_user(&pool, "pinger").await;
+        set_user_last_active(&pool, user.id).await.unwrap();
+        let last: Option<time::OffsetDateTime> =
+            sqlx::query_scalar("SELECT last_active_at FROM users WHERE id = $1")
+                .bind(user.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(last.is_some());
+        assert!(is_user_recently_active(&pool, user.id).await);
+    }
+
+    #[sqlx::test]
+    async fn is_user_recently_active_false_when_null(pool: PgPool) {
+        let user = make_user(&pool, "never-pinged").await;
+        assert!(!is_user_recently_active(&pool, user.id).await);
+    }
+
+    #[sqlx::test]
+    async fn is_user_recently_active_false_when_stale(pool: PgPool) {
+        let user = make_user(&pool, "stale").await;
+        sqlx::query(
+            "UPDATE users SET last_active_at = NOW() - interval '11 minutes' WHERE id = $1",
+        )
+        .bind(user.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(!is_user_recently_active(&pool, user.id).await);
+    }
+
+    #[test]
+    fn active_within_window_truth_table() {
+        let now = time::OffsetDateTime::now_utc();
+        let window = std::time::Duration::from_secs(600);
+        let five_min_ago = now - time::Duration::minutes(5);
+        let eleven_min_ago = now - time::Duration::minutes(11);
+        assert!(active_within_window(Some(five_min_ago), now, window));
+        assert!(!active_within_window(Some(eleven_min_ago), now, window));
+        assert!(!active_within_window(None, now, window));
     }
 
     #[sqlx::test]

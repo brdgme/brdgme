@@ -519,6 +519,19 @@ pub async fn get_user_theme() -> Result<Option<String>, ServerFnError> {
     }
 }
 
+/// Records a presence ping: stamps the caller's `last_active_at = now()`.
+/// Called by the client every 5 min while a page is open.
+#[server(PingActive, "/api")]
+pub async fn ping_active() -> Result<(), ServerFnError> {
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+    crate::db::set_user_last_active(&pool, user.id)
+        .await
+        .map_err(internal("ping_active: update"))
+}
+
 /// Everything the settings page needs in one round trip. `pref_colors` is
 /// always exactly 3 entries: stored prefs normalized, or the palette-order
 /// default (Green, Red, Blue) when unset - behaviour-neutral since identical
