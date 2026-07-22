@@ -2,12 +2,15 @@ use leptos::prelude::*;
 use leptos_router::{
     NavigateOptions,
     components::A,
-    hooks::{use_navigate, use_params_map},
+    hooks::{use_navigate, use_params_map, use_query_map},
 };
 use uuid::Uuid;
 
 use crate::components::{OpponentSlot, OpponentSlotEditor};
-use crate::game::server_fns::{BotSlot, GameTypeInfo, get_available_bots};
+use crate::game::server_fns::{
+    BotSlot, GameTypeInfo, PrefillSlot, RestartOutcome, get_available_bots, get_restart_prefill,
+    restart_game_with_roster,
+};
 use crate::players::encode_path_segment;
 
 /// Formats supported player counts, honoring non-contiguous sets:
@@ -34,6 +37,23 @@ fn player_range(counts: &[i32]) -> String {
 
 fn weight_text(weight: f32) -> String {
     format!("Weight {weight:.1} / 5")
+}
+
+fn prefill_to_slots(opponents: &[PrefillSlot]) -> Vec<OpponentSlot> {
+    opponents
+        .iter()
+        .map(|s| match (s.user_id, s.bot_name.as_deref()) {
+            (Some(uid), _) => OpponentSlot::Player {
+                query: String::new(),
+                selected: Some((uid, s.name.clone())),
+            },
+            (None, Some(bot_name)) => OpponentSlot::Bot {
+                name: s.name.clone(),
+                bot_name: bot_name.to_string(),
+            },
+            (None, None) => OpponentSlot::default(),
+        })
+        .collect()
 }
 
 /// Client-side filter + sort over the already-fetched list. `sort_key` is
@@ -173,6 +193,10 @@ pub fn NewGameSetupPage() -> impl IntoView {
     use crate::game::server_fns::get_available_game_types;
 
     let params = use_params_map();
+    let restart_game_id: Option<Uuid> = use_query_map()
+        .get()
+        .get("restart")
+        .and_then(|s| s.parse::<Uuid>().ok());
     let game_types = LocalResource::new(get_available_game_types);
 
     view! {
@@ -195,7 +219,8 @@ pub fn NewGameSetupPage() -> impl IntoView {
                                 <p>"No such game type."</p>
                             }
                                 .into_any(),
-                            Some(gt) => view! { <GameSetupPanel gt=gt.clone()/> }.into_any(),
+                            Some(gt) => view! { <GameSetupPanel gt=gt.clone() restart=restart_game_id/> }
+                                .into_any(),
                         },
                     }
                 }}
@@ -205,9 +230,15 @@ pub fn NewGameSetupPage() -> impl IntoView {
 }
 
 #[component]
-fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
+fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
     let suggestions = LocalResource::new(crate::friends::get_opponent_suggestions);
     let bot_names = LocalResource::new(get_available_bots);
+    let prefill = LocalResource::new(move || async move {
+        match restart {
+            Some(game_id) => Some(get_restart_prefill(game_id).await),
+            None => None,
+        }
+    });
 
     let (selected_version_id, set_selected_version_id) = signal(gt.versions.first().map(|v| v.id));
     let (player_count, set_player_count) = signal(gt.player_counts.first().copied().unwrap_or(2));
@@ -236,6 +267,17 @@ fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
         set_opponent_slots.update(|v| v.resize_with(n, OpponentSlot::default));
     });
 
+    Effect::new(move |_| {
+        let Some(Some(Ok(pf))) = prefill.get() else {
+            return;
+        };
+        let count = (pf.opponents.len() + 1) as i32;
+        let slots = prefill_to_slots(&pf.opponents);
+        set_selected_version_id.set(Some(pf.version_id));
+        set_opponent_slots.set(slots);
+        set_player_count.set(count);
+    });
+
     let create_action = Action::new(
         |(version_id, ids, emails, bots): &(Uuid, Vec<Uuid>, Vec<String>, Vec<BotSlot>)| {
             let version_id = *version_id;
@@ -249,13 +291,61 @@ fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
         },
     );
 
+    let restart_action = Action::new(
+        |(game_id, version_id, ids, emails, bots): &(
+            Uuid,
+            Uuid,
+            Vec<Uuid>,
+            Vec<String>,
+            Vec<BotSlot>,
+        )| {
+            let game_id = *game_id;
+            let version_id = *version_id;
+            let ids = ids.clone();
+            let emails = emails.clone();
+            let bots = bots.clone();
+            async move {
+                restart_game_with_roster(game_id, version_id, Some(ids), Some(emails), Some(bots))
+                    .await
+            }
+        },
+    );
+
     let navigate = use_navigate();
+    let navigate_create = navigate.clone();
     Effect::new(move |_| {
         if let Some(Ok(outcome)) = create_action.value().get() {
             if let Some(gid) = outcome.game_id {
-                navigate(&format!("/games/{}", gid), NavigateOptions::default());
+                navigate_create(&format!("/games/{}", gid), NavigateOptions::default());
             } else if let Some(pid) = outcome.proposal_id {
-                navigate(&format!("/invites/{}", pid), NavigateOptions::default());
+                navigate_create(&format!("/invites/{}", pid), NavigateOptions::default());
+            }
+        }
+    });
+
+    let navigate_restart = navigate.clone();
+    Effect::new(move |_| {
+        if let Some(Ok(outcome)) = restart_action.value().get() {
+            match outcome {
+                RestartOutcome::Created(po) => {
+                    if let Some(gid) = po.game_id {
+                        navigate_restart(&format!("/games/{gid}"), NavigateOptions::default());
+                    } else if let Some(pid) = po.proposal_id {
+                        navigate_restart(&format!("/invites/{pid}"), NavigateOptions::default());
+                    }
+                }
+                RestartOutcome::AlreadyRestarted {
+                    game_id: Some(g), ..
+                } => {
+                    navigate_restart(&format!("/games/{g}"), NavigateOptions::default());
+                }
+                RestartOutcome::AlreadyRestarted {
+                    proposal_id: Some(p),
+                    ..
+                } => {
+                    navigate_restart(&format!("/invites/{p}"), NavigateOptions::default());
+                }
+                RestartOutcome::AlreadyRestarted { .. } => {}
             }
         }
     });
@@ -286,14 +376,31 @@ fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
             }
         }
         set_form_error.set(None);
-        create_action.dispatch((version_id, ids, emails, bots));
+        if let Some(game_id) = restart {
+            restart_action.dispatch((game_id, version_id, ids, emails, bots));
+        } else {
+            create_action.dispatch((version_id, ids, emails, bots));
+        }
+    };
+
+    let server_error = move || -> Option<ServerFnError> {
+        if restart.is_some() {
+            restart_action.value().get().and_then(|r| r.err())
+        } else {
+            create_action.value().get().and_then(|r| r.err())
+        }
     };
 
     let gt = StoredValue::new(gt);
 
     view! {
         <div class="new-game-panel">
-            <h2>{gt.with_value(|g| g.name.clone())}</h2>
+            <h2>
+                {gt.with_value(|g| match restart {
+                    Some(_) => format!("Restarting {}", g.name),
+                    None => g.name.clone(),
+                })}
+            </h2>
             <p class="game-card-meta">
                 {gt.with_value(|g| player_range(&g.player_counts))} " | "
                 {gt.with_value(|g| weight_text(g.weight))}
@@ -302,9 +409,14 @@ fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
                 (!g.blurb.is_empty())
                     .then(|| view! { <p class="new-game-blurb">{g.blurb.clone()}</p> })
             })}
+            {restart.map(|gid| view! {
+                <p class="new-game-back">
+                    <A href=format!("/games/{gid}")>"Back to finished game"</A>
+                </p>
+            })}
             <form on:submit=on_submit>
                 {gt.with_value(|g| {
-                    (g.versions.len() > 1).then(|| {
+                    (restart.is_none() && g.versions.len() > 1).then(|| {
                         let versions = g.versions.clone();
                         view! {
                             <div class="form-field">
@@ -410,8 +522,8 @@ fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
                 <div class="form-actions">
                     <input
                         type="submit"
-                        value="Start game"
-                        disabled=move || create_action.pending().get()
+                        value=if restart.is_some() { "Restart game" } else { "Start game" }
+                        disabled=move || create_action.pending().get() || restart_action.pending().get()
                     />
                 </div>
                 {move || {
@@ -419,15 +531,10 @@ fn GameSetupPanel(gt: GameTypeInfo) -> impl IntoView {
                         .get()
                         .map(|e| view! { <div class="form-error">{e}</div> })
                 }}
-                <Show when=move || {
-                    create_action.value().get().is_some_and(|r| r.is_err())
-                }>
+                <Show when=move || server_error().is_some()>
                     <div class="form-error">
                         {move || {
-                            create_action
-                                .value()
-                                .get()
-                                .and_then(|r| r.err())
+                            server_error()
                                 .map(|e| crate::error::user_facing_server_error(&e))
                                 .unwrap_or_default()
                         }}
@@ -457,6 +564,34 @@ mod tests {
 
     fn names(list: &[GameTypeInfo]) -> Vec<&str> {
         list.iter().map(|g| g.name.as_str()).collect()
+    }
+
+    #[test]
+    fn prefill_to_slots_maps_humans_and_bots() {
+        use crate::game::server_fns::PrefillSlot;
+        let uid = Uuid::new_v4();
+        let opponents = vec![
+            PrefillSlot {
+                user_id: Some(uid),
+                name: "alice".to_string(),
+                bot_name: None,
+            },
+            PrefillSlot {
+                user_id: None,
+                name: "Botty".to_string(),
+                bot_name: Some("easy".to_string()),
+            },
+        ];
+        let slots = prefill_to_slots(&opponents);
+        assert_eq!(slots.len(), 2);
+        assert!(matches!(
+            &slots[0],
+            OpponentSlot::Player { selected: Some((id, name)), .. } if *id == uid && name == "alice"
+        ));
+        assert!(matches!(
+            &slots[1],
+            OpponentSlot::Bot { name, bot_name } if name == "Botty" && bot_name == "easy"
+        ));
     }
 
     #[test]

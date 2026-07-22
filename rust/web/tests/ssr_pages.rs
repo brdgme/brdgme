@@ -1402,3 +1402,27 @@ async fn new_game_setup_page_unknown_type_renders_shell(pool: PgPool) {
     let (status, content_type, body) = get(app, "/games/new/NoSuchGame", None).await;
     assert_clean_html_body(status, &content_type, &body, "Back to games");
 }
+
+#[sqlx::test]
+async fn new_game_setup_page_restart_mode_renders_shell(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Restart Game").await;
+    let user_a = make_user(&pool, "restart-player-a").await;
+    let user_b = make_user(&pool, "restart-player-b").await;
+    let game_id = insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+    let cookie = login_cookie(&pool, &user_a, "restart-player-a@example.com").await;
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(
+        app,
+        &format!("/games/new/Restart%20Game?restart={game_id}"),
+        Some(&cookie),
+    )
+    .await;
+    assert_clean_html_body(status, &content_type, &body, "Back to games");
+}
