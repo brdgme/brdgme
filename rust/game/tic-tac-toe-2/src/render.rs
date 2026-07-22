@@ -27,14 +27,26 @@ fn render_board(board: &Board) -> Vec<N> {
     nodes
 }
 
+fn render_with_labels(board: &Board, start_player: usize) -> Vec<N> {
+    let mut nodes = render_board(board);
+    nodes.push(N::text("\n"));
+    let x_player = start_player;
+    let o_player = 1 - start_player;
+    nodes.push(N::Player(x_player));
+    nodes.push(N::text(" is X, "));
+    nodes.push(N::Player(o_player));
+    nodes.push(N::text(" is O"));
+    nodes
+}
+
 impl Renderer for PubState {
     fn render(&self) -> Vec<N> {
-        render_board(&self.board)
+        render_with_labels(&self.board, self.start_player)
     }
 }
 
 impl Renderer for PlayerState {
     fn render(&self) -> Vec<N> {
-        render_board(&self.public.board)
+        render_with_labels(&self.public.board, self.public.start_player)
     }
 }

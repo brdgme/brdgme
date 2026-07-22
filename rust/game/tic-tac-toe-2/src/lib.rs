@@ -6,6 +6,7 @@ use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_markup::Node as N;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -103,8 +104,19 @@ impl Game {
         } else {
             Cell::O
         };
+        let mark = if player == self.start_player {
+            "X"
+        } else {
+            "O"
+        };
         self.next_player();
-        Ok(vec![])
+        Ok(vec![Log::public(vec![
+            N::Player(player),
+            N::text(" played "),
+            N::Bold(vec![N::text(mark.to_string())]),
+            N::text(" at "),
+            N::Bold(vec![N::text(loc.to_string())]),
+        ])])
     }
 
     pub fn winner(&self) -> Option<usize> {
