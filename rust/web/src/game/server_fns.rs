@@ -168,6 +168,17 @@ pub struct GameLogEntry {
     pub is_new: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicIndexGame {
+    pub game_id: Uuid,
+    pub type_name: String,
+    pub version_name: String,
+    pub html: String,
+    pub player_style: String,
+    pub player_names: Vec<String>,
+    pub logs: Vec<GameLogEntry>,
+}
+
 /// Builds the active-game summaries for `user`, or an empty list if there is
 /// no logged-in user - anonymous visitors hit pages that render
 /// `SidebarMenu` (e.g. the homepage), and "not logged in" is a normal state
@@ -342,6 +353,109 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         viewer_is_admin,
         viewer_user_id: Some(user.id),
     })
+}
+
+/// Spectator render of one game for the logged-out index, privacy-gated at
+/// render time so a game that stops being publicly visible between selection
+/// (find_public_index_game_id) and here is refused rather than leaked
+/// (Unit B section 2a / D-render-race). position = None => pub_render.
+#[cfg(feature = "ssr")]
+pub(crate) async fn render_game_public(
+    pool: &sqlx::PgPool,
+    http: &reqwest::Client,
+    game_id: Uuid,
+) -> Result<Option<PublicIndexGame>, ServerFnError> {
+    use crate::game::client;
+
+    if !crate::db::is_game_publicly_visible(pool, game_id)
+        .await
+        .map_err(internal("render_game_public: visibility"))?
+    {
+        return Ok(None);
+    }
+
+    let ge = crate::db::find_game_extended(pool, game_id)
+        .await
+        .map_err(internal("render_game_public: find game"))?
+        .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+    let render_resp = client::render(
+        http,
+        &ge.game_version.uri,
+        &ge.game_version.name,
+        ge.game.game_state.clone(),
+        None,
+    )
+    .await
+    .map_err(internal("render_game_public: render game"))?;
+
+    let (nodes, _) = brdgme_markup::from_string(&render_resp.render)
+        .map_err(internal("render_game_public: parse markup"))?;
+    let semantic_players = ge.semantic_players();
+    let html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
+        &nodes,
+        &semantic_players,
+    ));
+    let player_style = ge.player_style();
+    let player_names = ge
+        .game_players
+        .iter()
+        .map(|p| p.name().to_string())
+        .collect();
+
+    let logs = crate::db::find_recent_game_log_lines(pool, game_id, 3)
+        .await
+        .map_err(internal("render_game_public: load logs"))?
+        .into_iter()
+        .map(|log| {
+            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
+            let body_html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
+                &nodes,
+                &semantic_players,
+            ));
+            GameLogEntry {
+                body_html,
+                logged_at: log.logged_at,
+                is_new: false,
+            }
+        })
+        .collect();
+
+    Ok(Some(PublicIndexGame {
+        game_id,
+        type_name: ge.game_type.name,
+        version_name: ge.game_version.name,
+        html,
+        player_style,
+        player_names,
+        logs,
+    }))
+}
+
+#[cfg(feature = "ssr")]
+pub(crate) async fn public_index_data(
+    pool: &sqlx::PgPool,
+    http: &reqwest::Client,
+) -> Result<Option<PublicIndexGame>, ServerFnError> {
+    let Some(game_id) = crate::db::find_public_index_game_id(pool)
+        .await
+        .map_err(internal("get_public_index: select game"))?
+    else {
+        return Ok(None);
+    };
+    render_game_public(pool, http, game_id).await
+}
+
+/// Anonymous (no auth guard): the selected public game's spectator render +
+/// title + 3 recent public log lines for the logged-out index, or None when
+/// no game qualifies (Unit B R2).
+#[server(GetPublicIndex, "/api")]
+pub async fn get_public_index() -> Result<Option<PublicIndexGame>, ServerFnError> {
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let http_client = expect_context::<reqwest::Client>();
+    public_index_data(&pool, &http_client).await
 }
 
 /// Ok(None) = success. Ok(Some(message)) = the game rejected the command -
@@ -2159,5 +2273,191 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    fn log_time(minutes_ago: i64) -> time::PrimitiveDateTime {
+        let t = time::OffsetDateTime::now_utc() - time::Duration::minutes(minutes_ago);
+        time::PrimitiveDateTime::new(t.date(), t.time())
+    }
+
+    async fn insert_log(
+        pool: &PgPool,
+        game_id: Uuid,
+        body: &str,
+        is_public: bool,
+        minutes_ago: i64,
+    ) {
+        sqlx::query(
+            "INSERT INTO game_logs (game_id, body, is_public, logged_at) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(game_id)
+        .bind(body)
+        .bind(is_public)
+        .bind(log_time(minutes_ago))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Mock game service answering spectator `PubRender` requests (the public
+    /// index renders with position = None). The shared mock in game/mod.rs only
+    /// answers what the handler returns, so answer PubRender here.
+    async fn spawn_pub_render_service() -> String {
+        use brdgme_cmd::api::{PubRender, Request, Response};
+        crate::game::tests::spawn_mock_game_service(move |req| match req {
+            Request::PubRender { .. } => Response::PubRender {
+                render: PubRender {
+                    pub_state: "pub".to_string(),
+                    render: "mock public render".to_string(),
+                },
+            },
+            _ => Response::SystemError {
+                message: "unsupported in mock".to_string(),
+            },
+        })
+        .await
+    }
+
+    /// An active (non-finished) two-human game pointed at `uri`; both humans
+    /// default to game_visibility = 'public'.
+    async fn make_active_public_game(pool: &PgPool, uri: &str) -> Uuid {
+        let creator = make_user(pool, "creator").await;
+        let opponent = make_user(pool, "opponent").await;
+        let game_version_id = make_game_version_at(pool, uri).await;
+        let game = crate::db::create_game_with_users(
+            pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: creator,
+                opponent_ids: &[opponent],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        game.id
+    }
+
+    #[sqlx::test]
+    async fn public_index_returns_render_logs_and_type_name(pool: PgPool) {
+        let uri = spawn_pub_render_service().await;
+        let game_id = make_active_public_game(&pool, &uri).await;
+        insert_log(&pool, game_id, "first public line", true, 30).await;
+        insert_log(&pool, game_id, "second public line", true, 20).await;
+        insert_log(&pool, game_id, "third public line", true, 10).await;
+
+        let http = reqwest::Client::new();
+        let result = public_index_data(&pool, &http)
+            .await
+            .unwrap()
+            .expect("a game");
+
+        assert_eq!(result.game_id, game_id);
+        assert_eq!(result.type_name, "Test Game");
+        assert!(
+            result.html.contains("mock public render"),
+            "html: {}",
+            result.html
+        );
+        assert_eq!(result.player_names.len(), 2);
+        assert_eq!(result.logs.len(), 3);
+        assert!(result.logs[0].body_html.contains("first public line"));
+        assert!(result.logs[2].body_html.contains("third public line"));
+        assert!(!result.logs.iter().any(|l| l.is_new));
+    }
+
+    #[sqlx::test]
+    async fn public_index_none_when_no_qualifying_games(pool: PgPool) {
+        let uri = spawn_pub_render_service().await;
+        let http = reqwest::Client::new();
+        // No games at all.
+        assert!(public_index_data(&pool, &http).await.unwrap().is_none());
+
+        // A finished game does not qualify either.
+        let game_id = make_active_public_game(&pool, &uri).await;
+        sqlx::query("UPDATE games SET is_finished = true WHERE id = $1")
+            .bind(game_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(public_index_data(&pool, &http).await.unwrap().is_none());
+    }
+
+    #[sqlx::test]
+    async fn render_game_public_refuses_non_public_game(pool: PgPool) {
+        let uri = spawn_pub_render_service().await;
+        let game_id = make_active_public_game(&pool, &uri).await;
+        let http = reqwest::Client::new();
+
+        // Sanity: visible while all players are public.
+        assert!(
+            render_game_public(&pool, &http, game_id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        // A player switching to 'private' after selection must be caught by the
+        // render-time re-check (race window, D-render-race).
+        let player_user_id: Uuid = sqlx::query_scalar(
+            "SELECT user_id FROM game_players WHERE game_id = $1 AND user_id IS NOT NULL LIMIT 1",
+        )
+        .bind(game_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        crate::db::set_game_visibility(&pool, player_user_id, "private")
+            .await
+            .unwrap();
+
+        assert!(
+            render_game_public(&pool, &http, game_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // And the full selection path agrees.
+        assert!(public_index_data(&pool, &http).await.unwrap().is_none());
+    }
+
+    #[sqlx::test]
+    async fn public_index_logs_limited_to_three_public_only(pool: PgPool) {
+        let uri = spawn_pub_render_service().await;
+        let game_id = make_active_public_game(&pool, &uri).await;
+        // 5 public lines (oldest -> newest by minutes_ago descending) + 1 private.
+        insert_log(&pool, game_id, "public one", true, 50).await;
+        insert_log(&pool, game_id, "public two", true, 40).await;
+        insert_log(&pool, game_id, "public three", true, 30).await;
+        insert_log(&pool, game_id, "public four", true, 20).await;
+        insert_log(&pool, game_id, "public five", true, 10).await;
+        insert_log(&pool, game_id, "secret private line", false, 5).await;
+
+        let http = reqwest::Client::new();
+        let result = public_index_data(&pool, &http)
+            .await
+            .unwrap()
+            .expect("a game");
+
+        // Only the 3 most recent PUBLIC lines, in chronological order.
+        assert_eq!(result.logs.len(), 3);
+        assert!(result.logs[0].body_html.contains("public three"));
+        assert!(result.logs[1].body_html.contains("public four"));
+        assert!(result.logs[2].body_html.contains("public five"));
+        let joined = result
+            .logs
+            .iter()
+            .map(|l| l.body_html.clone())
+            .collect::<String>();
+        assert!(!joined.contains("secret private line"));
+        assert!(!joined.contains("public one"));
+        assert!(!joined.contains("public two"));
     }
 }
