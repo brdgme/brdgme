@@ -10,7 +10,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -182,8 +182,17 @@ impl Game {
             }
         }
         g.current_player = start_player;
+        logs.push(Log::public(vec![
+            N::Player(start_player),
+            N::text(" is the starting player as they got the fewest cards"),
+        ]));
 
         if players == 2 {
+            logs.push(Log::public(vec![
+                N::text("As you only have 2 players, you will be joined by "),
+                N::Player(DIRK),
+                N::text("!"),
+            ]));
             let dirk_logs = g.dirk_draw_tiles(6);
             logs.extend(dirk_logs);
         }
@@ -237,10 +246,7 @@ impl Game {
     }
 
     pub fn score_round(&mut self) -> Vec<Log> {
-        let mut logs = vec![Log::public(vec![N::text(format!(
-            "It is now scoring round {}",
-            self.round
-        ))])];
+        let mut content: Vec<N> = vec![N::text(format!("It is now scoring round {}", self.round))];
 
         for tt in SCORING_TILE_TYPES {
             let scores = self.score_type(tt, self.round);
@@ -248,45 +254,58 @@ impl Game {
                 for &p in &s.players {
                     self.boards[p].points += s.points;
                 }
-                let player_nodes: Vec<N> = s
-                    .players
-                    .iter()
-                    .flat_map(|&p| vec![N::Player(p), N::text(", ")])
-                    .collect();
-                let mut content = vec![N::text(format!("{:?} - ", tt))];
-                if player_nodes.is_empty() {
-                    content.push(N::text("nobody scored"));
-                } else {
-                    content.extend(player_nodes);
-                    content.push(N::text(format!(
-                        "scored {} points ({} tiles)",
-                        s.points, s.tile_count
-                    )));
+            }
+            content.push(N::text("\n"));
+            content.push(N::Bold(vec![N::text(format!(
+                "Scoring {}",
+                tt.abbr().trim()
+            ))]));
+            if scores.is_empty() {
+                content.push(N::text("\nnobody scored"));
+            } else {
+                for s in &scores {
+                    for &p in &s.players {
+                        content.push(N::text("\n"));
+                        content.push(N::Player(p));
+                        content.push(N::text(format!(
+                            " scored {} for having {}",
+                            s.points, s.tile_count
+                        )));
+                    }
                 }
-                logs.push(Log::public(content));
             }
         }
 
-        logs.push(Log::public(vec![N::text("Scoring walls")]));
+        content.push(N::text("\n"));
+        content.push(N::Bold(vec![N::text("Scoring walls")]));
         for p in 0..self.human_players {
             let wall = grid_longest_ext_wall(&self.boards[p].grid);
             if wall > 0 {
                 self.boards[p].points += wall;
-                logs.push(Log::public(vec![
-                    N::Player(p),
-                    N::text(format!(" scored {} points for walls", wall)),
-                ]));
+                content.push(N::text("\n"));
+                content.push(N::Player(p));
+                content.push(N::text(format!(" scored {} for their wall", wall)));
             }
         }
 
         if self.human_players == 2 {
             if self.round == 1 {
                 let dirk_logs = self.dirk_draw_tiles(6);
+                let mut logs = vec![Log::public(content)];
                 logs.extend(dirk_logs);
+                if self.round < 3 {
+                    self.round += 1;
+                }
+                return logs;
             } else if self.round == 2 {
                 let n = self.tile_bag.len() / 3;
                 let dirk_logs = self.dirk_draw_tiles(n as i32);
+                let mut logs = vec![Log::public(content)];
                 logs.extend(dirk_logs);
+                if self.round < 3 {
+                    self.round += 1;
+                }
+                return logs;
             }
         }
 
@@ -294,7 +313,7 @@ impl Game {
             self.round += 1;
         }
 
-        logs
+        vec![Log::public(content)]
     }
 
     pub fn score_type(&self, tile_type: TileType, round: i32) -> Vec<RoundTypeScore> {
@@ -404,6 +423,10 @@ impl Game {
         self.phase = Phase::FinalPlace;
         let mut logs = vec![];
 
+        let mut content: Vec<N> = vec![N::Bold(vec![N::text(
+            "Giving remaining tiles to the player with the most money cards of that currency",
+        )])];
+
         for currency in Currency::ALL {
             let ci = Currency::ALL.iter().position(|&c| c == currency).unwrap();
             if self.tiles[ci].tile_type == TileType::Empty {
@@ -423,20 +446,26 @@ impl Game {
                 }
             }
             if tied {
-                logs.push(Log::public(vec![N::text(format!(
-                    "Nobody got the {:?} tile (tie)",
-                    self.tiles[ci].tile_type
-                ))]));
+                content.push(N::text(format!(
+                    "\nNobody had the most money for {}",
+                    currency.name()
+                )));
             } else if let Some(p) = best_player {
                 let tile = self.tiles[ci].clone();
                 self.boards[p].place.push(tile.clone());
                 self.tiles[ci] = Tile::empty();
-                logs.push(Log::public(vec![
-                    N::Player(p),
-                    N::text(format!(" got the {:?} tile", tile.tile_type)),
-                ]));
+                content.push(N::text("\n"));
+                content.push(N::Player(p));
+                content.push(N::text(format!(
+                    " had the most money for {} with {} and got {}",
+                    currency.name(),
+                    best_value,
+                    tile.tile_type.abbr().trim()
+                )));
             }
         }
+
+        logs.push(Log::public(content));
 
         if not_empty(&self.boards[self.current_player].place).is_empty() {
             let np_logs = self.next_phase();
@@ -453,11 +482,14 @@ impl Game {
             .filter(|t| t.tile_type != TileType::Empty)
             .collect();
         if !non_empty.is_empty() {
-            let count = non_empty.len();
+            let abbrs: Vec<&str> = non_empty
+                .iter()
+                .map(|t| t.tile_type.abbr().trim())
+                .collect();
             self.boards[self.current_player].reserve.extend(non_empty);
             logs.push(Log::public(vec![
                 N::Player(self.current_player),
-                N::text(format!(" moved {} tile(s) to reserve", count)),
+                N::text(format!(" added {} to their reserve", abbrs.join(", "))),
             ]));
         }
         logs
@@ -803,7 +835,18 @@ impl Gamer for Game {
                 value: Command::Take { cards },
                 ..
             }) => {
-                let logs = self.take(player, &cards)?;
+                let mut logs = self.take(player, &cards)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.human_players)
+                        .map(|p| (p, self.boards[p].points))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..self.human_players)
+                            .map(|p| vec![self.boards[p].points])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -815,7 +858,18 @@ impl Gamer for Game {
                 value: Command::Spend { cards },
                 ..
             }) => {
-                let logs = self.spend(player, &cards)?;
+                let mut logs = self.spend(player, &cards)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.human_players)
+                        .map(|p| (p, self.boards[p].points))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..self.human_players)
+                            .map(|p| vec![self.boards[p].points])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -827,7 +881,18 @@ impl Gamer for Game {
                 value: Command::Place { tile, coord },
                 ..
             }) => {
-                let logs = self.place(player, tile, coord)?;
+                let mut logs = self.place(player, tile, coord)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.human_players)
+                        .map(|p| (p, self.boards[p].points))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..self.human_players)
+                            .map(|p| vec![self.boards[p].points])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -839,7 +904,18 @@ impl Gamer for Game {
                 value: Command::Swap { tile, coord },
                 ..
             }) => {
-                let logs = self.swap(player, tile, coord)?;
+                let mut logs = self.swap(player, tile, coord)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.human_players)
+                        .map(|p| (p, self.boards[p].points))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..self.human_players)
+                            .map(|p| vec![self.boards[p].points])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -851,7 +927,18 @@ impl Gamer for Game {
                 value: Command::Remove { coord },
                 ..
             }) => {
-                let logs = self.remove(player, coord)?;
+                let mut logs = self.remove(player, coord)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.human_players)
+                        .map(|p| (p, self.boards[p].points))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..self.human_players)
+                            .map(|p| vec![self.boards[p].points])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -863,7 +950,18 @@ impl Gamer for Game {
                 value: Command::Done,
                 ..
             }) => {
-                let logs = self.done(player)?;
+                let mut logs = self.done(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.human_players)
+                        .map(|p| (p, self.boards[p].points))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..self.human_players)
+                            .map(|p| vec![self.boards[p].points])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -931,6 +1029,10 @@ impl Gamer for Game {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    fn log_plain(log: &Log) -> String {
+        brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
+    }
 
     fn is_wall_char(c: char) -> bool {
         c == '|' || c == '-' || c == '+'
@@ -1311,5 +1413,161 @@ mod tests {
         assert!(!json.contains("\"card_pile\""));
         assert!(!json.contains("\"discard_pile\""));
         assert!(!json.contains("\"rng\""));
+    }
+
+    #[test]
+    fn log_starting_player() {
+        let (_, logs) = Game::start(3, 42).unwrap();
+        let found = logs
+            .iter()
+            .any(|l| log_plain(l).contains("is the starting player"));
+        assert!(found, "expected starting player log");
+    }
+
+    #[test]
+    fn log_dirk_2_player() {
+        let (_, logs) = Game::start(2, 42).unwrap();
+        let found = logs.iter().any(|l| log_plain(l).contains("joined by"));
+        assert!(found, "expected Dirk join log for 2-player game");
+    }
+
+    #[test]
+    fn log_scoring_format() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.boards[0]
+            .grid
+            .insert(Vect { x: 1, y: 0 }, Tile::new(TileType::Pavillion, 0, &[]));
+        let logs = g.score_round();
+        let combined: String = logs.iter().map(log_plain).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("Scoring Pav"),
+            "expected 'Scoring Pav' in: {}",
+            combined
+        );
+        assert!(
+            combined.contains("Scoring walls"),
+            "expected 'Scoring walls' in: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn log_scoring_wall_wording() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.boards[0].grid.insert(
+            Vect { x: 1, y: 0 },
+            Tile::new(
+                TileType::Pavillion,
+                0,
+                &[Dir::Left, Dir::Up, Dir::Right, Dir::Down],
+            ),
+        );
+        let logs = g.score_round();
+        let combined: String = logs.iter().map(log_plain).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("for their wall"),
+            "expected 'for their wall' in: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn log_final_place() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.phase = Phase::Place;
+        g.current_player = 0;
+        g.boards[0].place = vec![];
+        g.boards[1].place = vec![];
+        g.boards[2].place = vec![];
+        g.tiles[0] = Tile::new(TileType::Pavillion, 5, &[]);
+        g.tiles[1] = Tile::empty();
+        g.tiles[2] = Tile::empty();
+        g.tiles[3] = Tile::empty();
+        g.boards[0].cards = vec![Card::new(Currency::Blue, 9)];
+        g.boards[1].cards = vec![Card::new(Currency::Blue, 3)];
+        g.boards[2].cards = vec![Card::new(Currency::Blue, 5)];
+        let logs = g.final_place_phase();
+        let combined: String = logs.iter().map(log_plain).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("Giving remaining tiles"),
+            "expected final place header in: {}",
+            combined
+        );
+        assert!(
+            combined.contains("had the most money for blue"),
+            "expected currency detail in: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn log_reserve_tiles() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.current_player = 0;
+        g.boards[0].place = vec![
+            Tile::new(TileType::Pavillion, 5, &[]),
+            Tile::new(TileType::Seraglio, 3, &[]),
+        ];
+        let logs = g.reserve_tiles();
+        let combined: String = logs.iter().map(log_plain).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("added Pav, Ser to their reserve"),
+            "expected tile abbrs in reserve log: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn command_parser_spend() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.boards[0].cards = vec![
+            Card::new(Currency::Red, 3),
+            Card::new(Currency::Red, 4),
+            Card::new(Currency::Blue, 5),
+        ];
+        g.tiles[2] = Tile::new(TileType::Tower, 7, &[]);
+        let result = g.command(0, "spend r3 r4", &[]);
+        assert!(
+            result.is_ok(),
+            "spend r3 r4 should parse: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn command_spec_autocomplete() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.boards[0].cards = vec![
+            Card::new(Currency::Red, 3),
+            Card::new(Currency::Red, 4),
+            Card::new(Currency::Blue, 5),
+        ];
+        let spec = g.command_spec(0);
+        assert!(spec.is_some());
+        let suggestions = spec.unwrap().suggest("spend ", &[]);
+        let vals: Vec<String> = suggestions.iter().map(|s| s.value.clone()).collect();
+        assert!(
+            vals.iter().any(|v| v.contains("R3") || v.contains("r3")),
+            "expected R3 in suggestions: {:?}",
+            vals
+        );
+    }
+
+    #[test]
+    fn game_starts_and_take_works() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        let player = g.current_player;
+        let card = g.cards[0];
+        let cmd = format!("take {}", card);
+        let result = g.command(player, &cmd, &[]);
+        assert!(
+            result.is_ok(),
+            "take command should work: {:?}",
+            result.err()
+        );
     }
 }

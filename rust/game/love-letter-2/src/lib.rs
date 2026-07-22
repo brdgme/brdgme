@@ -6,7 +6,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use crate::card::Card;
@@ -715,80 +715,146 @@ impl Gamer for Game {
                 value: Command::Princess,
                 remaining,
                 ..
-            }) => self.play_princess(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.play_princess(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Countess,
                 remaining,
                 ..
-            }) => self.play_countess(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.play_countess(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::King(target),
                 remaining,
                 ..
-            }) => self.play_king(player, target).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.play_king(player, target)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Prince(target),
                 remaining,
                 ..
-            }) => self
-                .play_prince(player, target)
-                .map(|logs| CommandResponse {
+            }) => {
+                let mut logs = self.play_prince(player, target)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
                     logs,
                     can_undo: false,
                     remaining_input: remaining.to_string(),
-                }),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Handmaid,
                 remaining,
                 ..
-            }) => self.play_handmaid(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.play_handmaid(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Baron(target),
                 remaining,
                 ..
-            }) => self.play_baron(player, target).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.play_baron(player, target)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Priest(target),
                 remaining,
                 ..
-            }) => self
-                .play_priest(player, target)
-                .map(|logs| CommandResponse {
+            }) => {
+                let mut logs = self.play_priest(player, target)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
                     logs,
                     can_undo: false,
                     remaining_input: remaining.to_string(),
-                }),
+                })
+            }
             Ok(ParseOutput {
                 value: Command::Guard(target, card),
                 remaining,
                 ..
-            }) => self
-                .play_guard(player, target, card)
-                .map(|logs| CommandResponse {
+            }) => {
+                let mut logs = self.play_guard(player, target, card)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_points[p] as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
                     logs,
                     can_undo: false,
                     remaining_input: remaining.to_string(),
-                }),
+                })
+            }
             Err(e) => Err(e),
         }
     }

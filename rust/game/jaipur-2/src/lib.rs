@@ -8,7 +8,7 @@ use brdgme_color::NamedColor;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{Gamer, Log, Status};
+use brdgme_game::{Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use crate::render::render_goods_items;
@@ -746,11 +746,22 @@ impl Gamer for Game {
                 value: Command::Take { take, give },
                 ..
             }) => {
-                let logs = if take.len() == 1 && take[0] == Good::Camel && give.is_empty() {
+                let mut logs = if take.len() == 1 && take[0] == Good::Camel && give.is_empty() {
                     self.take_camels(player)?
                 } else {
                     self.take_goods(player, take, give)?
                 };
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..2)
+                        .map(|p| (p, self.tokens[p].iter().sum::<u32>() as i32))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..NUM_PLAYERS)
+                            .map(|p| vec![i32::from(self.winners().contains(&p))])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -762,7 +773,18 @@ impl Gamer for Game {
                 value: Command::Sell { good, quantity },
                 ..
             }) => {
-                let logs = self.sell(player, good, quantity)?;
+                let mut logs = self.sell(player, good, quantity)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..2)
+                        .map(|p| (p, self.tokens[p].iter().sum::<u32>() as i32))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..NUM_PLAYERS)
+                            .map(|p| vec![i32::from(self.winners().contains(&p))])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,

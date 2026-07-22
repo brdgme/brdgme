@@ -13,7 +13,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -1008,7 +1008,17 @@ impl Gamer for Game {
                 value: Command::Build { card },
                 ..
             }) => {
-                let logs = self.choose_build(player, card, false, false)?;
+                let mut logs = self.choose_build(player, card, false, false)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> =
+                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
+                    let placings = gen_placings(
+                        &(0..self.players)
+                            .map(|p| vec![self.player_vp(p), self.coins[p]])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -1020,7 +1030,17 @@ impl Gamer for Game {
                 value: Command::Free { card },
                 ..
             }) => {
-                let logs = self.choose_build(player, card, true, false)?;
+                let mut logs = self.choose_build(player, card, true, false)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> =
+                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
+                    let placings = gen_placings(
+                        &(0..self.players)
+                            .map(|p| vec![self.player_vp(p), self.coins[p]])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -1032,7 +1052,17 @@ impl Gamer for Game {
                 value: Command::Wonder { card },
                 ..
             }) => {
-                let logs = self.choose_build(player, card, false, true)?;
+                let mut logs = self.choose_build(player, card, false, true)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> =
+                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
+                    let placings = gen_placings(
+                        &(0..self.players)
+                            .map(|p| vec![self.player_vp(p), self.coins[p]])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -1044,7 +1074,17 @@ impl Gamer for Game {
                 value: Command::Discard { card },
                 ..
             }) => {
-                let logs = self.choose_discard(player, card)?;
+                let mut logs = self.choose_discard(player, card)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> =
+                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
+                    let placings = gen_placings(
+                        &(0..self.players)
+                            .map(|p| vec![self.player_vp(p), self.coins[p]])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -1056,7 +1096,17 @@ impl Gamer for Game {
                 value: Command::Deal { deal },
                 ..
             }) => {
-                let logs = self.choose_deal(player, deal)?;
+                let mut logs = self.choose_deal(player, deal)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> =
+                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
+                    let placings = gen_placings(
+                        &(0..self.players)
+                            .map(|p| vec![self.player_vp(p), self.coins[p]])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -1068,7 +1118,17 @@ impl Gamer for Game {
                 value: Command::Take { card },
                 ..
             }) => {
-                let logs = self.take_from_discard(player, card)?;
+                let mut logs = self.take_from_discard(player, card)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> =
+                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
+                    let placings = gen_placings(
+                        &(0..self.players)
+                            .map(|p| vec![self.player_vp(p), self.coins[p]])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,

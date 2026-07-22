@@ -13,7 +13,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -316,6 +316,17 @@ impl PlayerBoard {
 
     pub fn goods_limit(&self) -> i32 {
         2 + self.module(Module::Logistics)
+    }
+
+    pub fn cannot_fit_buy_error(&self, resource: Resource, amount: i32) -> String {
+        let spare = (self.goods_limit() - self.res(resource)).max(0);
+        format!(
+            "not enough room for {} {} - you have room for {} more {}",
+            amount,
+            resource.name(),
+            spare,
+            resource.name()
+        )
     }
 
     pub fn can_afford(&self, t: &Transaction) -> bool {
@@ -938,7 +949,11 @@ impl Game {
                         let mut t = Transaction::default();
                         t.0.insert(resource, amount);
                         if !self.player_boards[player].can_fit(&t) {
-                            return (false, 0, t.cannot_fit_error().to_string());
+                            return (
+                                false,
+                                0,
+                                self.player_boards[player].cannot_fit_buy_error(resource, amount),
+                            );
                         }
                     }
                 }
@@ -982,7 +997,11 @@ impl Game {
                         let mut t = Transaction::default();
                         t.0.insert(resource, amount);
                         if !self.player_boards[player].can_fit(&t) {
-                            return (false, 0, t.cannot_fit_error().to_string());
+                            return (
+                                false,
+                                0,
+                                self.player_boards[player].cannot_fit_buy_error(resource, amount),
+                            );
                         }
                         if let Some(p) = prices.get(&resource)
                             && p.buy > 0
@@ -1172,7 +1191,20 @@ impl Game {
         self.current_player == player && self.phase == Phase::TradeAndBuild
     }
 
+    fn flight_terminal(&self) -> bool {
+        let pile_empty = self
+            .sector_cards
+            .get(&self.current_sector)
+            .map(|v| v.is_empty())
+            .unwrap_or(true);
+        pile_empty || self.remaining_moves() <= 0 || self.remaining_actions() <= 0
+    }
+
     pub fn can_next(&self, player: usize) -> bool {
+        self.can_end(player) && !self.flight_terminal()
+    }
+
+    pub fn can_end(&self, player: usize) -> bool {
         if self.current_player != player
             || self.phase != Phase::Flight
             || self.flight_cards.is_empty()
@@ -1184,10 +1216,6 @@ impl Game {
             return true;
         }
         !self.flight_cards.last().unwrap().requires_action()
-    }
-
-    pub fn can_end(&self, player: usize) -> bool {
-        self.can_next(player)
     }
 
     pub fn can_found_colony(&self, player: usize) -> bool {
@@ -1856,11 +1884,25 @@ impl Gamer for Game {
                 remaining,
                 value: Command::Gain { resource },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.gain(player, resource)?,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.gain(player, resource)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].victory_points()))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..2)
+                            .map(|p| vec![self.player_boards[p].victory_points()])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: true,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Put { num, on },
@@ -1892,11 +1934,25 @@ impl Gamer for Game {
                 remaining,
                 value: Command::Upgrade { module },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.upgrade(player, module)?,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.upgrade(player, module)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].victory_points()))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..2)
+                            .map(|p| vec![self.player_boards[p].victory_points()])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: true,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Buy { amount, resource },
@@ -1955,20 +2011,48 @@ impl Gamer for Game {
                 remaining,
                 value: Command::Found,
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.found(player)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.found(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].victory_points()))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..2)
+                            .map(|p| vec![self.player_boards[p].victory_points()])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Fight,
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.fight(player)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.fight(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].victory_points()))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..2)
+                            .map(|p| vec![self.player_boards[p].victory_points()])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Pay,
@@ -1991,11 +2075,25 @@ impl Gamer for Game {
                 remaining,
                 value: Command::Complete { adventure },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.complete(player, adventure)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.complete(player, adventure)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].victory_points()))
+                        .collect();
+                    let placings = gen_placings(
+                        &(0..2)
+                            .map(|p| vec![self.player_boards[p].victory_points()])
+                            .collect::<Vec<Vec<i32>>>(),
+                    );
+                    logs.push(placings_log(&placings, Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Err(e) => Err(GameError::invalid_input(e.to_string())),
         }
     }
@@ -2241,5 +2339,159 @@ mod tests {
                 forbidden
             );
         }
+    }
+
+    #[test]
+    fn cannot_fit_buy_error_shows_spare_capacity() {
+        let mut board = PlayerBoard::new(0);
+        *board.resources.entry(Resource::Food).or_insert(0) += 1;
+        let err = board.cannot_fit_buy_error(Resource::Food, 3);
+        assert_eq!(
+            err,
+            "not enough room for 3 food - you have room for 1 more food"
+        );
+    }
+
+    #[test]
+    fn cannot_fit_buy_error_zero_spare() {
+        let mut board = PlayerBoard::new(0);
+        *board.resources.entry(Resource::Food).or_insert(0) += 2;
+        let err = board.cannot_fit_buy_error(Resource::Food, 1);
+        assert_eq!(
+            err,
+            "not enough room for 1 food - you have room for 0 more food"
+        );
+    }
+
+    #[test]
+    fn buy_over_capacity_trade_and_build() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::TradeAndBuild;
+        g.current_player = 0;
+        g.player_boards[0].trading_posts = vec![SectorCard::Trade {
+            name: "Test Trade".to_string(),
+            resources: vec![Resource::Food],
+            price: 1,
+            maximum: 0,
+            direction: TradeDir::Both,
+            trading_post: true,
+        }];
+        *g.player_boards[0]
+            .resources
+            .entry(Resource::Food)
+            .or_insert(0) += 1;
+        g.player_boards[0].resources.insert(Resource::Astro, 100);
+        let result = g.command(0, "buy 3 food", &players);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("you have room for 1 more food"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn can_next_and_can_end_non_terminal() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.flight_cards = vec![colony_card()];
+        g.current_sector = 1;
+        g.sector_cards.insert(1, vec![colony_card()]);
+        g.yellow_dice = 3;
+        g.player_boards[0].resources.insert(Resource::Booster, 0);
+        g.flight_actions = BTreeMap::new();
+        assert!(g.can_next(0));
+        assert!(g.can_end(0));
+    }
+
+    #[test]
+    fn can_next_false_when_pile_empty() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.flight_cards = vec![colony_card()];
+        g.current_sector = 1;
+        g.sector_cards.insert(1, vec![]);
+        g.yellow_dice = 3;
+        g.player_boards[0].resources.insert(Resource::Booster, 0);
+        g.flight_actions = BTreeMap::new();
+        assert!(!g.can_next(0));
+        assert!(g.can_end(0));
+    }
+
+    #[test]
+    fn can_next_false_when_no_moves() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.flight_cards = vec![colony_card()];
+        g.current_sector = 1;
+        g.sector_cards.insert(1, vec![colony_card()]);
+        g.yellow_dice = 0;
+        g.player_boards[0].resources.insert(Resource::Booster, 0);
+        g.flight_actions = BTreeMap::new();
+        assert!(!g.can_next(0));
+        assert!(g.can_end(0));
+    }
+
+    #[test]
+    fn can_next_false_when_no_actions() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.flight_cards = vec![colony_card()];
+        g.current_sector = 1;
+        g.sector_cards.insert(1, vec![colony_card()]);
+        g.yellow_dice = 3;
+        g.player_boards[0].resources.insert(Resource::Booster, 0);
+        g.flight_actions = BTreeMap::from([(0, true), (1, true)]);
+        assert!(!g.can_next(0));
+        assert!(g.can_end(0));
+    }
+
+    #[test]
+    fn command_next_rejected_terminal_end_allowed() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.flight_cards = vec![colony_card()];
+        g.current_sector = 1;
+        g.sector_cards.insert(1, vec![]);
+        g.yellow_dice = 3;
+        g.player_boards[0].resources.insert(Resource::Booster, 0);
+        g.flight_actions = BTreeMap::new();
+        assert!(g.command(0, "next", &players).is_err());
+        assert!(g.command(0, "end", &players).is_ok());
+    }
+
+    #[test]
+    fn last_sectors_leftmost_bold() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::ChooseSector;
+        g.player_boards[0].last_sectors = vec![3, 1, 2];
+        let nodes = g.pub_state().render();
+        let rendered = brdgme_markup::to_string(&nodes);
+        assert!(
+            rendered.contains("{{b}}3{{/b}} 1 2"),
+            "expected bold leftmost entry, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn last_sectors_hidden_when_empty() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::ChooseSector;
+        g.player_boards[0].last_sectors = vec![];
+        let nodes = g.pub_state().render();
+        let rendered = brdgme_markup::to_string(&nodes);
+        assert!(
+            !rendered.contains("Last sectors"),
+            "expected no Last sectors row, got: {rendered}"
+        );
     }
 }

@@ -6,7 +6,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use crate::card::{Card, GEMS, Noble, Resource, level_1_cards, level_2_cards, level_3_cards};
@@ -630,47 +630,92 @@ impl Gamer for Game {
                 remaining,
                 value: Command::Buy(loc),
                 ..
-            }) => self.buy(player, loc).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.buy(player, loc)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].prestige()))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Discard(tokens),
                 ..
-            }) => self.discard(player, &tokens).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.discard(player, &tokens)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].prestige()))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Reserve(loc),
                 ..
-            }) => self.reserve(player, loc).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.reserve(player, loc)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].prestige()))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Take(tokens),
                 ..
-            }) => self.take(player, &tokens).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.take(player, &tokens)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].prestige()))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Visit(noble),
                 ..
-            }) => self.visit(player, noble).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => {
+                let mut logs = self.visit(player, noble)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_boards[p].prestige()))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                Ok(CommandResponse {
+                    logs,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                })
+            }
             Err(e) => Err(e),
         }
     }
