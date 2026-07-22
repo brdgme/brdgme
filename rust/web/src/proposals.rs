@@ -15,6 +15,8 @@ use std::str::FromStr;
 use time::PrimitiveDateTime;
 use uuid::Uuid;
 
+use crate::components::opponent_slot::{OpponentSlot, OpponentSlotEditor};
+
 #[cfg(feature = "ssr")]
 use crate::error::internal;
 #[cfg(feature = "ssr")]
@@ -93,6 +95,7 @@ pub struct ProposalView {
     pub player_counts: Vec<i32>,
     pub players: Vec<ProposalPlayerView>,
     pub viewer_role: ViewerRole,
+    pub viewer_user_id: Uuid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1757,6 +1760,7 @@ pub async fn get_proposal(proposal_id: Uuid) -> Result<ProposalView, ServerFnErr
         player_counts,
         players,
         viewer_role,
+        viewer_user_id: user.id,
     })
 }
 
@@ -1818,6 +1822,12 @@ pub fn InvitePage() -> impl IntoView {
     let respond_action = ServerAction::<RespondProposal>::new();
     let cancel_action = ServerAction::<CancelProposal>::new();
     let remove_action = ServerAction::<RemoveProposalSlot>::new();
+    let add_action = ServerAction::<AddProposalPlayer>::new();
+    let transfer_action = ServerAction::<TransferProposalOwnership>::new();
+    let start_action = ServerAction::<StartProposal>::new();
+
+    let suggestions = LocalResource::new(crate::friends::get_opponent_suggestions);
+    let bot_names = LocalResource::new(crate::game::server_fns::get_available_bots);
 
     let navigate = use_navigate();
 
@@ -1850,6 +1860,29 @@ pub fn InvitePage() -> impl IntoView {
         }
     });
 
+    Effect::new(move |_| {
+        if let Some(Ok(())) = add_action.value().get()
+            && let Some(pid) = proposal_id()
+        {
+            crate::websocket_client::bump_proposal_update(proposal_update, pid);
+        }
+    });
+
+    Effect::new(move |_| {
+        if let Some(Ok(())) = transfer_action.value().get()
+            && let Some(pid) = proposal_id()
+        {
+            crate::websocket_client::bump_proposal_update(proposal_update, pid);
+        }
+    });
+
+    let nav_start = navigate.clone();
+    Effect::new(move |_| {
+        if let Some(Ok(gid)) = start_action.value().get() {
+            nav_start(&format!("/games/{}", gid), NavigateOptions::default());
+        }
+    });
+
     view! {
         <crate::components::MainLayout>
             <div class="content-page">
@@ -1862,6 +1895,11 @@ pub fn InvitePage() -> impl IntoView {
                             respond_action=respond_action
                             cancel_action=cancel_action
                             remove_action=remove_action
+                            add_action=add_action
+                            transfer_action=transfer_action
+                            start_action=start_action
+                            suggestions=suggestions
+                            bot_names=bot_names
                         /> }.into_any()
                     }
                 }}
@@ -1876,53 +1914,56 @@ fn ProposalDetail(
     respond_action: ServerAction<RespondProposal>,
     cancel_action: ServerAction<CancelProposal>,
     remove_action: ServerAction<RemoveProposalSlot>,
+    add_action: ServerAction<AddProposalPlayer>,
+    transfer_action: ServerAction<TransferProposalOwnership>,
+    start_action: ServerAction<StartProposal>,
+    suggestions: LocalResource<Result<Vec<crate::friends::OpponentSuggestion>, ServerFnError>>,
+    bot_names: LocalResource<Result<Vec<String>, ServerFnError>>,
 ) -> impl IntoView {
     let is_open = pv.proposal.status == "open";
     let viewer_role = pv.viewer_role.clone();
     let proposal_id = pv.proposal.id;
+    let owner_user_id = pv.proposal.owner_user_id;
     let game_type_name = pv.game_type_name.clone();
     let version_name = pv.version_name.clone();
+    let player_counts = pv.player_counts.clone();
 
     let is_owner = viewer_role == ViewerRole::Owner;
     let is_invitee = viewer_role == ViewerRole::Invitee;
 
-    let my_pending = pv
-        .players
-        .iter()
-        .any(|p| p.user_id.is_some() && p.response == "pending")
-        && is_invitee;
-
-    let has_declined = pv.players.iter().any(|p| p.response == "declined");
-
-    let declined_slots: Vec<ProposalPlayerView> = pv
-        .players
-        .iter()
-        .filter(|p| p.response == "declined")
-        .cloned()
-        .collect();
-
-    let declined_rows = StoredValue::new(
-        declined_slots
+    let my_response = if is_invitee {
+        pv.players
             .iter()
-            .map(|p| {
-                let pid = p.id;
-                let pname = p.name.clone();
-                view! {
-                    <div class="friend-row">
-                        <span>{pname}</span>
-                        " - "
-                        <a href="#" on:click=move |ev| {
-                            ev.prevent_default();
-                            remove_action.dispatch(RemoveProposalSlot {
-                                proposal_id,
-                                player_id: pid,
-                            });
-                        }>"Remove"</a>
-                    </div>
-                }
-            })
-            .collect_view(),
-    );
+            .find(|p| p.user_id == Some(pv.viewer_user_id))
+            .map(|p| p.response.clone())
+    } else {
+        None
+    };
+
+    let prospective_count = pv
+        .players
+        .iter()
+        .filter(|p| p.response != "declined")
+        .count();
+    let count_invalid = !player_counts.contains(&(prospective_count as i32));
+    let count_warning = StoredValue::new(if count_invalid {
+        let counts = player_counts
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!(
+            "This game supports {counts} players, but the roster has {prospective_count}"
+        ))
+    } else {
+        None
+    });
+
+    let (add_slot, set_add_slot) = signal(OpponentSlot::default());
+    let roster_user_ids: Vec<Uuid> = pv.players.iter().filter_map(|p| p.user_id).collect();
+    let taken = Signal::derive(move || roster_user_ids.clone());
+
+    let players_for_rows = StoredValue::new(pv.players.clone());
 
     view! {
         <h1>{game_type_name.clone()}</h1>
@@ -1938,36 +1979,98 @@ fn ProposalDetail(
 
         <section>
             <h2>"Players"</h2>
-            {pv.players.iter().map(|p| {
-                let name = p.name.clone();
-                let response = p.response.clone();
-                let is_bot = p.user_id.is_none();
-                let status_class = format!("invite-status invite-status-{}", response);
-                view! {
-                    <div class="friend-row">
-                        <span>{name}</span>
-                        {is_bot.then(|| view! { <span>" (bot)"</span> })}
-                        " - "
-                        <span class=status_class>{response.clone()}</span>
-                    </div>
-                }
-            }).collect_view()}
+            {players_for_rows.with_value(|players| {
+                players.iter().map(|p| {
+                    let name = p.name.clone();
+                    let response = p.response.clone();
+                    let is_bot = p.user_id.is_none();
+                    let status_class = format!("invite-status invite-status-{}", response);
+                    let pid = p.id;
+                    let p_uid = p.user_id;
+                    let is_owner_row = p_uid == Some(owner_user_id);
+                    let show_remove = is_owner && !is_owner_row;
+                    let show_make_owner = is_owner && !is_bot && !is_owner_row;
+                    let remove_name = p.name.clone();
+                    let transfer_name = p.name.clone();
+                    view! {
+                        <div class="friend-row">
+                            <span>{name}</span>
+                            {is_bot.then(|| view! { <span>" (bot)"</span> })}
+                            " - "
+                            <span class=status_class>{response.clone()}</span>
+                            {show_remove.then(|| {
+                                let rn = remove_name.clone();
+                                view! {
+                                    " "
+                                    <a href="#" on:click=move |ev| {
+                                        ev.prevent_default();
+                                        if crate::components::confirm(&format!("Remove {rn} from the game?")) {
+                                            remove_action.dispatch(RemoveProposalSlot {
+                                                proposal_id,
+                                                player_id: pid,
+                                            });
+                                        }
+                                    }>"(X)"</a>
+                                }
+                            })}
+                            {show_make_owner.then(|| {
+                                let tn = transfer_name.clone();
+                                let uid = p_uid.unwrap_or_default();
+                                view! {
+                                    " "
+                                    <a href="#" on:click=move |ev| {
+                                        ev.prevent_default();
+                                        if crate::components::confirm(&format!("Transfer ownership to {tn}?")) {
+                                            transfer_action.dispatch(TransferProposalOwnership {
+                                                proposal_id,
+                                                target_user_id: uid,
+                                            });
+                                        }
+                                    }>"(make owner)"</a>
+                                }
+                            })}
+                        </div>
+                    }
+                }).collect_view()
+            })}
         </section>
 
-        <Show when=move || is_invitee && my_pending && is_open>
+        <Show when=move || is_invitee && is_open>
             <section>
                 <h2>"Your invite"</h2>
-                <div class="form-actions">
-                    <a href="#" on:click=move |ev| {
-                        ev.prevent_default();
-                        respond_action.dispatch(RespondProposal { proposal_id, accept: true });
-                    }>"Accept"</a>
-                    " | "
-                    <a href="#" on:click=move |ev| {
-                        ev.prevent_default();
-                        respond_action.dispatch(RespondProposal { proposal_id, accept: false });
-                    }>"Decline"</a>
-                </div>
+                {match my_response.as_deref() {
+                    Some("pending") => view! {
+                        <div class="form-actions">
+                            <a href="#" on:click=move |ev| {
+                                ev.prevent_default();
+                                respond_action.dispatch(RespondProposal { proposal_id, accept: true });
+                            }>"Accept"</a>
+                            " | "
+                            <a href="#" on:click=move |ev| {
+                                ev.prevent_default();
+                                if crate::components::confirm("Decline this invite?") {
+                                    respond_action.dispatch(RespondProposal { proposal_id, accept: false });
+                                }
+                            }>"Decline"</a>
+                        </div>
+                    }.into_any(),
+                    Some("accepted") => view! {
+                        <div class="form-actions">
+                            <span>"You accepted this invite."</span>
+                            " "
+                            <a href="#" on:click=move |ev| {
+                                ev.prevent_default();
+                                if crate::components::confirm("Decline this invite? You will need to be re-invited to join.") {
+                                    respond_action.dispatch(RespondProposal { proposal_id, accept: false });
+                                }
+                            }>"Decline"</a>
+                        </div>
+                    }.into_any(),
+                    Some("declined") => view! {
+                        <p>"You declined this invite."</p>
+                    }.into_any(),
+                    _ => ().into_any(),
+                }}
             </section>
         </Show>
 
@@ -1975,19 +2078,61 @@ fn ProposalDetail(
             <section>
                 <h2>"Owner actions"</h2>
 
-                <Show when=move || has_declined>
-                    <div>
-                        <h3>"Declined slots"</h3>
-                        {declined_rows.into_inner()}
+                <div>
+                    <h3>"Add player"</h3>
+                    <OpponentSlotEditor
+                        label="New player".to_string()
+                        radio_group="add-player-mode".to_string()
+                        bot_default_name="Bot".to_string()
+                        get=add_slot.into()
+                        set=Callback::new(move |s: OpponentSlot| set_add_slot.set(s))
+                        taken=taken
+                        suggestions=suggestions
+                        bot_names=bot_names
+                    />
+                    <div class="form-actions">
+                        <button type="button" on:click=move |_| {
+                            let slot = add_slot.get_untracked();
+                            let (user_id, email, bot) = match slot {
+                                OpponentSlot::Player { selected: Some((id, _)), .. } => {
+                                    (Some(id), None, None)
+                                }
+                                OpponentSlot::Email(e) if !e.is_empty() => {
+                                    (None, Some(e), None)
+                                }
+                                OpponentSlot::Bot { name, bot_name } => {
+                                    (None, None, Some(crate::game::server_fns::BotSlot { name, bot_name }))
+                                }
+                                _ => return,
+                            };
+                            add_action.dispatch(AddProposalPlayer {
+                                proposal_id,
+                                user_id,
+                                email,
+                                bot,
+                            });
+                            set_add_slot.set(OpponentSlot::default());
+                        }>"Add player"</button>
                     </div>
-                </Show>
+                </div>
 
                 <div class="form-actions">
+                    <button
+                        type="button"
+                        disabled=move || start_action.pending().get()
+                        on:click=move |_| {
+                            start_action.dispatch(StartProposal { proposal_id });
+                        }
+                    >"Start game"</button>
+                    " "
                     <a href="#" on:click=move |ev| {
                         ev.prevent_default();
-                        cancel_action.dispatch(CancelProposal { proposal_id });
+                        if crate::components::confirm("Cancel this game invite?") {
+                            cancel_action.dispatch(CancelProposal { proposal_id });
+                        }
                     }>"Cancel invite"</a>
                 </div>
+                {count_warning.with_value(|w| w.clone().map(|msg| view! { <div class="form-error">{msg}</div> }))}
             </section>
         </Show>
 
@@ -2010,6 +2155,27 @@ fn ProposalDetail(
         }>
             <div class="form-error">
                 {move || remove_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
+            </div>
+        </Show>
+        <Show when=move || {
+            add_action.value().get().is_some_and(|r| r.is_err())
+        }>
+            <div class="form-error">
+                {move || add_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
+            </div>
+        </Show>
+        <Show when=move || {
+            transfer_action.value().get().is_some_and(|r| r.is_err())
+        }>
+            <div class="form-error">
+                {move || transfer_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
+            </div>
+        </Show>
+        <Show when=move || {
+            start_action.value().get().is_some_and(|r| r.is_err())
+        }>
+            <div class="form-error">
+                {move || start_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
             </div>
         </Show>
     }
