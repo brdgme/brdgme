@@ -640,6 +640,131 @@ pub async fn find_active_game_summaries(
     Ok(summaries)
 }
 
+#[cfg(feature = "ssr")]
+#[derive(sqlx::FromRow)]
+struct PendingGameRow {
+    proposal_id: Uuid,
+    type_name: String,
+    owner_user_id: Uuid,
+    my_response: String,
+    player_user_id: Option<Uuid>,
+    player_name: String,
+    player_response: String,
+}
+
+#[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(user_id = %user_id))]
+pub async fn find_pending_game_summaries(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<crate::game::server_fns::PendingGameSummary>> {
+    let rows = sqlx::query_as::<_, PendingGameRow>(
+        "SELECT gp.id AS proposal_id, gt.name AS type_name, gp.owner_user_id, \
+                me.response AS my_response, pp.user_id AS player_user_id, \
+                COALESCE(u.name, pp.bot_name, 'Bot') AS player_name, \
+                pp.response AS player_response \
+         FROM game_proposals gp \
+         JOIN game_versions gv ON gv.id = gp.game_version_id \
+         JOIN game_types gt ON gt.id = gv.game_type_id \
+         JOIN game_proposal_players me ON me.proposal_id = gp.id AND me.user_id = $1 \
+         JOIN game_proposal_players pp ON pp.proposal_id = gp.id \
+         LEFT JOIN users u ON u.id = pp.user_id \
+         WHERE gp.status = 'open' \
+         ORDER BY gp.created_at DESC, gp.id, pp.position",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out: Vec<crate::game::server_fns::PendingGameSummary> = Vec::new();
+    for row in rows {
+        let is_owner = row.owner_user_id == user_id;
+        if out.last().map(|s| s.id) != Some(row.proposal_id) {
+            out.push(crate::game::server_fns::PendingGameSummary {
+                id: row.proposal_id,
+                type_name: row.type_name,
+                players: Vec::new(),
+                is_owner,
+                is_invitee_needing_accept: !is_owner && row.my_response == "pending",
+                is_ready_to_start: true,
+            });
+        }
+        let summary = out.last_mut().ok_or_else(|| {
+            anyhow::anyhow!(
+                "pending player row for proposal {} has no summary",
+                row.proposal_id
+            )
+        })?;
+        if row.player_user_id.is_some() && row.player_response != "accepted" {
+            summary.is_ready_to_start = false;
+        }
+        if row.player_user_id != Some(user_id) {
+            summary.players.push(row.player_name);
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(feature = "ssr")]
+#[derive(sqlx::FromRow)]
+struct FinishedGameRow {
+    game_id: Uuid,
+    type_name: String,
+    opp_name: Option<String>,
+}
+
+#[cfg(feature = "ssr")]
+#[tracing::instrument(skip(pool), fields(user_id = %user_id))]
+pub async fn find_finished_game_summaries(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<crate::game::server_fns::FinishedGameSummary>> {
+    let rows = sqlx::query_as::<_, FinishedGameRow>(
+        "SELECT g.id AS game_id, gt.name AS type_name, \
+                COALESCE(u.name, gb.name, 'Bot') AS opp_name \
+         FROM games g \
+         JOIN game_versions gv ON gv.id = g.game_version_id \
+         JOIN game_types gt ON gt.id = gv.game_type_id \
+         JOIN game_players me ON me.game_id = g.id AND me.user_id = $1 \
+         LEFT JOIN game_players opp ON opp.game_id = g.id AND opp.id <> me.id \
+         LEFT JOIN users u ON u.id = opp.user_id \
+         LEFT JOIN game_bots gb ON gb.id = opp.game_bot_id \
+         WHERE g.is_finished = true \
+           AND g.id IN ( \
+               SELECT g2.id FROM games g2 \
+               JOIN game_players me2 ON me2.game_id = g2.id AND me2.user_id = $1 \
+               WHERE g2.is_finished = true \
+               ORDER BY g2.finished_at DESC, g2.id \
+               LIMIT 3 \
+           ) \
+         ORDER BY g.finished_at DESC, g.id, opp.position",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out: Vec<crate::game::server_fns::FinishedGameSummary> = Vec::new();
+    for row in rows {
+        if out.last().map(|s| s.id) != Some(row.game_id) {
+            out.push(crate::game::server_fns::FinishedGameSummary {
+                id: row.game_id,
+                type_name: row.type_name,
+                players: Vec::new(),
+            });
+        }
+        if let Some(name) = row.opp_name {
+            let summary = out.last_mut().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "finished opponent row for game {} has no summary",
+                    row.game_id
+                )
+            })?;
+            summary.players.push(name);
+        }
+    }
+    Ok(out)
+}
+
 /// The predecessor of a game is the older game that was restarted into it:
 /// `games.restarted_game_id` points old->new, so the new game's predecessor is
 /// the row whose `restarted_game_id` equals this game's id. At most one old
@@ -3156,6 +3281,162 @@ mod tests {
         assert!(finished_at.is_some());
         assert_eq!(names, vec!["friend".to_string(), "other".to_string()]);
         assert_eq!(places, vec![1, 2]);
+    }
+
+    // --- sidebar summaries (active / pending / finished) ---
+
+    async fn make_proposal(pool: &PgPool, game_version_id: Uuid, owner_id: Uuid) -> Uuid {
+        sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status) VALUES ($1,$2,'open') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(owner_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn add_proposal_player(
+        pool: &PgPool,
+        proposal_id: Uuid,
+        position: i32,
+        user_id: Option<Uuid>,
+        bot_name: Option<&str>,
+        response: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO game_proposal_players (proposal_id, position, user_id, bot_name, response) VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(proposal_id)
+        .bind(position)
+        .bind(user_id)
+        .bind(bot_name)
+        .bind(response)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[sqlx::test]
+    async fn active_summaries_exclude_finished_and_pending(pool: PgPool) {
+        let me = make_user(&pool, "me").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, version) = make_game_type_and_version(&pool).await;
+
+        // In-progress game: should appear.
+        make_game_with_players(&pool, version, me.id, &[opp.id], 0, &[0]).await;
+
+        // Finished game: excluded.
+        let finished = make_game_with_players(&pool, version, me.id, &[opp.id], 0, &[0]).await;
+        sqlx::query("UPDATE games SET is_finished = TRUE, finished_at = timezone('utc', now()) WHERE id = $1")
+            .bind(finished.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Open proposal owned by me: excluded (no games row yet).
+        let proposal = make_proposal(&pool, version, me.id).await;
+        add_proposal_player(&pool, proposal, 0, Some(me.id), None, "accepted").await;
+
+        let rows = find_active_game_summaries(&pool, me.id).await.unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[sqlx::test]
+    async fn pending_summaries_roles_and_ready_to_start(pool: PgPool) {
+        let owner = make_user(&pool, "owner").await;
+        let invitee_a = make_user(&pool, "invitee_a").await;
+        let invitee_b = make_user(&pool, "invitee_b").await;
+        let (_, version) = make_game_type_and_version(&pool).await;
+
+        let proposal = make_proposal(&pool, version, owner.id).await;
+        add_proposal_player(&pool, proposal, 0, Some(owner.id), None, "accepted").await;
+        add_proposal_player(&pool, proposal, 1, Some(invitee_a.id), None, "pending").await;
+        add_proposal_player(&pool, proposal, 2, Some(invitee_b.id), None, "accepted").await;
+
+        // Owner view.
+        let owner_rows = find_pending_game_summaries(&pool, owner.id).await.unwrap();
+        assert_eq!(owner_rows.len(), 1);
+        let o = &owner_rows[0];
+        assert!(o.is_owner);
+        assert!(!o.is_invitee_needing_accept);
+        assert!(!o.is_ready_to_start, "invitee_a still pending");
+        let mut o_players = o.players.clone();
+        o_players.sort();
+        assert_eq!(
+            o_players,
+            vec!["invitee_a".to_string(), "invitee_b".to_string()]
+        );
+
+        // Invitee A view.
+        let a_rows = find_pending_game_summaries(&pool, invitee_a.id)
+            .await
+            .unwrap();
+        assert_eq!(a_rows.len(), 1);
+        let a = &a_rows[0];
+        assert!(!a.is_owner);
+        assert!(a.is_invitee_needing_accept);
+        let mut a_players = a.players.clone();
+        a_players.sort();
+        assert_eq!(
+            a_players,
+            vec!["invitee_b".to_string(), "owner".to_string()]
+        );
+
+        // Once invitee_a accepts, the owner can start.
+        sqlx::query("UPDATE game_proposal_players SET response='accepted' WHERE proposal_id=$1 AND user_id=$2")
+            .bind(proposal)
+            .bind(invitee_a.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let owner_rows = find_pending_game_summaries(&pool, owner.id).await.unwrap();
+        assert!(owner_rows[0].is_ready_to_start);
+
+        // A bot never blocks ready_to_start.
+        let bot_proposal = make_proposal(&pool, version, owner.id).await;
+        add_proposal_player(&pool, bot_proposal, 0, Some(owner.id), None, "accepted").await;
+        add_proposal_player(&pool, bot_proposal, 1, Some(invitee_a.id), None, "accepted").await;
+        add_proposal_player(&pool, bot_proposal, 2, None, Some("Botty"), "accepted").await;
+        let bot_rows = find_pending_game_summaries(&pool, owner.id).await.unwrap();
+        let bot_summary = bot_rows.iter().find(|s| s.id == bot_proposal).unwrap();
+        assert!(bot_summary.is_ready_to_start);
+    }
+
+    #[sqlx::test]
+    async fn finished_summaries_returns_three_most_recent_in_order(pool: PgPool) {
+        let me = make_user(&pool, "me").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, version) = make_game_type_and_version(&pool).await;
+
+        let g1 = make_game_with_players(&pool, version, me.id, &[opp.id], 0, &[0]).await;
+        let g2 = make_game_with_players(&pool, version, me.id, &[opp.id], 0, &[0]).await;
+        let g3 = make_game_with_players(&pool, version, me.id, &[opp.id], 0, &[0]).await;
+        let g4 = make_game_with_players(&pool, version, me.id, &[opp.id], 0, &[0]).await;
+
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_finished_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        for (game, days) in [(&g1, 4), (&g2, 3), (&g3, 2), (&g4, 1)] {
+            sqlx::query(
+                "UPDATE games SET is_finished = TRUE, finished_at = timezone('utc', now()) - ($2 || ' days')::interval WHERE id = $1",
+            )
+            .bind(game.id)
+            .bind(days.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let rows = find_finished_game_summaries(&pool, me.id).await.unwrap();
+        let ids: Vec<Uuid> = rows.iter().map(|s| s.id).collect();
+        assert_eq!(ids, vec![g4.id, g3.id, g2.id]);
     }
 
     // --- 1. create_game_with_users ---

@@ -1,5 +1,5 @@
 use crate::components::game::PlayerName;
-use crate::game::server_fns::GameSummary;
+use crate::game::server_fns::{GameSummary, SidebarGames};
 use leptos::prelude::*;
 use leptos_router::NavigateOptions;
 use leptos_router::components::A;
@@ -50,20 +50,19 @@ pub fn MainLayout(
     // whenever ANY game is awaiting this player, on every page it is visible.
     // The resource is None during SSR/hydration so both start inactive -
     // class/attribute-only changes, no structural mismatch.
-    let active_games = expect_context::<LocalResource<Result<Vec<GameSummary>, ServerFnError>>>();
+    let active_games = expect_context::<LocalResource<Result<SidebarGames, ServerFnError>>>();
     let is_my_turn = Memo::new(move |_| {
         active_games
             .get()
             .and_then(|r| r.ok())
-            .is_some_and(|games| games.iter().any(|g| g.is_turn))
+            .is_some_and(|games| games.active.iter().any(|g| g.is_turn))
     });
     // The longest-waiting my-turn game, hidden while already viewing it.
     let next_game = Memo::new(move |_| {
         let id = active_games
             .get()
             .and_then(|r| r.ok())
-            .as_deref()
-            .and_then(next_game_id)?;
+            .and_then(|g| next_game_id(&g.active))?;
         (location.pathname.get() != format!("/games/{}", id)).then_some(id)
     });
     let navigate = use_navigate();
@@ -128,7 +127,7 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
     // client-side navigation instead of being torn down and recreated by
     // every page's own `<MainLayout>` - see the comment at their
     // `provide_context` call sites in `app.rs`.
-    let active_games = expect_context::<LocalResource<Result<Vec<GameSummary>, ServerFnError>>>();
+    let active_games = expect_context::<LocalResource<Result<SidebarGames, ServerFnError>>>();
     let current_user =
         expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
     let logged_in = move || matches!(current_user.get(), Some(Ok(Some(_))));
@@ -179,31 +178,85 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
             <div><A href="/settings">"Settings"</A></div>
             <div><A href="/friends">"Friends"</A></div>
             <div>
-                <h2>"Active games"</h2>
                 {move || match active_games.get() {
                     None => view! { <p>"Loading games..."</p> }.into_any(),
                     Some(Err(_)) => view! { <p class="error">"Error loading games"</p> }.into_any(),
                     Some(Ok(games)) => {
-                        if games.is_empty() {
-                            view! { <p class="no-games">"No active games"</p> }.into_any()
-                        } else {
-                            games.into_iter().map(|game| {
-                                let id = game.id.to_string();
-                                view! {
-                                    <div class="layout-game" class:my-turn=game.is_turn>
-                                        <A href=format!("/games/{}", id)>
-                                            <div class="layout-game-name">{game.type_name}</div>
-                                            <div class="layout-game-opponents">
-                                                "with "
-                                                {game.opponents.into_iter().map(|opp| view! {
-                                                    <span>" " <PlayerName name=opp.name color=opp.color /></span>
-                                                }).collect_view()}
-                                            </div>
-                                        </A>
-                                    </div>
-                                }.into_any()
-                            }).collect_view().into_any()
+                        let mut sections: Vec<AnyView> = Vec::new();
+                        if !games.active.is_empty() {
+                            sections.push(view! {
+                                <h2>"Active games"</h2>
+                                {games.active.into_iter().map(|game| {
+                                    let id = game.id.to_string();
+                                    view! {
+                                        <div class="layout-game" class:my-turn=game.is_turn>
+                                            <A href=format!("/games/{}", id)>
+                                                <div class="layout-game-name">{game.type_name}</div>
+                                                <div class="layout-game-opponents">
+                                                    "with "
+                                                    {game.opponents.into_iter().map(|opp| view! {
+                                                        <span>" " <PlayerName name=opp.name color=opp.color /></span>
+                                                    }).collect_view()}
+                                                </div>
+                                            </A>
+                                        </div>
+                                    }.into_any()
+                                }).collect_view()}
+                            }.into_any());
                         }
+                        if !games.pending.is_empty() {
+                            sections.push(view! {
+                                <h2>"Pending games"</h2>
+                                {games.pending.into_iter().map(|game| {
+                                    let id = game.id.to_string();
+                                    let needs_action = if game.is_owner {
+                                        game.is_ready_to_start
+                                    } else {
+                                        game.is_invitee_needing_accept
+                                    };
+                                    let name = if game.is_invitee_needing_accept {
+                                        format!("{} (Invite)", game.type_name)
+                                    } else {
+                                        game.type_name.clone()
+                                    };
+                                    view! {
+                                        <div class="layout-game" class:my-turn=needs_action>
+                                            <A href=format!("/invites/{}", id)>
+                                                <div class="layout-game-name">{name}</div>
+                                                <div class="layout-game-opponents">
+                                                    "with "
+                                                    {game.players.into_iter().map(|p| view! {
+                                                        <span>" " {p}</span>
+                                                    }).collect_view()}
+                                                </div>
+                                            </A>
+                                        </div>
+                                    }.into_any()
+                                }).collect_view()}
+                            }.into_any());
+                        }
+                        if !games.finished.is_empty() {
+                            sections.push(view! {
+                                <h2>"Finished games"</h2>
+                                {games.finished.into_iter().map(|game| {
+                                    let id = game.id.to_string();
+                                    view! {
+                                        <div class="layout-game">
+                                            <A href=format!("/games/{}", id)>
+                                                <div class="layout-game-name">{game.type_name}</div>
+                                                <div class="layout-game-opponents">
+                                                    "with "
+                                                    {game.players.into_iter().map(|p| view! {
+                                                        <span>" " {p}</span>
+                                                    }).collect_view()}
+                                                </div>
+                                            </A>
+                                        </div>
+                                    }.into_any()
+                                }).collect_view()}
+                            }.into_any());
+                        }
+                        sections.collect_view().into_any()
                     },
                 }}
             </div>

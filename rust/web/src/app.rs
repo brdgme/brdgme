@@ -120,12 +120,11 @@ pub fn App() -> impl IntoView {
     let logout_action = ServerAction::<crate::auth::Logout>::new();
     provide_context(logout_action);
 
-    let active_games: LocalResource<
-        Result<Vec<crate::game::server_fns::GameSummary>, ServerFnError>,
-    > = LocalResource::new(move || async move {
-        let _ = last_update.get();
-        crate::game::server_fns::get_active_games().await
-    });
+    let active_games: LocalResource<Result<crate::game::server_fns::SidebarGames, ServerFnError>> =
+        LocalResource::new(move || async move {
+            let _ = last_update.get();
+            crate::game::server_fns::get_sidebar_games().await
+        });
     provide_context(active_games);
 
     // None until the fetch resolves; treat that as logged-out so anonymous
@@ -173,7 +172,7 @@ pub fn App() -> impl IntoView {
         active_games
             .get()
             .and_then(|r| r.ok())
-            .map(|games| count_my_turn(&games))
+            .map(|games| count_my_turn(&games.active))
             .unwrap_or(0)
     });
     let title_text = move || {
@@ -272,7 +271,7 @@ fn LoginPage() -> impl IntoView {
     let current_user =
         expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
     let active_games = expect_context::<
-        LocalResource<Result<Vec<crate::game::server_fns::GameSummary>, ServerFnError>>,
+        LocalResource<Result<crate::game::server_fns::SidebarGames, ServerFnError>>,
     >();
 
     let (show_code_input, set_show_code_input) = signal(false);

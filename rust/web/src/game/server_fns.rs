@@ -30,6 +30,30 @@ pub struct GameSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingGameSummary {
+    pub id: Uuid,
+    pub type_name: String,
+    pub players: Vec<String>,
+    pub is_owner: bool,
+    pub is_invitee_needing_accept: bool,
+    pub is_ready_to_start: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinishedGameSummary {
+    pub id: Uuid,
+    pub type_name: String,
+    pub players: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidebarGames {
+    pub active: Vec<GameSummary>,
+    pub pending: Vec<PendingGameSummary>,
+    pub finished: Vec<FinishedGameSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameViewData {
     pub id: Uuid,
     pub version_id: Uuid,
@@ -129,15 +153,34 @@ async fn active_games_summary(
         .map_err(internal("get_active_games: find active games"))
 }
 
-#[server(GetActiveGames, "/api")]
-pub async fn get_active_games() -> Result<Vec<GameSummary>, ServerFnError> {
+#[server(GetSidebarGames, "/api")]
+pub async fn get_sidebar_games() -> Result<SidebarGames, ServerFnError> {
     use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
     let user = get_current_user().await?;
+    let Some(user) = user else {
+        return Ok(SidebarGames {
+            active: Vec::new(),
+            pending: Vec::new(),
+            finished: Vec::new(),
+        });
+    };
 
-    active_games_summary(user, &pool).await
+    let uid = user.id;
+    let active = active_games_summary(Some(user), &pool).await?;
+    let pending = crate::db::find_pending_game_summaries(&pool, uid)
+        .await
+        .map_err(internal("get_sidebar_games: pending"))?;
+    let finished = crate::db::find_finished_game_summaries(&pool, uid)
+        .await
+        .map_err(internal("get_sidebar_games: finished"))?;
+    Ok(SidebarGames {
+        active,
+        pending,
+        finished,
+    })
 }
 
 #[server(GetGameDetails, "/api")]
