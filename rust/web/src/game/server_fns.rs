@@ -1519,11 +1519,12 @@ mod tests {
         assert_eq!(summaries[0].opponents[0].name, "Botty");
     }
 
-    // Pins the sidebar sort order: my-turn games first, then most recently
-    // updated. Single-player games so whose_turn position 0 is always the
-    // creator (player order is shuffled in multi-slot games).
+    // Pins the sidebar sort order: my-turn games first (longest-waiting
+    // first by is_turn_at ASC), then non-my-turn games (most recent own
+    // turn first by last_turn_at DESC). Single-player games so whose_turn
+    // position 0 is always the creator.
     #[sqlx::test]
-    async fn active_games_summary_sorts_my_turn_first_then_updated_at_desc(pool: PgPool) {
+    async fn active_games_summary_sorts_my_turn_first_then_by_turn_timestamps(pool: PgPool) {
         let user_id = make_user(&pool, "human").await;
         let game_version_id = make_game_version(&pool).await;
 
@@ -1547,30 +1548,44 @@ mod tests {
             )
         };
 
-        // (a) not their turn, updated recently
+        // (a) not their turn, own turn ended 30 min ago
         let game_a = make_game(&[]).await.unwrap();
-        // (b) their turn, updated long ago
+        // (b) their turn, waiting 2 hours (longest)
         let game_b = make_game(&[0]).await.unwrap();
-        // (c) their turn, updated recently (creation timestamp left as-is)
+        // (c) their turn, waiting 1 hour
         let game_c = make_game(&[0]).await.unwrap();
+        // (d) not their turn, own turn ended 3 hours ago
+        let game_d = make_game(&[]).await.unwrap();
 
-        // The update_games_updated_at trigger overwrites updated_at on every
-        // UPDATE; disable it so the backdated values stick.
-        sqlx::raw_sql("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query!(
-            "UPDATE games SET updated_at = timezone('utc', now()) - interval '1 hour' WHERE id = $1",
-            game_a.id
+        sqlx::query(
+            "UPDATE game_players SET is_turn_at = timezone('utc', now()) - interval '2 hours' WHERE game_id = $1 AND user_id = $2",
         )
+        .bind(game_b.id)
+        .bind(user_id)
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query!(
-            "UPDATE games SET updated_at = timezone('utc', now()) - interval '10 days' WHERE id = $1",
-            game_b.id
+        sqlx::query(
+            "UPDATE game_players SET is_turn_at = timezone('utc', now()) - interval '1 hour' WHERE game_id = $1 AND user_id = $2",
         )
+        .bind(game_c.id)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET last_turn_at = timezone('utc', now()) - interval '30 minutes' WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_a.id)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET last_turn_at = timezone('utc', now()) - interval '3 hours' WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_d.id)
+        .bind(user_id)
         .execute(&pool)
         .await
         .unwrap();
@@ -1583,10 +1598,11 @@ mod tests {
         let summaries = active_games_summary(Some(user), &pool).await.unwrap();
 
         let ids: Vec<Uuid> = summaries.iter().map(|s| s.id).collect();
-        assert_eq!(ids, vec![game_c.id, game_b.id, game_a.id]);
+        assert_eq!(ids, vec![game_b.id, game_c.id, game_a.id, game_d.id]);
         assert!(summaries[0].is_turn);
         assert!(summaries[1].is_turn);
         assert!(!summaries[2].is_turn);
+        assert!(!summaries[3].is_turn);
     }
 
     // The requesting user must never be listed among their own opponents;
