@@ -132,6 +132,17 @@ pub async fn get_friends_overview() -> Result<FriendsOverview, ServerFnError> {
     })
 }
 
+#[server(GetIncomingFriendRequestCount, "/api")]
+pub async fn get_incoming_friend_request_count() -> Result<usize, ServerFnError> {
+    use sqlx::PgPool;
+    let pool = expect_context::<PgPool>();
+    let user = require_user().await?;
+    let count = crate::db::count_incoming_friend_requests(&pool, user.id)
+        .await
+        .map_err(internal("get_incoming_friend_request_count: count"))?;
+    Ok(count as usize)
+}
+
 /// D3: by user id (game-page button) or by exact username (friends page).
 /// Silent-shield semantics live in db::send_friend_request; the only honest
 /// errors here are the caller's own mistakes.

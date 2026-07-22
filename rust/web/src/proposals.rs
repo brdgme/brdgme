@@ -1764,7 +1764,7 @@ pub async fn get_proposal(proposal_id: Uuid) -> Result<ProposalView, ServerFnErr
     })
 }
 
-/// Lists the caller's pending invites for the dashboard section.
+/// Lists the caller's pending invites.
 #[server(GetPendingInvites, "/api")]
 pub async fn get_pending_invites() -> Result<Vec<InviteSummary>, ServerFnError> {
     use sqlx::PgPool;
@@ -1848,7 +1848,7 @@ pub fn InvitePage() -> impl IntoView {
     let nav3 = navigate.clone();
     Effect::new(move |_| {
         if let Some(Ok(())) = cancel_action.value().get() {
-            nav3("/dashboard", NavigateOptions::default());
+            nav3("/", NavigateOptions::default());
         }
     });
 

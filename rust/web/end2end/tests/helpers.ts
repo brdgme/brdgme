@@ -37,7 +37,7 @@ async function fetchLoginConfirmation(email: string): Promise<string> {
 /**
  * Drives the login UI end-to-end for a fresh email: submits the email form,
  * reads the confirmation code straight out of Postgres (SMTP is unset in the
- * e2e stack), then submits the code. Leaves the page on /dashboard.
+ * e2e stack), then submits the code. Leaves the page on /.
  */
 export async function login(page: Page, email: string): Promise<void> {
   await page.goto("/login");
@@ -57,7 +57,7 @@ export async function login(page: Page, email: string): Promise<void> {
 
   await page.getByPlaceholder("Login code").fill(code);
   await page.getByRole("button", { name: "Play!" }).click();
-  await page.waitForURL("**/dashboard");
+  await page.waitForURL("**/");
 }
 
 /**

@@ -132,6 +132,9 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
         expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
     let logged_in = move || matches!(current_user.get(), Some(Ok(Some(_))));
 
+    let friend_request_count: LocalResource<Result<usize, ServerFnError>> =
+        LocalResource::new(crate::friends::get_incoming_friend_request_count);
+
     // Close the mobile menu overlay on every route change - covers
     // "navigating closes it" for every link without per-link handlers.
     let location = leptos_router::hooks::use_location();
@@ -176,7 +179,18 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
             </div>
             <div><A href="/games/new">"New game"</A></div>
             <div><A href="/settings">"Settings"</A></div>
-            <div><A href="/friends">"Friends"</A></div>
+            <div>
+                <A href="/friends">"Friends"</A>
+                {move || {
+                    friend_request_count
+                        .get()
+                        .and_then(|r| r.ok())
+                        .filter(|&n| n > 0)
+                        .map(|n| {
+                            view! { <span class="friend-request-badge">{format!("({n} new)")}</span> }
+                        })
+                }}
+            </div>
             <div>
                 {move || match active_games.get() {
                     None => view! { <p>"Loading games..."</p> }.into_any(),

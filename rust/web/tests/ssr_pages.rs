@@ -268,10 +268,22 @@ async fn login_page_anonymous(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn dashboard_page_anonymous(pool: PgPool) {
+async fn dashboard_route_returns_not_found(pool: PgPool) {
     let app = build_router(make_state(pool).await).await;
     let (status, content_type, body) = get(app, "/dashboard", None).await;
-    assert_clean_html_body(status, &content_type, &body, "Dashboard");
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+    assert!(
+        content_type.starts_with("text/html"),
+        "content-type: {content_type}"
+    );
+    assert!(
+        body.contains("Page not found."),
+        "expected fallback marker in body: {body}"
+    );
+    assert!(
+        !body.to_lowercase().contains("panicked at"),
+        "SSR body contains a panic message: {body}"
+    );
 }
 
 // G-route ranking proof: static "/games/new" must outrank parametric

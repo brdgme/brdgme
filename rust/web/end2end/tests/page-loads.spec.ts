@@ -13,9 +13,6 @@ test("hard-loaded pages produce zero console errors", async ({ page }) => {
   const email = uniqueEmail("page-loads");
   await login(page, email);
 
-  await page.goto("/dashboard");
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-
   await page.goto("/games");
   await expect(page.getByRole("heading", { name: "New Game" })).toBeVisible();
 
@@ -27,7 +24,7 @@ test("hard-loaded pages produce zero console errors", async ({ page }) => {
   const gameUrl = page.url();
 
   // Navigate away and hard-load the game page directly, exercising SSR + hydration.
-  await page.goto("/dashboard");
+  await page.goto("/");
   await page.goto(gameUrl);
   await page.waitForFunction(() => document.body.dataset.hydrated === "true");
   await expect(page.locator(".game-render")).toBeVisible();

@@ -2036,6 +2036,16 @@ pub async fn list_incoming_friend_requests(
     .await?)
 }
 
+#[cfg(feature = "ssr")]
+pub async fn count_incoming_friend_requests(pool: &PgPool, user_id: Uuid) -> Result<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM friends WHERE target_user_id = $1 AND has_accepted IS NULL",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?)
+}
+
 /// Outgoing requests shown as "pending". DELIBERATELY includes declined
 /// rows (has_accepted = FALSE): the requester must not be able to
 /// distinguish pending from declined (D1 silent shield).

@@ -218,7 +218,6 @@ pub fn App() -> impl IntoView {
                 <Route path=StaticSegment("login") view=LoginPage/>
                 // "/games" is reserved (currently unused); the new-game flow lives at "/games/new".
                 // <Route path=StaticSegment("games") view=crate::new_game::NewGamePage/>
-                <Route path=StaticSegment("dashboard") view=DashboardPage/>
                 <Route path=StaticSegment("settings") view=crate::settings::SettingsPage/>
                 <Route path=StaticSegment("friends") view=crate::friends::FriendsPage/>
                 <Route path=StaticSegment("admin") view=crate::admin::AdminPage/>
@@ -490,7 +489,7 @@ fn LoginPage() -> impl IntoView {
         }
     });
 
-    // Navigate to dashboard on successful login. `current_user`/`active_games`
+    // Navigate to the index on successful login. `current_user`/`active_games`
     // live above the Router (see App()), so this navigation no longer
     // remounts them - refetch explicitly or the sidebar keeps showing
     // logged-out state and no active games until a hard reload.
@@ -499,7 +498,7 @@ fn LoginPage() -> impl IntoView {
         if confirm_action.value().get().is_some_and(|r| r.is_ok()) {
             current_user.refetch();
             active_games.refetch();
-            navigate("/dashboard", NavigateOptions::default());
+            navigate("/", NavigateOptions::default());
         }
     });
 
@@ -623,160 +622,6 @@ fn LoginPage() -> impl IntoView {
                 </div>
             </Show>
         </div>
-    }
-}
-
-#[component]
-fn DashboardPage() -> impl IntoView {
-    use crate::friends::{RespondToFriendRequest, get_friend_activity, get_friends_overview};
-
-    let (refresh, set_refresh) = signal(0u32);
-    let overview = LocalResource::new(move || {
-        refresh.track();
-        get_friends_overview()
-    });
-    let activity = LocalResource::new(get_friend_activity);
-    let respond_action = ServerAction::<RespondToFriendRequest>::new();
-    Effect::new(move |_| {
-        if let Some(Ok(())) = respond_action.value().get() {
-            set_refresh.update(|n| *n += 1);
-        }
-    });
-    let invites = LocalResource::new(move || {
-        refresh.track();
-        crate::proposals::get_pending_invites()
-    });
-    let invite_respond_action = ServerAction::<crate::proposals::RespondProposal>::new();
-    Effect::new(move |_| {
-        if let Some(Ok(_)) = invite_respond_action.value().get() {
-            set_refresh.update(|n| *n += 1);
-        }
-    });
-
-    view! {
-        <MainLayout>
-            <div class="content-page">
-                <h1>"Dashboard"</h1>
-
-                <div class="dashboard-sections">
-                    <section class="friend-requests">
-                        <h2>"Friend requests"</h2>
-                        {move || match overview.get() {
-                            None => view! { <p>"Loading..."</p> }.into_any(),
-                            Some(Err(_)) => ().into_any(), // anonymous or error: hide
-                            Some(Ok(o)) if o.incoming.is_empty() =>
-                                view! { <p>"No pending requests."</p> }.into_any(),
-                            Some(Ok(o)) => o.incoming.iter().map(|r| {
-                                let id = r.request_id;
-                                let name = r.name.clone();
-                                view! {
-                                    <div class="friend-row">
-                                        <span>
-                                            <A href=format!("/players/{}", crate::players::encode_path_segment(&name))>
-                                                {name.clone()}
-                                            </A>
-                                        </span>
-                                        " "
-                                        <a href="#" on:click=move |ev| {
-                                            ev.prevent_default();
-                                            respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: true, block: false });
-                                        }>"Accept"</a>
-                                        " | "
-                                        <a href="#" on:click=move |ev| {
-                                            ev.prevent_default();
-                                            respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: false, block: false });
-                                        }>"Decline"</a>
-                                        " | "
-                                        <a href="#" on:click=move |ev| {
-                                            ev.prevent_default();
-                                            let confirmed = web_sys::window()
-                                                .and_then(|w| w.confirm_with_message("Decline and block? They will no longer be able to send you friend requests or add you to games.").ok())
-                                                .unwrap_or(false);
-                                            if confirmed {
-                                                respond_action.dispatch(RespondToFriendRequest { request_id: id, accept: false, block: true });
-                                            }
-                                        }>"Decline and block"</a>
-                                    </div>
-                                }
-                            }).collect_view().into_any(),
-                        }}
-                        <p><a href="/friends">"Manage friends"</a></p>
-                    </section>
-
-                    <section class="pending-invites">
-                        <h2>"Pending invites"</h2>
-                        {move || match invites.get() {
-                            None => view! { <p>"Loading..."</p> }.into_any(),
-                            Some(Err(_)) => ().into_any(),
-                            Some(Ok(inv)) if inv.is_empty() =>
-                                view! { <p>"No pending invites."</p> }.into_any(),
-                            Some(Ok(inv)) => inv.iter().map(|i| {
-                                let pid = i.proposal_id;
-                                let label = format!("{} ({}, {} players)", i.game_type_name, i.owner_name, i.player_count);
-                                view! {
-                                    <div class="friend-row">
-                                        <span>
-                                            <A href=format!("/invites/{}", pid)>
-                                                {label}
-                                            </A>
-                                        </span>
-                                        " "
-                                        <a href="#" on:click=move |ev| {
-                                            ev.prevent_default();
-                                            invite_respond_action.dispatch(crate::proposals::RespondProposal { proposal_id: pid, accept: true });
-                                        }>"Accept"</a>
-                                        " | "
-                                        <a href="#" on:click=move |ev| {
-                                            ev.prevent_default();
-                                            invite_respond_action.dispatch(crate::proposals::RespondProposal { proposal_id: pid, accept: false });
-                                        }>"Decline"</a>
-                                    </div>
-                                }
-                            }).collect_view().into_any(),
-                        }}
-                    </section>
-
-                    <section class="friends-active-games">
-                        <h2>"Friends' active games"</h2>
-                        {move || match activity.get() {
-                            None => view! { <p>"Loading..."</p> }.into_any(),
-                            Some(Err(_)) => ().into_any(),
-                            Some(Ok(a)) if a.active.is_empty() =>
-                                view! { <p>"No games to watch right now."</p> }.into_any(),
-                            Some(Ok(a)) => a.active.iter().map(|g| {
-                                let href = format!("/games/{}", g.game_id);
-                                let label = format!("{}: {}", g.game_type, g.player_names.join(", "));
-                                view! { <div><a href=href>{label}</a></div> }
-                            }).collect_view().into_any(),
-                        }}
-                    </section>
-
-                    <section class="friends-recent-results">
-                        <h2>"Friends' recent results"</h2>
-                        {move || match activity.get() {
-                            None => view! { <p>"Loading..."</p> }.into_any(),
-                            Some(Err(_)) => ().into_any(),
-                            Some(Ok(a)) if a.results.is_empty() =>
-                                view! { <p>"No recent results."</p> }.into_any(),
-                            Some(Ok(a)) => a.results.iter().map(|g| {
-                                let href = format!("/games/{}", g.game_id);
-                                let players = g.player_names.iter().zip(g.places.iter())
-                                    .map(|(n, p)| if *p > 0 { format!("{p}. {n}") } else { n.clone() })
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                let label = format!("{}: {}", g.game_type, players);
-                                view! { <div><a href=href>{label}</a></div> }
-                            }).collect_view().into_any(),
-                        }}
-                    </section>
-
-                    <section class="active-games">
-                        <h2>"Active Games"</h2>
-                        <p>"Use the sidebar to navigate your games."</p>
-                    </section>
-                </div>
-            </div>
-        </MainLayout>
     }
 }
 
