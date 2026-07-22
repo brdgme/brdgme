@@ -67,7 +67,7 @@ brdgme_game = { path = "../lib/game", optional = true }
 brdgme_color = { path = "../lib/color", optional = true }
 brdgme_markup = { path = "../lib/markup", optional = true }
 brdgme_game_client = { path = "../lib/game_client", optional = true, features = ["sentry"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"], optional = true }
 aes-gcm = { version = "0.10", optional = true }
 hex = { version = "0.4", optional = true }
 rand = "0.10.2"

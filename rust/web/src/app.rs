@@ -8,7 +8,7 @@ use leptos_router::{
 };
 use uuid::Uuid;
 
-use crate::auth::server::{confirm_login, login};
+use crate::auth::server::{confirm_login, get_turnstile_site_key, login};
 use crate::components::MainLayout;
 
 // Reads the `theme` cookie before first paint so the correct theme is
@@ -85,6 +85,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
                 <style inner_html=theme_css></style>
                 <script inner_html=THEME_BOOT_SCRIPT></script>
+                <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
                 {sentry_snippet.map(|snippet| view! {
                     <script src="/sentry.js"></script>
                     <script inner_html=snippet></script>
@@ -454,6 +455,18 @@ fn HomePage() -> impl IntoView {
     }
 }
 
+fn get_turnstile_response() -> String {
+    use web_sys::wasm_bindgen::JsCast;
+
+    web_sys::window()
+        .and_then(|w| js_sys::Reflect::get(&w, &"turnstile".into()).ok())
+        .and_then(|ts| js_sys::Reflect::get(&ts, &"getResponse".into()).ok())
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+        .and_then(|f| f.call0(&web_sys::wasm_bindgen::JsValue::UNDEFINED).ok())
+        .and_then(|v| v.as_string())
+        .unwrap_or_default()
+}
+
 #[component]
 fn LoginPage() -> impl IntoView {
     let current_user =
@@ -469,9 +482,15 @@ fn LoginPage() -> impl IntoView {
     let code_email_input = NodeRef::<html::Input>::new();
     let code_input = NodeRef::<html::Input>::new();
 
-    let login_action = Action::new(|email: &String| {
+    let site_key: Resource<String> = Resource::new(
+        || (),
+        |_| async move { get_turnstile_site_key().await.unwrap_or_default() },
+    );
+
+    let login_action = Action::new(|(email, token): &(String, String)| {
         let email = email.clone();
-        async move { login(email).await }
+        let token = token.clone();
+        async move { login(email, token).await }
     });
 
     let confirm_action = Action::new(|(email, token): &(String, String)| {
@@ -480,7 +499,6 @@ fn LoginPage() -> impl IntoView {
         async move { confirm_login(email, token).await }
     });
 
-    // Show code input once server confirms email was sent.
     Effect::new(move |_| {
         if let Some(Ok(resp)) = login_action.value().get()
             && resp.success
@@ -489,10 +507,6 @@ fn LoginPage() -> impl IntoView {
         }
     });
 
-    // Navigate to the index on successful login. `current_user`/`active_games`
-    // live above the Router (see App()), so this navigation no longer
-    // remounts them - refetch explicitly or the sidebar keeps showing
-    // logged-out state and no active games until a hard reload.
     let navigate = use_navigate();
     Effect::new(move |_| {
         if confirm_action.value().get().is_some_and(|r| r.is_ok()) {
@@ -509,7 +523,8 @@ fn LoginPage() -> impl IntoView {
             return;
         };
         set_email.set(email_value.clone());
-        login_action.dispatch(email_value);
+        let token = get_turnstile_response();
+        login_action.dispatch((email_value, token));
     };
 
     let on_code_submit = move |ev: leptos::ev::SubmitEvent| {
@@ -518,9 +533,6 @@ fn LoginPage() -> impl IntoView {
             leptos::logging::warn!("on_code_submit: code_input not mounted");
             return;
         };
-        // If the email wasn't already collected (the "I already have a login
-        // code" shortcut skips step 1), read it from the code-step email
-        // field instead.
         let email_value = if email.get_untracked().is_empty() {
             let Some(email_value) = code_email_input.get().map(|el| el.value()) else {
                 leptos::logging::warn!("on_code_submit: code_email_input not mounted");
@@ -538,9 +550,6 @@ fn LoginPage() -> impl IntoView {
         set_show_code_input.set(true);
     };
 
-    // Autofocus: email field on load, code field once the code step renders
-    // (both re-fire once their `NodeRef` resolves, matching the pattern
-    // already used by `GameCommandInput`'s mount effect).
     Effect::new(move |_| {
         if let Some(el) = email_input.get() {
             let _ = el.focus();
@@ -577,6 +586,16 @@ fn LoginPage() -> impl IntoView {
                                 disabled=move || login_action.pending().get()
                             />
                         </div>
+                        {move || {
+                            let key = site_key.get().unwrap_or_default();
+                            if key.is_empty() {
+                                None
+                            } else {
+                                Some(view! {
+                                    <div class="cf-turnstile" data-sitekey=key data-theme="auto"></div>
+                                })
+                            }
+                        }}
                         <Show when=move || login_action.pending().get()>
                             <crate::components::Spinner/>
                         </Show>
@@ -586,6 +605,14 @@ fn LoginPage() -> impl IntoView {
                     </form>
                     <Show when=move || login_action.value().get().is_some_and(|r| r.is_err())>
                         <div class="error">"Failed to send login email. Please try again."</div>
+                    </Show>
+                    <Show when=move || login_action.value().get().is_some_and(|r| r.as_ref().is_ok_and(|resp| !resp.success))>
+                        <div class="error">
+                            {move || login_action.value().get()
+                                .and_then(|r| r.ok())
+                                .map(|resp| resp.message)
+                                .unwrap_or_default()}
+                        </div>
                     </Show>
                 </div>
             </Show>
