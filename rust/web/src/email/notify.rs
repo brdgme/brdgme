@@ -603,7 +603,7 @@ mod tests {
         .unwrap();
         let colors = ["Green", "Red", "Blue", "Yellow", "Purple"];
         let mut players = Vec::new();
-        for i in 0..n {
+        for (i, color) in colors.iter().take(n).enumerate() {
             let user_id: uuid::Uuid = sqlx::query_scalar(
                 "INSERT INTO users (name, pref_colors, turn_emails_enabled)
                  VALUES ($1, $2, true) RETURNING id",
@@ -632,7 +632,7 @@ mod tests {
             .bind(game_id)
             .bind(user_id)
             .bind(i as i32)
-            .bind(colors[i])
+            .bind(color)
             .fetch_one(pool)
             .await
             .unwrap();
