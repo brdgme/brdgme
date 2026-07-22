@@ -161,7 +161,7 @@ fn token_parser(include_gold: bool) -> impl Parser<T = Resource> {
             resource: Resource::Gold,
         });
     }
-    Map::new(Enum::exact(values), |c: TokenChoice| c.resource)
+    Map::new(Enum::partial(values), |c: TokenChoice| c.resource)
 }
 
 /// Port of `TokensParser` (`command.go`): one-or-more space-delimited tokens.
