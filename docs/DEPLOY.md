@@ -4,6 +4,17 @@ Production deploys are driven by ArgoCD watching the `brdgme-config` repo.
 The `brdgme` repo contains k8s manifests and application code; `brdgme-config`
 pins which commit of `brdgme` to render and which image tags to run.
 
+`brdgme-config` is a separate repository (`https://github.com/brdgme/brdgme-config.git`)
+cloned as a sibling directory to this repo:
+
+```
+Development/
+  brdgme/          <- this repo (application code + k8s manifests)
+  brdgme-config/   <- deploy config (ArgoCD kustomization, sealed secrets)
+```
+
+If it is not already cloned: `git clone https://github.com/brdgme/brdgme-config.git ../brdgme-config`
+
 ## Prerequisites
 
 - CI green on the target commit (the `e2e` job is allowed to fail)

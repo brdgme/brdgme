@@ -17,6 +17,7 @@ At the start of every session, read the following files in full:
 - `docs/BACKLOG.md`
 - `docs/CODING.md`
 - `docs/DEV.md`
+- `docs/DEPLOY.md`
 - `docs/VISION.md`
 
 Everything else under `docs/` is out of scope for this bootstrap step - read
