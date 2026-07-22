@@ -40,6 +40,8 @@ spec:
           env:
             - name: NATS_URL
               value: nats://nats:4222
+            - name: PUBLIC_BASE_URL
+              value: https://beta.brdg.me
           readinessProbe:
             httpGet:
               path: /healthz
