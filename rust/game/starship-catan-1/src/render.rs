@@ -125,15 +125,14 @@ fn render(pub_state: &PubState, player: Option<usize>, _peeking: Option<&[Sector
     match pub_state.phase {
         Phase::ChooseSector => {
             if !boards[viewer].last_sectors.is_empty() {
-                let joined = boards[viewer]
-                    .last_sectors
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let sectors = &boards[viewer].last_sectors;
+                let mut nodes = vec![N::Bold(vec![N::text(sectors[0].to_string())])];
+                for s in &sectors[1..] {
+                    nodes.push(N::text(format!(" {}", s)));
+                }
                 turn_rows.push(vec![
                     (A::Left, vec![N::Bold(vec![N::text("Last sectors")])]),
-                    (A::Left, vec![N::text(joined)]),
+                    (A::Left, nodes),
                 ]);
             }
         }
