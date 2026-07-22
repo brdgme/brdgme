@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::ast::Cell;
-use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
+use brdgme_markup::{Align as A, Node as N, Row, table_with_gap, word_wrap};
 use serde::{Deserialize, Serialize};
 
 use crate::card::{
@@ -102,6 +102,8 @@ fn double_row(mut left: Vec<Cell>, right: Vec<Cell>) -> Row {
     left.extend(right);
     left
 }
+
+const DESCRIPTION_WRAP_WIDTH: usize = 60;
 
 fn render(pub_state: &PubState, player: Option<usize>, _peeking: Option<&[SectorCard]>) -> Vec<N> {
     let viewer = player.unwrap_or(0);
@@ -290,7 +292,10 @@ fn render(pub_state: &PubState, player: Option<usize>, _peeking: Option<&[Sector
             (A::Left, adventure_planet_string(ac.planet())),
             (
                 A::Left,
-                vec![N::Fg(NamedColor::Grey.into(), vec![N::text(ac.text())])],
+                vec![N::Fg(
+                    NamedColor::Grey.into(),
+                    vec![N::text(word_wrap(ac.text(), DESCRIPTION_WRAP_WIDTH))],
+                )],
             ),
         ]);
     }
@@ -311,7 +316,10 @@ fn render(pub_state: &PubState, player: Option<usize>, _peeking: Option<&[Sector
             (A::Left, render_module_level(boards[opponent].module(m))),
             (
                 A::Left,
-                vec![N::Fg(NamedColor::Grey.into(), vec![N::text(m.summary())])],
+                vec![N::Fg(
+                    NamedColor::Grey.into(),
+                    vec![N::text(word_wrap(&m.summary(), DESCRIPTION_WRAP_WIDTH))],
+                )],
             ),
         ]);
     }

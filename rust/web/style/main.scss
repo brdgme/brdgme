@@ -273,6 +273,7 @@ body {
 
 .game-main {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -284,13 +285,12 @@ body {
   flex: 100;
   text-align: center;
   width: 100%;
+  overflow-x: auto;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
 }
 
 .game-main .game-render > pre {
-  margin: auto;
+  margin: 1em;
 }
 
 .game-main .recent-logs-container {
@@ -409,6 +409,7 @@ body {
   flex-direction: column;
   background-color: var(--mk-soften-foreground-90);
   width: 15em;
+  flex-shrink: 0;
   padding-left: 0.5em;
   padding-right: 0.5em;
   overflow-y: auto;

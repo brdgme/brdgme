@@ -9,6 +9,7 @@ pub use crate::html_class::{html_class, markup_class_css};
 use crate::parser::markup;
 pub use crate::semantic::{SemanticCol, SemanticColType, SemanticPlayer, transform_semantic};
 pub use crate::transform::{Player, from_lines, to_lines, transform, transform_with_palette};
+pub use crate::wrap::word_wrap;
 
 mod ansi;
 pub mod ast;
@@ -19,6 +20,7 @@ mod parser;
 mod plain;
 mod semantic;
 mod transform;
+mod wrap;
 
 pub fn html(input: &[TNode]) -> String {
     html::render(input)
