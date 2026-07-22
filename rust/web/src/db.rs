@@ -603,7 +603,11 @@ pub async fn find_active_game_summaries(
         LEFT JOIN users u ON u.id = opp.user_id
         LEFT JOIN game_bots gb ON gb.id = opp.game_bot_id
         WHERE g.is_finished = false
-        ORDER BY me.is_turn DESC, g.updated_at DESC, g.id, opp.position
+        ORDER BY
+            me.is_turn DESC,
+            CASE WHEN me.is_turn THEN me.is_turn_at END ASC,
+            CASE WHEN NOT me.is_turn THEN me.last_turn_at END DESC,
+            g.id, opp.position
         "#,
         user_id
     )
