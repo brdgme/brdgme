@@ -93,7 +93,33 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                 .collect()
         }
         Spec::Opt(spec) => suggest_spec(spec, remaining, names),
-        Spec::Many { spec, .. } => suggest_spec(spec, remaining, names),
+        Spec::Many { spec, delim, .. } => {
+            let mut rem = remaining;
+            loop {
+                match spec.parse(rem, names) {
+                    Ok(out) => {
+                        let after_item = out.remaining;
+                        if let Some(d) = delim {
+                            match d.parse(after_item, names) {
+                                Ok(d_out) => {
+                                    rem = d_out.remaining;
+                                    continue;
+                                }
+                                Err(_) => {
+                                    return suggest_spec(spec, after_item, names);
+                                }
+                            }
+                        } else {
+                            rem = after_item;
+                            continue;
+                        }
+                    }
+                    Err(_) => {
+                        return suggest_spec(spec, rem, names);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -488,9 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn many_with_delimiter_known_limitation() {
-        // Known limitation: after typing "1, " the delimiter is not consumed,
-        // so prefix "1, " doesn't match any enum value starting with "1, ".
+    fn many_with_delimiter_suggests_after_consumption() {
         let spec = Spec::Many {
             spec: Box::new(Spec::Enum {
                 values: vec!["1".into(), "2".into()],
@@ -500,9 +524,23 @@ mod tests {
             max: None,
             delim: Some(Box::new(Spec::Token(", ".into()))),
         };
-        // This correctly suggests nothing (limitation documented, not a crash)
         let s = spec.suggest("1, ", &[]);
-        assert!(s.is_empty());
+        assert_eq!(vals(&s), vec!["1", "2"]);
+    }
+
+    #[test]
+    fn many_with_space_delimiter_suggests_after_consumption() {
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Enum {
+                values: vec!["R3".into(), "B5".into(), "Y2".into()],
+                exact: true,
+            }),
+            min: Some(1),
+            max: None,
+            delim: Some(Box::new(Spec::Space)),
+        };
+        let s = spec.suggest("R3 ", &[]);
+        assert_eq!(vals(&s), vec!["R3", "B5", "Y2"]);
     }
 
     // --- Realistic game scenarios ---
