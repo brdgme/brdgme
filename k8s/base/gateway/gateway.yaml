@@ -46,20 +46,15 @@ spec:
       # flag that would tell it to is owned by DOKS's managed reconciler and
       # gets reverted - see the header comment above), so enabling this
       # annotation breaks all Gateway traffic.
-  # Only beta.brdg.me is served from this cluster for now. The legacy
-  # brdg.me hostnames (apex, legacy, api, ws) stay on the old server; their
-  # listeners were removed because their HTTP01 challenges can never
-  # complete until DNS points here, leaving certs permanently pending. Add
-  # the apex listeners back at DNS cutover.
   listeners:
-    - name: web-beta-http
-      hostname: beta.brdg.me
+    - name: web-http
+      hostname: brdg.me
       port: 80
       protocol: HTTP
-    - name: web-beta
-      hostname: beta.brdg.me
+    - name: web
+      hostname: brdg.me
       port: 443
       protocol: HTTPS
       tls:
         certificateRefs:
-          - name: beta-brdg-me-tls
+          - name: brdg-me-tls

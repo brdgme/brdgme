@@ -3,15 +3,12 @@
 # over the same day; tofu ADOPTED it via import blocks rather than
 # creating it - see the plan
 # docs/superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md.
-# Records: 8 legacy/Resend records are DNS-only (proxied = false) so the
-# legacy Linode site and Resend mail flow are untouched; beta is proxied
-# (orange-cloud) through the CF edge. The apex flips to proxied-new-LB on
-# cutover day (#16 runbook, spec W8).
+# Post-cutover (#16): the apex A record points at the DOKS Gateway LB and
+# is proxied (orange-cloud) through the CF edge; the Resend mail records
+# stay DNS-only. The legacy Linode mail/SPF records and the beta validation
+# subdomain were removed at cutover.
 #
-# All records use ttl = 1 (Cloudflare "automatic") to match the live zone
-# exactly (confirmed via the Task 1 API listing: every one of the 9 live
-# records already has ttl = 1, not 3600 - matching live avoids a spurious
-# in-place diff on adoption).
+# All records use ttl = 1 (Cloudflare "automatic").
 resource "cloudflare_zone" "brdgme" {
   name = var.domain_name
   type = "full"
@@ -20,31 +17,14 @@ resource "cloudflare_zone" "brdgme" {
   }
 }
 
-# Legacy prod records (Linode host) - DNS-only until cutover (item 16).
-resource "cloudflare_dns_record" "legacy_apex_a" {
+# Apex -> the DOKS Gateway load balancer (the IP beta used during
+# validation), proxied (orange-cloud) through the CF edge.
+resource "cloudflare_dns_record" "apex_a" {
   zone_id = cloudflare_zone.brdgme.id
   type    = "A"
   name    = "brdg.me"
-  content = "172.105.164.158"
-  proxied = false
-  ttl     = 1
-}
-
-resource "cloudflare_dns_record" "legacy_mail_a" {
-  zone_id = cloudflare_zone.brdgme.id
-  type    = "A"
-  name    = "mail.brdg.me"
-  content = "172.105.164.158"
-  proxied = false
-  ttl     = 1
-}
-
-resource "cloudflare_dns_record" "legacy_apex_spf" {
-  zone_id = cloudflare_zone.brdgme.id
-  type    = "TXT"
-  name    = "brdg.me"
-  content = "\"v=spf1 a:mail.brdg.me ip4:172.105.254.59 ip4:194.195.125.83 ip4:194.195.125.116 ~all\""
-  proxied = false
+  content = "170.64.251.15"
+  proxied = true
   ttl     = 1
 }
 
@@ -97,17 +77,6 @@ resource "cloudflare_dns_record" "resend_inbound_mx" {
   priority = 10
   proxied  = false
   ttl      = 1
-}
-
-# Pre-cutover validation subdomain (item 16 beta) - proxied through the
-# CF edge (orange-cloud). Proxied records require ttl = 1 (automatic).
-resource "cloudflare_dns_record" "beta_a" {
-  zone_id = cloudflare_zone.brdgme.id
-  type    = "A"
-  name    = "beta.brdg.me"
-  content = "170.64.251.15"
-  proxied = true
-  ttl     = 1
 }
 
 # Zone settings (spec W5). SSL "strict" = dashboard "Full (strict)":
@@ -203,4 +172,11 @@ resource "cloudflare_bot_management" "brdgme" {
   zone_id    = cloudflare_zone.brdgme.id
   enable_js  = true
   fight_mode = true
+}
+
+# Renamed at cutover (was legacy_apex_a). The moved block keeps the apex A
+# record an in-place update rather than a destroy/create.
+moved {
+  from = cloudflare_dns_record.legacy_apex_a
+  to   = cloudflare_dns_record.apex_a
 }
