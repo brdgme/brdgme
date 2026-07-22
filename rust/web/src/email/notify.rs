@@ -40,20 +40,13 @@ pub fn finished_header_text(winners: &[(String, Option<i32>)]) -> String {
     format!("Game over. Winners: {}", results.join(", "))
 }
 
-/// The "play in your browser" link. Reads `PUBLIC_BASE_URL` (default
-/// `http://localhost:3000`), stripping a trailing slash.
 pub fn browser_url(game_id: uuid::Uuid) -> String {
-    let base =
-        std::env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let base = base.trim_end_matches('/');
+    let base = crate::config::public_base_url();
     format!("{base}/games/{game_id}")
 }
 
-/// The "view rules" link for a game version.
 pub fn rules_url(version_id: uuid::Uuid) -> String {
-    let base =
-        std::env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let base = base.trim_end_matches('/');
+    let base = crate::config::public_base_url();
     format!("{base}/rules/{version_id}")
 }
 

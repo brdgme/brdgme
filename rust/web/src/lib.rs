@@ -13,6 +13,9 @@ pub mod stats;
 pub mod theme;
 
 #[cfg(feature = "ssr")]
+pub mod config;
+
+#[cfg(feature = "ssr")]
 pub mod state;
 
 #[cfg(feature = "ssr")]

@@ -131,9 +131,7 @@ pub struct RealInviteMailer {
 
 #[cfg(feature = "ssr")]
 fn invite_browser_url(proposal_id: Uuid) -> String {
-    let base =
-        std::env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let base = base.trim_end_matches('/');
+    let base = crate::config::public_base_url();
     format!("{base}/invites/{proposal_id}")
 }
 
@@ -323,9 +321,7 @@ impl InviteMailer for RealInviteMailer {
                 return;
             };
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
-            let base = std::env::var("PUBLIC_BASE_URL")
-                .unwrap_or_else(|_| "http://localhost:3000".to_string());
-            let base = base.trim_end_matches('/');
+            let base = crate::config::public_base_url();
             let game_url = format!("{base}/games/{game_id}");
             for user_id in invitee_user_ids {
                 let Ok(Some(recip)) = fetch_invite_recipient(&pool, user_id).await else {

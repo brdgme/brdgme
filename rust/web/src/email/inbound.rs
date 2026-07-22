@@ -758,9 +758,7 @@ async fn send_invite_reply_response(
             _ => (String::new(), None),
         };
 
-    let base =
-        std::env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let base = base.trim_end_matches('/');
+    let base = crate::config::public_base_url();
     let browser_url = match game_id {
         Some(gid) => format!("{base}/games/{gid}"),
         None => format!("{base}/invites/{proposal_id}"),
