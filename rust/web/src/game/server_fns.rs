@@ -129,6 +129,22 @@ pub struct GameTypeInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestartPrefill {
+    pub game_type_name: String,
+    pub version_id: Uuid,
+    pub version_name: String,
+    pub player_counts: Vec<i32>,
+    pub opponents: Vec<PrefillSlot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrefillSlot {
+    pub user_id: Option<Uuid>,
+    pub name: String,
+    pub bot_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameLogEntry {
     pub body_html: String,
     pub logged_at: PrimitiveDateTime,
@@ -930,6 +946,84 @@ pub async fn restart_game(
     Ok(outcome)
 }
 
+#[cfg(feature = "ssr")]
+pub(crate) async fn get_restart_prefill_impl(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    game_id: Uuid,
+) -> Result<RestartPrefill, ServerFnError> {
+    let ge = crate::db::find_game_extended(pool, game_id)
+        .await
+        .map_err(internal("get_restart_prefill: find game"))?
+        .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+    if !ge.game.is_finished {
+        return Err(ServerFnError::new("Game is not finished"));
+    }
+    if !ge
+        .game_players
+        .iter()
+        .any(|p| p.user.as_ref().is_some_and(|u| u.id == user_id))
+    {
+        return Err(ServerFnError::new("You are not a player in this game"));
+    }
+
+    let version =
+        crate::db::find_latest_non_deprecated_game_version(pool, ge.game_version.game_type_id)
+            .await
+            .map_err(internal("get_restart_prefill: find latest game version"))?
+            .unwrap_or_else(|| ge.game_version.clone());
+
+    let player_counts = crate::db::find_game_type_player_counts(pool, version.id)
+        .await
+        .map_err(internal("get_restart_prefill: find player counts"))?
+        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
+
+    let opponents = ge
+        .game_players
+        .iter()
+        .filter(|p| !p.user.as_ref().is_some_and(|u| u.id == user_id))
+        .map(|p| match (&p.user, &p.game_bot) {
+            (Some(u), _) => PrefillSlot {
+                user_id: Some(u.id),
+                name: u.name.clone(),
+                bot_name: None,
+            },
+            (None, Some(b)) => PrefillSlot {
+                user_id: None,
+                name: b.name.clone(),
+                bot_name: Some(b.bot_name.clone()),
+            },
+            (None, None) => PrefillSlot {
+                user_id: None,
+                name: p.name().to_string(),
+                bot_name: None,
+            },
+        })
+        .collect();
+
+    Ok(RestartPrefill {
+        game_type_name: ge.game_type.name,
+        version_id: version.id,
+        version_name: version.name,
+        player_counts,
+        opponents,
+    })
+}
+
+#[server(GetRestartPrefill, "/api")]
+pub async fn get_restart_prefill(game_id: Uuid) -> Result<RestartPrefill, ServerFnError> {
+    use crate::auth::server::get_current_user;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    get_restart_prefill_impl(&pool, user.id, game_id).await
+}
+
 #[server(BumpBotTurns, "/api")]
 pub async fn bump_bot_turns(game_id: Uuid) -> Result<(), ServerFnError> {
     use crate::auth::server::get_current_user;
@@ -1560,5 +1654,80 @@ mod tests {
         assert!(roster_error(&[2, 4], 3).is_some());
         // Solo (no opponents) rejected when unsupported.
         assert!(roster_error(&[2, 3, 4], 1).is_some());
+    }
+
+    #[sqlx::test]
+    async fn restart_prefill_returns_other_human_for_finished_two_player_game(pool: PgPool) {
+        let (game_id, creator_id) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+
+        let prefill = get_restart_prefill_impl(&pool, creator_id, game_id)
+            .await
+            .unwrap();
+
+        assert_eq!(prefill.game_type_name, "Test Game");
+        assert_eq!(prefill.version_name, "v1");
+        assert_eq!(prefill.player_counts, vec![2]);
+        assert_eq!(prefill.opponents.len(), 1);
+        let opp = &prefill.opponents[0];
+        assert_eq!(opp.name, "opponent");
+        assert!(opp.bot_name.is_none());
+        assert_ne!(opp.user_id, Some(creator_id));
+        assert!(opp.user_id.is_some());
+    }
+
+    #[sqlx::test]
+    async fn restart_prefill_returns_bots_for_solo_bot_game(pool: PgPool) {
+        let (game_id, creator_id) =
+            make_finished_solo_bot_game(&pool, "http://127.0.0.1:8100").await;
+
+        let prefill = get_restart_prefill_impl(&pool, creator_id, game_id)
+            .await
+            .unwrap();
+
+        assert_eq!(prefill.opponents.len(), 1);
+        let opp = &prefill.opponents[0];
+        assert_eq!(opp.user_id, None);
+        assert_eq!(opp.name, "Botty");
+        assert_eq!(opp.bot_name, Some("easy".to_string()));
+    }
+
+    #[sqlx::test]
+    async fn restart_prefill_rejects_non_player(pool: PgPool) {
+        let (game_id, _creator_id) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+        let stranger = make_user(&pool, "stranger").await;
+
+        let result = get_restart_prefill_impl(&pool, stranger, game_id).await;
+        assert!(result.is_err());
+    }
+
+    #[sqlx::test]
+    async fn restart_prefill_rejects_unfinished_game(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: creator,
+                opponent_ids: &[opponent],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = get_restart_prefill_impl(&pool, creator, game.id).await;
+        assert!(result.is_err());
     }
 }
