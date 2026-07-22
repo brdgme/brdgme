@@ -6,6 +6,7 @@ use leptos_router::components::A;
 use crate::components::ColorRibbon;
 use crate::stats::FinishedGameRow;
 use crate::stats::FormResult;
+use crate::stats::GameTypeStats;
 use crate::stats::viz::{FormStrip, Histogram, HistogramBucket, RatingChart, Sparkline};
 
 /// Reconstructs the recent rating series for one game type by walking
@@ -198,6 +199,19 @@ fn placing_histograms(games: &[FinishedGameRow]) -> Vec<PlacingHistogram> {
         .collect()
 }
 
+/// Game-type rows for the profile "By game type" table: drops types the
+/// player has no finished games in, then orders the rest by total games
+/// descending (name as a stable tie-break).
+fn game_types_for_profile(mut game_types: Vec<GameTypeStats>) -> Vec<GameTypeStats> {
+    game_types.retain(|s| s.games > 0);
+    game_types.sort_by(|a, b| {
+        b.games
+            .cmp(&a.games)
+            .then_with(|| a.game_type_name.cmp(&b.game_type_name))
+    });
+    game_types
+}
+
 #[component]
 pub fn PlayersPage() -> impl IntoView {
     use crate::components::layout::MainLayout;
@@ -237,6 +251,7 @@ pub fn PlayersPage() -> impl IntoView {
                             } else {
                                 format!("{:.1}%", d.totals.win_percent)
                             };
+                            let profile_game_types = game_types_for_profile(d.game_types.clone());
                             view! {
                                 <div class="profile content-page">
                                     <header class="profile-header">
@@ -305,14 +320,14 @@ pub fn PlayersPage() -> impl IntoView {
                                     </section>
                                     <section class="profile-game-types">
                                         <h2>"By game type"</h2>
-                                        {if d.game_types.is_empty() {
+                                        {if profile_game_types.is_empty() {
                                             view! {
                                                 <p class="profile-no-games">"No finished games yet."</p>
                                             }.into_any()
                                         } else {
                                             let bots = query.get().get("bots").as_deref() == Some("1");
                                             let player_name = d.user.name.clone();
-                                            let game_types = d.game_types.clone();
+                                            let game_types = profile_game_types.clone();
                                             let recent_form = d.recent_form.clone();
                                             let rows = game_types.into_iter().map(|s| {
                                                 let form = recent_form
@@ -1141,5 +1156,34 @@ mod tests {
         assert_eq!(hists.len(), 1);
         assert_eq!(hists[0].games, 1);
         assert_eq!(hists[0].wins, 1);
+    }
+
+    fn gt_stats(name: &str, games: i64) -> GameTypeStats {
+        GameTypeStats {
+            game_type_name: name.to_string(),
+            games,
+            wins: 0,
+            win_percent: 0.0,
+            avg_place_percentile: None,
+            rating: None,
+            peak_rating: None,
+        }
+    }
+
+    #[test]
+    fn game_types_for_profile_drops_zero_game_types_and_sorts_by_games_desc() {
+        let out = game_types_for_profile(vec![
+            gt_stats("Camel Up", 0),
+            gt_stats("Zebra Game", 3),
+            gt_stats("Duel", 7),
+            gt_stats("Catan", 3),
+        ]);
+        let names: Vec<&str> = out.iter().map(|s| s.game_type_name.as_str()).collect();
+        assert_eq!(names, vec!["Duel", "Catan", "Zebra Game"]);
+    }
+
+    #[test]
+    fn game_types_for_profile_empty_when_all_zero_games() {
+        assert!(game_types_for_profile(vec![gt_stats("Camel Up", 0)]).is_empty());
     }
 }

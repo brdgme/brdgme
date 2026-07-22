@@ -36,7 +36,10 @@ pub fn ColorChip(#[prop(into)] color: Signal<String>) -> impl IntoView {
     }
 }
 
-/// A "favourite colour" ribbon bar: one 5-space background block per colour,
+/// Width in spaces of one [`ColorRibbon`] colour segment.
+const COLOR_RIBBON_SEGMENT: &str = "        ";
+
+/// A "favourite colour" ribbon bar: one 8-space background block per colour,
 /// packed with no gap between blocks (military-ribbon style). Reuses the
 /// `mk-bg-*` markup classes so it previews in the live theme, mirroring the
 /// theme picker's swatch blocks.
@@ -48,9 +51,25 @@ pub fn ColorRibbon(colors: Vec<String>) -> impl IntoView {
                 .into_iter()
                 .map(|c| {
                     let slot = crate::theme::slot_from_color_name(&c);
-                    view! { <span class=format!("mk-bg-{slot}")>"     "</span> }
+                    view! { <span class=format!("mk-bg-{slot}")>{COLOR_RIBBON_SEGMENT}</span> }
                 })
                 .collect_view()}
         </span>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn color_ribbon_segment_is_eight_spaces() {
+        assert_eq!(COLOR_RIBBON_SEGMENT.len(), 8);
+        assert!(COLOR_RIBBON_SEGMENT.chars().all(|c| c == ' '));
+    }
+
+    #[test]
+    fn color_ribbon_three_segments_are_twenty_four_spaces() {
+        assert_eq!(COLOR_RIBBON_SEGMENT.len() * 3, 24);
     }
 }
