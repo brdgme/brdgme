@@ -2237,6 +2237,67 @@ pub async fn is_game_visible_to_user(
     .await?)
 }
 
+/// Picks the game to show on the logged-out index: an active (non-finished)
+/// game whose human players are ALL game_visibility = 'public', ranked by the
+/// count of recently-active human players, then most-recent update. Bots
+/// (user_id IS NULL) are dropped by the JOIN and never affect visibility or
+/// the active count. Shares the all-public predicate with
+/// `is_game_publicly_visible` so selection and render cannot drift (Unit B 2c).
+#[cfg(feature = "ssr")]
+pub async fn find_public_index_game_id(pool: &PgPool) -> Result<Option<Uuid>> {
+    let window =
+        time::Duration::try_from(RECENTLY_ACTIVE_WINDOW).unwrap_or(time::Duration::minutes(10));
+    let cutoff = time::OffsetDateTime::now_utc() - window;
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT g.id
+         FROM games g
+         WHERE g.is_finished = false
+           AND NOT EXISTS (
+             SELECT 1 FROM game_players gp
+             JOIN users u ON u.id = gp.user_id
+             WHERE gp.game_id = g.id
+               AND u.game_visibility <> 'public')
+         ORDER BY (
+           SELECT COUNT(*)
+           FROM game_players gp2
+           JOIN users u2 ON u2.id = gp2.user_id
+           WHERE gp2.game_id = g.id
+             AND u2.last_active_at > $1
+         ) DESC, g.updated_at DESC, g.id
+         LIMIT 1",
+    )
+    .bind(cutoff)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
+/// The most recent `limit` public log lines for a game, returned in
+/// chronological order (oldest first). For the logged-out index's "3 recent
+/// log lines" - spectators only ever see `is_public = true` lines (the
+/// player-scoped `get_game_logs` also surfaces targeted private lines, which
+/// must NOT appear on the public index).
+#[cfg(feature = "ssr")]
+pub async fn find_recent_game_log_lines(
+    pool: &PgPool,
+    game_id: Uuid,
+    limit: i64,
+) -> Result<Vec<crate::models::game::GameLog>> {
+    let mut logs: Vec<crate::models::game::GameLog> = sqlx::query_as(
+        "SELECT id, created_at, updated_at, game_id, body, is_public, logged_at
+         FROM game_logs
+         WHERE game_id = $1 AND is_public = true
+         ORDER BY logged_at DESC
+         LIMIT $2",
+    )
+    .bind(game_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    logs.reverse();
+    Ok(logs)
+}
+
 /// D4 + D7 enforcement choke point. Call after the roster is known but
 /// before players are attached: create_new_game and restart_game today,
 /// #24's create_proposal and any future matchmaking tomorrow.
@@ -3505,6 +3566,173 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    // --- Unit B2 public index game selection ---
+
+    async fn set_recently_active(pool: &PgPool, user_id: Uuid) {
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(user_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn set_stale(pool: &PgPool, user_id: Uuid) {
+        sqlx::query("UPDATE users SET last_active_at = NOW() - INTERVAL '1 hour' WHERE id = $1")
+            .bind(user_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn finish_game(pool: &PgPool, game_id: Uuid) {
+        sqlx::query("UPDATE games SET is_finished = true WHERE id = $1")
+            .bind(game_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[sqlx::test]
+    async fn find_public_index_game_id_picks_most_active_players(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let cara = make_user(&pool, "cara").await;
+        let dan = make_user(&pool, "dan").await;
+
+        let game_a = make_game_with_players(&pool, gv, alice.id, &[bob.id], 0, &[0]).await;
+        set_recently_active(&pool, alice.id).await;
+        set_recently_active(&pool, bob.id).await;
+
+        let _game_b = make_game_with_players(&pool, gv, cara.id, &[dan.id], 0, &[0]).await;
+        set_recently_active(&pool, cara.id).await;
+        set_stale(&pool, dan.id).await;
+
+        assert_eq!(
+            find_public_index_game_id(&pool).await.unwrap(),
+            Some(game_a.id)
+        );
+    }
+
+    #[sqlx::test]
+    async fn find_public_index_game_id_excludes_non_public_players(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let cara = make_user(&pool, "cara").await;
+
+        let _game_a = make_game_with_players(&pool, gv, alice.id, &[bob.id], 0, &[0]).await;
+        set_recently_active(&pool, alice.id).await;
+        set_recently_active(&pool, bob.id).await;
+        set_game_visibility(&pool, bob.id, "friends").await.unwrap();
+
+        let game_b = make_game_with_players(&pool, gv, cara.id, &[], 0, &[0]).await;
+        set_recently_active(&pool, cara.id).await;
+
+        assert_eq!(
+            find_public_index_game_id(&pool).await.unwrap(),
+            Some(game_b.id)
+        );
+    }
+
+    #[sqlx::test]
+    async fn find_public_index_game_id_excludes_private_player(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+
+        let _game = make_game_with_players(&pool, gv, alice.id, &[bob.id], 0, &[0]).await;
+        set_recently_active(&pool, alice.id).await;
+        set_recently_active(&pool, bob.id).await;
+        set_game_visibility(&pool, bob.id, "private").await.unwrap();
+
+        assert_eq!(find_public_index_game_id(&pool).await.unwrap(), None);
+    }
+
+    #[sqlx::test]
+    async fn find_public_index_game_id_excludes_finished_games(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+
+        let game = make_game_with_players(&pool, gv, alice.id, &[bob.id], 0, &[0]).await;
+        set_recently_active(&pool, alice.id).await;
+        set_recently_active(&pool, bob.id).await;
+        finish_game(&pool, game.id).await;
+
+        assert_eq!(find_public_index_game_id(&pool).await.unwrap(), None);
+    }
+
+    #[sqlx::test]
+    async fn find_public_index_game_id_none_when_no_games(pool: PgPool) {
+        assert_eq!(find_public_index_game_id(&pool).await.unwrap(), None);
+    }
+
+    #[sqlx::test]
+    async fn find_public_index_game_id_tiebreaks_by_updated_at(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+
+        let game_a = make_game_with_players(&pool, gv, alice.id, &[], 0, &[0]).await;
+        let game_b = make_game_with_players(&pool, gv, bob.id, &[], 0, &[0]).await;
+
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE games SET updated_at = NOW() - INTERVAL '1 hour' WHERE id = $1")
+            .bind(game_a.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE games SET updated_at = NOW() - INTERVAL '2 hours' WHERE id = $1")
+            .bind(game_b.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            find_public_index_game_id(&pool).await.unwrap(),
+            Some(game_a.id)
+        );
+    }
+
+    #[sqlx::test]
+    async fn find_recent_game_log_lines_returns_last_n_in_order(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let alice = make_user(&pool, "alice").await;
+        let game = make_game_with_players(&pool, gv, alice.id, &[], 0, &[0]).await;
+
+        for (i, body) in ["line1", "line2", "line3", "line4"].iter().enumerate() {
+            let minutes = 4 - i as i32;
+            sqlx::query(
+                "INSERT INTO game_logs (game_id, body, is_public, logged_at) \
+                 VALUES ($1, $2, true, NOW() - ($3 || ' minutes')::interval)",
+            )
+            .bind(game.id)
+            .bind(*body)
+            .bind(minutes.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO game_logs (game_id, body, is_public, logged_at) \
+             VALUES ($1, $2, false, NOW())",
+        )
+        .bind(game.id)
+        .bind("secret")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let logs = find_recent_game_log_lines(&pool, game.id, 3).await.unwrap();
+        let bodies: Vec<&str> = logs.iter().map(|l| l.body.as_str()).collect();
+        assert_eq!(logs.len(), 3);
+        assert_eq!(bodies, ["line2", "line3", "line4"]);
     }
 
     // --- #30 opponent suggestions (D6) ---
