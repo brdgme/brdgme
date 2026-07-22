@@ -231,8 +231,45 @@ pub(crate) async fn request_confirmation_code(
     Ok(generic_success)
 }
 
+#[cfg(feature = "ssr")]
+async fn verify_turnstile_token(secret: &str, token: &str) -> bool {
+    if secret.is_empty() || token.is_empty() {
+        return secret.is_empty();
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
+        .form(&[("secret", secret), ("response", token)])
+        .send()
+        .await;
+    match resp {
+        Ok(r) => r
+            .json::<serde_json::Value>()
+            .await
+            .map(|v| v["success"].as_bool().unwrap_or(false))
+            .unwrap_or(false),
+        Err(e) => {
+            tracing::warn!("Turnstile verification failed (fail-open): {e}");
+            true
+        }
+    }
+}
+
+#[server(GetTurnstileSiteKey, "/api")]
+pub async fn get_turnstile_site_key() -> Result<String, ServerFnError> {
+    Ok(std::env::var("TURNSTILE_SITE_KEY").unwrap_or_default())
+}
+
 #[server(Login, "/api")]
-pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
+pub async fn login(email: String, turnstile_token: String) -> Result<LoginResponse, ServerFnError> {
+    let secret = std::env::var("TURNSTILE_SECRET_KEY").unwrap_or_default();
+    if !verify_turnstile_token(&secret, &turnstile_token).await {
+        return Ok(LoginResponse {
+            success: false,
+            message: "CAPTCHA verification failed. Please try again.".to_string(),
+        });
+    }
+
     if email.is_empty() || !email.contains('@') {
         return Ok(LoginResponse {
             success: false,
@@ -240,7 +277,36 @@ pub async fn login(email: String) -> Result<LoginResponse, ServerFnError> {
         });
     }
 
+    if email
+        .split('@')
+        .next()
+        .is_some_and(|local| local.contains('+'))
+    {
+        return Ok(LoginResponse {
+            success: false,
+            message: "Plus-addressing is not supported".to_string(),
+        });
+    }
+
     let pool = expect_context::<PgPool>();
+
+    let domain = email.rsplit('@').next().unwrap_or("").to_lowercase();
+    if super::blocked_domains::is_blocked(&domain) {
+        let is_existing_verified: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM user_emails WHERE email = $1 AND verified_at IS NOT NULL)",
+        )
+        .bind(&email)
+        .fetch_one(&pool)
+        .await
+        .map_err(internal("login: check verified"))?;
+        if !is_existing_verified {
+            return Ok(LoginResponse {
+                success: false,
+                message: "This email domain is not supported".to_string(),
+            });
+        }
+    }
+
     let resend = expect_context::<Option<resend_rs::Resend>>();
     request_confirmation_code(&pool, resend.as_ref(), &email).await
 }
@@ -724,6 +790,17 @@ pub async fn add_email_address(email: String) -> Result<(), ServerFnError> {
     if email.is_empty() || !email.contains('@') {
         return Err(ServerFnError::new("Invalid email address"));
     }
+    if email
+        .split('@')
+        .next()
+        .is_some_and(|local| local.contains('+'))
+    {
+        return Err(ServerFnError::new("Plus-addressing is not supported"));
+    }
+    let domain = email.rsplit('@').next().unwrap_or("").to_lowercase();
+    if super::blocked_domains::is_blocked(&domain) {
+        return Err(ServerFnError::new("This email domain is not supported"));
+    }
     let pool = expect_context::<PgPool>();
     let user = get_current_user()
         .await?
@@ -911,7 +988,7 @@ mod tests {
 
     #[sqlx::test]
     async fn login_rejects_invalid_email(pool: PgPool) {
-        let resp = with_pool_context(&pool, || login("not-an-email".to_string()))
+        let resp = with_pool_context(&pool, || login("not-an-email".to_string(), String::new()))
             .await
             .unwrap();
         assert!(!resp.success);
@@ -920,7 +997,7 @@ mod tests {
     #[sqlx::test]
     async fn login_creates_confirmation_but_no_user(pool: PgPool) {
         let email = "new-user@example.com";
-        let resp = with_pool_context(&pool, || login(email.to_string()))
+        let resp = with_pool_context(&pool, || login(email.to_string(), String::new()))
             .await
             .unwrap();
         assert!(resp.success);
@@ -935,12 +1012,12 @@ mod tests {
     #[sqlx::test]
     async fn login_cooldown_suppresses_resend_with_identical_response(pool: PgPool) {
         let email = "cooldown@example.com";
-        let first = with_pool_context(&pool, || login(email.to_string()))
+        let first = with_pool_context(&pool, || login(email.to_string(), String::new()))
             .await
             .unwrap();
         let code = get_confirmation(&pool, email).await.unwrap().code;
 
-        let second = with_pool_context(&pool, || login(email.to_string()))
+        let second = with_pool_context(&pool, || login(email.to_string(), String::new()))
             .await
             .unwrap();
         assert_eq!(first.success, second.success);
@@ -967,7 +1044,7 @@ mod tests {
         )
         .await;
 
-        let resp = with_pool_context(&pool, || login(email.to_string()))
+        let resp = with_pool_context(&pool, || login(email.to_string(), String::new()))
             .await
             .unwrap();
         assert!(resp.success, "cap must be indistinguishable from success");
@@ -994,7 +1071,7 @@ mod tests {
         }
 
         let email = "legit@example.com";
-        let resp = with_pool_context(&pool, || login(email.to_string()))
+        let resp = with_pool_context(&pool, || login(email.to_string(), String::new()))
             .await
             .unwrap();
         assert!(!resp.success, "global cap is an honest refusal");
@@ -1019,7 +1096,7 @@ mod tests {
         )
         .await;
 
-        let resp = with_pool_context(&pool, || login(email.to_string()))
+        let resp = with_pool_context(&pool, || login(email.to_string(), String::new()))
             .await
             .unwrap();
         assert!(resp.success);
@@ -1046,9 +1123,11 @@ mod tests {
         )
         .await;
 
-        with_pool_context(&pool, || login("fresh@example.com".to_string()))
-            .await
-            .unwrap();
+        with_pool_context(&pool, || {
+            login("fresh@example.com".to_string(), String::new())
+        })
+        .await
+        .unwrap();
 
         assert!(
             get_confirmation(&pool, "stale@example.com").await.is_none(),
@@ -1078,7 +1157,8 @@ mod tests {
         )
         .await;
 
-        let calls = (0..5).map(|_| with_pool_context(&pool, || login(email.to_string())));
+        let calls =
+            (0..5).map(|_| with_pool_context(&pool, || login(email.to_string(), String::new())));
         let results = futures_util::future::join_all(calls).await;
         for r in results {
             assert!(
@@ -1116,8 +1196,11 @@ mod tests {
         // must be honestly refused. Without a lock spanning all rows (not
         // just one email's), concurrent requests across different emails can
         // each read the same pre-upsert SUM and all pass.
-        let calls = (0..6)
-            .map(|i| with_pool_context(&pool, move || login(format!("legit-{i}@example.com"))));
+        let calls = (0..6).map(|i| {
+            with_pool_context(&pool, move || {
+                login(format!("legit-{i}@example.com"), String::new())
+            })
+        });
         let results = futures_util::future::join_all(calls).await;
 
         let refused = results
@@ -1269,7 +1352,7 @@ mod tests {
     #[sqlx::test]
     async fn confirm_login_creates_user_exactly_once(pool: PgPool) {
         let email = "brand-new@example.com";
-        with_pool_context(&pool, || login(email.to_string()))
+        with_pool_context(&pool, || login(email.to_string(), String::new()))
             .await
             .unwrap();
         assert_eq!(user_count(&pool).await, 0);
