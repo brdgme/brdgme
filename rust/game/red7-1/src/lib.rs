@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{Gamer, Log, Status};
+use brdgme_game::{Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use crate::card::{Card, Suit, full_deck, leader, points, sort_by_suit, suit_rule};
@@ -476,7 +476,13 @@ impl Gamer for Game {
                 value: Command::Discard { card },
                 ..
             }) => {
-                let logs = self.discard(player, card)?;
+                let mut logs = self.discard(player, card)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.num_players)
+                        .map(|p| (p, self.player_points(p) as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -488,7 +494,13 @@ impl Gamer for Game {
                 value: Command::Done,
                 ..
             }) => {
-                let logs = self.done(player)?;
+                let mut logs = self.done(player)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.num_players)
+                        .map(|p| (p, self.player_points(p) as i32))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,

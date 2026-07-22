@@ -7,7 +7,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use crate::board::{Board, Loc, Tile};
@@ -283,7 +283,15 @@ able to win the game.",
             Command::Play(loc) => self.handle_play_command(player, &loc),
             Command::Found(corp) => self.handle_found_command(player, corp),
             Command::Buy(n, corp) => self.handle_buy_command(player, n, corp),
-            Command::Done => self.handle_done_command(player).map(|l| (l, false)),
+            Command::Done => self.handle_done_command(player).map(|mut l| {
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players.len())
+                        .map(|p| (p, self.player_score(p) as i32))
+                        .collect();
+                    l.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                (l, false)
+            }),
             Command::Merge(corp, into) => self.handle_merge_command(player, corp, into),
             Command::Sell(n) => self.handle_sell_command(player, n),
             Command::Trade(n) => self.handle_trade_command(player, n),

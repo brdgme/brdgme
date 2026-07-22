@@ -17,7 +17,7 @@ use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use command::Command;
@@ -479,7 +479,13 @@ impl Gamer for Game {
                 remaining,
                 ..
             }) => {
-                let logs = self.play(player as i32, piece, loc, dir)?;
+                let mut logs = self.play(player as i32, piece, loc, dir)?;
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, -self.remaining_piece_size(p as i32)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: true,

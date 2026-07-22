@@ -5,7 +5,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -225,7 +225,10 @@ impl Gamer for Game {
                 value: Command::Play(loc),
                 ..
             }) => {
-                let logs = self.play(player, loc)?;
+                let mut logs = self.play(player, loc)?;
+                if self.is_finished() {
+                    logs.push(placings_log(&self.placings(), None));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: true,
@@ -550,7 +553,7 @@ mod tests {
 
         let response = game.command(0, "play a then", &players()).unwrap();
         assert_eq!(response.remaining_input, " then");
-        assert!(response.logs.is_empty());
+        assert!(!response.logs.is_empty());
         assert!(response.can_undo);
     }
 
@@ -567,7 +570,7 @@ mod tests {
 
         assert!(game.is_finished());
         assert_eq!(game.current_player, 1);
-        assert!(response.logs.is_empty());
+        assert!(!response.logs.is_empty());
         assert!(response.can_undo);
         assert_eq!(response.remaining_input, " next");
     }
@@ -592,6 +595,7 @@ mod tests {
                 "{{b}}o{{/b}}{{fg grey}}|{{/fg}}",
                 "{{fg blue}}h{{/fg}}{{fg grey}}|{{/fg}}",
                 "{{b}}x{{/b}}",
+                "\n{{player 0}} is X, {{player 1}} is O",
             )
         );
     }

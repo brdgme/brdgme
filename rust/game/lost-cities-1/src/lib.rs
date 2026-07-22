@@ -9,7 +9,7 @@ use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
 use brdgme_game::game::gen_placings;
 use brdgme_game::rng::GameRng;
-use brdgme_game::{CommandResponse, Gamer, Log, Stat, Status};
+use brdgme_game::{CommandResponse, Gamer, Log, Stat, Status, placings_log};
 use brdgme_markup::Node as N;
 
 use std::collections::HashMap;
@@ -610,10 +610,17 @@ impl Gamer for Game {
                 value: Command::Draw,
                 remaining,
                 ..
-            }) => self.draw(player).map(|l| CommandResponse {
-                logs: l,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
+            }) => self.draw(player).map(|mut l| {
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> =
+                        (0..2).map(|p| (p, self.player_score(p) as i32)).collect();
+                    l.push(placings_log(&self.placings(), Some(&scores)));
+                }
+                CommandResponse {
+                    logs: l,
+                    can_undo: false,
+                    remaining_input: remaining.to_string(),
+                }
             }),
             Err(e) => Err(GameError::invalid_input(e.to_string())),
         }
