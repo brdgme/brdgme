@@ -640,6 +640,19 @@ pub async fn find_active_game_summaries(
     Ok(summaries)
 }
 
+/// The predecessor of a game is the older game that was restarted into it:
+/// `games.restarted_game_id` points old->new, so the new game's predecessor is
+/// the row whose `restarted_game_id` equals this game's id. At most one old
+/// game points at a given new game.
+#[cfg(feature = "ssr")]
+pub async fn find_predecessor_game_id(pool: &PgPool, game_id: Uuid) -> Result<Option<Uuid>> {
+    let id = sqlx::query_scalar::<_, Uuid>("SELECT id FROM games WHERE restarted_game_id = $1")
+        .bind(game_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(id)
+}
+
 #[cfg(feature = "ssr")]
 pub struct CreateGameOpts<'a> {
     pub game_version_id: Uuid,
@@ -4763,6 +4776,81 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(restarted, None);
+    }
+
+    #[sqlx::test]
+    async fn find_predecessor_game_id_returns_game_pointing_at_target(pool: PgPool) {
+        let user = make_user(&pool, "restarter").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let old_game = make_game_with_players(&pool, game_version_id, user.id, &[], 0, &[]).await;
+        let new_game = make_game_with_players(&pool, game_version_id, user.id, &[], 0, &[0]).await;
+
+        assert_eq!(
+            find_predecessor_game_id(&pool, new_game.id).await.unwrap(),
+            None
+        );
+
+        sqlx::query!(
+            "UPDATE games SET restarted_game_id = $1 WHERE id = $2",
+            new_game.id,
+            old_game.id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            find_predecessor_game_id(&pool, new_game.id).await.unwrap(),
+            Some(old_game.id)
+        );
+        assert_eq!(
+            find_predecessor_game_id(&pool, old_game.id).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            find_predecessor_game_id(&pool, Uuid::new_v4())
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[sqlx::test]
+    async fn finished_game_exposes_per_player_placings(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game = create_game_with_users(
+            &pool,
+            CreateGameOpts {
+                game_version_id,
+                whose_turn: &[],
+                eliminated: &[],
+                placings: &[2, 1],
+                points: &[],
+                creator_id: creator.id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[BotSlot {
+                    name: "Bot 0".to_string(),
+                    bot_name: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "initial_state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(ge.game.is_finished);
+        let by_pos: std::collections::HashMap<i32, Option<i32>> = ge
+            .game_players
+            .iter()
+            .map(|p| (p.game_player.position, p.game_player.place))
+            .collect();
+        assert_eq!(by_pos[&0], Some(2));
+        assert_eq!(by_pos[&1], Some(1));
     }
 
     #[sqlx::test]

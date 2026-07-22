@@ -40,6 +40,8 @@ pub struct GameViewData {
     pub is_finished: bool,
     pub can_undo: bool,
     pub restarted_game_id: Option<Uuid>,
+    /// The game this one was restarted from (reverse of `restarted_game_id`).
+    pub previous_game_id: Option<Uuid>,
     pub is_2player: bool,
     pub players: Vec<PlayerViewData>,
     pub command_spec: Option<brdgme_game::command::Spec>,
@@ -66,6 +68,9 @@ pub struct PlayerViewData {
     /// always `None` for unrated/bot games).
     pub rating_change: Option<i32>,
     pub points: f32,
+    /// 1-based placing for finished games (standard-competition ties); `None`
+    /// otherwise.
+    pub place: Option<i32>,
     pub is_turn: bool,
     pub is_bot: bool,
     /// Bot name (e.g. "medium"); `None` for humans. Drives the
@@ -208,6 +213,10 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         }
     }
 
+    let previous_game_id = crate::db::find_predecessor_game_id(&pool, game_id)
+        .await
+        .map_err(internal("get_game_details: predecessor"))?;
+
     Ok(GameViewData {
         id: ge.game.id,
         version_id: ge.game_version.id,
@@ -220,6 +229,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
             .and_then(|p| p.game_player.undo_game_state.as_ref())
             .is_some(),
         restarted_game_id: ge.game.restarted_game_id,
+        previous_game_id,
         is_2player: ge.game_players.len() == 2,
         players: ge
             .game_players
@@ -230,6 +240,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 rating: p.game_type_user.rating,
                 rating_change: p.game_player.rating_change,
                 points: p.game_player.points.unwrap_or(0.0),
+                place: p.game_player.place,
                 is_turn: p.game_player.is_turn,
                 is_bot: p.game_bot.is_some(),
                 bot_name: p.game_bot.as_ref().map(|b| b.bot_name.clone()),

@@ -30,6 +30,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let is_finished = data.is_finished;
     let is_2player = data.is_2player;
     let restarted_game_id = data.restarted_game_id;
+    let previous_game_id = data.previous_game_id;
     let can_restart = is_finished && restarted_game_id.is_none();
 
     let has_bot_waiting = data.players.iter().any(|p| p.is_bot && p.is_turn);
@@ -101,7 +102,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                     {
                         let viewer_user_id = data.viewer_user_id;
                         data.players.into_iter().map(|p| view! {
-                            <PlayerInfo player=p viewer_user_id=viewer_user_id />
+                            <PlayerInfo player=p viewer_user_id=viewer_user_id is_finished=is_finished />
                         }).collect_view()
                     }
                     <div class="game-actions">
@@ -142,6 +143,13 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                             <div>
                                 <a href=move || restarted_game_id.map(|id| format!("/games/{}", id)).unwrap_or_default()>
                                     "Go to new game"
+                                </a>
+                            </div>
+                        </Show>
+                        <Show when=move || previous_game_id.is_some()>
+                            <div>
+                                <a href=move || previous_game_id.map(|id| format!("/games/{}", id)).unwrap_or_default()>
+                                    "Previous game"
                                 </a>
                             </div>
                         </Show>
@@ -191,7 +199,11 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
 }
 
 #[component]
-fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl IntoView {
+fn PlayerInfo(
+    player: PlayerViewData,
+    viewer_user_id: Option<Uuid>,
+    is_finished: bool,
+) -> impl IntoView {
     // Legacy presentation: "Rating: 1216 (<icon>16)" - icon U+2197 (up,
     // green) / U+2198 (down, red) / "-" (zero, blue), number always the
     // absolute value. Only rendered once a rating change exists.
@@ -213,6 +225,7 @@ fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl Into
         }
     });
     let form = player.form;
+    let place = player.place;
     view! {
         <div class="player-info">
             <div class:brdgme-is-turn=player.is_turn>
@@ -235,9 +248,15 @@ fn PlayerInfo(player: PlayerViewData, viewer_user_id: Option<Uuid>) -> impl Into
                     </div>
                 })}
                 <div>"Points: " {player.points}</div>
-                {(!player.is_bot && !form.is_empty()).then(|| view! {
-                    <div>"Form: " <crate::stats::viz::FormStrip results=form/></div>
-                })}
+                {if is_finished {
+                    place.map(|place| view! {
+                        <div>"Place: " {place}</div>
+                    }.into_any())
+                } else {
+                    (!player.is_bot && !form.is_empty()).then(|| view! {
+                        <div>"Form: " <crate::stats::viz::FormStrip results=form/></div>
+                    }.into_any())
+                }}
                 {player.user_id
                     .filter(|uid| player.can_add_friend && viewer_user_id.is_some() && Some(*uid) != viewer_user_id)
                     .map(|uid| {
