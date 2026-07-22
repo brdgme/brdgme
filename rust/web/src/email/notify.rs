@@ -107,11 +107,6 @@ pub async fn render_board_and_you_can(
     }
 }
 
-fn now_utc() -> time::PrimitiveDateTime {
-    let t = time::OffsetDateTime::now_utc();
-    time::PrimitiveDateTime::new(t.date(), t.time())
-}
-
 enum NotifyKind {
     Turn,
     Eliminated,
@@ -281,11 +276,10 @@ async fn send_one(
         SendMode::BypassSuppression => {
             recipient.email.is_some() && !recipient.is_bot && recipient.turn_emails_enabled
         }
-        SendMode::Normal => crate::email::outbound::should_email_recipient(
-            &recipient,
-            now_utc(),
-            crate::email::outbound::suppress_window(),
-        ),
+        SendMode::Normal => {
+            crate::email::outbound::should_email_recipient(&recipient)
+                && !crate::email::outbound::suppress_for_web_presence(pool, recipient.user_id).await
+        }
     };
     if !should_send {
         return;
@@ -574,5 +568,112 @@ mod tests {
             None,
         )
         .await;
+    }
+
+    /// Builds one game with `n` human players, each with a verified primary
+    /// address and `turn_emails_enabled`, returning the game id and each
+    /// `(user_id, game_player_id)`.
+    async fn seed_game_with_emailable_players(
+        pool: &sqlx::PgPool,
+        n: usize,
+    ) -> (uuid::Uuid, Vec<(uuid::Uuid, uuid::Uuid)>) {
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Notify {}", uuid::Uuid::new_v4()))
+        .bind(vec![2, 3, 4])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_version_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://127.0.0.1:1', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO games (game_version_id, is_finished, game_state)
+             VALUES ($1, false, 'state') RETURNING id",
+        )
+        .bind(game_version_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let colors = ["Green", "Red", "Blue", "Yellow", "Purple"];
+        let mut players = Vec::new();
+        for i in 0..n {
+            let user_id: uuid::Uuid = sqlx::query_scalar(
+                "INSERT INTO users (name, pref_colors, turn_emails_enabled)
+                 VALUES ($1, $2, true) RETURNING id",
+            )
+            .bind(format!("u-{}", uuid::Uuid::new_v4()))
+            .bind(Vec::<String>::new())
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+                 VALUES ($1, $2, true, NOW())",
+            )
+            .bind(user_id)
+            .bind(format!("u-{}@example.com", uuid::Uuid::new_v4()))
+            .execute(pool)
+            .await
+            .unwrap();
+            let gp_id: uuid::Uuid = sqlx::query_scalar(
+                "INSERT INTO game_players
+                     (game_id, user_id, position, color, has_accepted, is_turn,
+                      is_turn_at, last_turn_at, is_eliminated, is_read)
+                 VALUES ($1, $2, $3, $4, true, false, NOW(), NOW(), false, false)
+                 RETURNING id",
+            )
+            .bind(game_id)
+            .bind(user_id)
+            .bind(i as i32)
+            .bind(colors[i])
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            players.push((user_id, gp_id));
+        }
+        (game_id, players)
+    }
+
+    async fn email_token(pool: &sqlx::PgPool, game_player_id: uuid::Uuid) -> Option<String> {
+        sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
+            .bind(game_player_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    // Per-recipient web-presence suppression: in the same game, the active
+    // player's automated turn email is skipped (no reply token minted) while the
+    // inactive player's still goes out.
+    #[sqlx::test]
+    async fn turn_notification_suppressed_per_recipient_by_presence(pool: sqlx::PgPool) {
+        let (game_id, players) = seed_game_with_emailable_players(&pool, 2).await;
+        let (active_user, active_gp) = players[0];
+        let (_inactive_user, inactive_gp) = players[1];
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(active_user)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let http = reqwest::Client::new();
+        send_turn_notification(None, &pool, &http, game_id, active_gp).await;
+        send_turn_notification(None, &pool, &http, game_id, inactive_gp).await;
+
+        assert!(
+            email_token(&pool, active_gp).await.is_none(),
+            "active player's automated turn email should be suppressed"
+        );
+        assert!(
+            email_token(&pool, inactive_gp).await.is_some(),
+            "inactive player's automated turn email should still send"
+        );
     }
 }

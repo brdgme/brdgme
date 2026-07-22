@@ -160,6 +160,14 @@ async fn fetch_invite_recipient(
     .await
 }
 
+/// Whether an automated invite email may go to this recipient: has a verified
+/// primary address, has invite emails enabled, and is NOT suppressed by web
+/// presence (the caller resolves presence via `suppress_for_web_presence`).
+#[cfg(feature = "ssr")]
+fn invite_recipient_should_send(recip: &InviteRecipient, suppressed_by_presence: bool) -> bool {
+    recip.email.is_some() && recip.invite_emails_enabled && !suppressed_by_presence
+}
+
 #[cfg(feature = "ssr")]
 async fn proposal_game_type_name(pool: &PgPool, proposal: &Proposal) -> String {
     let Ok(Some(gv)) = crate::db::find_game_version(pool, proposal.game_version_id).await else {
@@ -181,13 +189,13 @@ impl InviteMailer for RealInviteMailer {
             let Ok(Some(recip)) = fetch_invite_recipient(&pool, invitee_user_id).await else {
                 return;
             };
+            let suppressed =
+                crate::email::outbound::suppress_for_web_presence(&pool, Some(invitee_user_id))
+                    .await;
+            if !invite_recipient_should_send(&recip, suppressed) {
+                return;
+            }
             let Some(email) = recip.email else { return };
-            if !recip.invite_emails_enabled {
-                return;
-            }
-            if crate::email::outbound::is_recently_active(&pool, invitee_user_id).await {
-                return;
-            }
             let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
                 return;
             };
@@ -281,13 +289,12 @@ impl InviteMailer for RealInviteMailer {
                 let Ok(Some(recip)) = fetch_invite_recipient(&pool, user_id).await else {
                     continue;
                 };
+                let suppressed =
+                    crate::email::outbound::suppress_for_web_presence(&pool, Some(user_id)).await;
+                if !invite_recipient_should_send(&recip, suppressed) {
+                    continue;
+                }
                 let Some(email) = recip.email else { continue };
-                if !recip.invite_emails_enabled {
-                    continue;
-                }
-                if crate::email::outbound::is_recently_active(&pool, user_id).await {
-                    continue;
-                }
                 let content = crate::email::render::EmailContent {
                     subject: format!("{game_type_name} invite"),
                     header: Some("The game invite was cancelled.".into()),
@@ -327,13 +334,12 @@ impl InviteMailer for RealInviteMailer {
                 let Ok(Some(recip)) = fetch_invite_recipient(&pool, user_id).await else {
                     continue;
                 };
+                let suppressed =
+                    crate::email::outbound::suppress_for_web_presence(&pool, Some(user_id)).await;
+                if !invite_recipient_should_send(&recip, suppressed) {
+                    continue;
+                }
                 let Some(email) = recip.email else { continue };
-                if !recip.invite_emails_enabled {
-                    continue;
-                }
-                if crate::email::outbound::is_recently_active(&pool, user_id).await {
-                    continue;
-                }
                 let content = crate::email::render::EmailContent {
                     subject: format!("{game_type_name} invite"),
                     header: Some("The game has started!".into()),
@@ -1890,5 +1896,94 @@ fn ProposalDetail(
                 {move || cancel_action.value().get().and_then(|r| r.err()).map(|e| e.to_string()).unwrap_or_default()}
             </div>
         </Show>
+    }
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::*;
+
+    async fn seed_invite_user(pool: &PgPool, invite_emails_enabled: bool) -> Uuid {
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, invite_emails_enabled)
+             VALUES ($1, $2, $3) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .bind(invite_emails_enabled)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind(format!("u-{}@example.com", Uuid::new_v4()))
+        .execute(pool)
+        .await
+        .unwrap();
+        user_id
+    }
+
+    /// The exact gate the invite mailers apply: recipient resolution + the
+    /// per-recipient web-presence check.
+    async fn invite_gate(pool: &PgPool, user_id: Uuid) -> bool {
+        let recip = fetch_invite_recipient(pool, user_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let suppressed =
+            crate::email::outbound::suppress_for_web_presence(pool, Some(user_id)).await;
+        invite_recipient_should_send(&recip, suppressed)
+    }
+
+    #[sqlx::test]
+    async fn invite_notification_suppressed_by_recipient_presence(pool: PgPool) {
+        let active = seed_invite_user(&pool, true).await;
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(active)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            !invite_gate(&pool, active).await,
+            "invite email should be suppressed while the recipient is active on the web"
+        );
+
+        let inactive = seed_invite_user(&pool, true).await;
+        sqlx::query(
+            "UPDATE users SET last_active_at = NOW() - interval '11 minutes' WHERE id = $1",
+        )
+        .bind(inactive)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            invite_gate(&pool, inactive).await,
+            "invite email should send when the recipient is not active on the web"
+        );
+    }
+
+    #[test]
+    fn invite_recipient_should_send_truth_table() {
+        let enabled = InviteRecipient {
+            email: Some("a@b.c".into()),
+            theme_slug: None,
+            invite_emails_enabled: true,
+            name: "A".into(),
+        };
+        assert!(invite_recipient_should_send(&enabled, false));
+        assert!(!invite_recipient_should_send(&enabled, true));
+        let disabled = InviteRecipient {
+            invite_emails_enabled: false,
+            ..enabled.clone()
+        };
+        assert!(!invite_recipient_should_send(&disabled, false));
+        let no_email = InviteRecipient {
+            email: None,
+            ..enabled.clone()
+        };
+        assert!(!invite_recipient_should_send(&no_email, false));
     }
 }

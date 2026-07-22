@@ -2065,4 +2065,59 @@ mod tests {
             .unwrap();
         assert_eq!(status_msg(reply), "Re-sent 2 games to your active address.");
     }
+
+    // The `bump` command is a direct response to an inbound email: it must
+    // re-send even while the user is active on the web (Forced mode bypasses
+    // presence suppression that would hold back automated turn emails).
+    #[sqlx::test]
+    async fn bump_sends_regardless_of_web_presence(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "bump-active").await;
+        let opp = seed_user(&pool, "bump-active-opp").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind(format!("bump-active-{}@example.com", uuid::Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: user_id,
+                opponent_ids: &[opp],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "initial_state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE game_players SET is_turn = (user_id = $1) WHERE game_id = $2")
+            .bind(user_id)
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reply = bump_reply(&pool, &reqwest::Client::new(), None, user_id)
+            .await
+            .unwrap();
+        assert_eq!(status_msg(reply), "Re-sent 1 game to your active address.");
+    }
 }

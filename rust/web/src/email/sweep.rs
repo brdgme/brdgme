@@ -47,11 +47,6 @@ fn reminder_header_text(player_name: &str) -> String {
     format!("Still your turn, {player_name}.")
 }
 
-fn now_utc() -> time::PrimitiveDateTime {
-    let t = time::OffsetDateTime::now_utc();
-    time::PrimitiveDateTime::new(t.date(), t.time())
-}
-
 #[derive(Debug, sqlx::FromRow)]
 struct ReminderCandidate {
     game_player_id: Uuid,
@@ -134,11 +129,10 @@ async fn send_reminder(
         _ => return false,
     };
 
-    if !crate::email::outbound::should_email_recipient(
-        &recipient,
-        now_utc(),
-        crate::email::outbound::suppress_window(),
-    ) {
+    if !crate::email::outbound::should_email_recipient(&recipient) {
+        return true;
+    }
+    if crate::email::outbound::suppress_for_web_presence(pool, recipient.user_id).await {
         return true;
     }
 
@@ -942,5 +936,111 @@ mod tests {
             std::time::Duration::from_secs(172800)
         );
         unsafe { std::env::remove_var("INVITE_AUTO_DECLINE_AFTER") };
+    }
+
+    /// One game with a single emailable, turn-emails-enabled player; returns
+    /// `(game_id, user_id, game_player_id)`.
+    async fn seed_reminder_game(pool: &PgPool) -> (Uuid, Uuid, Uuid) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Reminder {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://127.0.0.1:1', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO games (game_version_id, is_finished, game_state)
+             VALUES ($1, false, 'state') RETURNING id",
+        )
+        .bind(game_version_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, turn_emails_enabled)
+             VALUES ($1, $2, true) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind(format!("u-{}@example.com", Uuid::new_v4()))
+        .execute(pool)
+        .await
+        .unwrap();
+        let gp_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_players
+                 (game_id, user_id, position, color, has_accepted, is_turn,
+                  is_turn_at, last_turn_at, is_eliminated, is_read)
+             VALUES ($1, $2, 0, 'Green', true, true,
+                     NOW() - interval '48 hours', NOW(), false, false)
+             RETURNING id",
+        )
+        .bind(game_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        (game_id, user_id, gp_id)
+    }
+
+    // The turn reminder is skipped while the recipient is active on the web (no
+    // reply token minted => the send returned before rendering) and sent once
+    // they are no longer active.
+    #[sqlx::test]
+    async fn turn_reminder_suppressed_by_recipient_presence(pool: PgPool) {
+        let (game_id, user_id, gp_id) = seed_reminder_game(&pool).await;
+        let http = reqwest::Client::new();
+
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        send_reminder(None, &pool, &http, game_id, gp_id).await;
+        let token: Option<String> =
+            sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            token.is_none(),
+            "turn reminder should be suppressed while recipient is active on the web"
+        );
+
+        sqlx::query(
+            "UPDATE users SET last_active_at = NOW() - interval '11 minutes' WHERE id = $1",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        send_reminder(None, &pool, &http, game_id, gp_id).await;
+        let token: Option<String> =
+            sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            token.is_some(),
+            "turn reminder should send once the recipient is no longer active"
+        );
     }
 }

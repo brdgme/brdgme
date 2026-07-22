@@ -98,64 +98,16 @@ pub fn parse_duration(raw: &str) -> Option<std::time::Duration> {
     Some(std::time::Duration::from_secs(n.saturating_mul(mult)))
 }
 
-/// Default active-web suppression window (1 hour) when the env var is unset or
-/// unparseable.
-pub const DEFAULT_SUPPRESS_WINDOW: std::time::Duration = std::time::Duration::from_secs(3600);
-
-/// Resolves an optional raw duration string to a window, falling back to
-/// `DEFAULT_SUPPRESS_WINDOW` on `None` or an unparseable value.
-pub fn window_from(raw: Option<&str>) -> std::time::Duration {
-    raw.and_then(parse_duration)
-        .unwrap_or(DEFAULT_SUPPRESS_WINDOW)
-}
-
-/// The active-web suppression window, read from `EMAIL_SUPPRESS_IF_ACTIVE_WITHIN`
-/// (a human duration, see `parse_duration`); defaults to 1 hour. A user active
-/// on the web within this window is not emailed a turn notification.
-pub fn suppress_window() -> std::time::Duration {
-    window_from(
-        std::env::var("EMAIL_SUPPRESS_IF_ACTIVE_WITHIN")
-            .ok()
-            .as_deref(),
-    )
-}
-
-/// Pure predicate: was the user last seen within `window` of `now`? `None`
-/// (never active) => `false`, so we send.
-pub fn is_recently_active_at(
-    last_seen_at: Option<time::PrimitiveDateTime>,
-    now: time::PrimitiveDateTime,
-    window: std::time::Duration,
-) -> bool {
-    let Some(last_seen_at) = last_seen_at else {
-        return false;
-    };
-    let window = time::Duration::try_from(window).unwrap_or(time::Duration::hours(1));
-    (now - last_seen_at) < window
-}
-
-fn now_utc() -> time::PrimitiveDateTime {
-    let t = time::OffsetDateTime::now_utc();
-    time::PrimitiveDateTime::new(t.date(), t.time())
-}
-
-/// Whether the user was active on the web within `suppress_window()`. Fails open
-/// (returns `false` => send) on a DB error or a missing user row.
-pub async fn is_recently_active(pool: &PgPool, user_id: Uuid) -> bool {
-    let row = sqlx::query_as::<_, (Option<time::PrimitiveDateTime>,)>(
-        "SELECT last_seen_at FROM users WHERE id = $1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await;
-    let row = match row {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("Failed to read last_seen_at for {}: {}", user_id, e);
-            return false;
-        }
-    };
-    is_recently_active_at(row.and_then(|(l,)| l), now_utc(), suppress_window())
+/// Per-recipient web-presence suppression for AUTOMATED emails only: true iff
+/// the recipient has a user who pinged the server within the presence window
+/// (i.e. has a page open). Bots and addressless slots have no user (`None`) and
+/// are never suppressed here. Direct responses to inbound email never call this.
+/// Fails open (false => send) on a DB error, via `db::is_user_recently_active`.
+pub async fn suppress_for_web_presence(pool: &PgPool, user_id: Option<Uuid>) -> bool {
+    match user_id {
+        Some(uid) => crate::db::is_user_recently_active(pool, uid).await,
+        None => false,
+    }
 }
 
 /// The single send choke point for rendered game emails. Mirrors
@@ -238,15 +190,15 @@ pub async fn ensure_email_token(pool: &PgPool, game_player_id: Uuid) -> anyhow::
 }
 
 /// Everything needed to decide whether (and how) to email one game-player slot:
-/// the verified primary address, the recipient's theme, the account opt-out,
-/// last web activity (for active-web suppression), and whether the slot is a
-/// bot. Plain query, matching `db::get_user_theme`.
+/// the verified primary address, the recipient's theme, the account opt-out, the
+/// owning user (for the per-recipient web-presence check; `None` for bots), and
+/// whether the slot is a bot. Plain query, matching `db::get_user_theme`.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct EmailRecipient {
     pub email: Option<String>,
     pub theme_slug: Option<String>,
     pub turn_emails_enabled: bool,
-    pub last_seen_at: Option<time::PrimitiveDateTime>,
+    pub user_id: Option<Uuid>,
     pub is_bot: bool,
 }
 
@@ -263,7 +215,7 @@ pub async fn fetch_email_recipient(
             ue.email AS email,
             u.theme AS theme_slug,
             COALESCE(u.turn_emails_enabled, false) AS turn_emails_enabled,
-            u.last_seen_at AS last_seen_at,
+            gp.user_id AS user_id,
             (gp.game_bot_id IS NOT NULL) AS is_bot
         FROM game_players gp
         LEFT JOIN users u ON gp.user_id = u.id
@@ -276,44 +228,25 @@ pub async fn fetch_email_recipient(
     Ok(row)
 }
 
-/// Whether a turn email should go to this recipient: NOT a bot AND has a
-/// verified primary email AND `turn_emails_enabled` AND NOT recently active on
-/// the web. (`email.is_some()` is implicit - you cannot mail an addressless
-/// slot.)
-pub fn should_email_recipient(
-    recipient: &EmailRecipient,
-    now: time::PrimitiveDateTime,
-    window: std::time::Duration,
-) -> bool {
-    recipient.email.is_some()
-        && !recipient.is_bot
-        && recipient.turn_emails_enabled
-        && !is_recently_active_at(recipient.last_seen_at, now, window)
+/// Whether an automated game email may go to this recipient: NOT a bot AND has a
+/// verified primary email AND `turn_emails_enabled`. (`email.is_some()` is
+/// implicit - you cannot mail an addressless slot.) The per-recipient web-
+/// presence suppression is a separate check (`suppress_for_web_presence`) applied
+/// at the automated send sites, never here and never for direct responses.
+pub fn should_email_recipient(recipient: &EmailRecipient) -> bool {
+    recipient.email.is_some() && !recipient.is_bot && recipient.turn_emails_enabled
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use time::{Date, Month, PrimitiveDateTime, Time};
 
-    fn fixed_now() -> PrimitiveDateTime {
-        PrimitiveDateTime::new(
-            Date::from_calendar_date(2026, Month::July, 20).unwrap(),
-            Time::from_hms(12, 0, 0).unwrap(),
-        )
-    }
-
-    fn recipient(
-        email: Option<&str>,
-        is_bot: bool,
-        enabled: bool,
-        last_seen_at: Option<PrimitiveDateTime>,
-    ) -> EmailRecipient {
+    fn recipient(email: Option<&str>, is_bot: bool, enabled: bool) -> EmailRecipient {
         EmailRecipient {
             email: email.map(String::from),
             theme_slug: None,
             turn_emails_enabled: enabled,
-            last_seen_at,
+            user_id: None,
             is_bot,
         }
     }
@@ -346,65 +279,65 @@ mod tests {
     }
 
     #[test]
-    fn window_from_falls_back_to_default() {
-        assert_eq!(window_from(None), std::time::Duration::from_secs(3600));
-        assert_eq!(
-            window_from(Some("30m")),
-            std::time::Duration::from_secs(1800)
-        );
-        assert_eq!(
-            window_from(Some("nonsense")),
-            std::time::Duration::from_secs(3600)
-        );
-    }
-
-    #[test]
-    fn is_recently_active_at_compares_window() {
-        let now = fixed_now();
-        let window = std::time::Duration::from_secs(3600);
-        let half_hour_ago = now - time::Duration::minutes(30);
-        let two_hours_ago = now - time::Duration::hours(2);
-        assert!(is_recently_active_at(Some(half_hour_ago), now, window));
-        assert!(!is_recently_active_at(Some(two_hours_ago), now, window));
-        assert!(!is_recently_active_at(None, now, window));
-    }
-
-    #[test]
     fn should_email_recipient_truth_table() {
-        let now = fixed_now();
-        let window = std::time::Duration::from_secs(3600);
-        let five_min_ago = now - time::Duration::minutes(5);
-
         // bot
-        assert!(!should_email_recipient(
-            &recipient(Some("a@b.c"), true, true, None),
-            now,
-            window
-        ));
+        assert!(!should_email_recipient(&recipient(
+            Some("a@b.c"),
+            true,
+            true
+        )));
         // opted out
-        assert!(!should_email_recipient(
-            &recipient(Some("a@b.c"), false, false, None),
-            now,
-            window
-        ));
-        // recently active on the web
-        assert!(!should_email_recipient(
-            &recipient(Some("a@b.c"), false, true, Some(five_min_ago)),
-            now,
-            window
-        ));
+        assert!(!should_email_recipient(&recipient(
+            Some("a@b.c"),
+            false,
+            false
+        )));
         // normal human
-        assert!(should_email_recipient(
-            &recipient(Some("a@b.c"), false, true, None),
-            now,
-            window
-        ));
+        assert!(should_email_recipient(&recipient(
+            Some("a@b.c"),
+            false,
+            true
+        )));
         // addressless slot
-        assert!(!should_email_recipient(
-            &recipient(None, false, true, None),
-            now,
-            window
-        ));
+        assert!(!should_email_recipient(&recipient(None, false, true)));
+    }
+
+    async fn seed_user(pool: &PgPool) -> Uuid {
+        sqlx::query_scalar("INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id")
+            .bind(format!("u-{}", Uuid::new_v4()))
+            .bind(Vec::<String>::new())
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    // Runs only where a Postgres is available (CI); expected to fail to connect
+    // locally (backlog #40).
+    #[sqlx::test]
+    async fn suppress_for_web_presence_tracks_ping_recency(pool: PgPool) {
+        let active = seed_user(&pool).await;
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(active)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(suppress_for_web_presence(&pool, Some(active)).await);
+
+        let stale = seed_user(&pool).await;
+        sqlx::query(
+            "UPDATE users SET last_active_at = NOW() - interval '11 minutes' WHERE id = $1",
+        )
+        .bind(stale)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(!suppress_for_web_presence(&pool, Some(stale)).await);
+
+        let never = seed_user(&pool).await;
+        assert!(!suppress_for_web_presence(&pool, Some(never)).await);
+
+        // Bots / addressless slots have no user and are never suppressed here.
+        assert!(!suppress_for_web_presence(&pool, None).await);
     }
 
     #[test]
