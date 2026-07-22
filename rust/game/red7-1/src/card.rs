@@ -68,7 +68,7 @@ impl Suit {
             Suit::Blue => NamedColor::Cyan,
             Suit::Green => NamedColor::Green,
             Suit::Yellow => NamedColor::Yellow,
-            Suit::Orange => NamedColor::Grey,
+            Suit::Orange => NamedColor::Orange,
             Suit::Red => NamedColor::Red,
         }
     }

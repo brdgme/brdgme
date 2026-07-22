@@ -125,15 +125,16 @@ impl Game {
         let mut display = drawn.clone();
         sort_by_suit(&mut display);
         display.reverse();
-        let card_nodes: Vec<N> = display
-            .iter()
-            .map(|c| {
-                N::Fg(
-                    c.suit.color().into(),
-                    vec![N::Bold(vec![N::text(format!("{}", c))])],
-                )
-            })
-            .collect();
+        let mut card_nodes: Vec<N> = vec![];
+        for (i, c) in display.iter().enumerate() {
+            if i > 0 {
+                card_nodes.push(N::text(" "));
+            }
+            card_nodes.push(N::Fg(
+                c.suit.color().into(),
+                vec![N::Bold(vec![N::text(format!("{}", c))])],
+            ));
+        }
         let mut content = vec![N::text("You drew ")];
         content.extend(card_nodes);
         logs.push(Log::private(content, vec![player]));
@@ -179,15 +180,16 @@ impl Game {
 
         let mut sorted_pal = leader_palette.clone();
         sort_by_suit(&mut sorted_pal);
-        let card_nodes: Vec<N> = sorted_pal
-            .iter()
-            .map(|c| {
-                N::Fg(
-                    c.suit.color().into(),
-                    vec![N::Bold(vec![N::text(format!("{}", c))])],
-                )
-            })
-            .collect();
+        let mut card_nodes: Vec<N> = vec![];
+        for (i, c) in sorted_pal.iter().enumerate() {
+            if i > 0 {
+                card_nodes.push(N::text(" "));
+            }
+            card_nodes.push(N::Fg(
+                c.suit.color().into(),
+                vec![N::Bold(vec![N::text(format!("{}", c))])],
+            ));
+        }
 
         let mut content = vec![N::Player(leader_idx), N::text(" won the round with ")];
         content.extend(card_nodes);
