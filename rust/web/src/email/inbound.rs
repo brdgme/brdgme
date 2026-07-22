@@ -779,7 +779,7 @@ async fn send_invite_reply_response(
         &content,
         palette,
         &[],
-        &format!("proposal-{proposal_id}"),
+        Some(&format!("proposal-{proposal_id}")),
         false,
         &format!("i-{}@brdg.me", player.email_token.as_deref().unwrap_or("")),
     );
@@ -857,7 +857,7 @@ async fn send_game_reply_response(
         &content,
         palette,
         &players,
-        &format!("game-{}", ge.game.id),
+        Some(&format!("game-{}", ge.game.id)),
         false,
         &crate::email::notify::reply_address(token),
     );
@@ -891,10 +891,6 @@ async fn send_rules_reply_response(
     headers.insert("In-Reply-To".to_string(), msg_id.clone());
     headers.insert("References".to_string(), msg_id);
     headers.insert(
-        "Reply-To".to_string(),
-        crate::email::notify::reply_address(token),
-    );
-    headers.insert(
         "List-Unsubscribe".to_string(),
         "<mailto:unsubscribe@brdg.me?subject=unsubscribe>".to_string(),
     );
@@ -908,6 +904,7 @@ async fn send_rules_reply_response(
         text,
         html: full_html,
         headers,
+        reply_to: crate::email::notify::reply_address(token),
     };
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
@@ -1035,7 +1032,7 @@ async fn send_settings_response(
         &content,
         palette,
         &[],
-        &thread_id,
+        Some(&thread_id),
         false,
         &reply_address,
     );

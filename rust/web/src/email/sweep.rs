@@ -186,7 +186,7 @@ async fn send_reminder(
         &content,
         palette,
         &players,
-        &format!("game-{game_id}"),
+        Some(&format!("game-{game_id}")),
         false,
         &crate::email::notify::reply_address(&token),
     );

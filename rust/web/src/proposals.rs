@@ -217,7 +217,7 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                &format!("proposal-{proposal_id}"),
+                Some(&format!("proposal-{proposal_id}")),
                 true,
                 &format!("i-{token}@brdg.me"),
             );
@@ -261,7 +261,7 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                &format!("proposal-{proposal_id}"),
+                Some(&format!("proposal-{proposal_id}")),
                 false,
                 &format!("i-{proposal_id}@brdg.me"),
             );
@@ -303,7 +303,7 @@ impl InviteMailer for RealInviteMailer {
                     &content,
                     palette,
                     &[],
-                    &format!("proposal-{proposal_id}"),
+                    Some(&format!("proposal-{proposal_id}")),
                     false,
                     &format!("i-{proposal_id}@brdg.me"),
                 );
@@ -349,7 +349,7 @@ impl InviteMailer for RealInviteMailer {
                     &content,
                     palette,
                     &[],
-                    &format!("proposal-{proposal_id}"),
+                    Some(&format!("proposal-{proposal_id}")),
                     false,
                     &format!("i-{proposal_id}@brdg.me"),
                 );

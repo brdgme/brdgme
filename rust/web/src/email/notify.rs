@@ -65,6 +65,13 @@ pub fn game_subject(
     format!("{} with {}", ge.game_type.name, opponent_names)
 }
 
+/// The per-turn de-threaded subject: "{Game type} {game_id}-{turn}". A unique
+/// subject per turn is the reliable de-threading lever (Resend overwrites custom
+/// Message-Id); primitives keep it trivially unit-testable.
+pub fn turn_subject(game_type_name: &str, game_id: uuid::Uuid, turn: i64) -> String {
+    format!("{game_type_name} {game_id}-{turn}")
+}
+
 /// Renders the board markup + "You can" command usages for `position`'s view of
 /// `ge`, best-effort: a failed game-service render degrades to absent blocks
 /// rather than failing the caller.
@@ -125,9 +132,8 @@ async fn build_content(
     ge: &crate::db::GameExtended,
     recipient_player: &crate::db::GamePlayerExtended,
     kind: NotifyKind,
+    subject: String,
 ) -> crate::email::render::EmailContent {
-    let subject = game_subject(ge, recipient_player);
-
     let header = Some(match kind {
         NotifyKind::Turn => turn_header_text(recipient_player.name()),
         NotifyKind::Eliminated => eliminated_header_text(recipient_player.name()),
@@ -179,13 +185,15 @@ async fn build_content(
     }
 }
 
-/// Whether the game has any logs yet (plain query; defaults to false on error).
-async fn game_has_logs(pool: &sqlx::PgPool, game_id: uuid::Uuid) -> bool {
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM game_logs WHERE game_id = $1)")
+/// How many logs the game has (plain query; defaults to 0 on error). Every
+/// command appends >=1 log, so this is a monotonic turn counter used both to
+/// detect the opening turn and to build the per-turn de-threaded subject.
+async fn game_log_count(pool: &sqlx::PgPool, game_id: uuid::Uuid) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM game_logs WHERE game_id = $1")
         .bind(game_id)
         .fetch_one(pool)
         .await
-        .unwrap_or(false)
+        .unwrap_or(0)
 }
 
 async fn send_one(
@@ -261,17 +269,26 @@ async fn send_one(
         .map(|p| crate::email::render::player_for_slot(p.name(), &p.game_player.color, palette))
         .collect();
 
-    let content = build_content(pool, http_client, &ge, recipient_player, kind).await;
+    let log_count = game_log_count(pool, game_id).await;
+    let is_first_message = log_count == 0;
+    let (subject, thread_id) = match &kind {
+        NotifyKind::Turn => (
+            turn_subject(&ge.game_type.name, ge.game.id, log_count),
+            None,
+        ),
+        NotifyKind::Eliminated | NotifyKind::Finished => (
+            game_subject(&ge, recipient_player),
+            Some(format!("game-{game_id}")),
+        ),
+    };
 
-    // v1 approximates 'first message' as 'the game has no logs yet' (the opening
-    // turn); there is no per-recipient mail-sent column.
-    let is_first_message = !game_has_logs(pool, game_id).await;
+    let content = build_content(pool, http_client, &ge, recipient_player, kind, subject).await;
 
     let rendered = crate::email::render::render_game_email(
         &content,
         palette,
         &players,
-        &format!("game-{game_id}"),
+        thread_id.as_deref(),
         is_first_message,
         &reply_address(&token),
     );
@@ -448,6 +465,16 @@ mod tests {
     #[test]
     fn reply_address_formats_token() {
         assert_eq!(reply_address("tok"), "g-tok@brdg.me");
+    }
+
+    #[test]
+    fn turn_subject_is_name_id_turn_and_unique_per_turn() {
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(turn_subject("Acquire", id, 12), format!("Acquire {id}-12"));
+        assert_ne!(
+            turn_subject("Acquire", id, 12),
+            turn_subject("Acquire", id, 13)
+        );
     }
 
     #[test]

@@ -169,8 +169,8 @@ pub async fn try_send_rendered_email(
 ) -> bool {
     let Some(resend) = resend else {
         println!(
-            "\n==> GAME EMAIL for {}\nSubject: {}\n\n{}\n",
-            to, email.subject, email.text
+            "\n==> GAME EMAIL for {}\nSubject: {}\nReply-To: {}\n\n{}\n",
+            to, email.subject, email.reply_to, email.text
         );
         return true;
     };
@@ -183,7 +183,8 @@ pub async fn try_send_rendered_email(
         email.subject.clone(),
     )
     .with_text(&email.text)
-    .with_html(&email.html);
+    .with_html(&email.html)
+    .with_reply(&email.reply_to);
     for (k, v) in email.headers {
         opts = opts.with_header(&k, &v);
     }

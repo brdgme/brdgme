@@ -32,12 +32,15 @@ pub struct EmailContent {
 }
 
 /// A fully-rendered email ready for the Resend `text` + `html` fields plus the
-/// threading/unsubscribe/reply headers.
+/// threading/unsubscribe headers and the reply address.
 pub struct RenderedEmail {
     pub subject: String,
     pub text: String,
     pub html: String,
     pub headers: BTreeMap<String, String>,
+    // Sent via Resend's dedicated reply_to field, not a header: Resend ignores a
+    // custom Reply-To header, so the reply address must ride the API field.
+    pub reply_to: String,
 }
 
 /// Resolves a stored `users.theme` slug to a concrete palette. NULL/system/
@@ -79,15 +82,17 @@ fn fallback_html(bg: &str, fg: &str, body: &str) -> String {
 
 /// Renders one outbound game email. `palette`/`players` are the recipient's
 /// resolved theme palette and the game's players with concrete colours (build
-/// via `palette_for_slug` + `player_for_slot`). `thread_id` is the Message-Id
-/// local part (e.g. "game-{id}", "proposal-{id}"); `is_first_message` selects
-/// Message-Id vs In-Reply-To+References; `reply_address` is the full Reply-To
-/// (e.g. "g-{token}@brdg.me").
+/// via `palette_for_slug` + `player_for_slot`). `thread_id` is the optional
+/// Message-Id local part (e.g. "game-{id}", "proposal-{id}"); when `Some`,
+/// `is_first_message` selects Message-Id vs In-Reply-To+References, and when
+/// `None` no threading headers are emitted (de-threaded turn mail);
+/// `reply_address` is the full reply address (e.g. "g-{token}@brdg.me"), carried
+/// on the `reply_to` field.
 pub fn render_game_email(
     content: &EmailContent,
     palette: &Palette,
     players: &[Player],
-    thread_id: &str,
+    thread_id: Option<&str>,
     is_first_message: bool,
     reply_address: &str,
 ) -> RenderedEmail {
@@ -218,14 +223,15 @@ pub fn render_game_email(
     }
 
     let mut headers = BTreeMap::new();
-    let msg_id = format!("<{thread_id}@brdg.me>");
-    if is_first_message {
-        headers.insert("Message-Id".to_string(), msg_id);
-    } else {
-        headers.insert("In-Reply-To".to_string(), msg_id.clone());
-        headers.insert("References".to_string(), msg_id);
+    if let Some(thread_id) = thread_id {
+        let msg_id = format!("<{thread_id}@brdg.me>");
+        if is_first_message {
+            headers.insert("Message-Id".to_string(), msg_id);
+        } else {
+            headers.insert("In-Reply-To".to_string(), msg_id.clone());
+            headers.insert("References".to_string(), msg_id);
+        }
     }
-    headers.insert("Reply-To".to_string(), reply_address.to_string());
     headers.insert(
         "List-Unsubscribe".to_string(),
         "<mailto:unsubscribe@brdg.me?subject=unsubscribe>".to_string(),
@@ -240,6 +246,7 @@ pub fn render_game_email(
         text,
         html,
         headers,
+        reply_to: reply_address.to_string(),
     }
 }
 
@@ -309,7 +316,7 @@ mod tests {
             &full_content(),
             &DRACULA,
             &two_players(&DRACULA),
-            "game-abc",
+            Some("game-abc"),
             true,
             "g-tok@brdg.me",
         );
@@ -333,7 +340,7 @@ mod tests {
             &full_content(),
             &DRACULA,
             &two_players(&DRACULA),
-            "game-abc",
+            Some("game-abc"),
             true,
             "g-tok@brdg.me",
         );
@@ -362,7 +369,7 @@ mod tests {
             &full_content(),
             &DRACULA,
             &two_players(&DRACULA),
-            "game-abc",
+            Some("game-abc"),
             true,
             "g-tok@brdg.me",
         );
@@ -404,7 +411,7 @@ mod tests {
             &content,
             &LIGHT,
             &two_players(&LIGHT),
-            "game-abc",
+            Some("game-abc"),
             true,
             "g-tok@brdg.me",
         );
@@ -422,7 +429,7 @@ mod tests {
             &full_content(),
             &DRACULA,
             &two_players(&DRACULA),
-            "game-abc",
+            Some("game-abc"),
             true,
             "g-tok@brdg.me",
         );
@@ -442,7 +449,7 @@ mod tests {
             &minimal_content(),
             &LIGHT,
             &[],
-            "game-abc",
+            Some("game-abc"),
             true,
             "g-tok@brdg.me",
         );
@@ -452,10 +459,7 @@ mod tests {
         );
         assert_eq!(email.headers.get("In-Reply-To"), None);
         assert_eq!(email.headers.get("References"), None);
-        assert_eq!(
-            email.headers.get("Reply-To").map(String::as_str),
-            Some("g-tok@brdg.me")
-        );
+        assert_eq!(email.reply_to, "g-tok@brdg.me");
         assert_eq!(
             email.headers.get("List-Unsubscribe").map(String::as_str),
             Some("<mailto:unsubscribe@brdg.me?subject=unsubscribe>")
@@ -475,7 +479,7 @@ mod tests {
             &minimal_content(),
             &LIGHT,
             &[],
-            "game-abc",
+            Some("game-abc"),
             false,
             "g-tok@brdg.me",
         );
@@ -496,7 +500,7 @@ mod tests {
             &minimal_content(),
             &LIGHT,
             &[],
-            "proposal-123",
+            Some("proposal-123"),
             true,
             "i-tok@brdg.me",
         );
@@ -504,16 +508,13 @@ mod tests {
             invite.headers.get("Message-Id").map(String::as_str),
             Some("<proposal-123@brdg.me>")
         );
-        assert_eq!(
-            invite.headers.get("Reply-To").map(String::as_str),
-            Some("i-tok@brdg.me")
-        );
+        assert_eq!(invite.reply_to, "i-tok@brdg.me");
 
         let settings = render_game_email(
             &minimal_content(),
             &LIGHT,
             &[],
-            "settings-u1",
+            Some("settings-u1"),
             false,
             "s-tok@brdg.me",
         );
@@ -521,9 +522,32 @@ mod tests {
             settings.headers.get("In-Reply-To").map(String::as_str),
             Some("<settings-u1@brdg.me>")
         );
+        assert_eq!(settings.reply_to, "s-tok@brdg.me");
+    }
+
+    #[test]
+    fn reply_to_field_carries_reply_address() {
+        let email = render_game_email(
+            &minimal_content(),
+            &LIGHT,
+            &[],
+            Some("game-abc"),
+            true,
+            "g-tok@brdg.me",
+        );
+        assert_eq!(email.reply_to, "g-tok@brdg.me");
+    }
+
+    #[test]
+    fn headers_none_thread_id_sets_no_threading_headers() {
+        let email = render_game_email(&minimal_content(), &LIGHT, &[], None, true, "g-tok@brdg.me");
+        assert_eq!(email.headers.get("Message-Id"), None);
+        assert_eq!(email.headers.get("In-Reply-To"), None);
+        assert_eq!(email.headers.get("References"), None);
+        assert_eq!(email.reply_to, "g-tok@brdg.me");
         assert_eq!(
-            settings.headers.get("Reply-To").map(String::as_str),
-            Some("s-tok@brdg.me")
+            email.headers.get("List-Unsubscribe").map(String::as_str),
+            Some("<mailto:unsubscribe@brdg.me?subject=unsubscribe>")
         );
     }
 }
