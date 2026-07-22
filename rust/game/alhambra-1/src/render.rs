@@ -76,33 +76,111 @@ fn tile_counts(grid: &Grid) -> HashMap<TileType, i32> {
     counts
 }
 
+fn corner_char(grid: &Grid, x: i32, y: i32) -> char {
+    let cur = grid_tile_at(grid, Vect { x, y });
+    let up = grid_tile_at(grid, Vect { x, y: y - 1 });
+    let left = grid_tile_at(grid, Vect { x: x - 1, y });
+    let up_left = grid_tile_at(grid, Vect { x: x - 1, y: y - 1 });
+
+    let any_present = [&cur, &up, &left, &up_left]
+        .iter()
+        .any(|t| t.tile_type != TileType::Empty);
+    if !any_present {
+        return '▒';
+    }
+
+    let bit_up = up.has_wall(Dir::Left) || up_left.has_wall(Dir::Right);
+    let bit_down = cur.has_wall(Dir::Left) || left.has_wall(Dir::Right);
+    let bit_left = up_left.has_wall(Dir::Down) || left.has_wall(Dir::Up);
+    let bit_right = up.has_wall(Dir::Down) || cur.has_wall(Dir::Up);
+
+    match (bit_up, bit_down, bit_left, bit_right) {
+        (true, true, true, true) => '╬',
+        (true, true, true, false) => '╣',
+        (true, true, false, true) => '╠',
+        (true, false, true, true) => '╩',
+        (false, true, true, true) => '╦',
+        (true, false, true, false) => '╝',
+        (true, false, false, true) => '╚',
+        (false, true, true, false) => '╗',
+        (false, true, false, true) => '╔',
+        (false, false, true, true) => '═',
+        (false, false, true, false) => '═',
+        (false, false, false, true) => '═',
+        (true, true, false, false) => '║',
+        (true, false, false, false) => '║',
+        (false, true, false, false) => '║',
+        (false, false, false, false) => ' ',
+    }
+}
+
+fn upper_str(grid: &Grid, x: i32, y: i32) -> String {
+    let cur = grid_tile_at(grid, Vect { x, y });
+    let above = grid_tile_at(grid, Vect { x, y: y - 1 });
+    if cur.has_wall(Dir::Up) || above.has_wall(Dir::Down) {
+        "═══".to_string()
+    } else if cur.tile_type == TileType::Empty && above.tile_type == TileType::Empty {
+        "▒▒▒".to_string()
+    } else {
+        "   ".to_string()
+    }
+}
+
+fn left_char(grid: &Grid, x: i32, y: i32) -> char {
+    let cur = grid_tile_at(grid, Vect { x, y });
+    let left = grid_tile_at(grid, Vect { x: x - 1, y });
+    if cur.has_wall(Dir::Left) || left.has_wall(Dir::Right) {
+        '║'
+    } else if cur.tile_type == TileType::Empty && left.tile_type == TileType::Empty {
+        '▒'
+    } else {
+        ' '
+    }
+}
+
+fn centre_str(grid: &Grid, x: i32, y: i32) -> String {
+    let tile = grid_tile_at(grid, Vect { x, y });
+    if tile.tile_type == TileType::Empty {
+        "▒▒▒".to_string()
+    } else {
+        tile.tile_type.abbr().to_string()
+    }
+}
+
 fn render_grid(grid: &Grid) -> N {
     if grid.is_empty() {
         return N::text("(empty)");
     }
     let (min, max) = grid_bounds(grid);
-    let mut rows: Vec<Row> = vec![];
+    let x_start = min.x - 1;
+    let x_end = max.x + 1;
+    let y_start = min.y - 1;
+    let y_end = max.y + 1;
 
-    let mut header: Row = vec![(A::Center, vec![N::text("")])];
-    for x in min.x..=max.x {
-        let col_letter = ((x - min.x) as u8 + b'a') as char;
-        header.push((A::Center, vec![N::text(format!("{}", col_letter))]));
+    let mut lines: Vec<String> = vec![];
+
+    let mut header = "    ".to_string();
+    for x in x_start..=x_end {
+        let col_letter = ((x - x_start) as u8 + b'a') as char;
+        header.push_str(&format!(" {}  ", col_letter));
     }
-    rows.push(header);
+    lines.push(header);
 
-    for y in min.y..=max.y {
-        let mut row: Row = vec![(A::Right, vec![N::text(format!("{}", y - min.y + 1))])];
-        for x in min.x..=max.x {
-            let tile = grid_tile_at(grid, Vect { x, y });
-            if tile.tile_type == TileType::Empty {
-                row.push((A::Center, vec![N::text(" . ".to_string())]));
-            } else {
-                row.push((A::Center, vec![render_tile_abbr(tile.tile_type)]));
-            }
+    for y in y_start..=y_end {
+        let label = format!("{:>2}", y - min.y + 2);
+        let mut line1 = format!("{}  ", label);
+        let mut line2 = format!("{}  ", label);
+        for x in x_start..=x_end {
+            line1.push(corner_char(grid, x, y));
+            line1.push_str(&upper_str(grid, x, y));
+            line2.push(left_char(grid, x, y));
+            line2.push_str(&centre_str(grid, x, y));
         }
-        rows.push(row);
+        lines.push(line1);
+        lines.push(line2);
     }
-    table_with_gap(&rows, 0)
+
+    N::text(lines.join("\n"))
 }
 
 fn render_tiles_for_purchase(tiles: &[Tile]) -> N {
@@ -228,36 +306,84 @@ fn render_player_summary(state: &PubState) -> N {
     table_with_gap(&rows, 2)
 }
 
-fn render_place_tiles(tiles: &[Tile]) -> Vec<N> {
+fn render_tile_block(t: &Tile) -> (String, String, String) {
+    let up = if t.has_wall(Dir::Up) {
+        "═══"
+    } else {
+        "   "
+    };
+    let left = if t.has_wall(Dir::Left) { '║' } else { ' ' };
+    let right = if t.has_wall(Dir::Right) { '║' } else { ' ' };
+    let down = if t.has_wall(Dir::Down) {
+        "═══"
+    } else {
+        "   "
+    };
+    let top_left = match (t.has_wall(Dir::Up), t.has_wall(Dir::Left)) {
+        (true, true) => '╔',
+        (true, false) => '═',
+        (false, true) => '║',
+        (false, false) => ' ',
+    };
+    let top_right = match (t.has_wall(Dir::Up), t.has_wall(Dir::Right)) {
+        (true, true) => '╗',
+        (true, false) => '═',
+        (false, true) => '║',
+        (false, false) => ' ',
+    };
+    let bot_left = match (t.has_wall(Dir::Down), t.has_wall(Dir::Left)) {
+        (true, true) => '╚',
+        (true, false) => '═',
+        (false, true) => '║',
+        (false, false) => ' ',
+    };
+    let bot_right = match (t.has_wall(Dir::Down), t.has_wall(Dir::Right)) {
+        (true, true) => '╝',
+        (true, false) => '═',
+        (false, true) => '║',
+        (false, false) => ' ',
+    };
+    (
+        format!("{}{}{}", top_left, up, top_right),
+        format!("{}{}{}", left, t.tile_type.abbr(), right),
+        format!("{}{}{}", bot_left, down, bot_right),
+    )
+}
+
+fn render_tile_set(label: &str, tiles: &[Tile]) -> Vec<N> {
     let non_empty = not_empty(tiles);
     if non_empty.is_empty() {
         return vec![];
     }
-    let mut nodes = vec![N::Bold(vec![N::text("Tiles to place: ")])];
+    let mut tops = vec![];
+    let mut mids = vec![];
+    let mut bots = vec![];
+    let mut indices = vec![];
     for (i, t) in non_empty.iter().enumerate() {
-        if i > 0 {
-            nodes.push(N::text("  "));
-        }
-        nodes.push(N::text(format!("{}:", i)));
-        nodes.push(render_tile_abbr(t.tile_type));
+        let (top, mid, bot) = render_tile_block(t);
+        tops.push(top);
+        mids.push(mid);
+        bots.push(bot);
+        indices.push(format!(" {}  ", i + 1));
     }
-    nodes
+    let sep = "  ";
+    let text = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        label,
+        tops.join(sep),
+        mids.join(sep),
+        bots.join(sep),
+        indices.join(sep),
+    );
+    vec![N::text(text)]
+}
+
+fn render_place_tiles(tiles: &[Tile]) -> Vec<N> {
+    render_tile_set("Tiles to place:", tiles)
 }
 
 fn render_reserve(tiles: &[Tile]) -> Vec<N> {
-    let non_empty = not_empty(tiles);
-    if non_empty.is_empty() {
-        return vec![];
-    }
-    let mut nodes = vec![N::Bold(vec![N::text("Reserved: ")])];
-    for (i, t) in non_empty.iter().enumerate() {
-        if i > 0 {
-            nodes.push(N::text("  "));
-        }
-        nodes.push(N::text(format!("{}:", i)));
-        nodes.push(render_tile_abbr(t.tile_type));
-    }
-    nodes
+    render_tile_set("Reserved:", tiles)
 }
 
 fn render_game(state: &PubState, viewer: Option<usize>, hand: Option<&[Card]>) -> Vec<N> {
