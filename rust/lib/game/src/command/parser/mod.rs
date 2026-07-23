@@ -1303,4 +1303,186 @@ mod tests {
                 .expect("expected ' BlAhbacon' to parse")
         );
     }
+
+    // --- Typed parser vs spec parser parity (drift guard) ---
+    //
+    // `Parser` is implemented twice: once for the typed combinators above and
+    // again for the serializable `Spec` (see `impl Parser for CommandSpec`).
+    // The dual implementation is retained deliberately (see
+    // docs/parser-autocomplete-handover.md §6 D5), so these tests guard
+    // against the two implementations drifting apart: for representative
+    // command shapes the typed parse and the `to_spec()`-derived spec parse
+    // must agree on consumption - same success/failure, and on success the
+    // same `remaining`. Values are not compared: the typed and spec
+    // implementations return different value types, and `suggest` only ever
+    // consumes `remaining` from spec-parse results.
+    fn assert_typed_spec_parity<P>(parser: &P, inputs: &[&str])
+    where
+        P: Parser,
+    {
+        let spec = parser.to_spec();
+        for input in inputs {
+            let typed_result = parser.parse(input, &[]);
+            let spec_result = spec.parse(input, &[]);
+            match (&typed_result, &spec_result) {
+                (Ok(typed), Ok(spec)) => assert_eq!(
+                    typed.remaining, spec.remaining,
+                    "typed and spec parsers disagree on remaining for input {:?}",
+                    input
+                ),
+                (Err(_), Err(_)) => {}
+                _ => panic!(
+                    "typed and spec parsers disagree on success for input {:?}: typed {}, spec {}",
+                    input,
+                    if typed_result.is_ok() {
+                        "succeeded"
+                    } else {
+                        "failed"
+                    },
+                    if spec_result.is_ok() {
+                        "succeeded"
+                    } else {
+                        "failed"
+                    },
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn splendor_take_typed_spec_parity() {
+        // Mirrors splendor-2's take_parser: Many(Enum) inside nested
+        // Chain/Space/Doc.
+        let parser = Chain2::new(
+            Doc::name_desc(
+                "take",
+                "take 3 different tokens, or 2 of the same token",
+                Token::new("take"),
+            ),
+            AfterSpace::new(Doc::name_desc(
+                "tokens",
+                "the tokens to take",
+                Many::some_spaced(Enum::partial(vec![
+                    "Diamond", "Sapphire", "Emerald", "Ruby", "Onyx",
+                ])),
+            )),
+        );
+        // Structural sanity check: the derived spec must match the shape that
+        // suggest.rs's splendor_take_spec() helper hard-codes.
+        assert_eq!(
+            parser.to_spec(),
+            CommandSpec::Chain(vec![
+                CommandSpec::Doc {
+                    name: "take".into(),
+                    desc: Some("take 3 different tokens, or 2 of the same token".into()),
+                    spec: Box::new(CommandSpec::Token("take".into())),
+                },
+                CommandSpec::Chain(vec![
+                    CommandSpec::Space,
+                    CommandSpec::Doc {
+                        name: "tokens".into(),
+                        desc: Some("the tokens to take".into()),
+                        spec: Box::new(CommandSpec::Many {
+                            spec: Box::new(CommandSpec::Enum {
+                                values: vec![
+                                    "Diamond".into(),
+                                    "Sapphire".into(),
+                                    "Emerald".into(),
+                                    "Ruby".into(),
+                                    "Onyx".into(),
+                                ],
+                                exact: false,
+                            }),
+                            min: Some(1),
+                            max: None,
+                            delim: Some(Box::new(CommandSpec::Space)),
+                        }),
+                    },
+                ]),
+            ])
+        );
+        assert_typed_spec_parity(
+            &parser,
+            &[
+                "take diamond sapphire emerald", // valid full command
+                "take dia sap em",               // unique prefixes
+                "take x",                        // garbage
+                "take dia sap emsa",             // mid-word stop
+                "take diamond ",                 // trailing space after a token
+                "take ",                         // trailing space, no tokens
+                "take",                          // no space after the token
+                "",                              // empty input
+            ],
+        );
+    }
+
+    #[test]
+    fn jaipur_sell_typed_spec_parity() {
+        // Mirrors jaipur-2's sell_parser
+        // (rust/game/jaipur-2/src/command.rs:60-91): a Many nested inside a
+        // OneOf. The trade-good enum is trimmed from jaipur's six goods
+        // (Diamond, Gold, Silver, Cloth, Spice, Leather) to the first three -
+        // coverage of the shape, not the value list, is what matters.
+        let goods = vec!["Diamond", "Gold", "Silver"];
+        let sell_quantity: Box<dyn Parser<T = (usize, String)>> = Box::new(Map::new(
+            Chain2::new(
+                Int::positive(),
+                AfterSpace::new(Enum::partial(goods.clone())),
+            ),
+            |(quantity, good): (i32, &str)| (quantity as usize, good.to_string()),
+        ));
+        let sell_many: Box<dyn Parser<T = (usize, String)>> = Box::new(Map::new(
+            Many::some_spaced(Enum::partial(goods)),
+            |goods: Vec<&str>| {
+                (
+                    goods.len(),
+                    goods.first().copied().unwrap_or("Diamond").to_string(),
+                )
+            },
+        ));
+        let parser = Chain2::new(
+            Doc::name_desc(
+                "sell",
+                "sell goods for tokens, eg. sell 2 dia or sell dia dia",
+                Token::new("sell"),
+            ),
+            AfterSpace::new(OneOf::new(vec![sell_quantity, sell_many])),
+        );
+        assert_typed_spec_parity(
+            &parser,
+            &[
+                "sell 2 diamond",     // valid quantity form
+                "sell diamond gold",  // valid repeated-good form
+                "sell 2 dia",         // unique prefix
+                "sell dia gol",       // unique prefixes
+                "sell x",             // garbage
+                "sell dia gol silva", // mid-word stop
+                "sell 0 diamond",     // below the Int minimum
+                "sell 2",             // missing the good
+                "sell diamond ",      // trailing space
+                "sell ",              // trailing space, no argument
+                "sell",               // no space after the token
+                "",                   // empty input
+            ],
+        );
+    }
+
+    #[test]
+    fn opt_typed_spec_parity() {
+        // Compact Opt-containing shape: an optional ` <int>` after a token,
+        // exercising the Opt arm of both implementations.
+        let parser = Chain2::new(Token::new("buy"), Opt::new(AfterSpace::new(Int::any())));
+        assert_typed_spec_parity(
+            &parser,
+            &[
+                "buy 3",  // present
+                "buy -3", // present, negative
+                "buy",    // absent
+                "buy ",   // absent, trailing space left over
+                "buy x",  // absent, junk left over
+                "buy3",   // absent, no space
+                "",       // empty input
+            ],
+        );
+    }
 }

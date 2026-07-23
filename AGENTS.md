@@ -47,6 +47,11 @@ playbook - read it before touching `rust/web/src/email/` or debugging a
   "No tilt apiserver found". Never block on unbounded/streaming tilt or
   kubectl output (`tilt logs -f`, foreground `port-forward`,
   `kubectl wait` without `--timeout`); poll bounded snapshots instead.
+- The duplicated `impl Parser for CommandSpec`
+  (`rust/lib/game/src/command/parser/mod.rs:813-1040`) is NOT dead code -
+  it is the suggest engine's advancement mechanism, and its deletion was
+  attempted and rejected. The duality is deliberate; do not try to remove
+  it (see `docs/decisions/COMMAND_PARSER_SPEC_DEDUP.md`).
 
 ## Database migrations
 

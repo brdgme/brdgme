@@ -36,6 +36,8 @@ keeps tests deterministic without constructing unnecessary state.
 
 ## Commands
 
+- Command grammars and autocomplete mechanics live in
+  `docs/authoring/COMMANDS.md`; never hand-roll parsing.
 - Set `can_undo: false` for commands that reveal hidden information or create
   random information gain. Only fully deterministic operations that expose no
   new information qualify for `true`.

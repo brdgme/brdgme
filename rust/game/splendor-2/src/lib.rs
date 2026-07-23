@@ -886,6 +886,25 @@ mod tests {
     }
 
     #[test]
+    fn test_take_command_spec_autocomplete() {
+        // Regression: the trailing (still-being-typed) token must filter the
+        // autocomplete suggestions, not be consumed as a completed token.
+        let (g, _) = Game::start(3, 1).unwrap();
+        let spec = g
+            .command_spec(0)
+            .expect("player 0 should have a command spec in a fresh game");
+        let vals = |input: &str| -> Vec<String> {
+            spec.suggest(input, &[])
+                .iter()
+                .map(|s| s.value.clone())
+                .collect()
+        };
+        assert_eq!(vals("take dia"), vec!["Diamond"]);
+        assert_eq!(vals("take dia sap em"), vec!["Emerald"]);
+        assert!(vals("take dia sap emsa").is_empty());
+    }
+
+    #[test]
     fn test_take_parser_regression_cases() {
         let p = players(3);
         {

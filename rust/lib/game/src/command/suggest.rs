@@ -1,3 +1,16 @@
+//! Client-side command autocomplete over the serializable `Spec`.
+//!
+//! Two invariants future editors must not break:
+//!
+//! - The trailing whitespace-delimited word is always treated as a
+//!   still-being-typed fragment; suggestion filtering never uses the
+//!   unconsumed leftover of a partial parse (`Enum::partial` can consume a
+//!   strict prefix of a word, e.g. `em` out of `emsa`).
+//! - The mid-word-stop guard lives only in the `Many` arm.
+//!   `AfterSpace::to_spec()` = `Chain([Space, inner])` makes the two
+//!   stop-cases indistinguishable in `Chain` (a guard there breaks 14
+//!   tests - see the parity/regression tests in `parser/mod.rs`).
+
 use crate::command::parser::Parser;
 use crate::command::{Spec, Suggestion};
 
@@ -99,6 +112,11 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                 match spec.parse(rem, names) {
                     Ok(out) => {
                         let after_item = out.remaining;
+                        if after_item.is_empty() {
+                            // A fully-parsed trailing word is still the fragment
+                            // being typed, so filter by it rather than advancing.
+                            return suggest_spec(spec, rem, names);
+                        }
                         if let Some(d) = delim {
                             match d.parse(after_item, names) {
                                 Ok(d_out) => {
@@ -106,7 +124,12 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                                     continue;
                                 }
                                 Err(_) => {
-                                    return suggest_spec(spec, after_item, names);
+                                    // The item parse may have stopped mid-word
+                                    // (e.g. an Enum prefix inside a longer word);
+                                    // the whole first word is the fragment, not
+                                    // the unconsumed leftover.
+                                    let fragment = rem.split_whitespace().next().unwrap_or("");
+                                    return suggest_spec(spec, fragment, names);
                                 }
                             }
                         } else {
@@ -1027,5 +1050,169 @@ mod tests {
         let s = acquire_buy_phase_spec().suggest("d", &[]);
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].value, "done");
+    }
+
+    // --- Splendor take (trailing-fragment regression) ---
+    //
+    // Mirrors the to_spec() output of splendor-2's take_parser:
+    //   Chain2(
+    //     Doc("take", "take 3 different tokens, or 2 of the same token", Token("take")),
+    //     AfterSpace(Doc("tokens", "the tokens to take",
+    //       Many { spec: Enum(GEMS, exact=false), min: Some(1), delim: Some(Space) })),
+    //   )
+    // where AfterSpace::to_spec() = Chain([Space, inner]) and
+    // GEMS = [Diamond, Sapphire, Emerald, Ruby, Onyx].
+
+    fn splendor_take_spec() -> Spec {
+        Spec::Chain(vec![
+            Spec::Doc {
+                name: "take".into(),
+                desc: Some("take 3 different tokens, or 2 of the same token".into()),
+                spec: Box::new(Spec::Token("take".into())),
+            },
+            Spec::Chain(vec![
+                Spec::Space,
+                Spec::Doc {
+                    name: "tokens".into(),
+                    desc: Some("the tokens to take".into()),
+                    spec: Box::new(Spec::Many {
+                        spec: Box::new(Spec::Enum {
+                            values: vec![
+                                "Diamond".into(),
+                                "Sapphire".into(),
+                                "Emerald".into(),
+                                "Ruby".into(),
+                                "Onyx".into(),
+                            ],
+                            exact: false,
+                        }),
+                        min: Some(1),
+                        max: None,
+                        delim: Some(Box::new(Spec::Space)),
+                    }),
+                },
+            ]),
+        ])
+    }
+
+    #[test]
+    fn splendor_take_trailing_fragment_filters_to_matching_gem() {
+        // "dia" is still being typed, so it must filter the suggestions rather
+        // than be consumed as a completed token.
+        let s = splendor_take_spec().suggest("take dia", &[]);
+        assert_eq!(vals(&s), vec!["Diamond"]);
+        assert_eq!(descs(&s), vec![Some("the tokens to take")]);
+    }
+
+    #[test]
+    fn splendor_take_trailing_fragment_after_consumed_tokens() {
+        let s = splendor_take_spec().suggest("take dia sap em", &[]);
+        assert_eq!(vals(&s), vec!["Emerald"]);
+    }
+
+    #[test]
+    fn splendor_take_overtyped_fragment_suggests_nothing() {
+        // "emsa" matches no gem, so there must be no suggestions at all.
+        let s = splendor_take_spec().suggest("take dia sap emsa", &[]);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn splendor_take_after_space_suggests_all_gems() {
+        let s = splendor_take_spec().suggest("take ", &[]);
+        assert_eq!(
+            vals(&s),
+            vec!["Diamond", "Sapphire", "Emerald", "Ruby", "Onyx"]
+        );
+    }
+
+    #[test]
+    fn splendor_take_full_gem_then_space_suggests_all_gems() {
+        let s = splendor_take_spec().suggest("take diamond ", &[]);
+        assert_eq!(
+            vals(&s),
+            vec!["Diamond", "Sapphire", "Emerald", "Ruby", "Onyx"]
+        );
+    }
+
+    #[test]
+    fn splendor_take_gem_prefix_then_space_suggests_all_gems() {
+        let s = splendor_take_spec().suggest("take dia ", &[]);
+        assert_eq!(
+            vals(&s),
+            vec!["Diamond", "Sapphire", "Emerald", "Ruby", "Onyx"]
+        );
+    }
+
+    #[test]
+    fn splendor_take_no_matching_gem_suggests_nothing() {
+        let s = splendor_take_spec().suggest("take x", &[]);
+        assert!(s.is_empty());
+    }
+
+    // --- Splendor buy (exact Enum trailing fragment) ---
+    //
+    // Mirrors the to_spec() output of splendor-2's buy_parser (with a trimmed
+    // location set):
+    //   Chain2(
+    //     Doc("buy", "buy a card", Token("buy")),
+    //     AfterSpace(Doc("card", "the card to buy", Enum(locs, exact=true))),
+    //   )
+
+    fn splendor_buy_spec() -> Spec {
+        Spec::Chain(vec![
+            Spec::Doc {
+                name: "buy".into(),
+                desc: Some("buy a card".into()),
+                spec: Box::new(Spec::Token("buy".into())),
+            },
+            Spec::Chain(vec![
+                Spec::Space,
+                Spec::Doc {
+                    name: "card".into(),
+                    desc: Some("the card to buy".into()),
+                    spec: Box::new(Spec::Enum {
+                        values: vec!["A1".into(), "A2".into(), "B1".into()],
+                        exact: true,
+                    }),
+                },
+            ]),
+        ])
+    }
+
+    #[test]
+    fn splendor_buy_location_prefix_filters() {
+        let s = splendor_buy_spec().suggest("buy A", &[]);
+        assert_eq!(vals(&s), vec!["A1", "A2"]);
+    }
+
+    #[test]
+    fn splendor_buy_full_location_still_suggests_itself() {
+        let s = splendor_buy_spec().suggest("buy A1", &[]);
+        assert_eq!(vals(&s), vec!["A1"]);
+    }
+
+    #[test]
+    fn splendor_buy_overtyped_location_suggests_nothing() {
+        let s = splendor_buy_spec().suggest("buy A1x", &[]);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn many_exact_enum_full_value_without_trailing_space_suggests_itself() {
+        // Like many_with_space_delimiter_suggests_after_consumption but without
+        // the trailing space: the fully-typed value is still the fragment being
+        // typed, so only it should be suggested.
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Enum {
+                values: vec!["R3".into(), "B5".into(), "Y2".into()],
+                exact: true,
+            }),
+            min: Some(1),
+            max: None,
+            delim: Some(Box::new(Spec::Space)),
+        };
+        let s = spec.suggest("R3", &[]);
+        assert_eq!(vals(&s), vec!["R3"]);
     }
 }
