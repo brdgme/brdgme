@@ -804,6 +804,14 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
     Ok(())
 }
 
+#[cfg(feature = "ssr")]
+fn count_active_humans(ge: &crate::db::GameExtended) -> usize {
+    ge.game_players
+        .iter()
+        .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
+        .count()
+}
+
 #[server(ConcedeGame, "/api")]
 pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
     use crate::auth::server::get_current_user;
@@ -813,6 +821,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
     let pool = expect_context::<PgPool>();
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
+    let jetstream = expect_context::<async_nats::jetstream::Context>();
     let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = get_current_user()
         .await?
@@ -827,11 +836,6 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
     if ge.game.is_finished {
         return Err(ServerFnError::new("Game is already finished"));
     }
-    if ge.game_players.len() != 2 {
-        return Err(ServerFnError::new(
-            "Concede is only available in 2-player games",
-        ));
-    }
 
     let player = ge
         .game_players
@@ -839,11 +843,30 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
         .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
-    crate::db::concede_game(&pool, game_id, player.game_player.id, player.name())
-        .await
-        .map_err(internal("concede_game: concede"))?;
+    if player.game_player.left_at.is_some() {
+        return Err(ServerFnError::new("You have already left this game"));
+    }
 
-    broadcaster.broadcast_game_update(game_id).await;
+    let active_humans = count_active_humans(&ge);
+    let replacement_available = crate::db::replacement_bot_available(&pool)
+        .await
+        .map_err(internal("concede_game: replacement available"))?;
+
+    if replacement_available {
+        crate::db::concede_game_replace(&pool, game_id, player.game_player.id, player.name())
+            .await
+            .map_err(internal("concede_game: replace"))?;
+    } else if active_humans == 2 {
+        crate::db::concede_game(&pool, game_id, player.game_player.id, player.name())
+            .await
+            .map_err(internal("concede_game: concede"))?;
+    } else {
+        return Err(ServerFnError::new(
+            "Concede is not available: no replacement bot configured",
+        ));
+    }
+
+    crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
 
     crate::email::notify::notify_game_emails(
         resend.as_ref(),

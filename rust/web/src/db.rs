@@ -1368,6 +1368,16 @@ pub async fn pick_replacement_bot(
 }
 
 #[cfg(feature = "ssr")]
+pub async fn replacement_bot_available(pool: &PgPool) -> Result<bool> {
+    let exists: Option<(bool,)> = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM bots WHERE can_replace_humans = true AND enabled = true)",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(exists.map(|(b,)| b).unwrap_or(false))
+}
+
+#[cfg(feature = "ssr")]
 #[tracing::instrument(skip(pool), fields(game_id = %game_id))]
 pub async fn concede_game_replace(
     pool: &PgPool,
