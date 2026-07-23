@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,\n            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,\n            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,\n            gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,\n            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,\n            gp.is_read as gp_is_read, gp.points as gp_points,\n            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,\n            u.id as \"u_id?\", u.created_at as \"u_created_at?\", u.updated_at as \"u_updated_at?\",\n            u.name as \"u_name?\", u.pref_colors as \"u_pref_colors?\",\n            gtu.id as \"gtu_id?\", gtu.created_at as \"gtu_created_at?\", gtu.updated_at as \"gtu_updated_at?\",\n            gtu.game_type_id as \"gtu_game_type_id?\", gtu.user_id as \"gtu_user_id?\",\n            gtu.last_game_finished_at as \"gtu_last_game_finished_at?\", gtu.rating as \"gtu_rating?\",\n            gtu.peak_rating as \"gtu_peak_rating?\",\n            gb.id as \"gb_id?\", gb.game_id as \"gb_game_id?\", gb.name as \"gb_name?\",\n            gb.bot_name as \"gb_bot_name?\"\n        FROM game_players gp\n        LEFT JOIN users u ON gp.user_id = u.id\n        LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = $2\n        LEFT JOIN game_bots gb ON gp.game_bot_id = gb.id\n        WHERE gp.game_id = $1\n        ORDER BY gp.position\n        ",
+  "query": "\n        SELECT\n            gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,\n            gp.game_id as gp_game_id, gp.user_id as gp_user_id, gp.position as gp_position,\n            gp.color as gp_color, gp.has_accepted as gp_has_accepted, gp.is_turn as gp_is_turn,\n            gp.is_turn_at as gp_is_turn_at, gp.place as gp_place,\n            gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,\n            gp.is_read as gp_is_read, gp.points as gp_points,\n            gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,\n            gp.ranked_placing as gp_ranked_placing, gp.left_at as gp_left_at,\n            u.id as \"u_id?\", u.created_at as \"u_created_at?\", u.updated_at as \"u_updated_at?\",\n            u.name as \"u_name?\", u.pref_colors as \"u_pref_colors?\",\n            gtu.id as \"gtu_id?\", gtu.created_at as \"gtu_created_at?\", gtu.updated_at as \"gtu_updated_at?\",\n            gtu.game_type_id as \"gtu_game_type_id?\", gtu.user_id as \"gtu_user_id?\",\n            gtu.last_game_finished_at as \"gtu_last_game_finished_at?\", gtu.rating as \"gtu_rating?\",\n            gtu.peak_rating as \"gtu_peak_rating?\",\n            gb.id as \"gb_id?\", gb.game_id as \"gb_game_id?\", gb.name as \"gb_name?\",\n            gb.bot_name as \"gb_bot_name?\"\n        FROM game_players gp\n        LEFT JOIN users u ON gp.user_id = u.id\n        LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = $2\n        LEFT JOIN game_bots gb ON gp.game_bot_id = gb.id\n        WHERE gp.game_id = $1\n        ORDER BY gp.position\n        ",
   "describe": {
     "columns": [
       {
@@ -90,86 +90,96 @@
       },
       {
         "ordinal": 17,
-        "name": "u_id?",
-        "type_info": "Uuid"
+        "name": "gp_ranked_placing",
+        "type_info": "Int4"
       },
       {
         "ordinal": 18,
-        "name": "u_created_at?",
+        "name": "gp_left_at",
         "type_info": "Timestamp"
       },
       {
         "ordinal": 19,
+        "name": "u_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 20,
+        "name": "u_created_at?",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 21,
         "name": "u_updated_at?",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 20,
+        "ordinal": 22,
         "name": "u_name?",
         "type_info": "Text"
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "u_pref_colors?",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "gtu_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "gtu_created_at?",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "gtu_updated_at?",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 25,
+        "ordinal": 27,
         "name": "gtu_game_type_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 26,
+        "ordinal": 28,
         "name": "gtu_user_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 27,
+        "ordinal": 29,
         "name": "gtu_last_game_finished_at?",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 28,
+        "ordinal": 30,
         "name": "gtu_rating?",
         "type_info": "Int4"
       },
       {
-        "ordinal": 29,
+        "ordinal": 31,
         "name": "gtu_peak_rating?",
         "type_info": "Int4"
       },
       {
-        "ordinal": 30,
+        "ordinal": 32,
         "name": "gb_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 31,
+        "ordinal": 33,
         "name": "gb_game_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 32,
+        "ordinal": 34,
         "name": "gb_name?",
         "type_info": "Text"
       },
       {
-        "ordinal": 33,
+        "ordinal": 35,
         "name": "gb_bot_name?",
         "type_info": "Text"
       }
@@ -198,6 +208,8 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       false,
       false,
@@ -217,5 +229,5 @@
       false
     ]
   },
-  "hash": "9f2b9a32d3d97286f17dd54b84cb0c1649a63da6758645d4fe53d43d7498a3c9"
+  "hash": "0ae1f1a668708250ad7c270b8701ff1e18ab552c6350f8609329daa2f0b71911"
 }

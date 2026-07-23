@@ -130,6 +130,8 @@ fn build_game_player_from_row(
     points: Option<f32>,
     undo_game_state: Option<String>,
     rating_change: Option<i32>,
+    ranked_placing: Option<i32>,
+    left_at: Option<time::PrimitiveDateTime>,
 ) -> crate::models::game::GamePlayer {
     crate::models::game::GamePlayer {
         id,
@@ -149,6 +151,8 @@ fn build_game_player_from_row(
         points,
         undo_game_state,
         rating_change,
+        ranked_placing,
+        left_at,
     }
 }
 
@@ -426,6 +430,7 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             gp.last_turn_at as gp_last_turn_at, gp.is_eliminated as gp_is_eliminated,
             gp.is_read as gp_is_read, gp.points as gp_points,
             gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
+            gp.ranked_placing as gp_ranked_placing, gp.left_at as gp_left_at,
             u.id as "u_id?", u.created_at as "u_created_at?", u.updated_at as "u_updated_at?",
             u.name as "u_name?", u.pref_colors as "u_pref_colors?",
             gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?", gtu.updated_at as "gtu_updated_at?",
@@ -490,6 +495,8 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
                 p.gp_points,
                 p.gp_undo_game_state,
                 p.gp_rating_change,
+                p.gp_ranked_placing,
+                p.gp_left_at,
             ),
             user,
             game_bot,

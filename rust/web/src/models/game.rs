@@ -66,6 +66,8 @@ pub struct GamePlayer {
     pub points: Option<f32>,
     pub undo_game_state: Option<String>,
     pub rating_change: Option<i32>,
+    pub ranked_placing: Option<i32>,
+    pub left_at: Option<PrimitiveDateTime>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
