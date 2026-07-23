@@ -71,6 +71,13 @@ pub struct GameViewData {
     /// link to `/invites/{id}` instead of offering a fresh restart.
     pub restart_proposal_id: Option<Uuid>,
     pub is_2player: bool,
+    /// Whether the viewer may concede: an active human in an unfinished game
+    /// with >=2 active humans, where a replacement bot exists or exactly 2
+    /// active humans remain (#47).
+    pub can_concede: bool,
+    /// Whether the viewer may end the game: a human in an unfinished game with
+    /// <=1 active humans remaining (#47).
+    pub can_end_game: bool,
     pub players: Vec<PlayerViewData>,
     pub command_spec: Option<brdgme_game::command::Spec>,
     /// `--mk-player-{n}`/`--mk-player-{n}-contrast` var declarations for this
@@ -104,6 +111,10 @@ pub struct PlayerViewData {
     /// Bot name (e.g. "medium"); `None` for humans. Drives the
     /// `(bot: bot_name)` suffix in the game-page player card.
     pub bot_name: Option<String>,
+    /// True when a human conceded/was replaced and a bot now plays for them:
+    /// both a user and a game bot are present. The card keeps the human's
+    /// name/link and adds a `(bot: ...)` suffix (#47).
+    pub is_replaced: bool,
     /// None for bots. Drives the game-page add-friend affordance (#30 D3).
     pub user_id: Option<Uuid>,
     /// False when already friends or viewer has an outgoing request; hides
@@ -308,6 +319,30 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         .await
         .map_err(internal("get_game_details: restart proposal"))?;
 
+    let active_humans = ge
+        .game_players
+        .iter()
+        .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
+        .count();
+    let viewer_is_active_human = ge.game_players.iter().any(|p| {
+        p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.left_at.is_none()
+    });
+    let replacement_available = crate::db::replacement_bot_available(&pool)
+        .await
+        .map_err(internal("get_game_details: replacement available"))?;
+
+    let can_concede = !ge.game.is_finished
+        && viewer_is_active_human
+        && active_humans >= 2
+        && (replacement_available || active_humans == 2);
+
+    let can_end_game = !ge.game.is_finished
+        && active_humans <= 1
+        && ge
+            .game_players
+            .iter()
+            .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
+
     Ok(GameViewData {
         id: ge.game.id,
         version_id: ge.game_version.id,
@@ -323,6 +358,8 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         previous_game_id,
         restart_proposal_id,
         is_2player: ge.game_players.len() == 2,
+        can_concede,
+        can_end_game,
         players: ge
             .game_players
             .iter()
@@ -336,6 +373,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
                 is_turn: p.game_player.is_turn,
                 is_bot: p.game_bot.is_some(),
                 bot_name: p.game_bot.as_ref().map(|b| b.bot_name.clone()),
+                is_replaced: p.user.is_some() && p.game_bot.is_some(),
                 user_id: p.user.as_ref().map(|u| u.id),
                 can_add_friend: p
                     .user
