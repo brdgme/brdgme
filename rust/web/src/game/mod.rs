@@ -4,6 +4,7 @@ pub use brdgme_game_client as client;
 pub mod export;
 #[cfg(feature = "ssr")]
 pub mod import;
+pub mod placing;
 pub mod server_fns;
 
 /// The fields of a game service `Status` used to update
