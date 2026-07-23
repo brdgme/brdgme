@@ -159,6 +159,7 @@ pub fn help_text() -> String {
      new <gametype> <opponent>... - start a new game (opponents: usernames or bot names like easy/medium/hard)\n\
      list - list the game types you can start\n\
      concede - concede the current game\n\
+     end - end the current game (only when you are the last human)\n\
      undo - undo your last move\n\
      bump - re-send all games waiting on your turn to your active address\n\
      restart - restart a finished game\n\
@@ -891,11 +892,6 @@ async fn run_concede(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandE
     if ge.game.is_finished {
         return Err(CommandError::User("Game is already finished".to_string()));
     }
-    if ge.game_players.len() != 2 {
-        return Err(CommandError::User(
-            "Concede is only available in 2-player games".to_string(),
-        ));
-    }
 
     let player = ge
         .game_players
@@ -903,12 +899,37 @@ async fn run_concede(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandE
         .find(|p| p.game_player.id == ctx.game_player_id)
         .ok_or_else(|| CommandError::User("You are not a player in this game".to_string()))?;
 
-    let before = ge.clone();
-    crate::db::concede_game(ctx.pool, ctx.game_id, ctx.game_player_id, player.name())
+    if player.game_player.left_at.is_some() {
+        return Err(CommandError::User(
+            "You have already left this game".to_string(),
+        ));
+    }
+
+    let active_humans = ge
+        .game_players
+        .iter()
+        .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
+        .count();
+    let replacement_available = crate::db::replacement_bot_available(ctx.pool)
         .await
         .map_err(CommandError::Internal)?;
 
-    ctx.broadcaster.broadcast_game_update(ctx.game_id).await;
+    let before = ge.clone();
+    if replacement_available {
+        crate::db::concede_game_replace(ctx.pool, ctx.game_id, ctx.game_player_id, player.name())
+            .await
+            .map_err(CommandError::Internal)?;
+    } else if active_humans == 2 {
+        crate::db::concede_game(ctx.pool, ctx.game_id, ctx.game_player_id, player.name())
+            .await
+            .map_err(CommandError::Internal)?;
+    } else {
+        return Err(CommandError::User(
+            "Concede is not available: no replacement bot configured".to_string(),
+        ));
+    }
+
+    crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, ctx.game_id).await;
     crate::email::notify::notify_game_emails(
         ctx.resend,
         ctx.pool,
@@ -919,6 +940,54 @@ async fn run_concede(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandE
     .await;
 
     Ok(CommandReply::Status("You conceded.".to_string()))
+}
+
+async fn run_end(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
+    let ge = crate::db::find_game_extended(ctx.pool, ctx.game_id)
+        .await?
+        .ok_or_else(|| CommandError::User("Game not found".to_string()))?;
+
+    if ge.game.is_finished {
+        return Err(CommandError::User("Game is already finished".to_string()));
+    }
+
+    let is_player = ge
+        .game_players
+        .iter()
+        .any(|p| p.game_player.id == ctx.game_player_id);
+    if !is_player {
+        return Err(CommandError::User(
+            "You are not a player in this game".to_string(),
+        ));
+    }
+
+    let active_humans = ge
+        .game_players
+        .iter()
+        .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
+        .count();
+    if active_humans > 1 {
+        return Err(CommandError::User(
+            "End game is only available to the last human".to_string(),
+        ));
+    }
+
+    let before = ge.clone();
+    crate::db::end_game(ctx.pool, ctx.game_id)
+        .await
+        .map_err(CommandError::Internal)?;
+
+    crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, ctx.game_id).await;
+    crate::email::notify::notify_game_emails(
+        ctx.resend,
+        ctx.pool,
+        ctx.http_client,
+        ctx.game_id,
+        Some(before),
+    )
+    .await;
+
+    Ok(CommandReply::Status("Game ended.".to_string()))
 }
 
 async fn run_undo(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
@@ -1145,6 +1214,7 @@ pub async fn dispatch_email_command(
 
     match verb_lower.as_str() {
         "concede" => return run_concede(ctx).await,
+        "end" => return run_end(ctx).await,
         "undo" => return run_undo(ctx).await,
         "restart" => return run_restart(ctx).await,
         "rules" => return run_rules(ctx, parse_rules_arg(arg)).await,
