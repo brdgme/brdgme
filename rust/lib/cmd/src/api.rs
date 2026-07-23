@@ -47,9 +47,41 @@ pub enum Request {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CliLog {
     pub content: String,
+    #[serde(deserialize_with = "go_compat_datetime::deserialize")]
     pub at: PrimitiveDateTime,
     pub public: bool,
     pub to: Vec<usize>,
+}
+
+/// Rust V2 game services serialize log timestamps with `time`'s default serde
+/// (a structured sequence), but Go V1 services emit an RFC 3339-ish string with
+/// a `T` separator (e.g. `2026-07-23T07:53:50.928274053`, see
+/// `brdgme-go/cmd/cli.go`) that the default deserializer rejects. Accept the
+/// native form unchanged and parse the Go string with the well-known ISO 8601
+/// format. Serialization is untouched, so deployed Rust services stay compatible.
+mod go_compat_datetime {
+    use serde::{Deserialize, Deserializer};
+    use time::PrimitiveDateTime;
+    use time::format_description::well_known::Iso8601;
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+        Native(PrimitiveDateTime),
+        Text(String),
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<PrimitiveDateTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Repr::deserialize(deserializer)? {
+            Repr::Native(dt) => Ok(dt),
+            Repr::Text(raw) => {
+                PrimitiveDateTime::parse(&raw, &Iso8601::DEFAULT).map_err(serde::de::Error::custom)
+            }
+        }
+    }
 }
 
 impl CliLog {
@@ -165,5 +197,37 @@ impl From<GameError> for Response {
                 message: e.to_string(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn go_play_response_deserializes() {
+        let body = include_str!("../testdata_go_play_resp.json");
+        let resp: Response = serde_json::from_str(body).expect("Go Play response must deserialize");
+        assert!(matches!(resp, Response::Play { .. }));
+    }
+
+    #[test]
+    fn go_log_at_format_deserializes() {
+        let json = r#"{"content":"x","at":"2026-07-23T07:53:50.928274053","public":true,"to":[]}"#;
+        let log: CliLog = serde_json::from_str(json).expect("Go log `at` format must deserialize");
+        assert_eq!(log.content, "x");
+    }
+
+    #[test]
+    fn log_at_round_trips_through_default_serde() {
+        let log = CliLog {
+            content: "x".to_string(),
+            at: time::macros::datetime!(2026-07-23 07:53:50.928274053),
+            public: true,
+            to: vec![],
+        };
+        let json = serde_json::to_string(&log).expect("serialize");
+        let back: CliLog = serde_json::from_str(&json).expect("our own output must deserialize");
+        assert_eq!(back.at, log.at);
     }
 }

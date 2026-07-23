@@ -25,6 +25,7 @@
 
   packages = with pkgs; [
     act
+    awscli2
     binaryen
     cargo-binstall
     cargo-leptos
