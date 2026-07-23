@@ -4,7 +4,9 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-type BotUpdateAction = Action<(Uuid, String, f32, bool, bool, bool), Result<(), ServerFnError>>;
+type BotUpdateAction =
+    Action<(Uuid, String, f32, bool, bool, bool, bool), Result<(), ServerFnError>>;
+type BotCreateAction = Action<(String, f32, bool, bool, bool), Result<BotRow, ServerFnError>>;
 type ProviderUpdateAction =
     Action<(Uuid, String, String, Option<String>, bool), Result<(), ServerFnError>>;
 type BotProviderCreateAction = Action<
@@ -39,6 +41,7 @@ pub struct BotRow {
     pub include_basic_strategy: bool,
     pub include_advanced_strategy: bool,
     pub temperature: f32,
+    pub can_replace_humans: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +76,8 @@ pub struct TestBotProviderResponse {
 }
 
 #[cfg(feature = "ssr")]
+type BotDbRow = (Uuid, String, i32, bool, bool, bool, f32, bool);
+#[cfg(feature = "ssr")]
 type ProviderDbRow = (Uuid, String, String, Option<Vec<u8>>, bool);
 #[cfg(feature = "ssr")]
 type BotProviderDbRow = (
@@ -90,8 +95,8 @@ type BotProviderDbRow = (
 
 #[cfg(feature = "ssr")]
 pub async fn list_bots(pool: &sqlx::PgPool) -> Result<Vec<BotRow>, ServerFnError> {
-    let rows: Vec<(Uuid, String, i32, bool, bool, bool, f32)> = sqlx::query_as(
-        "SELECT id, name, display_order, enabled, include_basic_strategy, include_advanced_strategy, temperature FROM bots ORDER BY display_order",
+    let rows: Vec<BotDbRow> = sqlx::query_as(
+        "SELECT id, name, display_order, enabled, include_basic_strategy, include_advanced_strategy, temperature, can_replace_humans FROM bots ORDER BY display_order",
     )
     .fetch_all(pool)
     .await
@@ -108,6 +113,7 @@ pub async fn list_bots(pool: &sqlx::PgPool) -> Result<Vec<BotRow>, ServerFnError
                 include_basic_strategy,
                 include_advanced_strategy,
                 temperature,
+                can_replace_humans,
             )| {
                 BotRow {
                     id,
@@ -117,6 +123,7 @@ pub async fn list_bots(pool: &sqlx::PgPool) -> Result<Vec<BotRow>, ServerFnError
                     include_basic_strategy,
                     include_advanced_strategy,
                     temperature,
+                    can_replace_humans,
                 }
             },
         )
@@ -130,16 +137,18 @@ pub async fn create_bot(
     temperature: f32,
     include_basic_strategy: bool,
     include_advanced_strategy: bool,
+    can_replace_humans: bool,
 ) -> Result<BotRow, ServerFnError> {
-    let row: (Uuid, String, i32, bool, bool, bool, f32) = sqlx::query_as(
-        "INSERT INTO bots (name, display_order, temperature, include_basic_strategy, include_advanced_strategy) \
-         VALUES ($1, COALESCE((SELECT MAX(display_order) + 1 FROM bots), 0), $2, $3, $4) \
-         RETURNING id, name, display_order, enabled, include_basic_strategy, include_advanced_strategy, temperature",
+    let row: BotDbRow = sqlx::query_as(
+        "INSERT INTO bots (name, display_order, temperature, include_basic_strategy, include_advanced_strategy, can_replace_humans) \
+         VALUES ($1, COALESCE((SELECT MAX(display_order) + 1 FROM bots), 0), $2, $3, $4, $5) \
+         RETURNING id, name, display_order, enabled, include_basic_strategy, include_advanced_strategy, temperature, can_replace_humans",
     )
     .bind(&name)
     .bind(temperature)
     .bind(include_basic_strategy)
     .bind(include_advanced_strategy)
+    .bind(can_replace_humans)
     .fetch_one(pool)
     .await
     .map_err(internal("admin_create_bot: insert"))?;
@@ -152,10 +161,12 @@ pub async fn create_bot(
         include_basic_strategy: row.4,
         include_advanced_strategy: row.5,
         temperature: row.6,
+        can_replace_humans: row.7,
     })
 }
 
 #[cfg(feature = "ssr")]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_bot(
     pool: &sqlx::PgPool,
     id: Uuid,
@@ -164,9 +175,10 @@ pub async fn update_bot(
     include_basic_strategy: bool,
     include_advanced_strategy: bool,
     enabled: bool,
+    can_replace_humans: bool,
 ) -> Result<(), ServerFnError> {
     sqlx::query(
-        "UPDATE bots SET name = $2, temperature = $3, include_basic_strategy = $4, include_advanced_strategy = $5, enabled = $6, updated_at = now() WHERE id = $1",
+        "UPDATE bots SET name = $2, temperature = $3, include_basic_strategy = $4, include_advanced_strategy = $5, enabled = $6, can_replace_humans = $7, updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(&name)
@@ -174,6 +186,7 @@ pub async fn update_bot(
     .bind(include_basic_strategy)
     .bind(include_advanced_strategy)
     .bind(enabled)
+    .bind(can_replace_humans)
     .execute(pool)
     .await
     .map_err(internal("admin_update_bot: update"))?;
@@ -640,6 +653,7 @@ pub async fn admin_create_bot(
     temperature: f32,
     include_basic_strategy: bool,
     include_advanced_strategy: bool,
+    can_replace_humans: bool,
 ) -> Result<BotRow, ServerFnError> {
     use crate::auth::server::get_current_user;
     use sqlx::PgPool;
@@ -661,6 +675,7 @@ pub async fn admin_create_bot(
         temperature,
         include_basic_strategy,
         include_advanced_strategy,
+        can_replace_humans,
     )
     .await
 }
@@ -673,6 +688,7 @@ pub async fn admin_update_bot(
     include_basic_strategy: bool,
     include_advanced_strategy: bool,
     enabled: bool,
+    can_replace_humans: bool,
 ) -> Result<(), ServerFnError> {
     use crate::auth::server::get_current_user;
     use sqlx::PgPool;
@@ -696,6 +712,7 @@ pub async fn admin_update_bot(
         include_basic_strategy,
         include_advanced_strategy,
         enabled,
+        can_replace_humans,
     )
     .await
 }
@@ -1048,20 +1065,22 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
     let error = RwSignal::new(None::<String>);
 
     let create_action = Action::new(
-        |(name, temperature, basic, advanced): &(String, f32, bool, bool)| {
+        |(name, temperature, basic, advanced, replace): &(String, f32, bool, bool, bool)| {
             let name = name.clone();
             let temperature = *temperature;
             let basic = *basic;
             let advanced = *advanced;
-            async move { admin_create_bot(name, temperature, basic, advanced).await }
+            let replace = *replace;
+            async move { admin_create_bot(name, temperature, basic, advanced, replace).await }
         },
     );
 
     let update_action = Action::new(
-        |(id, name, temperature, basic, advanced, enabled): &(
+        |(id, name, temperature, basic, advanced, enabled, replace): &(
             Uuid,
             String,
             f32,
+            bool,
             bool,
             bool,
             bool,
@@ -1072,7 +1091,10 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
             let basic = *basic;
             let advanced = *advanced;
             let enabled = *enabled;
-            async move { admin_update_bot(id, name, temperature, basic, advanced, enabled).await }
+            let replace = *replace;
+            async move {
+                admin_update_bot(id, name, temperature, basic, advanced, enabled, replace).await
+            }
         },
     );
 
@@ -1166,6 +1188,7 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
                     let bot_basic = bot.include_basic_strategy;
                     let bot_advanced = bot.include_advanced_strategy;
                     let bot_enabled = bot.enabled;
+                    let bot_replace = bot.can_replace_humans;
                     let ids_up = bot_ids.clone();
                     let ids_down = bot_ids.clone();
                     let can_up = i > 0;
@@ -1219,6 +1242,7 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
                                 bot_basic=bot_basic
                                 bot_advanced=bot_advanced
                                 bot_enabled=bot_enabled
+                                bot_can_replace_humans=bot_replace
                                 update_action=update_action
                             />
                         </Show>
@@ -1236,9 +1260,7 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
 }
 
 #[component]
-fn BotCreateForm(
-    create_action: Action<(String, f32, bool, bool), Result<BotRow, ServerFnError>>,
-) -> impl IntoView {
+fn BotCreateForm(create_action: BotCreateAction) -> impl IntoView {
     use crate::components::FormField;
     use leptos::html;
 
@@ -1246,6 +1268,7 @@ fn BotCreateForm(
     let temp_input = NodeRef::<html::Input>::new();
     let basic_input = NodeRef::<html::Input>::new();
     let advanced_input = NodeRef::<html::Input>::new();
+    let replace_input = NodeRef::<html::Input>::new();
 
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
@@ -1256,7 +1279,8 @@ fn BotCreateForm(
             .unwrap_or(0.2);
         let basic = basic_input.get().map(|el| el.checked()).unwrap_or(true);
         let advanced = advanced_input.get().map(|el| el.checked()).unwrap_or(false);
-        create_action.dispatch((name, temperature, basic, advanced));
+        let replace = replace_input.get().map(|el| el.checked()).unwrap_or(false);
+        create_action.dispatch((name, temperature, basic, advanced, replace));
     };
 
     view! {
@@ -1273,6 +1297,9 @@ fn BotCreateForm(
             <FormField label="Include advanced strategy">
                 <input type="checkbox" node_ref=advanced_input/>
             </FormField>
+            <FormField label="Can replace humans">
+                <input type="checkbox" node_ref=replace_input/>
+            </FormField>
             <div class="form-actions">
                 <input type="submit" value="Create" disabled=move || create_action.pending().get()/>
             </div>
@@ -1288,6 +1315,7 @@ fn BotEditForm(
     bot_basic: bool,
     bot_advanced: bool,
     bot_enabled: bool,
+    bot_can_replace_humans: bool,
     update_action: BotUpdateAction,
 ) -> impl IntoView {
     use crate::components::FormField;
@@ -1298,6 +1326,7 @@ fn BotEditForm(
     let basic_input = NodeRef::<html::Input>::new();
     let advanced_input = NodeRef::<html::Input>::new();
     let enabled_input = NodeRef::<html::Input>::new();
+    let replace_input = NodeRef::<html::Input>::new();
 
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
@@ -1309,7 +1338,8 @@ fn BotEditForm(
         let basic = basic_input.get().map(|el| el.checked()).unwrap_or(true);
         let advanced = advanced_input.get().map(|el| el.checked()).unwrap_or(false);
         let enabled = enabled_input.get().map(|el| el.checked()).unwrap_or(true);
-        update_action.dispatch((bot_id, name, temperature, basic, advanced, enabled));
+        let replace = replace_input.get().map(|el| el.checked()).unwrap_or(false);
+        update_action.dispatch((bot_id, name, temperature, basic, advanced, enabled, replace));
     };
 
     view! {
@@ -1337,6 +1367,13 @@ fn BotEditForm(
                     </FormField>
                     <FormField label="Enabled">
                         <input type="checkbox" node_ref=enabled_input prop:checked=bot_enabled/>
+                    </FormField>
+                    <FormField label="Can replace humans">
+                        <input
+                            type="checkbox"
+                            node_ref=replace_input
+                            prop:checked=bot_can_replace_humans
+                        />
                     </FormField>
                     <div class="form-actions">
                         <input type="submit" value="Save" disabled=move || update_action.pending().get()/>
