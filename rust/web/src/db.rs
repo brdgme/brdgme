@@ -1537,6 +1537,48 @@ fn elo_rating_change(a_rating: i32, b_rating: i32, a_score: f32) -> i32 {
     (ELO_K * (a_score - a_expected)).round() as i32
 }
 
+/// Computes and persists `ranked_placing` for every human player in a game
+/// that just finished. Survivors keep their game placing order; leavers
+/// (conceded/eliminated, ordered by `left_at`) take the remaining placings.
+/// Pure bots are omitted. Must run in the same transaction as the placings
+/// write and before `apply_rating_changes`.
+#[cfg(feature = "ssr")]
+async fn write_ranked_placings(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Result<()> {
+    struct Row {
+        id: Uuid,
+        user_id: Option<Uuid>,
+        left_at: Option<time::PrimitiveDateTime>,
+        place: Option<i32>,
+    }
+    let rows = sqlx::query_as!(
+        Row,
+        "SELECT id, user_id, left_at, place FROM game_players WHERE game_id = $1",
+        game_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let inputs: Vec<crate::game::placing::PlacingInput> = rows
+        .iter()
+        .map(|r| crate::game::placing::PlacingInput {
+            game_player_id: r.id,
+            is_pure_bot: r.user_id.is_none(),
+            left_at: r.left_at,
+            game_placing: r.place,
+        })
+        .collect();
+
+    let ranked = crate::game::placing::compute_ranked_placings(&inputs);
+    for (id, placing) in ranked {
+        sqlx::query("UPDATE game_players SET ranked_placing = $1 WHERE id = $2")
+            .bind(placing)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(())
+}
+
 /// Applies ELO rating changes for a game that just transitioned to finished
 /// with placings. Must be called within the same transaction as the
 /// placings write. No-op if the idempotency guard trips (any player already
@@ -1548,14 +1590,14 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
         id: Uuid,
         position: i32,
         user_id: Option<Uuid>,
-        game_bot_id: Option<Uuid>,
         place: Option<i32>,
+        ranked_placing: Option<i32>,
         rating_change: Option<i32>,
     }
 
     let players = sqlx::query_as!(
         PlayerRow,
-        "SELECT id, position, user_id, game_bot_id, place, rating_change FROM game_players WHERE game_id = $1",
+        "SELECT id, position, user_id, place, ranked_placing, rating_change FROM game_players WHERE game_id = $1",
         game_id
     )
     .fetch_all(&mut *tx)
@@ -1589,7 +1631,7 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
 
     let mut rated_players = Vec::with_capacity(players.len());
     for p in &players {
-        if p.game_bot_id.is_some() {
+        if p.user_id.is_none() {
             continue;
         }
         let user_id = p.user_id.ok_or_else(|| {
@@ -1630,7 +1672,7 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
 
     let places: std::collections::HashMap<i32, i32> = players
         .iter()
-        .map(|p| (p.position, p.place.unwrap_or(i32::MAX)))
+        .map(|p| (p.position, p.ranked_placing.or(p.place).unwrap_or(i32::MAX)))
         .collect();
 
     let mut rating_changes: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
@@ -1785,6 +1827,7 @@ pub async fn update_game_command_success(
     }
 
     if status.is_finished && !status.placings.is_empty() {
+        write_ranked_placings(&mut tx, game_id).await?;
         apply_rating_changes(&mut tx, game_id).await?;
     }
 
@@ -4990,7 +5033,16 @@ mod tests {
                 .await
                 .unwrap();
         update_game_command_success(
-            &pool, game.id, player_id, "", "", false, &status, &[], updated_at, vec![],
+            &pool,
+            game.id,
+            player_id,
+            "",
+            "",
+            false,
+            &status,
+            &[],
+            updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -5011,7 +5063,16 @@ mod tests {
                 .await
                 .unwrap();
         update_game_command_success(
-            &pool, game.id, player_id, "", "", false, &status, &[], updated_at, vec![],
+            &pool,
+            game.id,
+            player_id,
+            "",
+            "",
+            false,
+            &status,
+            &[],
+            updated_at,
+            vec![],
         )
         .await
         .unwrap();
@@ -5022,6 +5083,101 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(left_at, first_left_at);
+    }
+
+    #[sqlx::test]
+    async fn ratings_use_ranked_placing_and_skip_pure_bots(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        // 2 humans + 1 bot. Positions are shuffled by create_game_with_users, so
+        // look them up explicitly rather than assuming 0/1/2.
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opp.id], 1, &[0]).await;
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let opp_pos = position_of(&ge, opp.id);
+        let bot_pos = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.user_id.is_none())
+            .unwrap()
+            .game_player
+            .position;
+        let game_bot_id: Uuid = sqlx::query_scalar(
+            "SELECT game_bot_id FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(bot_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        // Replaced human (opp): both user_id and game_bot_id set. Best game
+        // placing (1) but worst ranked placing (2).
+        sqlx::query(
+            "UPDATE game_players SET place = $1, ranked_placing = $2, left_at = NOW(), game_bot_id = $3 WHERE game_id = $4 AND position = $5",
+        )
+        .bind(1i32)
+        .bind(2i32)
+        .bind(game_bot_id)
+        .bind(game.id)
+        .bind(opp_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Survivor (creator): game placing 2, ranked placing 1.
+        sqlx::query(
+            "UPDATE game_players SET place = $1, ranked_placing = $2 WHERE game_id = $3 AND position = $4",
+        )
+        .bind(2i32)
+        .bind(1i32)
+        .bind(game.id)
+        .bind(creator_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Pure bot: game placing 3, no ranked placing.
+        sqlx::query("UPDATE game_players SET place = 3 WHERE game_id = $1 AND position = $2")
+            .bind(game.id)
+            .bind(bot_pos)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        // The replaced human (opp) must be rated (has user_id) despite game_bot_id.
+        let rated: (Option<i32>, Option<i32>) = sqlx::query_as(
+            "SELECT rating_change, ranked_placing FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(opp_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            rated.0.is_some(),
+            "replaced human must receive a rating change"
+        );
+        // The pure bot must NOT be rated.
+        let bot_rated: Option<i32> = sqlx::query_scalar(
+            "SELECT rating_change FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(bot_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(bot_rated.is_none(), "pure bot must not be rated");
     }
 
     // --- 5. undo_game ---
