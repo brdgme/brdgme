@@ -295,7 +295,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         &pool,
         &human_user_ids,
         ge.game_version.game_type_id,
-        10,
+        5,
     )
     .await
     .map_err(internal("get_game_details: recent form"))?;

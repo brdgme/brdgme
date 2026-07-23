@@ -51,13 +51,19 @@ pub fn form_cell(place: Option<i32>) -> (String, &'static str) {
 
 #[component]
 pub fn FormStrip(results: Vec<FormResult>) -> impl IntoView {
+    let mut results = results;
+    results.reverse();
     view! {
-        <span class="form-strip" title="recent form (oldest to newest)">
+        <span class="form-strip" title="recent form (newest to oldest)">
             {results
                 .into_iter()
-                .map(|r| {
+                .enumerate()
+                .map(|(i, r)| {
                     let (label, class) = form_cell(r.place);
-                    view! { <span class=class>{label}</span> }
+                    // The strip is bold by default; emphasise only the newest
+                    // (leftmost) cell and relax the rest to normal weight.
+                    let style = if i == 0 { "font-weight:bold" } else { "font-weight:normal" };
+                    view! { <span class=class style=style>{label}</span> }
                 })
                 .collect_view()}
         </span>

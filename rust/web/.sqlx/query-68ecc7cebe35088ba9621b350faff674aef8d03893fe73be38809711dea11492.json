@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH qualifying AS (\n            SELECT\n                gp.user_id AS user_id,\n                g.id AS game_id,\n                g.finished_at,\n                COALESCE(gp.ranked_placing, gp.place) AS place,\n                gp.rating_change,\n                (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,\n                row_number() OVER (\n                    PARTITION BY gp.user_id ORDER BY g.finished_at DESC, g.id\n                ) AS rn\n            FROM game_players gp\n            JOIN games g ON g.id = gp.game_id\n            JOIN game_versions gv ON gv.id = g.game_version_id\n            JOIN game_types gt ON gt.id = gv.game_type_id\n            WHERE gp.user_id = ANY($1)\n              AND gt.id = $2\n              AND g.is_finished = true\n              AND (\n                  SELECT count(*) FROM game_players gp3\n                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL\n              ) >= 2\n        )\n        SELECT\n            user_id AS \"user_id!\",\n            game_id AS \"game_id!\",\n            finished_at,\n            place,\n            rating_change,\n            player_count AS \"player_count!\"\n        FROM qualifying\n        WHERE rn <= $3\n        ORDER BY user_id, finished_at ASC, \"game_id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "game_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "finished_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 3,
+        "name": "place",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "rating_change",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "player_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      null,
+      true,
+      null
+    ]
+  },
+  "hash": "68ecc7cebe35088ba9621b350faff674aef8d03893fe73be38809711dea11492"
+}

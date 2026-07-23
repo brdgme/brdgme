@@ -556,7 +556,7 @@ pub async fn recent_form(
                 gt.name AS game_type_name,
                 g.id AS game_id,
                 g.finished_at,
-                gp.place,
+                COALESCE(gp.ranked_placing, gp.place) AS place,
                 gp.rating_change,
                 (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
                 row_number() OVER (
@@ -629,7 +629,7 @@ pub async fn recent_form_for_game_type(
                 gp.user_id AS user_id,
                 g.id AS game_id,
                 g.finished_at,
-                gp.place,
+                COALESCE(gp.ranked_placing, gp.place) AS place,
                 gp.rating_change,
                 (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
                 row_number() OVER (
