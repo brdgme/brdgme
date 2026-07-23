@@ -879,6 +879,63 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
     Ok(())
 }
 
+#[server(EndGame, "/api")]
+pub async fn end_game(game_id: Uuid) -> Result<(), ServerFnError> {
+    use crate::auth::server::get_current_user;
+    use crate::websocket::GameBroadcaster;
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    let broadcaster = expect_context::<GameBroadcaster>();
+    let http_client = expect_context::<reqwest::Client>();
+    let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
+    let user = get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    let ge = crate::db::find_game_extended(&pool, game_id)
+        .await
+        .map_err(internal("end_game: find game"))?
+        .ok_or_else(|| ServerFnError::new("Game not found"))?;
+    let before = ge.clone();
+
+    if ge.game.is_finished {
+        return Err(ServerFnError::new("Game is already finished"));
+    }
+
+    let is_player = ge
+        .game_players
+        .iter()
+        .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
+    if !is_player {
+        return Err(ServerFnError::new("You are not a player in this game"));
+    }
+
+    let active_humans = count_active_humans(&ge);
+    if active_humans > 1 {
+        return Err(ServerFnError::new(
+            "End game is only available to the last human",
+        ));
+    }
+
+    crate::db::end_game(&pool, game_id)
+        .await
+        .map_err(internal("end_game: end"))?;
+
+    crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
+
+    crate::email::notify::notify_game_emails(
+        resend.as_ref(),
+        &pool,
+        &http_client,
+        game_id,
+        Some(before),
+    )
+    .await;
+    Ok(())
+}
+
 /// Race-safe restart core shared by the web server fn and the email `restart`
 /// command. Serializes concurrent restarts on the old game row (`FOR UPDATE`):
 /// the first restart wins, a second (concurrent or later) gets
