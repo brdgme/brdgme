@@ -1,6 +1,6 @@
 use crate::game::server_fns::{
-    BumpBotTurns, ConcedeGame, ForceDeleteGame, GameViewData, PlayerViewData, SubmitCommand,
-    UndoGame,
+    BumpBotTurns, ConcedeGame, EndGame, ForceDeleteGame, GameViewData, PlayerViewData,
+    SubmitCommand, UndoGame,
 };
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -28,7 +28,8 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let version_id = data.version_id;
     let can_undo = data.can_undo;
     let is_finished = data.is_finished;
-    let is_2player = data.is_2player;
+    let can_concede = data.can_concede;
+    let can_end_game = data.can_end_game;
     let restarted_game_id = data.restarted_game_id;
     let previous_game_id = data.previous_game_id;
     let restart_proposal_id = data.restart_proposal_id;
@@ -47,6 +48,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let game_update = expect_context::<RwSignal<Option<(Uuid, u64)>>>();
     let undo_action = ServerAction::<UndoGame>::new();
     let concede_action = ServerAction::<ConcedeGame>::new();
+    let end_game_action = ServerAction::<EndGame>::new();
     let bump_bot_action = ServerAction::<BumpBotTurns>::new();
     let force_delete_action = ServerAction::<ForceDeleteGame>::new();
 
@@ -61,6 +63,12 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     });
     Effect::new(move |_| {
         if let Some(Ok(())) = concede_action.value().get() {
+            trigger.set_last_update.update(|n| *n += 1);
+            crate::websocket_client::bump_game_update(game_update, game_id);
+        }
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(())) = end_game_action.value().get() {
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
         }
@@ -111,7 +119,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                                 }>"Undo"</a>
                             </div>
                         </Show>
-                        <Show when=move || !is_finished && is_2player>
+                        <Show when=move || can_concede>
                             <div>
                                 <a href="#" on:click=move |ev| {
                                     ev.prevent_default();
@@ -122,6 +130,19 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                                         concede_action.dispatch(ConcedeGame { game_id });
                                     }
                                 }>"Concede"</a>
+                            </div>
+                        </Show>
+                        <Show when=move || can_end_game>
+                            <div>
+                                <a href="#" on:click=move |ev| {
+                                    ev.prevent_default();
+                                    let confirmed = web_sys::window()
+                                        .and_then(|w| w.confirm_with_message("End this game?").ok())
+                                        .unwrap_or(false);
+                                    if confirmed {
+                                        end_game_action.dispatch(EndGame { game_id });
+                                    }
+                                }>"End game"</a>
                             </div>
                         </Show>
                         <Show when=move || can_restart>
@@ -229,9 +250,9 @@ fn PlayerInfo(
                 <PlayerName
                     name=player.name
                     color=player.color
-                    profile_link=!player.is_bot
+                    profile_link=player.user_id.is_some()
                 />
-                {player.is_bot.then(|| view! {
+                {(player.is_bot || player.is_replaced).then(|| view! {
                     <span class="player-bot-suffix">
                         " (bot: " {player.bot_name.clone().unwrap_or_default()} ")"
                     </span>
