@@ -21,6 +21,9 @@ use serde::{Deserialize, Serialize};
 use crate::command::PutWhere;
 use crate::render::{PlayerState, PubState};
 
+/// Number of recent flight sectors kept per player for the ChooseSector view.
+const LAST_SECTORS_LIMIT: usize = 5;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Phase {
     ChooseModule,
@@ -56,16 +59,6 @@ impl Transaction {
             .filter(|(_, v)| **v != 0)
             .map(|(r, _)| *r)
             .collect()
-    }
-
-    pub fn gain(&self) -> Transaction {
-        let mut g = BTreeMap::new();
-        for (r, v) in &self.0 {
-            if *v > 0 {
-                g.insert(*r, *v);
-            }
-        }
-        Transaction(g)
     }
 
     pub fn lose(&self) -> Transaction {
@@ -308,7 +301,7 @@ impl PlayerBoard {
         let mut t = BTreeMap::new();
         t.insert(Resource::Carbon, -2);
         t.insert(Resource::Cannon, 1);
-        if self.res(Resource::Booster) >= 3 {
+        if self.res(Resource::Cannon) >= 3 {
             t.insert(Resource::Science, -1);
         }
         Transaction(t)
@@ -502,6 +495,9 @@ pub struct Game {
     pub sector_draw_pile: Vec<SectorCard>,
     pub peeking: Vec<SectorCard>,
     pub flight_cards: Vec<SectorCard>,
+    /// Keyed by flight-card index; values are always true (a set in map's
+    /// clothing). Kept as BTreeMap<usize, bool> because changing the type
+    /// would change the serialized JSON shape and break saved games (a F20).
     pub flight_actions: BTreeMap<usize, bool>,
     pub current_sector: i32,
     pub trade_amount: i32,
@@ -753,11 +749,6 @@ impl Game {
         out
     }
 
-    pub fn next_turn(&mut self) -> Vec<Log> {
-        self.current_player = (self.current_player + 1) % 2;
-        self.new_turn()
-    }
-
     pub fn next_sector_card(&mut self) -> Vec<Log> {
         if self.phase != Phase::Flight {
             return vec![];
@@ -798,6 +789,9 @@ impl Game {
         self.player_boards[self.current_player]
             .last_sectors
             .insert(0, self.current_sector);
+        self.player_boards[self.current_player]
+            .last_sectors
+            .truncate(LAST_SECTORS_LIMIT);
         self.trade_amount = 0;
         self.player_trade_amount = 0;
         self.phase = Phase::TradeAndBuild;
@@ -914,7 +908,7 @@ impl Game {
                     return (
                         false,
                         0,
-                        format!("you can only {} with this trade card", trade_dir.string()),
+                        format!("you can only {} with this trade card", direction.string()),
                     );
                 }
                 let target_amount = amount * trade_dir.sign() + self.trade_amount;
@@ -1006,6 +1000,16 @@ impl Game {
                         if let Some(p) = prices.get(&resource)
                             && p.buy > 0
                         {
+                            if amount * p.buy > self.player_boards[player].res(Resource::Astro) {
+                                return (
+                                    false,
+                                    0,
+                                    format!(
+                                        "you only have ${}",
+                                        self.player_boards[player].res(Resource::Astro)
+                                    ),
+                                );
+                            }
                             return (true, p.buy, String::new());
                         }
                         return (false, 0, "you aren't able to buy that resource".to_string());
@@ -1264,7 +1268,7 @@ impl Game {
     }
 
     pub fn can_lose_module(&self, player: usize) -> bool {
-        self.current_player == player || self.losing_module
+        self.current_player == player && self.losing_module
     }
 
     pub fn can_complete(&self, player: usize) -> bool {
@@ -2163,7 +2167,26 @@ mod tests {
             name: "Test Colony".to_string(),
             resource: Resource::Carbon,
             dice: 1,
-            start_card: false,
+        }
+    }
+
+    fn pirate_card() -> SectorCard {
+        SectorCard::Pirate {
+            strength: 2,
+            ransom: 3,
+            destroy_cannon: false,
+            destroy_module: true,
+        }
+    }
+
+    fn test_trading_post(resource: Resource, price: i32) -> SectorCard {
+        SectorCard::Trade {
+            name: "Test Post".to_string(),
+            resources: vec![resource],
+            price,
+            maximum: 0,
+            direction: TradeDir::Both,
+            trading_post: true,
         }
     }
 
@@ -2493,5 +2516,203 @@ mod tests {
             !rendered.contains("Last sectors"),
             "expected no Last sectors row, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn cannon_surcharge_keys_off_cannons_not_boosters() {
+        let mut board = PlayerBoard::new(0);
+        board.resources.insert(Resource::Cannon, 3);
+        board.resources.insert(Resource::Booster, 0);
+        assert_eq!(
+            board.cannon_transaction().0.get(&Resource::Science),
+            Some(&-1),
+            "3 cannons must trigger the science surcharge"
+        );
+
+        let mut board = PlayerBoard::new(0);
+        board.resources.insert(Resource::Cannon, 0);
+        board.resources.insert(Resource::Booster, 3);
+        assert_eq!(
+            board.cannon_transaction().0.get(&Resource::Science),
+            None,
+            "boosters must not trigger the cannon surcharge"
+        );
+    }
+
+    #[test]
+    fn booster_surcharge_keys_off_boosters() {
+        let mut board = PlayerBoard::new(0);
+        board.resources.insert(Resource::Booster, 3);
+        board.resources.insert(Resource::Cannon, 0);
+        assert_eq!(
+            board.booster_transaction().0.get(&Resource::Science),
+            Some(&-1)
+        );
+        let mut board = PlayerBoard::new(0);
+        board.resources.insert(Resource::Booster, 2);
+        board.resources.insert(Resource::Cannon, 3);
+        assert_eq!(board.booster_transaction().0.get(&Resource::Science), None);
+    }
+
+    #[test]
+    fn lose_rejected_without_lost_fight() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.current_sector = 1;
+        g.flight_cards = vec![pirate_card()];
+        g.player_boards[0].modules.insert(Module::Sensor, 1);
+        assert!(
+            g.command(0, "lose sensor", &players).is_err(),
+            "voluntary module sacrifice on an unfought pirate must be rejected"
+        );
+        assert_eq!(g.player_boards[0].module(Module::Sensor), 1);
+        assert_eq!(g.phase, Phase::Flight, "the flight must not have ended");
+    }
+
+    #[test]
+    fn lose_works_after_losing_module_fight() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.current_sector = 1;
+        g.flight_cards = vec![pirate_card()];
+        g.player_boards[0].modules.insert(Module::Sensor, 1);
+        g.losing_module = true;
+        g.command(0, "lose sensor", &players).unwrap();
+        assert_eq!(g.player_boards[0].module(Module::Sensor), 0);
+        assert!(!g.losing_module);
+        assert_eq!(
+            g.phase,
+            Phase::TradeAndBuild,
+            "losing the module ends the flight"
+        );
+    }
+
+    #[test]
+    fn huge_buy_amount_rejected_before_arithmetic() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.current_sector = 1;
+        g.flight_cards = vec![SectorCard::Trade {
+            name: "Tostoku I".to_string(),
+            resources: vec![Resource::Carbon],
+            price: 2,
+            maximum: 0,
+            direction: TradeDir::Both,
+            trading_post: false,
+        }];
+        assert!(g.command(0, "buy 2147483647 carbon", &players).is_err());
+        assert!(g.command(0, "sell 2147483647 carbon", &players).is_err());
+        assert_eq!(
+            g.player_boards[0].res(Resource::Astro),
+            25,
+            "no money may move on a rejected amount"
+        );
+    }
+
+    #[test]
+    fn trade_and_build_buy_requires_astro() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::TradeAndBuild;
+        g.current_player = 0;
+        g.player_boards[0].trading_posts = vec![test_trading_post(Resource::Food, 3)];
+        g.player_boards[0].resources.insert(Resource::Astro, 2);
+        let result = g.command(0, "buy 1 food", &players);
+        assert!(result.is_err(), "an unaffordable buy must be rejected");
+        assert!(
+            result.unwrap_err().to_string().contains("you only have $2"),
+            "error must state the available astro"
+        );
+        assert_eq!(g.player_boards[0].res(Resource::Astro), 2);
+        assert_eq!(g.player_boards[0].res(Resource::Food), 0);
+    }
+
+    #[test]
+    fn trade_and_build_buy_allows_exact_astro() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::TradeAndBuild;
+        g.current_player = 0;
+        g.player_boards[0].trading_posts = vec![test_trading_post(Resource::Food, 3)];
+        g.player_boards[0].resources.insert(Resource::Astro, 6);
+        g.command(0, "buy 2 food", &players).unwrap();
+        assert_eq!(g.player_boards[0].res(Resource::Astro), 0);
+        assert_eq!(g.player_boards[0].res(Resource::Food), 2);
+    }
+
+    #[test]
+    fn sensor_peek_rendered_only_to_peeking_player() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.current_sector = 1;
+        g.peeking = vec![colony_card(), pirate_card()];
+        let peeker = brdgme_markup::to_string(&g.player_state(0).render());
+        assert!(peeker.contains("Peeked cards"), "got: {peeker}");
+        assert!(
+            peeker.contains("Test Colony"),
+            "card identity must be shown"
+        );
+        let opponent = brdgme_markup::to_string(&g.player_state(1).render());
+        assert!(
+            !opponent.contains("Peeked cards") && !opponent.contains("Test Colony"),
+            "opponent must not see peeked cards"
+        );
+        let public = brdgme_markup::to_string(&g.pub_state().render());
+        assert!(!public.contains("Peeked cards") && !public.contains("Test Colony"));
+    }
+
+    #[test]
+    fn current_turn_row_shows_current_player_not_viewer() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::ChooseSector;
+        g.current_player = 1;
+        let rendered = brdgme_markup::to_string(&g.pub_state().render());
+        let row = rendered
+            .lines()
+            .find(|l| l.contains("Current turn:"))
+            .expect("Current turn row must render");
+        assert!(
+            row.contains("{{player 1}}") && !row.contains("{{player 0}}"),
+            "got: {row}"
+        );
+    }
+
+    #[test]
+    fn direction_mismatch_error_names_card_direction() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.current_sector = 1;
+        g.flight_cards = vec![SectorCard::Trade {
+            name: "Merchant Outpost".to_string(),
+            resources: vec![Resource::Food],
+            price: 3,
+            maximum: 2,
+            direction: TradeDir::Sell,
+            trading_post: false,
+        }];
+        let (ok, _, reason) = g.can_trade(0, Resource::Food, 1);
+        assert!(!ok);
+        assert_eq!(reason, "you can only sell with this trade card");
+    }
+
+    #[test]
+    fn last_sectors_capped_on_flight_end() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.current_sector = 2;
+        g.player_boards[0].last_sectors = vec![1, 2, 3, 4, 1];
+        g.end_flight();
+        assert_eq!(g.player_boards[0].last_sectors, vec![2, 1, 2, 3, 4]);
     }
 }

@@ -55,6 +55,13 @@ pub enum PutWhere {
     Bottom,
 }
 
+/// Upper bound for buy/sell amounts. The largest legal amount is 4 (goods
+/// capacity is 2 + Logistics level); the bound exists so player input can
+/// never overflow the i32 price/fit arithmetic in lib.rs (a F14). Amounts
+/// between the legal maximum and this bound still get the more informative
+/// downstream game errors.
+const MAX_TRADE_AMOUNT: i32 = 99;
+
 fn found_parser() -> Box<dyn Parser<T = Command>> {
     Box::new(Map::new(
         Doc::name_desc(
@@ -118,7 +125,7 @@ fn buy_parser(tradable: Vec<Resource>) -> Box<dyn Parser<T = Command>> {
                 "buy resources, eg. buy 3 or buy 3 food",
                 Token::new("buy"),
             ),
-            AfterSpace::new(Int::positive()),
+            AfterSpace::new(Int::bounded(1, MAX_TRADE_AMOUNT)),
             Opt::new(AfterSpace::new(Enum::partial(tradable))),
         ),
         |(_, amount, resource): (String, i32, Option<Resource>)| Command::Buy { amount, resource },
@@ -133,7 +140,7 @@ fn sell_parser(tradable: Vec<Resource>) -> Box<dyn Parser<T = Command>> {
                 "sell resources, eg. sell 3 or sell 3 food",
                 Token::new("sell"),
             ),
-            AfterSpace::new(Int::positive()),
+            AfterSpace::new(Int::bounded(1, MAX_TRADE_AMOUNT)),
             Opt::new(AfterSpace::new(Enum::partial(tradable))),
         ),
         |(_, amount, resource): (String, i32, Option<Resource>)| Command::Sell { amount, resource },

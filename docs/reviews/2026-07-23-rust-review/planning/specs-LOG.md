@@ -3383,3 +3383,581 @@ Tests: 33 lib tests + 1 contract test, all passing. Full pre-commit gate
 
 No serialized-shape changes. No game-rules behaviour changes. Non-goals
 honoured (b F19/F20/WP-16, b F22/WP-08, Tile::walls HashMap, rot_all panic).
+
+---
+
+## WP-25 modern-art-2 liveness and cleanup - IMPLEMENTED 2026-07-25
+
+Lead: orchestrate Lead role. Workers: 5 serial (one per task).
+
+Spec: `planning/specs/WP-25-modern-art-liveness.md`. All 5 tasks completed
+in order, TDD (red-green) for Tasks 1-3.
+
+Commits (5, not pushed):
+1. `7821938` fix(modern-art-2): end the round when all hands are empty at any boundary (d F34 d F35, WP-25)
+2. `af2c014` fix(modern-art-2): reset auction state when a round ends (d F41, WP-25)
+3. `b0babb8` fix(modern-art-2): hide the bid line until a real bid exists (d F42, WP-25)
+4. `e560a75` docs(modern-art-2): correct next-turn and Double-auction rules text (d F39 d F40, WP-25)
+5. `6c0c19c` refactor(modern-art-2): drop throwaway vec, unwrap, dead import (d F44 d F45 d F46, WP-25)
+
+Findings fixed: d F34 (critical, settle busy-loop all hands empty), d F35
+(major, round-4 empty-handed starter soft-lock), d F39 (minor, RULES.md
+next-turn text), d F40 (minor, RULES.md Double omits Once Around), d F41
+(minor, stale State::Auction on game end), d F42 (nit, "$0 by auctioneer"
+render line), d F44 (nit, can_add throwaway vec), d F45 (nit, guarded
+unwrap), d F46 (nit, redundant Default import).
+
+Files changed: `rust/game/modern-art-2/src/lib.rs`, `src/render.rs`,
+`RULES.md`.
+
+Tests: 18 lib tests + 1 contract test, all passing (8 new tests added).
+Full pre-commit gate (`scripts/rust-test.sh`) passed. `cargo fmt --all --
+--check` and `cargo clippy -p modern-art-2 --all-targets -- -D warnings`
+clean.
+
+No serialized-shape changes. No game-rules behaviour changes. Non-goals
+honoured (d F36/F37/F43/WP-26, d F38/WP-09, WP-08 epilogue dedup).
+
+## Lead: T3-B5 / T3-B6 unit (resumed after previous Lead hit session limit post-T3-B4)
+
+### Worker 5 returned: T3-B5 part 1 (WP-52)
+Wrote `checklists/T3-B5-web-domain-stats-misc.md` with the shared batch header
+plus WP-52's 13 rows (9m/4n), grouped by source file, no line numbers, T3-B4
+house format. WP-53 half deliberately left to a second Worker pass; a
+`<!-- WP-53 SECTION GOES HERE -->` marker sits above the shared trailing
+sections. Nothing escalated. Dropped as spec-owned: `wd F45` (WP-47) and
+`ws F40` (WP-41 Task 8). Sequencing debt recorded in-file: `wd F74` needs WP-41
+Task 8 first; the four `stats/queries.rs` rows touching `finished_games` /
+`game_history` must rebase onto WP-47's `visible_user_ids` signature change.
+Also flagged a documentation defect: `specs/WP-54-frontend-ux-error-handling.md`
+mislabels `wd F62` as WP-50-owned email-canonicalization work - it is WP-52's
+`get_friends_overview` nit. Not corrected (WP-54 is finalized); surfaced for the
+Orchestrator.
+
+### Checklist ACCEPTED: T3-B5 part 1 (WP-52).
+
+### Worker 6 returned: T3-B5 part 2 (WP-53)
+Appended WP-53's 12 rows (3m/9n) to
+`checklists/T3-B5-web-domain-stats-misc.md` in 7 file groups, updated the header
+and merged the trailing sections. **Batch total 25 rows (12m/13n)** from a
+27-finding scope.
+- **ESCALATED: `wd F18`** (reqwest HTTP call inside the `FOR UPDATE` transaction).
+  `create_game_from_service` takes `&mut tx` and performs the request plus all
+  new-game inserts in one body, so hoisting the call out means splitting the
+  helper and touching all four callers - Tier 2 sized, and it collides with
+  WP-40/WP-45 in `restart_core`. **Needs an owner.**
+- `wd F6` (`is_eliminated` wipe) was kept as Tier 3: the SQL `CASE` half is one
+  line, with a sequencing note behind WP-40/WP-41.
+- Dropped as spec-owned: `wd F56` - `specs/WP-41-db-quality-pass.md` already owns
+  the identical `send_friend_request` read-then-insert race under its own id
+  `ws F39`.
+- Nothing decision-blocked. D-41 concerns only the `FriendsPage` `<select>`
+  binding; WP-53's single `friends.rs` row is in the `#[server]` region.
+- Two recommendations narrowed in-row: `wd F78` takes only the comment half
+  (deriving `FromRow` would need new columns + a db.rs rewrite); `wd F65` notes
+  `percent-encoding` is a transitive dep only - it appears in no `Cargo.toml`
+  under `rust/`.
+- Second ID-mislabel defect found in `specs/WP-54-frontend-ux-error-handling.md`'s
+  coordination section: it calls `wd F56` the `block_user` nit (really `wd F61`)
+  and `wd F65` the `get_friends_overview` nit (really `wd F62`). Its line fences
+  are correct so there is no collision; not corrected (WP-54 is finalized).
+
+### Checklist ACCEPTED: T3-B5 complete (25 rows).
+
+### Worker 7 returned: T3-B6
+Wrote `checklists/T3-B6-outbound-email-websocket.md`. 12 rows (6m/6n): WP-60 = 9
+(5m/4n; `wfe F44` and `wfe F45` kept as two rows pointing at one atomic
+`UPDATE..RETURNING` rewrite of `ensure_email_token`), WP-42 = 3 (`ws F60`,
+`ws F61`, `ws F62`; 1m/2n). Grouped by package then source file, no line numbers,
+T3-B4 house format.
+- **ESCALATED with an explicit verdict: `ws F59` - WP-42 NEEDS A COMPACT TIER 2
+  SPEC.** Neither half is a one-liner. Task A must thread identity from the
+  pre-`on_upgrade` extractors into `handle_socket` and filter every frame through
+  WP-47's `is_game_visible_to_user`, a per-frame async DB predicate whose caching
+  strategy is an **open design question**. Task B is a wholly new `sub`/`unsub`
+  protocol needing per-socket state plus the currently-dropped client `send`
+  handle. This confirms the T3-B6 note in `tier2-tier3-plan.md` section 2.1.
+  **Orchestrator decision required:** promote WP-42 to a Tier 2 compact spec.
+- Constraints recorded in-file: anonymous `/ws` upgrades must keep returning 101,
+  never 401 (`rust/web/tests/websocket_hygiene.rs` asserts it); WP-47 lands first
+  and WP-42 reuses `is_game_visible_to_user` rather than forking it.
+- Nothing contested was dropped: WP-51, WP-54 and WP-59 all explicitly disclaim
+  the nine `wfe` findings to WP-60. "Owned elsewhere" records `ws F55` as already
+  shipped by WP-36 and the WP-51 / `wfe F46` coordination point on
+  `try_send_rendered_email`.
+- Decision-blocked table empty: D-13 is answered, so the only cross-package
+  constraint is sequencing, not a decision.
+- Spot-check: live `websocket_client.rs` still destructures `ready_state: _`, so
+  `ws F60` is confirmed unfixed.
+
+### Checklist ACCEPTED: T3-B6 (12 rows).
+
+### UNIT CLOSE-OUT - T3-B5 and T3-B6 complete
+Both checklists written and accepted; `planning/checklists/` now holds
+T3-B1..T3-B6. Remaining Tier 3 batches: T3-B7 (WP-61 + WP-43) and T3-B8 (WP-65 +
+WP-74/WP-75, gated on D-19 and on WP-29/WP-30).
+
+Items for the Orchestrator:
+1. **Promote WP-42 to a Tier 2 compact spec** (`ws F59`, above). Its three
+   remaining findings stay in T3-B6's table.
+2. **`wd F18` needs an owner** - reqwest call inside the `FOR UPDATE` transaction
+   in `create_game_from_service`; Tier 2 sized and collides with WP-40/WP-45 in
+   `restart_core`.
+3. Two ID-mislabel defects in the finalized `specs/WP-54-frontend-ux-error-handling.md`
+   coordination text (`wd F62` attributed to WP-50; `wd F56`/`wd F65` swapped for
+   `wd F61`/`wd F62`). Line fences are correct, so no collision - documentation
+   only, left uncorrected.
+
+## UNIT: T3-B7 + T3-B8 + WP-42 promotion (Lead, 2026-07-26)
+
+### Worker 1 returned: T3-B7 checklist
+`planning/checklists/T3-B7-bot-service-web-deps.md` written (142 lines).
+- **17 rows (10 minor / 7 nit)**: WP-61 = 12 (`bo F4`, `F6`, `F7`, `F9`, `F10`,
+  `F11`, `F12`, `F13`, `F14`, `F15`, `F16`, plus `dp F7`), WP-43 = 5 (`ws F63`
+  through `ws F67`). Matches `tier2-tier3-plan.md` section 2.1's projection
+  exactly. T3-B4 house format, grouped by crate then source file, no line
+  numbers anywhere, implementer instruction reproduced verbatim.
+- `bo F12` + `dp F7` are recorded as **two rows pointing at one edit** (drop the
+  hand-rolled `rand_nonce`, use `Aes256Gcm::generate_nonce`, then delete the
+  direct `getrandom` dependency) - land together.
+- `ws F67` kept as a row and flagged **UNVERIFIABLE (external basis)**, not
+  rejected: verification could confirm only in-repo declared versions, not
+  crates.io currency.
+- Escalate section empty - all 17 compress to one line. `bo F9` (nine `try_get`
+  sites across `config.rs` and `main.rs`) is the widest but the rule is uniform
+  per site, so it stays one row.
+- Decision-blocked table empty and justified: D-17/D-18/D-19/D-21/D-23 all belong
+  to WP-64/66/67/69/70, not here. `dp F7` removes a direct dependency outright
+  rather than restating a version, so it does **not** wait on D-19.
+- Dropped as spec-owned, recorded in "Not in this checklist": `bo F1`/`F3`/`F5`
+  (WP-39), `bo F2` (WP-38), `bo F17` (WP-70, blocked on D-21 - leave
+  `serde_yaml = "0.9"` alone even though `bo F16` edits the same table),
+  `dp F13` (WP-68). `bo F8` is outside WP-61's declared scope.
+- Two carried-forward interactions recorded in-file: WP-39 Task 6 now consumes
+  the tokio `signal` feature, so `bo F16` must **not** strip it; and
+  `specs/WP-36-crypto-deploy-hardening.md` also reaches `bot/src/crypto.rs`, so
+  land WP-36 before `bo F11`/`bo F12` if both are in flight.
+- Every `bo`/`dp` id was resolved by counting `###` headings and cross-checked
+  against the package's declared paths; no mismatches. The known off-by-one
+  tally lines (dependencies 26/27, bot-operator-tools 30/31) did not disturb the
+  anchors dp F6/F12/F20 and bo F18/F25/F26/F28.
+
+### Checklist ACCEPTED: T3-B7 (17 rows).
+
+### Worker 2 returned: T3-B8 checklist
+`planning/checklists/T3-B8-workspace-hygiene-red7-docs.md` written (197 lines).
+- **11 rows (5 minor / 6 nit)**: WP-65 = 9 (`dp F4`, `F5`, `F9`, `F17`, `F21`,
+  `F22`, `F23`, plus `e F9`, `e F28`), WP-74 = 1, WP-75 = 1. Matches
+  `tier2-tier3-plan.md` section 2.1. T3-B4 house format, no line numbers,
+  implementer instruction verbatim. All seven `dp` ids resolved against WP-65's
+  declared paths with no mismatches (anchors dp F6/F12/F20 held despite the
+  26-vs-27-heading tally error).
+- **3 rows gated, each kept in the main table AND in the decision-blocked
+  table** (never dropped):
+  - `dp F9` (web tower-http / gloo-net / gloo-timers pins) on **D-19/WP-64** -
+    it is a version-pin row, so doing it before the `[workspace.dependencies]`
+    migration means writing the pin twice. The Worker correctly judged the other
+    six WP-65 rows as **not** genuinely D-19-dependent (`lazy_static`->`LazyLock`,
+    stale template files, CI job, test-module rename) and left them dispatchable
+    with sequencing notes only.
+  - `WP-74` on the WP-29-Task-5 + WP-30 sequencing gate (WP-30 is
+    BLOCKED-ON-USER-RULES-REVIEW, plus D-29/D-40; D-29's outcome may change how
+    elimination is described).
+  - `WP-75` on the same gate plus WP-74, plus a live render capture, plus a
+    ruling.
+- **ESCALATED: `WP-75` is not Tier 3.** Five required sections missing outright
+  plus a missing worked example = whole-document rewrite; "Reading the Display"
+  needs a render captured from a live game state (DB + built binary) so it is
+  **not writable from source alone** and the capture was correctly not attempted;
+  and it is blocked on an unfiled ruling. A pointer row remains in the WP-74/75
+  table so it is not lost. Recommended route recorded: a Tier 2-style spec after
+  WP-30 clears, with the render capture as an explicit implementer step.
+- **NEW OPEN QUESTION FOR THE USER, not currently in `decisions-needed.md`:** do
+  the shipped `rust/game/red7-1/{BASIC_STRATEGY.md,ADVANCED_STRATEGY.md}`
+  (surfaced via `Gamer::basic_strategy`/`advanced_strategy`) satisfy
+  `RULES_AUTHORING.md`'s mandatory "Strategy Tips" section, given that document
+  says "Always include this section"? Recorded in the checklist's
+  decision-blocked table; **needs filing as a decision item.**
+- Dropped as spec-owned: lords-of-vegas-1's `lazy_static` removal (`d F6`, owned
+  by `specs/WP-22-lords-of-vegas-fixes.md` Task 5 - so `dp F21` owns only the
+  `rust/lib/color` site), `dp F1`/`F2`/`F3` (WP-64), `dp F24`/`F25` (WP-69),
+  `dp F13` (WP-68), `dp F26`/`e F45`/`e F46` (WP-73), red7-1's `e F31`-`e F35`
+  (WP-29), `e F30` (WP-30, parked), `e F27` (WP-28).
+- Verification corrections honoured: `e F28`'s `.rls.toml` is **not** malformed
+  (the reported `build_lib = truetarget` was a `cat`-concatenation artifact);
+  `e F9` was recast from a love-letter-2 defect to a workspace-wide convention
+  sweep, and red7-1 keeps `mod tests` per WP-29.
+- Read-only spot-checks recorded in-file: `lazy_static` still declared in both
+  `lib/color` and `lords-of-vegas-1` (WP-22 Task 5 not yet landed);
+  lords-of-vegas-1 has `.rls.toml` but no `build-release` (two-file delete);
+  a `cargo-deny` CI job exists but is gated on a changed-files filter, so
+  `dp F23`'s scheduled currency job is not a duplicate.
+
+### Checklist ACCEPTED: T3-B8 (11 rows).
+
+### Worker 3 returned: WP-42 promoted to a Tier 2 compact spec
+`planning/specs/WP-42-websocket-auth-and-filtering.md` written (**142 lines** -
+2 over the 140 ceiling, ~22 over the ~120 target; accepted
+as-is because the overrun is all substance: the resolved caching design, the
+newly-discovered proposal predicate, and the test-rework warning, none of which
+compress. Flagged rather than trimmed).
+- Structure per WP-47 house style: Problem / Why it's wrong / Required end state
+  (3a `ws_handler`, 3b `handle_socket`, 3c `db.rs`, 3d Task B) / Non-goals /
+  Regression test cases / Riders. **No line numbers anywhere.** Implementer
+  stop-and-report instruction reproduced near the top.
+- `## 2` affirms **`ws F59` is correct as written**, verified live, and confirms
+  the "identity is already available" claim still holds: `/ws` is registered in
+  `router.rs::build_router` **before** `.layer(session_layer)`, and
+  `FromRef<AppState> for PgPool` exists in `state.rs`, so **no router or layer
+  reordering is needed.**
+- **OPEN DESIGN QUESTION RESOLVED - the per-frame async visibility check gets a
+  bounded per-socket TTL cache**: plain `HashMap<Uuid, (bool, Instant)>`,
+  ~256 entries, **30s TTL, positive and negative results cached identically**,
+  no new crate. Rejected with reasons in-spec: unconditional DB hit per frame
+  (converts the client-refetch amplification into a Postgres one), connect-time
+  membership set (unbounded staleness over an hours-long connection, so a
+  mid-connection join never streams), and positive/negative TTL asymmetry
+  (premature - both risks want a short TTL). **Accepted staleness: up to 30s
+  either direction. Failure mode: fail closed** - a sqlx error resolves to "not
+  visible", is warned, and is not cached. Escape hatches: TTL expiry, reconnect
+  (`use_websocket` already reopens on `visibilitychange`/`online`), and the
+  client-side `bump_game_update` on the user's own action.
+- **NEW SCOPE DISCOVERED - WP-42 gains a db.rs predicate WP-47 does not supply.**
+  WP-47 provides only the game dispatcher `is_game_visible_to_viewer`; there is
+  **no proposal visibility predicate anywhere in `rust/web/src/db.rs`**. The spec
+  adds `is_proposal_visible_to_user(pool, proposal_id, viewer_id)` (one
+  `EXISTS` over `game_proposal_players`) and rules that proposals have no public
+  form, so an anonymous socket receives **no** proposal frames at all without a
+  query. Game frames still call WP-47's dispatcher - not forked, SQL untouched.
+- **TEST HAZARD the implementer must not paper over:** the existing
+  `rust/web/tests/websocket_hygiene.rs` test
+  `live_websocket_survives_idle_past_request_timeout` broadcasts a **random**
+  `game_id` and asserts the anonymous socket receives it. Under fail-closed
+  filtering a nonexistent game is not publicly visible, so **that assertion must
+  be reworked** to broadcast for a real all-`'public'` seeded game. The spec says
+  in terms: do not "fix" it by weakening the filter. The 101-for-cookie-less
+  assertion itself stays.
+- Task B (`sub`/`unsub`) is marked separable, sized separately, and explicitly
+  must not block Task A. Filter order fixed as: participant-visible OR
+  explicitly subscribed AND publicly visible - **a `sub` must not bypass the
+  predicate.**
+- Non-goals fence out, as instructed: `ws F60`/`F61`/`F62` (they stay rows in
+  `planning/checklists/T3-B6-outbound-email-websocket.md`, not to be done
+  twice), WP-47's own predicate work, `ws F55` graceful shutdown (already
+  shipped by WP-36 - `begin_shutdown`/`drain_ws_tasks` and the shutdown
+  `select!` arm are live; do not disturb), the `db.rs` split (`ws F42`), and any
+  per-user NATS subject.
+
+### Spec ACCEPTED: WP-42 (Tier 2 promotion complete).
+
+### UNIT CLOSE-OUT - T3-B7, T3-B8 and the WP-42 promotion complete
+`planning/checklists/` now holds T3-B1..T3-B8 - **Tier 3 checklist coverage is
+complete** for all dispatchable batches. `planning/specs/` gains WP-42, making 26
+finalized specs.
+
+Items for the Orchestrator:
+1. **File a new decision item:** do red7-1's shipped `BASIC_STRATEGY.md` /
+   `ADVANCED_STRATEGY.md` satisfy `RULES_AUTHORING.md`'s mandatory "Strategy
+   Tips" section? Blocks any WP-75 spec. Not in `decisions-needed.md` today.
+2. **WP-75 needs a Tier 2-style spec, not a checklist row**, written only after
+   WP-30 clears, and it must carry the live-render capture as an explicit
+   implementer step (DB + built binary required; a read-only session cannot
+   produce it).
+3. **WP-42's spec widens `db.rs`** with `is_proposal_visible_to_user`. If the
+   deferred `db.rs` module split (ws F42) is ever scheduled, it must now also
+   wait on WP-42.
+4. `dp F9` is the only T3-B8 row genuinely gated on **D-19**; pushing the user
+   for D-19 unblocks it and WP-64/WP-65's manifest sequencing.
+5. Still outstanding from earlier units: **D-11** (unblocks WP-46, 3 majors),
+   **D-15** (reopened), `wd F18`'s missing owner.
+
+## WP-15 IMPLEMENTATION (Lead, 2026-07-26)
+
+Spec `planning/specs/WP-15-seven-wonders-mechanical.md` executed in full (all 9
+tasks, findings b F1/F2/F3/F9/F10/F12/F13/F14/F15). One commit, rust-only
+(`rust/game/seven-wonders-1/`). Gate: `cargo fmt --all -- --check` clean,
+`cargo clippy --workspace --exclude web --all-targets -- -D warnings` clean,
+`cargo test -p seven-wonders-1` = 40 lib + 1 contract green (23 baseline + 17
+new). TDD red-first for every fix.
+
+Two spec deviations, both test-arithmetic/setup (production code matches the
+spec exactly):
+1. Task 4 `stored_deal_paid_despite_mid_turn_divergence`: spec expected
+   `coins[MICK]==1`, live is 2 - Haven's own Bonus (`coins:1`, Raw DIR_SELF)
+   pays MICK 1 coin for his Clay Pit on build. Corrected the assertion to 2
+   (pre-fix free-deal value would be 4; the stored deal IS paid).
+2. Task 8 `deal_command_selects_between_multiple_deals`: spec's Haven setup
+   yields ONE deal, not two - `can_afford_perm`'s early return
+   (`lib/cost/src/lib.rs:183`) collapses "same good from either neighbor"
+   before the second neighbor is explored. Rebuilt the setup around Gardens
+   (Clay:2+Wood:1) with MICK self-providing one Clay (Clay Pool) and both
+   neighbors holding Tree Farm (Wood OR Clay) + Clay Pool, which genuinely
+   yields two deals (`{LEFT:4}` vs `{LEFT:2,RIGHT:2}`) and exercises `deal 2`
+   selection. Intent (b F14 multi-deal coverage) preserved.
+
+No docs/CODING.md or other docs/*.md updates: the spec proposes none.
+PORTING_NOTES.md:63-64 DrawDiscard claim is now true at fire time per the b F2
+prune; left unedited (out of scope).
+
+### LEAD RULING - `is_proposal_visible_to_user` stays in WP-42, not WP-47
+Worker 3 asked whether the new proposal predicate should be moved into WP-47.
+**It stays in WP-42.** WP-47's scope is `wd F17` (game details) and `wd F45`
+(stats identities); neither finding touches proposals, WP-47 is already
+finalized and accepted, and WP-42 is the only consumer. Moving it would reopen a
+closed spec to add a predicate with no caller in its own package. The
+one-predicate-no-forks rule is still honoured: WP-42 *consumes* WP-47's
+`is_game_visible_to_viewer` for game frames unchanged, and only adds a
+predicate for a rule WP-47 never encoded.
+
+Worker 3 also confirmed against live source, after drift from snapshot `f8763a5`:
+`ws_handler` still takes only `WebSocketUpgrade` + `State<GameBroadcaster>`;
+`handle_socket` still wildcard-subscribes and forwards unfiltered; the inbound
+arm still discards payloads; `/ws` is still registered before
+`.layer(session_layer)` and `/healthz` after; `FromRef<AppState> for PgPool`,
+`get_user_from_session` and `validate_session_token(pool, auth_token_id)` all
+exist as described; WP-36's `begin_shutdown`/`drain_ws_tasks`/shutdown arm are
+live. D-13's line numbers have drifted (`ws_handler` has moved) - as expected,
+which is why the spec cites none.
+
+# specs-LOG - Lead session, FINAL UNIT (prevention package + wrap-up)
+
+Date: 2026-07-26. Lead: orchestrate Lead role. Workers: model opus (user
+override). Same HARD READ-ONLY CONSTRAINTS as unit 3b: writes only inside
+`planning/`; never touch `rust/`; no cargo/build/test/clippy/fmt; no git
+mutations; validation by reading only. Another agent is concurrently editing
+`rust/` (critical fixes) - expect drift, never write there.
+
+## Plan (final unit)
+
+Four deliverables, one Worker each, serial:
+- D1: `planning/CODING-md-amendment-proposal.md` - consolidated CODING.md
+  amendment, 5 (maybe 6) rules derived from critical root causes, <150 lines,
+  matching the live `docs/CODING.md` voice. Sources: `planning/critical-path.md`,
+  specs WP-01, WP-40, WP-47, WP-57, WP-09a.
+- D2: `planning/open-decisions-for-user.md` - one table of everything needing
+  Michael's input (id / what's blocked / question / recommendation / source).
+- D3: append "Unowned / newly discovered" section to `planning/work-packages.md`
+  (5 items, new WP numbers, one line + severity each, no specs).
+- D4: `planning/README.md` - map of the planning directory, <80 lines.
+
+## Entries (final unit)
+
+- [planned] Plan written. No workers dispatched yet.
+- [dispatch W1] D1 CODING.md amendment proposal.
+- [W1 done] `planning/CODING-md-amendment-proposal.md` written, 130 lines
+  (cap 150), ASCII-only, SIX rules. Sixth rule added: "Deserialized state and
+  wire-supplied indices are untrusted; bounds-check at the boundary, once" -
+  justified by recurrence across WP-09a, WP-09b (15 crates), plus routed-in
+  items from WP-19 and WP-21 (four packages, past the three-package bar), and
+  not covered by the no-panic rule (that forbids the panic, this one fixes
+  WHERE the check goes). Insertion point: new top-level `## Request-Path
+  Invariants` between `## Rust: Error Handling` and `## Leptos: SSR and
+  Hydration`. LEAD VERIFIED the insertion point against the live
+  `docs/CODING.md` by grep: `## Rust: Error Handling` at :44, the `**DOM access
+  in event handlers.**` closing paragraph at :63, `## Leptos: SSR and
+  Hydration` at :69 - all exactly as claimed. Voice matches (bold lead-in
+  paragraph + fenced example, same as the rest of the file).
+  Caveats accepted, not defects: rules 2/3 paraphrase a single representative
+  line for the WRONG side (the specs describe those defects in prose and quote
+  no source, and the Worker is forbidden from reading `rust/` to quote
+  verbatim); rule 4's sketch is the spec's ordered SQL/error sequence in
+  comment form rather than invented Rust. Rules 1 and 5 are verbatim from
+  WP-01 Task 1 and WP-57 section 3c. All six name the real crate/function.
+  ACCEPTED without revision.
+  Worker note carried forward: `planning/critical-path.md` is STALE - it still
+  lists WP-40, WP-47 and WP-57 as "Spec? no" though finalized specs for all
+  three exist in `planning/specs/`. Recorded here; not corrected (outside this
+  unit's four deliverables).
+- [dispatch W2] D2 consolidated open decisions table.
+- [W2 done] `planning/open-decisions-for-user.md` written, 66 lines, ASCII-only,
+  ONE table of 34 rows plus a 2-item Notes section. Every row states exactly one
+  recommendation. Composition: 4 blessings on already-answered decisions (D-37,
+  D-8, D-14, bo F25), 17 unanswered gating decisions (D-11, D-15, D-7, D-9,
+  D-10, D-16, D-17..D-25, D-38, D-39, D-40), 1 parity-park row (D-35, covering
+  D-26..D-32 + D-34), 5 separate rows for the five egregious parity bugs (a F1
+  rtta-2 roll(), b F4 seven-wonders same-turn trade, b F7 both wonder sides,
+  e F30 red7 empty-palette tie-break, d F37 modern-art $20/$10 with the Go
+  original noted as identical), and 6 new ids (N-1 WP-38 thresholds, N-2 WP-10
+  cup_counts, N-3 WP-62 newest-wins, N-4 red7 Strategy-Tips ruling, N-5 BACKLOG
+  note, N-6 CODING.md amendment). All Orchestrator-supplied must-include items
+  are present.
+  D-25 / WP-17 DISCREPANCY RESOLVED (note 2 in the file): both documents are
+  partly wrong. The authoritative reading is the one
+  `checklists/T3-B3-splendor-libcost-holdem.md` already implements - D-25 gates
+  only 3 of WP-17's 8 findings (b F31, ls F39, dp F27, one indivisible
+  `lib/cost` consolidation) and the other 9 rows are dispatchable today. So
+  `work-packages.md:218`'s package-level `BLOCKED-ON-DECISION(D-25)` label
+  overstates the scope, and `tier2-tier3-plan.md` 2.1 is right that the batch
+  was dispatchable but its 2.2 blocked roster should list WP-17 as PARTIALLY
+  blocked. Neither source document was edited (out of this unit's scope) - the
+  reconciliation lives in the decisions file.
+  Excluded as already answered (checked against `decisions-needed.md`'s
+  ANSWERED/REFINEMENTS index): D-1, D-2, D-3, D-4, D-5, D-6, D-12, D-13, D-33,
+  D-36, plus D-41 (Lead applied ruling B; WP-54 is unblocked and an override
+  only edits WP-54 Task 2).
+  Undeterminable: the deployed Kubernetes version (bo F25) - the cell says so
+  rather than guessing a pin.
+  Lead review: read the file in full. Table is well formed, cells are one to
+  two sentences, ASCII clean, recommendations are all singular and concrete.
+  ACCEPTED without revision.
+  Known gap, deliberate: D2 was written before D3, so the 5 new WP numbers from
+  the "Unowned / newly discovered" section are not in the table. Reviewed - none
+  of the five needs a user decision (they are unowned work items, and wd F18's
+  refactor collision is an implementer sequencing problem, not a product
+  question), so no D2 revision pass is required.
+- [dispatch W3] D3 append "Unowned / newly discovered" to work-packages.md.
+- [W3 done] `## Unowned / newly discovered` appended to
+  `planning/work-packages.md` (file 799 -> 846 lines, 48 appended). Nothing
+  pre-existing was restructured - append only, Lead verified by reading the
+  tail. Max pre-existing WP number was WP-75, so the five items are WP-76..WP-80:
+  - WP-76 notify_game_emails wiring gap for email-originated moves - READY, 1M.
+  - WP-77 get_available_bots default bot_name - READY, 1m.
+  - WP-78 db.rs module split (ws F42) - DEFERRED, 1m. Blocker list is WP-35, 40,
+    42, 45, 47, 49, 50, 52, 53, 59 - the Worker correctly ADDED WP-59 from
+    WP-41's own disposition (the Orchestrator's list omitted it) and WP-42 from
+    the earlier LOG entry.
+  - WP-79 hoist the game-service HTTP call out of the FOR UPDATE transaction
+    (wd F18) - READY, 1m, with the four callers named and the WP-40/WP-45
+    `restart_core` collision recorded in the entry.
+  - WP-80 tic-tac-toe-2 unbounded `players` (f F46) - READY, 1m, pointed at
+    WP-09a/WP-09b.
+  Format matches the file: `### WP-NN title - STATUS` + Scope/Paths/Severity +
+  note lines; severity uses the file's own `c/M/m/n` code vocabulary. Finding
+  accounting preserved: WP-76/WP-77 carry 0 findings (spec-time discoveries,
+  like WP-74/WP-75) and WP-78/79/80 re-file findings already counted under
+  WP-41/WP-53/WP-09, so the 570 sum and the one-package-per-finding invariant
+  are both unaffected - the section says so explicitly. No specs written.
+  ACCEPTED without revision.
+- [dispatch W4] D4 planning/README.md index.
+- [W4 done] `planning/README.md` written, 79 lines (cap 80), ASCII-only. Covers
+  the directory's purpose (findings live in `../`), a 14-row file map, the
+  tiering, execution order and 6 implementer rules. Lead read it in full.
+  ACCEPTED without revision.
+  Worker found TWO planning files the brief did not name: `planning/BACKLOG.md`
+  (the phase-ordered Phase 0-7 prioritized backlog - this, not
+  `landing-order.md`, is the global ordering source) and `planning/triage-LOG.md`.
+  No expected file was missing. `findings/` is in the parent, not in `planning/`.
+  Inventory: 12 top-level files + `specs/` (40 WP specs + notes-conventions.md),
+  `checklists/` (T3-B1..B8), `raw/`.
+  FOUR tiering corrections the README now records (the brief's file counts were
+  right, but `tier2-tier3-plan.md` states ROSTERS, not file counts):
+  (1) the Tier 2 roster is 21 packages, not 15 - 13 dispatchable + 8
+  decision-blocked; only 14 roster packages got specs, WP-09 later split into
+  WP-09a/WP-09b (hence 15 files) and WP-42 was promoted from Tier 3;
+  (2) the 8 decision-blocked Tier 2 packages have NO spec: WP-04, 05, 46, 55,
+  58, 64, 66, 67;
+  (3) the Tier 3 roster is 23 packages and the 8 checklists cover the 16
+  dispatchable ones - WP-48, 50, 69, 70, 71, 72, 73 have no checklist;
+  (4) `tier2-tier3-plan.md` section 3 names the CODING proposal
+  `planning/CODING-amendment-proposed.md`; the real filename is
+  `CODING-md-amendment-proposal.md`. Section 2.2 also omits WP-17.
+  Tier 1 = 25 confirmed verbatim from section 0.1 (it includes WP-68).
+  `landing-order.md` correctly characterised: NOT a global order - six sections
+  of verified PAIRWISE sequencing constraints (WP-41 before WP-40; WP-56/WP-59
+  overlap table; WP-40 conflicts invisible until WP-54; a recommended cluster
+  order; a line-number caveat; and later Leads' chains - auth WP-41 -> WP-36 ->
+  WP-34 -> WP-35, WP-37 -> WP-38, WP-59 -> WP-57, WP-09a -> WP-09b, WP-09a ->
+  WP-21 T10). README states BACKLOG.md Phase 0-7 as the global order and
+  landing-order.md as the override where they disagree.
+
+## Completion (final unit)
+
+Unit COMPLETE 2026-07-26. All four deliverables written and Lead-reviewed;
+zero revision passes needed.
+
+1. `planning/CODING-md-amendment-proposal.md` - 130 lines, 6 rules, insertion
+   point verified against live `docs/CODING.md`.
+2. `planning/open-decisions-for-user.md` - 66 lines, one 34-row table + 2 notes.
+3. `planning/work-packages.md` - `## Unowned / newly discovered` appended,
+   WP-76..WP-80, 48 lines, finding accounting unaffected.
+4. `planning/README.md` - 79 lines, with four tiering corrections.
+
+Compliance: NO file under `rust/` was created, modified or deleted; NO
+cargo/build/test/clippy/fmt command was run by the Lead or any Worker; NO git
+mutation was run. All writes were confined to `planning/`.
+
+Still unresolved / carried forward:
+- `planning/critical-path.md` is STALE (lists WP-40/WP-47/WP-57 as "Spec? no"
+  though finalized specs exist). Not corrected - outside this unit's scope.
+- `planning/tier2-tier3-plan.md` still carries the wrong CODING-proposal
+  filename and omits WP-17 from its blocked roster; the corrections live in
+  `README.md` and `open-decisions-for-user.md` note 2 rather than in the plan
+  file itself.
+- `work-packages.md:218`'s package-level `BLOCKED-ON-DECISION(D-25)` label on
+  WP-17 overstates the gate (3 of 8 findings). Left as-is; documented.
+- Both doc proposals (`BACKLOG-note-proposed.md`, `CODING-md-amendment-proposal.md`)
+  remain UNAPPLIED to `docs/BACKLOG.md` and `docs/CODING.md`.
+- 34 decisions await Michael.
+
+## WP-21 implementation - complete (2026-07-26)
+
+Both crates done: cathedral-2 (Tasks 1-6), sushizock-2 (Tasks 7-10). All 12
+in-scope findings dispatched (c F22-F28 cathedral-2; c F29-F34 sushizock-2);
+red-first confirmed for the TDD tasks. Per-crate test/clippy/fmt green for
+both crates.
+
+Gate: `cargo fmt --all -- --check` clean; `cargo clippy --workspace --exclude
+web --all-targets -- -D warnings` clean. `scripts/rust-test.sh` could NOT run
+- environmental (Docker failed to bind port 15432, already allocated; exit
+125). Fallback `cargo test -p cathedral-2` and `-p sushizock-2` both PASS.
+
+Single commit f547238 (8 files: cathedral-2 Cargo.toml/command.rs/lib.rs/
+loc.rs/piece.rs/render.rs, sushizock-2 lib.rs, Cargo.lock). Not pushed.
+
+---
+
+## WP-06: lib cmd tools and http - COMPLETE
+
+Date: 2026-07-26. Lead: orchestrate Lead role.
+
+All 5 tasks executed per spec. Findings addressed: ls F19 (MAJOR), ls F20,
+ls F21, ls F22, ls F23, ls F26, ls F27, ls F28, ls F29, ls F30, ls F44,
+ls F45.
+
+Changes (14 files):
+- http.rs: extracted `route()`, SystemError instead of unwrap, 16 MiB body cap
+- error.rs: Parse message includes source; new ChildExit variant
+- gamer.rs: `renders` returns Result; handle_pub/player_render match not unwrap
+- cli.rs: requester error -> SystemError; expect with messages on writes
+- repl.rs: prompt returns Option (EOF=quit), refresh_renders on undo/load,
+  empty undo stack, is_empty(), panic messages with content
+- bot_cli.rs: deleted dead cli/Response, kept Request struct
+- rand_bot: removed extern crate, fixed mangled comment
+- api.rs: removed redundant serde(default); lock-in test
+- test_game.rs: new cfg(test) Gamer impls for transport tests
+- Cargo.toml: dev-deps tokio macros/rt, warp test feature
+
+Gate: `cargo fmt --all -- --check` clean; `cargo clippy --workspace --exclude
+web --all-targets -- -D warnings` clean; `scripts/rust-test.sh` ALL PASSED
+(13 brdgme_cmd tests, full workspace-minus-web, web with DB containers).
+
+Single commit a543120. Not pushed.
+
+---
+
+## WP-13 starship-catan-1 fixes - IMPLEMENTED 2026-07-26
+
+Lead: orchestrate Lead role. Workers: 4 serial dispatches (Tasks 1-4,
+Tasks 5-8, Task 9, final gate+commit).
+
+All 9 tasks implemented per spec. All 10 findings dispatched:
+- a F11: cannon_transaction surcharge now keys off Resource::Cannon
+- a F12: can_lose_module || changed to &&
+- a F13: TradeAndBuild buy branch gains astro affordability check
+- a F14: buy/sell parsers capped at Int::bounded(1, 99)
+- a F15: Sensor peek rendered to peeking player only (gated on current_player)
+- a F16: Current turn row uses N::Player(current) not N::Player(viewer)
+- a F17: dead code removed (Transaction::gain, Game::next_turn,
+  Module::description, join_dice, start_card field)
+- a F18: direction-mismatch error interpolates direction.string()
+- a F19: last_sectors capped at 5 via LAST_SECTORS_LIMIT const
+- a F20: comment-only (BTreeMap shape preserved for serde compat)
+
+Serde spot check: old Colony JSON with start_card field deserializes cleanly
+(serde ignores unknown fields, no deny_unknown_fields in crate).
+
+Tests: 40 passed, 0 failed (39 lib + 1 contract). 12 new tests added.
+Gate: `cargo fmt --all -- --check` clean; `cargo clippy --workspace --exclude
+web --all-targets -- -D warnings` clean; `scripts/rust-test.sh` ALL PASSED.
+
+Single commit 7f4f902. Not pushed.

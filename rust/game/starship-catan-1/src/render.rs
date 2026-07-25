@@ -105,7 +105,7 @@ fn double_row(mut left: Vec<Cell>, right: Vec<Cell>) -> Row {
 
 const DESCRIPTION_WRAP_WIDTH: usize = 60;
 
-fn render(pub_state: &PubState, player: Option<usize>, _peeking: Option<&[SectorCard]>) -> Vec<N> {
+fn render(pub_state: &PubState, player: Option<usize>, peeking: Option<&[SectorCard]>) -> Vec<N> {
     let viewer = player.unwrap_or(0);
     let opponent = (viewer + 1) % 2;
     let boards = &pub_state.player_boards;
@@ -122,7 +122,7 @@ fn render(pub_state: &PubState, player: Option<usize>, _peeking: Option<&[Sector
     // Current turn
     let mut turn_rows: Vec<Row> = vec![vec![
         (A::Left, vec![N::Bold(vec![N::text("Current turn:")])]),
-        (A::Left, vec![N::Player(viewer)]),
+        (A::Left, vec![N::Player(current)]),
     ]];
     match pub_state.phase {
         Phase::ChooseSector => {
@@ -178,6 +178,26 @@ fn render(pub_state: &PubState, player: Option<usize>, _peeking: Option<&[Sector
     }
     out.push(table_with_gap(&turn_rows, 2));
     out.push(N::text("\n\n"));
+
+    if player == Some(pub_state.current_player)
+        && let Some(peeking) = peeking
+        && !peeking.is_empty()
+    {
+        out.push(N::Bold(vec![N::text("Peeked cards")]));
+        out.push(N::text("\n"));
+        let mut peek_rows: Vec<Row> = vec![vec![
+            (A::Left, vec![N::Bold(vec![N::text("#")])]),
+            (A::Left, vec![N::Bold(vec![N::text("Card")])]),
+        ]];
+        for (i, c) in peeking.iter().enumerate() {
+            peek_rows.push(vec![
+                (A::Left, vec![N::text((i + 1).to_string())]),
+                (A::Left, c.full_string()),
+            ]);
+        }
+        out.push(table_with_gap(&peek_rows, 2));
+        out.push(N::text("\n\n"));
+    }
 
     // Resources
     let bold_name = |p: usize| vec![N::Bold(vec![N::Player(p)])];

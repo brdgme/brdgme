@@ -121,33 +121,6 @@ impl Module {
         }
     }
 
-    pub fn description(self, player: usize, level: i32) -> String {
-        match self {
-            Module::Logistics => {
-                format!("Store up to {} resources in each resource bay", 2 + level)
-            }
-            Module::Command => {
-                format!("Take up to {} actions during your flight phase", 2 + level)
-            }
-            Module::Sensor => format!(
-                "Look at the first {} sector cards of a flight, put each card on the bottom or top of the stack in any order",
-                1 + level
-            ),
-            Module::Trade => format!(
-                "Buy {} resource(s) of your choice from your opponent for 2 Astro each",
-                level
-            ),
-            Module::Science => format!(
-                "Produce a science point on a roll of a {}",
-                join_dice(&Module::science_module_dice(level, player))
-            ),
-            Module::Production => format!(
-                "Produce a trade good on a roll of a {}",
-                join_dice(&Module::trade_module_dice(level, player))
-            ),
-        }
-    }
-
     pub fn science_module_dice(level: i32, player: usize) -> Vec<i32> {
         match level {
             0 => vec![],
@@ -169,13 +142,6 @@ impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name())
     }
-}
-
-fn join_dice(dice: &[i32]) -> String {
-    dice.iter()
-        .map(|d| d.to_string())
-        .collect::<Vec<_>>()
-        .join(" or ")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -254,7 +220,6 @@ pub enum SectorCard {
         name: String,
         resource: Resource,
         dice: i32,
-        start_card: bool,
     },
     Trade {
         name: String,
@@ -465,7 +430,6 @@ fn colony(name: &str, resource: Resource, dice: i32) -> SectorCard {
         name: name.to_string(),
         resource,
         dice,
-        start_card: false,
     }
 }
 
