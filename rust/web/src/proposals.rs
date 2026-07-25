@@ -58,13 +58,6 @@ pub struct ProposalOutcome {
     pub game_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RespondOutcome {
-    pub accepted: bool,
-    pub started: bool,
-    pub game_id: Option<Uuid>,
-}
-
 #[cfg_attr(feature = "ssr", derive(FromRow))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposalPlayerView {
@@ -75,7 +68,6 @@ pub struct ProposalPlayerView {
     pub bot_difficulty: Option<String>,
     pub response: String,
     pub responded_at: Option<PrimitiveDateTime>,
-    pub email_token: Option<String>,
     /// Resolved display name: the human's username, or the bot display name.
     pub name: String,
 }
@@ -510,7 +502,7 @@ pub async fn find_proposal_roster(
 ) -> sqlx::Result<Vec<ProposalPlayerView>> {
     sqlx::query_as::<_, ProposalPlayerView>(
         "SELECT pp.id, pp.\"position\", pp.user_id, pp.bot_name, pp.bot_difficulty, pp.response, \
-         pp.responded_at, pp.email_token, \
+         pp.responded_at, \
          COALESCE(u.name, pp.bot_name, 'Bot') AS name \
          FROM game_proposal_players pp \
          LEFT JOIN users u ON u.id = pp.user_id \
@@ -660,28 +652,19 @@ pub async fn reset_accepted_humans_for_roster_change(
     proposal_id: Uuid,
     owner_user_id: Uuid,
 ) -> sqlx::Result<Vec<(Uuid, String)>> {
-    let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT id, user_id FROM game_proposal_players \
-         WHERE proposal_id = $1 AND response = 'accepted' AND user_id IS NOT NULL AND user_id <> $2 \
-         ORDER BY \"position\"",
+    sqlx::query_as(
+        "UPDATE game_proposal_players \
+         SET response = 'pending', responded_at = NULL, \
+             email_token = replace(gen_random_uuid()::text, '-', ''), \
+             updated_at = (now() AT TIME ZONE 'utc') \
+         WHERE proposal_id = $1 AND response = 'accepted' \
+           AND user_id IS NOT NULL AND user_id <> $2 \
+         RETURNING user_id, email_token",
     )
     .bind(proposal_id)
     .bind(owner_user_id)
     .fetch_all(&mut *tx)
-    .await?;
-    let mut out = Vec::new();
-    for (player_id, user_id) in rows {
-        let token = Uuid::new_v4().simple().to_string();
-        sqlx::query(
-            "UPDATE game_proposal_players SET response = 'pending', responded_at = NULL, email_token = $1, updated_at = (now() AT TIME ZONE 'utc') WHERE id = $2",
-        )
-        .bind(&token)
-        .bind(player_id)
-        .execute(&mut *tx)
-        .await?;
-        out.push((user_id, token));
-    }
-    Ok(out)
+    .await
 }
 
 #[cfg(feature = "ssr")]
@@ -694,16 +677,6 @@ pub async fn find_proposal_player_by_email_token(
     )
     .bind(token)
     .fetch_optional(pool)
-    .await
-}
-
-#[cfg(feature = "ssr")]
-pub async fn count_pending_human_invitees(pool: &PgPool, proposal_id: Uuid) -> sqlx::Result<i64> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM game_proposal_players WHERE proposal_id = $1 AND response = 'pending' AND user_id IS NOT NULL",
-    )
-    .bind(proposal_id)
-    .fetch_one(pool)
     .await
 }
 
@@ -722,10 +695,10 @@ pub async fn fetch_nudge_candidates(pool: &PgPool, threshold_secs: i64) -> Vec<N
          FROM game_proposals gp \
          JOIN game_proposal_players pp ON pp.proposal_id = gp.id \
          WHERE gp.status = 'open' AND gp.nudged_at IS NULL \
-           AND gp.created_at < NOW() - ($1 || ' seconds')::interval \
+           AND gp.created_at < NOW() - ($1 * interval '1 second') \
            AND pp.response = 'pending' AND pp.user_id IS NOT NULL",
     )
-    .bind(threshold_secs.to_string())
+    .bind(threshold_secs)
     .fetch_all(pool)
     .await;
     match rows {
@@ -752,9 +725,9 @@ pub async fn mark_proposal_nudged(pool: &PgPool, proposal_id: Uuid) {
 #[cfg(feature = "ssr")]
 pub async fn fetch_expiry_candidates(pool: &PgPool, threshold_secs: i64) -> Vec<Uuid> {
     let rows = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM game_proposals WHERE status = 'open' AND created_at < NOW() - ($1 || ' seconds')::interval",
+        "SELECT id FROM game_proposals WHERE status = 'open' AND created_at < NOW() - ($1 * interval '1 second')",
     )
-    .bind(threshold_secs.to_string())
+    .bind(threshold_secs)
     .fetch_all(pool)
     .await;
     match rows {
@@ -816,9 +789,9 @@ pub async fn fetch_auto_decline_candidates(
          WHERE gp.status = 'open' \
            AND pp.response = 'pending' \
            AND pp.user_id IS NOT NULL \
-           AND gp.created_at < NOW() - ($1 || ' seconds')::interval",
+           AND gp.created_at < NOW() - ($1 * interval '1 second')",
     )
-    .bind(threshold_secs.to_string())
+    .bind(threshold_secs)
     .fetch_all(pool)
     .await;
     match rows {
@@ -893,7 +866,7 @@ pub(crate) async fn find_or_create_user_by_email_tx(
     .bind(email)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(internal("create_proposal: resolve email"))?;
+    .map_err(internal("resolve invite email: lookup"))?;
     if let Some(id) = existing {
         return Ok(id);
     }
@@ -901,14 +874,14 @@ pub(crate) async fn find_or_create_user_by_email_tx(
     let new_user_id = Uuid::new_v4();
     let username = crate::db::generate_unique_username(&mut *tx)
         .await
-        .map_err(internal("create_proposal: gen username"))?;
+        .map_err(internal("resolve invite email: gen username"))?;
     sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1,$2,$3)")
         .bind(new_user_id)
         .bind(&username)
         .bind(Vec::<String>::new())
         .execute(&mut *tx)
         .await
-        .map_err(internal("create_proposal: resolve email"))?;
+        .map_err(internal("resolve invite email: insert user"))?;
     sqlx::query(
         "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1,$2,true,NOW())",
     )
@@ -916,7 +889,7 @@ pub(crate) async fn find_or_create_user_by_email_tx(
     .bind(email)
     .execute(&mut *tx)
     .await
-    .map_err(internal("create_proposal: resolve email"))?;
+    .map_err(internal("resolve invite email: insert email"))?;
     Ok(new_user_id)
 }
 
@@ -1026,6 +999,50 @@ fn proposal_ready_to_start(players: &[ProposalPlayer], player_counts: &[i32]) ->
     }
     let count = players.iter().filter(|p| p.response != "declined").count();
     crate::game::server_fns::roster_error(player_counts, count).is_none()
+}
+
+/// Why a respond_proposal call must be rejected, or None if allowed.
+/// The owner can never respond: declining would wedge the proposal
+/// (declined is terminal and the owner slot cannot be removed).
+#[cfg(feature = "ssr")]
+fn respond_denied_reason(is_owner: bool, current: &str, target: &str) -> Option<&'static str> {
+    if is_owner {
+        return Some("The owner can't respond to their own proposal. Cancel the invite instead.");
+    }
+    match (current, target) {
+        ("pending", "accepted") | ("pending", "declined") | ("accepted", "declined") => None,
+        _ => Some(if current == "declined" {
+            "You have already declined this invite."
+        } else {
+            "You have already accepted this invite."
+        }),
+    }
+}
+
+/// Ownership may only move to a human roster member who has accepted:
+/// a pending or declined owner could never respond (owners can't respond)
+/// and would wedge the proposal permanently.
+#[cfg(feature = "ssr")]
+fn transfer_target_error(players: &[ProposalPlayer], target_user_id: Uuid) -> Option<&'static str> {
+    match players.iter().find(|p| p.user_id == Some(target_user_id)) {
+        None => Some("That player isn't in this proposal."),
+        Some(p) if p.response != "accepted" => {
+            Some("Ownership can only be transferred to a player who has accepted.")
+        }
+        Some(_) => None,
+    }
+}
+
+/// Accepted human roster members other than the owner - the notification
+/// audience for cancel/start emails.
+#[cfg(feature = "ssr")]
+fn accepted_invitee_ids(players: &[ProposalPlayer], owner_user_id: Uuid) -> Vec<Uuid> {
+    players
+        .iter()
+        .filter(|p| p.response == "accepted")
+        .filter_map(|p| p.user_id)
+        .filter(|id| *id != owner_user_id)
+        .collect()
 }
 
 /// Creates an open game-invite proposal (owner and bots accepted, humans
@@ -1197,10 +1214,7 @@ pub async fn create_proposal(
 /// emailed that the game is ready to start.
 #[server(RespondProposal, "/api")]
 #[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
-pub async fn respond_proposal(
-    proposal_id: Uuid,
-    accept: bool,
-) -> Result<RespondOutcome, ServerFnError> {
+pub async fn respond_proposal(proposal_id: Uuid, accept: bool) -> Result<(), ServerFnError> {
     use crate::websocket::GameBroadcaster;
     use sqlx::PgPool;
 
@@ -1232,16 +1246,11 @@ pub async fn respond_proposal(
         .ok_or_else(|| ServerFnError::new("You are not an invitee of this proposal."))?;
 
     let target = if accept { "accepted" } else { "declined" };
-    let allowed = matches!(
-        (me.response.as_str(), target),
-        ("pending", "accepted") | ("pending", "declined") | ("accepted", "declined")
-    );
-    if !allowed {
-        let msg = if me.response == "declined" {
-            "You have already declined this invite."
-        } else {
-            "You have already accepted this invite."
-        };
+    if let Some(msg) = respond_denied_reason(
+        user.id == proposal.owner_user_id,
+        me.response.as_str(),
+        target,
+    ) {
         return Err(ServerFnError::new(msg));
     }
 
@@ -1258,7 +1267,7 @@ pub async fn respond_proposal(
             crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
                 .await
                 .map_err(internal("respond_proposal: player counts"))?
-                .unwrap_or_default();
+                .ok_or_else(|| ServerFnError::new("Game type not found"))?;
         became_ready = proposal_ready_to_start(&updated_players, &player_counts);
     }
 
@@ -1274,11 +1283,7 @@ pub async fn respond_proposal(
         mailer().notify_owner_decline(proposal_id, user.id);
     }
 
-    Ok(RespondOutcome {
-        accepted: accept,
-        started: false,
-        game_id: None,
-    })
+    Ok(())
 }
 
 /// Owner-only: explicitly start an open proposal. Requires all humans to have
@@ -1338,7 +1343,7 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
     let player_counts = crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
         .await
         .map_err(internal("start_proposal: player counts"))?
-        .unwrap_or_default();
+        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
     let count = players.iter().filter(|p| p.response != "declined").count();
     if let Some(msg) = crate::game::server_fns::roster_error(&player_counts, count) {
         return Err(ServerFnError::new(msg));
@@ -1359,12 +1364,7 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
     broadcaster.broadcast_proposal_update(proposal_id).await;
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
 
-    let invitee_ids: Vec<Uuid> = players
-        .iter()
-        .filter(|p| p.response == "accepted")
-        .filter_map(|p| p.user_id)
-        .filter(|id| *id != proposal.owner_user_id)
-        .collect();
+    let invitee_ids = accepted_invitee_ids(&players, proposal.owner_user_id);
     mailer().notify_started(proposal_id, game_id, invitee_ids);
 
     Ok(game_id)
@@ -1391,17 +1391,6 @@ pub async fn add_proposal_player(
         usize::from(user_id.is_some()) + usize::from(email.is_some()) + usize::from(bot.is_some());
     if provided != 1 {
         return Err(ServerFnError::new("Choose a player, email, or bot to add."));
-    }
-
-    let proposal = find_proposal(&pool, proposal_id)
-        .await
-        .map_err(internal("add_proposal_player: find"))?
-        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
-    if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new("Only the owner can edit this proposal."));
-    }
-    if proposal.status != "open" {
-        return Err(ServerFnError::new("This proposal is no longer open."));
     }
 
     let mut tx = pool
@@ -1508,6 +1497,7 @@ pub async fn add_proposal_player(
 
 /// Owner-only: cancel an open proposal and notify accepted invitees.
 #[server(CancelProposal, "/api")]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
 pub async fn cancel_proposal(proposal_id: Uuid) -> Result<(), ServerFnError> {
     use crate::websocket::GameBroadcaster;
     use sqlx::PgPool;
@@ -1515,23 +1505,6 @@ pub async fn cancel_proposal(proposal_id: Uuid) -> Result<(), ServerFnError> {
     let pool = expect_context::<PgPool>();
     let broadcaster = expect_context::<GameBroadcaster>();
     let user = crate::friends::require_user().await?;
-
-    let proposal = find_proposal(&pool, proposal_id)
-        .await
-        .map_err(internal("cancel_proposal: find"))?
-        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
-    if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new(
-            "Only the owner can cancel this proposal.",
-        ));
-    }
-    if proposal.status != "open" {
-        return Err(ServerFnError::new("This proposal is no longer open."));
-    }
-
-    let players = find_proposal_players(&pool, proposal_id)
-        .await
-        .map_err(internal("cancel_proposal: players"))?;
 
     let mut tx = pool
         .begin()
@@ -1551,6 +1524,10 @@ pub async fn cancel_proposal(proposal_id: Uuid) -> Result<(), ServerFnError> {
         return Err(ServerFnError::new("This proposal is no longer open."));
     }
 
+    let players = find_proposal_players_tx(&mut tx, proposal_id)
+        .await
+        .map_err(internal("cancel_proposal: players"))?;
+
     update_proposal_status(&mut tx, proposal_id, "cancelled", None)
         .await
         .map_err(internal("cancel_proposal: status"))?;
@@ -1560,13 +1537,10 @@ pub async fn cancel_proposal(proposal_id: Uuid) -> Result<(), ServerFnError> {
         .map_err(internal("cancel_proposal: commit transaction"))?;
 
     broadcaster.broadcast_proposal_update(proposal_id).await;
-    let invitee_ids: Vec<Uuid> = players
-        .iter()
-        .filter(|p| p.response == "accepted")
-        .filter_map(|p| p.user_id)
-        .filter(|id| *id != proposal.owner_user_id)
-        .collect();
-    mailer().notify_cancelled(proposal_id, invitee_ids);
+    mailer().notify_cancelled(
+        proposal_id,
+        accepted_invitee_ids(&players, proposal.owner_user_id),
+    );
 
     Ok(())
 }
@@ -1574,6 +1548,7 @@ pub async fn cancel_proposal(proposal_id: Uuid) -> Result<(), ServerFnError> {
 /// Owner-only: remove any slot (human or bot), allowing invalid player counts;
 /// re-normalizes positions and resets accepted humans to pending.
 #[server(RemoveProposalSlot, "/api")]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all, fields(proposal_id = %proposal_id)))]
 pub async fn remove_proposal_slot(proposal_id: Uuid, player_id: Uuid) -> Result<(), ServerFnError> {
     use crate::websocket::GameBroadcaster;
     use sqlx::PgPool;
@@ -1581,17 +1556,6 @@ pub async fn remove_proposal_slot(proposal_id: Uuid, player_id: Uuid) -> Result<
     let pool = expect_context::<PgPool>();
     let broadcaster = expect_context::<GameBroadcaster>();
     let user = crate::friends::require_user().await?;
-
-    let proposal = find_proposal(&pool, proposal_id)
-        .await
-        .map_err(internal("remove_proposal_slot: find"))?
-        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
-    if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new("Only the owner can edit this proposal."));
-    }
-    if proposal.status != "open" {
-        return Err(ServerFnError::new("This proposal is no longer open."));
-    }
 
     let mut tx = pool
         .begin()
@@ -1663,17 +1627,6 @@ pub async fn transfer_proposal_ownership(
     let broadcaster = expect_context::<GameBroadcaster>();
     let user = crate::friends::require_user().await?;
 
-    let proposal = find_proposal(&pool, proposal_id)
-        .await
-        .map_err(internal("transfer_proposal_ownership: find"))?
-        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
-    if proposal.owner_user_id != user.id {
-        return Err(ServerFnError::new("Only the owner can edit this proposal."));
-    }
-    if proposal.status != "open" {
-        return Err(ServerFnError::new("This proposal is no longer open."));
-    }
-
     let mut tx = pool
         .begin()
         .await
@@ -1693,8 +1646,8 @@ pub async fn transfer_proposal_ownership(
     let players = find_proposal_players_tx(&mut tx, proposal_id)
         .await
         .map_err(internal("transfer_proposal_ownership: players"))?;
-    if !players.iter().any(|p| p.user_id == Some(target_user_id)) {
-        return Err(ServerFnError::new("That player isn't in this proposal."));
+    if let Some(msg) = transfer_target_error(&players, target_user_id) {
+        return Err(ServerFnError::new(msg));
     }
 
     update_proposal_owner(&mut tx, proposal_id, target_user_id)
@@ -1766,6 +1719,7 @@ pub async fn get_proposal(proposal_id: Uuid) -> Result<ProposalView, ServerFnErr
 
 /// Lists the caller's pending invites.
 #[server(GetPendingInvites, "/api")]
+#[cfg_attr(feature = "ssr", tracing::instrument(skip_all))]
 pub async fn get_pending_invites() -> Result<Vec<InviteSummary>, ServerFnError> {
     use sqlx::PgPool;
 
@@ -1831,17 +1785,12 @@ pub fn InvitePage() -> impl IntoView {
 
     let navigate = use_navigate();
 
-    let nav1 = navigate.clone();
     Effect::new(move |_| {
-        if let Some(Ok(outcome)) = respond_action.value().get() {
-            if let Some(gid) = outcome.game_id {
-                nav1(&format!("/games/{}", gid), NavigateOptions::default());
-            } else {
-                crate::websocket_client::bump_proposal_update(
-                    proposal_update,
-                    proposal_id().unwrap_or_default(),
-                );
-            }
+        if let Some(Ok(())) = respond_action.value().get() {
+            crate::websocket_client::bump_proposal_update(
+                proposal_update,
+                proposal_id().unwrap_or_default(),
+            );
         }
     });
 
@@ -1989,7 +1938,8 @@ fn ProposalDetail(
                     let p_uid = p.user_id;
                     let is_owner_row = p_uid == Some(owner_user_id);
                     let show_remove = is_owner && !is_owner_row;
-                    let show_make_owner = is_owner && !is_bot && !is_owner_row;
+                    let show_make_owner =
+                        is_owner && !is_bot && !is_owner_row && response == "accepted";
                     let remove_name = p.name.clone();
                     let transfer_name = p.name.clone();
                     view! {
@@ -2301,6 +2251,189 @@ mod tests {
         .fetch_one(pool)
         .await
         .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn sweep_candidate_queries_match_backdated_proposals(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("tok-sweep".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        sqlx::query(
+            "UPDATE game_proposals SET created_at = created_at - interval '1 hour' WHERE id = $1",
+        )
+        .bind(pid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 60s threshold: the 1h-old proposal is a candidate everywhere.
+        assert!(
+            fetch_nudge_candidates(&pool, 60)
+                .await
+                .iter()
+                .any(|c| c.proposal_id == pid && c.user_id == a),
+            "nudge query must return the backdated pending invitee"
+        );
+        assert!(
+            fetch_expiry_candidates(&pool, 60).await.contains(&pid),
+            "expiry query must return the backdated proposal"
+        );
+        assert!(
+            fetch_auto_decline_candidates(&pool, 60)
+                .await
+                .iter()
+                .any(|(_, p)| *p == pid),
+            "auto-decline query must return the backdated pending slot"
+        );
+
+        // 2h threshold: nothing qualifies.
+        assert!(fetch_nudge_candidates(&pool, 7200).await.is_empty());
+        assert!(fetch_expiry_candidates(&pool, 7200).await.is_empty());
+        assert!(fetch_auto_decline_candidates(&pool, 7200).await.is_empty());
+    }
+
+    #[sqlx::test]
+    async fn roster_view_never_exposes_email_token(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("secret-token-do-not-leak".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let roster = find_proposal_roster(&pool, pid).await.unwrap();
+        assert_eq!(roster.len(), 2);
+        let json = serde_json::to_string(&roster).unwrap();
+        assert!(
+            !json.contains("email_token"),
+            "email_token field must not be serialized: {json}"
+        );
+        assert!(
+            !json.contains("secret-token-do-not-leak"),
+            "token value must not appear in serialized roster: {json}"
+        );
+    }
+
+    #[test]
+    fn respond_denied_reason_blocks_owner_and_bad_transitions() {
+        // Owner is always rejected, regardless of state.
+        assert!(respond_denied_reason(true, "accepted", "declined").is_some());
+        assert!(respond_denied_reason(true, "pending", "accepted").is_some());
+        // Invitee transitions unchanged.
+        assert!(respond_denied_reason(false, "pending", "accepted").is_none());
+        assert!(respond_denied_reason(false, "pending", "declined").is_none());
+        assert!(respond_denied_reason(false, "accepted", "declined").is_none());
+        assert_eq!(
+            respond_denied_reason(false, "declined", "accepted"),
+            Some("You have already declined this invite.")
+        );
+        assert_eq!(
+            respond_denied_reason(false, "accepted", "accepted"),
+            Some("You have already accepted this invite.")
+        );
+    }
+
+    #[test]
+    fn transfer_target_must_be_accepted_human() {
+        let mk = |user_id: Option<Uuid>, response: &str| ProposalPlayer {
+            id: Uuid::new_v4(),
+            created_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            ),
+            updated_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            ),
+            proposal_id: Uuid::new_v4(),
+            position: 0,
+            user_id,
+            bot_name: None,
+            bot_difficulty: None,
+            response: response.to_string(),
+            responded_at: None,
+            email_token: None,
+        };
+        let accepted = Uuid::new_v4();
+        let pending = Uuid::new_v4();
+        let declined = Uuid::new_v4();
+        let players = vec![
+            mk(Some(accepted), "accepted"),
+            mk(Some(pending), "pending"),
+            mk(Some(declined), "declined"),
+            mk(None, "accepted"), // bot
+        ];
+        assert!(transfer_target_error(&players, accepted).is_none());
+        assert!(transfer_target_error(&players, pending).is_some());
+        assert!(transfer_target_error(&players, declined).is_some());
+        assert!(transfer_target_error(&players, Uuid::new_v4()).is_some());
+    }
+
+    #[test]
+    fn accepted_invitee_ids_excludes_owner_bots_and_nonaccepted() {
+        let mk = |user_id: Option<Uuid>, response: &str| ProposalPlayer {
+            id: Uuid::new_v4(),
+            created_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            ),
+            updated_at: time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            ),
+            proposal_id: Uuid::new_v4(),
+            position: 0,
+            user_id,
+            bot_name: None,
+            bot_difficulty: None,
+            response: response.to_string(),
+            responded_at: None,
+            email_token: None,
+        };
+        let owner = Uuid::new_v4();
+        let a = Uuid::new_v4();
+        let players = vec![
+            mk(Some(owner), "accepted"),
+            mk(Some(a), "accepted"),
+            mk(Some(Uuid::new_v4()), "pending"),
+            mk(Some(Uuid::new_v4()), "declined"),
+            mk(None, "accepted"), // bot
+        ];
+        assert_eq!(accepted_invitee_ids(&players, owner), vec![a]);
     }
 
     #[sqlx::test]
