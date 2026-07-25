@@ -149,6 +149,7 @@ panic = "abort"
 
 [dev-dependencies]
 serial_test = "3.5.0"
+tokio = { version = "1", features = ["test-util", "rt-multi-thread", "macros", "signal"] }
 tokio-tungstenite = "0.30"
 
 [package.metadata.leptos]

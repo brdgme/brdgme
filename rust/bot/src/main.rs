@@ -26,7 +26,9 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use uuid::Uuid;
 
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 struct AppState {
@@ -451,7 +453,11 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         });
     }
 
-    unreachable!()
+    Err(anyhow!(
+        "Bot turn gave up after {} attempts without submitting a command \
+         (final attempt consumed by an LLM failure or a game-state refresh)",
+        MAX_ATTEMPTS
+    ))
 }
 
 async fn publish_bot_command(
@@ -682,6 +688,12 @@ async fn call_llm(
         .ok_or_else(|| anyhow!("LLM returned null content (reasoning budget exhausted?)"))
 }
 
+/// Liveness content only (k8s/base/bot/deployment.yaml wires /healthz as a
+/// livenessProbe; there is no readinessProbe and no Service). NATS state is
+/// deliberately the ONLY check: a wedged NATS client is fixed by a restart,
+/// whereas a DB outage is not — probing the pool here would crashloop the
+/// pod against a down database while sqlx's PgPool reconnects on its own
+/// (review bo F8: DB-check recommendation declined for a liveness probe).
 async fn healthz(AxumState(state): AxumState<AppState>) -> StatusCode {
     match state.jetstream.client().connection_state() {
         async_nats::connection::State::Connected => StatusCode::OK,
@@ -703,6 +715,28 @@ async fn serve_health(state: AppState, listen_addr: String) -> Result<()> {
     axum::serve(listener, app)
         .await
         .context("Health server failed")
+}
+
+/// Resolves on SIGTERM or ctrl-c. Same shape as web's shutdown_signal;
+/// this is what the long-enabled tokio "signal" feature was for.
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
 
 /// Waits for the monolith to have created the `BOT` stream and `bot-turn`
@@ -807,9 +841,32 @@ async fn main() -> Result<()> {
     let consumer = wait_for_turn_consumer(&jetstream).await?;
     let mut messages = consumer.messages().await?;
 
-    tracing::info!("Bot subscribed to bot.turn, waiting for messages");
+    const DEFAULT_MAX_CONCURRENT_TURNS: usize = 8;
+    let max_concurrent: usize = std::env::var("MAX_CONCURRENT_TURNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_TURNS);
+    let turn_permits = Arc::new(Semaphore::new(max_concurrent));
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
 
-    while let Some(message) = messages.next().await {
+    tracing::info!(
+        max_concurrent,
+        "Bot subscribed to bot.turn, waiting for messages"
+    );
+
+    loop {
+        let message = tokio::select! {
+            _ = &mut shutdown => break,
+            maybe = messages.next() => match maybe {
+                Some(m) => m,
+                None => {
+                    tracing::error!("bot.turn message stream ended");
+                    break;
+                }
+            },
+        };
         let message = match message {
             Ok(m) => m,
             Err(e) => {
@@ -828,8 +885,18 @@ async fn main() -> Result<()> {
             }
         };
 
+        let permit = tokio::select! {
+            _ = &mut shutdown => {
+                break;
+            }
+            permit = turn_permits.clone().acquire_owned() => {
+                permit.expect("turn semaphore is never closed")
+            }
+        };
+
         let state = state.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             let trace_id = Uuid::new_v4();
 
             let header_pairs: Vec<(String, String)> = message
@@ -865,6 +932,13 @@ async fn main() -> Result<()> {
             }
         });
     }
+
+    tracing::info!(
+        in_flight = max_concurrent - turn_permits.available_permits(),
+        "draining in-flight bot turns before exit"
+    );
+    let _ = turn_permits.acquire_many(max_concurrent as u32).await;
+    tracing::info!("all in-flight bot turns complete; exiting");
 
     Ok(())
 }

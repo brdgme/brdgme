@@ -43,6 +43,7 @@ async fn main() {
     web::nats::ensure_stream_and_consumers(&jetstream)
         .await
         .expect("Failed to create/get BOT stream and consumers");
+    let advisory_client = nats_client.clone();
     let broadcaster = GameBroadcaster::new(nats_client);
 
     let resend = std::env::var("RESEND_API_KEY")
@@ -59,18 +60,23 @@ async fn main() {
         let jetstream = jetstream.clone();
         let resend = resend.clone();
         async move {
-            if let Err(e) = web::game::run_bot_command_consumer(
-                pool,
-                http_client,
-                broadcaster,
-                jetstream,
-                resend,
-            )
-            .await
-            {
-                tracing::error!("bot.command consumer exited: {}", e);
-            }
+            web::nats::supervise_consumer("bot-command", move || {
+                web::game::run_bot_command_consumer(
+                    pool.clone(),
+                    http_client.clone(),
+                    broadcaster.clone(),
+                    jetstream.clone(),
+                    resend.clone(),
+                )
+            })
+            .await;
         }
+    });
+    tokio::spawn(async move {
+        web::nats::supervise_consumer("max-deliveries-advisory", move || {
+            web::nats::run_max_deliveries_advisory_listener(advisory_client.clone())
+        })
+        .await;
     });
     web::email::sweep::spawn_periodic_sweeps(
         pool.clone(),

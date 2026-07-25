@@ -390,7 +390,11 @@ pub async fn handle_bot_command_event(
             );
             match crate::db::find_bot_turns(pool, event.game_id).await {
                 Ok(turns) => {
-                    publish_bot_turns(jetstream, event.game_id, &turns, attempt + 1).await;
+                    let conflicting: Vec<crate::db::BotTurn> = turns
+                        .into_iter()
+                        .filter(|t| t.position == event.player_position)
+                        .collect();
+                    publish_bot_turns(jetstream, event.game_id, &conflicting, attempt + 1).await;
                 }
                 Err(e) => {
                     tracing::warn!(game_id = %event.game_id, "Failed to query bot turns while re-publishing bot.turn: {}", e)

@@ -599,3 +599,216 @@ async fn bot_command_delivered_exactly_once_across_two_fetchers(pool: PgPool) {
         "every published bot.command must be delivered exactly once across both fetchers"
     );
 }
+
+/// review ws F56: when a message exhausts max_deliver, the server emits a
+/// MAX_DELIVERIES advisory on the subject our listener subscribes to, with
+/// a payload our parser understands. Forces redeliveries with Nak (test-only;
+/// production code never naks — WP-38 boundary).
+#[sqlx::test]
+#[serial]
+async fn max_deliver_exhaustion_emits_parseable_advisory(pool: PgPool) {
+    let _pool = pool;
+    let jetstream = make_jetstream().await;
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let core_client = async_nats::connect(&nats_url).await.unwrap();
+    let mut advisories = core_client
+        .subscribe(nats::MAX_DELIVERIES_ADVISORY_SUBJECT)
+        .await
+        .unwrap();
+
+    let marker_game_id = Uuid::new_v4();
+    let event = BotCommandEvent {
+        game_id: marker_game_id,
+        player_position: 0,
+        command: "advisory-test".to_string(),
+        attempt: 0,
+    };
+    let ack = jetstream
+        .publish(
+            nats::SUBJECT_COMMAND,
+            serde_json::to_vec(&event).unwrap().into(),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    let our_seq = ack.sequence;
+
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    let consumer = stream
+        .get_or_create_consumer(
+            nats::CONSUMER_COMMAND,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(nats::CONSUMER_COMMAND.to_string()),
+                filter_subject: nats::SUBJECT_COMMAND.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut naks = 0;
+    'outer: for _ in 0..10 {
+        let mut messages = consumer
+            .batch()
+            .max_messages(20)
+            .expires(Duration::from_millis(500))
+            .messages()
+            .await
+            .unwrap();
+        while let Some(Ok(message)) = messages.next().await {
+            let ev: BotCommandEvent = serde_json::from_slice(&message.payload).unwrap();
+            if ev.game_id == marker_game_id {
+                message
+                    .ack_with(async_nats::jetstream::AckKind::Nak(None))
+                    .await
+                    .unwrap();
+                naks += 1;
+                if naks >= 3 {
+                    break 'outer;
+                }
+            } else {
+                message.ack().await.unwrap();
+            }
+        }
+    }
+    assert_eq!(
+        naks, 3,
+        "expected to nak the marker message max_deliver times"
+    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let adv = loop {
+        let remaining = deadline - tokio::time::Instant::now();
+        let msg = tokio::time::timeout(remaining, advisories.next())
+            .await
+            .expect("timed out waiting for MAX_DELIVERIES advisory")
+            .expect("advisory subscription ended");
+        if let Some(adv) = nats::parse_max_deliveries_advisory(&msg.payload)
+            && adv.stream_seq == our_seq
+        {
+            break adv;
+        }
+    };
+    assert_eq!(adv.stream, nats::STREAM_NAME);
+    assert_eq!(adv.consumer, nats::CONSUMER_COMMAND);
+    assert_eq!(adv.deliveries, 3);
+
+    let _ = stream.delete_message(our_seq).await;
+}
+
+/// One human (creator) plus two bot players, pointed at `uri`.
+async fn make_game_with_two_bots(pool: &PgPool, uri: &str) -> Uuid {
+    let p0 = make_user(pool, "p0").await;
+    let game_version_id = make_game_version(pool, uri).await;
+    let game = db::create_game_with_users(
+        pool,
+        CreateGameOpts {
+            game_version_id,
+            whose_turn: &[0],
+            eliminated: &[],
+            placings: &[],
+            points: &[],
+            creator_id: p0.id,
+            opponent_ids: &[],
+            opponent_emails: &[],
+            bot_slots: &[
+                db::BotSlot {
+                    name: "Bot A".to_string(),
+                    bot_name: "easy".to_string(),
+                },
+                db::BotSlot {
+                    name: "Bot B".to_string(),
+                    bot_name: "easy".to_string(),
+                },
+            ],
+            chat_id: None,
+            game_state: "initial_state",
+            all_accepted: false,
+        },
+    )
+    .await
+    .unwrap();
+    game.id
+}
+
+/// review wd F9: a stale-state conflict must re-publish bot.turn only for
+/// the conflicting event's position, not fan out to every bot on turn.
+#[sqlx::test]
+#[serial]
+async fn conflict_republish_targets_only_the_conflicting_bot(pool: PgPool) {
+    let jetstream = make_jetstream().await;
+    let http_client = reqwest::Client::new();
+    let broadcaster = make_broadcaster().await;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let uri = format!("http://{}", addr);
+    let game_id = make_game_with_two_bots(&pool, &uri).await;
+    let bot_positions: Vec<i32> = sqlx::query_scalar!(
+        "SELECT position FROM game_players WHERE game_id = $1 AND game_bot_id IS NOT NULL ORDER BY position",
+        game_id
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(bot_positions.len(), 2);
+    sqlx::query!(
+        "UPDATE game_players SET is_turn = (position = ANY($2)) WHERE game_id = $1",
+        game_id,
+        &bot_positions
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pool_for_handler = pool.clone();
+    let app = Router::new().route(
+        "/",
+        post(move |Json(_req): Json<Request>| {
+            let pool = pool_for_handler.clone();
+            async move {
+                sqlx::query!("UPDATE games SET updated_at = NOW() WHERE id = $1", game_id)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                Json(play_response("new_state", vec![0], true))
+            }
+        }),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let conflicting_pos = bot_positions[0];
+    let event = BotCommandEvent {
+        game_id,
+        player_position: conflicting_pos,
+        command: "abc".to_string(),
+        attempt: 0,
+    };
+    let _ = handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &None, &event)
+        .await;
+
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    let consumer = stream
+        .get_or_create_consumer(
+            nats::CONSUMER_TURN,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(nats::CONSUMER_TURN.to_string()),
+                filter_subject: nats::SUBJECT_TURN.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let events = drain_bot_turn_events(&consumer, game_id, 20, Duration::from_secs(5)).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "conflict must re-publish only the conflicting bot's turn, got {:?}",
+        events
+    );
+    assert_eq!(events[0].player_position, conflicting_pos);
+    assert_eq!(events[0].attempt, 1);
+}
