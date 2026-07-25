@@ -7,7 +7,9 @@ use serde::de::DeserializeOwned;
 use brdgme_game::errors::GameError;
 use brdgme_game::{CommandResponse, Gamer, Renderer};
 
-use crate::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
+use crate::api::{
+    CliLog, GameResponse, GameResponseError, PlayerRender, PubRender, Request, Response,
+};
 use crate::requester::Requester;
 use crate::requester::error::RequestError;
 
@@ -61,23 +63,22 @@ fn handle_player_counts<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>
 
 pub fn renders<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
     game: &G,
-) -> (PubRender, Vec<PlayerRender>) {
+) -> Result<(PubRender, Vec<PlayerRender>), GameResponseError> {
     let pub_state = game.pub_state();
     let pub_render = PubRender {
-        pub_state: serde_json::to_string(&pub_state).unwrap(),
+        pub_state: serde_json::to_string(&pub_state)?,
         render: brdgme_markup::to_string(&pub_state.render()),
     };
-    let player_renders: Vec<PlayerRender> = (0..game.player_count())
-        .map(|p| {
-            let player_state = game.player_state(p);
-            PlayerRender {
-                player_state: serde_json::to_string(&player_state).unwrap(),
-                render: brdgme_markup::to_string(&player_state.render()),
-                command_spec: game.command_spec(p),
-            }
-        })
-        .collect();
-    (pub_render, player_renders)
+    let mut player_renders: Vec<PlayerRender> = Vec::with_capacity(game.player_count());
+    for p in 0..game.player_count() {
+        let player_state = game.player_state(p);
+        player_renders.push(PlayerRender {
+            player_state: serde_json::to_string(&player_state)?,
+            render: brdgme_markup::to_string(&player_state.render()),
+            command_spec: game.command_spec(p),
+        });
+    }
+    Ok((pub_render, player_renders))
 }
 
 fn handle_new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
@@ -87,15 +88,15 @@ fn handle_new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
     let seed = seed.unwrap_or_else(rand::random);
     match G::start(players, seed) {
         Ok((game, logs)) => GameResponse::from_gamer(&game)
-            .map(|gs| {
-                let (public_render, player_renders) = renders(&game);
-                Response::New {
+            .and_then(|gs| {
+                let (public_render, player_renders) = renders(&game)?;
+                Ok(Response::New {
                     game: gs,
                     logs: CliLog::from_logs(&logs),
                     public_render,
                     player_renders,
                     seed,
-                }
+                })
             })
             .unwrap_or_else(|e| Response::SystemError {
                 message: e.to_string(),
@@ -109,13 +110,13 @@ fn handle_new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
 
 fn handle_status<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(game: &G) -> Response {
     GameResponse::from_gamer(game)
-        .map(|gr| {
-            let (public_render, player_renders) = renders(game);
-            Response::Status {
+        .and_then(|gr| {
+            let (public_render, player_renders) = renders(game)?;
+            Ok(Response::Status {
                 game: gr,
                 public_render,
                 player_renders,
-            }
+            })
         })
         .unwrap_or_else(|e| Response::SystemError {
             message: e.to_string(),
@@ -134,16 +135,16 @@ fn handle_play<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
             can_undo,
             remaining_input,
         }) => GameResponse::from_gamer(game)
-            .map(|gr| {
-                let (public_render, player_renders) = renders(game);
-                Response::Play {
+            .and_then(|gr| {
+                let (public_render, player_renders) = renders(game)?;
+                Ok(Response::Play {
                     game: gr,
                     logs: CliLog::from_logs(&logs),
                     can_undo,
                     remaining_input,
                     public_render,
                     player_renders,
-                }
+                })
             })
             .unwrap_or_else(|e| Response::SystemError {
                 message: e.to_string(),
@@ -159,10 +160,15 @@ fn handle_pub_render<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>(
     game: &G,
 ) -> Response {
     let pub_state = game.pub_state();
-    Response::PubRender {
-        render: PubRender {
-            pub_state: serde_json::to_string(&pub_state).unwrap(),
-            render: brdgme_markup::to_string(&pub_state.render()),
+    match serde_json::to_string(&pub_state) {
+        Ok(pub_state_json) => Response::PubRender {
+            render: PubRender {
+                pub_state: pub_state_json,
+                render: brdgme_markup::to_string(&pub_state.render()),
+            },
+        },
+        Err(e) => Response::SystemError {
+            message: GameResponseError::from(e).to_string(),
         },
     }
 }
@@ -172,11 +178,16 @@ fn handle_player_render<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>
     game: &G,
 ) -> Response {
     let player_state = game.player_state(player);
-    Response::PlayerRender {
-        render: PlayerRender {
-            player_state: serde_json::to_string(&player_state).unwrap(),
-            render: brdgme_markup::to_string(&player_state.render()),
-            command_spec: game.command_spec(player),
+    match serde_json::to_string(&player_state) {
+        Ok(player_state_json) => Response::PlayerRender {
+            render: PlayerRender {
+                player_state: player_state_json,
+                render: brdgme_markup::to_string(&player_state.render()),
+                command_spec: game.command_spec(player),
+            },
+        },
+        Err(e) => Response::SystemError {
+            message: GameResponseError::from(e).to_string(),
         },
     }
 }
@@ -200,5 +211,58 @@ fn handle_basic_strategy<G: Gamer + Debug + Clone + Serialize + DeserializeOwned
 fn handle_advanced_strategy<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> Response {
     Response::AdvancedStrategy {
         strategy: G::advanced_strategy(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_game::{BrokenRenderGame, TestGame};
+
+    #[test]
+    fn status_render_serialization_failure_returns_system_error() {
+        let state = serde_json::to_string(&BrokenRenderGame { players: 2 }).unwrap();
+        let mut r = new::<BrokenRenderGame>();
+        match r.request(&Request::Status { game: state }).unwrap() {
+            Response::SystemError { message } => assert!(
+                message.contains("failed to encode game state"),
+                "got: {}",
+                message
+            ),
+            resp => panic!("expected SystemError, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn pub_render_serialization_failure_returns_system_error() {
+        let state = serde_json::to_string(&BrokenRenderGame { players: 2 }).unwrap();
+        let mut r = new::<BrokenRenderGame>();
+        match r.request(&Request::PubRender { game: state }).unwrap() {
+            Response::SystemError { .. } => {}
+            resp => panic!("expected SystemError, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn player_render_serialization_failure_returns_system_error() {
+        let state = serde_json::to_string(&BrokenRenderGame { players: 2 }).unwrap();
+        let mut r = new::<BrokenRenderGame>();
+        match r.request(&Request::PlayerRender {
+            player: 0,
+            game: state,
+        }) {
+            Ok(Response::SystemError { .. }) => {}
+            resp => panic!("expected Ok(SystemError), got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn status_happy_path_unchanged() {
+        let state = serde_json::to_string(&TestGame::start(2, 1).unwrap().0).unwrap();
+        let mut r = new::<TestGame>();
+        match r.request(&Request::Status { game: state }).unwrap() {
+            Response::Status { player_renders, .. } => assert_eq!(2, player_renders.len()),
+            resp => panic!("expected Status, got {:?}", resp),
+        }
     }
 }

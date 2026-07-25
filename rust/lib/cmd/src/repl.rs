@@ -8,7 +8,7 @@ use brdgme_game::Status;
 use brdgme_game::command::doc;
 use brdgme_markup::{self, Node, Player, TNode, ansi, from_lines, to_lines, transform};
 
-use crate::api::{CliLog, GameResponse, Request, Response};
+use crate::api::{CliLog, GameResponse, PlayerRender, PubRender, Request, Response};
 use crate::requester::Requester;
 
 pub fn repl<T>(client: &mut T)
@@ -18,10 +18,12 @@ where
     print!("{}", Style::default().ansi());
     let mut player_names: Vec<String> = vec![];
     loop {
-        let player = prompt(format!(
+        let Some(player) = prompt(format!(
             "Enter player {} (or blank to finish)",
             player_names.len() + 1
-        ));
+        )) else {
+            return;
+        };
         if player.is_empty() {
             break;
         }
@@ -52,11 +54,11 @@ where
         Response::UserError { message } | Response::SystemError { message } => {
             panic!("{}", message)
         }
-        _ => panic!("wrong reponse"),
+        r => panic!("unexpected response to new game request: {:?}", r),
     };
     output_nl();
     output_logs(logs, &players);
-    let mut undo_stack: Vec<GameResponse> = vec![game.clone()];
+    let mut undo_stack: Vec<GameResponse> = vec![];
     loop {
         match game.status.clone() {
             Status::Finished { placings, .. } => {
@@ -95,7 +97,11 @@ where
                     output_nodes(&doc::render(&spec.doc()), &players);
                 }
                 println!();
-                let input = prompt(ansi(&transform(&[Node::Player(current_player)], &players)));
+                let Some(input) =
+                    prompt(ansi(&transform(&[Node::Player(current_player)], &players)))
+                else {
+                    return;
+                };
                 match input.as_ref() {
                     ":dump" | ":d" => println!("{:#?}", game),
                     ":json" => println!("{}", serde_json::ser::to_string_pretty(&game).unwrap()),
@@ -112,10 +118,12 @@ where
                     ":load" => {
                         let file = File::open("game.json").expect("could not open file");
                         game = serde_json::from_reader(file).expect("could not read file JSON");
+                        refresh_renders(client, &game, &mut public_render, &mut player_renders);
                     }
                     ":undo" | ":u" => {
                         if let Some(u) = undo_stack.pop() {
                             game = u;
+                            refresh_renders(client, &game, &mut public_render, &mut player_renders);
                         } else {
                             output_nodes(
                                 &[Node::Bold(vec![Node::Fg(
@@ -144,7 +152,7 @@ where
                             player_renders: new_player_renders,
                             ..
                         } => {
-                            if remaining_input.trim() != "" {
+                            if !remaining_input.trim().is_empty() {
                                 output_nl();
                                 output_error(format!("Unexpected: '{}'", remaining_input));
                                 continue;
@@ -164,11 +172,36 @@ where
                             output_nl();
                             output_error(message);
                         }
-                        _ => panic!("unexpected response"),
+                        r => panic!("unexpected response to play request: {:?}", r),
                     },
                 }
             }
         }
+    }
+}
+
+fn refresh_renders<T: Requester>(
+    client: &mut T,
+    game: &GameResponse,
+    public_render: &mut PubRender,
+    player_renders: &mut Vec<PlayerRender>,
+) {
+    match client
+        .request(&Request::Status {
+            game: game.state.clone(),
+        })
+        .unwrap()
+    {
+        Response::Status {
+            public_render: new_public_render,
+            player_renders: new_player_renders,
+            ..
+        } => {
+            *public_render = new_public_render;
+            *player_renders = new_player_renders;
+        }
+        Response::SystemError { message } => panic!("{}", message),
+        r => panic!("unexpected response to status request: {:?}", r),
     }
 }
 
@@ -223,13 +256,15 @@ fn output_nl() {
     output_markup("", &[]);
 }
 
-fn prompt<'a, T>(s: T) -> String
+fn prompt<'a, T>(s: T) -> Option<String>
 where
     T: Into<Cow<'a, str>>,
 {
     print!("{}: \x1b[K", s.into());
-    stdout().flush().unwrap();
+    stdout().flush().expect("failed to flush stdout");
     let mut input = String::new();
-    stdin().read_line(&mut input).unwrap();
-    input.trim().to_owned()
+    match stdin().read_line(&mut input) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(input.trim().to_owned()),
+    }
 }

@@ -95,10 +95,9 @@ fn commands(command_spec: &command::Spec, players: &[String]) -> Vec<BotCommand>
     ]
 }
 
-// / Most bots just want to use `brdgme_cmd::bot_cli`, however because RandBot
-// doesn't care about game / state, we implement a more simplified version of
-// the CLI here. This allows the bot to be used / with arbitrary games as long
-// as the command spec is generated.
+/// Reads a `bot_cli::Request` from `input` and writes generated commands to
+/// `output`. Only `command_spec` and `players` are used - RandBot doesn't need
+/// game state, so it works with arbitrary games.
 pub fn cli<I, O>(input: I, output: &mut O)
 where
     I: Read,

@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum RequestError {
-    #[error("failed to parse request")]
+    #[error("failed to parse request: {source}")]
     Parse {
         #[from]
         source: serde_json::Error,
@@ -16,6 +16,8 @@ pub enum RequestError {
     },
     #[error("Failed to get stdin")]
     Stdin,
+    #[error("child process exited with {status}")]
+    ChildExit { status: std::process::ExitStatus },
 }
 
 #[derive(Debug, Error)]

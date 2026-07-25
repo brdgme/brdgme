@@ -11,7 +11,6 @@ pub enum Request {
     PlayerCounts,
     New {
         players: usize,
-        #[serde(default)]
         seed: Option<u64>,
     },
     Status {
@@ -229,5 +228,16 @@ mod tests {
         let json = serde_json::to_string(&log).expect("serialize");
         let back: CliLog = serde_json::from_str(&json).expect("our own output must deserialize");
         assert_eq!(back.at, log.at);
+    }
+
+    #[test]
+    fn new_request_without_seed_deserializes_to_none() {
+        match serde_json::from_str::<Request>(r#"{"New":{"players":2}}"#).unwrap() {
+            Request::New { players, seed } => {
+                assert_eq!(2, players);
+                assert_eq!(None, seed);
+            }
+            r => panic!("expected New, got {:?}", r),
+        }
     }
 }
