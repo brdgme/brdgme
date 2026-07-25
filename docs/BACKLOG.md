@@ -13,44 +13,18 @@ Status table below into [`docs/archive/BACKLOG.md`](archive/BACKLOG.md),
 adding a Resolution and the date resolved - that file is append-only and
 keeps this one from filling up with closed work.
 
-**Priority order (updated 2026-07-10; hard-cutover resequencing
-2026-07-04):** done so far: restart-500 + 3-player-render bugs, #21
-OpenTofu (complete 2026-07-06), #22a Resend
-outbound, #22b-d + #24 + #25 (complete 2026-07-21), #14 dev + prod prereqs (fully done - client-IP/PROXY-protocol
-attempted and dropped 2026-07-08),
-#13 NATS bot eventing, #17 NATS WS migration, #19 prod provisioning +
-#15 ArgoCD + sealed-secrets (live, first fully-green sync 2026-07-08;
-their beta-window tails - CI deploy job, sync-failure drill, PITR verify,
-import rehearsal - remain), #28 WP1-3 app hardening (promoted 2026-07-08,
-complete 2026-07-10), #28 WP4 Cloudflare edge (complete 2026-07-11).
-**Top of backlog (updated 2026-07-17, post-cleanup):** all three #33
-polish batches are now implemented and committed to master, including
-the loading indicator when routing to a game for the first time (never
-on websocket/command rerenders of the visible game; consolidates the
-2026-07-11 initial-load-spinner entry), disable command input + send
-button while submitting, and autocomplete click refocuses the command
-input; Michael's manual beta verification of batches 2 and 3 is still
-pending; favicon grey and game-log flashing confirmed fixed 2026-07-17.
-**Remaining pre-go-live:** #34 admin functions remainder implemented
-2026-07-17 (force-delete, export route, import CLI) - end-to-end
-dev-stack smoke test still pending manual verification; then go-live.
-2026-07-17 (Michael): #35 and #39 are done (archived); #37 game
-verification is non-blocking; #16 is removed from the backlog - the
-cutover decision will be made directly once the play testers are
-comfortable, using the archived #16 runbooks. #32 demoted to post-go-live
-2026-07-10 (Michael: the Grafana Cloud quota must reset anyway - not a
-go-live blocker). (#20 external-dns retired 2026-07-05 - no viable DO
-provider; see 20-external-dns.md.)
-**Post-go-live:** #32 Alloy OTLP export investigation (demoted from
-pre-go-live 2026-07-10), #43 bot efficacy
-(player/public data contracts, per-game doc split, difficulty-as-config;
-added 2026-07-17, coordinate with #25) → #26 theming/dark mode →
-#23 Rust game ports (ongoing) → (bottom of backlog) #36 Web Push turn
-notifications. Unscheduled post-go-live captures (added 2026-07-17, need
-brainstorming): #44 new-game screen, #45 rich index page, #46 turn
-timer, #47 concede-with-bot-replacement, #48 basic moderation. #31 (Rust-only repo) spans both: WP1
-legacy-stack deletion can run pre-cutover (unblocked 2026-07-08 by the
-no-rollback decision; it simplifies #16); the rest follows #23.
+**Priority order (updated 2026-07-24):**
+**Immediate next:** #31 Rust-only repository (delete legacy trio + brdgme-go,
+lift `rust/` to root; #23 game ports now complete so WP3-5 unblocked).
+**Then:** #52 managed Postgres migration (CNPG to DO Managed Database, frees
+~600Mi cluster memory), #50 dev environment reassessment (make local dev viable
+again - kubernetes/kind/tilt too heavy; consider docker compose or partial
+deployments), #15 tails (CI deploy job, delete stale k8s/argocd/, admin-password
+rotation).
+**Unscheduled post-go-live:** #27 remainder (WebSocketTrigger deletion, flaky
+NATS tests), #36 Web Push, #37 game verification, #38 "new version" notification,
+#40 DB tests opt-in, #46 turn timer, #48 moderation, #49 sqlx macros (review first),
+#51 bot sqlx queries.
 
 ## Objective
 
@@ -82,41 +56,26 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 
 ## Status
 
-Fully done/resolved/superseded items (1-14, 17, 18, 20, 21, 28, Quick wins,
-Review findings 2026-07-04, Development Workflow) have been moved to
-[`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
+Fully done/resolved/superseded items (1-14, 17-26, 28-30,
+32-34, 41-45, 47, Quick wins, Review findings 2026-07-04, Development Workflow)
+have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 
 | # | Title | Status | Spec | Plan |
 |---|---|---|---|---|
-| 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation, sync-failure drill (#16 beta) | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
-| 19 | CloudNativePG | Dev complete; prod Cluster + Barman Cloud backups running under ArgoCD (green 2026-07-08); remaining: PITR verify + import rehearsal (#16 beta), real import at cutover | [spec](superpowers/specs/2026-07-08-19-cloudnativepg-design.md) | [plan](superpowers/plans/2026-07-08-19-cloudnativepg.md) |
-| 22 | Email via Resend | Complete 2026-07-21 - 22a outbound (Resend, landed 77a2092); 22b play-by-email (inbound parsing, game creation/plays/settings via email); 22c turn-reminder emails; 22d multi-email switching. Full email availability restored. | [spec](superpowers/specs/2026-07-05-22-email-via-resend-design.md) | [plan](superpowers/plans/2026-07-05-22-email-via-resend.md) |
-| 23 | Rust Game Ports | Pending - 4 more games ported 2026-07-20 (red7-1, alhambra-1, starship-catan-1, seven-wonders-1) + brdgme_cost shared lib; Go bugs fixed in port (starship_catan Winners() + die-range, Cost.Drop) | [spec](superpowers/specs/2026-07-04-23-rust-game-ports-design.md) | [plan](superpowers/plans/2026-07-04-23-rust-game-ports.md) |
-| 24 | Game Invites | Complete 2026-07-21 - game invites implemented (invite flow, accept/decline, policy enforcement) | [spec](superpowers/specs/2026-07-04-24-game-invites-design.md) | [plan](superpowers/plans/2026-07-04-24-game-invites.md) |
-| 25 | Rules Rendering for Humans (Web UI + Email) | Complete 2026-07-21 - rules rendering for humans (web UI + email); single-source RULES.md with render-time specialization | [spec](superpowers/specs/2026-07-05-25-rules-rendering-design.md) | [plan](superpowers/plans/2026-07-05-25-rules-rendering.md) |
-| 26 | Theming / Dark Mode (Web UI + Email) | Core complete 2026-07-13 (semantic colours end-to-end, `soften`/`contrast` transforms, 3 themes + system default + instant switching, migrations 006/007 written; see [implementation plan](superpowers/plans/2026-07-13-26-theming-semantic-colors.md) D1-D15 for review items). **Remaining - NEXT UP: web chrome theming** (~20 hardcoded colours in `web/style/main.scss`; boards/logs/sidebar theme correctly but page chrome stays light - critical to wrap up #26). Email theming deferred behind #22b-d | [spec](superpowers/specs/2026-07-05-26-theming-design.md) | [plan](superpowers/plans/2026-07-13-26-theming-semantic-colors.md) |
-| 27 | rust/web Simplification (skinny queries, WS signal merge; 5 WPs, added 2026-07-05) | Pending | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
-| 29 | Player Stats and Historical Reports (profiles, ELO charts, form strips; zero-dep SSR SVG charting) | v1 complete 2026-07-18 - profile pages (`/players/:name`, `/players/:name/:game_type`) with overall + per-game-type stats, ELO rating charts, sparklines, form strips in the game meta panel, add-friend button, active/recent games, head-to-head; peak_rating backfill (migration 011) with rating-drift reconstruction tests; zero-dep SSR SVG charting as designed | [spec](superpowers/specs/2026-07-08-29-stats-reports-design.md) | [plan](superpowers/plans/2026-07-08-29-stats-reports.md) |
-| 30 | Friends (requests, invite policy, picker suggestions, dashboard summaries; reuses the dormant 2017 `friends` table) | Draft 2026-07-08 - post-go-live, non-blocking; independent of #24 but shares its picker/policy surfaces | [spec](superpowers/specs/2026-07-08-30-friends-design.md) | [plan](superpowers/plans/2026-07-08-30-friends.md) |
+| 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
+| 27 | rust/web Simplification (remainder) | WP1/2/3b/4/5 done; remaining: (a) WP3a delete WebSocketTrigger - dual-signal duplication at every update site, needs re-scoping since trigger now carries proposal/friend updates and public index keys on it; (b) harden 2 flaky NATS-timing tests still `#[ignore]`d (`game/mod.rs:1078`, `websocket.rs:191`) | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
-| 32 | Alloy `otelcol.exporter.otlp.grafana_cloud` export failure (Tempo traces) | Superseded 2026-07-21 - Alloy and Grafana Cloud removed entirely (see alloy-grafana-removal spec); the OTLP export issue is moot | - | - |
-| 33 | Pre-go-live UI/UX polish batch (minor jank collected as found, e.g. login submit loading state) | Plan written 2026-07-11 - ready to execute; the collection doc ([docs/pre-go-live-polish.md](pre-go-live-polish.md)) is the requirements record, the plan is the batch fix. **2026-07-17: second batch of 9 entries (settings scroll/width/theme-picker polish, stale username after change, ELO change at game end, command input self-clearing, sub menu button still missing on mobile game pages, invalid-command errors surfaced raw as HTTP 500) implemented end-to-end, all 9 tasks committed to master** - only Task 9 Step 6 (manual beta reproduction/verification) remains, for Michael on the deployed beta | - | [plan](superpowers/plans/2026-07-11-33-pre-go-live-polish.md), [plan 2](superpowers/plans/2026-07-17-33-pre-go-live-polish-2.md) |
-| 34 | Admin functions (`is_admin` flag, force-delete game, game JSON export + dev import CLI) | Complete 2026-07-17 - `is_admin` flag (migration 008) and admin-only bump-bot-to-play landed 2026-07-16; force-delete game (transactional `db::delete_game` + confirm-dialog server fn), admin-guarded JSON export route (`GET /admin/games/{id}/export`, no emails), and the dev-only `import-game` CLI (maps bundle onto local game version by name, creates placeholder users) all implemented, gated, and committed | [spec](superpowers/specs/2026-07-11-34-admin-functions-design.md) | [plan](superpowers/plans/2026-07-17-34-admin-functions-remainder.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
 | 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - downgraded 2026-07-17 (Michael: games seem okay, does not block go-live) | - | - |
-| 38 | Frontend cache busting on new deploys (investigate stale WASM/asset caching when a new version is bumped in brdgme-config; options: user-facing "new version released, please reload" messaging, or simply force a reload when a new version is deployed) | Pending - unscheduled; added 2026-07-11 | - | - |
+| 38 | "New version released" notification (detect when a new version has gone live and show a message to users with the site open so they know to refresh; cache busting itself handled by Cloudflare) | Pending - unscheduled; scope narrowed 2026-07-24 to detection + user-facing message only; must include viability/suitability review first to confirm implementation is not prohibitively complex | - | - |
 | 40 | DB tests run (and fail) by default (every local/agent test run hits DB test failures, repeatedly surprising agents; investigate whether DB-dependent tests should be opt-in - e.g. feature/env gated - instead of opt-out, or made to pass by default) | Pending - unscheduled; added 2026-07-15. Addendum 2026-07-16 resolved: the `cargo sqlx prepare` failure was the `User` struct lacking `theme`/`is_admin` (migration 007/008) - fixed by 212f1db, which added both fields and regenerated `.sqlx`. The related `invite_policy` concern is also resolved: `User` queries now list columns explicitly instead of `SELECT *`/`RETURNING *`, so `invite_policy` deliberately staying off the `User` struct (see `get_invite_policy` in `rust/web/src/db.rs`) is safe and won't silently break `cargo sqlx prepare` again. | - | - |
-| 41 | Cluster resource improvements (from 2026-07-16 prod resource analysis, read-only): (a) install metrics-server - `kubectl top` unavailable, right-sizing is blind without it; (b) alloy OOMKilling at 256Mi limit (4 restarts, exit 137) - revised 2026-07-16: trim FIRST, don't raise - disable the traces pipeline (Tempo exporter confirmed still stuck in the #32 retry-and-drop loop, zero value while broken) and remove `OTEL_EXPORTER_OTLP_ENDPOINT` from `k8s/prod/app/web-patch.yaml`; keep the healthy logs (Loki) and metrics (Prometheus remote_write, incl. CNPG backup metrics) pipelines; re-measure after (a) lands and only raise the limit if OOMs persist; re-enable traces via revert once Grafana Cloud quota resets; (c) postgres-1/migrate and the argocd/cert-manager stacks run with no requests/limits (BestEffort) on a node fleet 151% overcommitted on memory limits - set requests, protect the DB; (d) GHCR `pull QPS exceeded` causing ImagePullBackOff churn on `-2` game replicas - add authenticated GHCR pull secret; (e) cert-manager (167), cainjector (165), cnpg-controller (245) historic exit-1 restart loops - investigate via previous-container logs; (f) node1 carries all game workers + web (49 pods, 70% mem requested) while node2 has infra - consider topology spread or reduced game replicas (~50 x 32Mi = ~1.6Gi) | Prepared 2026-07-16 (local branches, not deployed): (a) metrics-server v0.9.0 addon commit b0cbe74 (brdgme-config); (b) confirmed live OOM loop from stuck #32 Tempo exporter, traces disabled in 77ab35c (revert to re-enable), limit not raised; (c) postgres/migrate resources 771359b + 11 addon workloads d581709, single-sample sized, revisit after (a); (d) ghcr-pull SA wiring 9f89ab8 + sealed-secret skeleton 2eacf90, needs Michael's read:packages PAT; (e) diagnosed historic control-plane-reachability crashes (leader-election lease loss / API EOF), no fix needed beyond (c); (f) no spread change - requests-skew artifact, defer to #42 + re-evaluate. Deployed 2026-07-16: metrics-server live, alloy traces disabled (mem 234->162Mi), addon+postgres resources applied (all Burstable), ghcr-pull secret + SA wiring live; remaining: post-deploy baseline capture + docs commit, revisit sizings after a week of metrics-server data Alloy removed 2026-07-21 (item b moot - no more Alloy OOM or traces pipeline). | - | [plan](superpowers/plans/2026-07-16-41-cluster-resources.md) |
-| 42 | Game container image + idle-resource optimisation: (a) viability of `FROM scratch` (or distroless) images for the static Rust game binaries - only if battle-hardened best practice (CA certs, TLS, non-root, signals/PID 1, healthchecks all accounted for); (b) scale-to-zero with fast cold starts for game workers (candidates: KEDA HTTP add-on / NATS-based KEDA scaler, Knative; game workers are NATS-driven which suits event-driven scaling) - motivated by many more game ports coming and multiple deployed versions per game where only the latest gets traffic, so idle replicas reserving 32Mi each will not scale | Research + plan complete 2026-07-16 - verdicts: (a) yes, swap game images to `gcr.io/distroless/cc-debian12` (digest-pinned, non-root; ~64% smaller, mainstream/low-risk; musl+scratch optional later); (b) KEDA HTTP add-on (pinned v0.15.x) chosen as primary scale-to-zero mechanism per Michael's 2026-07-16 decision (prefers official upstream component over owned demand-tracking code); core-KEDA metrics-api and a bespoke operator shim remain documented fallbacks; latest versions stay on the direct Service path, non-latest scale to zero via the interceptor after a PoC gate. Phases 1-2 complete locally 2026-07-16 on branch 42-image-scale-to-zero (distroless cc-debian12 + non-root + port 8080 across 22 games, -63% image size verified; web game-client retry with backoff, 7/7 tests): deploy/canary and Phase 3 (KEDA) pending approval | [spec](superpowers/specs/2026-07-16-42-image-scale-to-zero-viability.md) | [plan](superpowers/plans/2026-07-16-42-image-scale-to-zero.md) |
-| 43 | Bot efficacy: player/public data contracts, per-game doc split, difficulty-as-config (added 2026-07-17, **post-go-live**; primary goal bot quality, reduced AI API spend a welcome side benefit). Bots currently struggle to parse the full game render, and it is a large, noisy prompt payload. (a) **Player/public data contracts**: every game exposes documented player data (exactly what that player sees in the render - no more, no less) and public data (exactly what a non-player spectator sees - no more, no less); (b) **per-game doc split** - RULES.md is broken down since some content is for humans, some for bots: `RULES.md` becomes purely the rules of the game; a render-explanation doc (working name `EXAMPLES.md` - open question whether it's needed at all); a doc describing the player/public data; and a separate high-level `STRATEGY` doc which humans also get access to (interacts with #25 rules rendering - coordinate the split with its single-source render-time specialization design); (c) **bot prompts** get only: the rules, the player/public data documentation, and BOTH the player and public data payloads (both so the bot can distinguish public from hidden information) - never the full render; (d) **difficulty as bot configuration, not prompt wording**: each difficulty is a complete standalone bot config (model, provider, thinking budget, docs provided). Initial mapping: Easy = deepseek-v4-flash, no thinking, no strategy doc; Medium = deepseek-v4-flash, high thinking, no strategy doc; Hard = deepseek-v4-flash, high thinking, + strategy doc. Full per-difficulty config so different providers can back different bots; (e) **future work (design for it now, build later)**: admin GUI to add/remove/switch bot configs - multiple configs per difficulty with priority for failover, shared priority for load balancing, enable/disable. Unparks the bot model configuration discussion parked 2026-07-11 | Implemented 2026-07-20 - full V2 game interface (data_docs, basic_strategy, advanced_strategy), structured YAML bot prompts (render removed), DB bot config (bots/llm_providers/bot_providers, migration 013), AES-256-GCM credential encryption, provider routing (round-robin + failover), game_client version abstraction (V1/V2), all 27 Rust games upgraded to V2, bot selection from DB in game creation UI. See [decisions](decisions/BOT_EFFICACY.md) and [spec](superpowers/specs/2026-07-20-43-bot-efficacy-design.md) | [spec](superpowers/specs/2026-07-20-43-bot-efficacy-design.md) | [plan](superpowers/plans/2026-07-20-43-bot-efficacy.md) |
-| 44 | "New game" screen usability (keep it simple but with good usability) | Captured 2026-07-17 - post-go-live, needs brainstorming before any design | - | - |
-| 45 | Rich index page for new visitors (elevator pitch about what the site is; maybe show a public render of some game) | Captured 2026-07-17 - post-go-live, needs brainstorming; a public game render ties into #43's public data work | - | - |
 | 46 | Turn timer to prevent dead games (idea sketch: some timer before the easy bot makes a play on the player's behalf? 3 strikes before forced concede?) | Captured 2026-07-17 - post-go-live, needs brainstorming; interacts with #47 bot replacement and #43 bot configs | - | - |
-| 47 | Concede in games with >2 players - conceding player replaced by a bot | Captured 2026-07-17 - post-go-live, needs brainstorming; interacts with #46 turn timer | - | - |
 | 48 | Basic moderation - initially just usernames, may extend to more later | Captured 2026-07-17 - post-go-live, needs brainstorming | - | - |
-| 49 | Convert #30 friends plain sqlx queries to compile-time-checked macros now that the .sqlx prepare workflow is healthy (the friends-related queries in `rust/web/src/db.rs` currently use plain (runtime-checked) `sqlx::query`/`sqlx::query_as` calls by old convention; convert them to `query!`/`query_as!` macros and add cache entries via `cargo sqlx prepare` per docs/DEV.md) | Captured 2026-07-18 - unscheduled | - | - |
-| Bug fixes | Bug fixes | Partially resolved | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
-| 50 | Dev environment reassessment (kind/tilt host crash) | Captured 2026-07-19 - unscheduled | - | - |
+| 49 | Convert #30 friends plain sqlx queries to compile-time-checked macros now that the .sqlx prepare workflow is healthy (the friends-related queries in `rust/web/src/db.rs` currently use plain (runtime-checked) `sqlx::query`/`sqlx::query_as` calls by old convention; convert them to `query!`/`query_as!` macros and add cache entries via `cargo sqlx prepare` per docs/DEV.md) | Captured 2026-07-18 - unscheduled; **note 2026-07-24: review first to ensure direction is correct and appropriate before executing** | - | - |
+| 51 | Bot dynamic sqlx queries mask schema drift (`rust/bot/src/main.rs` + `config.rs`: `row.try_get(..).unwrap_or(..)` turns query bugs into silent wrong behaviour - e.g. broken `is_turn` column makes bot silently never play; switch to checked `sqlx::query!` macros or replace `unwrap_or` defaults with `.context(..)?`) | Captured 2026-07-24 (split from Bug fixes plan); unscheduled | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
+| 50 | Dev environment reassessment - review the whole dev env with a view to making it viable to run locally again; the kind/tilt kubernetes setup is too heavy now (host crashes, 32GB RAM minimum per AGENTS.md); consider docker compose or allowing partial deployments | Captured 2026-07-19, prioritised 2026-07-24 | - | - |
+| 52 | Managed Postgres migration - move prod Postgres from in-cluster CloudNativePG to DigitalOcean Managed Database (~$15.15/mo, 1GB/1vCPU/10GB, syd1, private VPC); provision via OpenTofu, load prod data directly into managed instance, then remove CNPG resources (frees ~600Mi cluster memory); dev unaffected (keeps local Postgres) | Approved 2026-07-21, prioritised 2026-07-24; supersedes archived #19 | [spec](superpowers/specs/2026-07-21-managed-postgres-design.md) | [plan](superpowers/plans/2026-07-21-managed-postgres.md) |
+| 53 | Game rules review (parity park) | **PARKED - awaiting Michael's own review of game rules.** The 2026-07-23 Rust review found ~30 port-parity findings (code vs official rules vs RULES.md). D-35 and D-26..D-32, D-34 in [`docs/reviews/2026-07-23-rust-review/planning/decisions-needed.md`](reviews/2026-07-23-rust-review/planning/decisions-needed.md) are PARKED-PENDING-USER-RULES-REVIEW: some RULES.md content was AI-generated and may be wrong, and edition/variation choices are Michael's. **No gameplay change without per-game sign-off.** Packages WP-11, WP-12, WP-16, WP-20, WP-26, WP-30 are BLOCKED-ON-USER-RULES-REVIEW - implementing agents must not pick them up. Five egregious cases (a F1, b F4, b F7, e F30, d F37) are flagged separately as candidates for immediate fix; liveness fixes WP-15/WP-25 are NOT parked. | - | - |
 
 ---
 
@@ -135,15 +94,12 @@ tasks are also marked *(human)* inline in their phase files. Added
    verification). (The cilium PROXY-protocol ConfigMap flip is dropped -
    see History 2026-07-08; the `beta.brdg.me` record is already applied
    and resolving.)
-3. **#19 (during beta):** test import - `pg_dump` live Linode prod,
-   restore into a scratch CNPG database, record timings/fixes; verify a
-   PITR restore from the Spaces backups.
-4. **#16 cutover:** lower TTLs (`tofu apply`); announce downtime; stop
+3. **#16 cutover:** lower TTLs (`tofu apply`); announce downtime; stop
    the Linode stack; real `pg_dump`/restore + migrations; repoint apex
    DNS (`tofu apply`); smoke test; flip the uptime monitor to apex.
    (The `postgres-config`/`postgres-rw` host is handled at Phase 15
    sealing time, not cutover - revised 2026-07-06.)
-5. **#16 decommission (after the validation week):** decommission the
+4. **#16 decommission (after the validation week):** decommission the
    Linode server (archive a final dump); the source/manifest deletion
    itself is agent-delegable.
 
