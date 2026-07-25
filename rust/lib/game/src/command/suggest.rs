@@ -11,6 +11,8 @@
 //!   stop-cases indistinguishable in `Chain` (a guard there breaks 14
 //!   tests - see the parity/regression tests in `parser/mod.rs`).
 
+use std::collections::HashSet;
+
 use crate::command::parser::Parser;
 use crate::command::{Spec, Suggestion};
 
@@ -23,6 +25,13 @@ impl Spec {
 fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestion> {
     match spec {
         Spec::Token(token) => {
+            if token.is_empty() {
+                // A zero-width token has nothing to offer, and a
+                // `Suggestion { value: "" }` would short-circuit the `Chain`
+                // arm (any non-empty result is final there), hiding the
+                // suggestions of every later chain element (lg F20).
+                return vec![];
+            }
             if token.to_lowercase().starts_with(&remaining.to_lowercase()) {
                 vec![Suggestion {
                     value: token.clone(),
@@ -34,14 +43,26 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
         }
         Spec::Enum { values, .. } => {
             let lower = remaining.to_lowercase();
-            values
-                .iter()
-                .filter(|v| v.to_lowercase().starts_with(&lower))
-                .map(|v| Suggestion {
+            // Deduped on the lowercased value, the same key `Enum::parse`
+            // uses, so the suggestion list matches what is selectable
+            // (lg F18). Declaration order and first-occurrence casing are
+            // preserved.
+            let mut seen: HashSet<String> = HashSet::new();
+            let mut suggestions: Vec<Suggestion> = vec![];
+            for v in values {
+                let v_lower = v.to_lowercase();
+                if !v_lower.starts_with(&lower) {
+                    continue;
+                }
+                if !seen.insert(v_lower) {
+                    continue;
+                }
+                suggestions.push(Suggestion {
                     value: v.clone(),
                     desc: None,
-                })
-                .collect()
+                });
+            }
+            suggestions
         }
         Spec::OneOf(specs) => specs
             .iter()
@@ -84,7 +105,11 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
         Spec::Space => vec![],
         Spec::Int { min, max } => {
             let start = min.unwrap_or(1);
-            let end = max.map(|m| m.min(start + 4)).unwrap_or(start + 4);
+            // Saturating: a spec may set `min` within 4 of i32::MAX, where
+            // `start + 4` panics in debug and wraps to a negative (empty)
+            // range in release (lg F10).
+            let capped = start.saturating_add(4);
+            let end = max.map(|m| m.min(capped)).unwrap_or(capped);
             (start..=end)
                 .map(|i| i.to_string())
                 .filter(|s| s.starts_with(remaining))
@@ -106,9 +131,22 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                 .collect()
         }
         Spec::Opt(spec) => suggest_spec(spec, remaining, names),
-        Spec::Many { spec, delim, .. } => {
+        Spec::Many {
+            spec, max, delim, ..
+        } => {
             let mut rem = remaining;
+            // Items already fully consumed (item plus delimiter). The parse
+            // side refuses more than `max` of them, so suggesting a further
+            // item would offer input the parser rejects (lg F9, c F31).
+            // `min` is deliberately ignored: suggesting an item while below
+            // the minimum is correct.
+            let mut consumed_items = 0usize;
             loop {
+                if let Some(max) = max
+                    && consumed_items >= *max
+                {
+                    return vec![];
+                }
                 match spec.parse(rem, names) {
                     Ok(out) => {
                         let after_item = out.remaining;
@@ -120,6 +158,14 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                         if let Some(d) = delim {
                             match d.parse(after_item, names) {
                                 Ok(d_out) => {
+                                    if d_out.remaining.len() == rem.len() {
+                                        // Progress invariant (lg F6): neither the
+                                        // item nor the delimiter consumed
+                                        // anything, so looping would hang the
+                                        // WASM main thread.
+                                        return suggest_spec(spec, rem, names);
+                                    }
+                                    consumed_items += 1;
                                     rem = d_out.remaining;
                                     continue;
                                 }
@@ -133,6 +179,11 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                                 }
                             }
                         } else {
+                            if after_item.len() == rem.len() {
+                                // Progress invariant (lg F6), delimiter-free case.
+                                return suggest_spec(spec, rem, names);
+                            }
+                            consumed_items += 1;
                             rem = after_item;
                             continue;
                         }
@@ -202,6 +253,16 @@ mod tests {
         assert!(s.is_empty());
     }
 
+    #[test]
+    fn empty_token_suggests_nothing_and_does_not_shadow_a_chain() {
+        // lg F20: `"".starts_with("")` produced a Suggestion { value: "" },
+        // and the Chain arm treats any non-empty result as final - so a
+        // zero-width token hid every later element's suggestions.
+        assert!(Spec::Token("".into()).suggest("", &[]).is_empty());
+        let spec = Spec::Chain(vec![Spec::Token("".into()), Spec::Token("play".into())]);
+        assert_eq!(vals(&spec.suggest("", &[])), vec!["play"]);
+    }
+
     // --- Enum ---
 
     #[test]
@@ -253,6 +314,19 @@ mod tests {
         };
         let s = spec.suggest("o", &[]);
         assert_eq!(vals(&s), vec!["one", "other"]);
+    }
+
+    #[test]
+    fn enum_duplicate_values_suggested_once() {
+        // lg F18: Enum::parse dedupes values with a HashSet keyed on the
+        // lowercased value, so suggestions must not show duplicates that
+        // cannot be selected independently anyway.
+        let spec = Spec::Enum {
+            values: vec!["buy".into(), "buy".into(), "BUY".into(), "sell".into()],
+            exact: false,
+        };
+        assert_eq!(vals(&spec.suggest("", &[])), vec!["buy", "sell"]);
+        assert_eq!(vals(&spec.suggest("b", &[])), vec!["buy"]);
     }
 
     // --- OneOf ---
@@ -462,6 +536,25 @@ mod tests {
         assert!(s.is_empty());
     }
 
+    #[test]
+    fn int_near_i32_max_does_not_overflow() {
+        // lg F10: `start + 4` overflowed - a panic in debug builds, a wrap to
+        // a negative end (empty range) in release.
+        let spec = Spec::Int {
+            min: Some(i32::MAX - 1),
+            max: None,
+        };
+        assert_eq!(
+            vals(&spec.suggest("", &[])),
+            vec!["2147483646", "2147483647"]
+        );
+        let spec = Spec::Int {
+            min: Some(i32::MAX),
+            max: Some(i32::MAX),
+        };
+        assert_eq!(vals(&spec.suggest("", &[])), vec!["2147483647"]);
+    }
+
     // --- Player ---
 
     #[test]
@@ -564,6 +657,20 @@ mod tests {
         };
         let s = spec.suggest("R3 ", &[]);
         assert_eq!(vals(&s), vec!["R3", "B5", "Y2"]);
+    }
+
+    #[test]
+    fn many_zero_width_item_suggest_terminates() {
+        // lg F6: an item spec that succeeds consuming nothing (an empty
+        // Chain) spun this loop forever - on the WASM main thread, which
+        // freezes the browser tab.
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Chain(vec![])),
+            min: None,
+            max: None,
+            delim: None,
+        };
+        assert!(spec.suggest("y", &[]).is_empty());
     }
 
     // --- Realistic game scenarios ---
@@ -1214,5 +1321,100 @@ mod tests {
         };
         let s = spec.suggest("R3", &[]);
         assert_eq!(vals(&s), vec!["R3"]);
+    }
+
+    // --- Bounded Many (lg F9) and the sushizock-2 roll command (c F31) ---
+
+    fn bounded_many_spec(max: usize) -> Spec {
+        Spec::Many {
+            spec: Box::new(Spec::Enum {
+                values: vec!["1".into(), "2".into(), "3".into()],
+                exact: true,
+            }),
+            min: Some(1),
+            max: Some(max),
+            delim: Some(Box::new(Spec::Space)),
+        }
+    }
+
+    #[test]
+    fn many_stops_suggesting_at_max_items() {
+        // lg F9: the suggest loop discarded min/max, so it offered a third
+        // item for a Many the parser caps at two.
+        let spec = bounded_many_spec(2);
+        assert_eq!(vals(&spec.suggest("", &[])), vec!["1", "2", "3"]);
+        assert_eq!(vals(&spec.suggest("1 ", &[])), vec!["1", "2", "3"]);
+        assert!(
+            spec.suggest("1 2 ", &[]).is_empty(),
+            "no third item may be suggested once max is reached"
+        );
+        assert!(
+            spec.suggest("1 2 3 ", &[]).is_empty(),
+            "already past max: still nothing to suggest"
+        );
+        // A word still being typed at the cap is not a new item.
+        assert_eq!(vals(&spec.suggest("1 2", &[])), vec!["2"]);
+    }
+
+    // Mirrors the exact `to_spec()` output of sushizock-2's `roll_parser`
+    // (rust/game/sushizock-2/src/command.rs:38-50):
+    //   Map(Chain2(
+    //     Doc("roll", "roll dice", Token("roll")),
+    //     AfterSpace(Doc("dice", "list of dice numbers to roll, separated by
+    //       spaces", Many::bounded_spaced(Int::bounded(1, dice), 1, dice))),
+    //   ))
+    // where Map::to_spec() delegates to the inner parser and
+    // AfterSpace::to_spec() = Chain([Space, inner]).
+    fn sushizock_roll_spec(dice: usize) -> Spec {
+        Spec::Chain(vec![
+            Spec::Doc {
+                name: "roll".into(),
+                desc: Some("roll dice".into()),
+                spec: Box::new(Spec::Token("roll".into())),
+            },
+            Spec::Chain(vec![
+                Spec::Space,
+                Spec::Doc {
+                    name: "dice".into(),
+                    desc: Some("list of dice numbers to roll, separated by spaces".into()),
+                    spec: Box::new(Spec::Many {
+                        spec: Box::new(Spec::Int {
+                            min: Some(1),
+                            max: Some(dice as i32),
+                        }),
+                        min: Some(1),
+                        max: Some(dice),
+                        delim: Some(Box::new(Spec::Space)),
+                    }),
+                },
+            ]),
+        ])
+    }
+
+    #[test]
+    fn sushizock_roll_suggestions_stop_at_the_dice_count() {
+        // c F31: with five dice rolled, `roll` must stop suggesting numbers
+        // once five have been entered - the parser accepts at most five.
+        let spec = sushizock_roll_spec(5);
+        assert_eq!(vals(&spec.suggest("", &[])), vec!["roll"]);
+        assert_eq!(
+            vals(&spec.suggest("roll ", &[])),
+            vec!["1", "2", "3", "4", "5"]
+        );
+        assert_eq!(
+            vals(&spec.suggest("roll 1 2 ", &[])),
+            vec!["1", "2", "3", "4", "5"],
+            "two of five dice entered: more are still legal"
+        );
+        // Mid-word at the cap is still the fragment being typed.
+        assert_eq!(vals(&spec.suggest("roll 1 2 3 4 5", &[])), vec!["5"]);
+        assert!(
+            spec.suggest("roll 1 2 3 4 5 ", &[]).is_empty(),
+            "all five dice entered: nothing more may be suggested"
+        );
+        // The two-dice case (also sushi-go-2's shape).
+        let spec = sushizock_roll_spec(2);
+        assert_eq!(vals(&spec.suggest("roll ", &[])), vec!["1", "2"]);
+        assert!(spec.suggest("roll 1 2 ", &[]).is_empty());
     }
 }

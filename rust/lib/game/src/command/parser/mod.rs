@@ -288,6 +288,13 @@ where
     }
 }
 
+/// Repetition combinator.
+///
+/// Progress invariant: every iteration of the parse loop must consume at
+/// least one byte of input (via the delimiter or the item). A parser that
+/// succeeds consuming nothing (`Opt`, `Token::new("")`, an empty `Chain`)
+/// would otherwise loop forever, so both this impl and the `Spec::Many`
+/// impl stop as soon as an iteration makes no progress.
 pub struct Many<TP, DP>
 where
     TP: Parser,
@@ -344,18 +351,18 @@ where
         names: &[String],
     ) -> Result<Output<'a, Self::T>, GameError> {
         let mut parsed: Self::T = vec![];
-        if let Some(max) = self.max
-            && (max == 0 || max < self.min.unwrap_or(0))
-        {
-            return Ok(Output {
-                value: parsed,
-                consumed: &input[..0],
-                remaining: input,
-            });
-        }
         let mut first = true;
         let mut offset = 0;
         'outer: loop {
+            // Checked at the top of the loop exactly like the spec impl
+            // (`CommandSpec::Many`), so degenerate configs (`max == 0`, or
+            // `max < min`) fall through to the min check below instead of
+            // returning early with an empty Ok (lg F8).
+            if let Some(max) = self.max
+                && parsed.len() >= max
+            {
+                break 'outer;
+            }
             let mut inner_offset = offset;
             if !first {
                 if let Some(d) = self.delim.as_ref() {
@@ -372,10 +379,13 @@ where
                     value, consumed, ..
                 }) => {
                     parsed.push(value);
-                    offset = inner_offset + consumed.len();
-                    if let Some(max) = self.max
-                        && parsed.len() == max
-                    {
+                    let new_offset = inner_offset + consumed.len();
+                    // Progress invariant (see the struct doc comment): stop
+                    // when neither the delimiter nor the item consumed
+                    // anything, otherwise this loop never ends (lg F6).
+                    let progressed = new_offset > offset;
+                    offset = new_offset;
+                    if !progressed {
                         break 'outer;
                     }
                 }
@@ -619,8 +629,11 @@ where
         let mut matched: Vec<&T> = vec![];
         // Byte length of `input` consumed by the current best match(es).
         let mut match_len: usize = 0;
-        // Exact matches are prioritised, a shorter full match will happen over a longer partial
-        // match.
+        // Candidates are ranked by (bytes of input matched, then whether the
+        // whole value was matched). Longest wins; a full match only breaks a
+        // tie against an equal-length partial match. Replacing on a strictly
+        // better key - rather than appending on ties - is what makes the
+        // outcome independent of value declaration order (lg F5).
         let mut full_match = false;
         // Track which values have been searched to avoid duplicates.
         let mut searched: HashSet<String> = HashSet::new();
@@ -641,16 +654,25 @@ where
                 // The input isn't long enough and we require exact match, skip it.
                 continue;
             }
-            if matching > 0 && matching >= match_len && (!full_match || full) {
-                if full {
-                    full_match = true
-                }
-                if matching > match_len {
+            if matching == 0 {
+                continue;
+            }
+            match (matching.cmp(&match_len), full.cmp(&full_match)) {
+                // Strictly longer match: it becomes the sole candidate.
+                (Ordering::Greater, _) => {
                     matched = vec![v];
                     match_len = matching;
-                } else {
-                    matched.push(v);
+                    full_match = full;
                 }
+                // Same length, but a full match beats a partial one.
+                (Ordering::Equal, Ordering::Greater) => {
+                    matched = vec![v];
+                    full_match = full;
+                }
+                // Genuinely ambiguous: same length, same match kind.
+                (Ordering::Equal, Ordering::Equal) => matched.push(v),
+                // Shorter, or an equal-length partial against a full match.
+                _ => {}
             }
         }
         match matched.len() {
@@ -962,10 +984,16 @@ impl Parser for CommandSpec {
                     }
                     match spec.parse(inner_remaining, names) {
                         Ok(out) => {
+                            let step = delim_len + out.consumed.len();
                             values.push(out.value);
-                            consumed_len += delim_len + out.consumed.len();
+                            consumed_len += step;
                             remaining = out.remaining;
                             first = false;
+                            // Progress invariant, see the typed `Many` impl:
+                            // a zero-width iteration would loop forever.
+                            if step == 0 {
+                                break;
+                            }
                         }
                         Err(_) => break,
                     }
@@ -1229,6 +1257,92 @@ mod tests {
     }
 
     #[test]
+    fn many_degenerate_bounds_match_the_spec_impl() {
+        // lg F8: the typed impl used to return Ok(empty) for `max == 0` or
+        // `max < min` via an early return that skipped the min check, while
+        // the spec impl broke out of its loop and failed the min check. Same
+        // grammar, different success/failure - the exact drift the parity
+        // helper guards against.
+        let parser: Many<Int, Space> = Many {
+            parser: Int::any(),
+            min: Some(2),
+            max: Some(1),
+            delim: Some(Space {}),
+        };
+        parser
+            .parse("1 2", &[])
+            .expect_err("min 2 with max 1 must fail the min check");
+        assert_typed_spec_parity(&parser, &["1 2", "1", ""]);
+
+        let parser: Many<Int, Space> = Many {
+            parser: Int::any(),
+            min: Some(1),
+            max: Some(0),
+            delim: Some(Space {}),
+        };
+        parser
+            .parse("1 2", &[])
+            .expect_err("min 1 with max 0 must fail the min check");
+        assert_typed_spec_parity(&parser, &["1 2", "1", ""]);
+
+        // max == 0 without a min still succeeds consuming nothing.
+        let parser: Many<Int, Space> = Many {
+            parser: Int::any(),
+            min: None,
+            max: Some(0),
+            delim: Some(Space {}),
+        };
+        let out = parser
+            .parse("1 2", &[])
+            .expect("max 0 with no min must succeed with an empty value");
+        assert!(out.value.is_empty());
+        assert_eq!(out.consumed, "");
+        assert_eq!(out.remaining, "1 2");
+        assert_typed_spec_parity(&parser, &["1 2", ""]);
+    }
+
+    #[test]
+    fn many_zero_width_item_terminates() {
+        // lg F6: `Opt` always succeeds consuming nothing, so with no
+        // delimiter every iteration made zero progress and the loop pushed
+        // values forever (unbounded Vec growth with max = None).
+        let parser: Many<Opt<Token>, Space> = Many {
+            parser: Opt::new(Token::new("x")),
+            min: None,
+            max: None,
+            delim: None,
+        };
+        let out = parser
+            .parse("y", &[])
+            .expect("a zero-width Many must terminate and succeed");
+        assert_eq!(out.value, vec![None]);
+        assert_eq!(out.consumed, "");
+        assert_eq!(out.remaining, "y");
+        assert_typed_spec_parity(&parser, &["y", ""]);
+    }
+
+    #[test]
+    fn spec_many_zero_width_item_terminates() {
+        // lg F6: `Chain(vec![])` succeeds consuming nothing, so the spec
+        // Many loop had the same unbounded-growth defect as the typed one.
+        let spec = CommandSpec::Many {
+            spec: Box::new(CommandSpec::Chain(vec![])),
+            min: None,
+            max: None,
+            delim: None,
+        };
+        let out = spec
+            .parse("y", &[])
+            .expect("a zero-width spec Many must terminate and succeed");
+        assert_eq!(out.consumed, "");
+        assert_eq!(out.remaining, "y");
+        assert_eq!(
+            out.value,
+            serde_json::Value::Array(vec![serde_json::Value::Array(vec![])])
+        );
+    }
+
+    #[test]
     fn test_one_of_works() {
         let parsers: Vec<Box<dyn Parser<T = String>>> = vec![
             Box::new(Token::new("blah")),
@@ -1302,6 +1416,91 @@ mod tests {
                 .parse("DoGlog", &[])
                 .expect("expected 'DoGlog' to parse")
         );
+    }
+
+    #[test]
+    fn enum_full_match_wins_ties_in_either_declaration_order() {
+        // lg F5: a full match that ties the current best length used to be
+        // appended instead of replacing the partial, so ["abc", "ab"] with
+        // input "ab" produced a spurious "matched ab and abc" ambiguity
+        // error while ["ab", "abc"] parsed fine.
+        for values in [vec!["abc", "ab"], vec!["ab", "abc"]] {
+            let parser = Enum::partial(values.clone());
+            assert_eq!(
+                Output {
+                    value: "ab",
+                    consumed: "ab",
+                    remaining: "",
+                },
+                parser
+                    .parse("ab", &[])
+                    .unwrap_or_else(|e| panic!("values {:?}: {}", values, e)),
+            );
+            assert_eq!(
+                Output {
+                    value: "abc",
+                    consumed: "abc",
+                    remaining: "",
+                },
+                parser
+                    .parse("abc", &[])
+                    .unwrap_or_else(|e| panic!("values {:?}: {}", values, e)),
+            );
+        }
+    }
+
+    #[test]
+    fn enum_longest_match_wins_in_either_declaration_order() {
+        // lg F5, second half: the ranking key is (matched length, then full
+        // match), so the longer partial match wins regardless of which value
+        // was declared first. Pre-fix ["ab", "abcd"] consumed only "ab" while
+        // ["abcd", "ab"] consumed "abc" for the same input.
+        for values in [vec!["ab", "abcd"], vec!["abcd", "ab"]] {
+            let parser = Enum::partial(values.clone());
+            assert_eq!(
+                Output {
+                    value: "abcd",
+                    consumed: "abc",
+                    remaining: "x",
+                },
+                parser
+                    .parse("abcx", &[])
+                    .unwrap_or_else(|e| panic!("values {:?}: {}", values, e)),
+            );
+        }
+    }
+
+    #[test]
+    fn player_name_prefix_of_another_name_parses_longest() {
+        // lg F5 reachability: Player builds Enum::partial from player names,
+        // which are user-chosen, so prefix pairs are ordinary. Both orderings
+        // must resolve the same way.
+        for names in [
+            vec!["Bo".to_string(), "Bobby".to_string()],
+            vec!["Bobby".to_string(), "Bo".to_string()],
+        ] {
+            let parser = Player {};
+            let bobby = names.iter().position(|n| n == "Bobby").unwrap();
+            let bo = names.iter().position(|n| n == "Bo").unwrap();
+            assert_eq!(
+                bobby,
+                parser
+                    .parse("bobb", &names)
+                    .unwrap_or_else(|e| panic!("names {:?}: {}", names, e))
+                    .value,
+                "a longer partial name match must win: {:?}",
+                names
+            );
+            assert_eq!(
+                bo,
+                parser
+                    .parse("bo", &names)
+                    .unwrap_or_else(|e| panic!("names {:?}: {}", names, e))
+                    .value,
+                "an exact full name match must win ties: {:?}",
+                names
+            );
+        }
     }
 
     #[test]

@@ -48,7 +48,11 @@ fn doc_int(min: Option<i32>, max: Option<i32>) -> Vec<Node> {
         (Some(min), Some(max)) if min == max => {
             vec![Node::Bold(vec![Node::text(format!("{}", min))])]
         }
-        (min, Some(max)) => vec![Node::text(format!("{}-{}", min.unwrap_or(0), max))],
+        // `#` marks the open end. Substituting `0` would contradict both the
+        // parser (which accepts negatives when `min` is None) and
+        // `Int::expected_output` ("number N or lower") - lg F11.
+        (None, Some(max)) => vec![Node::text(format!("#-{}", max))],
+        (Some(min), Some(max)) => vec![Node::text(format!("{}-{}", min, max))],
         (Some(min), None) => vec![Node::text(format!("{}+", min))],
     }
 }
@@ -130,13 +134,14 @@ fn doc_many(
         }
         // Exactly 1
         (Some(1), Some(1)) => Some((doc, desc)),
-        // 0 or more
-        (None, _) | (Some(0), _) => {
+        // 0 or more. The `*` and `+` shorthands only apply when `max` is
+        // None - otherwise they would hide a bounded maximum (lg F12).
+        (None, None) | (Some(0), None) => {
             doc.push(Node::text("*"));
             Some((doc, desc))
         }
         // 1 or more
-        (Some(1), _) => {
+        (Some(1), None) => {
             doc.push(Node::text("+"));
             Some((doc, desc))
         }
@@ -146,7 +151,8 @@ fn doc_many(
             prepended.extend(doc);
             Some((prepended, desc))
         }
-        // All others displayed as range
+        // All others displayed as range. `min.unwrap_or(0)` is correct here,
+        // unlike in doc_int: a Many with no minimum requires zero items.
         (min, Some(max)) => {
             doc.push(Node::text(format!("({}-{})", min.unwrap_or(0), max)));
             Some((doc, desc))
@@ -184,4 +190,87 @@ pub fn render(docs: &[(Vec<Node>, Option<String>)]) -> Vec<Node> {
         output.extend(doc.to_owned());
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn doc_int_open_minimum_is_not_rendered_as_zero() {
+        // lg F11: `min.unwrap_or(0)` documented Int { min: None, max: Some(5) }
+        // as "0-5" while the parser accepts negatives and
+        // `Int::expected_output` says "number 5 or lower".
+        assert_eq!(doc_int(None, Some(5)), vec![Node::text("#-5")]);
+        // Unchanged shapes.
+        assert_eq!(doc_int(None, None), vec![Node::text("#")]);
+        assert_eq!(doc_int(Some(1), Some(5)), vec![Node::text("1-5")]);
+        assert_eq!(doc_int(Some(2), None), vec![Node::text("2+")]);
+        assert_eq!(
+            doc_int(Some(3), Some(3)),
+            vec![Node::Bold(vec![Node::text("3")])]
+        );
+    }
+
+    fn thing() -> Node {
+        Node::Bold(vec![Node::text("thing")])
+    }
+
+    fn many_doc(min: Option<usize>, max: Option<usize>) -> Option<Vec<Node>> {
+        doc_many(
+            &Spec::Token("thing".into()),
+            min,
+            max,
+            &None,
+            &Opts::default(),
+        )
+        .map(|(doc, _)| doc)
+    }
+
+    #[test]
+    fn doc_many_keeps_a_bounded_max() {
+        // lg F12: the `*` and `+` arms shadowed the range arm, so
+        // Many { min: Some(1), max: Some(2) } (sushi-go-2, sushizock-2,
+        // roll-through-the-ages-2) documented as "thing+" instead of
+        // "thing(1-2)".
+        assert_eq!(
+            many_doc(Some(1), Some(2)),
+            Some(vec![thing(), Node::text("(1-2)")])
+        );
+        assert_eq!(
+            many_doc(Some(0), Some(3)),
+            Some(vec![thing(), Node::text("(0-3)")])
+        );
+        assert_eq!(
+            many_doc(None, Some(3)),
+            Some(vec![thing(), Node::text("(0-3)")])
+        );
+        // Unbounded shapes keep their shorthand.
+        assert_eq!(many_doc(None, None), Some(vec![thing(), Node::text("*")]));
+        assert_eq!(
+            many_doc(Some(0), None),
+            Some(vec![thing(), Node::text("*")])
+        );
+        assert_eq!(
+            many_doc(Some(1), None),
+            Some(vec![thing(), Node::text("+")])
+        );
+        assert_eq!(
+            many_doc(Some(2), None),
+            Some(vec![Node::text("(2+)"), thing()])
+        );
+        // Optional-like and exactly-one shapes are unchanged.
+        assert_eq!(
+            many_doc(Some(0), Some(1)),
+            Some(vec![thing(), Node::text("?")])
+        );
+        assert_eq!(
+            many_doc(None, Some(1)),
+            Some(vec![thing(), Node::text("?")])
+        );
+        assert_eq!(many_doc(Some(1), Some(1)), Some(vec![thing()]));
+        // Empty ranges still document as nothing.
+        assert_eq!(many_doc(Some(0), Some(0)), None);
+        assert_eq!(many_doc(Some(2), Some(1)), None);
+    }
 }

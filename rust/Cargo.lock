@@ -836,7 +836,6 @@ version = "0.1.0"
 dependencies = [
  "brdgme_color",
  "brdgme_markup",
- "combine",
  "log",
  "rand 0.10.2",
  "rand_chacha 0.10.0",

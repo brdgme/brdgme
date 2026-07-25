@@ -9,7 +9,6 @@ edition = "2024"
 brdgme_color = { path = "../color" }
 brdgme_markup = { path = "../markup" }
 time = { version = "0.3", features = ["serde"] }
-combine = "4.6.7"
 thiserror = "2.0.18"
 log = "0.4.33"
 rand = "0.10.2"
