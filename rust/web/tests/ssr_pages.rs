@@ -1299,6 +1299,25 @@ async fn admin_export_route_missing_game_404s(pool: PgPool) {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+/// ws F31 smoke test only. `AdminPage`'s data comes from `LocalResource`s,
+/// which do not load during SSR, so this asserts the route renders without
+/// panicking or 500ing - it does NOT and cannot assert the client-side
+/// non-admin redirect. The redirect's shape is pinned by
+/// `admin_required_error_is_a_server_error_variant_with_the_constant` in
+/// `src/admin.rs`'s test module.
+#[sqlx::test]
+async fn admin_page_ssr_renders_for_non_admin_without_panicking(pool: PgPool) {
+    let user = make_user(&pool, "plainuser").await;
+    let cookie = login_cookie(&pool, &user, "plainuser@example.com").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, _content_type, body) = get(app, "/admin", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !body.contains("panicked"),
+        "SSR panic leaked into the body: {body}"
+    );
+}
+
 // --- rules page (#25) ---
 
 #[sqlx::test]

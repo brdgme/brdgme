@@ -8,7 +8,7 @@ type BotUpdateAction =
     Action<(Uuid, String, f32, bool, bool, bool, bool), Result<(), ServerFnError>>;
 type BotCreateAction = Action<(String, f32, bool, bool, bool), Result<BotRow, ServerFnError>>;
 type ProviderUpdateAction =
-    Action<(Uuid, String, String, Option<String>, bool), Result<(), ServerFnError>>;
+    Action<(Uuid, String, String, ApiKeyUpdate, bool), Result<(), ServerFnError>>;
 type BotProviderCreateAction = Action<
     (
         Uuid,
@@ -32,6 +32,30 @@ type BotProviderUpdateAction = Action<
     Result<(), ServerFnError>,
 >;
 
+/// The exact message a non-admin caller gets from every admin server fn.
+/// Shared so the client-side redirect in `AdminPage` cannot drift from it
+/// (ws F31); see the `ServerFnError::ServerError` match there.
+pub const ADMIN_REQUIRED: &str = "Admin access required";
+
+/// Authenticate, then require `users.is_admin`. Fail-closed.
+///
+/// `context` is threaded through to `internal` so each call site keeps its
+/// own server-side log breadcrumb; the client-visible error is identical at
+/// every site. Mirrors `friends::require_user` (ws F28).
+#[cfg(feature = "ssr")]
+async fn require_admin(pool: &sqlx::PgPool, context: &'static str) -> Result<(), ServerFnError> {
+    let user = crate::auth::server::get_current_user()
+        .await?
+        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+    if !crate::db::is_user_admin(pool, user.id)
+        .await
+        .map_err(internal(context))?
+    {
+        return Err(ServerFnError::new(ADMIN_REQUIRED));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotRow {
     pub id: Uuid,
@@ -51,6 +75,19 @@ pub struct ProviderRow {
     pub url: String,
     pub api_key_masked: Option<String>,
     pub enabled: bool,
+}
+
+/// What an update should do to a provider's stored API key. `Option<String>`
+/// could only express two of these three intentions, so "revoke this key"
+/// was unrepresentable on the public API surface (ws F21).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApiKeyUpdate {
+    /// Leave `api_key_encrypted` exactly as it is.
+    Keep,
+    /// Encrypt and store this new key.
+    Set(String),
+    /// Set `api_key_encrypted` to NULL.
+    Clear,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +167,82 @@ pub async fn list_bots(pool: &sqlx::PgPool) -> Result<Vec<BotRow>, ServerFnError
         .collect())
 }
 
+/// Advisory-lock key serializing every writer of `bots.display_order`.
+/// `create_bot` reads `MAX(display_order)+1` and `reorder_bots` renumbers the
+/// whole list; without this they can produce duplicate orders, and there is no
+/// unique constraint on the column (migration 013). Transaction-scoped, so it
+/// is released on commit or rollback (ws F18, ws F19).
+#[cfg(feature = "ssr")]
+const BOT_DISPLAY_ORDER_LOCK: i64 = 130_100_113;
+
+/// ws F25: cheap server-side validation. Every constraint below is duplicated
+/// in the HTML forms; these exist because the server fns are a public surface
+/// and a crafted call otherwise stores NaN temperatures, empty bot names or
+/// non-HTTP provider URLs.
+#[cfg(feature = "ssr")]
+fn require_text(value: &str, field: &'static str, max: usize) -> Result<String, ServerFnError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ServerFnError::new(format!("{field} is required")));
+    }
+    if trimmed.chars().count() > max {
+        return Err(ServerFnError::new(format!(
+            "{field} must be at most {max} characters"
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+#[cfg(feature = "ssr")]
+fn validate_temperature(temperature: f32) -> Result<(), ServerFnError> {
+    if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
+        return Err(ServerFnError::new(
+            "Temperature must be a number between 0.0 and 2.0",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "ssr")]
+fn validate_provider_url(url: &str) -> Result<String, ServerFnError> {
+    let url = require_text(url, "URL", 512)?;
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(ServerFnError::new(
+            "URL must start with http:// or https://",
+        ));
+    }
+    Ok(url)
+}
+
+#[cfg(feature = "ssr")]
+fn validate_extra_body(
+    extra_body: Option<serde_json::Value>,
+) -> Result<Option<serde_json::Value>, ServerFnError> {
+    let Some(value) = extra_body else {
+        return Ok(None);
+    };
+    if !value.is_object() {
+        return Err(ServerFnError::new("Extra body must be a JSON object"));
+    }
+    if value.to_string().len() > 8192 {
+        return Err(ServerFnError::new(
+            "Extra body must be at most 8192 bytes of JSON",
+        ));
+    }
+    Ok(Some(value))
+}
+
+#[cfg(feature = "ssr")]
+fn validate_reasoning_effort(
+    reasoning_effort: Option<String>,
+) -> Result<Option<String>, ServerFnError> {
+    match reasoning_effort {
+        // Free text on purpose: providers disagree on the vocabulary.
+        Some(v) => Ok(Some(require_text(&v, "Reasoning effort", 32)?)),
+        None => Ok(None),
+    }
+}
+
 #[cfg(feature = "ssr")]
 pub async fn create_bot(
     pool: &sqlx::PgPool,
@@ -139,6 +252,20 @@ pub async fn create_bot(
     include_advanced_strategy: bool,
     can_replace_humans: bool,
 ) -> Result<BotRow, ServerFnError> {
+    let name = require_text(&name, "Bot name", 64)?;
+    validate_temperature(temperature)?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(internal("admin_create_bot: begin"))?;
+
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(BOT_DISPLAY_ORDER_LOCK)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal("admin_create_bot: lock"))?;
+
     let row: BotDbRow = sqlx::query_as(
         "INSERT INTO bots (name, display_order, temperature, include_basic_strategy, include_advanced_strategy, can_replace_humans) \
          VALUES ($1, COALESCE((SELECT MAX(display_order) + 1 FROM bots), 0), $2, $3, $4, $5) \
@@ -149,9 +276,13 @@ pub async fn create_bot(
     .bind(include_basic_strategy)
     .bind(include_advanced_strategy)
     .bind(can_replace_humans)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(internal("admin_create_bot: insert"))?;
+
+    tx.commit()
+        .await
+        .map_err(internal("admin_create_bot: commit"))?;
 
     Ok(BotRow {
         id: row.0,
@@ -177,7 +308,10 @@ pub async fn update_bot(
     enabled: bool,
     can_replace_humans: bool,
 ) -> Result<(), ServerFnError> {
-    sqlx::query(
+    let name = require_text(&name, "Bot name", 64)?;
+    validate_temperature(temperature)?;
+
+    let result = sqlx::query(
         "UPDATE bots SET name = $2, temperature = $3, include_basic_strategy = $4, include_advanced_strategy = $5, enabled = $6, can_replace_humans = $7, updated_at = now() WHERE id = $1",
     )
     .bind(id)
@@ -190,6 +324,11 @@ pub async fn update_bot(
     .execute(pool)
     .await
     .map_err(internal("admin_update_bot: update"))?;
+    if result.rows_affected() == 0 {
+        return Err(ServerFnError::new(
+            "Bot not found - it may have been deleted; reload and try again",
+        ));
+    }
     Ok(())
 }
 
@@ -198,17 +337,61 @@ pub async fn reorder_bots(
     pool: &sqlx::PgPool,
     ordered_ids: Vec<Uuid>,
 ) -> Result<(), ServerFnError> {
-    for (i, id) in ordered_ids.iter().enumerate() {
-        sqlx::query("UPDATE bots SET display_order = $2, updated_at = now() WHERE id = $1")
-            .bind(*id)
-            .bind(i as i32)
-            .execute(pool)
-            .await
-            .map_err(internal("admin_reorder_bots: update"))?;
+    // A duplicated id would match one `bots` row from two ordinals; Postgres
+    // applies exactly one of them and does not say which, so the resulting
+    // order is nondeterministic. Reject before doing any work. (The old loop
+    // was deterministic here only by accident - last write won.)
+    let distinct: std::collections::HashSet<&Uuid> = ordered_ids.iter().collect();
+    if distinct.len() != ordered_ids.len() {
+        return Err(ServerFnError::new(
+            "Bot list contains a duplicate entry, please reload and try again",
+        ));
     }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(internal("admin_reorder_bots: begin"))?;
+
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(BOT_DISPLAY_ORDER_LOCK)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal("admin_reorder_bots: lock"))?;
+
+    // ws F18: one statement, so a partial renumber is impossible. WITH
+    // ORDINALITY is 1-based; the stored order stays 0-based.
+    let result = sqlx::query(
+        "UPDATE bots SET display_order = o.ord - 1, updated_at = now() \
+         FROM unnest($1::uuid[]) WITH ORDINALITY AS o(id, ord) \
+         WHERE bots.id = o.id",
+    )
+    .bind(&ordered_ids)
+    .execute(&mut *tx)
+    .await
+    .map_err(internal("admin_reorder_bots: update"))?;
+
+    // ws F29: an id that no longer exists means the admin is acting on a
+    // stale list; reject instead of reporting success for a partial reorder.
+    // `distinct.len() == ordered_ids.len()` was proven above, so comparing
+    // against either is equivalent - use `distinct` to keep the intent local.
+    if result.rows_affected() as usize != distinct.len() {
+        tx.rollback()
+            .await
+            .map_err(internal("admin_reorder_bots: rollback"))?;
+        return Err(ServerFnError::new(
+            "Bot list has changed, please reload and try again",
+        ));
+    }
+
+    tx.commit()
+        .await
+        .map_err(internal("admin_reorder_bots: commit"))?;
     Ok(())
 }
 
+// Deletes stay idempotent: a row that is already gone satisfies the request
+// (ws F29 - only the updates report "not found").
 #[cfg(feature = "ssr")]
 pub async fn delete_bot(pool: &sqlx::PgPool, id: Uuid) -> Result<(), ServerFnError> {
     sqlx::query("DELETE FROM bots WHERE id = $1")
@@ -217,6 +400,26 @@ pub async fn delete_bot(pool: &sqlx::PgPool, id: Uuid) -> Result<(), ServerFnErr
         .await
         .map_err(internal("admin_delete_bot: delete"))?;
     Ok(())
+}
+
+/// Minimum key length before any characters are revealed. At 8, the mask
+/// shows at most half the key; below it, nothing is shown at all (ws F20:
+/// the old `sk-...{last4}` mask round-tripped keys of <= 4 chars in full).
+#[cfg(feature = "ssr")]
+const API_KEY_MASK_MIN_LEN: usize = 8;
+
+/// Render a stored API key for display. Never fabricates a vendor prefix
+/// (the old mask hardcoded `sk-`, which is wrong for every non-OpenAI
+/// provider) and never reveals anything for a key short enough that the
+/// "last 4" would be most of it (ws F20).
+#[cfg(feature = "ssr")]
+fn mask_api_key(plaintext: &str) -> String {
+    let len = plaintext.chars().count();
+    if len < API_KEY_MASK_MIN_LEN {
+        return "(set)".to_string();
+    }
+    let last4: String = plaintext.chars().skip(len - 4).collect();
+    format!("...{last4}")
 }
 
 #[cfg(feature = "ssr")]
@@ -232,24 +435,24 @@ pub async fn list_providers(pool: &sqlx::PgPool) -> Result<Vec<ProviderRow>, Ser
 
     let mut providers = Vec::with_capacity(rows.len());
     for (id, name, url, api_key_encrypted, enabled) in rows {
-        let api_key_masked = match api_key_encrypted {
-            Some(encrypted) => {
-                let decrypted = crate::crypto::decrypt(&key, &encrypted)
-                    .map_err(internal("admin_list_providers: decrypt"))?;
-                let plaintext =
-                    String::from_utf8(decrypted).map_err(internal("admin_list_providers: utf8"))?;
-                let last4: String = plaintext
-                    .chars()
-                    .rev()
-                    .take(4)
-                    .collect::<String>()
-                    .chars()
-                    .rev()
-                    .collect();
-                Some(format!("sk-...{last4}"))
+        // ws F26: a single unreadable row must not take down the whole admin
+        // page. Degrade that provider's key column and log the id so the row
+        // can be re-keyed through this same UI. `load_key` failure above stays
+        // fatal - that is a deployment problem, not row corruption.
+        let api_key_masked = api_key_encrypted.map(|encrypted| {
+            match crate::crypto::decrypt(&key, &encrypted)
+                .map_err(|e| e.to_string())
+                .and_then(|d| String::from_utf8(d).map_err(|e| e.to_string()))
+            {
+                Ok(plaintext) => mask_api_key(&plaintext),
+                Err(e) => {
+                    tracing::error!(
+                        "admin_list_providers: provider {id} api_key_encrypted is unreadable: {e}"
+                    );
+                    "(undecryptable)".to_string()
+                }
             }
-            None => None,
-        };
+        });
         providers.push(ProviderRow {
             id,
             name,
@@ -268,6 +471,9 @@ pub async fn create_provider(
     url: String,
     api_key: Option<String>,
 ) -> Result<ProviderRow, ServerFnError> {
+    let name = require_text(&name, "Provider name", 64)?;
+    let url = validate_provider_url(&url)?;
+
     let api_key_encrypted: Option<Vec<u8>> = match &api_key {
         Some(key_str) => {
             let enc_key =
@@ -289,17 +495,7 @@ pub async fn create_provider(
     .await
     .map_err(internal("admin_create_provider: insert"))?;
 
-    let api_key_masked = api_key.map(|k| {
-        let last4: String = k
-            .chars()
-            .rev()
-            .take(4)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        format!("sk-...{last4}")
-    });
+    let api_key_masked = api_key.as_deref().map(mask_api_key);
 
     Ok(ProviderRow {
         id: row.0,
@@ -316,11 +512,14 @@ pub async fn update_provider(
     id: Uuid,
     name: String,
     url: String,
-    api_key: Option<String>,
+    api_key: ApiKeyUpdate,
     enabled: bool,
 ) -> Result<(), ServerFnError> {
-    match api_key {
-        Some(key_str) => {
+    let name = require_text(&name, "Provider name", 64)?;
+    let url = validate_provider_url(&url)?;
+
+    let rows = match api_key {
+        ApiKeyUpdate::Set(key_str) => {
             let enc_key =
                 crate::crypto::load_key().map_err(internal("admin_update_provider: load key"))?;
             let encrypted = crate::crypto::encrypt(&enc_key, key_str.as_bytes())
@@ -335,24 +534,42 @@ pub async fn update_provider(
             .bind(enabled)
             .execute(pool)
             .await
-            .map_err(internal("admin_update_provider: update"))?;
+            .map_err(internal("admin_update_provider: update"))?
+            .rows_affected()
         }
-        None => {
-            sqlx::query(
-                "UPDATE llm_providers SET name = $2, url = $3, enabled = $4, updated_at = now() WHERE id = $1",
-            )
-            .bind(id)
-            .bind(&name)
-            .bind(&url)
-            .bind(enabled)
-            .execute(pool)
-            .await
-            .map_err(internal("admin_update_provider: update"))?;
-        }
+        ApiKeyUpdate::Clear => sqlx::query(
+            "UPDATE llm_providers SET name = $2, url = $3, api_key_encrypted = NULL, enabled = $4, updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(&name)
+        .bind(&url)
+        .bind(enabled)
+        .execute(pool)
+        .await
+        .map_err(internal("admin_update_provider: clear key"))?
+        .rows_affected(),
+        ApiKeyUpdate::Keep => sqlx::query(
+            "UPDATE llm_providers SET name = $2, url = $3, enabled = $4, updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(&name)
+        .bind(&url)
+        .bind(enabled)
+        .execute(pool)
+        .await
+        .map_err(internal("admin_update_provider: update"))?
+        .rows_affected(),
+    };
+    if rows == 0 {
+        return Err(ServerFnError::new(
+            "Provider not found - it may have been deleted; reload and try again",
+        ));
     }
     Ok(())
 }
 
+// Deletes stay idempotent: a row that is already gone satisfies the request
+// (ws F29 - only the updates report "not found").
 #[cfg(feature = "ssr")]
 pub async fn delete_provider(pool: &sqlx::PgPool, id: Uuid) -> Result<(), ServerFnError> {
     sqlx::query("DELETE FROM llm_providers WHERE id = $1")
@@ -416,6 +633,10 @@ pub async fn create_bot_provider(
     extra_body: Option<serde_json::Value>,
     priority: i32,
 ) -> Result<BotProviderRow, ServerFnError> {
+    let model = require_text(&model, "Model", 128)?;
+    let reasoning_effort = validate_reasoning_effort(reasoning_effort)?;
+    let extra_body = validate_extra_body(extra_body)?;
+
     let row: BotProviderDbRow = sqlx::query_as(
         "INSERT INTO bot_providers (bot_id, provider_id, model, reasoning_effort, extra_body, priority) \
          VALUES ($1, $2, $3, $4, $5, $6) \
@@ -456,7 +677,11 @@ pub async fn update_bot_provider(
     priority: i32,
     enabled: bool,
 ) -> Result<(), ServerFnError> {
-    sqlx::query(
+    let model = require_text(&model, "Model", 128)?;
+    let reasoning_effort = validate_reasoning_effort(reasoning_effort)?;
+    let extra_body = validate_extra_body(extra_body)?;
+
+    let result = sqlx::query(
         "UPDATE bot_providers SET model = $2, reasoning_effort = $3, extra_body = $4, priority = $5, enabled = $6 WHERE id = $1",
     )
     .bind(id)
@@ -468,9 +693,16 @@ pub async fn update_bot_provider(
     .execute(pool)
     .await
     .map_err(internal("admin_update_bot_provider: update"))?;
+    if result.rows_affected() == 0 {
+        return Err(ServerFnError::new(
+            "Bot-provider link not found - it may have been deleted; reload and try again",
+        ));
+    }
     Ok(())
 }
 
+// Deletes stay idempotent: a row that is already gone satisfies the request
+// (ws F29 - only the updates report "not found").
 #[cfg(feature = "ssr")]
 pub async fn delete_bot_provider(pool: &sqlx::PgPool, id: Uuid) -> Result<(), ServerFnError> {
     sqlx::query("DELETE FROM bot_providers WHERE id = $1")
@@ -481,11 +713,74 @@ pub async fn delete_bot_provider(pool: &sqlx::PgPool, id: Uuid) -> Result<(), Se
     Ok(())
 }
 
+/// Cap on bytes read from an admin-configured upstream during a test call.
+/// The 10s reqwest timeout bounds how long a hostile endpoint can stream, not
+/// how much (ws F23). Comfortably above any real completion or error envelope.
+#[cfg(feature = "ssr")]
+const MAX_TEST_BODY_BYTES: usize = 8 * 1024;
+
+/// Response headers worth showing an admin. Everything else is dropped rather
+/// than round-tripped: an upstream can set arbitrary headers, including
+/// cookies and echoed credentials (ws F23).
+#[cfg(feature = "ssr")]
+const TEST_HEADER_ALLOWLIST: &[&str] = &[
+    "content-type",
+    "content-length",
+    "date",
+    "retry-after",
+    "x-request-id",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+];
+
+/// Read at most `MAX_TEST_BODY_BYTES` of a response body, then stop. Dropping
+/// the response cancels the remainder of the transfer.
+#[cfg(feature = "ssr")]
+async fn read_capped_body(mut resp: reqwest::Response) -> String {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut truncated = false;
+    loop {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                let remaining = MAX_TEST_BODY_BYTES.saturating_sub(buf.len());
+                if chunk.len() > remaining {
+                    buf.extend_from_slice(&chunk[..remaining]);
+                    truncated = true;
+                    break;
+                }
+                buf.extend_from_slice(&chunk);
+                if buf.len() >= MAX_TEST_BODY_BYTES {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(_) => return String::from_utf8_lossy(&buf).into_owned() + "\n<error reading body>",
+        }
+    }
+    let mut text = String::from_utf8_lossy(&buf).into_owned();
+    if truncated {
+        text.push_str(&format!("\n<truncated at {MAX_TEST_BODY_BYTES} bytes>"));
+    }
+    text
+}
+
+/// Filter response headers down to `TEST_HEADER_ALLOWLIST`.
+#[cfg(feature = "ssr")]
+fn allowlisted_headers(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter(|(k, _)| TEST_HEADER_ALLOWLIST.contains(&k.as_str()))
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("<binary>").to_string()))
+        .collect()
+}
+
 #[cfg(feature = "ssr")]
 pub async fn test_provider(
     pool: &sqlx::PgPool,
     http_client: &reqwest::Client,
     provider_id: Uuid,
+    model: Option<String>,
 ) -> Result<String, ServerFnError> {
     let row: Option<(String, Option<Vec<u8>>)> =
         sqlx::query_as("SELECT url, api_key_encrypted FROM llm_providers WHERE id = $1")
@@ -495,6 +790,29 @@ pub async fn test_provider(
             .map_err(internal("admin_test_provider: query"))?;
 
     let (url, api_key_encrypted) = row.ok_or_else(|| ServerFnError::new("Provider not found"))?;
+
+    // ws F22: never fabricate a model id. An explicit model wins; otherwise
+    // use the provider's highest-priority enabled link model. `bot_providers`
+    // is the only place a model is configured (migration 013) - neither
+    // `llm_providers` nor `bots` has a model column.
+    let model = match model.map(|m| require_text(&m, "Model", 128)).transpose()? {
+        Some(m) => m,
+        None => sqlx::query_scalar::<_, String>(
+            "SELECT model FROM bot_providers \
+             WHERE provider_id = $1 AND enabled \
+             ORDER BY priority, model LIMIT 1",
+        )
+        .bind(provider_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(internal("admin_test_provider: resolve model"))?
+        .ok_or_else(|| {
+            ServerFnError::new(
+                "No enabled bot-provider link for this provider, so there is no configured \
+                 model to test with. Enter a model above, or add a link first.",
+            )
+        })?,
+    };
 
     let key = crate::crypto::load_key().map_err(internal("admin_test_provider: load key"))?;
     let api_key = match api_key_encrypted {
@@ -507,7 +825,7 @@ pub async fn test_provider(
     };
 
     let body = serde_json::json!({
-        "model": "gpt-4o-mini",
+        "model": model,
         "messages": [{"role": "user", "content": "Say hello"}],
         "stream": false,
         "max_tokens": 5
@@ -521,19 +839,15 @@ pub async fn test_provider(
         .await
         .map_err(internal("admin_test_provider: request"))?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "unable to read body".to_string());
+    let status = resp.status();
+    let text = read_capped_body(resp).await;
+
+    if !status.is_success() {
         return Ok(format!("HTTP {status}: {text}"));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(internal("admin_test_provider: parse response"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&text).map_err(internal("admin_test_provider: parse response"))?;
 
     let content = json["choices"][0]["message"]["content"]
         .as_str()
@@ -548,14 +862,20 @@ pub async fn test_bot_provider(
     bot_provider_id: Uuid,
     prompt: &str,
 ) -> Result<TestBotProviderResponse, ServerFnError> {
-    type BotProviderRow = (
+    if prompt.chars().count() > 4096 {
+        return Err(ServerFnError::new(
+            "Test prompt must be at most 4096 characters",
+        ));
+    }
+
+    type BotProviderTestRow = (
         String,
         Option<Vec<u8>>,
         String,
         Option<String>,
         Option<serde_json::Value>,
     );
-    let row: Option<BotProviderRow> = sqlx::query_as(
+    let row: Option<BotProviderTestRow> = sqlx::query_as(
         "SELECT p.url, p.api_key_encrypted, bp.model, bp.reasoning_effort, bp.extra_body \
              FROM bot_providers bp \
              JOIN llm_providers p ON p.id = bp.provider_id \
@@ -610,15 +930,8 @@ pub async fn test_bot_provider(
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
     let status = resp.status().as_u16();
-    let headers: Vec<(String, String)> = resp
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("<binary>").to_string()))
-        .collect();
-    let body = resp
-        .text()
-        .await
-        .unwrap_or_else(|_| "unable to read body".to_string());
+    let headers = allowlisted_headers(resp.headers());
+    let body = read_capped_body(resp).await;
 
     Ok(TestBotProviderResponse {
         status,
@@ -630,19 +943,10 @@ pub async fn test_bot_provider(
 
 #[server(AdminListBots, "/api")]
 pub async fn admin_list_bots() -> Result<Vec<BotRow>, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_list_bots: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_list_bots: check admin").await?;
 
     list_bots(&pool).await
 }
@@ -655,19 +959,10 @@ pub async fn admin_create_bot(
     include_advanced_strategy: bool,
     can_replace_humans: bool,
 ) -> Result<BotRow, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_create_bot: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_create_bot: check admin").await?;
 
     create_bot(
         &pool,
@@ -690,19 +985,10 @@ pub async fn admin_update_bot(
     enabled: bool,
     can_replace_humans: bool,
 ) -> Result<(), ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_update_bot: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_update_bot: check admin").await?;
 
     update_bot(
         &pool,
@@ -719,57 +1005,30 @@ pub async fn admin_update_bot(
 
 #[server(AdminReorderBots, "/api")]
 pub async fn admin_reorder_bots(ordered_ids: Vec<Uuid>) -> Result<(), ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_reorder_bots: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_reorder_bots: check admin").await?;
 
     reorder_bots(&pool, ordered_ids).await
 }
 
 #[server(AdminDeleteBot, "/api")]
 pub async fn admin_delete_bot(id: Uuid) -> Result<(), ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_delete_bot: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_delete_bot: check admin").await?;
 
     delete_bot(&pool, id).await
 }
 
 #[server(AdminListProviders, "/api")]
 pub async fn admin_list_providers() -> Result<Vec<ProviderRow>, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_list_providers: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_list_providers: check admin").await?;
 
     list_providers(&pool).await
 }
@@ -780,19 +1039,10 @@ pub async fn admin_create_provider(
     url: String,
     api_key: Option<String>,
 ) -> Result<ProviderRow, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_create_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_create_provider: check admin").await?;
 
     create_provider(&pool, name, url, api_key).await
 }
@@ -802,60 +1052,33 @@ pub async fn admin_update_provider(
     id: Uuid,
     name: String,
     url: String,
-    api_key: Option<String>,
+    api_key: ApiKeyUpdate,
     enabled: bool,
 ) -> Result<(), ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_update_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_update_provider: check admin").await?;
 
     update_provider(&pool, id, name, url, api_key, enabled).await
 }
 
 #[server(AdminDeleteProvider, "/api")]
 pub async fn admin_delete_provider(id: Uuid) -> Result<(), ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_delete_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_delete_provider: check admin").await?;
 
     delete_provider(&pool, id).await
 }
 
 #[server(AdminListBotProviders, "/api")]
 pub async fn admin_list_bot_providers() -> Result<Vec<BotProviderRow>, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_list_bot_providers: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_list_bot_providers: check admin").await?;
 
     list_bot_providers(&pool).await
 }
@@ -869,19 +1092,10 @@ pub async fn admin_create_bot_provider(
     extra_body: Option<serde_json::Value>,
     priority: i32,
 ) -> Result<BotProviderRow, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_create_bot_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_create_bot_provider: check admin").await?;
 
     create_bot_provider(
         &pool,
@@ -904,19 +1118,10 @@ pub async fn admin_update_bot_provider(
     priority: i32,
     enabled: bool,
 ) -> Result<(), ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_update_bot_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_update_bot_provider: check admin").await?;
 
     update_bot_provider(
         &pool,
@@ -932,41 +1137,26 @@ pub async fn admin_update_bot_provider(
 
 #[server(AdminDeleteBotProvider, "/api")]
 pub async fn admin_delete_bot_provider(id: Uuid) -> Result<(), ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_delete_bot_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_delete_bot_provider: check admin").await?;
 
     delete_bot_provider(&pool, id).await
 }
 
 #[server(AdminTestProvider, "/api")]
-pub async fn admin_test_provider(provider_id: Uuid) -> Result<String, ServerFnError> {
-    use crate::auth::server::get_current_user;
+pub async fn admin_test_provider(
+    provider_id: Uuid,
+    model: Option<String>,
+) -> Result<String, ServerFnError> {
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
     let http_client = expect_context::<reqwest::Client>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_test_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_test_provider: check admin").await?;
 
-    test_provider(&pool, &http_client, provider_id).await
+    test_provider(&pool, &http_client, provider_id, model).await
 }
 
 #[server(AdminTestBotProvider, "/api")]
@@ -974,20 +1164,11 @@ pub async fn admin_test_bot_provider(
     bot_provider_id: Uuid,
     prompt: String,
 ) -> Result<TestBotProviderResponse, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
     let http_client = expect_context::<reqwest::Client>();
-    let user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
-    let is_admin = crate::db::is_user_admin(&pool, user.id)
-        .await
-        .map_err(internal("admin_test_bot_provider: check admin"))?;
-    if !is_admin {
-        return Err(ServerFnError::new("Admin access required"));
-    }
+    require_admin(&pool, "admin_test_bot_provider: check admin").await?;
 
     test_bot_provider(&pool, &http_client, bot_provider_id, &prompt).await
 }
@@ -1019,12 +1200,15 @@ pub fn AdminPage() -> impl IntoView {
             admin_list_providers()
         });
 
+    // ws F31: match the structured error variant against the shared
+    // ADMIN_REQUIRED constant. `Display` for ServerFnError prefixes
+    // "error running server function: ", so a string comparison on
+    // `to_string()` would be both fragile and (for equality) always false.
     Effect::new(move |_| {
-        if let Some(Err(e)) = bots.get() {
-            let msg = e.to_string();
-            if msg.contains("Admin access required") {
-                navigate2("/", NavigateOptions::default());
-            }
+        if let Some(Err(ServerFnError::ServerError(msg))) = bots.get()
+            && msg == ADMIN_REQUIRED
+        {
+            navigate2("/", NavigateOptions::default());
         }
     });
 
@@ -1109,8 +1293,8 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
     });
 
     Effect::new(move |_| {
-        if create_action.value().get().is_some() && !create_action.pending().get() {
-            match create_action.value().get().unwrap() {
+        if let Some(result) = create_action.value().get() {
+            match result {
                 Ok(_) => {
                     show_create.set(false);
                     error.set(None);
@@ -1122,8 +1306,8 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
     });
 
     Effect::new(move |_| {
-        if update_action.value().get().is_some() && !update_action.pending().get() {
-            match update_action.value().get().unwrap() {
+        if let Some(result) = update_action.value().get() {
+            match result {
                 Ok(_) => {
                     editing_id.set(None);
                     error.set(None);
@@ -1135,8 +1319,8 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
     });
 
     Effect::new(move |_| {
-        if delete_action.value().get().is_some() && !delete_action.pending().get() {
-            match delete_action.value().get().unwrap() {
+        if let Some(result) = delete_action.value().get() {
+            match result {
                 Ok(_) => {
                     error.set(None);
                     version.update(|v| *v += 1);
@@ -1147,8 +1331,8 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
     });
 
     Effect::new(move |_| {
-        if reorder_action.value().get().is_some() && !reorder_action.pending().get() {
-            match reorder_action.value().get().unwrap() {
+        if let Some(result) = reorder_action.value().get() {
+            match result {
                 Ok(_) => {
                     error.set(None);
                     version.update(|v| *v += 1);
@@ -1398,7 +1582,7 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
     });
 
     let update_action = Action::new(
-        |(id, name, url, api_key, enabled): &(Uuid, String, String, Option<String>, bool)| {
+        |(id, name, url, api_key, enabled): &(Uuid, String, String, ApiKeyUpdate, bool)| {
             let id = *id;
             let name = name.clone();
             let url = url.clone();
@@ -1413,16 +1597,23 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
         async move { admin_delete_provider(id).await }
     });
 
-    let test_action = Action::new(|id: &Uuid| {
+    // Optional model override for the provider health check; blank means
+    // "use the provider's configured link model" (ws F22).
+    let test_model = RwSignal::new(String::new());
+    // ws F24: the id travels with the result, so a completed test can never be
+    // attributed to another row (and cannot be dropped because `input()` has
+    // already been cleared by the time `value()` lands).
+    let test_action = Action::new(|(id, model): &(Uuid, Option<String>)| {
         let id = *id;
-        async move { admin_test_provider(id).await }
+        let model = model.clone();
+        async move { (id, admin_test_provider(id, model).await) }
     });
 
     let test_result = RwSignal::new(None::<(Uuid, Result<String, String>)>);
 
     Effect::new(move |_| {
-        if create_action.value().get().is_some() && !create_action.pending().get() {
-            match create_action.value().get().unwrap() {
+        if let Some(result) = create_action.value().get() {
+            match result {
                 Ok(_) => {
                     show_create.set(false);
                     error.set(None);
@@ -1434,8 +1625,8 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
     });
 
     Effect::new(move |_| {
-        if update_action.value().get().is_some() && !update_action.pending().get() {
-            match update_action.value().get().unwrap() {
+        if let Some(result) = update_action.value().get() {
+            match result {
                 Ok(_) => {
                     editing_id.set(None);
                     error.set(None);
@@ -1447,8 +1638,8 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
     });
 
     Effect::new(move |_| {
-        if delete_action.value().get().is_some() && !delete_action.pending().get() {
-            match delete_action.value().get().unwrap() {
+        if let Some(result) = delete_action.value().get() {
+            match result {
                 Ok(_) => {
                     error.set(None);
                     version.update(|v| *v += 1);
@@ -1459,14 +1650,8 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
     });
 
     Effect::new(move |_| {
-        if test_action.value().get().is_some()
-            && !test_action.pending().get()
-            && let Some(provider_id) = test_action.input().get()
-        {
-            let res = match test_action.value().get().unwrap() {
-                Ok(msg) => Ok(msg),
-                Err(e) => Err(e.to_string()),
-            };
+        if let Some((provider_id, result)) = test_action.value().get() {
+            let res = result.map_err(|e| e.to_string());
             test_result.set(Some((provider_id, res)));
         }
     });
@@ -1476,6 +1661,14 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
     view! {
         <h2>"Providers"</h2>
         {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+        <div class="form-actions">
+            <label>"Test model (blank = provider's configured model): "</label>
+            <input
+                type="text"
+                prop:value=move || test_model.get()
+                on:input=move |ev| test_model.set(event_target_value(&ev))
+            />
+        </div>
         <table class="admin-table">
             <thead>
                 <tr>
@@ -1508,15 +1701,17 @@ fn ProvidersSection(providers: Vec<ProviderRow>, version: RwSignal<u32>) -> impl
                                     <button
                                         disabled=move || {
                                             test_action.pending().get()
-                                                && test_action.input().get() == Some(id)
+                                                && test_action.input().get().is_some_and(|(tid, _)| tid == id)
                                         }
                                         on:click=move |_| {
-                                            test_action.dispatch(id);
+                                            let m = test_model.get();
+                                            let m = if m.trim().is_empty() { None } else { Some(m) };
+                                            test_action.dispatch((id, m));
                                         }
                                     >
                                         {move || {
                                             if test_action.pending().get()
-                                                && test_action.input().get() == Some(id)
+                                                && test_action.input().get().is_some_and(|(tid, _)| tid == id)
                                             {
                                                 "Testing..."
                                             } else {
@@ -1630,16 +1825,23 @@ fn ProviderEditForm(
     let name_input = NodeRef::<html::Input>::new();
     let url_input = NodeRef::<html::Input>::new();
     let key_input = NodeRef::<html::Input>::new();
+    let clear_input = NodeRef::<html::Input>::new();
     let enabled_input = NodeRef::<html::Input>::new();
 
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let name = name_input.get().map(|el| el.value()).unwrap_or_default();
         let url = url_input.get().map(|el| el.value()).unwrap_or_default();
-        let api_key = key_input
-            .get()
-            .map(|el| el.value())
-            .filter(|v| !v.is_empty());
+        // ws F21: blank still means "keep" - the explicit checkbox is the
+        // only way to revoke, and it wins over anything typed in the field.
+        let api_key = if clear_input.get().map(|el| el.checked()).unwrap_or(false) {
+            ApiKeyUpdate::Clear
+        } else {
+            match key_input.get().map(|el| el.value()) {
+                Some(v) if !v.is_empty() => ApiKeyUpdate::Set(v),
+                _ => ApiKeyUpdate::Keep,
+            }
+        };
         let enabled = enabled_input.get().map(|el| el.checked()).unwrap_or(true);
         update_action.dispatch((provider_id, name, url, api_key, enabled));
     };
@@ -1656,6 +1858,12 @@ fn ProviderEditForm(
                     </FormField>
                     <FormField label="API Key" help="Leave blank to keep existing key">
                         <input type="password" node_ref=key_input/>
+                    </FormField>
+                    <FormField
+                        label="Clear API key"
+                        help="Removes the stored key. Overrides anything typed above."
+                    >
+                        <input type="checkbox" node_ref=clear_input/>
                     </FormField>
                     <FormField label="Enabled">
                         <input type="checkbox" node_ref=enabled_input prop:checked=provider_enabled/>
@@ -1752,13 +1960,13 @@ fn BotProvidersSection(
     let test_action = Action::new(|(id, prompt): &(Uuid, String)| {
         let id = *id;
         let prompt = prompt.clone();
-        async move { admin_test_bot_provider(id, prompt).await }
+        async move { (id, admin_test_bot_provider(id, prompt).await) }
     });
     let test_result = RwSignal::new(None::<(Uuid, Result<TestBotProviderResponse, String>)>);
 
     Effect::new(move |_| {
-        if create_action.value().get().is_some() && !create_action.pending().get() {
-            match create_action.value().get().unwrap() {
+        if let Some(result) = create_action.value().get() {
+            match result {
                 Ok(_) => {
                     show_create.set(false);
                     error.set(None);
@@ -1770,8 +1978,8 @@ fn BotProvidersSection(
     });
 
     Effect::new(move |_| {
-        if update_action.value().get().is_some() && !update_action.pending().get() {
-            match update_action.value().get().unwrap() {
+        if let Some(result) = update_action.value().get() {
+            match result {
                 Ok(_) => {
                     editing_id.set(None);
                     error.set(None);
@@ -1783,8 +1991,8 @@ fn BotProvidersSection(
     });
 
     Effect::new(move |_| {
-        if delete_action.value().get().is_some() && !delete_action.pending().get() {
-            match delete_action.value().get().unwrap() {
+        if let Some(result) = delete_action.value().get() {
+            match result {
                 Ok(_) => {
                     error.set(None);
                     version.update(|v| *v += 1);
@@ -1795,14 +2003,8 @@ fn BotProvidersSection(
     });
 
     Effect::new(move |_| {
-        if test_action.value().get().is_some()
-            && !test_action.pending().get()
-            && let Some((bp_id, _)) = test_action.input().get()
-        {
-            let res = match test_action.value().get().unwrap() {
-                Ok(resp) => Ok(resp),
-                Err(e) => Err(e.to_string()),
-            };
+        if let Some((bp_id, result)) = test_action.value().get() {
+            let res = result.map_err(|e| e.to_string());
             test_result.set(Some((bp_id, res)));
         }
     });
@@ -2223,7 +2425,7 @@ mod tests {
 
         assert_eq!(providers.len(), 1);
         let masked = providers[0].api_key_masked.as_ref().unwrap();
-        assert_eq!(masked, "sk-...1234");
+        assert_eq!(masked, "...1234");
         assert!(!masked.contains(api_key));
     }
 
@@ -2276,7 +2478,7 @@ mod tests {
             provider_id,
             "preserve-test-renamed".to_string(),
             "http://localhost:8081".to_string(),
-            None,
+            ApiKeyUpdate::Keep,
             true,
         )
         .await
@@ -2316,7 +2518,7 @@ mod tests {
             provider_id,
             "replace-test".to_string(),
             "http://localhost:8080".to_string(),
-            Some(new_key.to_string()),
+            ApiKeyUpdate::Set(new_key.to_string()),
             true,
         )
         .await
@@ -2332,5 +2534,702 @@ mod tests {
         assert_ne!(raw, encrypted);
         let decrypted = crate::crypto::decrypt(&key, &raw).unwrap();
         assert_eq!(String::from_utf8(decrypted).unwrap(), new_key);
+    }
+
+    /// ws F21: Clear must actually NULL the column, and the listing must then
+    /// report no key rather than a mask.
+    #[sqlx::test]
+    async fn test_admin_update_provider_clears_key(pool: sqlx::PgPool) {
+        let key = test_encryption_key();
+        let encrypted = crate::crypto::encrypt(&key, b"sk-to-be-revoked-1234").unwrap();
+        let provider_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO llm_providers (id, name, url, api_key_encrypted, enabled) VALUES ($1, $2, $3, $4, true)",
+        )
+        .bind(provider_id)
+        .bind("clear-test")
+        .bind("http://localhost:8080")
+        .bind(&encrypted)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        update_provider(
+            &pool,
+            provider_id,
+            "clear-test".to_string(),
+            "http://localhost:8080".to_string(),
+            ApiKeyUpdate::Clear,
+            true,
+        )
+        .await
+        .unwrap();
+
+        let raw: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT api_key_encrypted FROM llm_providers WHERE id = $1")
+                .bind(provider_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(raw, None, "Clear must NULL api_key_encrypted");
+
+        let providers = list_providers(&pool).await.unwrap();
+        assert_eq!(providers[0].api_key_masked, None);
+
+        // And the name/url/enabled columns still updated in the Clear arm.
+        update_provider(
+            &pool,
+            provider_id,
+            "clear-test-renamed".to_string(),
+            "http://localhost:9999".to_string(),
+            ApiKeyUpdate::Clear,
+            false,
+        )
+        .await
+        .unwrap();
+        let (name, url, enabled): (String, String, bool) =
+            sqlx::query_as("SELECT name, url, enabled FROM llm_providers WHERE id = $1")
+                .bind(provider_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(name, "clear-test-renamed");
+        assert_eq!(url, "http://localhost:9999");
+        assert!(!enabled);
+    }
+
+    /// ws F25: crafted server-fn arguments are rejected before they reach SQL.
+    #[sqlx::test]
+    async fn test_bot_input_validation(pool: sqlx::PgPool) {
+        // Empty / whitespace-only name.
+        for name in ["", "   "] {
+            let err = create_bot(&pool, name.to_string(), 0.2, true, false, false)
+                .await
+                .expect_err("empty bot name must be rejected");
+            assert!(err.to_string().contains("Bot name is required"), "{err}");
+        }
+        // Over-long name.
+        let err = create_bot(&pool, "x".repeat(65), 0.2, true, false, false)
+            .await
+            .expect_err("over-long bot name must be rejected");
+        assert!(err.to_string().contains("at most 64"), "{err}");
+        // Non-finite and out-of-range temperature.
+        for t in [f32::NAN, f32::INFINITY, -0.1, 2.1, 1e9] {
+            let err = create_bot(&pool, "tempbot".to_string(), t, true, false, false)
+                .await
+                .expect_err("bad temperature must be rejected");
+            assert!(
+                err.to_string().contains("between 0.0 and 2.0"),
+                "{t}: {err}"
+            );
+        }
+        // Boundaries accepted, and the name is stored trimmed.
+        let bot = create_bot(&pool, "  edge  ".to_string(), 0.0, true, false, false)
+            .await
+            .unwrap();
+        assert_eq!(bot.name, "edge");
+        create_bot(&pool, "edge2".to_string(), 2.0, true, false, false)
+            .await
+            .unwrap();
+    }
+
+    #[sqlx::test]
+    async fn test_provider_input_validation(pool: sqlx::PgPool) {
+        let err = create_provider(
+            &pool,
+            "  ".to_string(),
+            "https://a.example".to_string(),
+            None,
+        )
+        .await
+        .expect_err("empty provider name must be rejected");
+        assert!(
+            err.to_string().contains("Provider name is required"),
+            "{err}"
+        );
+
+        for url in ["", "   ", "a.example", "ftp://a.example", "//a.example"] {
+            let err = create_provider(&pool, "p".to_string(), url.to_string(), None)
+                .await
+                .expect_err("bad url must be rejected");
+            assert!(err.to_string().contains("URL"), "{url}: {err}");
+        }
+
+        let p = create_provider(
+            &pool,
+            " trimmed ".to_string(),
+            " https://a.example ".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(p.name, "trimmed");
+        assert_eq!(p.url, "https://a.example");
+    }
+
+    #[sqlx::test]
+    async fn test_bot_provider_input_validation(pool: sqlx::PgPool) {
+        let bot = create_bot(&pool, "linkbot".to_string(), 0.2, true, false, false)
+            .await
+            .unwrap();
+        let provider = create_provider(
+            &pool,
+            "linkprovider".to_string(),
+            "https://a.example".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let err = create_bot_provider(&pool, bot.id, provider.id, "  ".to_string(), None, None, 0)
+            .await
+            .expect_err("empty model must be rejected");
+        assert!(err.to_string().contains("Model is required"), "{err}");
+
+        let err = create_bot_provider(
+            &pool,
+            bot.id,
+            provider.id,
+            "gpt-4o-mini".to_string(),
+            None,
+            Some(serde_json::json!([1, 2, 3])),
+            0,
+        )
+        .await
+        .expect_err("non-object extra_body must be rejected");
+        assert!(err.to_string().contains("JSON object"), "{err}");
+
+        let big = serde_json::json!({ "pad": "x".repeat(9000) });
+        let err = create_bot_provider(
+            &pool,
+            bot.id,
+            provider.id,
+            "gpt-4o-mini".to_string(),
+            None,
+            Some(big),
+            0,
+        )
+        .await
+        .expect_err("oversized extra_body must be rejected");
+        assert!(err.to_string().contains("8192"), "{err}");
+
+        // Valid link still works, and model/reasoning are trimmed.
+        let link = create_bot_provider(
+            &pool,
+            bot.id,
+            provider.id,
+            " gpt-4o-mini ".to_string(),
+            Some(" low ".to_string()),
+            Some(serde_json::json!({"top_p": 0.9})),
+            3,
+        )
+        .await
+        .unwrap();
+        assert_eq!(link.model, "gpt-4o-mini");
+        assert_eq!(link.reasoning_effort.as_deref(), Some("low"));
+    }
+
+    /// ws F28: the gate now lives in one place, so the thing worth pinning is
+    /// that no admin server fn skipped it. Source-level check: every admin
+    /// server fn body must contain a call to the shared gate helper.
+    ///
+    /// The two needles are built with `concat!` so they do not match this
+    /// test's own source - see the spec note above.
+    #[test]
+    fn every_admin_server_fn_calls_require_admin() {
+        let src = include_str!("admin.rs");
+        let server_fn_needle = concat!("#[", "server(Admin");
+        let gate_needle = concat!("require_admin", "(&pool,");
+        let server_fns = src.matches(server_fn_needle).count();
+        let gates = src.matches(gate_needle).count();
+        assert_eq!(
+            server_fns, 15,
+            "expected 15 admin server fns, found {server_fns} - update this test \
+             deliberately if an admin server fn was added or removed"
+        );
+        assert_eq!(
+            server_fns, gates,
+            "{server_fns} admin server fns but {gates} gates - an admin server \
+             fn is missing its authorization check"
+        );
+    }
+
+    /// ws F31: pin the exact shape the client redirect matches on. If this
+    /// breaks, `AdminPage`'s redirect Effect breaks with it.
+    #[test]
+    fn admin_required_error_is_a_server_error_variant_with_the_constant() {
+        let err = ServerFnError::new(ADMIN_REQUIRED);
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError variant, got {other:?}"),
+        }
+    }
+
+    /// ws F20: the mask must never return a short key verbatim, and must not
+    /// invent a vendor prefix.
+    #[test]
+    fn mask_api_key_rules() {
+        assert_eq!(mask_api_key(""), "(set)");
+        assert_eq!(mask_api_key("k"), "(set)");
+        assert_eq!(mask_api_key("abcd"), "(set)");
+        assert_eq!(mask_api_key("abcde"), "(set)");
+        assert_eq!(mask_api_key("abcdefg"), "(set)");
+        assert_eq!(mask_api_key("abcdefgh"), "...efgh");
+        assert_eq!(mask_api_key("sk-test-secret-key-1234"), "...1234");
+        // No fabricated prefix for a non-OpenAI key.
+        assert_eq!(mask_api_key("AIzaSyAveryLongGoogleKey9876"), "...9876");
+        // Multi-byte safe: last 4 chars, not last 4 bytes.
+        assert_eq!(mask_api_key("aaaaaaaaéèçà"), "...éèçà");
+        // Nothing short is ever echoed back.
+        for k in ["", "k", "ab", "abc", "abcd", "abcde", "ab cdef"] {
+            assert_eq!(mask_api_key(k), "(set)", "leaked short key {k:?}");
+        }
+    }
+
+    /// ws F26: one corrupt row must degrade to a marker, and every other
+    /// provider must still list. Before the fix this returned Err and the
+    /// whole admin page rendered as a single error.
+    #[sqlx::test]
+    async fn test_admin_list_providers_degrades_one_undecryptable_row(pool: sqlx::PgPool) {
+        let key = test_encryption_key();
+        let good = crate::crypto::encrypt(&key, b"sk-good-key-1234").unwrap();
+
+        sqlx::query(
+            "INSERT INTO llm_providers (id, name, url, api_key_encrypted, enabled) VALUES ($1, $2, $3, $4, true)",
+        )
+        .bind(Uuid::new_v4())
+        .bind("aaa-good")
+        .bind("http://localhost:8080")
+        .bind(&good)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Not ciphertext at all: 4 bytes, and `crypto::decrypt` returns
+        // DecryptionFailed for anything under 12 (crypto.rs:31-33), so this
+        // row fails independently of which key is loaded.
+        sqlx::query(
+            "INSERT INTO llm_providers (id, name, url, api_key_encrypted, enabled) VALUES ($1, $2, $3, $4, true)",
+        )
+        .bind(Uuid::new_v4())
+        .bind("bbb-corrupt")
+        .bind("http://localhost:8081")
+        .bind(vec![0u8, 1, 2, 3])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // No key at all: still None, not a marker.
+        sqlx::query("INSERT INTO llm_providers (id, name, url, enabled) VALUES ($1, $2, $3, true)")
+            .bind(Uuid::new_v4())
+            .bind("ccc-nokey")
+            .bind("http://localhost:8082")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Ordered by name, so aaa/bbb/ccc.
+        let providers = list_providers(&pool)
+            .await
+            .expect("must not fail wholesale");
+        assert_eq!(providers.len(), 3);
+        assert_eq!(providers[0].api_key_masked.as_deref(), Some("...1234"));
+        assert_eq!(
+            providers[1].api_key_masked.as_deref(),
+            Some("(undecryptable)")
+        );
+        assert_eq!(providers[2].api_key_masked, None);
+    }
+
+    async fn insert_bot(pool: &sqlx::PgPool, name: &str) -> Uuid {
+        create_bot(pool, name.to_string(), 0.2, true, false, false)
+            .await
+            .unwrap()
+            .id
+    }
+
+    /// ws F18: reorder writes 0-based orders matching the given sequence.
+    #[sqlx::test]
+    async fn test_reorder_bots_renumbers_zero_based(pool: sqlx::PgPool) {
+        // migration 013 seeds easy/medium/hard at 0/1/2; clear for determinism.
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let a = insert_bot(&pool, "aaa").await;
+        let b = insert_bot(&pool, "bbb").await;
+        let c = insert_bot(&pool, "ccc").await;
+
+        reorder_bots(&pool, vec![c, a, b]).await.unwrap();
+
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM bots ORDER BY display_order")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(names, vec!["ccc", "aaa", "bbb"]);
+        let orders: Vec<i32> =
+            sqlx::query_scalar("SELECT display_order FROM bots ORDER BY display_order")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(orders, vec![0, 1, 2]);
+    }
+
+    /// ws F18 + ws F29: an unknown id rolls the whole reorder back.
+    #[sqlx::test]
+    async fn test_reorder_bots_rejects_unknown_id_atomically(pool: sqlx::PgPool) {
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let a = insert_bot(&pool, "aaa").await;
+        let b = insert_bot(&pool, "bbb").await;
+
+        let err = reorder_bots(&pool, vec![b, Uuid::new_v4(), a])
+            .await
+            .expect_err("unknown id must be rejected");
+        assert!(err.to_string().contains("please reload"));
+
+        // Nothing moved.
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM bots ORDER BY display_order")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(names, vec!["aaa", "bbb"]);
+    }
+
+    /// ws F18: a duplicated id is rejected before any UPDATE runs, because
+    /// Postgres would pick one of the two ordinals nondeterministically.
+    #[sqlx::test]
+    async fn test_reorder_bots_rejects_duplicate_id(pool: sqlx::PgPool) {
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let a = insert_bot(&pool, "aaa").await;
+        let b = insert_bot(&pool, "bbb").await;
+
+        let err = reorder_bots(&pool, vec![a, b, a])
+            .await
+            .expect_err("duplicate id must be rejected");
+        assert!(err.to_string().contains("duplicate entry"), "{err}");
+
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM bots ORDER BY display_order")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(names, vec!["aaa", "bbb"]);
+    }
+
+    /// ws F19: sequential creates never reuse a display_order, and the
+    /// advisory lock is the thing that makes that true under concurrency.
+    /// (A truly concurrent test would need two pool connections racing; the
+    /// deterministic assertion here is the no-duplicate invariant.)
+    #[sqlx::test]
+    async fn test_create_bot_display_orders_are_unique(pool: sqlx::PgPool) {
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for n in ["a", "b", "c", "d"] {
+            insert_bot(&pool, n).await;
+        }
+        let dupes: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM (SELECT display_order FROM bots GROUP BY display_order HAVING count(*) > 1) d",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(dupes, 0);
+        let orders: Vec<i32> =
+            sqlx::query_scalar("SELECT display_order FROM bots ORDER BY display_order")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(orders, vec![0, 1, 2, 3]);
+    }
+
+    /// ws F29: updating a row that no longer exists must not report success.
+    #[sqlx::test]
+    async fn test_update_bot_unknown_id_is_not_found(pool: sqlx::PgPool) {
+        let err = update_bot(
+            &pool,
+            Uuid::new_v4(),
+            "ghost".to_string(),
+            0.2,
+            true,
+            false,
+            true,
+            false,
+        )
+        .await
+        .expect_err("unknown bot id must be rejected");
+        assert!(err.to_string().contains("Bot not found"), "{err}");
+    }
+
+    #[sqlx::test]
+    async fn test_update_provider_unknown_id_is_not_found(pool: sqlx::PgPool) {
+        // No-key branch.
+        let err = update_provider(
+            &pool,
+            Uuid::new_v4(),
+            "ghost".to_string(),
+            "http://localhost:1".to_string(),
+            ApiKeyUpdate::Keep,
+            true,
+        )
+        .await
+        .expect_err("unknown provider id must be rejected");
+        assert!(err.to_string().contains("Provider not found"), "{err}");
+
+        // Key-set branch.
+        let err = update_provider(
+            &pool,
+            Uuid::new_v4(),
+            "ghost".to_string(),
+            "http://localhost:1".to_string(),
+            ApiKeyUpdate::Set("sk-whatever-1234".to_string()),
+            true,
+        )
+        .await
+        .expect_err("unknown provider id must be rejected on the key branch too");
+        assert!(err.to_string().contains("Provider not found"), "{err}");
+    }
+
+    #[sqlx::test]
+    async fn test_update_bot_provider_unknown_id_is_not_found(pool: sqlx::PgPool) {
+        let err = update_bot_provider(
+            &pool,
+            Uuid::new_v4(),
+            "gpt-4o-mini".to_string(),
+            None,
+            None,
+            0,
+            true,
+        )
+        .await
+        .expect_err("unknown link id must be rejected");
+        assert!(err.to_string().contains("link not found"), "{err}");
+    }
+
+    /// ws F29: deletes stay idempotent on purpose.
+    #[sqlx::test]
+    async fn test_deletes_are_idempotent(pool: sqlx::PgPool) {
+        delete_bot(&pool, Uuid::new_v4()).await.unwrap();
+        delete_provider(&pool, Uuid::new_v4()).await.unwrap();
+        delete_bot_provider(&pool, Uuid::new_v4()).await.unwrap();
+    }
+
+    /// ws F22: the model must come from configuration, never from a literal.
+    /// Asserted through the resolution failure path, which runs before any
+    /// HTTP request is attempted.
+    #[sqlx::test]
+    async fn test_provider_requires_a_configured_model(pool: sqlx::PgPool) {
+        let key = test_encryption_key();
+        let encrypted = crate::crypto::encrypt(&key, b"sk-modeltest-1234").unwrap();
+        let provider_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO llm_providers (id, name, url, api_key_encrypted, enabled) VALUES ($1, $2, $3, $4, true)",
+        )
+        .bind(provider_id)
+        .bind("modeltest")
+        .bind("http://127.0.0.1:1")
+        .bind(&encrypted)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let client = reqwest::Client::new();
+
+        // No links at all: actionable error, and no request attempted.
+        let err = test_provider(&pool, &client, provider_id, None)
+            .await
+            .expect_err("no configured model must be an error, not a guess");
+        assert!(err.to_string().contains("no configured"), "{err}");
+
+        // A disabled link does not count.
+        let bot = create_bot(&pool, "modelbot".to_string(), 0.2, true, false, false)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO bot_providers (bot_id, provider_id, model, priority, enabled) VALUES ($1, $2, $3, 0, false)",
+        )
+        .bind(bot.id)
+        .bind(provider_id)
+        .bind("disabled-model")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let err = test_provider(&pool, &client, provider_id, None)
+            .await
+            .expect_err("a disabled link must not supply the model");
+        assert!(err.to_string().contains("no configured"), "{err}");
+
+        // An empty explicit model is a validation error, not a fallback.
+        let err = test_provider(&pool, &client, provider_id, Some("  ".to_string()))
+            .await
+            .expect_err("blank explicit model must be rejected");
+        assert!(err.to_string().contains("Model is required"), "{err}");
+
+        // With an enabled link, resolution succeeds and we get past the model
+        // step - the request to 127.0.0.1:1 then fails, which is the proof
+        // that resolution no longer short-circuits.
+        sqlx::query(
+            "INSERT INTO bot_providers (bot_id, provider_id, model, priority, enabled) VALUES ($1, $2, $3, 1, true)",
+        )
+        .bind(bot.id)
+        .bind(provider_id)
+        .bind("configured-model")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let err = test_provider(&pool, &client, provider_id, None)
+            .await
+            .expect_err("connection to port 1 must fail");
+        assert!(
+            !err.to_string().contains("no configured"),
+            "model resolution should have succeeded: {err}"
+        );
+    }
+
+    /// Spawn a throwaway HTTP server on an ephemeral port that answers
+    /// POST /v1/chat/completions with a fixed status/body/headers, and return
+    /// its base URL. Same in-process pattern as `spawn_mock_game_service` in
+    /// `tests/ssr_pages.rs:104-128`; never calls a real LLM (docs/CODING.md).
+    async fn spawn_upstream(
+        status: u16,
+        body: Vec<u8>,
+        extra_headers: Vec<(&'static str, &'static str)>,
+    ) -> String {
+        use axum::routing::post;
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let body = body.clone();
+                let extra_headers = extra_headers.clone();
+                async move {
+                    let mut headers = axum::http::HeaderMap::new();
+                    for (k, v) in extra_headers {
+                        headers.insert(
+                            axum::http::HeaderName::from_static(k),
+                            axum::http::HeaderValue::from_static(v),
+                        );
+                    }
+                    (
+                        axum::http::StatusCode::from_u16(status).unwrap(),
+                        headers,
+                        body,
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    async fn provider_with_link(pool: &sqlx::PgPool, url: &str) -> Uuid {
+        let key = test_encryption_key();
+        let encrypted = crate::crypto::encrypt(&key, b"sk-capped-1234").unwrap();
+        let provider_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO llm_providers (id, name, url, api_key_encrypted, enabled) VALUES ($1, $2, $3, $4, true)",
+        )
+        .bind(provider_id)
+        .bind("capped")
+        .bind(url)
+        .bind(&encrypted)
+        .execute(pool)
+        .await
+        .unwrap();
+        let bot = create_bot(pool, "cappedbot".to_string(), 0.2, true, false, false)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO bot_providers (bot_id, provider_id, model, priority, enabled) VALUES ($1, $2, 'm', 0, true)",
+        )
+        .bind(bot.id)
+        .bind(provider_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        provider_id
+    }
+
+    /// ws F23: an oversized upstream body is truncated, not buffered whole.
+    #[sqlx::test]
+    async fn test_provider_truncates_huge_error_body(pool: sqlx::PgPool) {
+        let url = spawn_upstream(500, vec![b'x'; 1_000_000], vec![]).await;
+        let provider_id = provider_with_link(&pool, &url).await;
+        let out = test_provider(&pool, &reqwest::Client::new(), provider_id, None)
+            .await
+            .unwrap();
+        assert!(out.starts_with("HTTP 500"), "{out}");
+        assert!(out.contains("<truncated at 8192 bytes>"), "not truncated");
+        assert!(
+            out.len() < 9_000,
+            "body was not capped: {} bytes",
+            out.len()
+        );
+    }
+
+    /// ws F23: only allowlisted headers reach the client.
+    #[sqlx::test]
+    async fn test_bot_provider_filters_headers_and_caps_body(pool: sqlx::PgPool) {
+        let url = spawn_upstream(
+            200,
+            vec![b'y'; 1_000_000],
+            vec![
+                ("content-type", "application/json"),
+                ("set-cookie", "session=leaked"),
+                ("x-upstream-secret", "nope"),
+            ],
+        )
+        .await;
+        let provider_id = provider_with_link(&pool, &url).await;
+        let link_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM bot_providers WHERE provider_id = $1")
+                .bind(provider_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let resp = test_bot_provider(&pool, &reqwest::Client::new(), link_id, "hi")
+            .await
+            .unwrap();
+        assert_eq!(resp.status, 200);
+        assert!(resp.body.contains("<truncated at 8192 bytes>"));
+        assert!(resp.body.len() < 9_000, "body not capped");
+        let names: Vec<&str> = resp.headers.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(names.contains(&"content-type"), "{names:?}");
+        assert!(
+            !names.contains(&"set-cookie"),
+            "leaked set-cookie: {names:?}"
+        );
+        assert!(
+            !names.contains(&"x-upstream-secret"),
+            "leaked unknown header: {names:?}"
+        );
+    }
+
+    /// A small body is returned intact with no truncation marker.
+    #[sqlx::test]
+    async fn test_bot_provider_small_body_intact(pool: sqlx::PgPool) {
+        let url = spawn_upstream(200, br#"{"ok":true}"#.to_vec(), vec![]).await;
+        let provider_id = provider_with_link(&pool, &url).await;
+        let link_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM bot_providers WHERE provider_id = $1")
+                .bind(provider_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let resp = test_bot_provider(&pool, &reqwest::Client::new(), link_id, "hi")
+            .await
+            .unwrap();
+        assert_eq!(resp.body, r#"{"ok":true}"#);
+        assert!(!resp.body.contains("truncated"));
     }
 }
