@@ -139,7 +139,11 @@ impl Game {
                     ),
                     AfterSpace::new(Many::some_spaced(Map::new(
                         Enum::exact(hand_cards),
-                        |s: String| Card::parse(&s).unwrap(),
+                        |s: String| {
+                            Card::parse(&s).expect(
+                                "Enum::exact only emits hand-card strings, which always parse",
+                            )
+                        },
                     ))),
                 ),
                 |(_, cards): (String, Vec<Card>)| Command::Spend { cards },

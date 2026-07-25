@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -331,6 +331,16 @@ pub fn grid_tile_at(g: &Grid, v: Vect) -> Tile {
     g.get(&v).cloned().unwrap_or_else(Tile::empty)
 }
 
+pub fn grid_tile_counts(g: &Grid) -> HashMap<TileType, i32> {
+    let mut counts = HashMap::new();
+    for t in g.values() {
+        if t.tile_type != TileType::Empty {
+            *counts.entry(t.tile_type).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
 pub fn grid_fountain_loc(g: &Grid) -> Option<Vect> {
     g.iter()
         .find(|(_, t)| t.tile_type == TileType::Fountain)
@@ -376,15 +386,14 @@ pub fn grid_is_valid(g: &Grid) -> (bool, String) {
         None => return (false, GRID_INVALID_NO_FOUNTAIN.to_string()),
     };
 
-    let mut walk_stack = vec![fv];
-    let mut in_walk_stack: HashMap<Vect, bool> = HashMap::new();
-    let mut connected: HashMap<Vect, bool> = HashMap::new();
+    let mut walk_stack = VecDeque::from([fv]);
+    let mut in_walk_stack: HashSet<Vect> = HashSet::new();
+    let mut connected: HashSet<Vect> = HashSet::new();
 
-    while let Some(next) = walk_stack.first().copied() {
-        walk_stack.remove(0);
+    while let Some(next) = walk_stack.pop_front() {
         let next_tile = grid_tile_at(g, next);
-        in_walk_stack.insert(next, false);
-        connected.insert(next, true);
+        in_walk_stack.insert(next);
+        connected.insert(next);
 
         for dir in Dir::ALL {
             let dv = next.add(dir.vect());
@@ -401,39 +410,38 @@ pub fn grid_is_valid(g: &Grid) -> (bool, String) {
                 continue;
             }
 
-            if in_walk_stack.contains_key(&dv) || connected.contains_key(&dv) {
+            if in_walk_stack.contains(&dv) || connected.contains(&dv) {
                 continue;
             }
 
-            walk_stack.push(dv);
-            in_walk_stack.insert(dv, true);
+            walk_stack.push_back(dv);
+            in_walk_stack.insert(dv);
         }
     }
 
     for (v, t) in g.iter() {
-        if t.tile_type != TileType::Empty && !connected.contains_key(v) {
+        if t.tile_type != TileType::Empty && !connected.contains(v) {
             return (false, GRID_INVALID_CANNOT_WALK.to_string());
         }
     }
 
     let (min, max) = grid_bounds(g);
     let start = min.add(Vect { x: -1, y: -1 });
-    let mut walk_stack = vec![start];
-    let mut in_walk_stack: HashMap<Vect, bool> = HashMap::new();
-    let mut connected: HashMap<Vect, bool> = HashMap::new();
+    let mut walk_stack = VecDeque::from([start]);
+    let mut in_walk_stack: HashSet<Vect> = HashSet::new();
+    let mut connected: HashSet<Vect> = HashSet::new();
 
-    while let Some(next) = walk_stack.first().copied() {
-        walk_stack.remove(0);
-        in_walk_stack.insert(next, false);
-        connected.insert(next, true);
+    while let Some(next) = walk_stack.pop_front() {
+        in_walk_stack.insert(next);
+        connected.insert(next);
 
         for dir in Dir::ALL {
             let dv = next.add(dir.vect());
             let dv_tile = grid_tile_at(g, dv);
 
             if dv_tile.tile_type != TileType::Empty
-                || in_walk_stack.contains_key(&dv)
-                || connected.contains_key(&dv)
+                || in_walk_stack.contains(&dv)
+                || connected.contains(&dv)
                 || dv.x < min.x - 1
                 || dv.x > max.x + 1
                 || dv.y < min.y - 1
@@ -442,15 +450,18 @@ pub fn grid_is_valid(g: &Grid) -> (bool, String) {
                 continue;
             }
 
-            walk_stack.push(dv);
-            in_walk_stack.insert(dv, true);
+            walk_stack.push_back(dv);
+            in_walk_stack.insert(dv);
         }
     }
 
+    // Inclusive on both axes for symmetry. Row max.y can never actually fail:
+    // any empty cell there borders the empty max.y + 1 ring row, which the
+    // outside flood always covers.
     for x in min.x..=max.x {
-        for y in min.y..max.y {
+        for y in min.y..=max.y {
             let v = Vect { x, y };
-            if grid_tile_at(g, v).tile_type == TileType::Empty && !connected.contains_key(&v) {
+            if grid_tile_at(g, v).tile_type == TileType::Empty && !connected.contains(&v) {
                 return (false, GRID_INVALID_GAP.to_string());
             }
         }
@@ -475,20 +486,25 @@ pub fn grid_is_internal_wall(g: &Grid, vd: VectDir) -> bool {
 }
 
 pub fn grid_longest_ext_wall(g: &Grid) -> i32 {
-    let mut visited: HashMap<VectDir, bool> = HashMap::new();
+    let mut visited: HashSet<VectDir> = HashSet::new();
     let mut longest = 0;
 
-    for (v, t) in g.iter() {
+    // Iterate in coordinate order: Grid is a HashMap, and on grids that
+    // violate the play invariants (mismatched walls) the walk result could
+    // otherwise depend on which segment starts each traversal.
+    let mut entries: Vec<(&Vect, &Tile)> = g.iter().collect();
+    entries.sort_by_key(|(v, _)| (v.x, v.y));
+    for (v, t) in entries {
         for d in Dir::ALL {
             if !t.has_wall(d) {
                 continue;
             }
             let vd = VectDir { vect: *v, dir: d };
-            if visited.contains_key(&vd) || grid_is_internal_wall(g, vd) {
+            if visited.contains(&vd) || grid_is_internal_wall(g, vd) {
                 continue;
             }
 
-            visited.insert(vd, true);
+            visited.insert(vd);
             let mut wall = 1;
 
             for rot_dir in [1i32, -1i32] {
@@ -504,16 +520,16 @@ pub fn grid_longest_ext_wall(g: &Grid) -> i32 {
                         if grid_tile_at(g, next_wall.vect).tile_type == TileType::Empty {
                             continue;
                         }
-                        if !visited.contains_key(&next_wall)
+                        if !visited.contains(&next_wall)
                             && grid_is_wall(g, next_wall)
                             && !grid_is_internal_wall(g, next_wall)
                         {
                             wall += 1;
-                            visited.insert(next_wall, true);
+                            visited.insert(next_wall);
                             found = true;
                             cur = next_wall;
+                            break;
                         }
-                        break;
                     }
                     if !found {
                         break;
@@ -599,13 +615,7 @@ impl PlayerBoard {
     }
 
     pub fn tile_counts(&self) -> HashMap<TileType, i32> {
-        let mut counts = HashMap::new();
-        for t in self.grid.values() {
-            if t.tile_type != TileType::Empty {
-                *counts.entry(t.tile_type).or_insert(0) += 1;
-            }
-        }
-        counts
+        grid_tile_counts(&self.grid)
     }
 
     pub fn currency_value(&self, currency: Currency) -> i32 {

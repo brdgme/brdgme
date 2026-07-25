@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
@@ -64,16 +62,6 @@ fn render_tile_abbr(t: TileType) -> N {
         tile_type_color(t).into(),
         vec![N::Bold(vec![N::text(t.abbr().trim().to_string())])],
     )
-}
-
-fn tile_counts(grid: &Grid) -> HashMap<TileType, i32> {
-    let mut counts = HashMap::new();
-    for t in grid.values() {
-        if t.tile_type != TileType::Empty {
-            *counts.entry(t.tile_type).or_insert(0) += 1;
-        }
-    }
-    counts
 }
 
 fn corner_char(grid: &Grid, x: i32, y: i32) -> char {
@@ -161,7 +149,9 @@ fn render_grid(grid: &Grid) -> N {
 
     let mut header = "    ".to_string();
     for x in x_start..=x_end {
-        let col_letter = ((x - x_start) as u8 + b'a') as char;
+        // Clamp: columns past 'z' are unaddressable via the coord parser
+        // anyway; wrapping the u8 would render punctuation.
+        let col_letter = char::from(((x - x_start).min(25)) as u8 + b'a');
         header.push_str(&format!(" {}  ", col_letter));
     }
     lines.push(header);
@@ -237,7 +227,7 @@ fn render_player_summary(state: &PubState) -> N {
 
     for p in 0..state.all_players {
         let board = &state.boards[p];
-        let counts = tile_counts(&board.grid);
+        let counts = grid_tile_counts(&board.grid);
         let is_dirk = state.human_players == 2 && p == DIRK;
 
         let wall_str = if is_dirk {

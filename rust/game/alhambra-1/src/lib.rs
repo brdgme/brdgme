@@ -98,6 +98,17 @@ pub struct RoundTypeScore {
     pub points: i32,
 }
 
+/// Raw index of the `n`th non-Empty tile, matching the 1-based numbering the
+/// renderer shows (render_tile_set filters Empty sentinels before labeling).
+fn nth_non_empty(tiles: &[Tile], n: usize) -> Option<usize> {
+    tiles
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.tile_type != TileType::Empty)
+        .nth(n)
+        .map(|(i, _)| i)
+}
+
 impl Game {
     pub fn start_game(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&players) {
@@ -428,7 +439,10 @@ impl Game {
         )])];
 
         for currency in Currency::ALL {
-            let ci = Currency::ALL.iter().position(|&c| c == currency).unwrap();
+            let ci = Currency::ALL
+                .iter()
+                .position(|&c| c == currency)
+                .expect("Currency::ALL contains every Currency variant");
             if self.tiles[ci].tile_type == TileType::Empty {
                 continue;
             }
@@ -554,9 +568,19 @@ impl Game {
         if cards.is_empty() {
             return Err(GameError::invalid_input("must take at least one card"));
         }
+        // Clone-and-verify (mirrors spend()): remove each requested card from
+        // a market copy so duplicate requests are counted against market
+        // multiplicity; commit only after all checks pass. A bare contains()
+        // pre-check let `take b1 b1` mint cards that were never in the market.
+        let mut market = self.cards.clone();
         for c in cards {
-            if !self.cards.contains(c) {
-                return Err(GameError::invalid_input(format!("{} is not available", c)));
+            match market.iter().position(|mc| mc == c) {
+                Some(pos) => {
+                    market.remove(pos);
+                }
+                None => {
+                    return Err(GameError::invalid_input(format!("{} is not available", c)));
+                }
             }
         }
         if cards.len() > 1 {
@@ -567,12 +591,8 @@ impl Game {
                 ));
             }
         }
-        for c in cards {
-            if let Some(pos) = self.cards.iter().position(|mc| mc == c) {
-                self.cards.remove(pos);
-            }
-            self.boards[player].cards.push(*c);
-        }
+        self.cards = market;
+        self.boards[player].cards.extend(cards.iter().copied());
         let card_strs: Vec<String> = cards.iter().map(|c| c.to_string()).collect();
         let mut logs = vec![Log::public(vec![
             N::Player(player),
@@ -598,11 +618,14 @@ impl Game {
                 ));
             }
         }
-        let ci = Currency::ALL.iter().position(|&c| c == currency).unwrap();
+        let ci = Currency::ALL
+            .iter()
+            .position(|&c| c == currency)
+            .expect("Currency::ALL contains every Currency variant");
         if self.tiles[ci].tile_type == TileType::Empty {
             return Err(GameError::invalid_input(format!(
-                "no tile available for {:?}",
-                currency
+                "no tile available for {}",
+                currency.name()
             )));
         }
         let tile = &self.tiles[ci];
@@ -634,9 +657,9 @@ impl Game {
         let mut logs = vec![Log::public(vec![
             N::Player(player),
             N::text(format!(
-                " spent {} on {:?} tile",
+                " spent {} on {} tile",
                 card_strs.join(", "),
-                tile.tile_type
+                tile.tile_type.abbr().trim()
             )),
         ])];
 
@@ -654,18 +677,16 @@ impl Game {
         if self.boards[player].grid.contains_key(&coord) {
             return Err(GameError::invalid_input("coordinate is not empty"));
         }
-        let tile = match self.phase {
+        let (tile, raw_idx) = match self.phase {
             Phase::Action => {
-                if n >= self.boards[player].reserve.len() {
-                    return Err(GameError::invalid_input("invalid reserve tile index"));
-                }
-                self.boards[player].reserve[n].clone()
+                let raw_idx = nth_non_empty(&self.boards[player].reserve, n)
+                    .ok_or_else(|| GameError::invalid_input("invalid reserve tile index"))?;
+                (self.boards[player].reserve[raw_idx].clone(), raw_idx)
             }
             _ => {
-                if n >= self.boards[player].place.len() {
-                    return Err(GameError::invalid_input("invalid place tile index"));
-                }
-                self.boards[player].place[n].clone()
+                let raw_idx = nth_non_empty(&self.boards[player].place, n)
+                    .ok_or_else(|| GameError::invalid_input("invalid place tile index"))?;
+                (self.boards[player].place[raw_idx].clone(), raw_idx)
             }
         };
         let mut test_grid = self.boards[player].grid.clone();
@@ -681,17 +702,17 @@ impl Game {
 
         let mut logs = vec![Log::public(vec![
             N::Player(player),
-            N::text(format!(" placed {:?} tile", tile.tile_type)),
+            N::text(format!(" placed {} tile", tile.tile_type.abbr().trim())),
         ])];
 
         match self.phase {
             Phase::Action => {
-                self.boards[player].reserve.remove(n);
+                self.boards[player].reserve.remove(raw_idx);
                 let np_logs = self.next_phase();
                 logs.extend(np_logs);
             }
             _ => {
-                self.boards[player].place[n] = Tile::empty();
+                self.boards[player].place[raw_idx] = Tile::empty();
                 if not_empty(&self.boards[player].place).is_empty() {
                     let np_logs = self.next_phase();
                     logs.extend(np_logs);
@@ -705,13 +726,12 @@ impl Game {
         if !self.can_swap(player) {
             return Err(GameError::invalid_input("can't swap at the moment"));
         }
-        if n >= self.boards[player].reserve.len() {
-            return Err(GameError::invalid_input("invalid reserve tile index"));
-        }
+        let raw_idx = nth_non_empty(&self.boards[player].reserve, n)
+            .ok_or_else(|| GameError::invalid_input("invalid reserve tile index"))?;
         if !self.boards[player].grid.contains_key(&coord) {
             return Err(GameError::invalid_input("no tile at coordinate"));
         }
-        let reserve_tile = self.boards[player].reserve[n].clone();
+        let reserve_tile = self.boards[player].reserve[raw_idx].clone();
         let grid_tile = self.boards[player].grid[&coord].clone();
 
         let mut test_grid = self.boards[player].grid.clone();
@@ -722,13 +742,14 @@ impl Game {
         }
 
         self.boards[player].grid.insert(coord, reserve_tile.clone());
-        self.boards[player].reserve[n] = grid_tile.clone();
+        self.boards[player].reserve[raw_idx] = grid_tile.clone();
 
         let logs = vec![Log::public(vec![
             N::Player(player),
             N::text(format!(
-                " swapped {:?} with {:?} tile",
-                reserve_tile.tile_type, grid_tile.tile_type
+                " swapped {} with {} tile",
+                reserve_tile.tile_type.abbr().trim(),
+                grid_tile.tile_type.abbr().trim()
             )),
         ])];
         let mut all_logs = logs;
@@ -759,7 +780,10 @@ impl Game {
 
         let mut logs = vec![Log::public(vec![
             N::Player(player),
-            N::text(format!(" removed {:?} tile to reserve", tile.tile_type)),
+            N::text(format!(
+                " removed {} tile to reserve",
+                tile.tile_type.abbr().trim()
+            )),
         ])];
         let np_logs = self.next_phase();
         logs.extend(np_logs);
@@ -1366,6 +1390,27 @@ mod tests {
     }
 
     #[test]
+    fn test_grid_longest_ext_wall_diagonal_blocker() {
+        // b F18: a non-empty diagonal tile without the turning wall must not
+        // abort the candidate scan before the straight continuation is tried.
+        // Blockers sit above both walled tiles so BOTH walk directions hit
+        // the truncating candidate first: the old code returns 1 from every
+        // start segment; the correct answer is 2.
+        let mut g: Grid = HashMap::new();
+        g.insert(
+            Vect { x: 0, y: 0 },
+            Tile::new(TileType::Arcades, 0, &[Dir::Up]),
+        );
+        g.insert(
+            Vect { x: 1, y: 0 },
+            Tile::new(TileType::Arcades, 0, &[Dir::Up]),
+        );
+        g.insert(Vect { x: 0, y: -1 }, Tile::new(TileType::Arcades, 0, &[]));
+        g.insert(Vect { x: 1, y: -1 }, Tile::new(TileType::Arcades, 0, &[]));
+        assert_eq!(2, grid_longest_ext_wall(&g));
+    }
+
+    #[test]
     fn test_grid_parse_coord() {
         let mut g: Grid = HashMap::new();
         g.insert(
@@ -1568,6 +1613,251 @@ mod tests {
             result.is_ok(),
             "take command should work: {:?}",
             result.err()
+        );
+    }
+
+    #[test]
+    fn take_cannot_mint_duplicate_cards() {
+        // b F16: requesting the same market card twice must fail, not mint a
+        // free copy into the hand.
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.cards = vec![Card::new(Currency::Blue, 1)];
+        g.boards[0].cards = vec![];
+        let result = g.command(0, "take b1 b1", &[]);
+        assert!(
+            result.is_err(),
+            "taking one market card twice must be rejected"
+        );
+        assert_eq!(
+            vec![Card::new(Currency::Blue, 1)],
+            g.cards,
+            "market must be unchanged after a failed take"
+        );
+        assert!(
+            g.boards[0].cards.is_empty(),
+            "hand must be unchanged after a failed take"
+        );
+    }
+
+    #[test]
+    fn take_allows_real_duplicates_in_market() {
+        // The deck holds 2-3 copies of each card, so two B1s in the market is
+        // legal and both may be taken in one command.
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.cards = vec![
+            Card::new(Currency::Blue, 1),
+            Card::new(Currency::Blue, 1),
+            Card::new(Currency::Red, 9),
+        ];
+        g.boards[0].cards = vec![];
+        g.command(0, "take b1 b1", &[]).unwrap();
+        assert_eq!(
+            vec![Card::new(Currency::Blue, 1), Card::new(Currency::Blue, 1)],
+            g.boards[0].cards
+        );
+        assert!(
+            !g.cards.contains(&Card::new(Currency::Blue, 1)),
+            "both market B1s must have been removed"
+        );
+    }
+
+    #[test]
+    fn place_index_matches_rendered_index_after_placement() {
+        // b F17: after placing the first of two bought tiles, the render
+        // shows the survivor as "1", so index 0 must resolve to it - not to
+        // the Empty sentinel left in the raw vec.
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Place;
+        g.boards[0].place = vec![
+            Tile::new(TileType::Pavillion, 5, &[]),
+            Tile::new(TileType::Seraglio, 3, &[]),
+        ];
+        // Fountain is at (0,0); orthogonally adjacent coords are valid.
+        g.place(0, 0, Vect { x: 0, y: -1 }).unwrap();
+        g.place(0, 0, Vect { x: 0, y: 1 }).unwrap();
+        assert_eq!(
+            TileType::Seraglio,
+            g.boards[0].grid[&Vect { x: 0, y: 1 }].tile_type,
+            "second `place 1` must place the remaining Seraglio tile"
+        );
+        assert!(
+            g.boards[0]
+                .grid
+                .values()
+                .all(|t| t.tile_type != TileType::Empty),
+            "no Empty sentinel may ever be inserted into the grid"
+        );
+    }
+
+    #[test]
+    fn place_index_out_of_range_after_placement_errors() {
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Place;
+        g.boards[0].place = vec![
+            Tile::new(TileType::Pavillion, 5, &[]),
+            Tile::new(TileType::Seraglio, 3, &[]),
+        ];
+        g.place(0, 0, Vect { x: 0, y: -1 }).unwrap();
+        // Only one live tile remains; index 1 must be rejected even though
+        // the raw vec still has two slots.
+        assert!(g.place(0, 1, Vect { x: 0, y: 1 }).is_err());
+    }
+
+    #[test]
+    fn swap_index_skips_empty_sentinels_in_reserve() {
+        // Hardening for legacy states corrupted by the pre-fix bug: an Empty
+        // in reserve must not be addressable; index 0 is the first live tile.
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.boards[0].reserve = vec![Tile::empty(), Tile::new(TileType::Pavillion, 5, &[])];
+        g.boards[0]
+            .grid
+            .insert(Vect { x: 0, y: 1 }, Tile::new(TileType::Garden, 4, &[]));
+        g.swap(0, 0, Vect { x: 0, y: 1 }).unwrap();
+        assert_eq!(
+            TileType::Pavillion,
+            g.boards[0].grid[&Vect { x: 0, y: 1 }].tile_type,
+            "swap 1 must use the first NON-empty reserve tile"
+        );
+        assert_eq!(TileType::Garden, g.boards[0].reserve[1].tile_type);
+    }
+
+    #[test]
+    fn spend_exact_payment_grants_extra_action() {
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.boards[0].cards = vec![Card::new(Currency::Blue, 3)];
+        g.tiles[0] = Tile::new(TileType::Tower, 3, &[]);
+        g.command(0, "spend b3", &[]).unwrap();
+        // total == cost: no phase advance - same player acts again.
+        assert_eq!(Phase::Action, g.phase);
+        assert_eq!(0, g.current_player);
+        assert_eq!(TileType::Empty, g.tiles[0].tile_type);
+        assert_eq!(1, not_empty(&g.boards[0].place).len());
+    }
+
+    #[test]
+    fn spend_overpayment_ends_action_phase() {
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.boards[0].cards = vec![Card::new(Currency::Blue, 4)];
+        g.tiles[0] = Tile::new(TileType::Tower, 3, &[]);
+        g.command(0, "spend b4", &[]).unwrap();
+        // Overpay: turn moves to the Place phase (the bought tile is
+        // placeable, so the phase does not skip past it).
+        assert_eq!(Phase::Place, g.phase);
+        assert_eq!(0, g.current_player);
+    }
+
+    #[test]
+    fn final_place_tie_distributes_no_tile() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.phase = Phase::Place;
+        g.current_player = 0;
+        g.boards[0].place = vec![];
+        g.boards[1].place = vec![];
+        g.boards[2].place = vec![];
+        g.tiles[0] = Tile::new(TileType::Pavillion, 5, &[]);
+        g.tiles[1] = Tile::empty();
+        g.tiles[2] = Tile::empty();
+        g.tiles[3] = Tile::empty();
+        g.boards[0].cards = vec![Card::new(Currency::Blue, 9)];
+        g.boards[1].cards = vec![Card::new(Currency::Blue, 9)];
+        g.boards[2].cards = vec![Card::new(Currency::Blue, 5)];
+        let logs = g.final_place_phase();
+        let combined: String = logs.iter().map(log_plain).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("Nobody had the most money for blue"),
+            "expected tie message in: {}",
+            combined
+        );
+        assert!(
+            g.boards.iter().all(|b| not_empty(&b.place).is_empty()),
+            "tied tile must not be distributed to anyone"
+        );
+        assert_eq!(
+            TileType::Pavillion,
+            g.tiles[0].tile_type,
+            "tied tile stays in the market slot"
+        );
+    }
+
+    #[test]
+    fn dirk_draws_six_tiles_at_start() {
+        let (g, _) = Game::start(2, 42).unwrap();
+        // Dirk's board: fountain + 6 drawn tiles.
+        assert_eq!(7, g.boards[DIRK].grid.len());
+    }
+
+    #[test]
+    fn dirk_draws_six_more_tiles_in_round_one_scoring() {
+        let (mut g, _) = Game::start(2, 42).unwrap();
+        let before = g.boards[DIRK].grid.len();
+        g.round = 1;
+        g.score_round();
+        assert_eq!(before + 6, g.boards[DIRK].grid.len());
+        assert_eq!(2, g.round);
+    }
+
+    #[test]
+    fn dirk_competes_in_tile_type_majorities() {
+        let (mut g, _) = Game::start(2, 42).unwrap();
+        // Human grids start with only the fountain; give Dirk the only
+        // Pavillions so Dirk alone holds that majority.
+        g.boards[0].grid = new_grid();
+        g.boards[1].grid = new_grid();
+        g.boards[DIRK].grid = new_grid();
+        g.boards[DIRK]
+            .grid
+            .insert(Vect { x: 1, y: 0 }, Tile::new(TileType::Pavillion, 0, &[]));
+        let scores = g.score_type(TileType::Pavillion, 1);
+        assert_eq!(
+            vec![RoundTypeScore {
+                players: vec![DIRK],
+                tile_count: 1,
+                points: 1
+            }],
+            scores
+        );
+    }
+
+    #[test]
+    fn logs_use_display_names_not_debug() {
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        g.boards[0].cards = vec![Card::new(Currency::Blue, 3)];
+        g.tiles[0] = Tile::new(TileType::Tower, 3, &[]);
+        let logs = g.spend(0, &[Card::new(Currency::Blue, 3)]).unwrap();
+        let combined: String = logs.iter().map(log_plain).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("spent B3 on Tow tile"),
+            "expected abbr, not Debug name, in: {}",
+            combined
+        );
+
+        // Error path: empty tile slot must name the currency in lowercase.
+        g.phase = Phase::Action;
+        g.current_player = 0;
+        g.tiles[1] = Tile::empty();
+        g.boards[0].cards = vec![Card::new(Currency::Green, 2)];
+        let err = g
+            .spend(0, &[Card::new(Currency::Green, 2)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no tile available for green"),
+            "expected currency.name() in: {}",
+            err
         );
     }
 }

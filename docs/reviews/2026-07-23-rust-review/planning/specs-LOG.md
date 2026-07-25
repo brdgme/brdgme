@@ -2350,6 +2350,710 @@ use was limited to read-only `ls`/`grep`/`sed`/`head`/`tail`/`wc`,
 
 ---
 
+## 2026-07-25 - Unit: Tier 2 / Tier 3 execution-plan SURVEY (Lead)
+
+Deliverable: `planning/tier2-tier3-plan.md`. Read-only unit - no spec writing,
+no source edits, no cargo/git mutation. Writes confined to `planning/`.
+
+### Lead pre-work (from planning docs only, no source read)
+
+Derived the candidate Tier 2 roster from `work-packages.md` severity tallies
+cross-checked against `critical-path.md` and the `planning/specs/` directory
+listing (25 spec files exist: WP-01, 03, 06, 07, 13, 14, 15, 19, 21, 22, 23, 25,
+28, 29, 36, 37, 39, 40, 41, 44, 51, 54, 56, 59 **and WP-68**, which the
+Orchestrator brief omitted).
+
+Candidate Tier 2 = has >=1 major, no spec, not BLOCKED-ON-USER-RULES-REVIEW:
+- READY (13): WP-02, 08, 09, 10, 34, 35, 38, 45, 47, 49, 57, 62, 63
+- BLOCKED-ON-DECISION (8, list-and-skip): WP-04 (D-38), 05 (D-39), 46 (D-11),
+  55 (D-16), 58 (D-10), 64 (D-19), 66 (D-17), 67 (D-18)
+
+Arithmetic finding: the brief's "Tier 3 = ~480 findings" over-counts. 257m + 225n
+= 482 total, but 99m + 96n are already inside the 25 finalized specs and 30m + 11n
+sit in the six BLOCKED-ON-USER-RULES-REVIEW packages. Remaining unspecced,
+unparked = **~130m + ~118n = ~248**. Recorded in the plan.
+
+Worker 1 dispatched: extract post-verification major finding IDs for the 11
+packages whose majors are not enumerated in `critical-path.md`, and cross-check
+the no-major (Tier 3) classification against `findings/verification/`.
+
+### Worker 1 returned - major-ID extraction + severity cross-check (read-only, wrote nothing)
+
+Majors for the 11 packages whose majors are not listed in `critical-path.md`
+(all counts reconcile with the `Severity:` tallies in `work-packages.md`):
+WP-02 = ls F2 + ls F3; WP-04 = lg F7; WP-05 = ls F12; WP-08 = e F1;
+WP-46 = wd F28 + wfe F30 + wfe F31; WP-49 = wd F67; WP-62 = bo F18;
+WP-63 = bo F26; WP-64 = dp F1; WP-66 = dp F6; WP-67 = dp F12.
+
+Cross-check of the 21 zero-major (Tier 3) packages: **zero majors confirmed in
+all 21**; no verification UPGRADE touches them (the only upgrade in the whole
+review is d F4 minor->major, already inside the specced WP-22). No REJECTED
+finding sits in any of them.
+
+REJECTED sweep across all 9 verification files: exactly **two** - games-batch-d
+F13 and web-server F30 - both already excluded from package scope. No package
+shrinks.
+
+New hazards surfaced by Worker 1 (carried into the plan's gotchas):
+1. **lib-support finding numbering diverges.** Raw `findings/lib-support.md` has
+   46 findings; `findings/verification/lib-support.md` has 45 - raw F10 (ANSI
+   escaping) is absent from verification, so every raw ls number >= 10 is +1
+   against verification. `work-packages.md` uses **verification numbering**
+   (only reconciles that way for WP-02 and WP-05). Resolving an `ls F10+` ID
+   against the raw file reads the WRONG finding.
+2. `dependencies.md` states 26 findings but contains 27 headings;
+   `bot-operator-tools.md` states 30 but contains 31. Sequential numbering is
+   sound (anchored by dp F6/F12/F20, bo F18/F25/F26/F28).
+3. ws F67 (WP-43) is UNVERIFIABLE, not rejected - needs network to check.
+
+### Worker 2 returned - cross-package absorption audit of the 25 finalized specs
+
+Key result: **no unspecced package is more than incidentally covered**; the
+finalized specs mostly *fence* the unspecced packages out rather than doing
+their work. Three real partials only:
+- **WP-38**: WP-39 already shipped the visibility half of ws F56 plus the
+  supervised restart loop. WP-38's residue is ws F27, wd F1/F2/F3/F5, bo F2 -
+  "what gets acked, when, with which AckKind". Do NOT re-do WP-39's work.
+  WP-36's spec text is STALE where it attributes consumer supervision to WP-38.
+- **WP-65**: WP-22 Task 5 already removed lords-of-vegas-1's lazy_static.
+- **WP-72**: WP-03 Task 8 deletes `combine` from `lib/game/Cargo.toml`, leaving
+  only the `lib/markup` half of dp F15 (inference, not stated in-spec).
+
+Work ROUTED IN to unspecced packages by LEAD RULING in finalized specs (these
+widen scope beyond `work-packages.md` and must appear in the Tier 2/3 rosters):
+WP-09 gains acquire-1 (WP-19:838) and sushizock-2 (WP-21:1079) to its crate list
+plus the `Gamer::player_state` totality gap; WP-10 gains starship-catan-1's
+`peeking` JSON exposure (WP-13); WP-62 gains `upsert_game_type_and_version`
+last-writer-wins on `game_types.player_counts` (WP-28:727); WP-35 gains the web
+email-change/re-verification UI (WP-56 removed the email path) and two WP-59
+riders; WP-04 gains two items from WP-03:1315/1317; WP-08 gains acquire-1,
+starship-catan-1 and lost-cities double-placings sites; WP-43, WP-50, WP-52,
+WP-53, WP-57, WP-58, WP-60, WP-64, WP-69, WP-70, WP-71 all gain riders.
+
+Two items have **NO owner** and need the Orchestrator/user to file them:
+1. **Email-originated game moves never call `notify_game_emails`** - other
+   players get no turn email (major functional gap). WP-51 explicitly forbids
+   folding it into WP-59 or WP-40 and proposes a new spec-time package.
+2. `get_available_bots` default `bot_name: "medium"` not guaranteed
+   (WP-54:2007, "If no package owns it, no owner - Lead to file").
+Plus the **db.rs module split (ws F42)** is a deferred future package that must
+land after WP-35/40/45/47/49/50/52/53/59.
+Plus **D-15 is reopened** by WP-59 (email `end` verb collides with acquire-1's
+and starship-catan-1's top-level `end` move).
+
+### Unit close-out - `planning/tier2-tier3-plan.md` written
+
+Contents: (0) scope arithmetic + one plan decision; (1) Tier 2 roster - 13
+dispatchable + 8 decision-blocked packages, partial-coverage table, routed-in
+scope, unowned items, 6 batches T2-B1..T2-B6; (2) Tier 3 roster - 16
+dispatchable packages in 8 batches T3-B1..T3-B8 + 7 decision-blocked; (3)
+prevention-package inputs (5 named root causes + 2 optional, each with its
+source spec/finding); (4) execution order; (5) 13 gotchas carried forward.
+
+**Plan decision recorded (flag to the user if disputed):** a Tier 2 spec covers
+its WHOLE package (majors in detail + the package's own minor/nit riders as an
+appendix), and Tier 3 covers only zero-major packages. The brief's split would
+have cut 20 of 21 Tier 2 packages in half and put two sessions in one file.
+
+Deliverables planned for future batches: Tier 2 -> `planning/specs/WP-nn-*.md`
+(~1 page each); Tier 3 -> `planning/checklists/` (one crate checklist per
+batch); prevention -> `planning/CODING-amendment-proposed.md` (a PROPOSAL,
+since writes outside `planning/` are forbidden - precedent
+`planning/BACKLOG-note-proposed.md`).
+
+Read-only compliance for the whole unit: the Lead wrote only
+`planning/tier2-tier3-plan.md` and this LOG. Both Workers wrote **no files at
+all** and reported in their final messages only. No file under `rust/` was
+read, created, modified or deleted by the Lead or either Worker; no
+cargo/build/check/test/clippy/fmt command run; no git mutation. Shell use was
+limited to read-only `wc`, `tail` and appends to this LOG.
+
+---
+
+## Unit: WP-34 + WP-35 Tier 2 specs (Worker, 2026-07-25)
+
+Written (only these two files, plus this LOG append):
+
+- `planning/specs/WP-34-auth-races-session-mechanical.md` (~155 lines) -
+  ws F1 (major, atomic `UPDATE ... RETURNING *` with `attempts >` NOT `>=`),
+  F3 `cycle_id`, F5 propagate DB error, F6 windowed cap via a NEW
+  append-only `login_email_sends` table + migration `023` (reset-on-rotation
+  is explicitly rejected as under-counting), F10 propagate the cap refusal,
+  F12/F13/F14/F15 nits.
+- `planning/specs/WP-35-auth-edge-semantics-fail-open.md` (~165 lines) -
+  ws F2 (claim-stealing in `confirm_login_inner`), F16 (fail-closed
+  `load_key` + eager startup validation), F4/F7/F8/F11, plus the three
+  routed-in items.
+
+**Landing order asserted in WP-35:** WP-41 -> WP-36 -> WP-34 -> WP-35.
+WP-36 is a NEW constraint this unit found: WP-36 Task 4 changes
+`crypto::load_key` to return `Zeroizing<[u8; 32]>`, and WP-35 rewrites the
+same function's fallback semantics. WP-34 before WP-35 because both edit
+`verify_turnstile_token` and `request_confirmation_code`.
+
+**Findings rejected / reclassified (with evidence):**
+
+1. **ws F4's uniform-rejection alternative - REJECTED** (already flagged by
+   the verification file and settled by D-14 (ii) = A). Kept as a
+   comment-only change plus a test pinning the asymmetry.
+2. **ws F11's expiry/GC half - REJECTED** by D-14 (iv). Only revoke-all is
+   specced; the spec instructs that the db.rs test asserting a 40-day token
+   still validates must stay green.
+3. **ws F6 option 1 (reset `sent_count` on rotation) - REJECTED** as
+   under-counting. Also re-derived: the PER-EMAIL cap is NOT affected,
+   because `request_confirmation_code` guards it with `code_valid &&`, so it
+   never spans a rotation. Only the global sum is wrong.
+4. **ws F1's recommendation carries an off-by-one** - `>` not `>=`. A
+   dedicated test (`attempts = 9` correct code -> Ok; `attempts = 10` ->
+   Err) is specced to pin it.
+
+**Routed-in item (a) re-derived DOWN - the Lead should note this.** The web
+email-change + re-verification flow **already exists in live code** and is
+already compliant: `add_email_address` (unverified insert + mailed code),
+`confirm_email_address`, `make_email_address_active` (refuses with
+`SetPrimaryOutcome::Unverified`), the 24h expiry sweep
+(`email/sweep.rs::spawn_unverified_email_sweep` +
+`db::delete_expired_unverified_emails`, `UNVERIFIED_EMAIL_EXPIRY`), and the
+UI in `settings.rs::EmailSection`. WP-56 removed only the email-side verbs.
+So (a) collapses to: a regression test pinning the
+verify-before-activate invariant, plus ws F2 so a squatted address cannot
+block the true owner. **Open question for the Lead/user:** D-14's wording
+says "confirmation link"; the live flow uses a 6-digit code. The specs treat
+link-vs-code as cosmetic and mark it a non-goal. If the user wants an actual
+link, that is new UI work and needs its own package.
+
+**Also found:** `db::delete_login_confirmation` does NOT exist today and
+WP-41 does NOT add it (grepped). WP-35 therefore specs adding
+`delete_login_confirmation` + `delete_login_confirmation_tx` (two variants -
+one call site is inside a transaction, one on the pool) and
+`invalidate_all_auth_tokens` to `db.rs`, which is why WP-41 must land first.
+
+Read-only compliance: nothing under `rust/` was written; no cargo/git
+mutation run. All validation was by reading live source at
+`/home/beefsack/Development/brdgme/rust/web/src/{auth/server.rs,
+auth/session.rs,crypto.rs,main.rs,db.rs,settings.rs,email/sweep.rs}`.
+
+---
+
+## 2026-07-25 - Tier 2 batch T2-B1 Lead - WP-34, WP-35 ACCEPTED
+
+Worker 1 (opus) returned two specs; Lead sanity-checked shape and accepted
+both without a second verification pass (per the no-adversarial-pass rule).
+
+- `specs/WP-34-auth-races-session-mechanical.md` (166 lines)
+- `specs/WP-35-auth-edge-semantics-fail-open.md` (215 lines)
+
+Both exceed the ~120-line target. Lead judged the excess to be content
+density (six mandatory sections + rider table + per-finding test cases), not
+padding, and accepted rather than spend budget re-cutting. Future Worker
+briefs in this unit reiterate the cap harder.
+
+Substantive outcomes the Orchestrator should carry forward:
+
+1. **New landing-order constraint discovered: WP-36 must precede WP-35.**
+   WP-36 Task 4 changes `crypto::load_key` to return `Zeroizing<[u8; 32]>`
+   while WP-35 rewrites the same function's fallback semantics. Full asserted
+   order: **WP-41 -> WP-36 -> WP-34 -> WP-35**. `planning/landing-order.md`
+   does not yet record this.
+2. **Routed-in item (a) re-derives DOWN.** The web email-change +
+   re-verification flow already exists and is compliant in live code
+   (`add_email_address` -> `confirm_email_address` ->
+   `make_email_address_active` refusing unverified, plus the 24h unverified
+   sweep and `settings.rs::EmailSection`). It collapses to a regression test
+   plus ws F2. **Open question for the user:** D-14 says "confirmation link"
+   but the live flow uses a 6-digit code. Spec marks link-vs-code cosmetic and
+   a NON-GOAL; if the user actually wants a link it needs its own package.
+3. `db::delete_login_confirmation` **does not exist** and WP-41 does not add
+   it. WP-35 therefore specs adding it, a `_tx` variant, and
+   `invalidate_all_auth_tokens`.
+4. Rejections recorded with evidence: ws F4's uniform-rejection alternative
+   (locks out verified users on blocked domains; D-14(ii)=A); ws F11's
+   expiry/GC half (D-14(iv) forbids session expiry - revoke-all only, and the
+   db.rs 40-day-token test must stay green); ws F6 option 1 (under-counts).
+   ws F1's `>=` off-by-one is pinned by a dedicated test.
+5. Worker re-derivation: the per-email send cap is NOT affected by the
+   rotation issue, because `request_confirmation_code` guards it with
+   `code_valid &&` so it never spans a rotation.
+
+Read-only compliance: writes confined to `planning/specs/` and this LOG.
+Nothing under `rust/` read-modified; no cargo/git commands.
+
+## 2026-07-25 - Worker: WP-47 + WP-45 specs (Tier 2)
+
+Drafted `specs/WP-47-game-visibility-gates.md` (120 lines) and
+`specs/WP-45-bot-slot-validation.md` (119 lines). Both under the 120-line cap.
+Sources: decisions-needed.md D-5/D-6/D-8/D-13 blocks only (grepped, not read
+whole); findings/web-domain.md #17/#27/#45 and findings/web-frontend-email.md
+#18 (neither file has a verification file - lead-verified raw findings are all
+there is); live source under `rust/web/src/`; WP-41 spec grepped for
+`is_game_visible_to_user` only.
+
+Findings verified against LIVE source, all three upheld:
+- **wd F17 correct as written.** `get_game_details` uses the viewer's
+  `game_players` row only to pick a render perspective; `None` falls through to
+  the full spectator render. `get_game_logs` in the same file *does* hard-reject
+  non-players, which is the contrast that proves the omission.
+- **wd F45 correct as written.** `get_player_game_type_stats` and
+  `get_player_history` never call `get_current_user`; `opponents_by_game` and
+  `head_to_head` in `stats/queries.rs` select `users.id`/`users.name` with no
+  `game_visibility` clause.
+- **wd F27 / wfe F18 correct as written.** Three web entry points pass
+  client `BotSlot` straight to insert; `classify_opponent`'s
+  `strip_prefix("bot:")` branch returns before the `bot_names` check that
+  guards bare tokens. Nothing rejected.
+
+`is_game_visible_to_user` reconciliation: the LIVE tree has exactly ONE
+definition (`db.rs`, `(pool, game_id, viewer_id) -> Result<bool>`), plus
+callers in `friend_recent_visible_game` and two tests. WP-41 Task 8 has NOT
+landed yet - its "second copy" is an inlined SQL copy inside
+`friend_recent_visible_game` (with cross-reference comment + drift-guard test),
+not a second Rust fn. WP-47's spec therefore forbids a third encoding: it adds
+only *callers* plus a no-new-SQL dispatcher
+`is_game_visible_to_viewer(pool, game_id, Option<Uuid>)`. The canonical
+signature already satisfies WP-42 (PgPool + Uuid, no leptos, no
+`get_current_user`) so the spec forbids changing it.
+
+Design call needing Lead awareness: D-6 says "anonymize private users" in
+stats, which is a **per-user** rule, whereas `is_game_visible_to_user` is
+**per-game**. The spec adds ONE derived batched helper
+`db::visible_user_ids(pool, &[Uuid], Option<Uuid>)` whose WHERE clause is the
+per-player clause lifted from the canonical predicate, with a drift-guard test
+asserting the two agree (for a viewer who is not a player of the game). A
+per-game gate would have meant excluding games from aggregates, which D-6
+explicitly forbids.
+
+Two consequential ripples the spec mandates: `stats::HeadToHead::user_id` must
+become `Option<Uuid>` (masked rows get `None` + "Anonymous"), and
+`players.rs`'s head-to-head table must render plain text instead of an `<A>`
+when `user_id` is `None` - so WP-47 touches `players.rs`, which is not in its
+work-packages.md path list.
+
+WP-45: D-8 option C reads as five checks, not four - the four write entry
+points plus `start_proposal_tx`. `restart_core` covers both
+`restart_game_with_roster` and the email restart path, so one check there
+serves two callers. Shared validator specced as
+`db::validate_bot_slots(executor, &[BotSlot]) -> Result<Option<String>>`,
+mirroring the existing `roster_error` Option-message shape; must be generic
+over executor because `start_proposal_tx` holds only a `&mut PgConnection`.
+Case-insensitive match required (the email path lowercases its token).
+
+Open question for the Lead: restart rebuilds bot slots from a finished game's
+*persisted* bots, so under "validate on write" a restart is rejected when a bot
+has since been disabled. I specced that as intended creation-time feedback per
+D-8, but it is the one place where write-validation touches previously-stored
+data and may deserve a confirmation.
+
+Read-only compliance: writes confined to `planning/specs/` and this LOG.
+Nothing under `rust/` modified; no cargo/git/build commands run.
+
+---
+
+## 2026-07-25 - Tier 2 batch T2-B2 (part 1) Lead - WP-47, WP-45 ACCEPTED
+
+Worker 2 (opus) returned two specs, both inside the 120-line cap. Lead
+sanity-checked shape and accepted; no second verification pass.
+
+- `specs/WP-47-game-visibility-gates.md` (120 lines)
+- `specs/WP-45-bot-slot-validation.md` (119 lines)
+
+Substantive outcomes:
+
+1. **The WP-41 "second copy" of `is_game_visible_to_user` is a false alarm.**
+   Live tree has exactly ONE Rust definition, in `rust/web/src/db.rs`, with
+   signature `(&PgPool, Uuid, Uuid) -> Result<bool>`. WP-41 Task 8 has not
+   landed; what the plan called a second copy is an inlined SQL copy inside
+   `friend_recent_visible_game`, not a second function. WP-47's spec forbids a
+   third encoding, adds callers plus a no-new-SQL dispatcher
+   `is_game_visible_to_viewer(pool, game_id, Option<Uuid>)`, and FREEZES the
+   canonical signature so WP-42 can call it with only a pool and a UUID.
+2. **No finding rejected.** wd F17, wd F45, wd F27 and wfe F18 were each
+   re-derived against live source and UPHELD. Evidence recorded in-spec:
+   F17 - `get_game_details` uses the viewer's player row only to pick a render
+   perspective, unlike `get_game_logs` which does reject non-players.
+   wfe F18 - `classify_opponent`'s `strip_prefix("bot:")` branch returns
+   before the `bot_names` check.
+3. **WP-47 scope widens beyond its work-packages.md path list.** D-6's
+   "anonymize private users" is a PER-USER rule while the canonical predicate
+   is PER-GAME, so WP-47 specs one derived batched helper `db::visible_user_ids`
+   with a drift-guard test, and this forces `stats::HeadToHead::user_id` to
+   `Option<Uuid>` plus a small render change in `rust/web/src/players.rs`.
+   `players.rs` was NOT in WP-47's declared paths - recorded here so it is not
+   double-owned by a Tier 3 web package.
+4. **Open question for the Orchestrator/user (WP-45):** restart rebuilds bot
+   slots from a FINISHED game's persisted bots, so write-validation rejects a
+   restart when a bot was disabled after the original game. Worker specced
+   this as intended creation-time feedback per D-8 (validate on write), but it
+   is the one place where write-validation touches already-stored data. If the
+   user wants restarts to survive bot deprecation, D-8's answer needs a carve-out.
+
+Read-only compliance: writes confined to `planning/specs/` and this LOG.
+
+## WP-49 rules and game-info pages (worker, 2026-07-25)
+
+Wrote `planning/specs/WP-49-rules-and-game-info-pages.md` (121 lines, under the
+120-line target by content but 121 with the trailing table row; format calibrated
+on WP-47/WP-45). Scope: wd F67 major + 7 riders (F68, F69, F70, F71, F76, F79,
+F80) + the lead-routed `rules.rs` error-surfacing item.
+
+Findings validated against LIVE source (`rust/web/src/rules.rs`,
+`game_info/mod.rs`, `game_info/queries.rs`, `db.rs`). No verification file exists
+for `web-domain.md` (confirmed: `findings/verification/` has no `web-domain*`),
+so the raw findings file was used. **No finding rejected** - F67, F69 and F76 all
+verified correct as written in live code and explicitly marked so in the spec.
+
+Routed-in item resolved: the plan's `rules.rs:46` is the `RulesPage`
+`Some(Err(e))` arm rendering `{e.to_string()}` raw. It is NOT an error swallow -
+`get_rendered_rules` already routes infra failures through `crate::error::internal`
+(opaque). The leak is the non-`internal` errors (`RenderError` authoring detail,
+"Game version not found", "Not authenticated"). Fix uses the existing
+`crate::error::user_facing_server_error` helper (convention from `new_game.rs`).
+
+Cross-package hazard recorded in the spec: F69 adds `is_public`/`is_deprecated`
+filters to `find_game_version_rules` and `find_game_version_render_meta`, which
+WP-41's Test 9 (`game_and_version_lookups`) asserts against. The spec instructs
+the implementer to re-read that test after the change and STOP if ambiguous.
+WP-41 -> WP-49 landing order stated in the header.
+
+Read-only compliance: writes confined to `planning/specs/` and this LOG. No
+`rust/` file touched, no cargo/git command run.
+
+---
+
+## 2026-07-25 - Tier 2 batch T2-B2 (part 2) Lead - WP-49 ACCEPTED; T2-B1+T2-B2 CLOSED
+
+Worker 3 (opus) returned `specs/WP-49-rules-and-game-info-pages.md` (121
+lines). Accepted; no second verification pass.
+
+1. **The routed-in `rules.rs` error-surfacing item is NOT an error swallow.**
+   Live `get_rendered_rules` already routes DB and game-service failures
+   through `crate::error::internal` (logs, returns opaque "Internal server
+   error"). The real defect is in `RulesPage`: its `Some(Err(e))` arm
+   interpolates `{e.to_string()}` straight into the page, so every error that
+   does not pass through `internal` (`RenderError` authoring-detail strings,
+   "Game version not found", "Not authenticated") is rendered raw. The spec
+   adopts the existing helper `crate::error::user_facing_server_error`, already
+   used in `new_game.rs`. The plan's `rules.rs:46` hint was approximate.
+2. **No finding rejected.** F67 (`ORDER BY name` in
+   `game_info_rules_version_id`), F69 (no `is_public` filter in
+   `find_game_version_rules` / `find_game_version_render_meta`) and F76 (dead
+   `pub use queries::*;` - zero `use crate::game_info::*` in the crate) each
+   verified correct against live source and marked explicitly so.
+   `findings/verification/` has no `web-domain` file; the raw findings stand.
+3. **Cross-package hazard:** F69's `is_public = true AND is_deprecated = false`
+   filters land on two `db.rs` functions that **WP-41's Test 9
+   (`game_and_version_lookups`) asserts against**, so WP-41's fixtures may need
+   updating. The spec instructs the implementer to re-read that test and STOP
+   if ambiguous rather than guess.
+4. **Conditional revert note:** F80's switch of `RulesPage` from
+   `LocalResource` to `Resource::new_blocking` is sound ONLY because F68
+   removes the auth gate. If the public-content posture (D-6) is ever
+   reversed, F80 must be reverted with it.
+
+### Unit close-out - T2-B1 and T2-B2 complete
+
+Five specs written, all accepted: WP-34, WP-35, WP-47, WP-45, WP-49. No
+package in either batch turned out to be empty. Nothing under `rust/` was
+written; no cargo/build/test/clippy/fmt run; no git mutation. Lead and all
+three Workers wrote only inside `planning/`.
+
+Items escalated to the Orchestrator: (a) new landing constraint
+WP-41 -> WP-36 -> WP-34 -> WP-35, not yet in `landing-order.md`; (b) D-14
+says "confirmation link" but live auth uses a 6-digit code - user call;
+(c) D-8 may need a carve-out so game restarts survive bot deprecation;
+(d) WP-47 pulls `rust/web/src/players.rs` into scope, outside its declared
+path list.
+
+---
+
+## 2026-07-25 - WP-41: db.rs quality pass - COMPLETE
+
+Commit: `baa5fc6` on `master`.
+
+All 11 tasks implemented per spec. Full `scripts/rust-test.sh` passes (exit 0,
+462 web tests green). Two test-fixture bugs discovered and fixed during
+verification: (1) `make_game_with_players` shuffles positions, so
+`whose_turn: &[0]` does not guarantee the creator is on turn - tests now
+explicitly UPDATE `is_turn` after creation; (2) the `update_is_turn_at`
+trigger overwrites `is_turn_at` on false->true in the same statement, so
+backdating requires a second UPDATE.
+
+Findings discharged: F35 (major, 25/27 covered), F36, F37, F39, F40, F41
+(comment), F43, F44, F45, F46, F47, F48, F49, F50, F51(2+3).
+Findings NOT touched per spec: F34/F38 (WP-40), F42 split (deferred),
+F51(1) (overturned).
+
+Files changed: `rust/web/src/db.rs` (+1397/-125), `rust/web/.sqlx/` (cache
+regenerated). No other files.
+
+---
+
+## 2026-07-25 - T2-B3/T2-B4 Lead (batches 3 and 4)
+
+Fresh Lead. A previous attempt at this unit died from a session limit before
+writing anything; nothing of B3/B4 had landed. Read-only: nothing under
+`rust/` written, no cargo/git run.
+
+### Worker 1 - WP-38 bot-turn wedge recovery - ACCEPTED
+
+`specs/WP-38-bot-turn-wedge-recovery.md`, 175 lines (over the ~120 target;
+6 findings across 4 files plus the D-5 preamble - accepted as proportionate,
+not padded).
+
+All six findings verified against LIVE source and **all six confirmed as
+written**, none already fixed: wd F1/F2/F3/F5 (the three ack arms in
+`run_bot_command_consumer`, the `Conflict` exhaustion `return Ok(())`,
+`publish_bot_turns`' two `warn!`-only failure arms, and no `.term()` anywhere
+in `web/src`); ws F27 (its UNCERTAIN resolved - `run_bot_turn` skips and
+returns `Ok(())` when `config::load_bot_config` is `None` and `bots` is
+non-empty); bo F2 (UNCERTAIN resolved - `ack_wait = 5 min` in
+`nats::ensure_stream_and_consumers`). WP-39 has **not** landed in the live
+tree yet, so its scope is fenced by spec text only.
+
+Two finding recommendations DECLINED in-spec with rationale:
+1. **ws F27's structural fix** (bots by id via a migration) - rejected by D-5,
+   which is explicit that bots stay by NAME and there is no migration. Only
+   the warn/surface half is specced.
+2. **wd F3's "surface publish failures as Err"** - declined: `execute_command`
+   has already committed, so leaving the `bot.command` unacked re-runs the
+   whole command on redelivery against advanced state. The reconciliation
+   sweep is the recovery path instead.
+
+Lead rulings made on the Worker's two open questions:
+- (a) The sweep gains a `jetstream` param on
+  `email::sweep::spawn_periodic_sweeps` and `game::publish_bot_turns` becomes
+  `pub(crate)`. ACCEPTED - the sweep module is already the home of every
+  periodic job, and the alternative (a second scheduler in `game/`) is worse.
+- (b) The 15-minute sweep threshold and 60s `AckKind::Progress` cadence are
+  Worker judgement calls, not from D-5. ACCEPTED as defaults; flagged to the
+  Orchestrator as tunable, not load-bearing.
+
+New landing constraint added to the spec header: **WP-46 also owns
+`web/src/email/sweep.rs`**. WP-38's edit there is additive, so either order
+works, but the second to land must rebase rather than fork the scaffolding.
+
+### Worker 2 - WP-57 inbound webhook delivery semantics - ACCEPTED
+
+`specs/WP-57-inbound-webhook-delivery-semantics.md`, 140 lines.
+
+All three findings (wfe F2 major, F10 minor, F16 nit) confirmed against LIVE
+code, none already fixed, none incorrect: `mark_event_processed` still runs
+immediately after signature verification and *before* payload
+deserialization; all three route handlers still return `()`;
+`resend_webhook`'s tail is still an unconditional `StatusCode::OK`;
+`verify_webhook` still has three `HeaderValue::from_str(...).unwrap()`.
+`inbound.rs` (2014 lines) matches WP-59's architecture description - the
+concurrent critical-fix agent has not touched it.
+
+**Test-fixture gap confirmed.** `rust/web/src/email/` has exactly one
+`#[cfg(test)]` module outside `inbound.rs` (in `outbound.rs`), and
+`inbound.rs`'s own `mod tests` is pure unit tests. No `AppState`/webhook
+fixture exists. The spec directs a new `rust/web/tests/inbound_webhook.rs`
+copied from `ssr_pages.rs`'s `make_state` + `#[sqlx::test]` + `build_router`
++ `oneshot` pattern, signing bodies with `svix::webhooks::Webhook::sign`
+(confirmed present in svix 1.98) and leaving `RESEND_API_KEY` unset as the
+transient-failure trigger - so no Resend HTTP double is needed.
+
+Lead rulings:
+- **ACCEPTED** the Worker's addition (not in the finding): at-least-once
+  retries re-execute non-idempotent work (game commands, invite responses),
+  so `Retry`/5xx is restricted strictly to failures occurring *before* any
+  state mutation. Post-dispatch and reply-send failures stay 200-and-marked.
+  Without this, D-2's literal "5xx on transient failure" would double-apply
+  moves. This is the correct reading of D-2 and must not be simplified away.
+- **Cross-package coupling flagged:** WP-57 widens WP-59's new
+  `fetch_inbound_text(state, email_id) -> Option<String>` to a
+  `Result`-shaped return so a failed fetch is distinguishable from an empty
+  body. WP-59 owns that function; WP-57 changes its shape only, not its body.
+  Both implementers need to know. Reinforces WP-59 -> WP-57 ordering.
+
+### T2-B3 CLOSED - both specs written and accepted.
+
+### Worker 3 - WP-10 pub_state hidden-info redaction - ACCEPTED
+
+`specs/WP-10-pub-state-hidden-info-redaction.md`, 129 lines. Covers three
+items: f F1, f F13, and the routed-in starship-catan-1 `peeking` item.
+
+All three confirmed live, none already fixed, none incorrect:
+- **f F1 (zombie-dice-2)** - `pub_state()` still does `cup: self.cup.clone()`,
+  `take_dice` still drains from the front, shuffle only at turn start/refill.
+  `render_cup` already collapses to per-colour counts, so a counts-only
+  `PubState` costs nothing visually. `DATA_DOCS.md`'s "no hidden information
+  per player" claim is still wrong and is in scope.
+- **f F13 (for-sale-2)** - `pub_state()` still clones `bids`. The Selling
+  render arm reads the viewer's own play from `pub_state.bids[p]`, so
+  redaction *requires* adding a `bid: i32` to `PlayerState` and repointing the
+  renderer. The Buying arm and `highest_bid` stay on the public `bids` - open
+  auction, legitimately public.
+- **starship-catan-1 (routed in from WP-13)** - CONFIRMED still exposed at the
+  JSON level: `player_state()` sets `peeking: self.peeking.clone()`
+  unconditionally for both seats. **WP-13 has not landed** (`render()` still
+  takes `_peeking` unused), so neither the render guard nor the data fix
+  exists. WP-10's fix is a one-line `player == self.current_player` guard and
+  does not collide with WP-13 Task 5.
+
+Lead rulings:
+- **ACCEPTED counts over sorted.** D-33 option A's text names both "counts"
+  and "canonicalized"; the spec uses
+  `PubState::cup_counts: Vec<(Colour, usize)>` in fixed Green/Yellow/Red
+  order. Information-equivalent to a sorted vec but a cleaner API. It is a
+  `PubState` API-shape change visible to bot clients, NOT a persisted-state
+  change.
+- Test-module naming differs per crate (`mod test` in zombie-dice-2 and
+  for-sale-2, `mod tests` in starship-catan-1) and two existing tests
+  (`test_pub_state_captures_rendered_fields`,
+  `test_pub_state_redacts_hands_and_cheques`) assert the leaky equality
+  directly. The spec names both - they must be updated, not deleted.
+
+**This spec sets the redaction shape for every game crate.** Later crates copy
+it.
+
+### LEAD RULING - WP-09 is SPLIT into WP-09a and WP-09b
+
+19 findings across ~17 crates is too large for one Tier 2 spec. The Tier 2
+plan anticipated this. The split is:
+- **WP-09a** - requester-boundary half: the two majors (e F18, e F36), the
+  systemic `Gamer::player_state` totality gap, and the routed-in acquire-1 /
+  sushizock-2 panics. **Lands FIRST.**
+- **WP-09b** - per-crate defensive sweep of the remaining 17 minor/nit
+  findings plus red7-1's `num_players` trust. Lands after 09a.
+
+`work-packages.md` needs updating to record the split and to add
+`rust/game/acquire-1`, `rust/game/sushizock-2` and `rust/lib/game/src/game.rs`
+to WP-09's path list. Flagged to the Orchestrator; not done by this Lead
+(work-packages.md is not this unit's file).
+
+### Worker 4 - WP-09a deserialized-state boundary - ACCEPTED
+
+`specs/WP-09a-deserialized-state-boundary.md`, 166 lines (over the ~120 hint;
+four routed-in items each need their own Problem/Why/End-state entry -
+accepted as proportionate).
+
+**Design answer on the `player_state` totality question: boundary check in
+`gamer.rs` only, trait signature UNCHANGED.** Rationale (Worker read every
+caller): `gamer.rs::renders` iterates `0..game.player_count()` and
+`lib/game/src/bot.rs` picks from `game.whose_turn()`, so both are already
+bounded; the only unchecked callers are `handle_play` and
+`handle_player_render`, which take the index straight off the deserialized
+`Request` envelope. Changing `player_state -> Result` would touch ~30 crates
+for zero additional safety. **ACCEPTED.**
+
+D-36's second half (the validate hook) lands as a defaulted no-op
+`Gamer::validate(&self) -> Result<(), GameError>` in
+`rust/lib/game/src/game.rs`, called in `Requester::request` after each
+`serde_json::from_str` (all four game-carrying variants). No crate implements
+it in this package - that is deliberate; WP-09b and later crate packages fill
+it in.
+
+All four routed-in items confirmed present in LIVE code by reading:
+`self.hands[player].clone()` in both lost-cities crates' `player_state`; both
+`panic!("must be Phase::SellOrTrade")` arms in acquire-1's
+`next_player_sell_trade` and `end_sell_trade_phase`; sushizock-2's
+`steal_blue`/`steal_red` guard `player == target` and emptiness but never
+`target < self.players`. Test modules named in the spec are all real
+(`api.rs` `mod tests`, sushizock-2 and lost-cities `mod test`, acquire-1
+`mod tests`, `game.rs` `mod tests`); the `gamer.rs` test module does not exist
+and the spec says to create it.
+
+**New cross-package constraint:** WP-21 Task 10 refactors
+`steal_blue`/`steal_red` into a shared helper *after* WP-09a lands. That task
+must carry the new `target < self.players` guard forward, not drop it.
+Escalated to the Orchestrator.
+
+### Worker 5 - WP-09b game-crate state-trust sweep - ACCEPTED
+
+`specs/WP-09b-game-crate-state-trust-sweep.md`, 138 lines. Table-shaped:
+one row per item, 18 rows.
+
+**All 18 of 18 items confirmed present in LIVE code.** None already fixed,
+none judged incorrect, nothing left UNVERIFIED.
+
+The Worker read every affected `pub struct Game` and corrected field names
+that a reader would otherwise guess wrong: for-sale-2 indexes on
+`bidding_player` (not `current_player`); no-thanks-2 on `currently_moving`;
+red7-1 has `scored_cards` (not `scores`); category-5-2's `board` is a fixed
+`[Vec<Card>; ROWS]`; age-of-war-2 has no per-player vectors at all, only
+castle-indexed ones.
+
+**Lead ratifies the two-tier pattern:**
+- **Tier 1** - a per-crate `Gamer::validate` impl filling WP-09a's new
+  defaulted hook (14 of 15 crates), leaving the panicking index /
+  `unreachable!()` sites themselves untouched as defence-in-depth.
+- **Tier 2** - an in-place guard for the four sites reachable *without* a
+  deserialized `Game`: lords-of-vegas-1 `Loc::parse_str`, love-letter-2
+  `assert_target`, age-of-war-2 `line_action`, for-sale-2's two `split_off`,
+  no-thanks-2's renderer `unwrap`.
+This makes WP-09b strictly dependent on WP-09a landing first. Correct call -
+it is what makes the sweep a one-line-per-crate job instead of a rewrite.
+
+Two verification corrections carried into the table as binding:
+- **greed-2 f F34's `points()` citation is a MIS-CITATION** - do not touch it.
+- **no-thanks-2 f F53 UNDERCOUNTS** - `chips[p]` and `final_scores[p]` are
+  also unchecked.
+
+Test conventions read per crate, not assumed: `mod tests` in
+lords-of-vegas-1 / tic-tac-toe-2 / red7-1, `mod test` in eleven others,
+modern-art-2 and lost-cities-2 have both. No crate needs a new test module.
+
+### T2-B4 CLOSED - three specs written and accepted (WP-10, WP-09a, WP-09b).
+
+### Unit close-out - T2-B3 and T2-B4 complete
+
+Five specs written, all accepted: WP-38, WP-57, WP-10, WP-09a, WP-09b (WP-09
+split into two). No package in either batch turned out to be empty; every one
+of the 27 findings across the two batches was confirmed present in live code
+and none was already fixed. Nothing under `rust/` was written; no
+cargo/build/test/clippy/fmt run; no git mutation. Lead and all five Workers
+wrote only inside `planning/`.
+
+Escalated to the Orchestrator - see the additions to `landing-order.md`:
+(a) WP-09 split into 09a/09b - `work-packages.md` needs the split recorded
+    and `rust/game/acquire-1`, `rust/game/sushizock-2`,
+    `rust/lib/game/src/game.rs` added to its path list;
+(b) WP-21 Task 10 must carry WP-09a's new sushizock-2 `target` guard forward;
+(c) WP-57 widens WP-59's `fetch_inbound_text` return shape;
+(d) WP-38 and WP-46 both touch `web/src/email/sweep.rs`;
+(e) WP-38's 15-minute sweep threshold and 60s `AckKind::Progress` cadence are
+    Lead-chosen defaults, not from D-5 - tunable, not load-bearing;
+(f) WP-10's `PubState::cup_counts` is a bot-client-visible API shape change.
+
+---
+
+## T2-B5 / T2-B6 Lead (final Tier 2 batches) - 2026-07-25
+
+### Worker 1 returned - WP-02 markup robustness and dedup
+
+Wrote `planning/specs/WP-02-markup-robustness-dedup.md` (139 lines; 10
+findings, so slightly over the ~120 cap - accepted). All ten findings
+(verification `ls F2`-`ls F11`) specced; none already fixed, none rejected.
+Numbering hazard handled correctly: verification F10/F11 = raw F11/F12, raw
+F10 (ANSI/plain renderer escaping) is absent from verification and was
+explicitly marked out of scope.
+
+**ESCALATION - D-37 option A refined by the Worker.** D-37's answer says
+"error on non-empty rest + define an escape (`{{` or backslash) + escape on
+`to_string`". A bare `{{` escape is UNSOUND: it matches the leading `{{` of
+every closing tag, so a nested `markup()` would consume its own terminator.
+The Worker pinned **`{{lbrace}}`** instead and recorded it as the spec's Open
+question. The Orchestrator should put this to the user - it is a change to the
+answered decision's letter, not its intent.
+
+Two further Lead-accepted spec calls:
+- the escape is implemented inside `parser.rs::text` (yielding one `char`)
+  rather than as an eleventh `choice` alternative, so
+  `from_string(to_string(n)) == n` holds exactly instead of splitting text
+  into adjacent nodes;
+- `from_string` keeps its `(nodes, rest)` signature to avoid churning ~10
+  call sites across `web/`, `lib/cmd` and `tools/` while another agent is
+  editing `rust/`.
+
+Note for WP-06: making `from_string` hard-error on leftover input turns
+`lib/cmd/src/repl.rs`'s two `from_string(...).unwrap()` calls into live panic
+sites. WP-02 lists them as a non-goal; WP-06 owns them.
+
+### Spec ACCEPTED: WP-02.
+
+---
+
 ## WP-01 implementation progress
 
 Date: 2026-07-25. Lead: orchestrate Lead role (WP-01 execution unit).
@@ -2372,3 +3076,310 @@ Verification: `scripts/rust-test.sh` passed end-to-end (107 brdgme_game,
 One deviation from spec: markup `slice` tests needed `slice::<Color>(...)`
 turbofish for type inference on bare `TN::text(...)` assertions (E0283).
 Functionally identical to spec intent.
+
+### Worker 2 returned - WP-08 finish/placings epilogue dedup sweep
+
+Wrote `planning/specs/WP-08-finish-placings-epilogue-dedup.md` (150 lines; 12
+findings across 13 crates - over the ~120 cap but proportionate, accepted).
+All 12 specced; none already fixed, none rejected.
+
+**Refactor shape (the spec's first decision, made and justified): identical
+per-crate private `finish_epilogue(&self, logs: &mut Vec<Log>)` extract, NO new
+`lib/game` API.** Worker read live epilogues in nine crates: the only common
+line is `logs.push(placings_log(&placings, Some(&scores)))`, and
+`brdgme_game::placings_log` already IS the shared helper. Everything above it
+diverges per crate - the finished predicate (rtta uses a `self.finished` field,
+not `is_finished()`), the scores expression (`player_points` /
+`player_total_money` / `player_vp` / `scores()` / token sums / `player_score`)
+and the placings expression (`self.placings()`, `self.calc_placings()`, or a
+local `gen_placings`). A shared helper would have to take both `scores` and
+`placings` - i.e. be `placings_log` again - or take closures. Lead accepts.
+
+e F14 handled as a uniform `!was_finished && is_finished()` transition gate
+(a no-op except in age-of-war-2).
+
+Routed-in scope honoured: **acquire-1** joins (cheap hoist into its existing
+trailing `.map`); **starship-catan-1** joins, coverage widening from 5 of 17
+arms to all 17. **red7-1 fenced out in Non-goals.**
+
+**Two Worker rulings the Orchestrator may overturn:**
+1. **lost-cities-1/-2 get no code change.** The routed-in "double placings-log
+   site" was re-derived: each crate has exactly ONE epilogue site (the `Draw`
+   arm, its only finishing path). The real duplication is `end_round`'s
+   `game_over_log()` plus `placings_log` both announcing the winner - and
+   WP-28 Task 4 deliberately rewrites `-2`'s `game_over_log()` and asserts its
+   wording, so deleting either line would contradict that package. Closed as
+   "both stay" rather than left unowned.
+2. starship-catan-1's widening from 5 to 17 arms is stated as
+   intentional-and-safe, NOT as a bug fix - the Worker did not re-trace whether
+   the 12 uncovered arms can actually reach `victory_points() >= 10`.
+
+Incidental find: greed-2's `Score` arm has no epilogue (it cannot finish
+today); the hoist closes it.
+
+### Spec ACCEPTED: WP-08. T2-B5 CLOSED.
+
+### Worker 3 returned - WP-62 operator
+
+Wrote `planning/specs/WP-62-operator.md` (150 lines; two majors plus five
+riders - over the ~120 cap but proportionate, accepted). Source: **raw
+`findings/bot-operator-tools.md`; no `findings/verification/bot-operator-tools.md`
+exists** and the spec says so.
+
+**Routed-in second major (WP-28 lead ruling) specced. Design call: newest
+non-deprecated version wins, NOT union.** Justification from live code: new
+games pick a version via `rust/web/src/db.rs::find_latest_non_deprecated_game_version`,
+but roster validation reads the shared type row via
+`find_game_type_player_counts` (keyed by version id, returns
+`game_types.player_counts`). A union would let validation accept a 3-player
+Lost Cities roster that the actually-selected version cannot run. Fix is three
+statements in `upsert_game_type_and_version` (id-only upsert, version upsert,
+then a guarded `UPDATE` that writes counts/weight/blurb only when no newer
+non-deprecated version exists). No migration. **`upsert_game_type_and_version`
+lives in `rust/operator/src/controller.rs`, not in `rust/web`** - the package
+stays single-crate. Lead accepts.
+
+Dispositions: bo F18 specced; routed-in `game_types` major specced; bo F20-F24
+specced; bo F25 BLOCKED.
+- **bo F19 specced WITH A CORRECTION.** The field genuinely does not exist, but
+  the finding's symptom claim is wrong: the applied `k8s/base/operator/crd.yaml`
+  never had a Players printcolumn. The real defect is derive-vs-manifest drift,
+  so the fix is to DELETE the printcolumn, not to surface it in status (which
+  would need a CRD manifest edit outside the declared paths).
+- bo F20 specced as an async wrapper around `reconcile`, because `error_policy`
+  is sync and cannot await.
+
+**OPEN QUESTION FOR MICHAEL (unchanged, escalate): what Kubernetes version does
+the deployed cluster run?** bo F25's `k8s-openapi` pin cannot be chosen without
+it. The rider is recorded as blocked; once answered, select the `v1_NN` feature
+for the oldest targeted cluster in `rust/operator/Cargo.toml`.
+
+Implementer caveat carried in the spec: `kube-runtime` 4.0.0 is in the lockfile
+with the `runtime` feature on, but the exact `kube::runtime::finalizer` module
+path was NOT confirmed against the vendored crate - the spec instructs
+STOP-and-report if it differs.
+
+### Spec ACCEPTED: WP-62.
+
+### Worker 4 returned - WP-63 fuzz tool
+
+Wrote `planning/specs/WP-63-fuzz-tool.md` (150 lines - over the cap for a small
+package, but the dedup ruling and the bo F26 hang-test recipe needed the room;
+accepted). Confirmed `findings/verification/` has NO file for either
+bot-operator-tools or dependencies, so every claim was re-derived from live
+source; the spec states this.
+
+Live layout is `Cargo.toml` + `src/lib.rs` + `src/main.rs` (no `src/bin/`), and
+the crate has **no test module** - the spec directs a new `#[cfg(test)] mod
+tests` in `src/lib.rs` using a stub `Requester` from the already-present
+`brdgme_cmd` dep, deliberately avoiding the `[dev-dependencies]`/`src/bin` trap
+(e F45).
+
+**Dedup ruling: KEEP SEPARATE from `brdgme_rand_bot::commands()`.** It is
+private, returns quality-scored `Vec<BotCommand>` that the fuzzer would
+immediately unwrap back to a `String`, and after WP-07 changes its join to `""`
+the outputs already match. The real shared primitive is `spec_to_command`,
+which the fuzz tool already calls. No landing-order dependency on WP-07
+results. Consistent with WP-07's own rider table, which defers the "sharing
+half" of ls F41 to here. Lead accepts.
+
+Dispositions: bo F26, F27, F29, F30, F31 specced; **bo F28 = dp F20 specced
+ONCE** (single `num_cpus` change, both IDs cited). Nothing already-fixed,
+nothing rejected.
+
+Minor open item: the bo F31 regression test needs a hand-built
+`api::Response::New` fixture (Active status, `command_spec: None` render). The
+spec marks it droppable-with-a-note if disproportionate; the F26 hang test is
+the only mandatory one.
+
+### Spec ACCEPTED: WP-63. T2-B6 CLOSED.
+
+### Bookkeeping applied to `work-packages.md`
+
+- **WP-09** heading now records the **split into WP-09a + WP-09b** (09a =
+  requester boundary + new `Gamer::validate` hook, lands first; 09b = the
+  18-item per-crate sweep, strictly depends on 09a), and its path list gains
+  `rust/lib/game/src/game.rs`, `rust/game/acquire-1` and `rust/game/sushizock-2`.
+- **WP-21** gains a note that Task 10 must carry WP-09a's new sushizock-2
+  `Player{} target` bounds guard forward through its refactor.
+- **WP-59** gains a note that WP-57 widens `fetch_inbound_text`'s return shape.
+
+### UNIT CLOSE-OUT - T2-B5 and T2-B6 complete; ALL TIER 2 BATCHES ARE DONE
+
+Four specs written and accepted: WP-02, WP-08, WP-62, WP-63. No package in
+either batch was empty; all 37 findings across the four packages were confirmed
+present in live code and none was already fixed. Nothing under `rust/` was
+written; no cargo/build/test/clippy/fmt run; no git mutation. Lead and all four
+Workers wrote only inside `planning/`.
+
+**Escalated to the Orchestrator (decisions the user must make):**
+(a) **D-37's `{{` escape token is unsound** - it collides with closing-tag
+    syntax. WP-02 pins `{{lbrace}}`. Needs the user's blessing.
+(b) **bo F25 needs the deployed Kubernetes version from Michael** before the
+    `k8s-openapi` pin can be chosen. WP-62's rider is blocked on it.
+(c) Two WP-08 Worker rulings that overrode routed-in framing:
+    lost-cities-1/-2 get NO code change (the "double placings-log site"
+    re-derived as `game_over_log()` + `placings_log`, and WP-28 Task 4 already
+    owns that wording); starship-catan-1's 5-to-17-arm widening is stated as
+    intentional-and-safe, not as a verified bug fix.
+
+---
+
+## TIER 3 - Lead unit T3-B1..B3 (2026-07-25)
+
+### Worker 1 returned: T3-B1
+
+`checklists/T3-B1-zombie-battleship-forsale-category5.md`. WP-31 (7) + WP-32
+(12) = 19 findings, 20 table rows (`f F3` split across `lib.rs` and
+`render.rs`). games-batch-f numbering; raw == verification, no offset. Nothing
+escalated; nothing rejected; no line numbers cited. Plan corrections applied:
+`f F18` uses `Option<Phase>` + explicit fallback (NOT the finding's unsound
+`#[serde(default)]`), `f F28` label-only (do not negate `points()`), `f F6`
+notes a transition-only guard misses mid-rolloff membership changes.
+
+### Checklist ACCEPTED: T3-B1.
+
+### Worker 2 returned: T3-B2
+
+`checklists/T3-B2-small-game-crates.md`. WP-33 = 17 findings, 17 rows (4m/13n)
+across greed-2 (3), farkle-2 (5), tic-tac-toe-2 (3), no-thanks-2 (3),
+liars-dice-2 (3). games-batch-f numbering; raw == verification. Nothing
+escalated, no spec overlap, no line numbers. Verification corrections carried:
+`f F56` reframed as reachable via F57's uncapped parser; `f F48` scoped to
+log+board+label+RULES.md with the exact-render test update
+(`exact_render_markup_matches_the_old_board`) mandatory. `f F46` (ttt unbounded
+`players`) is out of WP-33 scope - an inline note points at WP-09a/WP-09b so
+the omission is not misread as a drop.
+
+### Checklist ACCEPTED: T3-B2.
+
+### Worker 3 returned: T3-B3
+
+`checklists/T3-B3-splendor-libcost-holdem.md`. WP-17 (8) + WP-18 (4) = 12
+findings, 12 rows: 9 in the main table (splendor-2 `b F30/F32/F34/F35`,
+`lib/cost` `ls F38`, texas-holdem-2 `c F1/F3/F4/F5`) plus a separate
+**BLOCKED ON D-25** table of 3 (`b F31`, `ls F39`, `dp F27` - all one
+consolidation change, options A/B mutually exclusive, must land together).
+Numbering documented per prefix: `b`/`c` positional raw==verification, `ls` =
+VERIFICATION numbering (+1 offset vs raw for F10+), `dp` = no verification
+file, lead-verified only. Nothing escalated, nothing dropped, no line numbers.
+No spec overlap: `specs/WP-06-*.md` routes `ls F38`/`ls F39` out to WP-17, and
+WP-15 only reads `lib/cost::can_afford_perm`; `b F33`/`c F6` are WP-08's and
+were already out of scope.
+
+### Checklist ACCEPTED: T3-B3.
+
+### UNIT CLOSE-OUT - T3-B1, T3-B2, T3-B3 complete
+
+Three checklist files written under `planning/checklists/`, 48 findings / 49
+rows total. No specs written (correct for Tier 3). Nothing under `rust/` was
+written; no cargo/build/test/clippy/fmt run; no git mutation. Lead and all
+three Workers wrote only inside `planning/`.
+
+**Escalated to the Orchestrator:**
+(a) **D-25 is unanswered and gates 3 of T3-B3's 12 rows.** `work-packages.md`
+    marks WP-17 BLOCKED-ON-DECISION(D-25) but `tier2-tier3-plan.md` section
+    2.1 lists T3-B1..B3 as dispatchable now and omits WP-17 from its blocked
+    roster (2.2) - the two documents disagree. Resolved by carving the three
+    gated rows into their own table rather than dropping or shipping them.
+    Recommendation stands at option A (port splendor-2 onto `lib/cost`).
+(b) `f F46` (tic-tac-toe-2 unbounded `players`) is in no Tier 3 package -
+    it belongs to WP-09a/WP-09b. T3-B2 carries an inline pointer only.
+
+## Lead: T3-B4 / T3-B5 / T3-B6 unit
+
+### Worker 4 returned: T3-B4
+
+`checklists/T3-B4-sushigo-loveletter-ageofwar.md`. WP-24 sushi-go-2 (7) +
+WP-27 love-letter-2/age-of-war-2 (8) = 15 findings, 15 rows (4m/11n), grouped
+by crate then source file, no line numbers, T3-B2 house format. Nothing
+decision-blocked, nothing escalated, no rows dropped. Verification corrections
+applied: `d F26` downgraded to nit and made **doc-only** (the official
+Gamewright rulebook DOES break ties by puddings, so `placings` and
+`test_placings_pudding_tiebreaker` must NOT change); `d F31` is not a
+byte-for-byte duplicate (method vs free fn) so the row keeps the free fn and
+delegates. A "Not in this checklist (owned elsewhere)" section names the
+adjacent spec-owned findings so the omissions are not misread as drops:
+`d F33`, `e F13`, `e F14` -> WP-08; `e F10` + the love-letter
+`assert_target`/`end_round`/`end_score` items -> WP-09a/WP-09b. Sequencing
+warning recorded: `e F12` edits the same age-of-war `command` fn WP-08 touches.
+
+### Checklist ACCEPTED: T3-B4.
+
+---
+
+## WP-39 implementation complete
+
+Date: 2026-07-25. Commit: 347970a on master.
+
+All 8 tasks implemented and verified via `scripts/rust-test.sh` (full pass):
+
+- Task 1 (ws F53/wd F4): `supervise_consumer` in `web/src/nats.rs` with
+  exponential backoff (1s..30s, reset after 60s stable). Wired in
+  `web/src/main.rs`. 2 unit tests (paused-clock tokio).
+- Task 2 (ws F56): `run_max_deliveries_advisory_listener` +
+  `parse_max_deliveries_advisory` in `web/src/nats.rs`. Supervised spawn in
+  main.rs. 1 unit test + 1 integration test (Nak-forced exhaustion against
+  real nats-server).
+- Task 3 (ws F57/F58): `stream_config_drift`/`consumer_config_drift` +
+  startup warn in `ensure_stream_and_consumers`. ack_wait invariant comment.
+  2 unit tests.
+- Task 4 (wd F9): Conflict re-publish filtered to `event.player_position`
+  in `game/mod.rs`. 1 two-bot integration test.
+- Task 5 (bo F1): `unreachable!()` -> `Err(anyhow!(...))` in
+  `bot/src/main.rs`.
+- Task 6 (bo F3/F5): `Arc<Semaphore>` concurrency bound +
+  `shutdown_signal()` + drain in `bot/src/main.rs`.
+- Task 7 (bo F8): healthz doc comment declining DB-check recommendation.
+- Task 8: `scripts/rust-test.sh` full pass (485 web unit, 7 nats_bot_eventing
+  integration, 41 ssr_pages, 35 bot, workspace libs).
+
+New alertable metrics: `nats_consumer_restarts_total`,
+`bot_stream_max_deliveries_total` (web :9090 /metrics). New env:
+`MAX_CONCURRENT_TURNS` (bot, default 8). No k8s manifest changes.
+
+## WP-36 implementation complete
+
+Date: 2025-07-25.
+
+All 5 tasks implemented and verified via `scripts/rust-test.sh` (full pass,
+491 web unit tests, 0 failures):
+
+- Task 1 (ws F52): `secure_cookie()` helper in `web/src/auth/session.rs`;
+  session cookie Secure by default, `SECURE_COOKIE=false` opts out. 3 unit
+  tests.
+- Task 2 (ws F52 deploy): `k8s/dev/web-patch.yaml` (new), dev kustomization
+  patch, Tiltfile local web env, `.env.template` documentation. Prod needs
+  no manifest change.
+- Task 3 (ws F54): `rustls::crypto::aws_lc_rs::default_provider().install_default()`
+  as first statement of web's main; optional ssr-gated dep.
+- Task 4 (ws F17): `Zeroizing<[u8; 32]>` return from `load_key`/`default_key`
+  in `web/src/crypto.rs`; hex buffer wiped. AAD declined (shared format with
+  bot + existing prod ciphertexts). 3 unit tests.
+- Task 5 (ws F55): `CancellationToken` + `TaskTracker` on `GameBroadcaster`;
+  close frame on shutdown; bounded 5s drain in main. 1 integration test.
+
+Prod picks up F52/F54/F55 on next web image deploy; no prod manifest change.
+
+---
+
+## WP-14 alhambra-1 core fixes - IMPLEMENTED 2026-07-25
+
+Lead: orchestrate Lead role. All 10 tasks from
+`planning/specs/WP-14-alhambra-core-fixes.md` executed serially via Workers.
+
+Findings fixed: b F16 (critical, take() duplicate mint), b F17 (major,
+place/swap index divergence), b F18 (major, wall-walk premature break),
+b F21 (minor, missing tests), b F23 (nit, expect() naming), b F24 (nit,
+gap-check symmetry), b F25 (nit, Debug formatting), b F26 (nit, tile_counts
+dedup), b F27 (nit, column-header clamp), b F28 (nit, VecDeque/HashSet).
+
+Files changed: `rust/game/alhambra-1/src/lib.rs`, `src/card.rs`,
+`src/command.rs`, `src/render.rs`.
+
+Tests: 33 lib tests + 1 contract test, all passing. Full pre-commit gate
+(`scripts/rust-test.sh`) passed. `cargo fmt --all -- --check` and
+`cargo clippy --workspace --exclude web --all-targets -- -D warnings` clean.
+
+No serialized-shape changes. No game-rules behaviour changes. Non-goals
+honoured (b F19/F20/WP-16, b F22/WP-08, Tile::walls HashMap, rot_all panic).
