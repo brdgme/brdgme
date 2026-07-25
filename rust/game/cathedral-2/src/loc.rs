@@ -163,23 +163,6 @@ pub fn locs_by_row() -> Vec<Vec<Loc>> {
         .collect()
 }
 
-/// Port of `ParseLoc` (`play_command.go`): case-insensitive `^[a-j]\d+$`.
-pub fn parse_loc(input: &str) -> Option<Loc> {
-    let mut chars = input.chars();
-    let first = chars.next()?;
-    if !first.is_ascii_alphabetic() {
-        return None;
-    }
-    let rest: String = chars.collect();
-    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    let row = first.to_ascii_uppercase() as i32 - 'A' as i32;
-    let col: i32 = rest.parse().ok()?;
-    let loc = Loc::new(col - 1, row);
-    if loc.valid() { Some(loc) } else { None }
-}
-
 pub const WALK_CONTINUE: i32 = 0;
 pub const WALK_BLOCKED: i32 = 1;
 pub const WALK_FINISH: i32 = 2;

@@ -12,27 +12,6 @@ pub enum Command {
     Play { piece: i32, loc: Loc, dir: Dir },
 }
 
-/// A location choice paired with its string name, for use with the `Enum`
-/// parser. Port of the `AllLocs[i].String()` enum values built in
-/// `LocParser` (`command.go`).
-#[derive(Debug, Clone, Copy)]
-struct LocChoice {
-    loc: Loc,
-    name: &'static str,
-}
-
-// Leaked once per process; the location set is fixed (100 entries), so this
-// is a bounded, one-time allocation rather than a per-parse leak.
-fn loc_name(loc: Loc) -> &'static str {
-    Box::leak(loc.to_key().into_boxed_str())
-}
-
-impl std::fmt::Display for LocChoice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
 /// A direction choice paired with its string name. Port of the
 /// `OrthoDirNames` enum values built in `DirParser` (`command.go`).
 #[derive(Debug, Clone, Copy)]
@@ -50,6 +29,11 @@ impl std::fmt::Display for DirChoice {
 impl Game {
     /// Port of `CommandParser` (`command.go`).
     pub fn command_parser(&self, player: i32) -> Option<Box<dyn Parser<T = Command> + '_>> {
+        // Single choke point for both `Gamer::command` and
+        // `Gamer::command_spec`, which each build their parser here (c F25).
+        if player < 0 || player as usize >= self.players {
+            return None;
+        }
         if self.can_play(player) {
             Some(Box::new(self.play_parser(player)))
         } else {
@@ -90,20 +74,20 @@ impl Game {
 /// Port of `PieceParser` (`command.go`): 1-based `Int{Min:1,
 /// Max:len(Pieces[player])}` mapped to a 0-based index by subtracting 1.
 fn piece_parser(player: i32) -> impl Parser<T = i32> {
-    let max = pieces(player).len() as i32;
+    // `command_parser` rejects out-of-range players before this is built, so
+    // the catalogue is always present here; `0` degrades to a parser that
+    // matches nothing rather than panicking.
+    let max = pieces(player).map_or(0, |p| p.len() as i32);
     Map::new(Int::bounded(1, max), |v: i32| v - 1)
 }
 
 /// Port of `LocParser` (`command.go`): an `Enum` over every `AllLocs[i].String()`.
+///
+/// `Loc`'s `Display` impl forwards verbatim to `to_key()`, and `Enum` only
+/// needs `ToString + Clone`, so the locations go in directly - no wrapper
+/// struct and no leaked `&'static str` name table (c F22).
 fn loc_parser() -> impl Parser<T = Loc> {
-    let values: Vec<LocChoice> = loc::all_locs()
-        .into_iter()
-        .map(|l| LocChoice {
-            loc: l,
-            name: loc_name(l),
-        })
-        .collect();
-    Map::new(Enum::partial(values), |c: LocChoice| c.loc)
+    Enum::partial(loc::all_locs())
 }
 
 /// Port of `DirParser` (`command.go`): an `Enum` over `OrthoDirNames`.
@@ -116,4 +100,42 @@ fn dir_parser() -> impl Parser<T = Dir> {
         })
         .collect();
     Map::new(Enum::partial(values), |c: DirChoice| c.dir)
+}
+
+#[cfg(test)]
+mod test {
+    use brdgme_game::command::Spec;
+    use brdgme_game::command::parser::Parser;
+
+    use super::loc_parser;
+    use crate::loc;
+
+    #[test]
+    fn loc_parser_spec_is_every_board_location_in_row_major_order() {
+        // c F22 lock-in: dropping the leaked `&'static str` name table must
+        // not change the accepted grammar or the advertised command spec.
+        match loc_parser().to_spec() {
+            Spec::Enum { values, exact } => {
+                assert!(!exact, "locations are matched by prefix");
+                assert_eq!(100, values.len());
+                assert_eq!("A1", values[0]);
+                assert_eq!("J10", values[99]);
+                let expected: Vec<String> = loc::all_locs().iter().map(|l| l.to_key()).collect();
+                assert_eq!(expected, values);
+            }
+            s => panic!("expected an Enum spec, got {:?}", s),
+        }
+    }
+
+    #[test]
+    fn loc_parser_parses_a_full_and_a_partial_location() {
+        let names: Vec<String> = vec!["mick".to_string(), "steve".to_string()];
+        let out = loc_parser().parse("f6", &names).expect("f6 must parse");
+        assert_eq!(loc::Loc::new(5, 5), out.value);
+        let out = loc_parser()
+            .parse("j10 rest", &names)
+            .expect("j10 must parse");
+        assert_eq!(loc::Loc::new(9, 9), out.value);
+        assert_eq!(" rest", out.remaining);
+    }
 }

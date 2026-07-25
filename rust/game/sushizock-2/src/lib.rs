@@ -148,7 +148,14 @@ fn all_dice(rolled: &[DieFace], kept: &[DieFace]) -> Vec<DieFace> {
 }
 
 fn roll_dice(rng: &mut GameRng, n: usize) -> Vec<DieFace> {
-    (0..n).map(|_| *DIE_FACES.choose(rng).unwrap()).collect()
+    // Indexed rather than `choose(..).unwrap()`: CODING.md bans `.unwrap()`
+    // on request-reachable paths. `IndexedRandom::choose` is itself
+    // `self[rng.random_range(..self.len())]` in rand 0.10, so this draws
+    // identically and does not shift the dice of any in-flight saved game
+    // (c F32).
+    (0..n)
+        .map(|_| DIE_FACES[rng.random_range(0..DIE_FACES.len())])
+        .collect()
 }
 
 fn blue_tiles() -> Vec<Tile> {
@@ -396,15 +403,37 @@ impl Game {
         ])]
     }
 
-    pub fn take_blue(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
-        if !self.can_take_blue(player) {
-            return Err(GameError::invalid_input(
+    fn take(&mut self, player: usize, kind: TileType) -> Result<Vec<Log>, GameError> {
+        let counts = self.dice_counts_all();
+        let (allowed, idx, message) = match kind {
+            TileType::Blue => (
+                self.can_take_blue(player),
+                counts.sushi,
                 "unable to take blue at the moment",
-            ));
+            ),
+            TileType::Red => (
+                self.can_take_red(player),
+                counts.bones,
+                "unable to take red at the moment",
+            ),
+        };
+        if !allowed {
+            return Err(GameError::invalid_input(message));
         }
-        let idx = self.dice_counts_all().sushi - 1;
-        let t = self.blue_tiles.remove(idx);
-        self.player_blue_tiles[player].push(t);
+        // `can_take_*` guarantees `idx >= 1` and `pile.len() >= idx`.
+        let idx = idx - 1;
+        let t = match kind {
+            TileType::Blue => {
+                let t = self.blue_tiles.remove(idx);
+                self.player_blue_tiles[player].push(t);
+                t
+            }
+            TileType::Red => {
+                let t = self.red_tiles.remove(idx);
+                self.player_red_tiles[player].push(t);
+                t
+            }
+        };
         let mut logs = vec![Log::public(vec![
             N::Player(player),
             N::text(" took "),
@@ -414,18 +443,79 @@ impl Game {
         Ok(logs)
     }
 
+    pub fn take_blue(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
+        self.take(player, TileType::Blue)
+    }
+
     pub fn take_red(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
-        if !self.can_take_red(player) {
-            return Err(GameError::invalid_input("unable to take red at the moment"));
+        self.take(player, TileType::Red)
+    }
+
+    fn steal(
+        &mut self,
+        player: usize,
+        target: usize,
+        kind: TileType,
+        n: Option<i32>,
+    ) -> Result<Vec<Log>, GameError> {
+        let n = n.unwrap_or(1);
+        let (allowed, message) = match (kind, n == 1) {
+            (TileType::Blue, true) => (
+                self.can_steal_blue(player),
+                "can't steal a blue tile at the moment",
+            ),
+            (TileType::Blue, false) => (
+                self.can_steal_blue_n(player),
+                "can't steal a hidden blue tile at the moment",
+            ),
+            (TileType::Red, true) => (
+                self.can_steal_red(player),
+                "can't steal a red tile at the moment",
+            ),
+            (TileType::Red, false) => (
+                self.can_steal_red_n(player),
+                "can't steal a hidden red tile at the moment",
+            ),
+        };
+        if !allowed {
+            return Err(GameError::invalid_input(message));
         }
-        let idx = self.dice_counts_all().bones - 1;
-        let t = self.red_tiles.remove(idx);
-        self.player_red_tiles[player].push(t);
-        let mut logs = vec![Log::public(vec![
-            N::Player(player),
-            N::text(" took "),
-            N::Bold(vec![render::tile(&t)]),
-        ])];
+        if player == target {
+            return Err(GameError::invalid_input("can't steal from yourself"));
+        }
+        let len = match kind {
+            TileType::Blue => self.player_blue_tiles[target].len(),
+            TileType::Red => self.player_red_tiles[target].len(),
+        };
+        if len == 0 {
+            return Err(GameError::invalid_input(match kind {
+                TileType::Blue => "they don't have any blue tiles to steal",
+                TileType::Red => "they don't have any red tiles to steal",
+            }));
+        }
+        // Validate before any arithmetic: `n` comes straight from
+        // `Int::any()`, so `len as i32 - n` overflows for n = i32::MIN.
+        // Accepts exactly 1..=len (c F29).
+        if n < 1 || n as usize > len {
+            return Err(GameError::invalid_input(format!(
+                "invalid tile number, you need to pick something between 1 and {}",
+                len
+            )));
+        }
+        let idx = len - n as usize;
+        let t = match kind {
+            TileType::Blue => {
+                let t = self.player_blue_tiles[target].remove(idx);
+                self.player_blue_tiles[player].push(t);
+                t
+            }
+            TileType::Red => {
+                let t = self.player_red_tiles[target].remove(idx);
+                self.player_red_tiles[player].push(t);
+                t
+            }
+        };
+        let mut logs = self.steal_log(player, target, &t);
         logs.extend(self.next_player());
         Ok(logs)
     }
@@ -436,40 +526,7 @@ impl Game {
         target: usize,
         n: Option<i32>,
     ) -> Result<Vec<Log>, GameError> {
-        let n = n.unwrap_or(1);
-        if n == 1 {
-            if !self.can_steal_blue(player) {
-                return Err(GameError::invalid_input(
-                    "can't steal a blue tile at the moment",
-                ));
-            }
-        } else if !self.can_steal_blue_n(player) {
-            return Err(GameError::invalid_input(
-                "can't steal a hidden blue tile at the moment",
-            ));
-        }
-        if player == target {
-            return Err(GameError::invalid_input("can't steal from yourself"));
-        }
-        if self.player_blue_tiles[target].is_empty() {
-            return Err(GameError::invalid_input(
-                "they don't have any blue tiles to steal",
-            ));
-        }
-        let len = self.player_blue_tiles[target].len();
-        let index = len as i32 - n;
-        if index < 0 || index as usize >= len {
-            return Err(GameError::invalid_input(format!(
-                "invalid tile number, you need to pick something between 1 and {}",
-                len
-            )));
-        }
-        let idx = index as usize;
-        let t = self.player_blue_tiles[target].remove(idx);
-        self.player_blue_tiles[player].push(t);
-        let mut logs = self.steal_log(player, target, &t);
-        logs.extend(self.next_player());
-        Ok(logs)
+        self.steal(player, target, TileType::Blue, n)
     }
 
     pub fn steal_red(
@@ -478,40 +535,7 @@ impl Game {
         target: usize,
         n: Option<i32>,
     ) -> Result<Vec<Log>, GameError> {
-        let n = n.unwrap_or(1);
-        if n == 1 {
-            if !self.can_steal_red(player) {
-                return Err(GameError::invalid_input(
-                    "can't steal a red tile at the moment",
-                ));
-            }
-        } else if !self.can_steal_red_n(player) {
-            return Err(GameError::invalid_input(
-                "can't steal a hidden red tile at the moment",
-            ));
-        }
-        if player == target {
-            return Err(GameError::invalid_input("can't steal from yourself"));
-        }
-        if self.player_red_tiles[target].is_empty() {
-            return Err(GameError::invalid_input(
-                "they don't have any red tiles to steal",
-            ));
-        }
-        let len = self.player_red_tiles[target].len();
-        let index = len as i32 - n;
-        if index < 0 || index as usize >= len {
-            return Err(GameError::invalid_input(format!(
-                "invalid tile number, you need to pick something between 1 and {}",
-                len
-            )));
-        }
-        let idx = index as usize;
-        let t = self.player_red_tiles[target].remove(idx);
-        self.player_red_tiles[player].push(t);
-        let mut logs = self.steal_log(player, target, &t);
-        logs.extend(self.next_player());
-        Ok(logs)
+        self.steal(player, target, TileType::Red, n)
     }
 
     fn steal_log(&self, player: usize, target: usize, tile: &Tile) -> Vec<Log> {
@@ -526,43 +550,34 @@ impl Game {
 
     pub fn take_worst(&mut self) -> Vec<Log> {
         let player = self.current_player;
-        if !self.red_tiles.is_empty() {
-            let mut min_idx = 0;
-            let mut min_val = self.red_tiles[0].value;
-            for (i, t) in self.red_tiles.iter().enumerate() {
-                if t.value < min_val {
-                    min_val = t.value;
-                    min_idx = i;
-                }
-            }
-            let t = self.red_tiles.remove(min_idx);
-            self.player_red_tiles[player].push(t);
-            let mut logs = vec![Log::public(vec![
-                N::Player(player),
-                N::text(" is forced to take "),
-                N::Bold(vec![render::tile(&t)]),
-            ])];
-            logs.extend(self.next_player());
-            logs
+        let kind = if self.red_tiles.is_empty() {
+            TileType::Blue
         } else {
-            let mut min_idx = 0;
-            let mut min_val = self.blue_tiles[0].value;
-            for (i, t) in self.blue_tiles.iter().enumerate() {
-                if t.value < min_val {
-                    min_val = t.value;
-                    min_idx = i;
-                }
-            }
-            let t = self.blue_tiles.remove(min_idx);
-            self.player_blue_tiles[player].push(t);
-            let mut logs = vec![Log::public(vec![
-                N::Player(player),
-                N::text(" is forced to take "),
-                N::Bold(vec![render::tile(&t)]),
-            ])];
-            logs.extend(self.next_player());
-            logs
+            TileType::Red
+        };
+        let pile = match kind {
+            TileType::Blue => &mut self.blue_tiles,
+            TileType::Red => &mut self.red_tiles,
+        };
+        // Unreachable with both piles empty: the game would be finished and
+        // `command_parser` returns `None`. `min_by_key` keeps the FIRST
+        // minimum, matching the hand-rolled strict-`<` loop it replaces
+        // (c F33).
+        let Some((min_idx, _)) = pile.iter().enumerate().min_by_key(|(_, t)| t.value) else {
+            return vec![];
+        };
+        let t = pile.remove(min_idx);
+        match kind {
+            TileType::Blue => self.player_blue_tiles[player].push(t),
+            TileType::Red => self.player_red_tiles[player].push(t),
         }
+        let mut logs = vec![Log::public(vec![
+            N::Player(player),
+            N::text(" is forced to take "),
+            N::Bold(vec![render::tile(&t)]),
+        ])];
+        logs.extend(self.next_player());
+        logs
     }
 
     pub fn roll_dice_cmd(
@@ -713,7 +728,16 @@ impl Gamer for Game {
                 value: Command::Roll(dice),
                 ..
             }) => {
-                let logs = self.roll_dice_cmd(player, &dice)?;
+                let mut logs = self.roll_dice_cmd(player, &dice)?;
+                // The game can finish here via the forced `take_worst`
+                // inside `roll_dice_cmd`; emit the same placings log as the
+                // take and steal arms (c F30).
+                if self.is_finished() {
+                    let scores: Vec<(usize, i32)> = (0..self.players)
+                        .map(|p| (p, self.player_score(p)))
+                        .collect();
+                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                }
                 Ok(CommandResponse {
                     logs,
                     can_undo: false,
@@ -1735,5 +1759,135 @@ mod test {
         // Should have taken 1 (the minimum blue)
         assert_eq!(1, g.player_blue_tiles[0].len());
         assert_eq!(1, g.player_blue_tiles[0][0].value);
+    }
+
+    #[test]
+    fn test_steal_blue_rejects_extreme_negative_tile_number() {
+        // c F29: `Int::any()` parses i32::MIN, and `len as i32 - n` then
+        // overflows - a crafted command string panics the process in every
+        // overflow-checked build.
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        let n = names();
+        g.player_blue_tiles[BJ] = vec![Tile {
+            kind: TileType::Blue,
+            value: 3,
+        }];
+        g.kept_dice = vec![
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+            DieFace::Bones,
+        ];
+        g.rolled_dice = vec![];
+        let err = g
+            .command(MICK, "steal bj blue -2147483648", &n)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("invalid tile number"),
+            "unexpected error: {}",
+            err
+        );
+        assert_eq!(1, g.player_blue_tiles[BJ].len(), "no tile may move");
+        assert!(g.player_blue_tiles[MICK].is_empty());
+    }
+
+    #[test]
+    fn test_steal_red_rejects_extreme_negative_tile_number() {
+        // c F29, the identical duplicated branch in `steal_red`.
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        let n = names();
+        g.player_red_tiles[STEVE] = vec![Tile {
+            kind: TileType::Red,
+            value: -3,
+        }];
+        g.kept_dice = vec![
+            DieFace::RedChopsticks,
+            DieFace::RedChopsticks,
+            DieFace::RedChopsticks,
+            DieFace::RedChopsticks,
+            DieFace::Sushi,
+        ];
+        g.rolled_dice = vec![];
+        let err = g
+            .command(MICK, "steal ste red -2147483648", &n)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("invalid tile number"),
+            "unexpected error: {}",
+            err
+        );
+        assert_eq!(1, g.player_red_tiles[STEVE].len(), "no tile may move");
+    }
+
+    #[test]
+    fn test_steal_tile_number_bounds_are_inclusive() {
+        // c F29 regression fence: 1..=len must stay accepted and len+1
+        // rejected, so the new guard cannot drift from the old one.
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        let n = names();
+        let stack = vec![
+            Tile {
+                kind: TileType::Blue,
+                value: 3,
+            },
+            Tile {
+                kind: TileType::Blue,
+                value: 1,
+            },
+        ];
+        g.player_blue_tiles[BJ] = stack.clone();
+        g.kept_dice = vec![
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+            DieFace::Bones,
+        ];
+        g.rolled_dice = vec![];
+        assert!(g.command(MICK, "steal bj blue 3", &n).is_err(), "len + 1");
+        assert!(g.command(MICK, "steal bj blue 0", &n).is_err(), "zero");
+        // n == len is the bottom of the stack and must succeed.
+        g.command(MICK, "steal bj blue 2", &n).unwrap();
+        assert_eq!(vec![stack[0]], g.player_blue_tiles[MICK]);
+    }
+
+    #[test]
+    fn test_roll_finishing_via_take_worst_logs_placings() {
+        // c F30: the game can finish inside `roll_dice_cmd` via the forced
+        // `take_worst`, and that path must emit the placings log like the
+        // take and steal arms do.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let n = names();
+        // One blue tile left, no red tiles.
+        g.blue_tiles = vec![Tile {
+            kind: TileType::Blue,
+            value: 2,
+        }];
+        g.red_tiles = vec![];
+        g.player_blue_tiles = vec![vec![], vec![]];
+        g.player_red_tiles = vec![vec![], vec![]];
+        g.current_player = MICK;
+        g.remaining_rolls = 1;
+        // Two sushi already kept means `sushi >= 2 > blue_tiles.len()`, so
+        // `can_take_blue` stays false whatever the re-roll produces; red is
+        // empty so `can_take_red` is false; nobody else holds tiles so
+        // `can_steal` is false. That forces `take_worst`.
+        g.kept_dice = vec![DieFace::Sushi, DieFace::Sushi];
+        g.rolled_dice = vec![DieFace::Bones, DieFace::Bones];
+
+        let resp = g.command(MICK, "roll 1", &n).unwrap();
+        assert!(g.is_finished(), "the forced take must empty the last pile");
+        let text = resp
+            .logs
+            .iter()
+            .map(|l| brdgme_markup::plain(&brdgme_markup::transform(&l.content, &[])))
+            .collect::<Vec<String>>()
+            .join("\n");
+        assert!(
+            text.contains("Final scores:"),
+            "the roll path must emit the placings log, got: {}",
+            text
+        );
     }
 }

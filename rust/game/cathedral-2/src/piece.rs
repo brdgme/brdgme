@@ -55,7 +55,7 @@ fn p(player: i32, typ: i32, positions: &[(i32, i32)], directional: bool) -> Piec
 }
 
 /// Port of `Pieces[0]` (`piece.go`): player 0's 14 pieces, indices `0..13`.
-fn player_0_pieces() -> Vec<Piece> {
+pub fn player_0_pieces() -> Vec<Piece> {
     vec![
         p(0, 1, &[(0, 0), (0, 1), (-1, 1), (0, 2), (1, 2)], true),
         p(0, 2, &[(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)], true),
@@ -76,7 +76,7 @@ fn player_0_pieces() -> Vec<Piece> {
 
 /// Port of `Pieces[1]` (`piece.go`): player 1's 15 pieces, index 0 is the
 /// Cathedral (`PlayerType{PlayerCathedral, 1}`).
-fn player_1_pieces() -> Vec<Piece> {
+pub fn player_1_pieces() -> Vec<Piece> {
     vec![
         p(
             PLAYER_CATHEDRAL,
@@ -103,10 +103,14 @@ fn player_1_pieces() -> Vec<Piece> {
 
 /// Port of the `Pieces` package var (`piece.go`), the full piece catalogue
 /// keyed by player index (0 or 1).
-pub fn pieces(player: i32) -> Vec<Piece> {
+///
+/// Returns `None` for any other index rather than panicking: the request
+/// harness forwards player indices unvalidated, and an `Option` keeps
+/// "not a player" distinguishable from "no pieces left" (c F25).
+pub fn pieces(player: i32) -> Option<Vec<Piece>> {
     match player {
-        0 => player_0_pieces(),
-        1 => player_1_pieces(),
-        _ => panic!("invalid player: {}", player),
+        0 => Some(player_0_pieces()),
+        1 => Some(player_1_pieces()),
+        _ => None,
     }
 }

@@ -22,7 +22,7 @@ use brdgme_markup::Node as N;
 
 use command::Command;
 use loc::{Dir, Loc, ORTHO_DIRS};
-use piece::pieces;
+use piece::{Piece, pieces};
 use tile::{NO_PLAYER, PLAYER_CATHEDRAL, PlayerType, Tile, empty_tile};
 
 const PLAYERS: usize = 2;
@@ -82,11 +82,32 @@ pub enum LocFilter {
 }
 
 impl Game {
+    /// The tile at `loc`, or `empty_tile()` if `loc` is off the board.
+    ///
+    /// The off-board guard mirrors `render.rs`'s `Tiler` implementation so
+    /// both `tile_at`s share one contract: `Loc::to_key` assumes `0..=9` on
+    /// both axes and overflows on a negative `y`. Note this is the permissive
+    /// direction - off-board reads as empty AND unowned - so placement
+    /// legality still depends on the separate `!l.valid()` check in
+    /// `can_play_piece` (c F26).
     fn tile_at(&self, loc: Loc) -> Tile {
+        if !loc.valid() {
+            return empty_tile();
+        }
         self.board
             .get(&loc.to_key())
             .cloned()
             .unwrap_or_else(empty_tile)
+    }
+
+    /// The piece catalogue for `player`, or `None` if `player` is not a
+    /// player in this game. This is the single game-aware player-index check
+    /// (`piece::pieces` alone cannot know `self.players`) (c F25).
+    fn player_pieces(&self, player: i32) -> Option<Vec<Piece>> {
+        if player < 0 || player as usize >= self.players {
+            return None;
+        }
+        pieces(player)
     }
 
     fn loc_filter_matches(&self, filter: LocFilter, player: i32, loc: Loc) -> bool {
@@ -122,7 +143,10 @@ impl Game {
         loc: Loc,
         dir: Dir,
     ) -> Result<(), String> {
-        let all_pieces = pieces(player);
+        let all_pieces = match self.player_pieces(player) {
+            Some(p) => p,
+            None => return Err("that is not a player in this game".to_string()),
+        };
         if piece < 0 || piece as usize > all_pieces.len() {
             return Err("that is not a valid piece number".to_string());
         }
@@ -170,7 +194,16 @@ impl Game {
         }
 
         let mut logs: Vec<Log> = vec![];
-        let all_pieces = pieces(player);
+        // Unreachable in practice: `can_play` above already rejects an
+        // out-of-range player. Kept total so no future reordering can panic.
+        let all_pieces = match self.player_pieces(player) {
+            Some(p) => p,
+            None => {
+                return Err(GameError::invalid_input(
+                    "that is not a player in this game",
+                ));
+            }
+        };
         let p = all_pieces[piece as usize].clone();
         let n = rotation_n(dir);
         let rotated = loc::rotate_locs(&p.positions, n);
@@ -217,7 +250,9 @@ impl Game {
                 content.push(N::Player(pl));
                 content.push(N::text(" - "));
                 content.push(N::Bold(vec![N::text(
-                    self.remaining_piece_size(pl as i32).to_string(),
+                    self.remaining_piece_size(pl as i32)
+                        .unwrap_or(0)
+                        .to_string(),
                 )]));
             }
             logs.push(Log::public(content));
@@ -279,6 +314,14 @@ impl Game {
             let mut area: Vec<Loc> = vec![];
             let mut pieces_found: std::collections::HashSet<PlayerType> =
                 std::collections::HashSet::new();
+            // The area walk blocks only on the capturing player's own
+            // pieces. Cathedral tiles (`PLAYER_CATHEDRAL`) deliberately do
+            // NOT block it: per RULES.md "3. Captures resolve
+            // automatically", the Cathedral counts as a piece *identity*
+            // found inside an enclosed region, not as part of the enclosing
+            // wall. Verbatim Go parity with `CheckCaptures`
+            // (`play_command.go`). Intended behaviour, not a preserved
+            // defect (c F23).
             loc::walk(l, &all_dirs, |l2| {
                 if visited.contains(&l2) || self.tile_at(l2).player == player {
                     return loc::WALK_BLOCKED;
@@ -340,24 +383,34 @@ impl Game {
     }
 
     /// Port of `Game.RemainingPieceSize` (`game.go`).
-    pub fn remaining_piece_size(&self, player: i32) -> i32 {
-        let all_pieces = pieces(player);
+    ///
+    /// `None` when `player` is not a player in this game - this feeds
+    /// scoring (`points`, `calc_placings`, the final-scores log), so a
+    /// fabricated `0` would be a silent wrong answer (c F25).
+    pub fn remaining_piece_size(&self, player: i32) -> Option<i32> {
+        let all_pieces = self.player_pieces(player)?;
         let mut sum = 0i32;
         for (i, p) in all_pieces.iter().enumerate() {
             if !self.played_pieces[player as usize][i] {
                 sum += p.positions.len() as i32;
             }
         }
-        sum
+        Some(sum)
     }
 
     /// Port of `Game.CanPlaySomething` (`game.go`).
     pub fn can_play_something(&self, player: i32, filter: LocFilter) -> bool {
+        // Hoisted out of the location loop: the catalogue is identical for
+        // every location, and rebuilding it 100 times per call was pure
+        // waste. `None` means `player` is not a player in this game, which
+        // can play nothing (c F25).
+        let Some(all_pieces) = self.player_pieces(player) else {
+            return false;
+        };
         for l in loc::all_locs() {
             if !self.loc_filter_matches(filter, player, l) {
                 continue;
             }
-            let all_pieces = pieces(player);
             // Try to play the easiest one first.
             for i in (0..all_pieces.len()).rev() {
                 if self.played_pieces[player as usize][i] {
@@ -391,8 +444,9 @@ impl Game {
 
     /// Port of `Game.Placings` (`game.go`).
     fn calc_placings(&self) -> Vec<usize> {
+        // `p` is always in `0..self.players`, so `None` is unreachable.
         let metrics: Vec<Vec<i32>> = (0..self.players)
-            .map(|p| vec![-self.remaining_piece_size(p as i32)])
+            .map(|p| vec![-self.remaining_piece_size(p as i32).unwrap_or(0)])
             .collect();
         gen_placings(&metrics)
     }
@@ -428,7 +482,10 @@ impl Gamer for Game {
         for l in loc::all_locs() {
             board.insert(l.to_key(), empty_tile());
         }
-        let played_pieces = vec![vec![false; pieces(0).len()], vec![false; pieces(1).len()]];
+        let played_pieces = vec![
+            vec![false; piece::player_0_pieces().len()],
+            vec![false; piece::player_1_pieces().len()],
+        ];
         let g = Game {
             players,
             board,
@@ -464,6 +521,12 @@ impl Gamer for Game {
         input: &str,
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
+        if player >= self.players {
+            return Err(GameError::internal(format!(
+                "player {} is not a player in this game ({} players)",
+                player, self.players
+            )));
+        }
         let output = match self.command_parser(player as i32) {
             Some(cp) => cp,
             None => {
@@ -482,7 +545,7 @@ impl Gamer for Game {
                 let mut logs = self.play(player as i32, piece, loc, dir)?;
                 if self.is_finished() {
                     let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, -self.remaining_piece_size(p as i32)))
+                        .map(|p| (p, -self.remaining_piece_size(p as i32).unwrap_or(0)))
                         .collect();
                     logs.push(placings_log(&self.placings(), Some(&scores)));
                 }
@@ -516,7 +579,7 @@ impl Gamer for Game {
 
     fn points(&self) -> Vec<f32> {
         (0..self.players)
-            .map(|p| self.remaining_piece_size(p as i32) as f32)
+            .map(|p| self.remaining_piece_size(p as i32).unwrap_or(0) as f32)
             .collect()
     }
 
@@ -1034,8 +1097,16 @@ C1C1C1..........G4G4
     #[test]
     fn points_returns_raw_remaining_piece_size() {
         let (g, _) = Game::start(2, 1).unwrap();
-        let expected0: i32 = pieces(0).iter().map(|p| p.positions.len() as i32).sum();
-        let expected1: i32 = pieces(1).iter().map(|p| p.positions.len() as i32).sum();
+        let expected0: i32 = pieces(0)
+            .unwrap()
+            .iter()
+            .map(|p| p.positions.len() as i32)
+            .sum();
+        let expected1: i32 = pieces(1)
+            .unwrap()
+            .iter()
+            .map(|p| p.positions.len() as i32)
+            .sum();
         assert_eq!(vec![expected0 as f32, expected1 as f32], g.points());
     }
 
@@ -1271,5 +1342,81 @@ C1C1C1..G1G1G.G.G1G.
         );
         let markup = brdgme_game::Renderer::render(&g.pub_state());
         assert!(!markup.is_empty());
+    }
+
+    #[test]
+    fn tile_at_returns_empty_for_off_board_locations() {
+        // c F26: `Loc::to_key` computes `b'A' + y as u8`, which overflows for
+        // negative y (panic in overflow-checked builds) and yields a garbage
+        // key above row J. `Game::tile_at` must reject off-board locations
+        // before keying, matching render.rs's `Tiler` guard.
+        let (g, _) = Game::start(2, 1).unwrap();
+        for l in [
+            Loc::new(-1, -1),
+            Loc::new(0, -1),
+            Loc::new(-1, 0),
+            Loc::new(0, 10),
+            Loc::new(10, 0),
+            Loc::new(-5, 42),
+        ] {
+            let t = g.tile_at(l);
+            assert_eq!(NO_PLAYER, t.player, "{:?} must read as empty", l);
+            assert_eq!(NO_PLAYER, t.owner, "{:?} must read as unowned", l);
+        }
+        // On-board reads are unaffected.
+        assert_eq!(NO_PLAYER, g.tile_at(Loc::new(0, 0)).player);
+        assert_eq!(NO_PLAYER, g.tile_at(Loc::new(9, 9)).player);
+    }
+
+    #[test]
+    fn out_of_range_player_is_rejected_not_panicked() {
+        // c F25: the request harness forwards the player index unvalidated
+        // (rust/lib/cmd/src/requester/gamer.rs:125-135, :170-182), so an
+        // out-of-range index must produce an error, not kill the process.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        // `no_open_tiles` routes `can_play` through `can_play_something`,
+        // which is the path that reaches the piece catalogue.
+        g.no_open_tiles = true;
+
+        let err = g.command(2, "play 1 a1 down", &players()).unwrap_err();
+        assert!(
+            err.to_string().contains("not a player in this game"),
+            "unexpected error: {}",
+            err
+        );
+        assert!(g.command_spec(2).is_none());
+        assert!(g.command_spec(0).is_some());
+        assert!(!g.can_play_something(2, LocFilter::Playable));
+        assert!(!g.can_play(2));
+    }
+
+    #[test]
+    fn remaining_piece_size_is_none_for_a_non_player() {
+        // c F25: scoring must not fabricate a 0 for a player who does not
+        // exist - `None` forces the caller to decide.
+        let (g, _) = Game::start(2, 1).unwrap();
+        assert!(g.remaining_piece_size(0).is_some());
+        assert!(g.remaining_piece_size(1).is_some());
+        assert_eq!(None, g.remaining_piece_size(2));
+        assert_eq!(None, g.remaining_piece_size(-1));
+    }
+
+    #[test]
+    fn player_state_render_survives_a_non_player_index() {
+        // c F25: `Gamer::player_state` cannot return a Result, so the render
+        // must degrade to an explicit marker instead of panicking or showing
+        // a fictitious empty hand.
+        let (g, _) = Game::start(2, 1).unwrap();
+        let markup = brdgme_game::Renderer::render(&g.player_state(2));
+        let text = brdgme_markup::plain(&brdgme_markup::transform(&markup, &[]));
+        assert!(
+            text.contains("not a player in this game"),
+            "expected the non-player marker, got: {}",
+            text
+        );
+        // A real player still renders their catalogue, not the marker.
+        let markup = brdgme_game::Renderer::render(&g.player_state(0));
+        let text = brdgme_markup::plain(&brdgme_markup::transform(&markup, &[]));
+        assert!(!text.contains("not a player in this game"));
     }
 }

@@ -356,7 +356,19 @@ fn render_piece(p: &Piece) -> Vec<N> {
 /// (mirroring Go's per-flush `render.Table` calls, each prefixed by a
 /// literal `"\n"`), not as multiple rows of one shared table.
 fn render_player_remaining_tiles(state: &PubState, p_num: usize) -> Vec<N> {
-    let all_pieces = piece::pieces(p_num as i32);
+    // `Gamer::player_state` cannot reject an out-of-range player (the trait
+    // returns `Self::PlayerState`, not a `Result`), so the render is where
+    // the index is checked. Say so explicitly rather than showing an empty
+    // hand for a player who does not exist (c F25).
+    let all_pieces = match piece::pieces(p_num as i32) {
+        Some(p) if p_num < state.players && p_num < state.played_pieces.len() => p,
+        _ => {
+            return vec![N::Bold(vec![N::Fg(
+                NamedColor::Grey.into(),
+                vec![N::text("not a player in this game")],
+            )])];
+        }
+    };
     let mut nodes: Vec<N> = vec![];
     let mut current_cells: Row = vec![];
     let mut cur_width: i32 = 0;
