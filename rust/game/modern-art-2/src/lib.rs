@@ -307,6 +307,7 @@ impl Game {
             "It is the end of the round",
         )])])];
         self.currently_auctioning = vec![];
+        self.state = State::PlayCard;
         let mut counts: HashMap<Suit, usize> = HashMap::new();
         for s in suits() {
             counts.insert(s, self.suit_cards_on_table(s));
@@ -1253,5 +1254,27 @@ mod test {
             BJ, g.current_player,
             "STEVE (no cards) skipped; BJ still holds a card"
         );
+    }
+
+    #[test]
+    fn game_end_via_fifth_card_leaves_no_stale_auction() {
+        let p = players(4);
+        let mut g = mock_game();
+        let lm_open = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        };
+        g.round = 3;
+        g.player_purchases[MICK] = vec![lm_open, lm_open];
+        g.player_purchases[STEVE] = vec![lm_open];
+        g.player_purchases[BJ] = vec![lm_open];
+        g.player_hands[MICK].push(lm_open);
+        g.command(MICK, "play lmop", &p).unwrap();
+        assert!(g.is_finished());
+        let ps = g.pub_state();
+        assert!(!ps.is_auction, "finished game must not report an auction");
+        assert!(ps.auctioning.is_empty());
+        assert_eq!(None, ps.auction_type);
+        assert_eq!(None, ps.current_bid, "no bogus $0 bid on the final screen");
     }
 }
