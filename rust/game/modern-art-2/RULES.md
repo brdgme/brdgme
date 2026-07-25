@@ -60,7 +60,7 @@ The auction type printed on the card determines how it's sold:
   amount (`bid 8`) or passes (bids of $0). Once everyone has responded, the
   highest bid wins; bids and passes are not revealed to other players as they
   happen.
-- **Double** - Works like Open, Fixed Price, or Sealed depending on the second
+- **Double** - Works like Open, Fixed Price, Sealed, or Once Around depending on the second
   card added, with one exception: any player, including the auctioneer, may
   add a second card of the *same artist* (but not another Double) to the
   auction with `add <card>` before bidding starts. Both cards go to the
@@ -72,8 +72,10 @@ The auction type printed on the card determines how it's sold:
 
 Whoever wins the auction pays their bid: to the auctioneer if someone else
 wins, or to the bank if the auctioneer wins their own auction. The winner
-adds the card(s) to their purchases (face-up, public knowledge) and it
-becomes their turn next.
+adds the card(s) to their purchases (face-up, public knowledge). The next
+turn then passes to the player on the auctioneer's left (for a Double
+auction where a second card was added, to the left of the player who added
+it).
 
 If a player has no cards in hand when it becomes their turn, they're skipped.
 
