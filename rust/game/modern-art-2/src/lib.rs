@@ -1277,4 +1277,31 @@ mod test {
         assert_eq!(None, ps.auction_type);
         assert_eq!(None, ps.current_bid, "no bogus $0 bid on the final screen");
     }
+
+    #[test]
+    fn no_current_bid_line_before_any_bid() {
+        use brdgme_game::Renderer;
+        let p = players(4);
+        let mut g = mock_game();
+        g.current_player = BJ;
+        g.player_hands[BJ].push(Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        });
+        g.command(BJ, "play lmop", &p).unwrap();
+        let no_bids = brdgme_markup::plain(&brdgme_markup::transform(&g.pub_state().render(), &[]));
+        assert!(
+            !no_bids.contains("Current bid"),
+            "no bid line before any bid, got:\n{}",
+            no_bids
+        );
+        g.command(STEVE, "bid 10", &p).unwrap();
+        let with_bid =
+            brdgme_markup::plain(&brdgme_markup::transform(&g.pub_state().render(), &[]));
+        assert!(
+            with_bid.contains("Current bid: $10"),
+            "real bids must still render, got:\n{}",
+            with_bid
+        );
+    }
 }

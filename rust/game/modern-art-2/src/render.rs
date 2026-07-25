@@ -61,6 +61,7 @@ fn render(
         out.push(N::text("\n\n"));
         if pub_state.auction_type != Some(Rank::Sealed)
             && let Some((bidder, bid)) = pub_state.current_bid
+            && bid > 0
         {
             out.push(N::Bold(vec![N::text("Current bid:")]));
             out.push(N::text(" "));
