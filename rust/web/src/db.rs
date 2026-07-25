@@ -1,3 +1,58 @@
+//! Database access layer.
+//!
+//! # `updated_at` convention
+//!
+//! `migrations/001_initial_schema.sql:25-32` defines `update_updated_at()` and
+//! attaches it as a BEFORE UPDATE trigger (001:392-446) to these 14 tables:
+//! `users`, `user_emails`, `user_auth_tokens`, `friends`, `chats`,
+//! `chat_users`, `chat_messages`, `game_types`, `game_type_users`,
+//! `game_versions`, `games`, `game_players`, `game_logs`, `game_log_targets`.
+//! The trigger overwrites `NEW.updated_at` unconditionally, so **never write
+//! `updated_at` by hand in an UPDATE against one of those tables** - the
+//! assignment is dead SQL (ws F36).
+//!
+//! Tables added by later migrations have `updated_at` columns but **no
+//! trigger**: `bots` and `llm_providers` (013_bot_efficacy.sql:10,20) and
+//! `game_proposals` / `game_proposal_players` (015_game_proposals.sql:8,22).
+//! Manual `updated_at` maintenance on those tables is REQUIRED - see
+//! `delete_game`, which nulls two `game_proposals` FK columns and must keep
+//! its manual sets.
+//!
+//! Three other BEFORE UPDATE triggers are conditional and are NOT substitutes
+//! for an explicit write: `update_finished_at` fires only on `is_finished`
+//! false -> true (001:448-452), `update_is_turn_at` only on `is_turn`
+//! false -> true (001:454-458), and `update_last_turn_at` only on `is_turn`
+//! true -> false (001:460-464).
+//!
+//! # Module map
+//!
+//! This file is deliberately one module (a split is tracked as review finding
+//! ws F42, deferred while several decision-blocked work packages still have
+//! pending edits here). Section order:
+//!
+//! - row builders (`build_*_from_row`, `build_game_type_user`)
+//! - lookups and getters (`get_user*`, `find_game*`, `find_*_summaries`)
+//! - username and colour helpers (`validate_username`,
+//!   `generate_unique_username`, `choose_colors`)
+//! - game lifecycle writes (`create_game_with_users*`, `concede_game*`,
+//!   `end_game`, `delete_game`, `undo_game`)
+//! - logs and ELO (`insert_game_logs_tx`, `elo_*`, `write_ranked_placings`,
+//!   `apply_rating_changes`)
+//! - the command write path (`update_game_command_success`)
+//! - theme and presence
+//! - `#30` friends and blocks
+//! - game-visibility predicates (`is_game_visible_to_user` and friends)
+//! - invite policy, user search, user settings
+//! - `#22d` multiple emails per account
+//! - `#[cfg(all(test, feature = "ssr"))] mod tests`
+//!
+//! Every production item is individually `#[cfg(feature = "ssr")]`-gated -
+//! there is no module-level gate. The single exception is
+//! `validate_username`, which is ungated so the client-side settings form and
+//! the server fns share one definition. The other pure predicates
+//! (`active_within_window`, `can_remove_email`, `can_switch_to_email`,
+//! `is_expired_unverified`, `cap_digest`) are `ssr`-gated even though they are
+//! pure; every caller is server-side, so leave them gated.
 #[cfg(feature = "ssr")]
 use crate::game::StatusUpdate;
 #[cfg(feature = "ssr")]
@@ -53,6 +108,23 @@ fn build_game_bot_from_row(
     }))
 }
 
+/// Builds a `GameTypeUser` from LEFT-JOINed columns, synthesizing a default row
+/// when the join produced NULLs (a player who has not been rated in this game
+/// type yet).
+///
+/// **The synthetic row is marked by `id == Uuid::nil()`** and carries
+/// `rating = peak_rating = 1200`, matching the `game_type_users.rating` column
+/// default, with `last_game_finished_at = None`, `created_at`/`updated_at` set
+/// to the caller's `default_ts`, and `user_id = default_user_id` (also
+/// `Uuid::nil()` when the caller had no user id, i.e. a bot slot). That is
+/// deliberate - new
+/// players start at 1200 and the render path wants a value, not an `Option` -
+/// but it means callers cannot tell "no rating row yet" from "a real row
+/// sitting at 1200" except via the nil id. No caller reads `id` today (the
+/// only field consumed off this struct outside db.rs is `rating`, at
+/// `game/server_fns.rs:369`); if one ever needs the distinction, change the
+/// return type to `Option<GameTypeUser>` rather than adding nil-id checks at
+/// call sites (ws F43).
 #[cfg(feature = "ssr")]
 // Splitting these into a params struct would be a larger refactor than warranted here.
 #[allow(clippy::too_many_arguments)]
@@ -564,7 +636,7 @@ pub async fn is_player_in_game(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> R
 /// exist. Written as a plain (non-macro) query, matching `get_user_theme`
 /// below.
 #[cfg(feature = "ssr")]
-pub async fn is_user_admin(pool: &PgPool, user_id: Uuid) -> sqlx::Result<bool> {
+pub async fn is_user_admin(pool: &PgPool, user_id: Uuid) -> Result<bool> {
     let row: Option<(bool,)> = sqlx::query_as("SELECT is_admin FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(pool)
@@ -859,6 +931,16 @@ pub fn validate_username(name: &str) -> bool {
 /// safe) and is case-insensitively unused. Long words make regeneration
 /// expected and cheap. The uuid fallback is unreachable in practice but keeps
 /// this total. Takes a connection so it can run inside callers' transactions.
+/// **Race note (ws F46):** the availability SELECT and the caller's INSERT are
+/// separate statements, so a concurrent transaction can claim the same
+/// generated name in between. The `users_name_lower_key` unique index
+/// (migrations/009_username_rules.sql:41) is the actual guarantee; the loser
+/// gets a 23505 that surfaces as a failed account/game creation. Retrying here
+/// is not possible: every caller runs this inside an open transaction
+/// (auth/server.rs:439, game/import.rs:181, proposals.rs:902,
+/// db.rs `create_game_with_users_tx`), where a 23505 aborts the whole
+/// transaction, so a retry would need SAVEPOINT plumbing in four modules. The
+/// petname space plus the 100-attempt loop makes a collision vanishingly rare.
 #[cfg(feature = "ssr")]
 pub async fn generate_unique_username(conn: &mut sqlx::PgConnection) -> Result<String> {
     for _ in 0..100 {
@@ -974,13 +1056,16 @@ fn choose_colors(prefs: &[Vec<String>], palette: &[&str]) -> Vec<String> {
     rem_prefs.shuffle(&mut rng);
 
     'outer: loop {
-        for (pos, pref) in rem_prefs.clone() {
-            if assigned.contains_key(&pos) || pref.is_empty() {
+        // Iterate by reference: the body mutates only `assigned` and
+        // `remaining`, never `rem_prefs`, so the old per-pass clone of the
+        // whole vec bought nothing (ws F49).
+        for (pos, pref) in &rem_prefs {
+            if assigned.contains_key(pos) || pref.is_empty() {
                 continue;
             }
             let want_color = &pref[0];
             if let Some(idx) = remaining.iter().position(|c| c == want_color) {
-                assigned.insert(pos, remaining.remove(idx));
+                assigned.insert(*pos, remaining.remove(idx));
             }
             if remaining.is_empty() {
                 break 'outer;
@@ -1220,9 +1305,16 @@ pub async fn create_game_with_users_tx(
     Ok(game)
 }
 
-/// Inserts game logs within an existing transaction, so callers can commit
-/// them atomically alongside other writes (e.g. the game state update in
-/// `update_game_command_success`).
+/// Inserts a command's logs and their per-player targets inside the caller's
+/// transaction.
+///
+/// Deliberately row-at-a-time: 1 + N + M sequential statements, where N is the
+/// number of logs produced by a single game command (single digits in practice)
+/// and M their targets. Reviewed as ws F41 and left alone - batching via
+/// `UNNEST` would trade three compile-time-checked `query!` macros for
+/// hand-verified offline metadata with no measured benefit. Revisit if a game
+/// ever emits logs in the hundreds per command, or if this shows up in a real
+/// profile.
 #[cfg(feature = "ssr")]
 pub async fn insert_game_logs_tx(
     tx: &mut sqlx::PgConnection,
@@ -1297,7 +1389,7 @@ pub async fn concede_game(
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
-        "UPDATE games SET is_finished = true, finished_at = NOW(), updated_at = NOW() WHERE id = $1",
+        "UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1",
         game_id
     )
     .execute(&mut *tx)
@@ -1318,7 +1410,7 @@ pub async fn concede_game(
         sqlx::query(
             r#"UPDATE game_players
                SET is_turn = false, place = $1, undo_game_state = NULL,
-                   turn_reminder_sent_at = NULL, updated_at = NOW()
+                   turn_reminder_sent_at = NULL
                WHERE id = $2"#,
         )
         .bind(place)
@@ -1394,7 +1486,7 @@ pub async fn concede_game_replace(
     sqlx::query(
         r#"UPDATE game_players
            SET is_turn = false, game_bot_id = $1, left_at = NOW(),
-               undo_game_state = NULL, turn_reminder_sent_at = NULL, updated_at = NOW()
+               undo_game_state = NULL, turn_reminder_sent_at = NULL
            WHERE id = $2"#,
     )
     .bind(bot.id)
@@ -1424,7 +1516,7 @@ pub async fn end_game(pool: &PgPool, game_id: Uuid) -> Result<()> {
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
-        "UPDATE games SET is_finished = true, finished_at = NOW(), updated_at = NOW() WHERE id = $1",
+        "UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1",
         game_id
     )
     .execute(&mut *tx)
@@ -1441,7 +1533,7 @@ pub async fn end_game(pool: &PgPool, game_id: Uuid) -> Result<()> {
         sqlx::query(
             r#"UPDATE game_players
                SET place = $1, is_turn = false, undo_game_state = NULL,
-                   turn_reminder_sent_at = NULL, updated_at = NOW()
+                   turn_reminder_sent_at = NULL
                WHERE id = $2"#,
         )
         .bind(place)
@@ -1476,13 +1568,16 @@ pub async fn delete_game(pool: &PgPool, game_id: Uuid) -> Result<bool> {
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
-        "UPDATE games SET restarted_game_id = NULL, updated_at = NOW() WHERE restarted_game_id = $1",
+        "UPDATE games SET restarted_game_id = NULL WHERE restarted_game_id = $1",
         game_id
     )
     .execute(&mut *tx)
     .await?;
     // game_proposals (migration 015) FK-reference games via started_game_id and
     // restarted_game_id; null both or the game delete violates those FKs.
+    // NOTE: game_proposals has NO update_updated_at trigger (see the module
+    // header), so the manual `updated_at = NOW()` in the next two statements is
+    // REQUIRED - do not sweep it away (ws F36).
     sqlx::query(
         "UPDATE game_proposals SET started_game_id = NULL, updated_at = NOW() WHERE started_game_id = $1",
     )
@@ -1523,7 +1618,7 @@ pub async fn delete_game(pool: &PgPool, game_id: Uuid) -> Result<bool> {
 #[tracing::instrument(skip(pool), fields(game_id = %game_id, user_id = %user_id))]
 pub async fn mark_game_read(pool: &PgPool, game_id: Uuid, user_id: Uuid) -> Result<()> {
     sqlx::query!(
-        "UPDATE game_players SET is_read = true, updated_at = NOW() WHERE game_id = $1 AND user_id = $2",
+        "UPDATE game_players SET is_read = true WHERE game_id = $1 AND user_id = $2",
         game_id,
         user_id
     )
@@ -1544,7 +1639,7 @@ pub async fn undo_game(
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
-        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = NULL, updated_at = NOW() WHERE id = $3",
+        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = NULL WHERE id = $3",
         undo_state,
         status.is_finished,
         game_id
@@ -1570,8 +1665,7 @@ pub async fn undo_game(
                SET is_turn = $1, is_eliminated = $2, place = $3, undo_game_state = NULL,
                    turn_reminder_sent_at = NULL,
                    left_at = CASE WHEN is_eliminated = false AND $2 = true
-                                  THEN NOW() ELSE left_at END,
-                   updated_at = NOW()
+                                  THEN NOW() ELSE left_at END
                WHERE id = $4"#,
         )
         .bind(is_turn)
@@ -1799,12 +1893,11 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
         .collect();
 
     let mut rating_changes: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
-    for (a_index, a) in rated_players
-        .iter()
-        .take(rated_players.len().saturating_sub(1))
-        .enumerate()
-    {
-        for b in rated_players.iter().skip(a_index + 1) {
+    // Each unordered pair exactly once: index `i` against the tail slice.
+    // (Was `.take(len - 1).enumerate()` + `.skip(a_index + 1)`; the `take` was
+    // redundant because the last index yields an empty tail - ws F50.)
+    for (i, a) in rated_players.iter().enumerate() {
+        for b in &rated_players[i + 1..] {
             let a_place = places.get(&a.position).copied().unwrap_or(i32::MAX);
             let b_place = places.get(&b.position).copied().unwrap_or(i32::MAX);
             let a_score: f32 = match a_place.cmp(&b_place) {
@@ -1826,7 +1919,7 @@ async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Res
         sqlx::query!(
             r#"
             UPDATE game_type_users
-            SET rating = rating + $1, peak_rating = GREATEST(peak_rating, rating + $1), updated_at = NOW()
+            SET rating = rating + $1, peak_rating = GREATEST(peak_rating, rating + $1)
             WHERE game_type_id = $2 AND user_id = $3
             "#,
             change,
@@ -1887,8 +1980,15 @@ pub async fn update_game_command_success(
 
     let mut tx = pool.begin().await?;
 
+    // `is_finished` is sticky: a finished game stays finished, matching
+    // `COALESCE($3, finished_at)` on the timestamp column. Un-finishing is
+    // `undo_game`'s job (it writes is_finished AND finished_at = NULL
+    // together); allowing a stray non-finish command to flip the flag here
+    // produced `is_finished = false` with a non-NULL `finished_at` (ws F37).
+    // `updated_at` is maintained by the update_games_updated_at trigger, so
+    // the optimistic-concurrency guard below still sees a changed value.
     let update_result = sqlx::query!(
-        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = COALESCE($3, finished_at), updated_at = NOW() WHERE id = $4 AND updated_at = $5",
+        "UPDATE games SET game_state = $1, is_finished = ($2 OR is_finished), finished_at = COALESCE($3, finished_at) WHERE id = $4 AND updated_at = $5",
         new_game_state,
         status.is_finished,
         finished_at,
@@ -1918,6 +2018,17 @@ pub async fn update_game_command_success(
         let place = status.placings.get(pos).map(|&pl| pl as i32);
         let is_eliminated = status.eliminated.contains(&pos);
         let player_points = points.get(pos).copied();
+        // `is_turn_at` is LAST TURN ACTIVITY, not "turn started": it is
+        // re-stamped on every command by a player who is still on turn, in the
+        // same statement that clears `turn_reminder_sent_at` below. That pairing
+        // is deliberate - the turn-reminder sweep gates on
+        // `turn_reminder_sent_at IS NULL AND is_turn_at < NOW() - threshold`
+        // (email/sweep.rs:64-65), so a player mid-multi-action-turn who just
+        // acted is not nagged. `find_active_turn_games` orders the switch digest
+        // by the same field, i.e. least-recently-active first. The
+        // `update_is_turn_at` trigger (migrations/001:454-458) only covers the
+        // false -> true transition and is not a substitute for this write
+        // (ws F44).
         let is_turn_at = if is_turn { now } else { p_is_turn_at };
         let is_played = p_id == played_player_id;
         let last_turn_at = p_last_turn_at;
@@ -1933,8 +2044,7 @@ pub async fn update_game_command_success(
                    undo_game_state = $5, last_turn_at = $6, is_turn_at = $7,
                    turn_reminder_sent_at = NULL,
                    left_at = CASE WHEN is_eliminated = false AND $3 = true
-                                  THEN NOW() ELSE left_at END,
-                   updated_at = NOW()
+                                  THEN NOW() ELSE left_at END
                WHERE id = $8"#,
         )
         .bind(is_turn)
@@ -1974,7 +2084,7 @@ pub async fn get_user_theme(pool: &PgPool, user_id: Uuid) -> Result<Option<Strin
 
 #[cfg(feature = "ssr")]
 pub async fn set_user_theme(pool: &PgPool, user_id: Uuid, theme: Option<&str>) -> Result<()> {
-    sqlx::query("UPDATE users SET theme = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET theme = $1 WHERE id = $2")
         .bind(theme)
         .bind(user_id)
         .execute(pool)
@@ -2051,9 +2161,37 @@ struct FriendRow {
 /// changing their mind (flip to accepted), and everything else as a silent
 /// no-op. If the target has blocked the source, this is a silent no-op too
 /// (D7): the requester must not be able to distinguish any of these.
+///
+/// Self-requests are a silent no-op (the `friends_check` CHECK constraint
+/// stays as the backstop, and `friends.rs`' server fn rejects them with a real
+/// user error before we get here) - ws F48.
+///
+/// The whole read-then-insert runs under a transaction-scoped advisory lock on
+/// the ORDERED pair, so two opposite-direction requests serialize and the
+/// second one takes the mutual-intent auto-accept branch instead of colliding
+/// with the `friends_pair_key` expression index (010_friends.sql:7-9) and
+/// returning a raw 23505 - ws F39.
 #[cfg(feature = "ssr")]
 pub async fn send_friend_request(pool: &PgPool, source: Uuid, target: Uuid) -> Result<()> {
+    if source == target {
+        // Silent no-op, matching this function's other silent paths (ws F48).
+        return Ok(());
+    }
     let mut tx = pool.begin().await?;
+    // Serialize both directions of this unordered pair for the duration of the
+    // transaction, so the read-then-insert below cannot race the opposite
+    // direction into a raw `friends_pair_key` 23505 (ws F39). Same key from
+    // either direction, and it is the only lock taken, so no deadlock is
+    // possible. Released on commit or rollback.
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(
+           hashtext(LEAST($1::uuid, $2::uuid)::text),
+           hashtext(GREATEST($1::uuid, $2::uuid)::text))",
+    )
+    .bind(source)
+    .bind(target)
+    .execute(&mut *tx)
+    .await?;
     let target_blocked_source: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2)",
     )
@@ -2088,13 +2226,10 @@ pub async fn send_friend_request(pool: &PgPool, source: Uuid, target: Uuid) -> R
         // me and I declined (my own request now = both sides opted in).
         Some(r) => {
             if r.has_accepted != Some(true) {
-                sqlx::query(
-                    "UPDATE friends SET has_accepted = TRUE,
-                     updated_at = timezone('utc', now()) WHERE id = $1",
-                )
-                .bind(r.id)
-                .execute(&mut *tx)
-                .await?;
+                sqlx::query("UPDATE friends SET has_accepted = TRUE WHERE id = $1")
+                    .bind(r.id)
+                    .execute(&mut *tx)
+                    .await?;
             }
         }
     }
@@ -2112,7 +2247,7 @@ pub async fn respond_to_friend_request(
     accept: bool,
 ) -> Result<bool> {
     let res = sqlx::query(
-        "UPDATE friends SET has_accepted = $1, updated_at = timezone('utc', now())
+        "UPDATE friends SET has_accepted = $1
          WHERE id = $2 AND target_user_id = $3 AND has_accepted IS NULL",
     )
     .bind(accept)
@@ -2338,7 +2473,7 @@ pub async fn get_invite_policy(pool: &PgPool, user_id: Uuid) -> Result<String> {
 
 #[cfg(feature = "ssr")]
 pub async fn set_invite_policy(pool: &PgPool, user_id: Uuid, policy: &str) -> Result<()> {
-    sqlx::query("UPDATE users SET invite_policy = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET invite_policy = $1 WHERE id = $2")
         .bind(policy)
         .bind(user_id)
         .execute(pool)
@@ -2359,7 +2494,7 @@ pub async fn get_game_visibility(pool: &PgPool, user_id: Uuid) -> Result<String>
 
 #[cfg(feature = "ssr")]
 pub async fn set_game_visibility(pool: &PgPool, user_id: Uuid, visibility: &str) -> Result<()> {
-    sqlx::query("UPDATE users SET game_visibility = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET game_visibility = $1 WHERE id = $2")
         .bind(visibility)
         .bind(user_id)
         .execute(pool)
@@ -2402,6 +2537,12 @@ pub async fn is_game_publicly_visible(pool: &PgPool, game_id: Uuid) -> Result<bo
 /// A game is visible to `viewer_id` iff the viewer is one of its players, OR
 /// every human player is either 'public' or ('friends' AND friends with the
 /// viewer). A 'private' player blocks all non-self viewing. Bots never block.
+/// **This predicate is duplicated once**, inlined into
+/// `friend_recent_visible_game` to avoid a per-candidate round trip (ws F40).
+/// The two are kept in step by
+/// `friend_recent_visible_game_matches_is_game_visible_to_user`; if you change
+/// the rule here, change it there and that test will tell you if you missed a
+/// case.
 #[cfg(feature = "ssr")]
 pub async fn is_game_visible_to_user(
     pool: &PgPool,
@@ -2490,6 +2631,17 @@ pub async fn find_recent_game_log_lines(
     Ok(logs)
 }
 
+/// The friend's most recently updated game that `viewer_id` may see, scanning
+/// only the `scan_limit` most recent (so an old visible game does not surface
+/// when everything recent is hidden - the pre-inlining behaviour, preserved).
+///
+/// The visibility rule is `is_game_visible_to_user`'s predicate, inlined so
+/// this is one query instead of one query per candidate (ws F40). The derived
+/// table applies the scan window first and the predicate is projected as
+/// `visible`, which keeps the window semantics identical. Keep in step with
+/// `is_game_visible_to_user`; the
+/// `friend_recent_visible_game_matches_is_game_visible_to_user` test asserts
+/// the two agree.
 #[cfg(feature = "ssr")]
 pub async fn friend_recent_visible_game(
     pool: &PgPool,
@@ -2497,26 +2649,41 @@ pub async fn friend_recent_visible_game(
     viewer_id: Uuid,
     scan_limit: i64,
 ) -> Result<Option<(Uuid, String, time::PrimitiveDateTime)>> {
-    let candidates: Vec<(Uuid, String, time::PrimitiveDateTime)> = sqlx::query_as(
-        "SELECT g.id, gt.name, g.updated_at
-         FROM game_players gp
-         JOIN games g ON g.id = gp.game_id
-         JOIN game_versions gv ON gv.id = g.game_version_id
-         JOIN game_types gt ON gt.id = gv.game_type_id
-         WHERE gp.user_id = $1
-         ORDER BY g.updated_at DESC, g.id
-         LIMIT $2",
+    Ok(sqlx::query_as(
+        "SELECT c.id, c.name, c.updated_at
+         FROM (
+           SELECT g.id, gt.name, g.updated_at,
+                  (EXISTS(SELECT 1 FROM game_players v
+                          WHERE v.game_id = g.id AND v.user_id = $3)
+                   OR NOT EXISTS(
+                     SELECT 1 FROM game_players gp2
+                     JOIN users u ON u.id = gp2.user_id
+                     WHERE gp2.game_id = g.id
+                       AND NOT (
+                         u.game_visibility = 'public'
+                         OR (u.game_visibility = 'friends' AND EXISTS(
+                           SELECT 1 FROM friends f WHERE f.has_accepted = TRUE
+                             AND ((f.source_user_id = $3 AND f.target_user_id = u.id)
+                               OR (f.target_user_id = $3 AND f.source_user_id = u.id))
+                         ))
+                       ))) AS visible
+           FROM game_players gp
+           JOIN games g ON g.id = gp.game_id
+           JOIN game_versions gv ON gv.id = g.game_version_id
+           JOIN game_types gt ON gt.id = gv.game_type_id
+           WHERE gp.user_id = $1
+           ORDER BY g.updated_at DESC, g.id
+           LIMIT $2
+         ) c
+         WHERE c.visible
+         ORDER BY c.updated_at DESC, c.id
+         LIMIT 1",
     )
     .bind(friend_user_id)
     .bind(scan_limit)
-    .fetch_all(pool)
-    .await?;
-    for (game_id, type_name, updated_at) in candidates {
-        if is_game_visible_to_user(pool, game_id, viewer_id).await? {
-            return Ok(Some((game_id, type_name, updated_at)));
-        }
-    }
-    Ok(None)
+    .bind(viewer_id)
+    .fetch_optional(pool)
+    .await?)
 }
 
 #[cfg(feature = "ssr")]
@@ -2796,7 +2963,7 @@ pub async fn get_user_name(pool: &PgPool, user_id: Uuid) -> Result<String> {
 /// `get_user_theme`.
 #[cfg(feature = "ssr")]
 pub async fn set_user_name(pool: &PgPool, user_id: Uuid, name: &str) -> Result<bool> {
-    let res = sqlx::query("UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2")
+    let res = sqlx::query("UPDATE users SET name = $1 WHERE id = $2")
         .bind(name)
         .bind(user_id)
         .execute(pool)
@@ -2824,7 +2991,7 @@ pub async fn get_user_pref_colors(pool: &PgPool, user_id: Uuid) -> Result<Vec<St
 
 #[cfg(feature = "ssr")]
 pub async fn set_user_pref_colors(pool: &PgPool, user_id: Uuid, colors: &[String]) -> Result<()> {
-    sqlx::query("UPDATE users SET pref_colors = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET pref_colors = $1 WHERE id = $2")
         .bind(colors)
         .bind(user_id)
         .execute(pool)
@@ -2849,7 +3016,7 @@ pub async fn set_user_turn_emails_enabled(
     user_id: Uuid,
     enabled: bool,
 ) -> Result<()> {
-    sqlx::query("UPDATE users SET turn_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET turn_emails_enabled = $1 WHERE id = $2")
         .bind(enabled)
         .bind(user_id)
         .execute(pool)
@@ -2863,7 +3030,7 @@ pub async fn set_user_invite_emails_enabled(
     user_id: Uuid,
     enabled: bool,
 ) -> Result<()> {
-    sqlx::query("UPDATE users SET invite_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET invite_emails_enabled = $1 WHERE id = $2")
         .bind(enabled)
         .bind(user_id)
         .execute(pool)
@@ -2877,7 +3044,7 @@ pub async fn set_user_reminder_emails_enabled(
     user_id: Uuid,
     enabled: bool,
 ) -> Result<()> {
-    sqlx::query("UPDATE users SET reminder_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET reminder_emails_enabled = $1 WHERE id = $2")
         .bind(enabled)
         .bind(user_id)
         .execute(pool)
@@ -2997,7 +3164,7 @@ pub async fn insert_unverified_email(
 #[cfg(feature = "ssr")]
 pub async fn mark_email_verified(pool: &PgPool, user_id: Uuid, email: &str) -> Result<bool> {
     let res = sqlx::query(
-        "UPDATE user_emails SET verified_at = NOW(), updated_at = NOW()
+        "UPDATE user_emails SET verified_at = NOW()
          WHERE user_id = $1 AND email = $2 AND verified_at IS NULL",
     )
     .bind(user_id)
@@ -3040,14 +3207,14 @@ pub async fn set_primary_email(
         return Ok(SetPrimaryOutcome::Unverified);
     }
     sqlx::query(
-        "UPDATE user_emails SET is_primary = false, updated_at = NOW()
+        "UPDATE user_emails SET is_primary = false
          WHERE user_id = $1 AND is_primary = true",
     )
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
-        "UPDATE user_emails SET is_primary = true, updated_at = NOW()
+        "UPDATE user_emails SET is_primary = true
          WHERE user_id = $1 AND email = $2",
     )
     .bind(user_id)
@@ -3127,10 +3294,15 @@ pub async fn delete_expired_unverified_emails(
 ) -> Result<u64> {
     let secs = threshold.as_secs() as i64;
     let res = sqlx::query(
+        // `make_interval(secs => ...)` instead of the older
+        // `($1 || ' seconds')::interval` idiom: the parameter stays an integer
+        // instead of being formatted to text and re-parsed as an interval
+        // (ws F47). Not an injection fix - `$1` was always a bound parameter.
         "DELETE FROM user_emails
-         WHERE verified_at IS NULL AND created_at < NOW() - ($1 || ' seconds')::interval",
+         WHERE verified_at IS NULL
+           AND created_at < NOW() - make_interval(secs => $1::double precision)",
     )
-    .bind(secs.to_string())
+    .bind(secs)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
@@ -3489,10 +3661,32 @@ mod tests {
         );
     }
 
+    /// ws F48: a self-request is a silent application-level no-op. The
+    /// `friends_check` CHECK constraint (migrations/001:114) remains the
+    /// backstop and is asserted directly below, so the guard cannot be
+    /// mistaken for the DB's protection going away.
     #[sqlx::test]
-    async fn self_request_rejected_by_db_check(pool: PgPool) {
+    async fn self_request_is_silent_no_op(pool: PgPool) {
         let a = make_user(&pool, "alice").await;
-        assert!(send_friend_request(&pool, a.id, a.id).await.is_err());
+        send_friend_request(&pool, a.id, a.id)
+            .await
+            .expect("self-request must be a silent Ok, not an error");
+        assert_eq!(
+            count_rows(&pool, "friends").await,
+            0,
+            "self-request must not write a friends row"
+        );
+        // The DB CHECK still rejects a self row inserted directly.
+        let direct =
+            sqlx::query("INSERT INTO friends (source_user_id, target_user_id) VALUES ($1, $2)")
+                .bind(a.id)
+                .bind(a.id)
+                .execute(&pool)
+                .await;
+        assert!(
+            direct.is_err(),
+            "friends_check must still reject a self row (ws F48 backstop)"
+        );
     }
 
     #[sqlx::test]
@@ -3807,6 +4001,39 @@ mod tests {
             !is_game_visible_to_user(&pool, game.id, friend.id)
                 .await
                 .unwrap()
+        );
+    }
+
+    /// ws F51(2): with TWO 'friends'-tier players, a viewer who is a friend of
+    /// only one of them must NOT see the game - the rule is "no player fails
+    /// the check", not "some player passes it".
+    #[sqlx::test]
+    async fn is_game_visible_to_user_friends_tier_requires_every_friends_player(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let half_friend = make_user(&pool, "cara").await;
+        let both_friend = make_user(&pool, "dana").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+
+        set_game_visibility(&pool, a.id, "friends").await.unwrap();
+        set_game_visibility(&pool, b.id, "friends").await.unwrap();
+        // cara is friends with `a` only; dana is friends with both.
+        accept_friends(&pool, a.id, half_friend.id).await;
+        accept_friends(&pool, a.id, both_friend.id).await;
+        accept_friends(&pool, b.id, both_friend.id).await;
+
+        assert!(
+            !is_game_visible_to_user(&pool, game.id, half_friend.id)
+                .await
+                .unwrap(),
+            "a viewer friends with only one of two 'friends' players must NOT see the game"
+        );
+        assert!(
+            is_game_visible_to_user(&pool, game.id, both_friend.id)
+                .await
+                .unwrap(),
+            "a viewer friends with every 'friends' player must see the game"
         );
     }
 
@@ -4619,6 +4846,11 @@ mod tests {
         let human = &ge.game_players[0];
         assert_eq!(human.game_type_user.rating, 1200);
         assert_eq!(human.game_type_user.peak_rating, 1200);
+        assert_eq!(
+            human.game_type_user.id,
+            Uuid::nil(),
+            "synthetic default rating row must be marked by a nil id (ws F43)"
+        );
         assert_eq!(human.game_type_user.game_type_id, game_type_id);
     }
 
@@ -4855,11 +5087,11 @@ mod tests {
         assert_eq!(p0.game_player.place, Some(1));
         assert_eq!(p1.game_player.place, Some(2));
 
-        // The COALESCE only guards the case where the finished_at param is NULL
-        // (i.e. is_finished = false): finished_at is preserved rather than
-        // cleared. When is_finished = true it always passes Some(now), so a
-        // second "finished" call actually advances finished_at rather than
-        // preserving it - this differs from the plan's phrasing, see report.
+        // Second command carries is_finished = false. Finish is sticky in both
+        // columns: `is_finished` stays true (`($2 OR is_finished)`) and
+        // `finished_at` is preserved by the COALESCE. When is_finished = true
+        // the call passes Some(now), so a genuine second finish DOES advance
+        // finished_at - only `undo_game` un-finishes a game (ws F37).
         update_game_command_success(
             &pool,
             game.id,
@@ -4886,6 +5118,11 @@ mod tests {
             ge_after_2.game.finished_at,
             Some(first_finished_at),
             "COALESCE preserves finished_at when the new value is NULL"
+        );
+        assert!(
+            ge_after_2.game.is_finished,
+            "is_finished must stay true once set; a non-finish command must not \
+             produce is_finished = false with a non-NULL finished_at (ws F37)"
         );
     }
 
@@ -6526,6 +6763,10 @@ mod tests {
         assert!(names.contains(&"player_open".to_string()));
     }
 
+    /// Test-only row counter. **The `format!`-built SQL is safe ONLY because
+    /// every caller passes a hard-coded table-name literal.** Do not copy this
+    /// pattern outside `mod tests`, and never pass a runtime value for `table`
+    /// (ws F51(3)).
     async fn count_rows(pool: &PgPool, table: &str) -> i64 {
         sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", table))
             .fetch_one(pool)
@@ -6873,5 +7114,1036 @@ mod tests {
             get_user_email_prefs(&pool, user_id).await.unwrap(),
             (true, true, true)
         );
+    }
+
+    /// ws F36: the manual `updated_at = NOW()` assignments were removed from
+    /// every UPDATE against a trigger-maintained table (see the module header).
+    /// This pins the trigger actually doing the work, for both `games` and
+    /// `game_players`, so a future accidental removal of the trigger - or a
+    /// re-added manual set - is caught here.
+    #[sqlx::test]
+    async fn update_updated_at_trigger_maintains_games_and_game_players(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+
+        // Backdate both rows so any trigger-driven bump is unmistakable.
+        sqlx::query("ALTER TABLE games DISABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("ALTER TABLE game_players DISABLE TRIGGER update_game_players_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE games SET updated_at = '2020-01-01 00:00:00' WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET updated_at = '2020-01-01 00:00:00' WHERE game_id = $1",
+        )
+        .bind(game.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("ALTER TABLE games ENABLE TRIGGER update_games_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("ALTER TABLE game_players ENABLE TRIGGER update_game_players_updated_at")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // mark_game_read UPDATEs game_players and no longer sets updated_at.
+        mark_game_read(&pool, game.id, a.id).await.unwrap();
+        let gp_updated: time::PrimitiveDateTime = sqlx::query_scalar(
+            "SELECT updated_at FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            gp_updated.year() > 2020,
+            "update_game_players_updated_at must bump updated_at without a manual set, got {gp_updated}"
+        );
+
+        // end_game UPDATEs games and no longer sets updated_at.
+        end_game(&pool, game.id).await.unwrap();
+        let g_updated: time::PrimitiveDateTime =
+            sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            g_updated.year() > 2020,
+            "update_games_updated_at must bump updated_at without a manual set, got {g_updated}"
+        );
+    }
+
+    /// ws F35 + ws F45: `is_user_admin` had no test at all, and now returns
+    /// `anyhow::Result`. Covers all three outcomes including the fail-closed
+    /// unknown-user case.
+    #[sqlx::test]
+    async fn is_user_admin_true_false_and_unknown_user(pool: PgPool) {
+        let plain = make_user(&pool, "plain").await;
+        let admin = make_user(&pool, "adminuser").await;
+        sqlx::query("UPDATE users SET is_admin = true WHERE id = $1")
+            .bind(admin.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(is_user_admin(&pool, admin.id).await.unwrap());
+        assert!(!is_user_admin(&pool, plain.id).await.unwrap());
+        // Fail closed for a user id that does not exist.
+        assert!(!is_user_admin(&pool, Uuid::new_v4()).await.unwrap());
+    }
+
+    /// ws F47: `make_interval(secs => 0)` must behave like the old
+    /// `('0' || ' seconds')::interval` - i.e. a zero threshold deletes every
+    /// unverified row (created_at is strictly in the past) and still spares
+    /// verified ones.
+    #[sqlx::test]
+    async fn delete_expired_unverified_emails_zero_threshold(pool: PgPool) {
+        let user = make_user(&pool, "sweeper").await;
+        let unverified = format!("u-{}@example.com", Uuid::new_v4());
+        let verified = format!("v-{}@example.com", Uuid::new_v4());
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
+            .bind(user.id)
+            .bind(&unverified)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user.id)
+        .bind(&verified)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let deleted = delete_expired_unverified_emails(&pool, std::time::Duration::from_secs(0))
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1, "zero threshold must delete the unverified row");
+        let remaining = list_user_emails(&pool, user.id).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].email, verified);
+    }
+
+    /// ws F39: two opposite-direction requests must end in the mutual-intent
+    /// accepted state regardless of interleaving. A single-connection test
+    /// cannot force the true concurrent interleaving, so this asserts the
+    /// serialized outcome plus that the advisory lock is re-entrant for the
+    /// same pair within one session (taking it twice must not deadlock or
+    /// change the result), which is what the pooled server does across
+    /// sequential requests.
+    #[sqlx::test]
+    async fn opposite_direction_requests_auto_accept_under_pair_lock(pool: PgPool) {
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        send_friend_request(&pool, b.id, a.id).await.unwrap();
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, Some(true))),
+            "B->A after A->B must auto-accept the single pair row"
+        );
+        assert_eq!(
+            count_rows(&pool, "friends").await,
+            1,
+            "the pair-unique index must still leave exactly one row"
+        );
+
+        // Re-sending in either direction stays a no-op and never errors.
+        send_friend_request(&pool, a.id, b.id).await.unwrap();
+        send_friend_request(&pool, b.id, a.id).await.unwrap();
+        assert_eq!(count_rows(&pool, "friends").await, 1);
+        assert_eq!(
+            friend_row_state(&pool, a.id, b.id).await,
+            Some((a.id, Some(true)))
+        );
+    }
+
+    /// ws F40: the inlined predicate must agree with `is_game_visible_to_user`
+    /// case for case. Four visibility tiers x one game each; for each case,
+    /// "the function returned this game" must equal "the shared predicate says
+    /// this game is visible".
+    ///
+    /// Each case gets its OWN `friend` user (and therefore its own one-game
+    /// scan universe), so no rows have to be deleted between cases and the
+    /// `scan_limit` window is unambiguous.
+    #[sqlx::test]
+    async fn friend_recent_visible_game_matches_is_game_visible_to_user(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let viewer = make_user(&pool, "viewer").await;
+
+        // Four co-players, one per case: public (the default), 'friends' and a
+        // friend of the viewer, 'friends' but NOT a friend of the viewer, and
+        // 'private'.
+        let co_public = make_user(&pool, "copublic").await;
+        let co_friends_yes = make_user(&pool, "cofriendsyes").await;
+        let co_friends_no = make_user(&pool, "cofriendsno").await;
+        let co_private = make_user(&pool, "coprivate").await;
+        set_game_visibility(&pool, co_friends_yes.id, "friends")
+            .await
+            .unwrap();
+        set_game_visibility(&pool, co_friends_no.id, "friends")
+            .await
+            .unwrap();
+        set_game_visibility(&pool, co_private.id, "private")
+            .await
+            .unwrap();
+        accept_friends(&pool, viewer.id, co_friends_yes.id).await;
+
+        for (case, co, expected_visible) in [
+            ("public", co_public.id, true),
+            ("friends_yes", co_friends_yes.id, true),
+            ("friends_no", co_friends_no.id, false),
+            ("private", co_private.id, false),
+        ] {
+            // A fresh friend per case. The friend stays at the 'public'
+            // default so only `co` can hide the game.
+            let friend = make_user(&pool, &format!("friend_{case}")).await;
+            accept_friends(&pool, viewer.id, friend.id).await;
+
+            let game = make_game_with_players(&pool, gv, friend.id, &[co], 0, &[0]).await;
+            let via_predicate = is_game_visible_to_user(&pool, game.id, viewer.id)
+                .await
+                .unwrap();
+            let via_inlined = friend_recent_visible_game(&pool, friend.id, viewer.id, 10)
+                .await
+                .unwrap()
+                .map(|(id, _, _)| id)
+                == Some(game.id);
+            assert_eq!(
+                via_predicate, expected_visible,
+                "is_game_visible_to_user disagreed with the expected case {case}"
+            );
+            assert_eq!(
+                via_inlined, via_predicate,
+                "inlined predicate disagreed with is_game_visible_to_user for case {case}"
+            );
+        }
+    }
+
+    /// ws F35: `find_active_turn_games` feeds the 22d switch digest and had no
+    /// test. Covers oldest-turn-first ordering, the cap, and the three
+    /// exclusions (not my turn, finished game, other user).
+    ///
+    /// Note: `game_players.is_turn_at` is `timestamp without time zone NOT
+    /// NULL` (migrations/001_initial_schema.sql:193), so the query's `NULLS
+    /// LAST` clause (db.rs:3112) is vestigial and cannot be exercised.
+    /// Backdating `is_turn_at` alone does not disturb `is_turn`, so the
+    /// `update_is_turn_at` trigger (001:454-458) does not fire and undo the
+    /// fixture.
+    #[sqlx::test]
+    async fn find_active_turn_games_orders_oldest_turn_first_and_caps(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let me = make_user(&pool, "me").await;
+        let other = make_user(&pool, "other").await;
+
+        // Three games where it is my turn, with distinct is_turn_at values.
+        // NOTE: make_game_with_players shuffles positions, so whose_turn is
+        // unreliable; explicitly set is_turn for `me` after creation. The
+        // update_is_turn_at trigger overwrites is_turn_at on false->true, so
+        // backdate in a SECOND statement (trigger does not re-fire).
+        let mut ids = Vec::new();
+        for (i, day) in ["2026-01-03", "2026-01-01", "2026-01-02"]
+            .iter()
+            .enumerate()
+        {
+            let g = make_game_with_players(&pool, gv, me.id, &[other.id], 0, &[]).await;
+            sqlx::query(
+                "UPDATE game_players SET is_turn = true WHERE game_id = $1 AND user_id = $2",
+            )
+            .bind(g.id)
+            .bind(me.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "UPDATE game_players SET is_turn_at = $1::timestamp WHERE game_id = $2 AND user_id = $3",
+            )
+            .bind(format!("{day} 00:00:00"))
+            .bind(g.id)
+            .bind(me.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+            ids.push((i, g.id, *day));
+        }
+        // A game where it is NOT my turn.
+        let not_my_turn = make_game_with_players(&pool, gv, me.id, &[other.id], 0, &[]).await;
+        sqlx::query("UPDATE game_players SET is_turn = false WHERE game_id = $1 AND user_id = $2")
+            .bind(not_my_turn.id)
+            .bind(me.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // A finished game where it IS my turn.
+        let finished = make_game_with_players(&pool, gv, me.id, &[other.id], 0, &[]).await;
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE game_id = $1 AND user_id = $2")
+            .bind(finished.id)
+            .bind(me.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE games SET is_finished = true WHERE id = $1")
+            .bind(finished.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let rows = find_active_turn_games(&pool, me.id, 10).await.unwrap();
+        let got: Vec<Uuid> = rows.iter().map(|(g, _)| *g).collect();
+        let by_day = |d: &str| ids.iter().find(|(_, _, day)| *day == d).unwrap().1;
+        assert_eq!(
+            got,
+            vec![
+                by_day("2026-01-01"),
+                by_day("2026-01-02"),
+                by_day("2026-01-03")
+            ],
+            "must be ordered by is_turn_at ascending"
+        );
+        assert!(
+            !got.contains(&not_my_turn.id),
+            "must exclude games where it is not my turn"
+        );
+        assert!(!got.contains(&finished.id), "must exclude finished games");
+
+        // The returned game_player_id must be MY player row, not the opponent's.
+        let (_, gp_id) = rows[0];
+        let owner: Uuid = sqlx::query_scalar("SELECT user_id FROM game_players WHERE id = $1")
+            .bind(gp_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owner, me.id);
+
+        // Cap.
+        let capped = find_active_turn_games(&pool, me.id, 2).await.unwrap();
+        assert_eq!(capped.len(), 2);
+        assert_eq!(capped[0].0, by_day("2026-01-01"));
+
+        // Another user sees none of my turns.
+        assert!(
+            find_active_turn_games(&pool, other.id, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// ws F35: `generate_unique_username` had no test. Asserts the result
+    /// satisfies the D2 username rules and is unused, and that generating +
+    /// claiming twice yields two distinct names.
+    ///
+    /// The taken-branch retry (line "if taken.is_none()") cannot be forced
+    /// deterministically - the candidate comes from `petname`, so a test cannot
+    /// pre-claim the exact name the next call will draw. This covers the loop's
+    /// success path and the uniqueness contract, which is the part callers
+    /// depend on.
+    #[sqlx::test]
+    async fn generate_unique_username_is_valid_and_unclaimed(pool: PgPool) {
+        let mut conn = pool.acquire().await.unwrap();
+
+        let first = generate_unique_username(&mut conn).await.unwrap();
+        assert!(
+            validate_username(&first),
+            "generated name must satisfy the D2 rules: {first}"
+        );
+        assert!(
+            find_user_id_by_name(&pool, &first).await.unwrap().is_none(),
+            "generated name must be unused"
+        );
+
+        // Claim it, then generate again: the second name must differ and must
+        // itself be claimable (the unique index would reject a duplicate).
+        sqlx::query("INSERT INTO users (name, pref_colors) VALUES ($1, $2)")
+            .bind(&first)
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let second = generate_unique_username(&mut conn).await.unwrap();
+        assert!(validate_username(&second));
+        assert_ne!(
+            second.to_lowercase(),
+            first.to_lowercase(),
+            "must not hand back a name that is already claimed"
+        );
+        sqlx::query("INSERT INTO users (name, pref_colors) VALUES ($1, $2)")
+            .bind(&second)
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .expect("second generated name must be insertable");
+    }
+
+    /// ws F35: `insert_game_logs_tx` had no direct test (only empty-vec calls
+    /// via `update_game_command_success`). Covers the log row fields, target
+    /// fan-out by position, and that a `to` position with no matching player is
+    /// silently dropped.
+    #[sqlx::test]
+    async fn insert_game_logs_tx_writes_logs_and_targets(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+
+        let at = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2026, time::Month::March, 4).unwrap(),
+            time::Time::from_hms(5, 6, 7).unwrap(),
+        );
+        let logs = vec![
+            brdgme_cmd::api::CliLog {
+                content: "public log".to_string(),
+                at,
+                public: true,
+                to: vec![],
+            },
+            brdgme_cmd::api::CliLog {
+                content: "private to both".to_string(),
+                at,
+                public: false,
+                // position 9 does not exist and must be dropped silently.
+                to: vec![0, 1, 9],
+            },
+        ];
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_game_logs_tx(&mut tx, game.id, logs).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let rows: Vec<(String, bool, time::PrimitiveDateTime, i64)> = sqlx::query_as(
+            "SELECT gl.body, gl.is_public, gl.logged_at,
+                    (SELECT COUNT(*) FROM game_log_targets t WHERE t.game_log_id = gl.id)
+             FROM game_logs gl WHERE gl.game_id = $1 ORDER BY gl.body",
+        )
+        .bind(game.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], ("private to both".to_string(), false, at, 2));
+        assert_eq!(rows[1], ("public log".to_string(), true, at, 0));
+
+        // Targets point at the two real player rows (order-independent since
+        // make_game_with_players shuffles positions).
+        let mut targeted: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT gp.user_id FROM game_log_targets t
+             JOIN game_players gp ON gp.id = t.game_player_id
+             JOIN game_logs gl ON gl.id = t.game_log_id
+             WHERE gl.game_id = $1",
+        )
+        .bind(game.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        targeted.sort();
+        let mut expected = vec![a.id, b.id];
+        expected.sort();
+        assert_eq!(targeted, expected);
+    }
+
+    /// ws F35: `mark_game_read` had no test. Only the calling user's player row
+    /// may be marked, and only in the named game.
+    #[sqlx::test]
+    async fn mark_game_read_marks_only_the_caller_in_that_game(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let g1 = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+        let g2 = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+        sqlx::query("UPDATE game_players SET is_read = false")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        mark_game_read(&pool, g1.id, a.id).await.unwrap();
+
+        let read: Vec<(Uuid, Uuid, bool)> = sqlx::query_as(
+            "SELECT game_id, user_id, is_read FROM game_players ORDER BY game_id, position",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        for (game_id, user_id, is_read) in read {
+            let expected = game_id == g1.id && user_id == a.id;
+            assert_eq!(
+                is_read, expected,
+                "is_read wrong for game {game_id} user {user_id} (g1={}, g2={})",
+                g1.id, g2.id
+            );
+        }
+
+        // Marking a game the user is not in is a no-op, not an error.
+        let stranger = make_user(&pool, "stranger").await;
+        mark_game_read(&pool, g1.id, stranger.id).await.unwrap();
+    }
+
+    /// ws F35: `should_hide_add_friend` had no test. The button hides when the
+    /// viewer already has an outgoing row of ANY state (pending, declined,
+    /// accepted - the D1 shield) and when an ACCEPTED reverse row exists, but
+    /// NOT for a merely pending incoming request.
+    #[sqlx::test]
+    async fn should_hide_add_friend_covers_every_row_state(pool: PgPool) {
+        let viewer = make_user(&pool, "viewer").await;
+        let stranger = make_user(&pool, "stranger").await;
+        let pending_out = make_user(&pool, "pendingout").await;
+        let pending_in = make_user(&pool, "pendingin").await;
+        let declined_out = make_user(&pool, "declinedout").await;
+        let accepted = make_user(&pool, "accepted").await;
+
+        send_friend_request(&pool, viewer.id, pending_out.id)
+            .await
+            .unwrap();
+        send_friend_request(&pool, pending_in.id, viewer.id)
+            .await
+            .unwrap();
+        send_friend_request(&pool, viewer.id, declined_out.id)
+            .await
+            .unwrap();
+        let (req_id, _, _) = list_incoming_friend_requests(&pool, declined_out.id)
+            .await
+            .unwrap()[0];
+        respond_to_friend_request(&pool, req_id, declined_out.id, false)
+            .await
+            .unwrap();
+        accept_friends(&pool, viewer.id, accepted.id).await;
+
+        assert!(
+            !should_hide_add_friend(&pool, viewer.id, stranger.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            should_hide_add_friend(&pool, viewer.id, pending_out.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            should_hide_add_friend(&pool, viewer.id, declined_out.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            should_hide_add_friend(&pool, viewer.id, accepted.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !should_hide_add_friend(&pool, viewer.id, pending_in.id)
+                .await
+                .unwrap(),
+            "a pending INCOMING request must not hide the button - accepting it \
+             by sending back is the documented mutual-intent path"
+        );
+    }
+
+    /// ws F35: neither restart-proposal lookup had a test. Only `open`
+    /// proposals count, the earliest wins, and the `_tx` variant must agree
+    /// with the pool variant.
+    #[sqlx::test]
+    async fn find_open_restart_proposal_finds_earliest_open_only(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let owner = make_user(&pool, "owner").await;
+        let other = make_user(&pool, "other").await;
+        let old_game = make_game_with_players(&pool, gv, owner.id, &[other.id], 0, &[0]).await;
+
+        // Helper as a plain async fn call, not a closure: no borrow-checker
+        // gymnastics, and `game_proposals` only needs these five columns
+        // (migrations/015_game_proposals.sql:5-15 - `status` is CHECKed against
+        // 'open'/'started'/'cancelled', `created_at` is a bare `timestamp`).
+        async fn insert_proposal(
+            pool: &PgPool,
+            gv: Uuid,
+            owner_id: Uuid,
+            old_id: Uuid,
+            status: &str,
+            created: &str,
+        ) -> Uuid {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO game_proposals
+                   (game_version_id, owner_user_id, restarted_game_id, status, created_at)
+                 VALUES ($1, $2, $3, $4, $5::timestamp) RETURNING id",
+            )
+            .bind(gv)
+            .bind(owner_id)
+            .bind(old_id)
+            .bind(status)
+            .bind(created)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+        }
+
+        // No proposal yet.
+        assert!(
+            find_open_restart_proposal(&pool, old_game.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let cancelled = insert_proposal(
+            &pool,
+            gv,
+            owner.id,
+            old_game.id,
+            "cancelled",
+            "2026-01-01 00:00:00",
+        )
+        .await;
+        assert!(
+            find_open_restart_proposal(&pool, old_game.id)
+                .await
+                .unwrap()
+                .is_none(),
+            "a cancelled proposal must not count"
+        );
+
+        let later_open = insert_proposal(
+            &pool,
+            gv,
+            owner.id,
+            old_game.id,
+            "open",
+            "2026-01-03 00:00:00",
+        )
+        .await;
+        let earlier_open = insert_proposal(
+            &pool,
+            gv,
+            owner.id,
+            old_game.id,
+            "open",
+            "2026-01-02 00:00:00",
+        )
+        .await;
+        assert_eq!(
+            find_open_restart_proposal(&pool, old_game.id)
+                .await
+                .unwrap(),
+            Some(earlier_open),
+            "earliest open proposal wins for a deterministic winner"
+        );
+        assert_ne!(earlier_open, later_open);
+        assert_ne!(earlier_open, cancelled);
+
+        // The _tx variant must agree.
+        let mut tx = pool.begin().await.unwrap();
+        assert_eq!(
+            find_open_restart_proposal_tx(&mut tx, old_game.id)
+                .await
+                .unwrap(),
+            Some(earlier_open)
+        );
+        tx.rollback().await.unwrap();
+
+        // An unrelated game has none.
+        let unrelated = make_game_with_players(&pool, gv, owner.id, &[other.id], 0, &[0]).await;
+        assert!(
+            find_open_restart_proposal(&pool, unrelated.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// ws F35: neither bot lookup had a test. `find_enabled_bots` returns only
+    /// enabled bots ordered by display_order; `replacement_bot_available`
+    /// requires BOTH `enabled = true` AND `can_replace_humans = true`
+    /// (column added by migrations/022_concede_bot_replacement.sql:16,
+    /// defaulting to false).
+    ///
+    /// NOTE: migrations/013_bot_efficacy.sql:41-44 seeds three enabled bots
+    /// ('easy' 0, 'medium' 1, 'hard' 2), all with can_replace_humans = false,
+    /// so the baseline here is NOT an empty table and those three names are
+    /// already taken (`bots.name` is UNIQUE).
+    #[sqlx::test]
+    async fn bot_lookups_respect_enabled_and_can_replace_humans(pool: PgPool) {
+        // Seeded baseline.
+        assert_eq!(
+            find_enabled_bots(&pool).await.unwrap(),
+            vec!["easy".to_string(), "medium".to_string(), "hard".to_string()],
+            "the three seeded bots, ordered by display_order"
+        );
+        assert!(
+            !replacement_bot_available(&pool).await.unwrap(),
+            "no seeded bot has can_replace_humans"
+        );
+
+        // A DISABLED bot is excluded from find_enabled_bots and must not make a
+        // replacement available even though it can replace humans.
+        sqlx::query(
+            "INSERT INTO bots (name, display_order, enabled, can_replace_humans)
+             VALUES ('offbot', 3, false, true)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            find_enabled_bots(&pool).await.unwrap(),
+            vec!["easy".to_string(), "medium".to_string(), "hard".to_string()],
+            "a disabled bot must be excluded"
+        );
+        assert!(
+            !replacement_bot_available(&pool).await.unwrap(),
+            "can_replace_humans on a DISABLED bot must not count"
+        );
+
+        // Enabled AND flagged -> available.
+        sqlx::query("UPDATE bots SET can_replace_humans = true WHERE name = 'easy'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(replacement_bot_available(&pool).await.unwrap());
+
+        // Ordering is display_order, not name or insertion order.
+        sqlx::query("UPDATE bots SET display_order = 99 WHERE name = 'easy'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            find_enabled_bots(&pool).await.unwrap(),
+            vec!["medium".to_string(), "hard".to_string(), "easy".to_string()],
+            "ordered by display_order"
+        );
+    }
+
+    /// ws F35: seven untested single-statement user getters/setters, batched
+    /// into one round-trip test per the coverage cut rule.
+    #[sqlx::test]
+    async fn user_getters_and_setters_round_trip(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let email = format!("alice-{}@example.com", Uuid::new_v4());
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, true)")
+            .bind(user.id)
+            .bind(&email)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // get_user / get_user_by_email
+        assert_eq!(get_user(&pool, user.id).await.unwrap().unwrap().id, user.id);
+        assert!(get_user(&pool, Uuid::new_v4()).await.unwrap().is_none());
+        assert_eq!(
+            get_user_by_email(&pool, &email).await.unwrap().unwrap().id,
+            user.id
+        );
+        assert!(
+            get_user_by_email(&pool, "nobody@example.com")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // get_user_name / find_user_id_by_name (case-insensitive)
+        assert_eq!(get_user_name(&pool, user.id).await.unwrap(), "alice");
+        assert_eq!(
+            find_user_id_by_name(&pool, "ALICE").await.unwrap(),
+            Some(user.id)
+        );
+        assert_eq!(find_user_id_by_name(&pool, "nobody").await.unwrap(), None);
+
+        // set_user_name: success, then a case-insensitive conflict -> Ok(false)
+        assert!(set_user_name(&pool, user.id, "alice2").await.unwrap());
+        assert_eq!(get_user_name(&pool, user.id).await.unwrap(), "alice2");
+        let other = make_user(&pool, "bob").await;
+        assert!(
+            !set_user_name(&pool, other.id, "ALICE2").await.unwrap(),
+            "a case-insensitive name clash must be Ok(false), not an error"
+        );
+        assert_eq!(get_user_name(&pool, other.id).await.unwrap(), "bob");
+
+        // pref colors: empty by default, round-trip, legacy names normalized
+        assert!(
+            get_user_pref_colors(&pool, user.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        set_user_pref_colors(&pool, user.id, &["Green".to_string(), "Amber".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(
+            get_user_pref_colors(&pool, user.id).await.unwrap(),
+            vec!["Green".to_string(), "Orange".to_string()],
+            "stored legacy 'Amber' must read back normalized to 'Orange'"
+        );
+        // Unknown user -> empty, not an error.
+        assert!(
+            get_user_pref_colors(&pool, Uuid::new_v4())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// ws F35: five untested lookups, batched. The only one with real logic is
+    /// `find_latest_non_deprecated_game_version`, which must skip deprecated
+    /// rows.
+    #[sqlx::test]
+    async fn game_and_version_lookups(pool: PgPool) {
+        let (game_type_id, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[], 1, &[0]).await;
+
+        // find_game
+        let found = find_game(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(found.id, game.id);
+        assert_eq!(found.game_version_id, gv);
+        assert!(find_game(&pool, Uuid::new_v4()).await.unwrap().is_none());
+
+        // find_game_version
+        let version = find_game_version(&pool, gv).await.unwrap().unwrap();
+        assert_eq!(version.id, gv);
+        assert_eq!(version.game_type_id, game_type_id);
+        assert!(!version.is_deprecated);
+        assert!(
+            find_game_version(&pool, Uuid::new_v4())
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // rules default to '' (migrations/004) and round-trip
+        assert_eq!(
+            find_game_version_rules(&pool, gv).await.unwrap(),
+            Some(String::new())
+        );
+        sqlx::query("UPDATE game_versions SET rules = $1 WHERE id = $2")
+            .bind("how to play")
+            .bind(gv)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            find_game_version_rules(&pool, gv).await.unwrap(),
+            Some("how to play".to_string())
+        );
+        assert!(
+            find_game_version_rules(&pool, Uuid::new_v4())
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // render meta
+        let (uri, name, iface) = find_game_version_render_meta(&pool, gv)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(uri, "http://localhost:0/mock");
+        assert_eq!(name, "1.0.0");
+        assert!(
+            iface >= 1,
+            "interface_version should have a sane default, got {iface}"
+        );
+        assert!(
+            find_game_version_render_meta(&pool, Uuid::new_v4())
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // latest non-deprecated must skip a deprecated newer row
+        let newer: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '2.0.0', 'http://localhost:0/mock2', true, true) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let latest = find_latest_non_deprecated_game_version(&pool, game_type_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(
+            latest.id, newer,
+            "a deprecated version must never be chosen"
+        );
+        assert_eq!(latest.id, gv);
+        assert!(
+            find_latest_non_deprecated_game_version(&pool, Uuid::new_v4())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// ws F35: three untested friend/block helpers, batched.
+    #[sqlx::test]
+    async fn friend_request_helpers(pool: PgPool) {
+        let me = make_user(&pool, "me").await;
+        let x = make_user(&pool, "requesterx").await;
+        let y = make_user(&pool, "requestery").await;
+
+        assert_eq!(
+            count_incoming_friend_requests(&pool, me.id).await.unwrap(),
+            0
+        );
+        send_friend_request(&pool, x.id, me.id).await.unwrap();
+        send_friend_request(&pool, y.id, me.id).await.unwrap();
+        assert_eq!(
+            count_incoming_friend_requests(&pool, me.id).await.unwrap(),
+            2
+        );
+
+        let incoming = list_incoming_friend_requests(&pool, me.id).await.unwrap();
+        let (req_id, _, _) = incoming[0];
+        let source = get_pending_request_source(&pool, req_id, me.id)
+            .await
+            .unwrap();
+        assert!(source == Some(x.id) || source == Some(y.id));
+        assert_eq!(
+            get_pending_request_source(&pool, req_id, x.id)
+                .await
+                .unwrap(),
+            None,
+            "only the TARGET of the request may resolve its source"
+        );
+        assert_eq!(
+            get_pending_request_source(&pool, Uuid::new_v4(), me.id)
+                .await
+                .unwrap(),
+            None
+        );
+
+        // Once responded, it is no longer pending and drops out of both.
+        respond_to_friend_request(&pool, req_id, me.id, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            count_incoming_friend_requests(&pool, me.id).await.unwrap(),
+            1
+        );
+        assert_eq!(
+            get_pending_request_source(&pool, req_id, me.id)
+                .await
+                .unwrap(),
+            None
+        );
+
+        // has_block_conn must agree with has_block, and is directional.
+        block_user(&pool, me.id, x.id).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        assert!(has_block_conn(&mut conn, me.id, x.id).await.unwrap());
+        assert!(!has_block_conn(&mut conn, x.id, me.id).await.unwrap());
+        assert_eq!(
+            has_block_conn(&mut conn, me.id, x.id).await.unwrap(),
+            has_block(&pool, me.id, x.id).await.unwrap()
+        );
+    }
+
+    /// ws F35 guard: the functions listed below were among the 27 public db.rs
+    /// functions with ZERO test references at review time. 25 of them are now
+    /// covered by name in this module; the two exclusions are documented in the
+    /// WP-41 spec (`create_pool` needs a real DATABASE_URL outside the
+    /// per-test database; `create_game_with_users_tx` is the body of the
+    /// `create_game_with_users` wrapper, exercised by every fixture game).
+    ///
+    /// This test is a *reminder*, not a mechanism: it re-asserts the cheapest
+    /// invariant of each newly covered function so that deleting one of the
+    /// tests above still leaves a failing signal here.
+    #[sqlx::test]
+    async fn ws_f35_previously_untested_functions_are_reachable(pool: PgPool) {
+        let (game_type_id, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[]).await;
+        // make_game_with_players shuffles positions; ensure `a` is on turn.
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE game_id = $1 AND user_id = $2")
+            .bind(game.id)
+            .bind(a.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+
+        assert_eq!(
+            count_incoming_friend_requests(&pool, a.id).await.unwrap(),
+            0
+        );
+        assert!(find_active_turn_games(&pool, a.id, 5).await.unwrap().len() == 1);
+        // NOT is_empty(): migrations/013_bot_efficacy.sql:41-44 seeds three
+        // enabled bots into every test database.
+        assert_eq!(find_enabled_bots(&pool).await.unwrap().len(), 3);
+        assert!(find_game(&pool, game.id).await.unwrap().is_some());
+        assert!(find_game_version(&pool, gv).await.unwrap().is_some());
+        assert!(
+            find_game_version_render_meta(&pool, gv)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(find_game_version_rules(&pool, gv).await.unwrap().is_some());
+        assert!(
+            find_latest_non_deprecated_game_version(&pool, game_type_id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            find_open_restart_proposal(&pool, game.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let mut tx = pool.begin().await.unwrap();
+        assert!(
+            find_open_restart_proposal_tx(&mut tx, game.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        tx.rollback().await.unwrap();
+        assert_eq!(
+            find_user_id_by_name(&pool, "alice").await.unwrap(),
+            Some(a.id)
+        );
+        assert!(validate_username(
+            &generate_unique_username(&mut conn).await.unwrap()
+        ));
+        assert!(
+            get_pending_request_source(&pool, Uuid::new_v4(), a.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(get_user(&pool, a.id).await.unwrap().is_some());
+        assert!(
+            get_user_by_email(&pool, "nobody@example.com")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(get_user_name(&pool, a.id).await.unwrap(), "alice");
+        assert!(get_user_pref_colors(&pool, a.id).await.unwrap().is_empty());
+        assert!(!has_block_conn(&mut conn, a.id, b.id).await.unwrap());
+        assert!(!is_user_admin(&pool, a.id).await.unwrap());
+        mark_game_read(&pool, game.id, a.id).await.unwrap();
+        assert!(!replacement_bot_available(&pool).await.unwrap());
+        assert!(set_user_name(&pool, a.id, "alice_renamed").await.unwrap());
+        set_user_pref_colors(&pool, a.id, &[]).await.unwrap();
+        assert!(!should_hide_add_friend(&pool, a.id, b.id).await.unwrap());
+
+        let mut tx = pool.begin().await.unwrap();
+        insert_game_logs_tx(&mut tx, game.id, vec![]).await.unwrap();
+        tx.commit().await.unwrap();
     }
 }
