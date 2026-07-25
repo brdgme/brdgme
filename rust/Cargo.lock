@@ -6789,6 +6789,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "slab",
  "tokio",
@@ -7526,6 +7527,7 @@ dependencies = [
  "rand 0.10.2",
  "reqwest",
  "resend-rs",
+ "rustls",
  "sentry",
  "sentry-tower",
  "sentry-tracing",
@@ -7538,6 +7540,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite 0.30.0",
+ "tokio-util",
  "tower",
  "tower-http 0.7.0",
  "tower-sessions",
@@ -7547,6 +7550,7 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "web-sys",
+ "zeroize",
 ]
 
 [[package]]

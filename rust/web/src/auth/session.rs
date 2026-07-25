@@ -22,6 +22,18 @@ pub struct SessionUser {
 #[cfg(feature = "ssr")]
 pub const SESSION_USER_KEY: &str = "user";
 
+/// `SECURE_COOKIE` env semantics: the session cookie carries the `Secure`
+/// attribute unless the value is the exact literal "false". Unset (prod
+/// k8s, which sets nothing) means Secure. The opt-out exists for dev
+/// environments served over plain HTTP on non-localhost hostnames
+/// (http://web.brdgme.lvh.me:8080 in-cluster Tilt), where browsers refuse
+/// Secure cookies entirely; see k8s/dev/web-patch.yaml and the Tiltfile
+/// local web resource.
+#[cfg(feature = "ssr")]
+fn secure_cookie(env_value: Option<&str>) -> bool {
+    env_value != Some("false")
+}
+
 #[cfg(feature = "ssr")]
 pub async fn create_session_layer(pool: &PgPool) -> SessionManagerLayer<PostgresStore> {
     let store = PostgresStore::new(pool.clone());
@@ -29,9 +41,7 @@ pub async fn create_session_layer(pool: &PgPool) -> SessionManagerLayer<Postgres
         .migrate()
         .await
         .expect("Failed to run session store migration");
-    let secure = std::env::var("SECURE_COOKIE")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let secure = secure_cookie(std::env::var("SECURE_COOKIE").ok().as_deref());
     SessionManagerLayer::new(store)
         .with_secure(secure)
         .with_same_site(tower_sessions::cookie::SameSite::Lax)
@@ -91,4 +101,27 @@ pub async fn invalidate_auth_token(pool: &PgPool, auth_token_id: Uuid) -> Result
         .await?;
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::secure_cookie;
+
+    #[test]
+    fn secure_cookie_defaults_to_secure_when_unset() {
+        assert!(secure_cookie(None));
+    }
+
+    #[test]
+    fn secure_cookie_explicit_false_opts_out() {
+        assert!(!secure_cookie(Some("false")));
+    }
+
+    #[test]
+    fn secure_cookie_any_other_value_stays_secure() {
+        assert!(secure_cookie(Some("true")));
+        assert!(secure_cookie(Some("0")));
+        assert!(secure_cookie(Some("")));
+        assert!(secure_cookie(Some("FALSE"))); // opt-out is the exact literal only
+    }
 }

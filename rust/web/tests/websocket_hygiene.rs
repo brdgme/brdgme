@@ -129,3 +129,25 @@ async fn live_websocket_survives_idle_past_request_timeout(pool: PgPool) {
     let v: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(v["game_id"], game_id.to_string());
 }
+
+/// review ws F55: on graceful shutdown the server must send a proper close
+/// frame instead of hard-dropping the TCP connection.
+#[sqlx::test]
+async fn shutdown_sends_close_frame_to_connected_websockets(pool: PgPool) {
+    let (addr, broadcaster) = spawn_app(pool).await;
+    let (mut ws, _resp) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+        .await
+        .expect("ws connect");
+
+    broadcaster.begin_shutdown();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match timeout(remaining, ws.next()).await {
+            Ok(Some(Ok(Message::Close(_)))) => break,
+            Ok(Some(Ok(_))) => continue,
+            other => panic!("expected close frame before timeout, got: {other:?}"),
+        }
+    }
+}

@@ -128,7 +128,7 @@ else:
     k8s_yaml(kustomize("k8s/dev-without-web"))
     local_resource(
         "web",
-        serve_cmd="cd rust/web && SQLX_OFFLINE=true DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/nats-0 --target-namespace brdgme -- cargo leptos watch",
+        serve_cmd="cd rust/web && SQLX_OFFLINE=true SECURE_COOKIE=false DATABASE_URL=postgres://brdgme_user:brdgme_password@localhost:5432/brdgme NATS_URL=nats://localhost:4222 mirrord exec -f .mirrord/mirrord.json --target pod/nats-0 --target-namespace brdgme -- cargo leptos watch",
         links=["http://localhost:3000"],
         resource_deps=["postgres", "nats"],
     )

@@ -25,15 +25,23 @@ mod ssr {
         response::IntoResponse,
     };
     use futures_util::{sink::SinkExt, stream::StreamExt};
+    use tokio_util::sync::CancellationToken;
+    use tokio_util::task::TaskTracker;
 
     #[derive(Clone)]
     pub struct GameBroadcaster {
         client: async_nats::Client,
+        shutdown: CancellationToken,
+        ws_tasks: TaskTracker,
     }
 
     impl GameBroadcaster {
         pub fn new(client: async_nats::Client) -> Self {
-            Self { client }
+            Self {
+                client,
+                shutdown: CancellationToken::new(),
+                ws_tasks: TaskTracker::new(),
+            }
         }
 
         pub async fn broadcast_game_update(&self, game_id: Uuid) {
@@ -77,13 +85,32 @@ mod ssr {
                 tracing::error!("NATS flush failed after proposal.{}: {}", proposal_id, e);
             }
         }
+
+        /// Signals every live websocket task to send a close frame and exit,
+        /// and closes the tracker so `drain_ws_tasks` can complete. Called from
+        /// main's graceful-shutdown path (review ws F55).
+        pub fn begin_shutdown(&self) {
+            self.shutdown.cancel();
+            self.ws_tasks.close();
+        }
+
+        /// Resolves when all tracked websocket tasks have finished. Only
+        /// terminates after `begin_shutdown` (the tracker must be closed).
+        pub async fn drain_ws_tasks(&self) {
+            self.ws_tasks.wait().await;
+        }
     }
 
     pub async fn ws_handler(
         ws: WebSocketUpgrade,
         State(broadcaster): State<GameBroadcaster>,
     ) -> impl IntoResponse {
-        ws.on_upgrade(move |socket| handle_socket(socket, broadcaster))
+        let tracker = broadcaster.ws_tasks.clone();
+        ws.on_upgrade(move |socket| {
+            tracker
+                .clone()
+                .track_future(handle_socket(socket, broadcaster))
+        })
     }
 
     /// Decrements the `ws_connections` gauge on drop, so every exit path out of
@@ -129,6 +156,8 @@ mod ssr {
         ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         ping_interval.tick().await; // first tick fires immediately, skip it
 
+        let shutdown = broadcaster.shutdown.clone();
+
         loop {
             tokio::select! {
                 msg = game_sub.next() => {
@@ -169,6 +198,10 @@ mod ssr {
                         Some(Ok(_)) => {}
                         _ => break,
                     }
+                }
+                _ = shutdown.cancelled() => {
+                    let _ = sender.send(Message::Close(None)).await;
+                    break;
                 }
             }
         }

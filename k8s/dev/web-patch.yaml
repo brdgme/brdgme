@@ -1,0 +1,17 @@
+# Dev-only: in-cluster dev web is served over plain HTTP at
+# http://web.brdgme.lvh.me:8080 (non-localhost, no TLS), where browsers
+# refuse cookies carrying the Secure attribute. The app defaults to
+# Secure (rust/web/src/auth/session.rs); this is the explicit dev opt-out.
+# Prod sets nothing and therefore gets Secure.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          env:
+            - name: SECURE_COOKIE
+              value: "false"

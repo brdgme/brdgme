@@ -11,6 +11,14 @@ async fn main() {
     use web::state::AppState;
     use web::websocket::GameBroadcaster;
 
+    // Both rustls backends are enabled in this binary's graph (reqwest ->
+    // aws-lc-rs, sqlx/async-nats -> ring), so any crate reading the process
+    // default provider would panic without an explicit install. See
+    // docs/CODING.md "rustls crypto backends" and rust/operator/src/main.rs.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     dotenvy::dotenv().ok();
     init_tracing();
     // Runs after `init_tracing` (matches sentry-rust's own tracing-demo.rs
@@ -111,9 +119,25 @@ async fn main() {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown({
+        let broadcaster = broadcaster.clone();
+        async move {
+            shutdown_signal().await;
+            broadcaster.begin_shutdown();
+        }
+    })
     .await
     .unwrap();
+
+    if tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        broadcaster.drain_ws_tasks(),
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!("websocket tasks did not drain within 5s of shutdown");
+    }
 }
 
 #[cfg(feature = "ssr")]

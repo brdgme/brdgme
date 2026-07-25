@@ -6,3 +6,6 @@ resources:
 - ../base/operator
 - ../base/postgres
 - ../base/web
+
+patches:
+- path: web-patch.yaml

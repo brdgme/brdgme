@@ -22,6 +22,7 @@ console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.10", optional = true }
 leptos_meta = { version = "0.8.6" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], optional = true }
+tokio-util = { version = "0.7", features = ["rt"], optional = true }
 wasm-bindgen = { version = "=0.2.121", optional = true }
 
 # Database dependencies
@@ -68,8 +69,14 @@ brdgme_color = { path = "../lib/color", optional = true }
 brdgme_markup = { path = "../lib/markup", optional = true }
 brdgme_game_client = { path = "../lib/game_client", optional = true, features = ["sentry"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"], optional = true }
+# The workspace enables both rustls backends (reqwest -> aws-lc-rs;
+# sqlx/async-nats defaults -> ring), so rustls can't auto-select a
+# process-default provider. Direct dep exists solely for the
+# install_default() call in main.rs; see CODING.md's rustls section.
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"], optional = true }
 aes-gcm = { version = "0.10", optional = true }
 hex = { version = "0.4", optional = true }
+zeroize = { version = "1", optional = true }
 rand = "0.10.2"
 futures-util = "0.3.32"
 gloo-net = { version = "0.7", features = ["websocket"] }
@@ -100,6 +107,7 @@ hydrate = [
 ssr = [
     "dep:axum",
     "dep:tokio",
+    "dep:tokio-util",
     "dep:leptos_axum",
     "leptos/ssr",
     "leptos_meta/ssr",
@@ -127,8 +135,10 @@ ssr = [
     "dep:dotenvy",
     "dep:tower-http",
     "dep:reqwest",
+    "dep:rustls",
     "dep:aes-gcm",
     "dep:hex",
+    "dep:zeroize",
     "dep:async-nats",
     "leptos-use/ssr",
     "dep:axum-prometheus",

@@ -1,6 +1,7 @@
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use thiserror::Error;
+use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Debug, Error)]
 pub enum CryptoError {
@@ -39,8 +40,8 @@ pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         .map_err(|_| CryptoError::DecryptionFailed)
 }
 
-pub fn default_key() -> [u8; 32] {
-    let mut key = [0u8; 32];
+pub fn default_key() -> Zeroizing<[u8; 32]> {
+    let mut key = Zeroizing::new([0u8; 32]);
     let seed = b"brdgme-dev-key-not-for-prod!!!";
     key[..seed.len()].copy_from_slice(seed);
     key
@@ -50,15 +51,19 @@ pub fn using_default_key() -> bool {
     std::env::var("DATABASE_ENCRYPTION_KEY").is_err()
 }
 
-pub fn load_key() -> Result<[u8; 32], CryptoError> {
+pub fn load_key() -> Result<Zeroizing<[u8; 32]>, CryptoError> {
     let hex_str = match std::env::var("DATABASE_ENCRYPTION_KEY") {
         Ok(v) => v,
         Err(_) => return Ok(default_key()),
     };
-    let bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
-    let key: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| CryptoError::InvalidKeyLength)?;
+    let mut bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
+    if bytes.len() != 32 {
+        bytes.zeroize();
+        return Err(CryptoError::InvalidKeyLength);
+    }
+    let mut key = Zeroizing::new([0u8; 32]);
+    key.copy_from_slice(&bytes);
+    bytes.zeroize();
     Ok(key)
 }
 
@@ -66,4 +71,38 @@ fn rand_nonce() -> Result<[u8; 12], CryptoError> {
     let mut nonce = [0u8; 12];
     getrandom::fill(&mut nonce).map_err(|_| CryptoError::EncryptionFailed)?;
     Ok(nonce)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let key = default_key();
+        let ct = encrypt(&key, b"secret api key").unwrap();
+        assert_ne!(&ct[12..], b"secret api key");
+        assert_eq!(decrypt(&key, &ct).unwrap(), b"secret api key");
+    }
+
+    #[test]
+    fn decrypt_rejects_tampered_ciphertext() {
+        let key = default_key();
+        let mut ct = encrypt(&key, b"secret").unwrap();
+        let last = ct.len() - 1;
+        ct[last] ^= 0x01;
+        assert!(matches!(
+            decrypt(&key, &ct),
+            Err(CryptoError::DecryptionFailed)
+        ));
+    }
+
+    #[test]
+    fn decrypt_rejects_short_input() {
+        let key = default_key();
+        assert!(matches!(
+            decrypt(&key, &[0u8; 11]),
+            Err(CryptoError::DecryptionFailed)
+        ));
+    }
 }
