@@ -368,6 +368,7 @@ impl Game {
             self.round += 1;
             self.next_player();
             logs.extend(self.start_round());
+            logs.extend(self.advance_past_empty_hands());
         }
         logs
     }
@@ -449,6 +450,15 @@ impl Game {
         ]));
         self.state = State::PlayCard;
         self.next_player();
+        logs.extend(self.advance_past_empty_hands());
+        logs
+    }
+
+    fn advance_past_empty_hands(&mut self) -> Vec<Log> {
+        if self.player_hands.iter().all(|h| h.is_empty()) {
+            return self.end_round();
+        }
+        let mut logs = vec![];
         while self.player_hands[self.current_player].is_empty() {
             logs.push(Log::public(vec![
                 N::text("Skipping "),
@@ -659,81 +669,50 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let (remaining, mut logs) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Play(c),
                 ..
-            }) => {
-                let mut logs = self.play_card(player, c)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_money[p]))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (remaining, self.play_card(player, c)?),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Add(c),
                 ..
-            }) => {
-                let mut logs = self.add_card(player, c)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_money[p]))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (remaining, self.add_card(player, c)?),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Bid(amount),
                 ..
-            }) => self.bid(player, amount).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (remaining, self.bid(player, amount)?),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Buy,
                 ..
-            }) => self.buy(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (remaining, self.buy(player)?),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Pass,
                 ..
-            }) => self.pass(player).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (remaining, self.pass(player)?),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Price(amount),
                 ..
-            }) => self.set_price(player, amount).map(|logs| CommandResponse {
-                logs,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
-            Err(e) => Err(e),
+            }) => (remaining, self.set_price(player, amount)?),
+            Err(e) => return Err(e),
+        };
+        if self.is_finished() {
+            let scores: Vec<(usize, i32)> = (0..self.players)
+                .map(|p| (p, self.player_money[p]))
+                .collect();
+            logs.push(placings_log(&self.placings(), Some(&scores)));
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo: false,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1137,5 +1116,142 @@ mod test {
         assert!(!json.contains("money"));
         assert!(!json.contains("hand"));
         assert!(!json.contains("current_bid") || json.contains("\"current_bid\":null"));
+    }
+
+    fn log_plain(log: &Log) -> String {
+        brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
+    }
+
+    #[test]
+    fn all_hands_empty_after_settle_ends_the_game() {
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let p = players(3);
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.round = 3;
+        g.state = State::PlayCard;
+        g.current_player = MICK;
+        g.player_hands = vec![
+            vec![Card {
+                suit: Suit::LiteMetal,
+                rank: Rank::Open,
+            }],
+            vec![],
+            vec![],
+        ];
+        g.player_purchases = vec![vec![]; 3];
+        g.command(MICK, "play lmop", &p).unwrap();
+        g.command(STEVE, "pass", &p).unwrap();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let result = g.command(BJ, "pass", &p);
+            let _ = tx.send((g, result));
+        });
+        let (g, result) = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("settle with all hands empty must terminate (d F34 busy-loop)");
+        let resp = result.unwrap();
+        assert!(
+            g.is_finished(),
+            "round 4 with no cards left must end the game"
+        );
+        assert_eq!(1, g.value_board.len(), "the round must have been scored");
+        assert!(g.whose_turn_players().is_empty());
+        assert!(
+            resp.logs.iter().any(|l| {
+                let t = log_plain(l);
+                t.contains("wins!") || t.contains("tie!")
+            }),
+            "finishing via pass must emit the placings log"
+        );
+    }
+
+    #[test]
+    fn round_four_skips_empty_handed_starter() {
+        let p = players(3);
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.round = 2;
+        g.state = State::PlayCard;
+        g.current_player = MICK;
+        let lm_open = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        };
+        let yo_open = Card {
+            suit: Suit::Yoko,
+            rank: Rank::Open,
+        };
+        g.player_purchases = vec![vec![lm_open, lm_open], vec![lm_open, lm_open], vec![]];
+        g.player_hands = vec![vec![lm_open], vec![], vec![yo_open]];
+        let resp = g.command(MICK, "play lmop", &p).unwrap();
+        assert_eq!(3, g.round, "round 4 must have started");
+        assert!(!g.is_finished());
+        assert_eq!(State::PlayCard, g.state);
+        assert_eq!(
+            BJ, g.current_player,
+            "empty-handed STEVE must be skipped when round 4 starts (d F35)"
+        );
+        assert!(
+            resp.logs.iter().any(|l| log_plain(l).contains("Skipping")),
+            "the skip must be logged"
+        );
+    }
+
+    #[test]
+    fn round_four_with_no_cards_anywhere_ends_immediately() {
+        let p = players(3);
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.round = 2;
+        g.state = State::PlayCard;
+        g.current_player = MICK;
+        let lm_open = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        };
+        g.player_purchases = vec![vec![lm_open, lm_open], vec![lm_open, lm_open], vec![]];
+        g.player_hands = vec![vec![lm_open], vec![], vec![]];
+        g.command(MICK, "play lmop", &p).unwrap();
+        assert!(
+            g.is_finished(),
+            "round 4 with no cards in any hand must end the game immediately"
+        );
+        assert_eq!(
+            2,
+            g.value_board.len(),
+            "both round 3 and round 4 must have been scored"
+        );
+        assert!(g.whose_turn_players().is_empty());
+    }
+
+    #[test]
+    fn settle_skips_empty_hands_when_cards_remain() {
+        let p = players(3);
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.round = 3;
+        g.state = State::PlayCard;
+        g.current_player = MICK;
+        g.player_hands = vec![
+            vec![Card {
+                suit: Suit::LiteMetal,
+                rank: Rank::Open,
+            }],
+            vec![],
+            vec![Card {
+                suit: Suit::Yoko,
+                rank: Rank::Open,
+            }],
+        ];
+        g.player_purchases = vec![vec![]; 3];
+        g.command(MICK, "play lmop", &p).unwrap();
+        g.command(STEVE, "pass", &p).unwrap();
+        g.command(BJ, "pass", &p).unwrap();
+        assert!(!g.is_finished());
+        assert_eq!(State::PlayCard, g.state);
+        assert_eq!(
+            BJ, g.current_player,
+            "STEVE (no cards) skipped; BJ still holds a card"
+        );
     }
 }
