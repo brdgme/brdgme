@@ -2347,3 +2347,28 @@ only. No file under `rust/` created, modified or deleted by the Lead or either
 Worker; no cargo/build/check/test/clippy/fmt command run; no git mutation (shell
 use was limited to read-only `ls`/`grep`/`sed`/`head`/`tail`/`wc`,
 `git log --oneline`, `git diff --stat` and `git diff`).
+
+---
+
+## WP-01 implementation progress
+
+Date: 2026-07-25. Lead: orchestrate Lead role (WP-01 execution unit).
+
+All 7 tasks implemented and committed as `c2637c1`:
+
+- Task 1 (lg F1): `Space::parse` - `input.len() - input.trim_start().len()`
+- Task 2 (lg F2): `Token::parse` - `input.get(..t_len)` boundary check
+- Task 3 (lg F3 + lg F4): `shared_prefix` returns `(input_bytes, value_bytes)`;
+  `Enum::parse` uses value-bytes for full-match detection
+- Task 4 (lg F16): `Int::parse` - `char_indices` byte-length accumulation
+- Task 5 (ls F1): `slice()` - char-unit slicing + `<=` boundary skip
+- Task 6 (e F29): `CardParser` - `chars[0].len_utf8() + chars[1].len_utf8()`
+- Task 7: docs/CODING.md non-ASCII test convention added
+
+Verification: `scripts/rust-test.sh` passed end-to-end (107 brdgme_game,
+48 brdgme_markup, 19 red7-1, 480 web, 41 ssr_pages, 5 nats_bot_eventing,
+1 websocket_hygiene; 2 ignored known-flaky NATS). fmt + clippy clean.
+
+One deviation from spec: markup `slice` tests needed `slice::<Color>(...)`
+turbofish for type inference on bare `TN::text(...)` assertions (E0283).
+Functionally identical to spec intent.

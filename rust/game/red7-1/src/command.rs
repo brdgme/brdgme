@@ -28,11 +28,14 @@ impl Parser for CardParser {
                 offset: 0,
             });
         }
-        match Card::parse(&input[..2]) {
+        // Byte length of the first two chars: `2` as a byte index cuts
+        // multi-byte input (e.g. "r€") mid-char and panics.
+        let split = chars[0].len_utf8() + chars[1].len_utf8();
+        match Card::parse(&input[..split]) {
             Some(card) => Ok(Output {
                 value: card,
-                consumed: &input[..2],
-                remaining: &input[2..],
+                consumed: &input[..split],
+                remaining: &input[split..],
             }),
             None => Err(brdgme_game::errors::GameError::Parse {
                 message: Some("the card must be a letter followed by a number, eg. r6".to_string()),
@@ -102,5 +105,40 @@ impl Game {
         } else {
             Some(Box::new(OneOf::new(parsers)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::card::Suit;
+
+    #[test]
+    fn card_parser_handles_multibyte_input() {
+        let parser = CardParser;
+        // '€' is 3 bytes: the old byte-index-2 slice panicked mid-char.
+        parser
+            .parse("r€", &[])
+            .expect_err("expected 'r€' to produce an error");
+        parser
+            .parse("€5", &[])
+            .expect_err("expected '€5' to produce an error");
+        parser
+            .parse("r\u{a0}", &[])
+            .expect_err("expected 'r' + NBSP to produce an error");
+        // ASCII behavior unchanged.
+        let out = parser.parse("r6x", &[]).expect("expected 'r6x' to parse");
+        assert_eq!(
+            out.value,
+            Card {
+                suit: Suit::Red,
+                rank: 6
+            }
+        );
+        assert_eq!(out.consumed, "r6");
+        assert_eq!(out.remaining, "x");
+        parser
+            .parse("r", &[])
+            .expect_err("expected single char to produce an error");
     }
 }

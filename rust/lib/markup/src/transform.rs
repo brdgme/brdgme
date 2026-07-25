@@ -261,7 +261,7 @@ fn slice<C: Copy>(nodes: &[TNode<C>], range: &Range<usize>) -> Vec<TNode<C>> {
     let mut end = range.end;
     for n in nodes {
         let n_len = TNode::len(std::slice::from_ref(n));
-        if n_len < start {
+        if n_len <= start {
             start -= n_len;
             end -= n_len;
             continue;
@@ -271,7 +271,14 @@ fn slice<C: Copy>(nodes: &[TNode<C>], range: &Range<usize>) -> Vec<TNode<C>> {
             TNode::Bg(ref color, ref children) => TNode::Bg(*color, slice(children, &(start..end))),
             TNode::Bold(ref children) => TNode::Bold(slice(children, &(start..end))),
             TNode::Text(ref text) => {
-                TNode::Text(text[start..cmp::min(text.len(), end)].to_string())
+                // start/end are char offsets (TNode::len counts chars), so
+                // slice by chars; byte indexing panics on multi-byte glyphs.
+                TNode::Text(
+                    text.chars()
+                        .skip(start)
+                        .take(end.saturating_sub(start))
+                        .collect(),
+                )
             }
         };
 
@@ -588,6 +595,39 @@ mod tests {
                 TN::Bg(LIGHT.blue, vec![TN::text("e"), TN::text("four")]),
                 TN::Bg(LIGHT.grey, vec![TN::text("f")]),
             ]),]
+        );
+    }
+
+    #[test]
+    fn slice_multibyte_works() {
+        // Char offsets into multi-byte text: 'é' is 2 bytes but 1 char.
+        // Byte-indexing panics at byte 1 (inside 'é').
+        assert_eq!(
+            slice::<Color>(&[TN::text("é!")], &(1..2)),
+            vec![TN::text("!")],
+        );
+        // Box-drawing glyphs as used by canvas boards (3 bytes each).
+        assert_eq!(
+            slice::<Color>(&[TN::text("│ab│")], &(1..3)),
+            vec![TN::text("ab")],
+        );
+        // Multi-byte inside a nested colored node, mirroring slice_works.
+        assert_eq!(
+            slice(
+                &[TN::Fg(LIGHT.red, vec![TN::Bold(vec![TN::text("héllo")])])],
+                &(1..3),
+            ),
+            vec![TN::Fg(LIGHT.red, vec![TN::Bold(vec![TN::text("él")])])]
+        );
+    }
+
+    #[test]
+    fn slice_skips_node_ending_at_range_start() {
+        // A node ending exactly at range.start must be skipped, not emitted
+        // as an empty text node.
+        assert_eq!(
+            slice::<Color>(&[TN::text("ab"), TN::text("cd")], &(2..4)),
+            vec![TN::text("cd")],
         );
     }
 }

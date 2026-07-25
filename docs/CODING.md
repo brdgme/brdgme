@@ -608,3 +608,26 @@ g.current_player)` is inherently flaky in that shape - a same-player
 bounce-back is a legal outcome, not a bug. Assert on the emitted log content
 instead (e.g. that a "it is now X's turn" log names the *other* player),
 which holds regardless of how many players the turn cascades through.
+
+**Non-ASCII input coverage for string slicing.** Rust `&str` indexing is by
+bytes and panics off char boundaries, while user input is arbitrary UTF-8 -
+iOS autocorrect inserts U+00A0 NBSP, and player names and commands can carry
+accents or emoji. Any code that slices, indexes, or measures a string derived
+from user input (commands, player names, rendered markup text) must include
+at least one test where a multi-byte character sits at the computed boundary.
+Use these canonical hostile inputs (all appear in the lib/game, lib/markup,
+and red7-1 parser tests):
+
+- `"\u{a0}"` - NBSP: 2-byte WHITESPACE (`char::is_whitespace` is true), the
+  live iOS trigger; also `"\u{3000}"` (3-byte ideographic space).
+- `"é"` / `"ñ"` - 2-byte letters; `"café"` for prefix matching that stops
+  mid-value.
+- `"€"` / `"│"` - 3-byte symbol / box-drawing glyph (canvas boards).
+- `"e\u{301}"` - combining accent: 2 chars, 1 grapheme; pins down which unit
+  a function counts in.
+- `"🀄"` - 4-byte emoji.
+
+Convention for new parser/render code: every `parse`-like function over user
+input gets an `..._handles_multibyte_input`-style test alongside its ASCII
+tests, asserting error-not-panic for malformed multi-byte input and correct
+`consumed`/`remaining` splits for valid input containing multi-byte chars.

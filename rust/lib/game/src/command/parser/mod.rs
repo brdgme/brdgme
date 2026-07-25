@@ -47,20 +47,20 @@ impl Parser for Token {
 
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, String>, GameError> {
         let t_len = self.token.len();
-        if input.len() < self.token.len()
-            || UniCase::new(&input[..t_len]) != UniCase::new(&self.token)
-        {
-            return Err(GameError::Parse {
+        // get() returns None when t_len exceeds the input or is not a char
+        // boundary of the input; both are mismatches, never panics.
+        match input.get(..t_len) {
+            Some(prefix) if UniCase::new(prefix) == UniCase::new(&self.token) => Ok(Output {
+                value: self.token.to_owned(),
+                consumed: prefix,
+                remaining: &input[t_len..],
+            }),
+            _ => Err(GameError::Parse {
                 message: None,
                 expected: self.expected(names),
                 offset: 0,
-            });
+            }),
         }
-        Ok(Output {
-            value: self.token.to_owned(),
-            consumed: &input[..t_len],
-            remaining: &input[t_len..],
-        })
     }
 
     fn expected(&self, _names: &[String]) -> Vec<String> {
@@ -121,9 +121,12 @@ impl Parser for Int {
 
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, i32>, GameError> {
         let mut found_digit = false;
-        let consumed_count = input
-            .chars()
-            .enumerate()
+        // Byte length of the accepted prefix. The accepted chars are all
+        // 1-byte ASCII today, but a byte length keeps this slice-safe if the
+        // accepted set ever grows (see the Space/Enum multi-byte panics this
+        // file previously had).
+        let consumed_len = input
+            .char_indices()
             .take_while(|&(i, c)| {
                 if i == 0 && c == '-' {
                     true
@@ -134,7 +137,9 @@ impl Parser for Int {
                     false
                 }
             })
-            .count();
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
         if !found_digit {
             return Err(GameError::Parse {
                 message: None,
@@ -142,7 +147,7 @@ impl Parser for Int {
                 offset: 0,
             });
         }
-        let consumed = &input[..consumed_count];
+        let consumed = &input[..consumed_len];
         let value: i32 = consumed.parse().map_err(|_| GameError::Parse {
             message: Some(format!("failed to parse '{}'", consumed)),
             expected: self.expected(names),
@@ -169,7 +174,7 @@ impl Parser for Int {
         Ok(Output {
             value,
             consumed,
-            remaining: &input[consumed_count..],
+            remaining: &input[consumed_len..],
         })
     }
 
@@ -428,7 +433,11 @@ impl Parser for Space {
     type T = String;
 
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, String>, GameError> {
-        let consumed = input.chars().take_while(|c| c.is_whitespace()).count();
+        // Byte length of the leading whitespace run. trim_start strips the
+        // same set of chars as char::is_whitespace, so this is always a char
+        // boundary; a char count here would byte-slice mid-char on multi-byte
+        // whitespace such as U+00A0 NBSP.
+        let consumed = input.len() - input.trim_start().len();
         if consumed == 0 {
             return Err(GameError::Parse {
                 message: None,
@@ -575,21 +584,26 @@ where
     }
 }
 
-fn shared_prefix(s1: &str, s2: &str) -> usize {
-    let mut s1i = s1.chars();
-    let mut s2i = s2.chars();
-    let mut len = 0usize;
-    loop {
-        match (s1i.next(), s2i.next()) {
-            (Some(s1c), Some(s2c)) => {
-                if s1c != s2c {
-                    return len;
-                }
-                len += 1;
+/// Case-insensitive shared prefix of `input` and `value`, compared per char
+/// via char::to_lowercase. Returns byte lengths `(input_bytes, value_bytes)`
+/// of the matched prefix in each ORIGINAL string; both are char boundaries
+/// of their own string, so they are safe slice indices. Byte lengths are
+/// tracked separately because case-insensitively equal prefixes can differ
+/// in byte length between the two strings.
+fn shared_prefix(input: &str, value: &str) -> (usize, usize) {
+    let mut input_bytes = 0usize;
+    let mut value_bytes = 0usize;
+    let mut vi = value.chars();
+    for ic in input.chars() {
+        match vi.next() {
+            Some(vc) if ic.to_lowercase().eq(vc.to_lowercase()) => {
+                input_bytes += ic.len_utf8();
+                value_bytes += vc.len_utf8();
             }
-            _ => return len,
+            _ => break,
         }
     }
+    (input_bytes, value_bytes)
 }
 
 impl<T> Parser for Enum<T>
@@ -602,8 +616,8 @@ where
         input: &'a str,
         names: &[String],
     ) -> Result<Output<'a, Self::T>, GameError> {
-        let input_lower = input.to_lowercase();
         let mut matched: Vec<&T> = vec![];
+        // Byte length of `input` consumed by the current best match(es).
         let mut match_len: usize = 0;
         // Exact matches are prioritised, a shorter full match will happen over a longer partial
         // match.
@@ -611,20 +625,24 @@ where
         // Track which values have been searched to avoid duplicates.
         let mut searched: HashSet<String> = HashSet::new();
         for v in &self.values {
-            let v_str = v.clone().to_string().to_lowercase();
-            if searched.contains(&v_str) {
+            let v_str = v.clone().to_string();
+            let v_key = v_str.to_lowercase();
+            if searched.contains(&v_key) {
                 // This is a duplicate, skip it.
                 continue;
             }
-            searched.insert(v_str.clone());
-            let v_len = v_str.len();
-            let matching = shared_prefix(&input_lower, &v_str);
-            if self.exact && matching < v_len {
+            searched.insert(v_key);
+            let (matching, v_matching) = shared_prefix(input, &v_str);
+            // Whether the whole value was matched, measured in the value's
+            // own bytes (comparing input bytes to value bytes would misfire
+            // whenever case folding changes byte length).
+            let full = v_matching == v_str.len();
+            if self.exact && !full {
                 // The input isn't long enough and we require exact match, skip it.
                 continue;
             }
-            if matching > 0 && matching >= match_len && (!full_match || matching == v_len) {
-                if matching == v_len {
+            if matching > 0 && matching >= match_len && (!full_match || full) {
+                if full {
                     full_match = true
                 }
                 if matching > match_len {
@@ -1483,6 +1501,167 @@ mod tests {
                 "buy3",   // absent, no space
                 "",       // empty input
             ],
+        );
+    }
+
+    #[test]
+    fn space_parser_handles_multibyte_whitespace() {
+        // U+00A0 NBSP is 2-byte whitespace; iOS autocorrect inserts it in
+        // place of a regular space. Must not panic (char count != byte len).
+        let parser = Space {};
+        assert_eq!(
+            Output {
+                value: "\u{a0}".to_string(),
+                consumed: "\u{a0}",
+                remaining: "x",
+            },
+            parser
+                .parse("\u{a0}x", &[])
+                .expect("expected NBSP to parse as whitespace")
+        );
+        // Mixed ASCII + NBSP + ideographic space run.
+        assert_eq!(
+            Output {
+                value: " \u{a0}\u{3000}".to_string(),
+                consumed: " \u{a0}\u{3000}",
+                remaining: "go",
+            },
+            parser
+                .parse(" \u{a0}\u{3000}go", &[])
+                .expect("expected mixed whitespace run to parse")
+        );
+        // Non-whitespace multi-byte char must still error, not panic.
+        parser
+            .parse("é", &[])
+            .expect_err("expected 'é' to produce an error");
+    }
+
+    #[test]
+    fn token_parser_handles_multibyte_input() {
+        // "nñ" is 3 bytes; byte index 2 (the token's length) is inside 'ñ'.
+        // Must be a mismatch, not a panic.
+        let parser = Token::new("no");
+        parser
+            .parse("nñ", &[])
+            .expect_err("expected 'nñ' to produce an error for token 'no'");
+        // Multi-byte input longer than the token still mismatches cleanly.
+        parser
+            .parse("ñofurther", &[])
+            .expect_err("expected 'ñofurther' to produce an error for token 'no'");
+        // A multi-byte token still matches multi-byte input exactly.
+        let parser = Token::new("sí");
+        assert_eq!(
+            Output {
+                value: "sí".to_string(),
+                consumed: "sí",
+                remaining: "!",
+            },
+            parser.parse("sí!", &[]).expect("expected 'sí!' to parse")
+        );
+    }
+
+    #[test]
+    fn int_parser_stops_cleanly_at_multibyte_chars() {
+        let parser = Int {
+            min: None,
+            max: None,
+        };
+        assert_eq!(
+            Output {
+                value: 12,
+                consumed: "12",
+                remaining: "é",
+            },
+            parser.parse("12é", &[]).expect("expected '12é' to parse")
+        );
+        parser
+            .parse("é12", &[])
+            .expect_err("expected 'é12' to produce an error");
+        // Non-ASCII digits are rejected, not consumed.
+        parser
+            .parse("١٢", &[])
+            .expect_err("expected Arabic-Indic digits to produce an error");
+    }
+
+    #[test]
+    fn enum_parser_handles_multibyte_values() {
+        // lg F3: shared_prefix returned chars, Enum sliced bytes.
+        let parser = Enum::partial(vec!["café", "dog"]);
+        assert_eq!(
+            Output {
+                value: "café",
+                consumed: "café",
+                remaining: "x",
+            },
+            parser
+                .parse("caféx", &[])
+                .expect("expected 'caféx' to parse")
+        );
+        // Partial prefix stopping before the multi-byte char.
+        assert_eq!(
+            Output {
+                value: "café",
+                consumed: "caf",
+                remaining: "",
+            },
+            parser.parse("caf", &[]).expect("expected 'caf' to parse")
+        );
+        // Case-insensitive multi-byte match.
+        assert_eq!(
+            Output {
+                value: "café",
+                consumed: "CAFÉ",
+                remaining: "",
+            },
+            parser.parse("CAFÉ", &[]).expect("expected 'CAFÉ' to parse")
+        );
+    }
+
+    #[test]
+    fn enum_parser_multibyte_player_name() {
+        // lg F3 reachability: Player builds Enum::partial from user names.
+        let names = vec!["José".to_string(), "Bob".to_string()];
+        let parser = Player {};
+        assert_eq!(
+            Output {
+                value: 0,
+                consumed: "josé",
+                remaining: "",
+            },
+            parser
+                .parse("josé", &names)
+                .expect("expected player name 'josé' to parse")
+        );
+    }
+
+    #[test]
+    fn exact_enum_matches_multibyte_values() {
+        // lg F4: chars-vs-bytes comparison made exact multi-byte values
+        // unmatchable, and broke full-match priority.
+        let parser = Enum::exact(vec!["café", "dog"]);
+        assert_eq!(
+            Output {
+                value: "café",
+                consumed: "café",
+                remaining: "",
+            },
+            parser.parse("café", &[]).expect("expected 'café' to parse")
+        );
+        parser
+            .parse("caf", &[])
+            .expect_err("expected partial 'caf' to error under exact");
+        // Full-match priority with multi-byte values: the exact-length full
+        // match must beat the equal-input-length partial of a longer value.
+        let parser = Enum::partial(vec!["café", "cafét"]);
+        assert_eq!(
+            Output {
+                value: "café",
+                consumed: "café",
+                remaining: "",
+            },
+            parser
+                .parse("café", &[])
+                .expect("expected full match 'café' to win over partial 'cafét'")
         );
     }
 }
