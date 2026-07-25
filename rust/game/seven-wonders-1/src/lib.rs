@@ -1,13 +1,14 @@
 pub mod card;
 pub mod command;
 pub mod render;
+mod scoring;
+mod trade;
 
 pub use card::*;
 pub use command::Command;
 
 use std::collections::HashMap;
 
-use brdgme_cost::{Cost, can_afford_perm};
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
 use brdgme_game::errors::GameError;
@@ -31,7 +32,16 @@ pub enum Action {
         card: usize,
         free: bool,
         wonder: bool,
+        /// Legacy: pre-upgrade saved states stored the chosen deal as an
+        /// index into a deal list recomputed at execute time. Read only as a
+        /// fallback when `deal_coins` is `None`; new states always write
+        /// `None` here. Kept so old mid-hand states keep deserializing.
         deal: Option<usize>,
+        /// The chosen trade payment (direction -> coins), captured at choose
+        /// time so mid-turn state changes cannot reorder or shrink a
+        /// recomputed deal list (b F9).
+        #[serde(default)]
+        deal_coins: Option<HashMap<i32, i32>>,
         chosen: bool,
     },
     Discard {
@@ -174,11 +184,6 @@ impl Game {
         vec![Log::public(vec![N::text(format!("Age {} begins", round))])]
     }
 
-    fn start_hand(&mut self) -> Vec<Log> {
-        self.actions = vec![None; self.players];
-        vec![]
-    }
-
     fn end_hand(&mut self) -> Vec<Log> {
         let max_hand = self.hands.iter().map(|h| h.len()).max().unwrap_or(0);
 
@@ -192,7 +197,6 @@ impl Game {
                 if self.hands[p].len() == 1 && !self.has_play_final_card(p) {
                     let card = self.hands[p].pop().unwrap();
                     self.discard.push(card);
-                    self.coins[p] += DISCARD_COINS;
                     logs.push(Log::public(vec![
                         N::Player(p),
                         N::text(" discarded their last card"),
@@ -205,13 +209,11 @@ impl Game {
                 logs.extend(er_logs);
                 return logs;
             }
-            let sh_logs = self.start_hand();
-            logs.extend(sh_logs);
             return logs;
         }
 
         self.pass_hands();
-        self.start_hand()
+        vec![]
     }
 
     fn end_round(&mut self) -> Vec<Log> {
@@ -253,6 +255,7 @@ impl Game {
         }
 
         let mut logs = self.execute_actions();
+        logs.extend(self.prune_resolvers());
 
         if self.to_resolve.is_empty() {
             let eh_logs = self.end_hand();
@@ -274,10 +277,17 @@ impl Game {
                         free,
                         wonder,
                         deal,
+                        deal_coins,
                         ..
                     } => {
-                        let (build_logs, built) =
-                            self.execute_build(p, *card, *free, *wonder, *deal);
+                        let (build_logs, built) = self.execute_build(
+                            p,
+                            *card,
+                            *free,
+                            *wonder,
+                            *deal,
+                            deal_coins.as_ref(),
+                        );
                         logs.extend(build_logs);
                         if let Some(c) = built {
                             let hl = self.post_build_hook(p, &c);
@@ -303,6 +313,7 @@ impl Game {
         free: bool,
         wonder: bool,
         deal: Option<usize>,
+        deal_coins: Option<&HashMap<i32, i32>>,
     ) -> (Vec<Log>, Option<Card>) {
         let mut logs = vec![];
 
@@ -317,7 +328,7 @@ impl Game {
             let stage_card = db[&stage_name].clone();
 
             if !free {
-                let deal_map = self.resolve_deal(player, &stage_card.cost, deal);
+                let deal_map = self.resolve_deal(player, &stage_card.cost, deal, deal_coins);
                 self.pay_cost(player, &stage_card.cost, &deal_map);
             }
 
@@ -344,7 +355,7 @@ impl Game {
                     }
                 }
             } else {
-                let deal_map = self.resolve_deal(player, &card.cost, deal);
+                let deal_map = self.resolve_deal(player, &card.cost, deal, deal_coins);
                 self.pay_cost(player, &card.cost, &deal_map);
             }
 
@@ -407,113 +418,16 @@ impl Game {
                     }
                 }
             }
+            // Takeability can change between here and when the resolver fires
+            // (same-hand discards grow the pile; an earlier resolver's take
+            // shrinks it), so it is enforced by prune_resolvers() at hand
+            // completion and after each take, not at queue time (b F2).
             CardEffect::DrawDiscard { .. } if !self.discard.is_empty() => {
                 self.to_resolve.push(Resolver::DrawDiscard { player });
             }
             _ => {}
         }
         logs
-    }
-
-    fn resolve_deal(
-        &self,
-        player: usize,
-        cost: &Cost<Good>,
-        deal: Option<usize>,
-    ) -> HashMap<i32, i32> {
-        match deal {
-            Some(idx) => {
-                let (_, deals) = self.can_afford_cost(player, cost);
-                deals.get(idx).cloned().unwrap_or_default()
-            }
-            None => HashMap::new(),
-        }
-    }
-
-    fn pay_cost(&mut self, player: usize, cost: &Cost<Good>, deal: &HashMap<i32, i32>) {
-        let coin_cost = cost.0.get(&Good::Coin).copied().unwrap_or(0);
-        self.coins[player] -= coin_cost;
-
-        for (&dir, &coins) in deal {
-            let neighbor = if dir == DIR_LEFT {
-                (player + self.players - 1) % self.players
-            } else {
-                (player + 1) % self.players
-            };
-            self.coins[player] -= coins;
-            self.coins[neighbor] += coins;
-        }
-    }
-
-    pub fn can_afford_cost(
-        &self,
-        player: usize,
-        cost: &Cost<Good>,
-    ) -> (bool, Vec<HashMap<i32, i32>>) {
-        let coin_cost = cost.0.get(&Good::Coin).copied().unwrap_or(0);
-        if self.coins[player] < coin_cost {
-            return (false, vec![]);
-        }
-
-        let goods_cost: Cost<Good> = Cost(
-            cost.0
-                .iter()
-                .filter(|(g, _)| **g != Good::Coin)
-                .map(|(g, v)| (*g, *v))
-                .collect(),
-        );
-
-        if goods_cost.is_zero() {
-            return (true, vec![HashMap::new()]);
-        }
-
-        let own = self.player_goods_options(player);
-        let left_player = (player + self.players - 1) % self.players;
-        let right_player = (player + 1) % self.players;
-        let left = self.player_goods_options(left_player);
-        let right = self.player_goods_options(right_player);
-
-        let own_count = own.len();
-        let left_count = left.len();
-
-        let mut with = own;
-        with.extend(left);
-        with.extend(right);
-
-        let (can, allocations) = can_afford_perm(&goods_cost, &with);
-        if !can {
-            return (false, vec![]);
-        }
-
-        let mut deals: Vec<HashMap<i32, i32>> = vec![];
-        for alloc in &allocations {
-            let mut deal: HashMap<i32, i32> = HashMap::new();
-            for (i, c) in alloc.iter().enumerate() {
-                let dir = if i < own_count {
-                    continue;
-                } else if i < own_count + left_count {
-                    DIR_LEFT
-                } else {
-                    DIR_RIGHT
-                };
-                for (good, amount) in &c.0 {
-                    if *amount > 0 {
-                        let per_good = self.trade_cost_per_good(player, dir, *good);
-                        *deal.entry(dir).or_insert(0) += amount * per_good;
-                    }
-                }
-            }
-            let total_deal_cost: i32 = deal.values().sum();
-            if self.coins[player] - coin_cost >= total_deal_cost && !deals.contains(&deal) {
-                deals.push(deal);
-            }
-        }
-
-        if deals.is_empty() {
-            (false, vec![])
-        } else {
-            (true, deals)
-        }
     }
 
     pub fn can_build_card(&self, player: usize, card_idx: usize) -> (bool, Vec<HashMap<i32, i32>>) {
@@ -576,32 +490,6 @@ impl Game {
             .any(|c| matches!(c.effect, CardEffect::PlayFinalCard))
     }
 
-    fn player_goods_options(&self, player: usize) -> Vec<Vec<Cost<Good>>> {
-        let mut options = vec![];
-        let city = &self.cities[player];
-        let mut city_cost = HashMap::new();
-        city_cost.insert(city.initial_resource, 1);
-        options.push(vec![Cost(city_cost)]);
-        for card in &self.cards[player] {
-            if let CardEffect::Good { goods } = &card.effect {
-                options.push(goods.clone());
-            }
-        }
-        options
-    }
-
-    fn trade_cost_per_good(&self, player: usize, dir: i32, good: Good) -> i32 {
-        for card in &self.cards[player] {
-            if let CardEffect::Trade { directions, goods } = &card.effect
-                && directions.contains(&dir)
-                && goods.contains(&good)
-            {
-                return DISCOUNTED_TRADE_COST;
-            }
-        }
-        BASE_TRADE_COST
-    }
-
     fn bonus_count(&self, player: usize, target_kinds: &[BonusTarget], directions: &[i32]) -> i32 {
         let mut count = 0;
         for &dir in directions {
@@ -646,113 +534,6 @@ impl Game {
         strength
     }
 
-    pub fn science_vp(&self, player: usize) -> i32 {
-        let mut field_options: Vec<Vec<Field>> = vec![];
-        for card in &self.cards[player] {
-            if let CardEffect::Science { fields } = &card.effect {
-                field_options.push(fields.clone());
-            }
-        }
-        if field_options.is_empty() {
-            return 0;
-        }
-        let mut best = 0;
-        let mut counts: HashMap<Field, i32> = HashMap::new();
-        Self::science_permute(&field_options, &mut counts, 0, &mut best);
-        best
-    }
-
-    fn science_permute(
-        options: &[Vec<Field>],
-        counts: &mut HashMap<Field, i32>,
-        idx: usize,
-        best: &mut i32,
-    ) {
-        if idx == options.len() {
-            let score = Self::score_science(counts);
-            if score > *best {
-                *best = score;
-            }
-            return;
-        }
-        for &field in &options[idx] {
-            *counts.entry(field).or_insert(0) += 1;
-            Self::science_permute(options, counts, idx + 1, best);
-            *counts.get_mut(&field).unwrap() -= 1;
-        }
-    }
-
-    fn score_science(counts: &HashMap<Field, i32>) -> i32 {
-        let mut score = 0;
-        let mut min_count = i32::MAX;
-        for field in all_fields() {
-            let count = counts.get(&field).copied().unwrap_or(0);
-            score += count * count;
-            if count < min_count {
-                min_count = count;
-            }
-        }
-        if min_count == i32::MAX {
-            min_count = 0;
-        }
-        score + min_count * 7
-    }
-
-    pub fn player_vp(&self, player: usize) -> i32 {
-        let mut vp = self.victory_tokens[player] - self.defeat_tokens[player];
-        vp += self.coins[player] / 3;
-        vp += self.science_vp(player);
-
-        for card in &self.cards[player] {
-            match &card.effect {
-                CardEffect::VP { vp: card_vp } => vp += card_vp,
-                CardEffect::Bonus {
-                    target_kinds,
-                    directions,
-                    vp: bonus_vp,
-                    ..
-                } if *bonus_vp > 0 => {
-                    vp += self.bonus_count(player, target_kinds, directions) * bonus_vp;
-                }
-                CardEffect::MimicGuild => {
-                    vp += self.mimic_guild_vp(player);
-                }
-                _ => {}
-            }
-        }
-
-        vp
-    }
-
-    fn mimic_guild_vp(&self, player: usize) -> i32 {
-        let mut best = 0;
-        for &dir in DIR_NEIGHBOURS {
-            let neighbor = if dir == DIR_LEFT {
-                (player + self.players - 1) % self.players
-            } else {
-                (player + 1) % self.players
-            };
-            for card in &self.cards[neighbor] {
-                if card.kind != CardKind::Guild {
-                    continue;
-                }
-                if let CardEffect::Bonus {
-                    target_kinds,
-                    directions,
-                    vp: bonus_vp,
-                    ..
-                } = &card.effect
-                {
-                    let card_vp = self.bonus_count(player, target_kinds, directions) * bonus_vp;
-                    if card_vp > best {
-                        best = card_vp;
-                    }
-                }
-            }
-        }
-        best
-    }
-
     fn military_conflicts(&mut self) -> Vec<Log> {
         let mut logs = vec![];
         let tokens = (self.round as i32) * 2 - 1;
@@ -769,9 +550,11 @@ impl Game {
                 self.defeat_tokens[right] += 1;
                 logs.push(Log::public(vec![
                     N::Player(p),
+                    N::text(" defeated "),
+                    N::Player(right),
                     N::text(format!(
-                        " defeated player {} in military conflict (+{} victory, +1 defeat)",
-                        right, tokens
+                        " in military conflict (+{} victory, +1 defeat)",
+                        tokens
                     )),
                 ]));
             }
@@ -805,8 +588,8 @@ impl Game {
             let stage_card = &db[stage_name];
             let (_, deals) = self.can_afford_cost(player, &stage_card.cost);
 
-            let (deal, chosen) = if deals.len() <= 1 {
-                (deals.first().map(|_| 0), true)
+            let (deal_coins, chosen) = if deals.len() <= 1 {
+                (deals.into_iter().next(), true)
             } else {
                 (None, false)
             };
@@ -815,7 +598,8 @@ impl Game {
                 card: card_idx,
                 free,
                 wonder: true,
-                deal,
+                deal: None,
+                deal_coins,
                 chosen,
             });
         } else if free {
@@ -827,6 +611,7 @@ impl Game {
                 free: true,
                 wonder: false,
                 deal: None,
+                deal_coins: None,
                 chosen: true,
             });
         } else {
@@ -835,8 +620,8 @@ impl Game {
                 return Err(GameError::invalid_input("cannot afford this card"));
             }
 
-            let (deal, chosen) = if deals.len() <= 1 {
-                (deals.first().map(|_| 0), true)
+            let (deal_coins, chosen) = if deals.len() <= 1 {
+                (deals.into_iter().next(), true)
             } else {
                 (None, false)
             };
@@ -845,7 +630,8 @@ impl Game {
                 card: card_idx,
                 free: false,
                 wonder: false,
-                deal,
+                deal: None,
+                deal_coins,
                 chosen,
             });
         }
@@ -893,7 +679,8 @@ impl Game {
                     card,
                     free,
                     wonder,
-                    deal: Some(deal_idx),
+                    deal: None,
+                    deal_coins: Some(deals[deal_idx].clone()),
                     chosen: true,
                 });
 
@@ -903,6 +690,28 @@ impl Game {
                 "no pending deal selection for this player",
             )),
         }
+    }
+
+    fn has_takeable_discard(&self, player: usize) -> bool {
+        self.discard
+            .iter()
+            .any(|c| !self.cards[player].iter().any(|o| o.name == c.name))
+    }
+
+    fn prune_resolvers(&mut self) -> Vec<Log> {
+        let mut logs = vec![];
+        while let Some(Resolver::DrawDiscard { player }) = self.to_resolve.first() {
+            let player = *player;
+            if self.has_takeable_discard(player) {
+                break;
+            }
+            self.to_resolve.remove(0);
+            logs.push(Log::public(vec![
+                N::Player(player),
+                N::text(" has no cards they can take from the discard pile"),
+            ]));
+        }
+        logs
     }
 
     fn take_from_discard(&mut self, player: usize, card_idx: usize) -> Result<Vec<Log>, GameError> {
@@ -930,6 +739,7 @@ impl Game {
         ])];
 
         self.to_resolve.remove(0);
+        logs.extend(self.prune_resolvers());
 
         if self.to_resolve.is_empty() {
             let eh_logs = self.end_hand();
@@ -981,7 +791,7 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            hand: self.hands[player].clone(),
+            hand: self.hands.get(player).cloned().unwrap_or_default(),
         }
     }
 
@@ -1230,6 +1040,10 @@ mod tests {
         cities().into_iter().find(|c| c.name == "Rhodes A").unwrap()
     }
 
+    fn giza_a() -> City {
+        cities().into_iter().find(|c| c.name == "Giza A").unwrap()
+    }
+
     fn db_card(name: &str) -> Card {
         card_db()[name].clone()
     }
@@ -1267,6 +1081,46 @@ mod tests {
         *counts.entry(Field::Theology).or_insert(0) += 2;
         *counts.entry(Field::Mathematics).or_insert(0) += 2;
         assert_eq!(Game::score_science(&counts), 26);
+    }
+
+    #[test]
+    fn halicarnassus_b_stage_vp_is_scored() {
+        // b F1: DrawDiscard stages carry printed VP (2/1/0 for the B side)
+        // that player_vp dropped via the catch-all arm.
+        let mut g = new_game();
+        g.cards[MICK] = vec![
+            db_card("Halicarnassus B Wonder Stage 1"),
+            db_card("Halicarnassus B Wonder Stage 2"),
+            db_card("Halicarnassus B Wonder Stage 3"),
+        ];
+        // 3 starting coins = 1 VP; stages = 2 + 1 + 0 = 3 VP.
+        assert_eq!(g.player_vp(MICK), 4);
+    }
+
+    #[test]
+    fn halicarnassus_a_stage_vp_unchanged() {
+        // Lock in that the A side (vp: 0 on its DrawDiscard stage) is a no-op.
+        let mut g = new_game();
+        g.cards[MICK] = vec![db_card("Halicarnassus A Wonder Stage 2")];
+        assert_eq!(g.player_vp(MICK), 1); // coins only
+    }
+
+    #[test]
+    fn auto_discarded_last_card_pays_no_coins() {
+        // b F3: only the player-chosen discard action pays DISCARD_COINS;
+        // the end-of-age auto-discard is free per the official rules.
+        let mut g = new_game();
+        for p in 0..3 {
+            g.hands[p].truncate(2);
+        }
+        cmd(&mut g, MICK, "discard 1").unwrap();
+        cmd(&mut g, STEVE, "discard 1").unwrap();
+        cmd(&mut g, GREG, "discard 1").unwrap();
+
+        assert_eq!(g.round, 2, "the age must have ended via the auto-discard");
+        assert_eq!(g.discard.len(), 6, "3 chosen + 3 auto-discarded cards");
+        // 3 starting coins + 3 for the chosen discard + 0 for the auto-discard.
+        assert_eq!(g.coins, vec![6, 6, 6]);
     }
 
     #[test]
@@ -1485,6 +1339,322 @@ mod tests {
 
         assert_eq!(g.whose_turn(), vec![MICK]);
         assert!(cmd(&mut g, MICK, "take 1").is_err());
+    }
+
+    #[test]
+    fn drawdiscard_pruned_when_pile_all_owned() {
+        // b F2: with every pile card already owned by the resolver's player,
+        // the resolver must be dropped instead of soft-locking the game.
+        let mut g = new_game();
+        // Giza's initial resource is Stone, so MICK's 3 Ore come only from his
+        // own cards and the build resolves as a single, empty trade deal.
+        for p in 0..3 {
+            g.cities[p] = giza_a();
+        }
+        g.hands[MICK][0] = db_card("Halicarnassus A Wonder Stage 2");
+        g.cards[MICK] = vec![db_card("Ore Vein"), db_card("Foundry"), db_card("Palace")];
+        g.hands[STEVE][0] = db_card("Lumber Yard");
+        g.hands[GREG][0] = db_card("Clay Pool");
+        g.discard = vec![db_card("Palace")];
+
+        cmd(&mut g, MICK, "build 1").unwrap();
+        cmd(&mut g, STEVE, "build 1").unwrap();
+        // STEVE and GREG BUILD (zero-cost cards) so the pile stays [Palace].
+        cmd(&mut g, GREG, "build 1").unwrap();
+
+        assert!(
+            g.to_resolve.is_empty(),
+            "a resolver with nothing takeable must be pruned"
+        );
+        assert_eq!(
+            g.whose_turn(),
+            vec![MICK, STEVE, GREG],
+            "the hand must have ended and passed for everyone"
+        );
+    }
+
+    #[test]
+    fn second_resolver_pruned_when_pile_emptied() {
+        // b F2 (multi-resolver): the first take empties the pile; the second
+        // resolver must be pruned at that moment, not stranded.
+        let mut g = new_game();
+        for p in 0..3 {
+            g.cities[p] = giza_a();
+        }
+        g.hands[MICK][0] = db_card("Halicarnassus A Wonder Stage 2");
+        g.cards[MICK] = vec![db_card("Ore Vein"), db_card("Foundry")];
+        g.hands[STEVE][0] = db_card("Halicarnassus B Wonder Stage 1");
+        g.cards[STEVE] = vec![db_card("Ore Vein"), db_card("Foundry")];
+        g.hands[GREG][0] = db_card("Lumber Yard");
+        g.discard = vec![db_card("Palace")];
+
+        cmd(&mut g, MICK, "build 1").unwrap();
+        cmd(&mut g, STEVE, "build 1").unwrap();
+        cmd(&mut g, GREG, "build 1").unwrap();
+
+        assert_eq!(g.to_resolve.len(), 2, "both DrawDiscard builds must queue");
+        assert_eq!(g.whose_turn(), vec![MICK]);
+
+        cmd(&mut g, MICK, "take 1").unwrap();
+
+        assert!(g.cards[MICK].iter().any(|c| c.name == "Palace"));
+        assert!(
+            g.to_resolve.is_empty(),
+            "the second resolver must be pruned once the pile is empty"
+        );
+    }
+
+    #[test]
+    fn legacy_action_json_still_deserializes() {
+        // b F9: mid-hand saved states from before the deal_coins field carry
+        // only the legacy index; they must keep deserializing.
+        let old = r#"{"Build":{"card":2,"free":false,"wonder":false,"deal":0,"chosen":true}}"#;
+        let a: Action = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            a,
+            Action::Build {
+                card: 2,
+                free: false,
+                wonder: false,
+                deal: Some(0),
+                deal_coins: None,
+                chosen: true,
+            }
+        );
+    }
+
+    #[test]
+    fn stored_deal_paid_despite_mid_turn_divergence() {
+        // b F9: the deal chosen at choose time must be the deal paid at
+        // execute time, even when a recompute would find a different (or no)
+        // deal list. Pre-fix, the recompute here finds NO deals and
+        // unwrap_or_default() builds Haven for free.
+        let mut g = new_game();
+        for p in 0..3 {
+            g.cities[p] = rhodes_a();
+        }
+        // Haven costs Wood+Ore+Textile. MICK: Ore (city), Loom (textile),
+        // Clay Pit; the Wood must come from STEVE's Tree Farm => one deal,
+        // 2 coins to the right.
+        g.cards = vec![
+            vec![db_card("Clay Pit"), db_card("Loom")],
+            vec![db_card("Tree Farm")],
+            vec![],
+        ];
+        g.hands[MICK] = vec![db_card("Haven")];
+
+        cmd(&mut g, MICK, "build 1").unwrap();
+        let stored = match &g.actions[MICK] {
+            Some(Action::Build {
+                deal_coins: Some(m),
+                chosen: true,
+                ..
+            }) => m.clone(),
+            other => panic!("deal must be captured at choose time, got {:?}", other),
+        };
+        assert_eq!(stored.get(&DIR_RIGHT), Some(&2));
+
+        // Sabotage: remove the traded-from neighbor's goods so a recompute
+        // at execute time cannot reproduce the deal list.
+        g.cards[STEVE].clear();
+
+        cmd(&mut g, STEVE, "discard 1").unwrap();
+        cmd(&mut g, GREG, "discard 1").unwrap(); // triggers execution
+
+        assert!(g.cards[MICK].iter().any(|c| c.name == "Haven"));
+        // 3 starting - 2 deal + 1 from Haven's own Raw-card Bonus (Clay Pit).
+        // Pre-fix the sabotaged recompute built Haven for free, giving 4.
+        assert_eq!(g.coins[MICK], 2);
+        assert_eq!(
+            g.coins[STEVE], 8,
+            "3 starting + 2 trade payment + 3 discard coins"
+        );
+    }
+
+    #[test]
+    fn military_log_uses_player_node() {
+        // b F12: the defeated player must be an N::Player node, not a raw
+        // zero-based index in the text.
+        let mut g = new_game();
+        g.cards[MICK] = vec![db_card("Stockade")];
+        let logs = g.military_conflicts();
+        assert_eq!(logs.len(), 1);
+        let rendered = brdgme_markup::to_string(&logs[0].content);
+        assert_eq!(
+            rendered,
+            "{{player 0}} defeated {{player 1}} in military conflict (+1 victory, +1 defeat)"
+        );
+    }
+
+    #[test]
+    fn out_of_range_player_is_guarded() {
+        // b F10: a framework-passed bad index must degrade gracefully, not
+        // panic (sibling-crate pattern: category-5-2, sushi-go-2).
+        let g = new_game();
+        assert!(g.player_state(99).hand.is_empty());
+        assert!(g.command_parser(99).is_none());
+        assert!(g.command_spec(99).is_none());
+    }
+
+    #[test]
+    fn military_conflict_awards_tokens_per_age() {
+        // b F14: victory tokens are 2*age - 1; each loss is one defeat token.
+        let mut g = new_game();
+        g.cards[MICK] = vec![db_card("Stockade")]; // strength 1 vs 0 vs 0
+        g.round = 1;
+        g.military_conflicts();
+        // Only MICK (1) beats his right neighbor STEVE (0); STEVE vs GREG and
+        // GREG vs MICK are not victories for the attacker.
+        // NOTE: the live loop battles each player against their RIGHT
+        // neighbor only (official rules battle both neighbors). No finding
+        // covers that deviation; this test locks CURRENT behavior. If WP-16's
+        // adjudication ever extends to it, update this test there.
+        assert_eq!(g.victory_tokens, vec![1, 0, 0]);
+        assert_eq!(g.defeat_tokens, vec![0, 1, 0]);
+
+        g.round = 3;
+        g.military_conflicts();
+        assert_eq!(g.victory_tokens, vec![1 + 5, 0, 0]);
+        assert_eq!(g.defeat_tokens, vec![0, 2, 0]);
+    }
+
+    #[test]
+    fn hands_pass_toward_lower_index_in_odd_ages() {
+        // b F14: odd ages take the hand from the next-higher index, even ages
+        // from the next-lower (pass_hands, lib.rs).
+        let mut g = new_game();
+        let originals = g.hands.clone();
+        g.round = 1;
+        g.pass_hands();
+        assert_eq!(g.hands[0], originals[1]);
+        assert_eq!(g.hands[1], originals[2]);
+        assert_eq!(g.hands[2], originals[0]);
+
+        g.round = 2;
+        g.pass_hands();
+        assert_eq!(g.hands, originals, "one pass each way must round-trip");
+    }
+
+    #[test]
+    fn haven_scores_own_raw_cards() {
+        // Haven: 1 VP per own Raw card (DIR_SELF). Coins zeroed to isolate.
+        let mut g = new_game();
+        g.coins = vec![0, 0, 0];
+        g.cards[MICK] = vec![db_card("Haven"), db_card("Lumber Yard")];
+        assert_eq!(g.player_vp(MICK), 1);
+    }
+
+    #[test]
+    fn strategists_guild_scores_neighbor_defeats() {
+        // Strategists Guild: 1 VP per neighbor defeat token (DIR_NEIGHBOURS).
+        let mut g = new_game();
+        g.coins = vec![0, 0, 0];
+        g.cards[STEVE] = vec![db_card("Strategists Guild")];
+        g.defeat_tokens = vec![2, 0, 1];
+        // Neighbors of STEVE hold 2 + 1 tokens; own tokens are 0.
+        assert_eq!(g.player_vp(STEVE), 3);
+    }
+
+    #[test]
+    fn builders_guild_scores_wonder_stages_all_directions() {
+        // Builders Guild: 1 VP per wonder stage self + both neighbors.
+        let mut g = new_game();
+        g.coins = vec![0, 0, 0];
+        g.cards[MICK] = vec![db_card("Rhodes A Wonder Stage 1")];
+        g.cards[STEVE] = vec![db_card("Builders Guild")];
+        g.cards[GREG] = vec![db_card("Rhodes A Wonder Stage 1")];
+        // STEVE: 0 own + 1 (MICK) + 1 (GREG) = 2 VP; the guild card itself
+        // is CardKind::Guild, not Wonder.
+        assert_eq!(g.player_vp(STEVE), 2);
+    }
+
+    #[test]
+    fn deal_command_selects_between_multiple_deals() {
+        // b F14: Gardens costs Clay:2 + Wood:1. MICK's Clay Pool covers one
+        // Clay, leaving {Clay:1, Wood:1} to trade. Each neighbor's Tree Farm
+        // (Wood OR Clay) plus Clay Pool yields two distinct deals: buy both
+        // from one side, or split. The player must be able to pick the second
+        // deal via `deal 2` and pay exactly that deal.
+        //
+        // (The spec's original Haven setup produced a single deal: the
+        // can_afford_perm early return at lib/cost collapses "same good from
+        // either neighbor" before the second neighbor is explored. This setup
+        // uses a multi-option source so two deals genuinely survive.)
+        let mut g = new_game();
+        for p in 0..3 {
+            g.cities[p] = rhodes_a();
+        }
+        g.coins = vec![10, 3, 3];
+        g.cards = vec![
+            vec![db_card("Clay Pool")],
+            vec![db_card("Tree Farm"), db_card("Clay Pool")],
+            vec![db_card("Tree Farm"), db_card("Clay Pool")],
+        ];
+        g.hands[MICK] = vec![db_card("Gardens")];
+
+        let (_, deals) = g.can_afford_cost(MICK, &db_card("Gardens").cost);
+        assert_eq!(deals.len(), 2, "both-from-one-side vs split = two deals");
+        assert_ne!(deals[0], deals[1]);
+
+        cmd(&mut g, MICK, "build 1").unwrap();
+        assert!(matches!(
+            g.actions[MICK],
+            Some(Action::Build { chosen: false, .. })
+        ));
+        // MICK still to act: the deal choice is pending.
+        assert!(g.whose_turn().contains(&MICK));
+
+        cmd(&mut g, MICK, "deal 2").unwrap();
+        let expected = deals[1].clone();
+        let coins_before = g.coins.clone();
+
+        cmd(&mut g, STEVE, "discard 1").unwrap();
+        cmd(&mut g, GREG, "discard 1").unwrap(); // triggers execution
+
+        assert!(g.cards[MICK].iter().any(|c| c.name == "Gardens"));
+        let paid: i32 = expected.values().sum();
+        assert_eq!(g.coins[MICK], coins_before[MICK] - paid);
+        for (&dir, &coins) in &expected {
+            let neighbor = if dir == DIR_LEFT { GREG } else { STEVE };
+            // +3 is that neighbor's own discard payment.
+            assert_eq!(g.coins[neighbor], coins_before[neighbor] + 3 + coins);
+        }
+    }
+
+    #[test]
+    fn same_seed_same_game() {
+        // b F14: starts are deterministic per seed. Compare typed values, not
+        // JSON - Cost's HashMap serializes in instance-dependent order.
+        let (a, _) = Game::start_game(5, 123).unwrap();
+        let (b, _) = Game::start_game(5, 123).unwrap();
+        assert_eq!(
+            a.cities.iter().map(|c| &c.name).collect::<Vec<_>>(),
+            b.cities.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+        assert_eq!(a.hands, b.hands);
+    }
+
+    #[test]
+    fn full_game_discard_replay_finishes() {
+        // b F14: a deterministic all-discard game must run 3 ages to a
+        // finished status with placings for everyone, never stalling.
+        let p = players();
+        let (mut g, _) = Game::start_game(3, 7).unwrap();
+        let mut guard = 0;
+        while !g.is_finished() {
+            guard += 1;
+            assert!(guard < 100, "game did not finish - state machine stalled");
+            let turn = g.whose_turn();
+            assert!(!turn.is_empty(), "active game with nobody to act");
+            for pl in turn {
+                g.command(pl, "discard 1", &p).unwrap();
+            }
+        }
+        assert_eq!(g.round, 3);
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(placings.len(), 3),
+            s => panic!("expected finished status, got {:?}", s),
+        }
     }
 
     #[test]

@@ -18,6 +18,10 @@ impl Game {
             return None;
         }
 
+        if player >= self.players {
+            return None;
+        }
+
         if let Some(crate::Resolver::DrawDiscard { player: rp }) = self.to_resolve.first() {
             if *rp != player {
                 return None;
