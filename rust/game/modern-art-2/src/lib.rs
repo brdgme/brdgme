@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::default::Default;
 
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -149,7 +148,7 @@ impl Game {
                     (0..self.players)
                         .filter(|&p| {
                             let bid = self.bids.get(&p);
-                            p != highest_bidder && (bid.is_none() || *bid.unwrap() > 0)
+                            p != highest_bidder && bid.is_none_or(|&b| b > 0)
                         })
                         .collect()
                 }
@@ -257,7 +256,7 @@ impl Game {
         self.is_auction()
             && self.auction_type() == Some(Rank::Double)
             && self.is_players_turn(player)
-            && !self.player_hands.get(player).unwrap_or(&vec![]).is_empty()
+            && self.player_hands.get(player).is_some_and(|h| !h.is_empty())
     }
 
     pub fn can_buy(&self, player: usize) -> bool {
