@@ -30,6 +30,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Semaphore;
 
+const ACK_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
@@ -179,7 +181,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
                     temperature: 0.2,
                 }
             } else {
-                tracing::info!(
+                tracing::warn!(
                     elapsed_ms = turn_start.elapsed().as_millis() as u64,
                     outcome = "skipped",
                     reason = "bot not found or disabled",
@@ -916,7 +918,22 @@ async fn main() -> Result<()> {
             let transaction = sentry::start_transaction(ctx);
             sentry::configure_scope(|scope| scope.set_span(Some(transaction.clone().into())));
 
+            let message = Arc::new(message);
+            let heartbeat_message = message.clone();
+            let heartbeat = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(ACK_HEARTBEAT_INTERVAL).await;
+                    if let Err(e) = heartbeat_message
+                        .ack_with(async_nats::jetstream::AckKind::Progress)
+                        .await
+                    {
+                        tracing::warn!("Failed to send ack heartbeat: {}", e);
+                    }
+                }
+            });
+
             let result = run_bot_turn(&state, event, trace_id).await;
+            heartbeat.abort();
             transaction.finish();
             match result {
                 Ok(()) => {
@@ -990,5 +1007,10 @@ mod tests {
                 "thinking": {"type": "disabled"},
             })
         );
+    }
+
+    #[test]
+    fn ack_heartbeat_interval_below_ack_wait() {
+        assert!(ACK_HEARTBEAT_INTERVAL < std::time::Duration::from_secs(5 * 60));
     }
 }

@@ -732,6 +732,130 @@ async fn make_game_with_two_bots(pool: &PgPool, uri: &str) -> Uuid {
     game.id
 }
 
+#[sqlx::test]
+#[serial]
+async fn user_error_republishes_bot_turn_with_incremented_attempt(pool: PgPool) {
+    let jetstream = make_jetstream().await;
+    let http_client = reqwest::Client::new();
+    let broadcaster = make_broadcaster().await;
+
+    let uri = spawn_mock_game_service(|_req| Response::UserError {
+        message: "invalid command".to_string(),
+    })
+    .await;
+    let game_id = make_game_with_human_and_bot(&pool, &uri).await;
+    let bot_pos = bot_position(&pool, game_id).await;
+    sqlx::query!(
+        "UPDATE game_players SET is_turn = (position = $2) WHERE game_id = $1",
+        game_id,
+        bot_pos
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let event = BotCommandEvent {
+        game_id,
+        player_position: bot_pos,
+        command: "abc".to_string(),
+        attempt: 0,
+    };
+    let _ = handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &None, &event)
+        .await;
+
+    let ge = db::find_game_extended(&pool, game_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ge.game.game_state, "initial_state");
+
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    let consumer = stream
+        .get_or_create_consumer(
+            nats::CONSUMER_TURN,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(nats::CONSUMER_TURN.to_string()),
+                filter_subject: nats::SUBJECT_TURN.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let events = drain_bot_turn_events(&consumer, game_id, 20, Duration::from_secs(5)).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "expected exactly one re-published bot.turn event"
+    );
+    assert_eq!(events[0].player_position, bot_pos);
+    assert_eq!(events[0].attempt, 1);
+}
+
+#[sqlx::test]
+#[serial]
+async fn user_error_attempt_limit_exhaustion_gives_up(pool: PgPool) {
+    let jetstream = make_jetstream().await;
+    let http_client = reqwest::Client::new();
+    let broadcaster = make_broadcaster().await;
+
+    let uri = spawn_mock_game_service(|_req| Response::UserError {
+        message: "invalid command".to_string(),
+    })
+    .await;
+    let game_id = make_game_with_human_and_bot(&pool, &uri).await;
+    let bot_pos = bot_position(&pool, game_id).await;
+    sqlx::query!(
+        "UPDATE game_players SET is_turn = (position = $2) WHERE game_id = $1",
+        game_id,
+        bot_pos
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    let consumer = stream
+        .get_or_create_consumer(
+            nats::CONSUMER_TURN,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(nats::CONSUMER_TURN.to_string()),
+                filter_subject: nats::SUBJECT_TURN.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let mut attempt = 0;
+    for _ in 0..(nats::MAX_TURN_ATTEMPTS + 1) {
+        let event = BotCommandEvent {
+            game_id,
+            player_position: bot_pos,
+            command: "abc".to_string(),
+            attempt,
+        };
+        let _ =
+            handle_bot_command_event(&pool, &http_client, &broadcaster, &jetstream, &None, &event)
+                .await;
+
+        if attempt >= nats::MAX_TURN_ATTEMPTS {
+            let events =
+                drain_bot_turn_events(&consumer, game_id, 20, Duration::from_secs(2)).await;
+            assert!(
+                events.is_empty(),
+                "expected no bot.turn re-publish after exhausting attempts, got {:?}",
+                events
+            );
+            break;
+        }
+
+        let events = drain_bot_turn_events(&consumer, game_id, 20, Duration::from_secs(5)).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].attempt, attempt + 1);
+        attempt = events[0].attempt;
+    }
+}
+
 /// review wd F9: a stale-state conflict must re-publish bot.turn only for
 /// the conflicting event's position, not fan out to every bot on turn.
 #[sqlx::test]

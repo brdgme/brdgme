@@ -182,7 +182,10 @@ pub async fn trigger_bot_turns(
 ) {
     match crate::db::find_bot_turns(pool, game_id).await {
         Ok(turns) => publish_bot_turns(jetstream, game_id, &turns, 0).await,
-        Err(e) => tracing::warn!(%game_id, "Failed to query bot turns: {}", e),
+        Err(e) => {
+            tracing::error!(%game_id, "Failed to query bot turns: {}", e);
+            axum_prometheus::metrics::counter!("bot_turn_publish_failures_total").increment(1);
+        }
     }
 }
 
@@ -190,7 +193,7 @@ pub async fn trigger_bot_turns(
 /// `bot.command` consumer (attempt N, re-publish after a stale-state
 /// conflict).
 #[cfg(feature = "ssr")]
-async fn publish_bot_turns(
+pub(crate) async fn publish_bot_turns(
     jetstream: &async_nats::jetstream::Context,
     game_id: uuid::Uuid,
     turns: &[crate::db::BotTurn],
@@ -234,11 +237,14 @@ async fn publish_bot_turns(
             // that returns `Ok` is actually durable in the stream.
             Ok(ack) => {
                 if let Err(e) = ack.await {
-                    tracing::warn!(%game_id, "bot.turn publish not acked: {}", e);
+                    tracing::error!(%game_id, "bot.turn publish not acked: {}", e);
+                    axum_prometheus::metrics::counter!("bot_turn_publish_failures_total")
+                        .increment(1);
                 }
             }
             Err(e) => {
-                tracing::warn!(%game_id, "Failed to publish bot.turn: {}", e);
+                tracing::error!(%game_id, "Failed to publish bot.turn: {}", e);
+                axum_prometheus::metrics::counter!("bot_turn_publish_failures_total").increment(1);
             }
         }
     }
@@ -303,8 +309,11 @@ pub async fn run_bot_command_consumer(
                 }
             }
             Err(ExecuteCommandError::UserError(_)) => {
-                // A bot-issued command the game rejected as invalid will
-                // never succeed on redelivery - ack it so it doesn't loop.
+                // Unreachable for the `handle_bot_command_event` path: it now
+                // resolves `UserError` internally (re-publishing `bot.turn` or,
+                // on exhaustion, giving up) and returns `Ok(())`. Kept so any
+                // future caller that does surface a `UserError` still acks it -
+                // a game-rejected command never succeeds on redelivery.
                 tracing::warn!(
                     game_id = %event.game_id,
                     "Acking bot.command message rejected by the game (not transient)"
@@ -313,12 +322,33 @@ pub async fn run_bot_command_consumer(
                     tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
                 }
             }
-            Err(ExecuteCommandError::Other(_)) => {
-                tracing::warn!(
-                    game_id = %event.game_id,
-                    "Leaving bot.command message unacked for redelivery after transient failure"
-                );
-            }
+            Err(ExecuteCommandError::Other(_)) => match message.info() {
+                Ok(info) if info.delivered >= crate::nats::MAX_DELIVER => {
+                    if let Err(e) = message.ack_with(async_nats::jetstream::AckKind::Term).await {
+                        tracing::warn!(game_id = %event.game_id, "Failed to term bot.command message: {}", e);
+                    }
+                    tracing::error!(
+                        game_id = %event.game_id,
+                        delivered = info.delivered,
+                        "Terminating bot.command message after exhausting max_deliver"
+                    );
+                    axum_prometheus::metrics::counter!("bot_command_terminated_total").increment(1);
+                }
+                Ok(info) => {
+                    tracing::warn!(
+                        game_id = %event.game_id,
+                        delivered = info.delivered,
+                        "Leaving bot.command message unacked for redelivery after transient failure"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        game_id = %event.game_id,
+                        "Leaving bot.command message unacked for redelivery (failed to read delivery info: {})",
+                        e
+                    );
+                }
+            },
         }
     }
 
@@ -378,6 +408,7 @@ pub async fn handle_bot_command_event(
                     attempt,
                     "Bot turn exhausted state-conflict retries, giving up"
                 );
+                axum_prometheus::metrics::counter!("bot_turn_wedge_total").increment(1);
                 // Nothing more will happen for this game/attempt, so treat
                 // exhaustion as a successful outcome for acking purposes.
                 return Ok(());
@@ -397,7 +428,9 @@ pub async fn handle_bot_command_event(
                     publish_bot_turns(jetstream, event.game_id, &conflicting, attempt + 1).await;
                 }
                 Err(e) => {
-                    tracing::warn!(game_id = %event.game_id, "Failed to query bot turns while re-publishing bot.turn: {}", e)
+                    tracing::error!(game_id = %event.game_id, "Failed to query bot turns while re-publishing bot.turn: {}", e);
+                    axum_prometheus::metrics::counter!("bot_turn_publish_failures_total")
+                        .increment(1);
                 }
             }
             // Conflict is re-published as a fresh bot.turn; the original
@@ -411,7 +444,31 @@ pub async fn handle_bot_command_event(
                 "Bot command rejected by game: {}",
                 msg
             );
-            Err(ExecuteCommandError::UserError(msg))
+            if attempt >= crate::nats::MAX_TURN_ATTEMPTS {
+                tracing::error!(
+                    game_id = %event.game_id,
+                    position = event.player_position,
+                    attempt,
+                    "Bot turn exhausted user-error retries, giving up"
+                );
+                axum_prometheus::metrics::counter!("bot_turn_wedge_total").increment(1);
+                return Ok(());
+            }
+            match crate::db::find_bot_turns(pool, event.game_id).await {
+                Ok(turns) => {
+                    let conflicting: Vec<crate::db::BotTurn> = turns
+                        .into_iter()
+                        .filter(|t| t.position == event.player_position)
+                        .collect();
+                    publish_bot_turns(jetstream, event.game_id, &conflicting, attempt + 1).await;
+                }
+                Err(e) => {
+                    tracing::error!(game_id = %event.game_id, "Failed to query bot turns while re-publishing bot.turn: {}", e);
+                    axum_prometheus::metrics::counter!("bot_turn_publish_failures_total")
+                        .increment(1);
+                }
+            }
+            Ok(())
         }
         Err(ExecuteCommandError::Other(e)) => {
             tracing::warn!(

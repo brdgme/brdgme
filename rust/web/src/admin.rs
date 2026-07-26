@@ -68,6 +68,17 @@ pub struct BotRow {
     pub can_replace_humans: bool,
 }
 
+/// A bot type referenced by one or more unfinished games that no longer
+/// resolves to an enabled `bots` row (renamed away, deleted, or disabled).
+/// Dangling references are a supported state (D-05/D-08): the bot service
+/// falls back to a synthetic config, so the admin page only warns. An empty
+/// `bots` table is deliberately never reported (the same fallback applies).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DanglingBotName {
+    pub bot_name: String,
+    pub game_count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderRow {
     pub id: Uuid,
@@ -164,6 +175,42 @@ pub async fn list_bots(pool: &sqlx::PgPool) -> Result<Vec<BotRow>, ServerFnError
                 }
             },
         )
+        .collect())
+}
+
+/// Distinct `game_bots.bot_name` values used by an unfinished game that have
+/// no enabled `bots` row, each with the count of affected unfinished games.
+///
+/// A name is dangling when no `bots` row matches `name = gb.bot_name AND
+/// enabled = true`. The `EXISTS (SELECT 1 FROM bots)` guard makes an EMPTY
+/// `bots` table yield zero rows: with no bots configured the bot service falls
+/// back to a synthetic config, so nothing is dangling and no warning is wanted
+/// (D-05/D-08). `NOT EXISTS` alone would flag every referenced name in that
+/// case.
+#[cfg(feature = "ssr")]
+pub async fn list_dangling_bot_names(
+    pool: &sqlx::PgPool,
+) -> Result<Vec<DanglingBotName>, ServerFnError> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT gb.bot_name, COUNT(DISTINCT g.id) \
+         FROM game_bots gb \
+         JOIN games g ON g.id = gb.game_id \
+         WHERE g.is_finished = false \
+         AND EXISTS (SELECT 1 FROM bots) \
+         AND NOT EXISTS (SELECT 1 FROM bots b WHERE b.name = gb.bot_name AND b.enabled = true) \
+         GROUP BY gb.bot_name \
+         ORDER BY gb.bot_name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(internal("admin_list_dangling_bot_names: query"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(bot_name, game_count)| DanglingBotName {
+            bot_name,
+            game_count,
+        })
         .collect())
 }
 
@@ -951,6 +998,16 @@ pub async fn admin_list_bots() -> Result<Vec<BotRow>, ServerFnError> {
     list_bots(&pool).await
 }
 
+#[server(AdminListDanglingBotNames, "/api")]
+pub async fn admin_list_dangling_bot_names() -> Result<Vec<DanglingBotName>, ServerFnError> {
+    use sqlx::PgPool;
+
+    let pool = expect_context::<PgPool>();
+    require_admin(&pool, "admin_list_dangling_bot_names: check admin").await?;
+
+    list_dangling_bot_names(&pool).await
+}
+
 #[server(AdminCreateBot, "/api")]
 pub async fn admin_create_bot(
     name: String,
@@ -1248,6 +1305,15 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
     let editing_id = RwSignal::new(None::<Uuid>);
     let error = RwSignal::new(None::<String>);
 
+    // Dangling bot names re-fetch on the same `version` signal as the rest of
+    // the section (same pattern as `BotProvidersSection`'s `links`), so a
+    // create/update/delete/reorder that bumps `version` refreshes the banner.
+    let dangling: LocalResource<Result<Vec<DanglingBotName>, ServerFnError>> =
+        LocalResource::new(move || {
+            version.track();
+            admin_list_dangling_bot_names()
+        });
+
     let create_action = Action::new(
         |(name, temperature, basic, advanced, replace): &(String, f32, bool, bool, bool)| {
             let name = name.clone();
@@ -1348,6 +1414,26 @@ fn BotsSection(bots: Vec<BotRow>, version: RwSignal<u32>) -> impl IntoView {
     view! {
         <h2>"Bots"</h2>
         {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+        {move || {
+            let names = dangling.get().and_then(|res| res.ok())?;
+            if names.is_empty() {
+                return None;
+            }
+            Some(view! {
+                <div class="warning">
+                    <p>
+                        "These bot types are referenced by unfinished games but have no enabled bot configuration:"
+                    </p>
+                    <ul>
+                        {names.into_iter().map(|d| {
+                            view! {
+                                <li>{format!("{} ({} unfinished game(s))", d.bot_name, d.game_count)}</li>
+                            }
+                        }).collect_view()}
+                    </ul>
+                </div>
+            }.into_any())
+        }}
         <table class="admin-table">
             <thead>
                 <tr>
@@ -2405,6 +2491,173 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn test_admin_list_dangling_bot_names_rejects_non_admin(pool: sqlx::PgPool) {
+        sqlx::query(
+            "INSERT INTO users (id, name, pref_colors, is_admin) VALUES ($1, $2, $3, false)",
+        )
+        .bind(Uuid::new_v4())
+        .bind("testuser")
+        .bind(Vec::<String>::new())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE name = 'testuser'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let is_admin = crate::db::is_user_admin(&pool, user_id).await.unwrap();
+        assert!(!is_admin);
+    }
+
+    /// Seed an unfinished (`is_finished = false`) or finished game with the
+    /// minimal `game_types`/`game_versions` parents `games` requires.
+    async fn seed_dangling_game(pool: &sqlx::PgPool, is_finished: bool) -> Uuid {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Dangling {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://127.0.0.1:1', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO games (game_version_id, is_finished, game_state)
+             VALUES ($1, $2, 'state') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(is_finished)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// Reference a bot type (`bot_name`) from a game. `game_bots.name` is the
+    /// per-game display name and is irrelevant here, so it is randomized.
+    async fn seed_game_bot(pool: &sqlx::PgPool, game_id: Uuid, bot_name: &str) {
+        sqlx::query("INSERT INTO game_bots (game_id, name, bot_name) VALUES ($1, $2, $3)")
+            .bind(game_id)
+            .bind(format!("Bot {}", Uuid::new_v4()))
+            .bind(bot_name)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    /// Every referenced bot resolves to an enabled `bots` row: nothing dangles.
+    #[sqlx::test]
+    async fn test_list_dangling_bot_names_none_when_all_enabled(pool: sqlx::PgPool) {
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO bots (name, enabled) VALUES ($1, true)")
+            .bind("present-bot")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let game_id = seed_dangling_game(&pool, false).await;
+        seed_game_bot(&pool, game_id, "present-bot").await;
+
+        let dangling = list_dangling_bot_names(&pool).await.unwrap();
+        assert!(
+            dangling.is_empty(),
+            "an enabled bot must not be reported dangling, got {dangling:?}"
+        );
+    }
+
+    /// An EMPTY `bots` table must yield zero rows even though an unfinished
+    /// game references a bot name: the bot service falls back to a synthetic
+    /// config then, so there is nothing to warn about (D-05/D-08).
+    #[sqlx::test]
+    async fn test_list_dangling_bot_names_none_when_bots_table_empty(pool: sqlx::PgPool) {
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let game_id = seed_dangling_game(&pool, false).await;
+        seed_game_bot(&pool, game_id, "orphan-bot").await;
+
+        let dangling = list_dangling_bot_names(&pool).await.unwrap();
+        assert!(
+            dangling.is_empty(),
+            "an empty bots table must yield zero dangling names, got {dangling:?}"
+        );
+    }
+
+    /// A renamed-away name (no `bots.name` match) and a disabled bot are both
+    /// dangling, counted by distinct unfinished game; an enabled bot is not;
+    /// and a FINISHED game referencing a dangling name is not counted.
+    #[sqlx::test]
+    async fn test_list_dangling_bot_names_counts_renamed_and_disabled(pool: sqlx::PgPool) {
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO bots (name, enabled) VALUES ($1, false)")
+            .bind("disabled-bot")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO bots (name, enabled) VALUES ($1, true)")
+            .bind("live-bot")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Two unfinished games + one FINISHED game reference a renamed-away
+        // name; only the two unfinished ones count.
+        let g1 = seed_dangling_game(&pool, false).await;
+        let g2 = seed_dangling_game(&pool, false).await;
+        let g3 = seed_dangling_game(&pool, true).await;
+        seed_game_bot(&pool, g1, "renamed-away").await;
+        seed_game_bot(&pool, g2, "renamed-away").await;
+        seed_game_bot(&pool, g3, "renamed-away").await;
+
+        // One unfinished game references the disabled bot.
+        let g4 = seed_dangling_game(&pool, false).await;
+        seed_game_bot(&pool, g4, "disabled-bot").await;
+
+        // One unfinished game references the enabled bot - not dangling.
+        let g5 = seed_dangling_game(&pool, false).await;
+        seed_game_bot(&pool, g5, "live-bot").await;
+
+        let dangling = list_dangling_bot_names(&pool).await.unwrap();
+        let by_name: std::collections::HashMap<String, i64> = dangling
+            .into_iter()
+            .map(|d| (d.bot_name, d.game_count))
+            .collect();
+        assert_eq!(
+            by_name.get("renamed-away").copied(),
+            Some(2),
+            "renamed-away must count the 2 unfinished games, not the finished one: {by_name:?}"
+        );
+        assert_eq!(
+            by_name.get("disabled-bot").copied(),
+            Some(1),
+            "a disabled bot is dangling: {by_name:?}"
+        );
+        assert!(
+            !by_name.contains_key("live-bot"),
+            "an enabled bot must not be dangling: {by_name:?}"
+        );
+        assert_eq!(
+            by_name.len(),
+            2,
+            "expected exactly 2 dangling names: {by_name:?}"
+        );
+    }
+
+    #[sqlx::test]
     async fn test_admin_list_providers_never_returns_full_key(pool: sqlx::PgPool) {
         let key = test_encryption_key();
         let api_key = "sk-test-secret-key-1234";
@@ -2743,8 +2996,8 @@ mod tests {
         let server_fns = src.matches(server_fn_needle).count();
         let gates = src.matches(gate_needle).count();
         assert_eq!(
-            server_fns, 15,
-            "expected 15 admin server fns, found {server_fns} - update this test \
+            server_fns, 16,
+            "expected 16 admin server fns, found {server_fns} - update this test \
              deliberately if an admin server fn was added or removed"
         );
         assert_eq!(

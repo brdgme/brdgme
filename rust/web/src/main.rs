@@ -91,6 +91,7 @@ async fn main() {
         resend.clone(),
         http_client.clone(),
         broadcaster.clone(),
+        jetstream.clone(),
     );
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;

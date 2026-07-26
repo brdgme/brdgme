@@ -18,6 +18,12 @@ pub const CONSUMER_COMMAND: &str = "bot-command";
 /// (`BotTurnEvent::attempt`), on top of the original publish.
 pub const MAX_TURN_ATTEMPTS: i32 = 3;
 
+/// JetStream `max_deliver` for the BOT stream's pull consumers: the maximum
+/// times a single message is redelivered before JetStream gives up. Shared
+/// by the consumer config and the (future) term ceiling so the two cannot
+/// drift (WP-38).
+pub const MAX_DELIVER: i64 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotTurnEvent {
     pub game_id: Uuid,
@@ -142,7 +148,6 @@ pub async fn ensure_stream_and_consumers(js: &async_nats::jetstream::Context) ->
     // change (WP-38 / decision D-5, which also owns the bot-turn
     // consumer's long-turn story).
     let ack_wait = Duration::from_secs(5 * 60);
-    let max_deliver = 3;
 
     for (name, subject) in [
         (CONSUMER_TURN, SUBJECT_TURN),
@@ -153,7 +158,7 @@ pub async fn ensure_stream_and_consumers(js: &async_nats::jetstream::Context) ->
             filter_subject: subject.to_string(),
             ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
             ack_wait,
-            max_deliver,
+            max_deliver: MAX_DELIVER,
             ..Default::default()
         };
         let consumer = stream

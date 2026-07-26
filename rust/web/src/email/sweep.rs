@@ -228,6 +228,97 @@ pub fn spawn_turn_reminder_sweep(
     });
 }
 
+pub const DEFAULT_BOT_TURN_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(900);
+
+pub const DEFAULT_BOT_TURN_SWEEP_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(900);
+
+pub fn bot_turn_threshold() -> std::time::Duration {
+    std::env::var("BOT_TURN_THRESHOLD")
+        .ok()
+        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .unwrap_or(DEFAULT_BOT_TURN_THRESHOLD)
+}
+
+pub fn bot_turn_sweep_interval() -> std::time::Duration {
+    std::env::var("BOT_TURN_SWEEP_INTERVAL")
+        .ok()
+        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .unwrap_or(DEFAULT_BOT_TURN_SWEEP_INTERVAL)
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct BotTurnCandidate {
+    game_id: Uuid,
+    position: i32,
+    bot_name: String,
+    is_dangling: bool,
+}
+
+async fn fetch_bot_turn_candidates(
+    pool: &PgPool,
+    threshold: std::time::Duration,
+) -> Vec<BotTurnCandidate> {
+    let threshold_secs = threshold.as_secs() as i64;
+    let rows = sqlx::query_as::<_, BotTurnCandidate>(
+        "SELECT gp.game_id AS game_id,
+                gp.position AS position,
+                gb.bot_name AS bot_name,
+                (b.id IS NULL OR b.enabled = false) AS is_dangling
+         FROM game_players gp
+         JOIN games g ON gp.game_id = g.id
+         JOIN game_bots gb ON gp.game_bot_id = gb.id
+         LEFT JOIN bots b ON gb.bot_name = b.name
+         WHERE gp.is_turn = true
+           AND gp.game_bot_id IS NOT NULL
+           AND g.is_finished = false
+           AND gp.is_turn_at < NOW() - ($1 || ' seconds')::interval",
+    )
+    .bind(threshold_secs.to_string())
+    .fetch_all(pool)
+    .await;
+    match rows {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("bot_turn_sweep: candidate query failed: {}", e);
+            Vec::new()
+        }
+    }
+}
+
+async fn sweep_bot_turns_once(pool: &PgPool, jetstream: &async_nats::jetstream::Context) {
+    let threshold = bot_turn_threshold();
+    let candidates = fetch_bot_turn_candidates(pool, threshold).await;
+    let mut dangling_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for c in &candidates {
+        if c.is_dangling {
+            dangling_names.insert(c.bot_name.clone());
+            continue;
+        }
+        let turns = vec![crate::db::BotTurn {
+            position: c.position,
+            bot_name: c.bot_name.clone(),
+        }];
+        crate::game::publish_bot_turns(jetstream, c.game_id, &turns, 0).await;
+        axum_prometheus::metrics::counter!("bot_turn_sweep_republished_total").increment(1);
+    }
+    axum_prometheus::metrics::gauge!("bot_turn_dangling_bot_names")
+        .set(dangling_names.len() as f64);
+}
+
+pub fn spawn_bot_turn_sweep(pool: PgPool, jetstream: async_nats::jetstream::Context) {
+    let interval = bot_turn_sweep_interval();
+    tracing::info!("bot_turn_sweep: sweep every {:?}", interval);
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            sweep_bot_turns_once(&pool, &jetstream).await;
+        }
+    });
+}
+
 /// The 22d unverified-address expiry window: unverified `user_emails` older
 /// than this are deleted by `spawn_unverified_email_sweep`.
 pub const UNVERIFIED_EMAIL_EXPIRY: std::time::Duration = std::time::Duration::from_secs(86400);
@@ -392,12 +483,14 @@ pub fn spawn_periodic_sweeps(
     resend: Option<resend_rs::Resend>,
     http_client: reqwest::Client,
     broadcaster: crate::websocket::GameBroadcaster,
+    jetstream: async_nats::jetstream::Context,
 ) {
     spawn_turn_reminder_sweep(pool.clone(), resend.clone(), http_client.clone());
     spawn_unverified_email_sweep(pool.clone());
     spawn_invite_nudge_sweep(pool.clone(), resend.clone());
     spawn_invite_expiry_sweep(pool.clone(), resend.clone());
     spawn_invite_auto_decline_sweep(pool.clone(), broadcaster);
+    spawn_bot_turn_sweep(pool.clone(), jetstream);
 }
 
 #[cfg(all(test, feature = "ssr"))]
@@ -1042,5 +1135,186 @@ mod tests {
             token.is_some(),
             "turn reminder should send once the recipient is no longer active"
         );
+    }
+
+    async fn seed_bot_sweep_game(pool: &PgPool, is_finished: bool) -> Uuid {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("BotSweep {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://localhost:0/mock', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO games (game_version_id, is_finished, game_state)
+             VALUES ($1, $2, 'state') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(is_finished)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn seed_bot_type(pool: &PgPool, enabled: bool) -> String {
+        let name = format!("bot-{}", Uuid::new_v4());
+        sqlx::query("INSERT INTO bots (name, enabled) VALUES ($1, $2)")
+            .bind(&name)
+            .bind(enabled)
+            .execute(pool)
+            .await
+            .unwrap();
+        name
+    }
+
+    async fn seed_bot_player(
+        pool: &PgPool,
+        game_id: Uuid,
+        position: i32,
+        color: &str,
+        bot_type: &str,
+        age_secs: i64,
+    ) -> Uuid {
+        let gb_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_bots (game_id, name, bot_name) VALUES ($1, $2, $3) RETURNING id",
+        )
+        .bind(game_id)
+        .bind(format!("Bot {}", Uuid::new_v4()))
+        .bind(bot_type)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO game_players
+                 (game_id, user_id, position, color, has_accepted, is_turn,
+                  is_turn_at, last_turn_at, is_eliminated, is_read, game_bot_id)
+             VALUES ($1, NULL, $2, $3, true, true,
+                     NOW() - ($4 || ' seconds')::interval, NOW(), false, false, $5)
+             RETURNING id",
+        )
+        .bind(game_id)
+        .bind(position)
+        .bind(color)
+        .bind(age_secs.to_string())
+        .bind(gb_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn seed_human_player(
+        pool: &PgPool,
+        game_id: Uuid,
+        position: i32,
+        color: &str,
+        age_secs: i64,
+    ) -> Uuid {
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO game_players
+                 (game_id, user_id, position, color, has_accepted, is_turn,
+                  is_turn_at, last_turn_at, is_eliminated, is_read)
+             VALUES ($1, $2, $3, $4, true, true,
+                     NOW() - ($5 || ' seconds')::interval, NOW(), false, false)
+             RETURNING id",
+        )
+        .bind(game_id)
+        .bind(user_id)
+        .bind(position)
+        .bind(color)
+        .bind(age_secs.to_string())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn bot_turn_candidates_exclude_human_players(pool: PgPool) {
+        let game_id = seed_bot_sweep_game(&pool, false).await;
+        seed_human_player(&pool, game_id, 0, "Green", 3600).await;
+
+        let candidates =
+            fetch_bot_turn_candidates(&pool, std::time::Duration::from_secs(1800)).await;
+        assert!(
+            !candidates.iter().any(|c| c.game_id == game_id),
+            "a human player (game_bot_id NULL) must never be a bot-turn candidate"
+        );
+    }
+
+    #[sqlx::test]
+    async fn bot_turn_candidates_exclude_finished_games(pool: PgPool) {
+        let game_id = seed_bot_sweep_game(&pool, true).await;
+        let bot_type = seed_bot_type(&pool, true).await;
+        seed_bot_player(&pool, game_id, 0, "Green", &bot_type, 3600).await;
+
+        let candidates =
+            fetch_bot_turn_candidates(&pool, std::time::Duration::from_secs(1800)).await;
+        assert!(
+            !candidates.iter().any(|c| c.game_id == game_id),
+            "a finished game must be excluded"
+        );
+    }
+
+    #[sqlx::test]
+    async fn bot_turn_candidates_exclude_recent_turns(pool: PgPool) {
+        let game_id = seed_bot_sweep_game(&pool, false).await;
+        let bot_type = seed_bot_type(&pool, true).await;
+        seed_bot_player(&pool, game_id, 0, "Green", &bot_type, 60).await;
+
+        let candidates =
+            fetch_bot_turn_candidates(&pool, std::time::Duration::from_secs(1800)).await;
+        assert!(
+            !candidates.iter().any(|c| c.game_id == game_id),
+            "a bot whose is_turn_at is within the threshold must be excluded"
+        );
+    }
+
+    #[sqlx::test]
+    async fn bot_turn_candidates_partition_live_and_dangling(pool: PgPool) {
+        let game_id = seed_bot_sweep_game(&pool, false).await;
+
+        let live_type = seed_bot_type(&pool, true).await;
+        seed_bot_player(&pool, game_id, 0, "Green", &live_type, 3600).await;
+
+        let disabled_type = seed_bot_type(&pool, false).await;
+        seed_bot_player(&pool, game_id, 1, "Blue", &disabled_type, 3600).await;
+
+        let missing_type = format!("missing-{}", Uuid::new_v4());
+        seed_bot_player(&pool, game_id, 2, "Red", &missing_type, 3600).await;
+
+        let candidates =
+            fetch_bot_turn_candidates(&pool, std::time::Duration::from_secs(1800)).await;
+        let mine: Vec<&BotTurnCandidate> =
+            candidates.iter().filter(|c| c.game_id == game_id).collect();
+        assert_eq!(mine.len(), 3);
+
+        let live = mine.iter().find(|c| c.bot_name == live_type).unwrap();
+        assert!(!live.is_dangling, "an enabled bot is a LIVE candidate");
+        assert_eq!(live.position, 0);
+
+        let disabled = mine.iter().find(|c| c.bot_name == disabled_type).unwrap();
+        assert!(disabled.is_dangling, "a disabled bot is DANGLING");
+
+        let missing = mine.iter().find(|c| c.bot_name == missing_type).unwrap();
+        assert!(missing.is_dangling, "a bot with no bots row is DANGLING");
+
+        assert_eq!(mine.iter().filter(|c| !c.is_dangling).count(), 1);
+        assert_eq!(mine.iter().filter(|c| c.is_dangling).count(), 2);
     }
 }
