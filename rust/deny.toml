@@ -28,10 +28,6 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "transitive via leptos/either_of; unmaintained notice only, no safe upgrade available from us" },
     # proc-macro-error2 2.0.1, transitive via leptos_macro. Same situation.
     { id = "RUSTSEC-2026-0173", reason = "transitive via leptos_macro; unmaintained notice only, no safe upgrade available from us" },
-    # term_size 0.3.2, direct dependency of lib/cmd (brdgme_cmd), used across
-    # all game binaries. Replacement is terminal_size; requires a lib/cmd
-    # code change, deferred to a dependency-bump pass.
-    { id = "RUSTSEC-2020-0163", reason = "direct dep of lib/cmd; unmaintained notice only, replacement (terminal_size) needs a code change deferred to a dependency-bump pass" },
 ]
 
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html

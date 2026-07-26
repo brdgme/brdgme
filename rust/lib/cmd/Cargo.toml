@@ -13,7 +13,7 @@ time = { workspace = true, features = ["parsing", "formatting", "macros"] }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-term_size = "0.3.2"
+terminal_size = "0.4"
 warp = { version = "0.4.3", features = ["server"], optional = true }
 tokio = { workspace = true, features = ["signal"], optional = true }
 sentry = { workspace = true, optional = true }

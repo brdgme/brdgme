@@ -216,7 +216,7 @@ fn output_logs(logs: Vec<CliLog>, players: &[Player]) {
 }
 
 fn output_nodes(nodes: &[Node], players: &[Player]) {
-    let (term_w, _) = term_size::dimensions().unwrap_or_default();
+    let term_w = terminal_size::terminal_size().map_or(0, |(w, _)| w.0 as usize);
     print!(
         "{}",
         ansi(&from_lines(
