@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH qualifying AS (\n            SELECT g.id AS game_id, gp.place\n            FROM game_players gp\n            JOIN games g ON g.id = gp.game_id\n            JOIN game_versions gv ON gv.id = g.game_version_id\n            JOIN game_types gt ON gt.id = gv.game_type_id\n            WHERE gp.user_id = $1\n              AND g.is_finished = true\n              AND gt.name = $2\n              AND (\n                  SELECT count(*) FROM game_players gp2\n                  WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL\n              ) >= CASE WHEN $3 THEN 1 ELSE 2 END\n        ),\n        opponent_rows AS (\n            SELECT\n                q.place AS my_place,\n                gp.user_id AS opp_id,\n                u.name AS opp_name,\n                gp.place AS opp_place\n            FROM qualifying q\n            JOIN game_players gp\n                ON gp.game_id = q.game_id AND gp.user_id IS NOT NULL AND gp.user_id <> $1\n            JOIN users u ON u.id = gp.user_id\n        )\n        SELECT\n            opp_id AS \"user_id!\",\n            opp_name AS \"name!\",\n            count(*) AS \"games!\",\n            count(*) FILTER (\n                WHERE my_place IS NOT NULL AND opp_place IS NOT NULL AND my_place < opp_place\n            ) AS \"wins!\",\n            count(*) FILTER (\n                WHERE my_place IS NOT NULL AND opp_place IS NOT NULL AND my_place > opp_place\n            ) AS \"losses!\",\n            count(*) FILTER (\n                WHERE my_place IS NOT NULL AND opp_place IS NOT NULL AND my_place = opp_place\n            ) AS \"ties!\"\n        FROM opponent_rows\n        GROUP BY opp_id, opp_name\n        ORDER BY \"games!\" DESC, opp_name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "games!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "wins!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "losses!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "ties!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "1cb2b8dfc5454ba0abb66a85c97b30ab950dc6e7620a5dcac8b0a664e802793e"
+}

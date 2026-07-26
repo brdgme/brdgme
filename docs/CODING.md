@@ -620,6 +620,29 @@ now()` on every `UPDATE`, regardless of the `SET` clause. Consequences:
   `ALTER TABLE games DISABLE TRIGGER update_games_updated_at` (safe inside a
   `#[sqlx::test]` per-test database).
 
+**Read-then-write on a game row needs an `updated_at` guard, not a snapshot
+check.** `update_game_command_success` is the reference shape: the caller
+passes `ge.game.updated_at`, the write carries `AND updated_at = $n`, and 0
+rows affected becomes `db::StaleStateConflict` - a distinguishable type, so
+callers can say "someone moved first" instead of "internal error". Every
+mutating game-lifecycle function (`concede_game`, `concede_game_replace`,
+`undo_game`) takes `expected_updated_at` and opens its transaction with
+`claim_unfinished_game_tx`, which locks the row `FOR UPDATE` and rejects both a
+finished game (`db::GameAlreadyFinished`) and a stale snapshot. Checking
+`ge.game.is_finished` in a server fn is a courtesy for the error message only;
+it is never the guard, because the game service round-trip sits between the
+read and the write.
+
+**A finished game cannot be undone.** `undo_game` refuses once
+`games.is_finished` is true. Finishing a game runs `apply_rating_changes`,
+which mutates `game_type_users.rating`/`peak_rating` and stamps
+`game_players.rating_change` as its own idempotency token; `undo_game` reverts
+game state only, so undoing a finish would leave the voided ELO applied *and*
+suppress rating of the real outcome forever. Rewinding ratings is deliberately
+not implemented (review 2026-07-23, decision D-3 option A). If undo-after-finish
+is ever wanted, the rewind must land in the same transaction as the state
+revert.
+
 **One-off data migrations: sanitize + numeric suffix beats generating fancy
 names.** `009_username_rules.sql` backfills any `users.name` violating the D2
 charset by regex-stripping disallowed characters, truncating to 16 chars, and

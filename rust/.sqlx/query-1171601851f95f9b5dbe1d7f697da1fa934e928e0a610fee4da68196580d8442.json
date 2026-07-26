@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT gt.player_counts FROM game_types gt\n         JOIN game_versions gv ON gv.game_type_id = gt.id\n         WHERE gv.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "player_counts",
+        "type_info": "Int4Array"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1171601851f95f9b5dbe1d7f697da1fa934e928e0a610fee4da68196580d8442"
+}

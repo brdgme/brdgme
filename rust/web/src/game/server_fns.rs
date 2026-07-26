@@ -351,9 +351,10 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         html,
         is_my_turn: player.map(|p| p.game_player.is_turn).unwrap_or(false),
         is_finished: ge.game.is_finished,
-        can_undo: player
-            .and_then(|p| p.game_player.undo_game_state.as_ref())
-            .is_some(),
+        can_undo: !ge.game.is_finished
+            && player
+                .and_then(|p| p.game_player.undo_game_state.as_ref())
+                .is_some(),
         restarted_game_id: ge.game.restarted_game_id,
         previous_game_id,
         restart_proposal_id,
@@ -769,9 +770,7 @@ pub async fn mark_read(game_id: Uuid) -> Result<(), ServerFnError> {
 #[server(UndoGame, "/api")]
 pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
     use crate::auth::server::get_current_user;
-    use crate::game::client;
     use crate::websocket::GameBroadcaster;
-    use brdgme_cmd::api::{Request, Response};
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
@@ -783,51 +782,7 @@ pub async fn undo_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    let ge = crate::db::find_game_extended(&pool, game_id)
-        .await
-        .map_err(internal("undo_game: find game"))?
-        .ok_or_else(|| ServerFnError::new("Game not found"))?;
-    let before = ge.clone();
-
-    let player = ge
-        .game_players
-        .iter()
-        .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
-        .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
-
-    let undo_state = player
-        .game_player
-        .undo_game_state
-        .clone()
-        .ok_or_else(|| ServerFnError::new("No undo state available"))?;
-
-    let resp = client::request(
-        &http_client,
-        &ge.game_version.uri,
-        &ge.game_version.name,
-        &Request::Status {
-            game: undo_state.clone(),
-        },
-    )
-    .await
-    .map_err(internal("undo_game: fetch status from game service"))?;
-
-    let game_response = match resp {
-        Response::Status { game, .. } => game,
-        _ => return Err(ServerFnError::new("Unexpected response from game service")),
-    };
-
-    let status = crate::game::status_fields(game_response.status);
-
-    crate::db::undo_game(
-        &pool,
-        game_id,
-        &undo_state,
-        player.game_player.position as usize,
-        &status,
-    )
-    .await
-    .map_err(internal("undo_game: apply undo"))?;
+    let before = undo_core(&pool, &http_client, game_id, ActingPlayer::User(user.id)).await?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
 
@@ -850,6 +805,163 @@ fn count_active_humans(ge: &crate::db::GameExtended) -> usize {
         .count()
 }
 
+#[cfg(feature = "ssr")]
+pub(crate) enum ActingPlayer {
+    User(Uuid),
+    GamePlayer(Uuid),
+}
+
+#[cfg(feature = "ssr")]
+fn conflict_or_internal(context: &'static str, e: anyhow::Error) -> ServerFnError {
+    if e.downcast_ref::<crate::db::GameAlreadyFinished>().is_some() {
+        return ServerFnError::new("Game is already finished");
+    }
+    if e.downcast_ref::<crate::db::StaleStateConflict>().is_some() {
+        return ServerFnError::new(
+            "The game changed while this was being processed; nothing was changed. Please try again.",
+        );
+    }
+    internal(context)(e)
+}
+
+#[cfg(feature = "ssr")]
+pub(crate) async fn undo_core(
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    game_id: Uuid,
+    actor: ActingPlayer,
+) -> Result<crate::db::GameExtended, ServerFnError> {
+    use brdgme_cmd::api::{Request, Response};
+
+    let ge = crate::db::find_game_extended(pool, game_id)
+        .await
+        .map_err(internal("undo_core: find game"))?
+        .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+    let player = match &actor {
+        ActingPlayer::User(user_id) => ge
+            .game_players
+            .iter()
+            .find(|p| p.user.as_ref().is_some_and(|u| u.id == *user_id))
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?,
+        ActingPlayer::GamePlayer(gp_id) => ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id == *gp_id)
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?,
+    };
+
+    if ge.game.is_finished {
+        return Err(ServerFnError::new(
+            "This game is finished and can no longer be undone.",
+        ));
+    }
+
+    let undo_state = player
+        .game_player
+        .undo_game_state
+        .clone()
+        .ok_or_else(|| ServerFnError::new("No undo state available"))?;
+
+    let resp = crate::game::client::request(
+        http_client,
+        &ge.game_version.uri,
+        &ge.game_version.name,
+        &Request::Status {
+            game: undo_state.clone(),
+        },
+    )
+    .await
+    .map_err(internal("undo_core: fetch status from game service"))?;
+
+    let game_response = match resp {
+        Response::Status { game, .. } => game,
+        _ => return Err(ServerFnError::new("Unexpected response from game service")),
+    };
+
+    let status = crate::game::status_fields(game_response.status);
+
+    crate::db::undo_game(
+        pool,
+        game_id,
+        &undo_state,
+        player.game_player.position as usize,
+        &status,
+        player.game_player.id,
+        ge.game.updated_at,
+    )
+    .await
+    .map_err(|e| conflict_or_internal("undo_core: apply undo", e))?;
+
+    Ok(ge)
+}
+
+#[cfg(feature = "ssr")]
+pub(crate) async fn concede_core(
+    pool: &sqlx::PgPool,
+    game_id: Uuid,
+    actor: ActingPlayer,
+) -> Result<crate::db::GameExtended, ServerFnError> {
+    let ge = crate::db::find_game_extended(pool, game_id)
+        .await
+        .map_err(internal("concede_core: find game"))?
+        .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+    if ge.game.is_finished {
+        return Err(ServerFnError::new("Game is already finished"));
+    }
+
+    let player = match &actor {
+        ActingPlayer::User(user_id) => ge
+            .game_players
+            .iter()
+            .find(|p| p.user.as_ref().is_some_and(|u| u.id == *user_id))
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?,
+        ActingPlayer::GamePlayer(gp_id) => ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id == *gp_id)
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?,
+    };
+
+    if player.game_player.left_at.is_some() {
+        return Err(ServerFnError::new("You have already left this game"));
+    }
+
+    let active_humans = count_active_humans(&ge);
+    let replacement_available = crate::db::replacement_bot_available(pool)
+        .await
+        .map_err(internal("concede_core: replacement available"))?;
+
+    if replacement_available {
+        crate::db::concede_game_replace(
+            pool,
+            game_id,
+            player.game_player.id,
+            player.name(),
+            ge.game.updated_at,
+        )
+        .await
+        .map_err(|e| conflict_or_internal("concede_core: replace", e))?;
+    } else if active_humans == 2 {
+        crate::db::concede_game(
+            pool,
+            game_id,
+            player.game_player.id,
+            player.name(),
+            ge.game.updated_at,
+        )
+        .await
+        .map_err(|e| conflict_or_internal("concede_core: concede", e))?;
+    } else {
+        return Err(ServerFnError::new(
+            "Concede is not available: no replacement bot configured",
+        ));
+    }
+
+    Ok(ge)
+}
+
 #[server(ConcedeGame, "/api")]
 pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
     use crate::auth::server::get_current_user;
@@ -865,44 +977,7 @@ pub async fn concede_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    let ge = crate::db::find_game_extended(&pool, game_id)
-        .await
-        .map_err(internal("concede_game: find game"))?
-        .ok_or_else(|| ServerFnError::new("Game not found"))?;
-    let before = ge.clone();
-
-    if ge.game.is_finished {
-        return Err(ServerFnError::new("Game is already finished"));
-    }
-
-    let player = ge
-        .game_players
-        .iter()
-        .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
-        .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
-
-    if player.game_player.left_at.is_some() {
-        return Err(ServerFnError::new("You have already left this game"));
-    }
-
-    let active_humans = count_active_humans(&ge);
-    let replacement_available = crate::db::replacement_bot_available(&pool)
-        .await
-        .map_err(internal("concede_game: replacement available"))?;
-
-    if replacement_available {
-        crate::db::concede_game_replace(&pool, game_id, player.game_player.id, player.name())
-            .await
-            .map_err(internal("concede_game: replace"))?;
-    } else if active_humans == 2 {
-        crate::db::concede_game(&pool, game_id, player.game_player.id, player.name())
-            .await
-            .map_err(internal("concede_game: concede"))?;
-    } else {
-        return Err(ServerFnError::new(
-            "Concede is not available: no replacement bot configured",
-        ));
-    }
+    let before = concede_core(&pool, game_id, ActingPlayer::User(user.id)).await?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
 

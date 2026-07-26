@@ -256,7 +256,9 @@ Key tables in PostgreSQL:
   `is_public`, `is_deprecated`, and `interface_version` (1 or 2) flags;
   unique constraint on `(game_type_id, name)`.
 - **`games`**: Active and finished game instances. Stores the serialized
-  `game_state` blob.
+  `game_state` blob. `is_finished` is one-way for a rated game - a finished
+  game can be deleted by an admin but never un-finished (see docs/CODING.md,
+  Database).
 - **`game_players`**: Links `users` to `games`, storing player position and
   player-specific state.
 - **`game_logs`**: Immutable history of all actions and messages within a game.

@@ -726,49 +726,13 @@ async fn run_settings_summary(
 }
 
 async fn run_concede(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
-    let ge = crate::db::find_game_extended(ctx.pool, ctx.game_id)
-        .await?
-        .ok_or_else(|| CommandError::User("Game not found".to_string()))?;
-
-    if ge.game.is_finished {
-        return Err(CommandError::User("Game is already finished".to_string()));
-    }
-
-    let player = ge
-        .game_players
-        .iter()
-        .find(|p| p.game_player.id == ctx.game_player_id)
-        .ok_or_else(|| CommandError::User("You are not a player in this game".to_string()))?;
-
-    if player.game_player.left_at.is_some() {
-        return Err(CommandError::User(
-            "You have already left this game".to_string(),
-        ));
-    }
-
-    let active_humans = ge
-        .game_players
-        .iter()
-        .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
-        .count();
-    let replacement_available = crate::db::replacement_bot_available(ctx.pool)
-        .await
-        .map_err(CommandError::Internal)?;
-
-    let before = ge.clone();
-    if replacement_available {
-        crate::db::concede_game_replace(ctx.pool, ctx.game_id, ctx.game_player_id, player.name())
-            .await
-            .map_err(CommandError::Internal)?;
-    } else if active_humans == 2 {
-        crate::db::concede_game(ctx.pool, ctx.game_id, ctx.game_player_id, player.name())
-            .await
-            .map_err(CommandError::Internal)?;
-    } else {
-        return Err(CommandError::User(
-            "Concede is not available: no replacement bot configured".to_string(),
-        ));
-    }
+    let before = crate::game::server_fns::concede_core(
+        ctx.pool,
+        ctx.game_id,
+        crate::game::server_fns::ActingPlayer::GamePlayer(ctx.game_player_id),
+    )
+    .await
+    .map_err(|e| classify_server_fn_error("concede", e))?;
 
     crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, ctx.game_id).await;
     crate::email::notify::notify_game_emails(
@@ -832,50 +796,14 @@ async fn run_end(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError
 }
 
 async fn run_undo(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
-    use brdgme_cmd::api::{Request, Response};
-
-    let ge = crate::db::find_game_extended(ctx.pool, ctx.game_id)
-        .await?
-        .ok_or_else(|| CommandError::User("Game not found".to_string()))?;
-
-    let player = ge
-        .game_players
-        .iter()
-        .find(|p| p.game_player.id == ctx.game_player_id)
-        .ok_or_else(|| CommandError::User("You are not a player in this game".to_string()))?;
-
-    let undo_state = player
-        .game_player
-        .undo_game_state
-        .clone()
-        .ok_or_else(|| CommandError::User("No undo state available".to_string()))?;
-
-    let before = ge.clone();
-
-    let resp = crate::game::client::request(
+    let before = crate::game::server_fns::undo_core(
+        ctx.pool,
         ctx.http_client,
-        &ge.game_version.uri,
-        &ge.game_version.name,
-        &Request::Status {
-            game: undo_state.clone(),
-        },
+        ctx.game_id,
+        crate::game::server_fns::ActingPlayer::GamePlayer(ctx.game_player_id),
     )
     .await
-    .map_err(|e| CommandError::Internal(anyhow::anyhow!("undo: fetch status: {e}")))?;
-
-    let game_response = match resp {
-        Response::Status { game, .. } => game,
-        _ => {
-            return Err(CommandError::Internal(anyhow::anyhow!(
-                "undo: unexpected response from game service"
-            )));
-        }
-    };
-
-    let status = crate::game::status_fields(game_response.status);
-    crate::db::undo_game(ctx.pool, ctx.game_id, &undo_state, ctx.position, &status)
-        .await
-        .map_err(CommandError::Internal)?;
+    .map_err(|e| classify_server_fn_error("undo", e))?;
 
     crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, ctx.game_id).await;
     crate::email::notify::notify_game_emails(

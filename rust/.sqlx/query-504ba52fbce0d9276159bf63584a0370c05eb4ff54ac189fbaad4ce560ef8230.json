@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, body, is_public, logged_at, created_at\n         FROM game_logs WHERE game_id = $1 ORDER BY logged_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_public",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "logged_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "504ba52fbce0d9276159bf63584a0370c05eb4ff54ac189fbaad4ce560ef8230"
+}

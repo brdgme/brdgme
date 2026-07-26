@@ -203,10 +203,9 @@ pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: U
     }
 
     for p in &players {
-        let change = rating_changes.get(&p.position).copied().unwrap_or(0);
-        if change == 0 {
+        let Some(&change) = rating_changes.get(&p.position) else {
             continue;
-        }
+        };
         let rating_before = rating_befores.get(&p.position).copied();
         sqlx::query("UPDATE game_players SET rating_change = $1, rating_before = $2 WHERE id = $3")
             .bind(change)
@@ -480,9 +479,9 @@ mod tests {
         let c_p1 = find_rating_change(&pool, game.id, p1_pos as i32).await;
         let c_p2 = find_rating_change(&pool, game.id, p2_pos as i32).await;
         assert_eq!(c_creator, Some(32));
-        // A net-zero change is skipped entirely (spec: "skip zero changes"),
-        // so rating_change stays NULL rather than being written as 0.
-        assert_eq!(c_p1, None);
+        // A net-zero change is now written as Some(0) so the idempotency
+        // guard is armed even for exact ties (WP-40 Task 5).
+        assert_eq!(c_p1, Some(0));
         assert_eq!(c_p2, Some(-32));
         // Zero-sum across all pairs.
         assert_eq!(
@@ -726,7 +725,7 @@ mod tests {
             .unwrap();
         let conceding_id = conceding.game_player.id;
 
-        concede_game(&pool, game.id, conceding_id, "creator")
+        concede_game(&pool, game.id, conceding_id, "creator", ge.game.updated_at)
             .await
             .unwrap();
 
@@ -859,5 +858,69 @@ mod tests {
             opponent_rb.unwrap() + opponent_change.unwrap(),
             opponent_rating_after
         );
+    }
+
+    #[sqlx::test]
+    async fn apply_rating_changes_writes_zero_change(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let opponent_pos = position_of(&ge, opponent.id);
+
+        sqlx::query(
+            "UPDATE game_players SET place = 1, ranked_placing = 1 WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(creator_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET place = 1, ranked_placing = 1 WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(opponent_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let c_change = find_rating_change(&pool, game.id, creator_pos).await;
+        let o_change = find_rating_change(&pool, game.id, opponent_pos).await;
+        assert_eq!(c_change, Some(0));
+        assert_eq!(o_change, Some(0));
+
+        let c_rb: Option<i32> = sqlx::query_scalar(
+            "SELECT rating_before FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(creator_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(c_rb, Some(1200));
+
+        let (creator_rating, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        assert_eq!(creator_rating, 1200);
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let (creator_rating_after, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        assert_eq!(creator_rating_after, 1200);
     }
 }

@@ -322,15 +322,21 @@ pub async fn concede_game(
     game_id: Uuid,
     conceding_player_id: Uuid,
     conceding_name: &str,
+    expected_updated_at: time::PrimitiveDateTime,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
+    claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
 
-    sqlx::query!(
-        "UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1",
-        game_id
+    let update_result = sqlx::query!(
+        "UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1 AND updated_at = $2 AND is_finished = false",
+        game_id,
+        expected_updated_at
     )
     .execute(&mut *tx)
     .await?;
+    if update_result.rows_affected() == 0 {
+        return Err(StaleStateConflict.into());
+    }
 
     let players = sqlx::query!(
         "SELECT id FROM game_players WHERE game_id = $1 ORDER BY position",
@@ -341,7 +347,12 @@ pub async fn concede_game(
 
     // Assigns place 1 to every non-conceding player and place 2 to the conceder.
     // Only correct for 2-player games; callers must enforce that constraint.
-    debug_assert!(players.len() == 2, "concede_game assumes exactly 2 players");
+    if players.len() != 2 {
+        return Err(anyhow::anyhow!(
+            "concede_game requires exactly 2 players, found {}",
+            players.len()
+        ));
+    }
     for p in &players {
         let place: i32 = if p.id == conceding_player_id { 2 } else { 1 };
         sqlx::query(
@@ -378,12 +389,14 @@ pub async fn concede_game_replace(
     game_id: Uuid,
     conceding_player_id: Uuid,
     conceding_name: &str,
+    expected_updated_at: time::PrimitiveDateTime,
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
-
     let bot = pick_replacement_bot(pool, game_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("no replacement bot configured"))?;
+
+    let mut tx = pool.begin().await?;
+    claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
 
     sqlx::query(
         r#"UPDATE game_players
@@ -524,17 +537,36 @@ pub async fn undo_game(
     undo_state: &str,
     player_position: usize,
     status: &StatusUpdate,
+    game_player_id: Uuid,
+    expected_updated_at: time::PrimitiveDateTime,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
+    claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
 
-    sqlx::query!(
-        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = NULL WHERE id = $3",
+    let undo_check: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT undo_game_state FROM game_players WHERE id = $1 AND game_id = $2",
+    )
+    .bind(game_player_id)
+    .bind(game_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    match undo_check {
+        Some(Some(_)) => {}
+        _ => return Err(StaleStateConflict.into()),
+    }
+
+    let update_result = sqlx::query!(
+        "UPDATE games SET game_state = $1, is_finished = $2, finished_at = NULL WHERE id = $3 AND updated_at = $4 AND is_finished = false",
         undo_state,
         status.is_finished,
-        game_id
+        game_id,
+        expected_updated_at
     )
     .execute(&mut *tx)
     .await?;
+    if update_result.rows_affected() == 0 {
+        return Err(StaleStateConflict.into());
+    }
 
     let players = sqlx::query!(
         "SELECT id, position FROM game_players WHERE game_id = $1",
@@ -574,6 +606,12 @@ pub async fn undo_game(
     .execute(&mut *tx)
     .await?;
 
+    // Rating fields (`game_players.rating_change`/`rating_before`,
+    // `game_type_users.rating`) are deliberately NOT touched here: a finished
+    // game can no longer be undone (see the claim above), so no rated game ever
+    // reaches this function. Rewinding ratings is out of scope by decision
+    // (review 2026-07-23, D-3 option A); if undo-after-finish is ever allowed
+    // again, the rewind must land in the SAME transaction as this revert.
     tx.commit().await?;
     Ok(())
 }
@@ -585,6 +623,32 @@ pub async fn undo_game(
 #[derive(Debug, thiserror::Error)]
 #[error("Game was updated by another action, please retry")]
 pub struct StaleStateConflict;
+
+#[cfg(feature = "ssr")]
+#[derive(Debug, thiserror::Error)]
+#[error("Game is already finished")]
+pub struct GameAlreadyFinished;
+
+#[cfg(feature = "ssr")]
+async fn claim_unfinished_game_tx(
+    tx: &mut sqlx::PgConnection,
+    game_id: Uuid,
+    expected_updated_at: time::PrimitiveDateTime,
+) -> Result<()> {
+    let row: Option<(bool, time::PrimitiveDateTime)> =
+        sqlx::query_as("SELECT is_finished, updated_at FROM games WHERE id = $1 FOR UPDATE")
+            .bind(game_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let (is_finished, updated_at) = row.ok_or_else(|| anyhow::anyhow!("Game not found"))?;
+    if is_finished {
+        return Err(GameAlreadyFinished.into());
+    }
+    if updated_at != expected_updated_at {
+        return Err(StaleStateConflict.into());
+    }
+    Ok(())
+}
 
 #[cfg(feature = "ssr")]
 // Splitting these into a params struct would be a larger refactor than warranted here.
@@ -1333,7 +1397,7 @@ mod tests {
                 .await
                 .unwrap();
 
-        concede_game_replace(&pool, game.id, conceder, "a")
+        concede_game_replace(&pool, game.id, conceder, "a", ge.game.updated_at)
             .await
             .unwrap();
 
@@ -1385,7 +1449,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        concede_game_replace(&pool, game.id, conceder, "a")
+        concede_game_replace(&pool, game.id, conceder, "a", ge.game.updated_at)
             .await
             .unwrap();
 
@@ -1454,17 +1518,21 @@ mod tests {
         .await
         .unwrap();
 
+        let ge_before_undo = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+
         undo_game(
             &pool,
             game.id,
             "state_before_move",
-            0, // player_position that used the undo
+            0,
             &StatusUpdate {
                 is_finished: false,
                 whose_turn: vec![0],
                 eliminated: vec![],
                 placings: vec![],
             },
+            p0_id,
+            ge_before_undo.game.updated_at,
         )
         .await
         .unwrap();
@@ -1510,7 +1578,7 @@ mod tests {
             .unwrap();
         let conceding_id = conceding.game_player.id;
 
-        concede_game(&pool, game.id, conceding_id, "creator")
+        concede_game(&pool, game.id, conceding_id, "creator", ge.game.updated_at)
             .await
             .unwrap();
 
@@ -1739,5 +1807,473 @@ mod tests {
         let mut expected = vec![a.id, b.id];
         expected.sort();
         assert_eq!(targeted, expected);
+    }
+
+    #[sqlx::test]
+    async fn undo_game_rejects_finished_game(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_id = ge.game_players[0].game_player.id;
+        let creator_pos = position_of(&ge, creator.id) as usize;
+        let opponent_pos = position_of(&ge, opponent.id) as usize;
+
+        let mut placings = vec![0usize; 2];
+        placings[creator_pos] = 1;
+        placings[opponent_pos] = 2;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_before",
+            "state_final",
+            true,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_finished = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let result = undo_game(
+            &pool,
+            game.id,
+            "state_before",
+            0,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            p0_id,
+            ge_finished.game.updated_at,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<GameAlreadyFinished>().is_some(),
+            "expected GameAlreadyFinished, got: {err:?}"
+        );
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge_after.game.game_state, "state_final");
+        assert!(ge_after.game.is_finished);
+        assert!(ge_after.game.finished_at.is_some());
+        for p in &ge_after.game_players {
+            assert!(p.game_player.rating_change.is_some() || p.game_player.user_id.is_none());
+        }
+
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        assert!(!logs.iter().any(|l| l.body.contains("used an undo")));
+    }
+
+    #[sqlx::test]
+    async fn undo_game_rejects_stale_updated_at(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_id = ge.game_players[0].game_player.id;
+        let p1_id = ge.game_players[1].game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_0",
+            "state_1",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![1],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_p0 = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let stale_updated_at = ge_after_p0.game.updated_at;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            p1_id,
+            "state_1",
+            "state_2",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge_after_p0.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let result = undo_game(
+            &pool,
+            game.id,
+            "state_0",
+            0,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            p0_id,
+            stale_updated_at,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<StaleStateConflict>().is_some(),
+            "expected StaleStateConflict, got: {err:?}"
+        );
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge_after.game.game_state, "state_2");
+    }
+
+    #[sqlx::test]
+    async fn undo_game_rejects_consumed_undo_state(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_id = ge.game_players[0].game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_0",
+            "state_1",
+            true,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![1],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after_move = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+
+        undo_game(
+            &pool,
+            game.id,
+            "state_0",
+            0,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            p0_id,
+            ge_after_move.game.updated_at,
+        )
+        .await
+        .unwrap();
+
+        let ge_after_undo = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let result = undo_game(
+            &pool,
+            game.id,
+            "state_0",
+            0,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![0],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            p0_id,
+            ge_after_undo.game.updated_at,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<StaleStateConflict>().is_some(),
+            "expected StaleStateConflict, got: {err:?}"
+        );
+
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        let undo_logs: Vec<_> = logs
+            .iter()
+            .filter(|l| l.body.contains("used an undo"))
+            .collect();
+        assert_eq!(undo_logs.len(), 1);
+    }
+
+    #[sqlx::test]
+    async fn concede_game_rejects_finished_game(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_id = ge.game_players[0].game_player.id;
+        let creator_pos = position_of(&ge, creator.id) as usize;
+        let opponent_pos = position_of(&ge, opponent.id) as usize;
+
+        let mut placings = vec![0usize; 2];
+        placings[creator_pos] = 1;
+        placings[opponent_pos] = 2;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_before",
+            "state_final",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_finished = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceder = ge_finished
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == opponent_pos as i32)
+            .unwrap();
+        let result = concede_game(
+            &pool,
+            game.id,
+            conceder.game_player.id,
+            "opponent",
+            ge_finished.game.updated_at,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<GameAlreadyFinished>().is_some(),
+            "expected GameAlreadyFinished, got: {err:?}"
+        );
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        for p in &ge_after.game_players {
+            if p.game_player.user_id.is_some() {
+                assert!(p.game_player.place.is_some());
+            }
+        }
+    }
+
+    #[sqlx::test]
+    async fn concede_game_rejects_stale_updated_at(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let stale_updated_at = ge.game.updated_at;
+        let p0_id = ge.game_players[0].game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_0",
+            "state_1",
+            false,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![1],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceder = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+        let result = concede_game(
+            &pool,
+            game.id,
+            conceder.game_player.id,
+            "opponent",
+            stale_updated_at,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<StaleStateConflict>().is_some(),
+            "expected StaleStateConflict, got: {err:?}"
+        );
+
+        let ge_final = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(!ge_final.game.is_finished);
+    }
+
+    #[sqlx::test]
+    async fn concede_game_replace_rejects_finished_game(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let b = make_user(&pool, "b").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[a.id, b.id], 0, &[0])
+                .await;
+
+        sqlx::query("INSERT INTO bots (name, can_replace_humans) VALUES ('Hard', true)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let p0_id = ge.game_players[0].game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            p0_id,
+            "state_0",
+            "state_final",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings: vec![1, 2, 3],
+            },
+            &[],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_finished = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let a_pos = position_of(&ge_finished, a.id);
+        let conceder: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND position = $2")
+                .bind(game.id)
+                .bind(a_pos)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let result =
+            concede_game_replace(&pool, game.id, conceder, "a", ge_finished.game.updated_at).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<GameAlreadyFinished>().is_some(),
+            "expected GameAlreadyFinished, got: {err:?}"
+        );
+
+        let left_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT left_at FROM game_players WHERE id = $1")
+                .bind(conceder)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(left_at.is_none());
+    }
+
+    #[sqlx::test]
+    async fn concede_game_requires_two_players(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let b = make_user(&pool, "b").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[a.id, b.id], 0, &[0])
+                .await;
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceding = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+
+        let result = concede_game(
+            &pool,
+            game.id,
+            conceding.game_player.id,
+            "creator",
+            ge.game.updated_at,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            err_msg.contains("requires exactly 2 players"),
+            "expected player-count error, got: {err_msg}"
+        );
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        for p in &ge_after.game_players {
+            assert_eq!(p.game_player.place, None);
+        }
     }
 }
