@@ -227,6 +227,24 @@ pub async fn delete_expired_unverified_emails(
     Ok(res.rows_affected())
 }
 
+/// Deletes processed webhook events older than `threshold` (the wfe F11
+/// prune). Returns the count deleted.
+#[cfg(feature = "ssr")]
+pub async fn delete_old_processed_webhook_events(
+    pool: &PgPool,
+    threshold: std::time::Duration,
+) -> Result<u64> {
+    let secs = threshold.as_secs() as i64;
+    let res = sqlx::query(
+        "DELETE FROM processed_webhook_events
+         WHERE processed_at < NOW() - make_interval(secs => $1::double precision)",
+    )
+    .bind(secs)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
@@ -503,6 +521,40 @@ mod tests {
         assert!(rows.iter().any(|r| r.email == fresh));
         assert!(rows.iter().any(|r| r.email == verified_old));
         assert!(!rows.iter().any(|r| r.email == expired));
+    }
+
+    #[sqlx::test]
+    async fn delete_old_processed_webhook_events_prunes_only_old(pool: PgPool) {
+        use crate::email::sweep::PROCESSED_WEBHOOK_EVENT_RETENTION;
+
+        let old_id = format!("evt-old-{}", Uuid::new_v4());
+        let fresh_id = format!("evt-fresh-{}", Uuid::new_v4());
+        sqlx::query(
+            "INSERT INTO processed_webhook_events (event_id, processed_at)
+             VALUES ($1, NOW() - interval '10 days')",
+        )
+        .bind(&old_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO processed_webhook_events (event_id) VALUES ($1)")
+            .bind(&fresh_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let deleted = delete_old_processed_webhook_events(&pool, PROCESSED_WEBHOOK_EVENT_RETENTION)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining: Vec<(String,)> =
+            sqlx::query_as("SELECT event_id FROM processed_webhook_events")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(remaining.iter().any(|(id,)| id == &fresh_id));
+        assert!(!remaining.iter().any(|(id,)| id == &old_id));
     }
 
     /// ws F47: `make_interval(secs => 0)` must behave like the old

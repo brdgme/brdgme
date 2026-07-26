@@ -10,6 +10,8 @@ pub const DEFAULT_REMINDER_THRESHOLD: std::time::Duration = std::time::Duration:
 
 pub const DEFAULT_SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(900);
 
+const REMINDER_SWEEP_LIMIT: i64 = 200;
+
 pub fn reminder_threshold() -> std::time::Duration {
     std::env::var("TURN_REMINDER_AFTER")
         .ok()
@@ -22,25 +24,6 @@ pub fn sweep_interval() -> std::time::Duration {
         .ok()
         .and_then(|v| crate::email::outbound::parse_duration(&v))
         .unwrap_or(DEFAULT_SWEEP_INTERVAL)
-}
-
-pub fn should_reset_reminder(was_turn: bool, is_turn: bool) -> bool {
-    was_turn != is_turn
-}
-
-pub fn is_reminder_candidate(
-    is_turn: bool,
-    is_eliminated: bool,
-    turn_reminder_sent_at: Option<time::PrimitiveDateTime>,
-    is_turn_at: time::PrimitiveDateTime,
-    now: time::PrimitiveDateTime,
-    threshold: std::time::Duration,
-) -> bool {
-    if !is_turn || is_eliminated || turn_reminder_sent_at.is_some() {
-        return false;
-    }
-    let threshold = time::Duration::try_from(threshold).unwrap_or(time::Duration::hours(24));
-    (now - is_turn_at) >= threshold
 }
 
 fn reminder_header_text(player_name: &str) -> String {
@@ -59,15 +42,16 @@ async fn fetch_candidates(pool: &PgPool, threshold: std::time::Duration) -> Vec<
         "SELECT gp.id AS game_player_id, gp.game_id AS game_id
          FROM game_players gp
          JOIN users u ON gp.user_id = u.id
-         WHERE gp.is_turn = true
-           AND gp.is_eliminated = false
-           AND gp.turn_reminder_sent_at IS NULL
-           AND gp.is_turn_at < NOW() - ($1 || ' seconds')::interval
-            AND gp.game_bot_id IS NULL
-            AND u.reminder_emails_enabled = true
-         FOR UPDATE SKIP LOCKED",
+          WHERE gp.is_turn = true
+            AND gp.is_eliminated = false
+            AND gp.turn_reminder_sent_at IS NULL
+            AND gp.is_turn_at < NOW() - ($1 || ' seconds')::interval
+             AND gp.game_bot_id IS NULL
+             AND u.reminder_emails_enabled = true
+          LIMIT $2",
     )
     .bind(threshold_secs.to_string())
+    .bind(REMINDER_SWEEP_LIMIT)
     .fetch_all(pool)
     .await;
     match rows {
@@ -79,38 +63,42 @@ async fn fetch_candidates(pool: &PgPool, threshold: std::time::Duration) -> Vec<
     }
 }
 
-async fn mark_reminder_sent(pool: &PgPool, game_player_id: Uuid) {
-    if let Err(e) = sqlx::query(
+async fn mark_reminder_sent_tx(
+    tx: &mut sqlx::PgConnection,
+    game_player_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
         "UPDATE game_players SET turn_reminder_sent_at = NOW(), updated_at = NOW() WHERE id = $1",
     )
     .bind(game_player_id)
-    .execute(pool)
-    .await
-    {
-        tracing::error!(
-            "turn_reminder: failed to mark sent for {}: {}",
-            game_player_id,
-            e
-        );
-    }
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
+enum ReminderOutcome {
+    Sent,
+    PermanentSkip,
+    Retry,
 }
 
 async fn send_reminder(
     resend: Option<&resend_rs::Resend>,
     pool: &PgPool,
     http_client: &reqwest::Client,
+    tx: &mut sqlx::PgConnection,
     game_id: Uuid,
     game_player_id: Uuid,
-) -> bool {
+) -> ReminderOutcome {
     let ge = match crate::db::find_game_extended(pool, game_id).await {
         Ok(Some(g)) => g,
         Ok(None) => {
             tracing::warn!("turn_reminder: game {} not found", game_id);
-            return false;
+            return ReminderOutcome::PermanentSkip;
         }
         Err(e) => {
             tracing::error!("turn_reminder: failed to load game {}: {}", game_id, e);
-            return false;
+            return ReminderOutcome::Retry;
         }
     };
 
@@ -120,23 +108,24 @@ async fn send_reminder(
         .find(|p| p.game_player.id == game_player_id)
     {
         Some(p) => p,
-        None => return false,
+        None => return ReminderOutcome::PermanentSkip,
     };
 
     let recipient = match crate::email::outbound::fetch_email_recipient(pool, game_player_id).await
     {
         Ok(Some(r)) => r,
-        _ => return false,
+        _ => return ReminderOutcome::PermanentSkip,
     };
 
-    if !crate::email::outbound::should_email_recipient(&recipient) {
-        return true;
+    if !(recipient.email.is_some() && !recipient.is_bot && recipient.reminder_emails_enabled) {
+        return ReminderOutcome::PermanentSkip;
     }
     if crate::email::outbound::suppress_for_web_presence(pool, recipient.user_id).await {
-        return true;
+        return ReminderOutcome::Retry;
     }
 
-    let token = match crate::email::outbound::ensure_email_token(pool, game_player_id).await {
+    let token = match crate::email::outbound::ensure_email_token_tx(&mut *tx, game_player_id).await
+    {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(
@@ -144,7 +133,7 @@ async fn send_reminder(
                 game_player_id,
                 e
             );
-            return false;
+            return ReminderOutcome::Retry;
         }
     };
 
@@ -187,9 +176,13 @@ async fn send_reminder(
 
     let to = match recipient.email {
         Some(e) => e,
-        None => return false,
+        None => return ReminderOutcome::PermanentSkip,
     };
-    crate::email::outbound::try_send_rendered_email(resend, rendered, &to).await
+    if crate::email::outbound::try_send_rendered_email(resend, rendered, &to).await {
+        ReminderOutcome::Sent
+    } else {
+        ReminderOutcome::Retry
+    }
 }
 
 async fn sweep_once(
@@ -204,9 +197,67 @@ async fn sweep_once(
     }
     tracing::info!("turn_reminder: {} candidate(s)", candidates.len());
     for c in candidates {
-        let ok = send_reminder(resend, pool, http_client, c.game_id, c.game_player_id).await;
-        if ok {
-            mark_reminder_sent(pool, c.game_player_id).await;
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!(
+                    "turn_reminder: failed to begin tx for {}: {}",
+                    c.game_player_id,
+                    e
+                );
+                continue;
+            }
+        };
+        let claimed: Option<Uuid> = match sqlx::query_scalar(
+            "SELECT id FROM game_players
+             WHERE id = $1 AND turn_reminder_sent_at IS NULL AND is_turn = true
+             FOR UPDATE SKIP LOCKED",
+        )
+        .bind(c.game_player_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(opt) => opt,
+            Err(e) => {
+                tracing::error!(
+                    "turn_reminder: claim query failed for {}: {}",
+                    c.game_player_id,
+                    e
+                );
+                continue;
+            }
+        };
+        if claimed.is_none() {
+            continue;
+        }
+        let outcome = send_reminder(
+            resend,
+            pool,
+            http_client,
+            &mut tx,
+            c.game_id,
+            c.game_player_id,
+        )
+        .await;
+        match outcome {
+            ReminderOutcome::Sent | ReminderOutcome::PermanentSkip => {
+                if let Err(e) = mark_reminder_sent_tx(&mut tx, c.game_player_id).await {
+                    tracing::error!(
+                        "turn_reminder: failed to mark sent for {}: {}",
+                        c.game_player_id,
+                        e
+                    );
+                    continue;
+                }
+                if let Err(e) = tx.commit().await {
+                    tracing::error!(
+                        "turn_reminder: failed to commit for {}: {}",
+                        c.game_player_id,
+                        e
+                    );
+                }
+            }
+            ReminderOutcome::Retry => {}
         }
     }
 }
@@ -331,6 +382,21 @@ async fn sweep_unverified_emails_once(pool: &PgPool) {
     }
 }
 
+/// wfe F11: processed webhook events older than this are pruned. 7 days is
+/// comfortably past the svix retry window (~5 days).
+pub const PROCESSED_WEBHOOK_EVENT_RETENTION: std::time::Duration =
+    std::time::Duration::from_secs(7 * 86400);
+
+async fn sweep_processed_webhook_events_once(pool: &PgPool) {
+    match crate::db::delete_old_processed_webhook_events(pool, PROCESSED_WEBHOOK_EVENT_RETENTION)
+        .await
+    {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("processed_webhook_event_prune: deleted {} row(s)", n),
+        Err(e) => tracing::error!("processed_webhook_event_prune: delete failed: {}", e),
+    }
+}
+
 /// Periodic job deleting unverified addresses that were never confirmed
 /// (the 22d expiry cleanup). Reuses the shared `sweep_interval()` cadence.
 pub fn spawn_unverified_email_sweep(pool: PgPool) {
@@ -342,6 +408,7 @@ pub fn spawn_unverified_email_sweep(pool: PgPool) {
         loop {
             tick.tick().await;
             sweep_unverified_emails_once(&pool).await;
+            sweep_processed_webhook_events_once(&pool).await;
         }
     });
 }
@@ -383,16 +450,20 @@ async fn sweep_invite_nudge_once(resend: Option<&resend_rs::Resend>, pool: &PgPo
     if candidates.is_empty() {
         return;
     }
-    let mut proposal_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     tracing::info!("invite_nudge: {} candidate(s)", candidates.len());
     let mailer = crate::proposals::mailer_from(pool.clone(), resend.cloned());
+    let mut all_sent: std::collections::HashMap<Uuid, bool> = std::collections::HashMap::new();
     for c in &candidates {
         use crate::proposals::InviteMailer;
-        mailer.send_invite(c.proposal_id, c.user_id, c.email_token.clone());
-        proposal_ids.insert(c.proposal_id);
+        let ok = mailer
+            .send_invite_now(c.proposal_id, c.user_id, c.email_token.clone())
+            .await;
+        *all_sent.entry(c.proposal_id).or_insert(true) &= ok;
     }
-    for pid in &proposal_ids {
-        crate::proposals::mark_proposal_nudged(pool, *pid).await;
+    for (pid, sent) in &all_sent {
+        if *sent {
+            crate::proposals::mark_proposal_nudged(pool, *pid).await;
+        }
     }
 }
 
@@ -442,6 +513,7 @@ pub fn spawn_invite_expiry_sweep(pool: PgPool, resend: Option<resend_rs::Resend>
 }
 
 async fn sweep_invite_auto_decline_once(
+    resend: Option<&resend_rs::Resend>,
     pool: &PgPool,
     broadcaster: &crate::websocket::GameBroadcaster,
 ) {
@@ -452,10 +524,15 @@ async fn sweep_invite_auto_decline_once(
         return;
     }
     tracing::info!("invite_auto_decline: {} candidate(s)", candidates.len());
+    let mailer = crate::proposals::mailer_from(pool.clone(), resend.cloned());
     let mut proposal_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-    for (player_id, proposal_id) in &candidates {
-        crate::proposals::auto_decline_proposal_player(pool, *player_id).await;
-        proposal_ids.insert(*proposal_id);
+    for (player_id, proposal_id, user_id) in &candidates {
+        let declined = crate::proposals::auto_decline_proposal_player(pool, *player_id).await;
+        if declined {
+            proposal_ids.insert(*proposal_id);
+            use crate::proposals::InviteMailer;
+            mailer.notify_owner_decline(*proposal_id, *user_id);
+        }
     }
     for pid in &proposal_ids {
         broadcaster.broadcast_proposal_update(*pid).await;
@@ -464,6 +541,7 @@ async fn sweep_invite_auto_decline_once(
 
 pub fn spawn_invite_auto_decline_sweep(
     pool: PgPool,
+    resend: Option<resend_rs::Resend>,
     broadcaster: crate::websocket::GameBroadcaster,
 ) {
     let interval = sweep_interval();
@@ -473,7 +551,7 @@ pub fn spawn_invite_auto_decline_sweep(
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            sweep_invite_auto_decline_once(&pool, &broadcaster).await;
+            sweep_invite_auto_decline_once(resend.as_ref(), &pool, &broadcaster).await;
         }
     });
 }
@@ -489,114 +567,13 @@ pub fn spawn_periodic_sweeps(
     spawn_unverified_email_sweep(pool.clone());
     spawn_invite_nudge_sweep(pool.clone(), resend.clone());
     spawn_invite_expiry_sweep(pool.clone(), resend.clone());
-    spawn_invite_auto_decline_sweep(pool.clone(), broadcaster);
+    spawn_invite_auto_decline_sweep(pool.clone(), resend.clone(), broadcaster);
     spawn_bot_turn_sweep(pool.clone(), jetstream);
 }
 
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
-    use time::{Date, Month, PrimitiveDateTime, Time};
-
-    fn fixed_now() -> PrimitiveDateTime {
-        PrimitiveDateTime::new(
-            Date::from_calendar_date(2026, Month::July, 20).unwrap(),
-            Time::from_hms(12, 0, 0).unwrap(),
-        )
-    }
-
-    #[test]
-    fn should_reset_reminder_on_transition() {
-        assert!(should_reset_reminder(false, true));
-        assert!(should_reset_reminder(true, false));
-        assert!(!should_reset_reminder(true, true));
-        assert!(!should_reset_reminder(false, false));
-    }
-
-    #[test]
-    fn candidate_predicate_accepts_due_player() {
-        let now = fixed_now();
-        let old_turn = now - time::Duration::hours(25);
-        assert!(is_reminder_candidate(
-            true,
-            false,
-            None,
-            old_turn,
-            now,
-            std::time::Duration::from_secs(86400),
-        ));
-    }
-
-    #[test]
-    fn candidate_predicate_rejects_already_reminded() {
-        let now = fixed_now();
-        let old_turn = now - time::Duration::hours(25);
-        assert!(!is_reminder_candidate(
-            true,
-            false,
-            Some(now - time::Duration::hours(1)),
-            old_turn,
-            now,
-            std::time::Duration::from_secs(86400),
-        ));
-    }
-
-    #[test]
-    fn candidate_predicate_rejects_not_turn() {
-        let now = fixed_now();
-        let old_turn = now - time::Duration::hours(25);
-        assert!(!is_reminder_candidate(
-            false,
-            false,
-            None,
-            old_turn,
-            now,
-            std::time::Duration::from_secs(86400),
-        ));
-    }
-
-    #[test]
-    fn candidate_predicate_rejects_eliminated() {
-        let now = fixed_now();
-        let old_turn = now - time::Duration::hours(25);
-        assert!(!is_reminder_candidate(
-            true,
-            true,
-            None,
-            old_turn,
-            now,
-            std::time::Duration::from_secs(86400),
-        ));
-    }
-
-    #[test]
-    fn candidate_predicate_rejects_below_threshold() {
-        let now = fixed_now();
-        let recent_turn = now - time::Duration::hours(23);
-        assert!(!is_reminder_candidate(
-            true,
-            false,
-            None,
-            recent_turn,
-            now,
-            std::time::Duration::from_secs(86400),
-        ));
-    }
-
-    #[test]
-    fn candidate_predicate_boundary_exact_threshold() {
-        let now = fixed_now();
-        let exact = now - time::Duration::hours(24);
-        assert!(is_reminder_candidate(
-            true,
-            false,
-            None,
-            exact,
-            now,
-            std::time::Duration::from_secs(86400),
-        ));
-    }
-
     #[test]
     fn reminder_threshold_defaults_to_24h() {
         unsafe { std::env::remove_var("TURN_REMINDER_AFTER") };
@@ -849,7 +826,9 @@ mod tests {
         .await
         .unwrap();
 
-        mark_reminder_sent(&pool, gp_id).await;
+        let mut tx = pool.begin().await.unwrap();
+        mark_reminder_sent_tx(&mut tx, gp_id).await.unwrap();
+        tx.commit().await.unwrap();
 
         let sent_at: Option<time::PrimitiveDateTime> =
             sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
@@ -1105,7 +1084,9 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        send_reminder(None, &pool, &http, game_id, gp_id).await;
+        let mut tx = pool.begin().await.unwrap();
+        send_reminder(None, &pool, &http, &mut tx, game_id, gp_id).await;
+        tx.commit().await.unwrap();
         let token: Option<String> =
             sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
                 .bind(gp_id)
@@ -1124,7 +1105,9 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        send_reminder(None, &pool, &http, game_id, gp_id).await;
+        let mut tx = pool.begin().await.unwrap();
+        send_reminder(None, &pool, &http, &mut tx, game_id, gp_id).await;
+        tx.commit().await.unwrap();
         let token: Option<String> =
             sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
                 .bind(gp_id)
@@ -1135,6 +1118,166 @@ mod tests {
             token.is_some(),
             "turn reminder should send once the recipient is no longer active"
         );
+    }
+
+    // F30 (headline): a web-present recipient is NOT marked (presence => Retry =>
+    // rollback), and is sent+marked once presence lapses. Drives `sweep_once`,
+    // not `send_reminder`. With `resend = None` there is no send counter, so we
+    // assert on the DB mark (`turn_reminder_sent_at`).
+    #[sqlx::test]
+    async fn turn_reminder_sweep_suppressed_by_presence_then_sends(pool: PgPool) {
+        let (_game_id, user_id, gp_id) = seed_reminder_game(&pool).await;
+        let http = reqwest::Client::new();
+
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sweep_once(None, &pool, &http).await;
+        let sent_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            sent_at.is_none(),
+            "presence => Retry => row must NOT be marked"
+        );
+
+        sqlx::query(
+            "UPDATE users SET last_active_at = NOW() - interval '11 minutes' WHERE id = $1",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sweep_once(None, &pool, &http).await;
+        let sent_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            sent_at.is_some(),
+            "lapsed presence => Sent => row must be marked"
+        );
+    }
+
+    // F32 / D-11: `reminder_emails_enabled` ALONE governs reminders. A user with
+    // reminders on but turn emails OFF is still selected and marked sent through
+    // `sweep_once` (the reminder sweep never consults `turn_emails_enabled`).
+    #[sqlx::test]
+    async fn turn_reminder_sweep_ignores_turn_emails_disabled(pool: PgPool) {
+        let (_game_id, user_id, gp_id) = seed_reminder_game(&pool).await;
+        let http = reqwest::Client::new();
+
+        sqlx::query("UPDATE users SET turn_emails_enabled = false WHERE id = $1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let candidates = fetch_candidates(&pool, std::time::Duration::from_secs(86400)).await;
+        assert!(
+            candidates.iter().any(|c| c.game_player_id == gp_id),
+            "reminder_emails_enabled alone selects the candidate"
+        );
+
+        sweep_once(None, &pool, &http).await;
+        let sent_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            sent_at.is_some(),
+            "turn_emails_enabled=false must NOT stop the reminder sweep"
+        );
+    }
+
+    // F31: two concurrent sweeps over ONE due candidate mark it exactly once.
+    // The claim re-checks `turn_reminder_sent_at IS NULL` under FOR UPDATE SKIP
+    // LOCKED, so only one replica can mark. With `resend = None` we cannot count
+    // sends directly; we assert the row ends marked (it can only be marked once).
+    #[sqlx::test]
+    async fn turn_reminder_sweep_concurrent_marks_once(pool: PgPool) {
+        let (_game_id, _user_id, gp_id) = seed_reminder_game(&pool).await;
+        let http = reqwest::Client::new();
+
+        let ((), ()) = tokio::join!(
+            sweep_once(None, &pool, &http),
+            sweep_once(None, &pool, &http),
+        );
+
+        let sent_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(sent_at.is_some(), "the due candidate must be marked");
+    }
+
+    // F40: `fetch_candidates` caps at REMINDER_SWEEP_LIMIT (200). Seed 201 due
+    // candidates (one player per game, sharing a version) and assert exactly 200
+    // come back.
+    #[sqlx::test]
+    async fn fetch_candidates_caps_at_sweep_limit(pool: PgPool) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Limit {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://127.0.0.1:1', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let want = REMINDER_SWEEP_LIMIT + 1;
+        for _ in 0..want {
+            let game_id: Uuid = sqlx::query_scalar(
+                "INSERT INTO games (game_version_id, is_finished, game_state)
+                 VALUES ($1, false, 'state') RETURNING id",
+            )
+            .bind(game_version_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            let user_id: Uuid = sqlx::query_scalar(
+                "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+            )
+            .bind(format!("u-{}", Uuid::new_v4()))
+            .bind(Vec::<String>::new())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO game_players
+                     (game_id, user_id, position, color, has_accepted, is_turn,
+                      is_turn_at, last_turn_at, is_eliminated, is_read)
+                 VALUES ($1, $2, 0, 'Green', true, true,
+                         NOW() - interval '48 hours', NOW(), false, false)",
+            )
+            .bind(game_id)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let candidates = fetch_candidates(&pool, std::time::Duration::from_secs(86400)).await;
+        assert_eq!(candidates.len(), REMINDER_SWEEP_LIMIT as usize);
     }
 
     async fn seed_bot_sweep_game(pool: &PgPool, is_finished: bool) -> Uuid {

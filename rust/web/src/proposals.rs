@@ -99,8 +99,15 @@ pub struct InviteSummary {
 }
 
 #[cfg(feature = "ssr")]
+#[async_trait::async_trait]
 pub trait InviteMailer: Send + Sync {
     fn send_invite(&self, proposal_id: Uuid, invitee_user_id: Uuid, email_token: Option<String>);
+    async fn send_invite_now(
+        &self,
+        proposal_id: Uuid,
+        invitee_user_id: Uuid,
+        email_token: Option<String>,
+    ) -> bool;
     fn notify_changed_reinvite(
         &self,
         proposal_id: Uuid,
@@ -170,57 +177,110 @@ async fn proposal_game_type_name(pool: &PgPool, proposal: &Proposal) -> String {
 }
 
 #[cfg(feature = "ssr")]
+impl RealInviteMailer {
+    /// The real invite-send work, awaited and observable. Returns `true` when
+    /// the invite was sent OR is permanently unsendable (no token, recipient
+    /// missing/gated, no address, proposal gone, not open, or a rotated/stale
+    /// token) - any outcome that should NOT be retried. Returns `false` only on
+    /// a transient condition (web presence suppression, or a failed send) so the
+    /// caller can leave the row unmarked and retry next tick. Mirrors the
+    /// reminder sweep's at-least-once semantics (D-02).
+    async fn send_invite_core(
+        &self,
+        proposal_id: Uuid,
+        invitee_user_id: Uuid,
+        email_token: Option<String>,
+    ) -> bool {
+        let pool = &self.pool;
+        let resend = &self.resend;
+        let Some(token) = email_token else {
+            return true;
+        };
+        let Ok(Some(recip)) = fetch_invite_recipient(pool, invitee_user_id).await else {
+            return true;
+        };
+        let suppressed =
+            crate::email::outbound::suppress_for_web_presence(pool, Some(invitee_user_id)).await;
+        if suppressed {
+            return false;
+        }
+        if !invite_recipient_should_send(&recip, false) {
+            return true;
+        }
+        let Some(email) = recip.email else {
+            return true;
+        };
+        let Ok(Some(proposal)) = find_proposal(pool, proposal_id).await else {
+            return true;
+        };
+        if proposal.status != "open" {
+            return true;
+        }
+        let Ok(Some(pp)) = find_proposal_player_by_email_token(pool, &token).await else {
+            return true;
+        };
+        if pp.proposal_id != proposal_id
+            || pp.user_id != Some(invitee_user_id)
+            || pp.response != "pending"
+        {
+            return true;
+        }
+        let game_type_name = proposal_game_type_name(pool, &proposal).await;
+        let owner_name = fetch_invite_recipient(pool, proposal.owner_user_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|r| r.name)
+            .unwrap_or_default();
+        let content = crate::email::render::EmailContent {
+            subject: format!("{game_type_name} invite from {owner_name}"),
+            header: Some(format!(
+                "{owner_name} invited you to play {game_type_name}."
+            )),
+            digest: None,
+            board: None,
+            you_can: Some(vec![
+                "Reply \"accept\" to join, or \"decline\" to pass.".into(),
+            ]),
+            browser_url: Some(invite_browser_url(proposal_id)),
+            rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
+            footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
+        };
+        let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
+        let rendered = crate::email::render::render_game_email(
+            &content,
+            palette,
+            &[],
+            Some(&format!("proposal-{proposal_id}")),
+            true,
+            &format!("i-{token}@brdg.me"),
+        );
+        crate::email::outbound::try_send_rendered_email(resend.as_ref(), rendered, &email).await
+    }
+}
+
+#[cfg(feature = "ssr")]
+#[async_trait::async_trait]
 impl InviteMailer for RealInviteMailer {
     fn send_invite(&self, proposal_id: Uuid, invitee_user_id: Uuid, email_token: Option<String>) {
         let pool = self.pool.clone();
         let resend = self.resend.clone();
         tokio::spawn(async move {
-            let Some(token) = email_token else { return };
-            let Ok(Some(recip)) = fetch_invite_recipient(&pool, invitee_user_id).await else {
-                return;
-            };
-            let suppressed =
-                crate::email::outbound::suppress_for_web_presence(&pool, Some(invitee_user_id))
-                    .await;
-            if !invite_recipient_should_send(&recip, suppressed) {
-                return;
-            }
-            let Some(email) = recip.email else { return };
-            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
-                return;
-            };
-            let game_type_name = proposal_game_type_name(&pool, &proposal).await;
-            let owner_name = fetch_invite_recipient(&pool, proposal.owner_user_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|r| r.name)
-                .unwrap_or_default();
-            let content = crate::email::render::EmailContent {
-                subject: format!("{game_type_name} invite from {owner_name}"),
-                header: Some(format!(
-                    "{owner_name} invited you to play {game_type_name}."
-                )),
-                digest: None,
-                board: None,
-                you_can: Some(vec![
-                    "Reply \"accept\" to join, or \"decline\" to pass.".into(),
-                ]),
-                browser_url: Some(invite_browser_url(proposal_id)),
-                rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
-                footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
-            };
-            let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
-            let rendered = crate::email::render::render_game_email(
-                &content,
-                palette,
-                &[],
-                Some(&format!("proposal-{proposal_id}")),
-                true,
-                &format!("i-{token}@brdg.me"),
-            );
-            crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
+            let mailer = RealInviteMailer { pool, resend };
+            mailer
+                .send_invite_core(proposal_id, invitee_user_id, email_token)
+                .await;
         });
+    }
+
+    async fn send_invite_now(
+        &self,
+        proposal_id: Uuid,
+        invitee_user_id: Uuid,
+        email_token: Option<String>,
+    ) -> bool {
+        self.send_invite_core(proposal_id, invitee_user_id, email_token)
+            .await
     }
 
     fn notify_changed_reinvite(
@@ -744,6 +804,42 @@ pub async fn cancel_proposal_for_expiry(
     pool: &PgPool,
     proposal_id: Uuid,
 ) -> Option<(Uuid, Vec<Uuid>)> {
+    let owner: Option<Uuid> = match sqlx::query_scalar(
+        "SELECT owner_user_id FROM game_proposals WHERE id = $1 AND status = 'open'",
+    )
+    .bind(proposal_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(owner) => owner,
+        Err(e) => {
+            tracing::error!(
+                "invite_expiry: owner read failed for {}: {}",
+                proposal_id,
+                e
+            );
+            return None;
+        }
+    };
+    let owner = owner?;
+    let accepted: Vec<Uuid> = match sqlx::query_scalar(
+        "SELECT user_id FROM game_proposal_players WHERE proposal_id = $1 AND response = 'accepted' AND user_id IS NOT NULL",
+    )
+    .bind(proposal_id)
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(
+                "invite_expiry: accepted-read failed for {}: {}",
+                proposal_id,
+                e
+            );
+            return None;
+        }
+    };
+    let accepted_ids: Vec<Uuid> = accepted.into_iter().filter(|id| *id != owner).collect();
     let result = sqlx::query(
         "UPDATE game_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND status = 'open'",
     )
@@ -758,22 +854,6 @@ pub async fn cancel_proposal_for_expiry(
         }
         _ => {}
     }
-    let owner: Option<Uuid> =
-        sqlx::query_scalar("SELECT owner_user_id FROM game_proposals WHERE id = $1")
-            .bind(proposal_id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    let owner = owner?;
-    let accepted: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT user_id FROM game_proposal_players WHERE proposal_id = $1 AND response = 'accepted' AND user_id IS NOT NULL",
-    )
-    .bind(proposal_id)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
-    let accepted_ids: Vec<Uuid> = accepted.into_iter().filter(|id| *id != owner).collect();
     Some((owner, accepted_ids))
 }
 
@@ -781,15 +861,15 @@ pub async fn cancel_proposal_for_expiry(
 pub async fn fetch_auto_decline_candidates(
     pool: &PgPool,
     threshold_secs: i64,
-) -> Vec<(Uuid, Uuid)> {
-    let rows = sqlx::query_as::<_, (Uuid, Uuid)>(
-        "SELECT pp.id, pp.proposal_id \
+) -> Vec<(Uuid, Uuid, Uuid)> {
+    let rows = sqlx::query_as::<_, (Uuid, Uuid, Uuid)>(
+        "SELECT pp.id, pp.proposal_id, pp.user_id \
          FROM game_proposal_players pp \
          JOIN game_proposals gp ON gp.id = pp.proposal_id \
          WHERE gp.status = 'open' \
            AND pp.response = 'pending' \
            AND pp.user_id IS NOT NULL \
-           AND gp.created_at < NOW() - ($1 * interval '1 second')",
+           AND pp.updated_at < NOW() - ($1 * interval '1 second')",
     )
     .bind(threshold_secs)
     .fetch_all(pool)
@@ -804,15 +884,19 @@ pub async fn fetch_auto_decline_candidates(
 }
 
 #[cfg(feature = "ssr")]
-pub async fn auto_decline_proposal_player(pool: &PgPool, player_id: Uuid) {
-    if let Err(e) = sqlx::query(
+pub async fn auto_decline_proposal_player(pool: &PgPool, player_id: Uuid) -> bool {
+    match sqlx::query(
         "UPDATE game_proposal_players SET response = 'declined', responded_at = NOW(), updated_at = NOW() WHERE id = $1 AND response = 'pending'",
     )
     .bind(player_id)
     .execute(pool)
     .await
     {
-        tracing::error!("invite_auto_decline: decline failed for {}: {}", player_id, e);
+        Ok(r) => r.rows_affected() == 1,
+        Err(e) => {
+            tracing::error!("invite_auto_decline: decline failed for {}: {}", player_id, e);
+            false
+        }
     }
 }
 
@@ -2315,6 +2399,13 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(
+            "UPDATE game_proposal_players SET updated_at = updated_at - interval '1 hour' WHERE proposal_id = $1",
+        )
+        .bind(pid)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // 60s threshold: the 1h-old proposal is a candidate everywhere.
         assert!(
@@ -2332,7 +2423,7 @@ mod tests {
             fetch_auto_decline_candidates(&pool, 60)
                 .await
                 .iter()
-                .any(|(_, p)| *p == pid),
+                .any(|(_, p, _)| *p == pid),
             "auto-decline query must return the backdated pending slot"
         );
 
@@ -2340,6 +2431,158 @@ mod tests {
         assert!(fetch_nudge_candidates(&pool, 7200).await.is_empty());
         assert!(fetch_expiry_candidates(&pool, 7200).await.is_empty());
         assert!(fetch_auto_decline_candidates(&pool, 7200).await.is_empty());
+    }
+
+    // wfe F34: auto-decline reports a real transition exactly once. The first
+    // call flips pending -> declined (true); the second finds no pending row
+    // (false), so the sweep only marks/notifies on the real transition (D-02).
+    #[sqlx::test]
+    async fn auto_decline_proposal_player_transitions_once(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let player_id = insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("tok-f34".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        assert!(
+            auto_decline_proposal_player(&pool, player_id).await,
+            "first decline of a pending row must report a real transition"
+        );
+        assert!(
+            !auto_decline_proposal_player(&pool, player_id).await,
+            "second decline of an already-declined row must report no transition"
+        );
+    }
+
+    // wd F28: the auto-decline window keys on pp.updated_at, NOT gp.created_at.
+    // A proposal whose created_at is backdated past the threshold but with a
+    // freshly-added (fresh pp.updated_at) pending player is NOT a candidate;
+    // once pp.updated_at is backdated past the threshold it BECOMES one.
+    #[sqlx::test]
+    async fn auto_decline_keys_on_player_updated_at_not_proposal_created_at(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let player_id = insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("tok-f28".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        sqlx::query(
+            "UPDATE game_proposals SET created_at = created_at - interval '1 hour' WHERE id = $1",
+        )
+        .bind(pid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            !fetch_auto_decline_candidates(&pool, 60)
+                .await
+                .iter()
+                .any(|(pp_id, _, _)| *pp_id == player_id),
+            "a fresh pp.updated_at must NOT be a candidate even when gp.created_at is old"
+        );
+
+        sqlx::query(
+            "UPDATE game_proposal_players SET updated_at = updated_at - interval '1 hour' WHERE id = $1",
+        )
+        .bind(player_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            fetch_auto_decline_candidates(&pool, 60)
+                .await
+                .iter()
+                .any(|(pp_id, _, _)| *pp_id == player_id),
+            "an old pp.updated_at must be a candidate"
+        );
+    }
+
+    // wd F38: the invite-send core returns `true` (permanently unsendable, no
+    // send) for a CANCELLED proposal and for a STALE/rotated token. With
+    // `resend = None` there is no outbox, so the `true` return is the assertion.
+    #[sqlx::test]
+    async fn send_invite_core_permanent_skip_cancelled_and_stale_token(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let a = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(a),
+            None,
+            None,
+            "pending",
+            Some("tok-f38".into()),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let mailer = mailer_from(pool.clone(), None);
+
+        // (a) CANCELLED proposal => permanent skip.
+        sqlx::query("UPDATE game_proposals SET status = 'cancelled' WHERE id = $1")
+            .bind(pid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            mailer.send_invite_now(pid, a, Some("tok-f38".into())).await,
+            "a cancelled proposal must be a permanent skip (true)"
+        );
+
+        // Restore to open so only the token is stale.
+        sqlx::query("UPDATE game_proposals SET status = 'open' WHERE id = $1")
+            .bind(pid)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // (b) STALE token (matches no pending row) => permanent skip.
+        assert!(
+            mailer
+                .send_invite_now(pid, a, Some("stale-rotated-token".into()))
+                .await,
+            "a stale/rotated token must be a permanent skip (true)"
+        );
     }
 
     #[sqlx::test]
@@ -3178,6 +3421,53 @@ mod tests {
         assert!(
             err_msg.contains("easy"),
             "error should mention the invalid bot: {err_msg}"
+        );
+    }
+
+    async fn proposal_status(pool: &PgPool, proposal_id: Uuid) -> String {
+        sqlx::query_scalar("SELECT status FROM game_proposals WHERE id = $1")
+            .bind(proposal_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn cancel_proposal_for_expiry_reads_roster_then_cancels(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let invitee = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(invitee), None, None, "accepted", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let outcome = cancel_proposal_for_expiry(&pool, pid).await;
+        let (owner_id, accepted_ids) = outcome.expect("open proposal should cancel");
+        assert_eq!(owner_id, owner);
+        assert!(
+            accepted_ids.contains(&invitee),
+            "accepted ids should contain the non-owner invitee"
+        );
+        assert!(
+            !accepted_ids.contains(&owner),
+            "accepted ids should not contain the owner"
+        );
+        assert_eq!(proposal_status(&pool, pid).await, "cancelled");
+
+        assert!(
+            cancel_proposal_for_expiry(&pool, pid).await.is_none(),
+            "an already-cancelled proposal returns None"
+        );
+        assert_eq!(
+            proposal_status(&pool, pid).await,
+            "cancelled",
+            "status stays cancelled and nothing changes"
         );
     }
 }

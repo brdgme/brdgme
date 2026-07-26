@@ -125,6 +125,31 @@ pub async fn ensure_email_token(pool: &PgPool, game_player_id: Uuid) -> anyhow::
     Ok(token)
 }
 
+/// Transaction-aware [`ensure_email_token`]: identical select-then-update, but on
+/// the caller's connection so it can run inside a held transaction (the reminder
+/// sweep's `FOR UPDATE` claim) instead of deadlocking against that claim's row
+/// lock on the shared pool. Mirrors `sweep::mark_reminder_sent_tx`.
+pub async fn ensure_email_token_tx(
+    tx: &mut sqlx::PgConnection,
+    game_player_id: Uuid,
+) -> anyhow::Result<String> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT email_token FROM game_players WHERE id = $1")
+            .bind(game_player_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some((Some(tok),)) = row {
+        return Ok(tok);
+    }
+    let token = generate_email_token();
+    sqlx::query("UPDATE game_players SET email_token = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&token)
+        .bind(game_player_id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(token)
+}
+
 /// Returns the user's `settings_email_token`, generating and persisting one on
 /// first use (lazy population, per the WP-56 migration). Plain query, matching
 /// `ensure_email_token`.
@@ -155,6 +180,7 @@ pub struct EmailRecipient {
     pub email: Option<String>,
     pub theme_slug: Option<String>,
     pub turn_emails_enabled: bool,
+    pub reminder_emails_enabled: bool,
     pub user_id: Option<Uuid>,
     pub is_bot: bool,
 }
@@ -172,6 +198,7 @@ pub async fn fetch_email_recipient(
             ue.email AS email,
             u.theme AS theme_slug,
             COALESCE(u.turn_emails_enabled, false) AS turn_emails_enabled,
+            COALESCE(u.reminder_emails_enabled, false) AS reminder_emails_enabled,
             gp.user_id AS user_id,
             (gp.game_bot_id IS NOT NULL) AS is_bot
         FROM game_players gp
@@ -203,6 +230,7 @@ mod tests {
             email: email.map(String::from),
             theme_slug: None,
             turn_emails_enabled: enabled,
+            reminder_emails_enabled: true,
             user_id: None,
             is_bot,
         }
