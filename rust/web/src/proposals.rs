@@ -955,6 +955,14 @@ pub(crate) async fn start_proposal_tx(
             bot_name: p.bot_difficulty.clone().unwrap_or_default(),
         })
         .collect();
+
+    if let Some(msg) = crate::db::validate_bot_slots(&mut *tx, &bot_slots)
+        .await
+        .map_err(internal("start_proposal_tx: validate bot slots"))?
+    {
+        return Err(ServerFnError::new(msg));
+    }
+
     let player_count = accepted.len();
 
     let game = create_game_from_service(
@@ -1082,6 +1090,13 @@ pub async fn create_proposal(
         .map_err(internal("create_proposal: find player counts"))?
         .ok_or_else(|| ServerFnError::new("Game type not found"))?;
     if let Some(msg) = crate::game::server_fns::roster_error(&player_counts, player_count) {
+        return Err(ServerFnError::new(msg));
+    }
+
+    if let Some(msg) = crate::db::validate_bot_slots(&pool, &bot_slots)
+        .await
+        .map_err(internal("create_proposal: validate bot slots"))?
+    {
         return Err(ServerFnError::new(msg));
     }
 
@@ -1456,6 +1471,12 @@ pub async fn add_proposal_player(
         .map_err(internal("add_proposal_player: insert human"))?;
         invite = Some((hid, token));
     } else if let Some(bot) = bot {
+        if let Some(msg) = crate::db::validate_bot_slots(&mut *tx, std::slice::from_ref(&bot))
+            .await
+            .map_err(internal("add_proposal_player: validate bot slots"))?
+        {
+            return Err(ServerFnError::new(msg));
+        }
         insert_proposal_player(
             &mut tx,
             proposal_id,
@@ -3090,5 +3111,57 @@ mod tests {
         let players = find_proposal_players(&pool, pid).await.unwrap();
         let player = players.iter().find(|p| p.user_id == Some(a)).unwrap();
         assert_eq!(player.response, "accepted");
+    }
+
+    #[sqlx::test]
+    async fn start_proposal_tx_rejects_disabled_bot(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+
+        sqlx::query(
+            "INSERT INTO game_proposal_players (proposal_id, position, user_id, response) VALUES ($1, 0, $2, 'accepted')",
+        )
+        .bind(pid)
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO game_proposal_players (proposal_id, position, bot_name, bot_difficulty, response) VALUES ($1, 1, 'Bot 1', 'easy', 'accepted')",
+        )
+        .bind(pid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("UPDATE bots SET enabled = false WHERE name = 'easy'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let proposal = find_proposal(&pool, pid).await.unwrap().unwrap();
+        let players = find_proposal_players(&pool, pid).await.unwrap();
+        let game_version = crate::db::find_game_version(&pool, gv)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let result = start_proposal_tx(
+            &mut tx,
+            &reqwest::Client::new(),
+            &proposal,
+            &players,
+            &game_version,
+        )
+        .await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("easy"),
+            "error should mention the invalid bot: {err_msg}"
+        );
     }
 }

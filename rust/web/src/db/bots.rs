@@ -42,6 +42,37 @@ pub async fn find_enabled_bots(pool: &PgPool) -> Result<Vec<String>> {
 }
 
 #[cfg(feature = "ssr")]
+pub async fn validate_bot_slots(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    bot_slots: &[crate::game::server_fns::BotSlot],
+) -> Result<Option<String>> {
+    if bot_slots.is_empty() {
+        return Ok(None);
+    }
+    let valid_names: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM bots WHERE enabled = true ORDER BY display_order")
+            .fetch_all(executor)
+            .await
+            .map_err(|e| anyhow::anyhow!("validate_bot_slots: {e}"))?;
+    for slot in bot_slots {
+        if slot.name.trim().is_empty() {
+            return Ok(Some("Bot display name cannot be empty".to_string()));
+        }
+        if !valid_names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&slot.bot_name))
+        {
+            return Ok(Some(format!(
+                "'{}' is not a valid bot type. Valid bot types: {}",
+                slot.bot_name,
+                valid_names.join(", ")
+            )));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "ssr")]
 pub async fn pick_replacement_bot(
     pool: &PgPool,
     game_id: Uuid,
@@ -206,5 +237,73 @@ mod tests {
             vec!["medium".to_string(), "hard".to_string(), "easy".to_string()],
             "ordered by display_order"
         );
+    }
+
+    #[sqlx::test]
+    async fn validate_bot_slots_accepts_enabled_bot(pool: PgPool) {
+        let slots = vec![crate::game::server_fns::BotSlot {
+            name: "My Bot".to_string(),
+            bot_name: "easy".to_string(),
+        }];
+        assert_eq!(validate_bot_slots(&pool, &slots).await.unwrap(), None);
+    }
+
+    #[sqlx::test]
+    async fn validate_bot_slots_accepts_case_mismatch(pool: PgPool) {
+        let slots = vec![crate::game::server_fns::BotSlot {
+            name: "My Bot".to_string(),
+            bot_name: "EASY".to_string(),
+        }];
+        assert_eq!(validate_bot_slots(&pool, &slots).await.unwrap(), None);
+    }
+
+    #[sqlx::test]
+    async fn validate_bot_slots_rejects_unknown_type(pool: PgPool) {
+        let slots = vec![crate::game::server_fns::BotSlot {
+            name: "My Bot".to_string(),
+            bot_name: "garbage".to_string(),
+        }];
+        let result = validate_bot_slots(&pool, &slots).await.unwrap();
+        assert!(result.is_some());
+        let msg = result.unwrap();
+        assert!(
+            msg.contains("garbage"),
+            "message should name the offending bot: {msg}"
+        );
+        assert!(
+            msg.contains("easy"),
+            "message should list valid bots: {msg}"
+        );
+    }
+
+    #[sqlx::test]
+    async fn validate_bot_slots_rejects_disabled_bot(pool: PgPool) {
+        sqlx::query("UPDATE bots SET enabled = false WHERE name = 'hard'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let slots = vec![crate::game::server_fns::BotSlot {
+            name: "My Bot".to_string(),
+            bot_name: "hard".to_string(),
+        }];
+        let result = validate_bot_slots(&pool, &slots).await.unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("hard"));
+    }
+
+    #[sqlx::test]
+    async fn validate_bot_slots_rejects_empty_display_name(pool: PgPool) {
+        let slots = vec![crate::game::server_fns::BotSlot {
+            name: "   ".to_string(),
+            bot_name: "easy".to_string(),
+        }];
+        let result = validate_bot_slots(&pool, &slots).await.unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("empty"));
+    }
+
+    #[sqlx::test]
+    async fn validate_bot_slots_accepts_empty_slice(pool: PgPool) {
+        assert_eq!(validate_bot_slots(&pool, &[]).await.unwrap(), None);
     }
 }

@@ -414,6 +414,13 @@ async fn run_new_command(
         }
     }
 
+    if let Some(msg) = crate::db::validate_bot_slots(ctx.pool, &bot_slots)
+        .await
+        .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: validate bot slots: {e}")))?
+    {
+        return Err(CommandError::User(msg));
+    }
+
     check_duplicate_players(&human_ids).map_err(CommandError::User)?;
 
     let player_count = 1 + human_ids.len() + bot_slots.len();
@@ -1914,5 +1921,101 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status_msg(reply), "Re-sent 1 game to your active address.");
+    }
+
+    #[sqlx::test]
+    async fn new_command_rejects_invalid_bot_type(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "bot-reject-user").await;
+        let type_name = format!("botreject{}", uuid::Uuid::new_v4().simple());
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(&type_name)
+        .bind(vec![2, 3, 4])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false)",
+        )
+        .bind(game_type_id)
+        .bind("1.0.0")
+        .bind("http://127.0.0.1:1")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let sctx = StandaloneCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            user_id,
+        };
+
+        match run_new_command(&sctx, &format!("{type_name} bot:garbage")).await {
+            Err(CommandError::User(msg)) => {
+                assert!(
+                    msg.contains("garbage"),
+                    "error should name the invalid bot: {msg}"
+                );
+                assert!(msg.contains("easy"), "error should list valid bots: {msg}");
+            }
+            Err(CommandError::Internal(e)) => {
+                panic!("expected User error, got Internal: {e}")
+            }
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+
+        let game_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(game_count, 0, "no game should have been created");
+    }
+
+    #[sqlx::test]
+    async fn new_command_accepts_valid_bot_type(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "bot-accept-user").await;
+        let type_name = format!("botaccept{}", uuid::Uuid::new_v4().simple());
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(&type_name)
+        .bind(vec![2, 3, 4])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false)",
+        )
+        .bind(game_type_id)
+        .bind("1.0.0")
+        .bind("http://127.0.0.1:1")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let sctx = StandaloneCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            user_id,
+        };
+
+        match run_new_command(&sctx, &format!("{type_name} bot:easy")).await {
+            Err(CommandError::User(msg)) => {
+                panic!("validation should pass for enabled bot, got User error: {msg}")
+            }
+            Err(CommandError::Internal(_)) => {}
+            Ok(_) => {}
+        }
     }
 }
