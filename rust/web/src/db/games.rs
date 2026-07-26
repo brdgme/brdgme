@@ -524,6 +524,18 @@ pub async fn find_active_turn_games(
     .await?)
 }
 
+/// The game version a game was created from. `Ok(None)` when the game does not
+/// exist.
+#[cfg(feature = "ssr")]
+pub async fn find_game_version_id_for_game(pool: &PgPool, game_id: Uuid) -> Result<Option<Uuid>> {
+    Ok(
+        sqlx::query_scalar("SELECT game_version_id FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_optional(pool)
+            .await?,
+    )
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
@@ -1120,5 +1132,18 @@ mod tests {
         // Marking a game the user is not in is a no-op, not an error.
         let stranger = make_user(&pool, "stranger").await;
         mark_game_read(&pool, g1.id, stranger.id).await.unwrap();
+    }
+
+    #[sqlx::test]
+    async fn find_game_version_id_for_game_returns_none_for_unknown_game(
+        pool: sqlx::PgPool,
+    ) -> sqlx::Result<()> {
+        assert_eq!(
+            find_game_version_id_for_game(&pool, Uuid::new_v4())
+                .await
+                .unwrap(),
+            None
+        );
+        Ok(())
     }
 }

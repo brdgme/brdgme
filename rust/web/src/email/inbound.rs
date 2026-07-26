@@ -5,11 +5,57 @@ use axum::extract::State;
 use crate::proposals::InviteMailer;
 use crate::state::AppState;
 
+/// Splits an inbound reply body into command lines, dropping the quoted
+/// original and everything after the attribution or signature.
+///
+/// Stop conditions (wfe F6):
+/// 1. a single-line `On ... wrote:` attribution (the pre-existing rule) - stop;
+/// 2. Outlook's unquoted `-----Original Message-----` separator - stop;
+/// 3. an Outlook-style header line (`From:`, `Sent:`, `To:`, `Subject:`,
+///    `Cc:`, `Date:`) - stop. Safe because no game grammar in the repo has a
+///    colon-terminated top-level token;
+/// 4. a `--` / `-- ` signature marker (the pre-existing rule) - stop;
+/// 5. at the FIRST `>`-quoted line, retract the block of already-collected
+///    lines since the last blank line if any of them looks like an attribution
+///    (ends with `:`, or carries a `<...@...>` address). This is the
+///    language-independent rule and it is what catches Gmail's two-line wrapped
+///    attribution and localized clients that never write `wrote:`. Quoted lines
+///    themselves are still skipped rather than terminating the scan, so a
+///    command typed below a quote block still works, exactly as before.
+///
+/// Known limits: an attribution block that is NOT preceded by a blank line will
+/// take the sender's last command with it (they are indistinguishable), and an
+/// attribution that neither ends with `:` nor carries an address is not
+/// detected.
 pub fn parse_reply_commands(text: &str) -> Vec<String> {
-    let mut commands = Vec::new();
+    const HEADER_PREFIXES: [&str; 6] = ["from:", "sent:", "to:", "subject:", "cc:", "date:"];
+
+    fn looks_like_attribution(line: &str) -> bool {
+        if line.ends_with(':') {
+            return true;
+        }
+        match (line.find('<'), line.rfind('>')) {
+            (Some(open), Some(close)) if close > open => line[open..close].contains('@'),
+            _ => false,
+        }
+    }
+
+    let mut commands: Vec<String> = Vec::new();
+    let mut block_start = 0usize;
+    let mut retracted = false;
     for line in text.lines() {
         let trimmed = line.trim_start();
         if trimmed.starts_with('>') {
+            if !retracted {
+                retracted = true;
+                if commands[block_start..]
+                    .iter()
+                    .any(|c| looks_like_attribution(c))
+                {
+                    commands.truncate(block_start);
+                }
+                block_start = commands.len();
+            }
             continue;
         }
         if trimmed.starts_with("On ") && trimmed.ends_with("wrote:") {
@@ -20,7 +66,15 @@ pub fn parse_reply_commands(text: &str) -> Vec<String> {
             break;
         }
         if t.is_empty() {
+            block_start = commands.len();
             continue;
+        }
+        let lower = t.to_ascii_lowercase();
+        if lower.starts_with("-----original message") {
+            break;
+        }
+        if HEADER_PREFIXES.iter().any(|p| lower.starts_with(p)) {
+            break;
         }
         commands.push(t.to_string());
     }
@@ -50,9 +104,54 @@ pub fn parse_reply_address(addr: &str) -> Option<InboundRoute> {
     Some(route)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteIntent {
+    Accept,
+    Decline,
+}
+
+/// The sender's invite response: the FIRST command line that is exactly
+/// `accept` or `decline` (ASCII-case-insensitive), so a body mentioning both
+/// honours what was stated first instead of always accepting (wfe F15).
+/// Matching is whole-line, as before: `decline politely` matches nothing.
+pub fn parse_invite_intent(commands: &[String]) -> Option<InviteIntent> {
+    commands.iter().find_map(|c| {
+        if c.eq_ignore_ascii_case("accept") {
+            Some(InviteIntent::Accept)
+        } else if c.eq_ignore_ascii_case("decline") {
+            Some(InviteIntent::Decline)
+        } else {
+            None
+        }
+    })
+}
+
 pub fn extract_plain_text(raw: &str) -> Option<String> {
     let msg = mail_parser::MessageParser::default().parse(raw)?;
     msg.body_text(0).map(|s| s.to_string())
+}
+
+pub fn extract_addr_spec(value: &str) -> Option<String> {
+    let sanitized = value.split(['\r', '\n']).next().unwrap_or("");
+    let value = sanitized.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    if !value.contains(['<', '>', '"', '(', ')', ',', ':', ';'])
+        && !value.contains(char::is_whitespace)
+        && value.matches('@').count() == 1
+    {
+        return Some(value.to_string());
+    }
+
+    let raw = format!("From: {value}\r\n\r\n");
+    let msg = mail_parser::MessageParser::default().parse(raw.as_bytes())?;
+    let addr = msg.from()?.first()?.address()?.trim();
+    if addr.is_empty() || !addr.contains('@') {
+        return None;
+    }
+    Some(addr.to_string())
 }
 
 #[async_trait::async_trait]
@@ -174,33 +273,14 @@ struct ResendInboundData {
 }
 
 /// First recipient address that parses to a routing token wins; `to` is checked
-/// before `received_for`.
+/// before `received_for`. Each candidate goes through `extract_addr_spec` first
+/// so `"brdg.me <g-tok@brdg.me>"` routes the same as `"g-tok@brdg.me"`
+/// (wfe F4); an unparseable value is still tried verbatim.
 pub fn select_route(to: &[String], received_for: &[String]) -> Option<InboundRoute> {
-    to.iter()
-        .chain(received_for.iter())
-        .find_map(|addr| parse_reply_address(addr))
-}
-
-pub enum CommandLoopOutcome<E> {
-    AllExecuted(usize),
-    Failed { index: usize, error: E },
-}
-
-/// Runs `commands` in order through `execute`, stopping at the first error.
-pub async fn run_commands_in_order<F, Fut, E>(
-    commands: &[String],
-    mut execute: F,
-) -> CommandLoopOutcome<E>
-where
-    F: FnMut(String) -> Fut,
-    Fut: std::future::Future<Output = Result<(), E>>,
-{
-    for (index, cmd) in commands.iter().enumerate() {
-        if let Err(error) = execute(cmd.clone()).await {
-            return CommandLoopOutcome::Failed { index, error };
-        }
-    }
-    CommandLoopOutcome::AllExecuted(commands.len())
+    to.iter().chain(received_for.iter()).find_map(|addr| {
+        let bare = extract_addr_spec(addr).unwrap_or_else(|| addr.to_string());
+        parse_reply_address(&bare)
+    })
 }
 
 pub fn confirmed_header_text(count: usize) -> String {
@@ -221,19 +301,6 @@ fn settings_response_header(error: Option<String>, last_status: Option<String>) 
         status
     } else {
         no_command_header_text()
-    }
-}
-
-pub fn error_reply_text(err: &crate::game::ExecuteCommandError) -> String {
-    use crate::game::ExecuteCommandError;
-    match err {
-        ExecuteCommandError::UserError(msg) => msg.clone(),
-        ExecuteCommandError::Conflict => {
-            "Your move could not be applied because the game changed; please try again.".to_string()
-        }
-        ExecuteCommandError::Other(_) => {
-            "An unexpected error occurred while processing your move.".to_string()
-        }
     }
 }
 
@@ -473,22 +540,64 @@ pub async fn resend_webhook(
         return StatusCode::OK;
     }
 
+    let Some(from) = extract_addr_spec(&event.data.from) else {
+        tracing::warn!(
+            "resend webhook: could not extract an address from the From value; no response"
+        );
+        return StatusCode::OK;
+    };
+
     match select_route(&event.data.to, &event.data.received_for) {
         Some(InboundRoute::Game(token)) => {
-            handle_game_reply(&state, &token, &event.data.from, &event.data.email_id).await;
+            handle_game_reply(&state, &token, &from, &event.data.email_id).await;
         }
         Some(InboundRoute::Invite(token)) => {
-            handle_invite_reply(&state, &token, &event.data.from, &event.data.email_id).await;
+            handle_invite_reply(&state, &token, &from, &event.data.email_id).await;
         }
         Some(InboundRoute::Settings(token)) => {
-            handle_settings_reply_route(&state, &token, &event.data.from, &event.data.email_id)
-                .await;
+            handle_settings_reply_route(&state, &token, &from, &event.data.email_id).await;
         }
         None => {
             tracing::info!("resend webhook: no route for recipient; ignoring");
         }
     }
     StatusCode::OK
+}
+
+/// Fetches an inbound email's raw MIME source from Resend and returns its
+/// plain-text body, or `None` (already logged) if the key is unconfigured or
+/// the fetch fails. The single place the inbound direction reads
+/// `RESEND_API_KEY`; this block used to be duplicated verbatim in all three
+/// routes (wfe F9).
+async fn fetch_inbound_text(state: &AppState, email_id: &str) -> Option<String> {
+    let api_key = match std::env::var("RESEND_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            tracing::error!("resend webhook: RESEND_API_KEY not configured; cannot fetch body");
+            return None;
+        }
+    };
+    let source = ResendInbound {
+        api_key,
+        http: state.http_client.clone(),
+    };
+    match source.fetch_raw_email(email_id).await {
+        Ok(raw) => Some(extract_plain_text(&raw).unwrap_or_default()),
+        Err(e) => {
+            tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
+            None
+        }
+    }
+}
+
+/// Releases the proposal `FOR UPDATE` lock on an invite early-exit path that
+/// has written nothing, so the outbound response email is not sent while
+/// holding it (wfe F7). Rollback, not commit: no path that calls this has
+/// written anything.
+async fn rollback_invite_tx(tx: sqlx::Transaction<'_, sqlx::Postgres>, context: &str) {
+    if let Err(e) = tx.rollback().await {
+        tracing::warn!("resend webhook: invite rollback failed ({context}): {e}");
+    }
 }
 
 async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: &str) {
@@ -518,25 +627,9 @@ async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: 
         }
     }
 
-    let api_key = match std::env::var("RESEND_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            tracing::error!("resend webhook: RESEND_API_KEY not configured; cannot fetch body");
-            return;
-        }
+    let Some(text) = fetch_inbound_text(state, email_id).await else {
+        return;
     };
-    let source = ResendInbound {
-        api_key,
-        http: state.http_client.clone(),
-    };
-    let raw = match source.fetch_raw_email(email_id).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
-            return;
-        }
-    };
-    let text = extract_plain_text(&raw).unwrap_or_default();
     let commands = parse_reply_commands(&text);
 
     if commands.is_empty() {
@@ -625,31 +718,14 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
         }
     }
 
-    let api_key = match std::env::var("RESEND_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            tracing::error!("resend webhook: RESEND_API_KEY not configured; cannot fetch body");
-            return;
-        }
+    let Some(text) = fetch_inbound_text(state, email_id).await else {
+        return;
     };
-    let source = ResendInbound {
-        api_key,
-        http: state.http_client.clone(),
-    };
-    let raw = match source.fetch_raw_email(email_id).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
-            return;
-        }
-    };
-    let text = extract_plain_text(&raw).unwrap_or_default();
     let commands = parse_reply_commands(&text);
 
-    let accept = commands.iter().any(|c| c.eq_ignore_ascii_case("accept"));
-    let decline = commands.iter().any(|c| c.eq_ignore_ascii_case("decline"));
+    let intent = parse_invite_intent(&commands);
 
-    if !accept && !decline {
+    let Some(intent) = intent else {
         send_invite_reply_response(
             state,
             &player,
@@ -660,7 +736,8 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
         )
         .await;
         return;
-    }
+    };
+    let accept = intent == InviteIntent::Accept;
 
     let proposal_id = player.proposal_id;
     let mut tx = match pool.begin().await {
@@ -684,6 +761,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
     };
 
     if proposal.status != "open" {
+        rollback_invite_tx(tx, "invite no longer open").await;
         send_invite_reply_response(
             state,
             &player,
@@ -706,10 +784,18 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
 
     let me = match players.iter().find(|p| p.id == player.id) {
         Some(p) => p,
-        None => return,
+        None => {
+            tracing::warn!(
+                "resend webhook: invite token's player {} is not in proposal {proposal_id}'s roster; no response",
+                player.id
+            );
+            rollback_invite_tx(tx, "invite player not in roster").await;
+            return;
+        }
     };
 
     if me.response != "pending" {
+        rollback_invite_tx(tx, "invite already responded").await;
         send_invite_reply_response(
             state,
             &player,
@@ -841,23 +927,38 @@ async fn send_invite_reply_response(
         }
     };
 
-    let (game_type_name, game_version_id) =
-        match crate::proposals::find_proposal(pool, proposal_id).await {
-            Ok(Some(proposal)) => {
-                let gvid = proposal.game_version_id;
-                match crate::db::find_game_version(pool, proposal.game_version_id).await {
-                    Ok(Some(gv)) => (
-                        crate::proposals::find_game_type_name(pool, gv.game_type_id)
-                            .await
-                            .unwrap_or(None)
-                            .unwrap_or_default(),
-                        Some(gvid),
-                    ),
-                    _ => (String::new(), Some(gvid)),
+    let mut game_type_name: Option<String> = None;
+    let mut game_version_id: Option<uuid::Uuid> = None;
+    match crate::proposals::find_proposal(pool, proposal_id).await {
+        Ok(Some(proposal)) => {
+            game_version_id = Some(proposal.game_version_id);
+            match crate::db::find_game_version(pool, proposal.game_version_id).await {
+                Ok(Some(gv)) => {
+                    match crate::proposals::find_game_type_name(pool, gv.game_type_id).await {
+                        Ok(Some(name)) => game_type_name = Some(name),
+                        Ok(None) => tracing::warn!(
+                            "resend webhook: game type {} not found for invite subject",
+                            gv.game_type_id
+                        ),
+                        Err(e) => {
+                            tracing::error!("resend webhook: invite game type lookup failed: {e}")
+                        }
+                    }
+                }
+                Ok(None) => tracing::warn!(
+                    "resend webhook: game version {} not found for invite subject",
+                    proposal.game_version_id
+                ),
+                Err(e) => {
+                    tracing::error!("resend webhook: invite game version lookup failed: {e}")
                 }
             }
-            _ => (String::new(), None),
-        };
+        }
+        Ok(None) => {
+            tracing::warn!("resend webhook: proposal {proposal_id} not found for invite subject")
+        }
+        Err(e) => tracing::error!("resend webhook: invite proposal lookup failed: {e}"),
+    }
 
     let base = crate::config::public_base_url();
     let browser_url = match game_id {
@@ -867,7 +968,10 @@ async fn send_invite_reply_response(
 
     let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
     let content = crate::email::render::EmailContent {
-        subject: format!("{game_type_name} invite"),
+        subject: match &game_type_name {
+            Some(name) => format!("{name} invite"),
+            None => "Your brdg.me invite".to_string(),
+        },
         header: Some(header),
         digest: None,
         board: None,
@@ -882,7 +986,7 @@ async fn send_invite_reply_response(
         &[],
         Some(&format!("proposal-{proposal_id}")),
         false,
-        &format!("i-{}@brdg.me", player.email_token.as_deref().unwrap_or("")),
+        &crate::email::notify::invite_reply_address(player.email_token.as_deref().unwrap_or("")),
     );
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
@@ -1088,30 +1192,13 @@ async fn send_rules_reply_response(
 }
 
 async fn handle_settings_reply_route(state: &AppState, token: &str, from: &str, email_id: &str) {
-    let api_key = match std::env::var("RESEND_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            tracing::error!(
-                "resend webhook: RESEND_API_KEY not configured; cannot fetch settings body"
-            );
-            return;
-        }
+    let Some(text) = fetch_inbound_text(state, email_id).await else {
+        return;
     };
-    let source = ResendInbound {
-        api_key,
-        http: state.http_client.clone(),
-    };
-    let raw = match source.fetch_raw_email(email_id).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
-            return;
-        }
-    };
-    handle_settings_reply(state, token, from, &raw).await;
+    handle_settings_reply(state, token, from, &text).await;
 }
 
-async fn handle_settings_reply(state: &AppState, token: &str, from: &str, raw_body: &str) {
+async fn handle_settings_reply(state: &AppState, token: &str, from: &str, text: &str) {
     let user_id = match find_user_by_settings_token(&state.pool, token).await {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -1138,8 +1225,7 @@ async fn handle_settings_reply(state: &AppState, token: &str, from: &str, raw_bo
         }
     }
 
-    let text = extract_plain_text(raw_body).unwrap_or_default();
-    let commands = parse_reply_commands(&text);
+    let commands = parse_reply_commands(text);
 
     if commands.is_empty() {
         send_settings_response(
@@ -1205,7 +1291,7 @@ async fn send_settings_response(
     let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
     let reply_address =
         match crate::email::outbound::ensure_settings_email_token(pool, user_id).await {
-            Ok(token) => format!("s-{token}@brdg.me"),
+            Ok(token) => crate::email::notify::settings_reply_address(&token),
             Err(e) => {
                 tracing::error!(
                     "resend webhook: settings email token unavailable; omitting reply address: {e}"
@@ -1308,6 +1394,73 @@ mod tests {
     #[test]
     fn parse_reply_commands_empty_input() {
         assert_eq!(parse_reply_commands(""), Vec::<String>::new());
+    }
+
+    #[test]
+    fn parse_reply_commands_cuts_at_wrapped_gmail_attribution() {
+        let input = "play e4\n\
+                     \n\
+                     On Wed, 22 Jul 2026 at 13:16, brdg.me <mail@brdg.me>\n\
+                     wrote:\n\
+                     > board\n\
+                     > more board";
+        assert_eq!(parse_reply_commands(input), vec!["play e4"]);
+    }
+
+    #[test]
+    fn parse_reply_commands_cuts_at_localized_attribution() {
+        let input = "play e4\n\
+                     \n\
+                     Le 22 juillet 2026 a 13:16, brdg.me a ecrit :\n\
+                     > board";
+        assert_eq!(parse_reply_commands(input), vec!["play e4"]);
+    }
+
+    #[test]
+    fn parse_reply_commands_cuts_at_outlook_original_message_block() {
+        let input = "play e4\n\
+                     \n\
+                     -----Original Message-----\n\
+                     From: brdg.me <mail@brdg.me>\n\
+                     Sent: Wednesday, 22 July 2026 13:16\n\
+                     Subject: Your turn\n\
+                     \n\
+                     board text that is not quoted";
+        assert_eq!(parse_reply_commands(input), vec!["play e4"]);
+    }
+
+    #[test]
+    fn parse_reply_commands_cuts_at_bare_header_block() {
+        let input = "play e4\n\
+                     \n\
+                     From: brdg.me <mail@brdg.me>\n\
+                     Sent: Wednesday, 22 July 2026 13:16\n\
+                     board text";
+        assert_eq!(parse_reply_commands(input), vec!["play e4"]);
+    }
+
+    #[test]
+    fn parse_reply_commands_keeps_last_command_before_blank_then_quote() {
+        let input = "play e4\n\
+                     done\n\
+                     \n\
+                     On Wed, 22 Jul 2026 at 13:16, brdg.me <mail@brdg.me> wrote:\n\
+                     > board";
+        assert_eq!(parse_reply_commands(input), vec!["play e4", "done"]);
+    }
+
+    #[test]
+    fn parse_reply_commands_keeps_a_command_typed_below_a_quote_block() {
+        let input = "> board\n\
+                     > more board\n\
+                     play e4";
+        assert_eq!(parse_reply_commands(input), vec!["play e4"]);
+    }
+
+    #[test]
+    fn parse_reply_commands_does_not_retract_a_command_directly_above_a_quote() {
+        let input = "play d4\n> previous move was e4";
+        assert_eq!(parse_reply_commands(input), vec!["play d4"]);
     }
 
     #[test]
@@ -1464,55 +1617,93 @@ Just a plain body";
         );
     }
 
-    #[tokio::test]
-    async fn run_commands_all_succeed() {
-        let cmds: Vec<String> = vec!["a".into(), "b".into(), "c".into()];
-        let outcome: CommandLoopOutcome<String> =
-            run_commands_in_order(&cmds, |_cmd| async { Ok::<(), String>(()) }).await;
-        match outcome {
-            CommandLoopOutcome::AllExecuted(n) => assert_eq!(n, 3),
-            CommandLoopOutcome::Failed { .. } => panic!("expected success"),
+    #[test]
+    fn extract_addr_spec_bare_address_is_unchanged() {
+        assert_eq!(
+            extract_addr_spec("alice@example.com").as_deref(),
+            Some("alice@example.com")
+        );
+        assert_eq!(
+            extract_addr_spec("  alice@example.com  ").as_deref(),
+            Some("alice@example.com")
+        );
+    }
+
+    #[test]
+    fn extract_addr_spec_display_name_forms() {
+        for input in [
+            "Alice <alice@example.com>",
+            "\"Doe, Alice\" <alice@example.com>",
+            "Alice (at home) <alice@example.com>",
+            "=?utf-8?q?Alice?= <alice@example.com>",
+            "<alice@example.com>",
+        ] {
+            assert_eq!(
+                extract_addr_spec(input).as_deref(),
+                Some("alice@example.com"),
+                "input: {input}"
+            );
         }
     }
 
-    #[tokio::test]
-    async fn run_commands_stops_at_first_error() {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let cmds: Vec<String> = vec!["ok".into(), "bad".into(), "never".into()];
-        let seen = Arc::new(AtomicUsize::new(0));
-        let seen2 = seen.clone();
-        let outcome: CommandLoopOutcome<String> = run_commands_in_order(&cmds, move |cmd| {
-            let seen2 = seen2.clone();
-            async move {
-                seen2.fetch_add(1, Ordering::SeqCst);
-                if cmd == "bad" {
-                    Err("boom".to_string())
-                } else {
-                    Ok(())
-                }
-            }
-        })
-        .await;
-        match outcome {
-            CommandLoopOutcome::Failed { index, error } => {
-                assert_eq!(index, 1);
-                assert_eq!(error, "boom");
-            }
-            CommandLoopOutcome::AllExecuted(_) => panic!("expected failure"),
-        }
-        assert_eq!(seen.load(Ordering::SeqCst), 2); // stopped before "never"
+    #[test]
+    fn extract_addr_spec_first_of_several() {
+        assert_eq!(
+            extract_addr_spec("a@x.com, b@y.com").as_deref(),
+            Some("a@x.com")
+        );
     }
 
-    #[tokio::test]
-    async fn run_commands_empty_list() {
-        let cmds: Vec<String> = vec![];
-        let outcome: CommandLoopOutcome<String> =
-            run_commands_in_order(&cmds, |_cmd| async { Ok::<(), String>(()) }).await;
-        match outcome {
-            CommandLoopOutcome::AllExecuted(n) => assert_eq!(n, 0),
-            CommandLoopOutcome::Failed { .. } => panic!("expected success"),
-        }
+    #[test]
+    fn extract_addr_spec_rejects_valueless_input() {
+        assert_eq!(extract_addr_spec(""), None);
+        assert_eq!(extract_addr_spec("   "), None);
+        assert_eq!(extract_addr_spec("Alice"), None);
+        assert_eq!(extract_addr_spec("<>"), None);
+    }
+
+    #[test]
+    fn extract_addr_spec_strips_crlf_before_parsing() {
+        assert_eq!(
+            extract_addr_spec("Alice <alice@example.com>\r\nBcc: evil@x.com").as_deref(),
+            Some("alice@example.com")
+        );
+    }
+
+    #[test]
+    fn parse_invite_intent_first_verb_wins() {
+        let decline_first: Vec<String> = vec!["decline".into(), "accept".into()];
+        assert_eq!(
+            parse_invite_intent(&decline_first),
+            Some(InviteIntent::Decline)
+        );
+        let accept_first: Vec<String> = vec!["accept".into(), "decline".into()];
+        assert_eq!(
+            parse_invite_intent(&accept_first),
+            Some(InviteIntent::Accept)
+        );
+    }
+
+    #[test]
+    fn parse_invite_intent_is_case_insensitive_and_whole_line() {
+        assert_eq!(
+            parse_invite_intent(&["ACCEPT".to_string()]),
+            Some(InviteIntent::Accept)
+        );
+        assert_eq!(parse_invite_intent(&["decline politely".to_string()]), None);
+        assert_eq!(parse_invite_intent(&[]), None);
+    }
+
+    #[test]
+    fn select_route_handles_display_name_recipients() {
+        assert_eq!(
+            select_route(&["brdg.me <g-abc@brdg.me>".to_string()], &[]),
+            Some(InboundRoute::Game("abc".to_string()))
+        );
+        assert_eq!(
+            select_route(&[], &["Invites <i-xyz@brdg.me>".to_string()]),
+            Some(InboundRoute::Invite("xyz".to_string()))
+        );
     }
 
     #[tokio::test]
@@ -1664,20 +1855,6 @@ Just a plain body";
     #[test]
     fn no_command_header_text_mentions_command() {
         assert!(no_command_header_text().contains("command"));
-    }
-
-    #[test]
-    fn error_reply_text_maps_each_variant() {
-        use crate::game::ExecuteCommandError;
-        assert_eq!(
-            error_reply_text(&ExecuteCommandError::UserError("nope".to_string())),
-            "nope"
-        );
-        assert!(error_reply_text(&ExecuteCommandError::Conflict).contains("changed"));
-        assert!(
-            error_reply_text(&ExecuteCommandError::Other(anyhow::anyhow!("boom")))
-                .contains("unexpected")
-        );
     }
 
     // Runs only where a Postgres is available (CI); expected to fail to connect

@@ -5,10 +5,27 @@
 //! logs-only - nothing here ever fails the game operation that triggered it.
 //! SSR-only like the rest of `email`.
 
-/// The per-player Reply-To address (`g-{token}@brdg.me`) the inbound
-/// webhook routes on.
+/// The single inbound reply domain. Every reply address the app advertises
+/// (`g-`/`i-`/`s-`) is on this domain (wfe F14). Deliberately NOT the
+/// Message-Id domain (`render.rs`) or the unsubscribe mailto domain, which are
+/// different concepts that merely happen to share the string today.
+pub const REPLY_DOMAIN: &str = "brdg.me";
+
+/// The per-player game reply address (`g-{token}@brdg.me`) the inbound webhook
+/// routes on.
 pub fn reply_address(token: &str) -> String {
-    format!("g-{token}@brdg.me")
+    format!("g-{token}@{REPLY_DOMAIN}")
+}
+
+/// The per-invitee proposal reply address (`i-{token}@brdg.me`).
+pub fn invite_reply_address(token: &str) -> String {
+    format!("i-{token}@{REPLY_DOMAIN}")
+}
+
+/// The per-user settings reply address (`s-{token}@brdg.me`), used for
+/// replies that carry no game or invite context.
+pub fn settings_reply_address(token: &str) -> String {
+    format!("s-{token}@{REPLY_DOMAIN}")
 }
 
 pub fn turn_header_text(player_name: &str) -> String {
@@ -500,6 +517,8 @@ mod tests {
     #[test]
     fn reply_address_formats_token() {
         assert_eq!(reply_address("tok"), "g-tok@brdg.me");
+        assert_eq!(invite_reply_address("tok"), "i-tok@brdg.me");
+        assert_eq!(settings_reply_address("tok"), "s-tok@brdg.me");
     }
 
     #[test]

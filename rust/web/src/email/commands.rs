@@ -24,6 +24,32 @@ pub enum CommandError {
     Internal(#[from] anyhow::Error),
 }
 
+/// Splits a `ServerFnError` from a shared helper into this module's
+/// user-vs-internal classification (wfe F21, wfe F24).
+///
+/// `crate::error::internal` is the only producer of
+/// `INTERNAL_ERROR_MESSAGE`, and it has already logged the real cause, so that
+/// exact message means "infrastructure failure": classify it `Internal` so the
+/// caller substitutes the generic apology and inbound.rs logs the correlation.
+/// Every other `ServerError` message is a deliberate user-facing string and is
+/// returned as its BARE text - `ServerFnError`'s `Display` would otherwise
+/// email it wrapped in "error running server function: ...".
+fn classify_server_fn_error(
+    context: &'static str,
+    e: leptos::prelude::ServerFnError,
+) -> CommandError {
+    use leptos::prelude::ServerFnError;
+    match e {
+        ServerFnError::ServerError(msg) if msg == crate::error::INTERNAL_ERROR_MESSAGE => {
+            CommandError::Internal(anyhow::anyhow!(
+                "{context}: internal failure (cause already logged by crate::error::internal)"
+            ))
+        }
+        ServerFnError::ServerError(msg) => CommandError::User(msg),
+        other => CommandError::Internal(anyhow::anyhow!("{context}: {other}")),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RulesFilter {
     All,
@@ -377,7 +403,10 @@ async fn run_new_command(
                     .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: find user: {e}")))?
                     .ok_or_else(|| CommandError::User(format!("No user named '{username}'.")))?;
                 if id == ctx.user_id {
-                    continue;
+                    return Err(CommandError::User(
+                        "You are included in the game automatically; do not list yourself as an opponent."
+                            .to_string(),
+                    ));
                 }
                 human_ids.push(id);
                 human_names.push(username);
@@ -449,9 +478,10 @@ async fn bump_reply(
     resend: Option<&resend_rs::Resend>,
     user_id: uuid::Uuid,
 ) -> Result<CommandReply, CommandError> {
-    let games = crate::db::find_active_turn_games(pool, user_id, crate::db::SWITCH_DIGEST_CAP)
+    let games = crate::db::find_active_turn_games(pool, user_id, crate::db::SWITCH_DIGEST_CAP + 1)
         .await
         .map_err(|e| CommandError::Internal(anyhow::anyhow!("bump: find turn games: {e}")))?;
+    let capped_out = games.len() > crate::db::SWITCH_DIGEST_CAP;
     let capped = crate::db::cap_digest(games, crate::db::SWITCH_DIGEST_CAP);
     let n = capped.len();
     for (game_id, game_player_id) in capped {
@@ -464,11 +494,18 @@ async fn bump_reply(
         )
         .await;
     }
-    Ok(CommandReply::Status(match n {
+    let mut msg = match n {
         0 => "No games are waiting on your turn.".to_string(),
         1 => "Re-sent 1 game to your active address.".to_string(),
         n => format!("Re-sent {n} games to your active address."),
-    }))
+    };
+    if capped_out {
+        msg.push_str(&format!(
+            " More games are waiting; this reply is capped at {}. Open the site to see them all.",
+            crate::db::SWITCH_DIGEST_CAP
+        ));
+    }
+    Ok(CommandReply::Status(msg))
 }
 
 async fn run_settings_name(
@@ -615,7 +652,7 @@ async fn run_emails_toggle(
     user_id: uuid::Uuid,
     enabled: bool,
 ) -> Result<CommandReply, CommandError> {
-    set_turn_emails_enabled(pool, user_id, enabled)
+    crate::db::set_user_turn_emails_enabled(pool, user_id, enabled)
         .await
         .map_err(CommandError::Internal)?;
     let msg = if enabled {
@@ -631,7 +668,7 @@ async fn run_emails_invite_toggle(
     user_id: uuid::Uuid,
     enabled: bool,
 ) -> Result<CommandReply, CommandError> {
-    set_invite_emails_enabled(pool, user_id, enabled)
+    crate::db::set_user_invite_emails_enabled(pool, user_id, enabled)
         .await
         .map_err(CommandError::Internal)?;
     let msg = if enabled {
@@ -647,7 +684,7 @@ async fn run_emails_reminder_toggle(
     user_id: uuid::Uuid,
     enabled: bool,
 ) -> Result<CommandReply, CommandError> {
-    set_reminder_emails_enabled(pool, user_id, enabled)
+    crate::db::set_user_reminder_emails_enabled(pool, user_id, enabled)
         .await
         .map_err(CommandError::Internal)?;
     let msg = if enabled {
@@ -671,14 +708,10 @@ async fn run_settings_summary(
     let theme = crate::db::get_user_theme(pool, user_id)
         .await
         .map_err(CommandError::Internal)?;
-    let (emails_enabled, invite_emails_enabled, reminder_emails_enabled): (bool, bool, bool) =
-        sqlx::query_as(
-            "SELECT turn_emails_enabled, invite_emails_enabled, reminder_emails_enabled FROM users WHERE id = $1",
-        )
-        .bind(user_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| CommandError::Internal(anyhow::anyhow!("settings: fetch emails: {e}")))?;
+    let (emails_enabled, invite_emails_enabled, reminder_emails_enabled) =
+        crate::db::get_user_email_prefs(pool, user_id)
+            .await
+            .map_err(CommandError::Internal)?;
 
     Ok(CommandReply::Status(format_settings_summary(
         &SettingsSummary {
@@ -690,45 +723,6 @@ async fn run_settings_summary(
             reminder_emails_enabled,
         },
     )))
-}
-
-async fn set_turn_emails_enabled(
-    pool: &sqlx::PgPool,
-    user_id: uuid::Uuid,
-    enabled: bool,
-) -> anyhow::Result<()> {
-    sqlx::query("UPDATE users SET turn_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
-        .bind(enabled)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-async fn set_invite_emails_enabled(
-    pool: &sqlx::PgPool,
-    user_id: uuid::Uuid,
-    enabled: bool,
-) -> anyhow::Result<()> {
-    sqlx::query("UPDATE users SET invite_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
-        .bind(enabled)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-async fn set_reminder_emails_enabled(
-    pool: &sqlx::PgPool,
-    user_id: uuid::Uuid,
-    enabled: bool,
-) -> anyhow::Result<()> {
-    sqlx::query("UPDATE users SET reminder_emails_enabled = $1, updated_at = NOW() WHERE id = $2")
-        .bind(enabled)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(())
 }
 
 async fn run_concede(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
@@ -957,7 +951,7 @@ async fn run_restart(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandE
         &bot_slots,
     )
     .await
-    .map_err(|e| CommandError::User(e.to_string()))?;
+    .map_err(|e| classify_server_fn_error("restart", e))?;
 
     match outcome {
         RestartOutcome::Created(created) => {
@@ -992,13 +986,10 @@ async fn run_rules(
     ctx: &EmailCommandCtx<'_>,
     filter: RulesFilter,
 ) -> Result<CommandReply, CommandError> {
-    let version_id: uuid::Uuid =
-        sqlx::query_scalar("SELECT game_version_id FROM games WHERE id = $1")
-            .bind(ctx.game_id)
-            .fetch_optional(ctx.pool)
-            .await
-            .map_err(|e| CommandError::Internal(anyhow::anyhow!("rules: fetch game version: {e}")))?
-            .ok_or_else(|| CommandError::User("Game not found".to_string()))?;
+    let version_id = crate::db::find_game_version_id_for_game(ctx.pool, ctx.game_id)
+        .await
+        .map_err(CommandError::Internal)?
+        .ok_or_else(|| CommandError::User("Game not found".to_string()))?;
 
     let rules_src = crate::db::find_game_version_rules(ctx.pool, version_id)
         .await?
@@ -1093,7 +1084,7 @@ pub async fn dispatch_email_command(
     }
 
     if let Some(enabled) = subscribe_toggle(&verb_lower) {
-        set_turn_emails_enabled(ctx.pool, ctx.user_id, enabled)
+        crate::db::set_user_turn_emails_enabled(ctx.pool, ctx.user_id, enabled)
             .await
             .map_err(CommandError::Internal)?;
         let msg = if enabled {
@@ -1171,6 +1162,24 @@ mod tests {
         assert!(!help_text().is_empty());
     }
 
+    #[test]
+    fn classify_server_fn_error_redacted_internal_is_internal() {
+        let e = leptos::prelude::ServerFnError::new(crate::error::INTERNAL_ERROR_MESSAGE);
+        match classify_server_fn_error("ctx", e) {
+            CommandError::Internal(_) => {}
+            CommandError::User(m) => panic!("expected Internal, got User({m})"),
+        }
+    }
+
+    #[test]
+    fn classify_server_fn_error_user_message_is_bare() {
+        let e = leptos::prelude::ServerFnError::new("Game is not finished");
+        match classify_server_fn_error("ctx", e) {
+            CommandError::User(m) => assert_eq!(m, "Game is not finished"),
+            CommandError::Internal(e) => panic!("expected User, got Internal({e})"),
+        }
+    }
+
     #[sqlx::test]
     async fn subscribe_unsubscribe_toggles_turn_emails(pool: sqlx::PgPool) {
         let user_id: uuid::Uuid = sqlx::query_scalar(
@@ -1182,7 +1191,7 @@ mod tests {
         .await
         .unwrap();
 
-        set_turn_emails_enabled(&pool, user_id, false)
+        crate::db::set_user_turn_emails_enabled(&pool, user_id, false)
             .await
             .unwrap();
         let enabled: bool =
@@ -1193,7 +1202,9 @@ mod tests {
                 .unwrap();
         assert!(!enabled);
 
-        set_turn_emails_enabled(&pool, user_id, true).await.unwrap();
+        crate::db::set_user_turn_emails_enabled(&pool, user_id, true)
+            .await
+            .unwrap();
         let enabled: bool =
             sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
                 .bind(user_id)
@@ -1807,6 +1818,49 @@ mod tests {
                     panic!("expected Status reply for {line}, got internal error: {e}")
                 }
             }
+        }
+    }
+
+    #[sqlx::test]
+    async fn new_rejects_naming_yourself_as_an_opponent(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "self-namer").await;
+        let type_name = format!("selftest{}", uuid::Uuid::new_v4().simple());
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(&type_name)
+        .bind(vec![2, 3, 4])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false)",
+        )
+        .bind(game_type_id)
+        .bind("1.0.0")
+        .bind("http://127.0.0.1:1")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let sctx = StandaloneCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            user_id,
+        };
+
+        match run_new_command(&sctx, &format!("{type_name} self-namer")).await {
+            Err(CommandError::User(msg)) => assert!(
+                msg.contains("included in the game automatically"),
+                "unexpected user error: {msg}"
+            ),
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
         }
     }
 
