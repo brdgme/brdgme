@@ -1,5 +1,29 @@
 # Critical path - brdgme Rust review
 
+> **STALE - HISTORICAL SNAPSHOT. Read this note before trusting anything below
+> (added 2026-07-26).**
+>
+> - The criticals are **being executed right now on a separate branch by a
+>   separate agent**. This file's status columns ("ready", "blocked",
+>   "spec-gapped") describe the state at time of writing and are no longer
+>   maintained.
+> - **Tier 2 and Tier 3 planning are now COMPLETE**: 40 specs in
+>   `planning/specs/` and 8 checklists in `planning/checklists/`. See
+>   `planning/tier2-tier3-plan.md` for the completed rosters.
+> - **`planning/README.md` is the current entry point** for the planning set.
+>   `planning/specs-LOG.md` is the authoritative record of what has actually
+>   been done, and `planning/open-decisions-for-user.md` is the authoritative
+>   list of what is still awaiting the user.
+> - **Any line-number citation in this file is historical** and was taken
+>   against the review snapshot worktree `f8763a5`. Verification found 33-46% of
+>   line citations in the web-side material were wrong even then, and the live
+>   tree has drifted further. Locate code by file path + function name only.
+> - **Work packages that have landed on `master` as of 2026-07-26** (from
+>   `git log`): WP-01, WP-03, WP-06, WP-13, WP-14, WP-15, WP-21, WP-25, WP-36,
+>   WP-37, WP-39, WP-41, WP-44. Anything not in that list should be treated as
+>   not landed, and `planning/specs-LOG.md` is authoritative if the two
+>   disagree - do not infer landing state from this file.
+
 Scope: the 10 criticals plus the majors that are security / data-corruption /
 liveness class and plausibly must ship with them. Everything else in
 `work-packages.md` and `BACKLOG.md` is off this path.

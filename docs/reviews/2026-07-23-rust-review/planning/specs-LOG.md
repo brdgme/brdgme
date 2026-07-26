@@ -3961,3 +3961,2461 @@ Gate: `cargo fmt --all -- --check` clean; `cargo clippy --workspace --exclude
 web --all-targets -- -D warnings` clean; `scripts/rust-test.sh` ALL PASSED.
 
 Single commit 7f4f902. Not pushed.
+
+---
+
+## Planning-doc reconciliation pass - DONE 2026-07-26
+
+Lead: orchestrate Lead role, no Workers. Read-only against `rust/`; writes
+confined to `planning/`. Three staleness fixes so a cheap execution model is
+not misled:
+
+1. `tier2-tier3-plan.md`
+   - Section 3 pointed at `planning/CODING-amendment-proposed.md`, which does
+     not exist. Corrected to the real file
+     `planning/CODING-md-amendment-proposal.md` and marked the prevention
+     package DONE.
+   - Added a STATUS UPDATE banner: Tier 2 and Tier 3 planning are COMPLETE.
+   - Roster 1.1 (13 Tier 2 packages) marked COMPLETE with a new `Covered by`
+     column naming each spec file. WP-09 is recorded as having split, exactly
+     as the plan predicted, into `specs/WP-09a-deserialized-state-boundary.md`
+     and `specs/WP-09b-game-crate-state-trust-sweep.md` (land 09a first).
+   - Roster 2.1 (8 Tier 3 batches) marked COMPLETE with a `Covered by` column
+     naming each checklist. T3-B5 was NOT split.
+   - Rosters 1.2 and 2.2 (decision-blocked) untouched - still blocked.
+
+2. WP-17 blocked-status disagreement resolved as **partially blocked**.
+   `work-packages.md` said `BLOCKED-ON-DECISION(D-25)` at package level while
+   `tier2-tier3-plan.md` 2.1 listed it as dispatchable. Authoritative reading
+   is `checklists/T3-B3-splendor-libcost-holdem.md`: D-25 gates only
+   **b F31, ls F39, dp F27** (the lib/cost keep-or-fold consolidation, one
+   change seen from three findings units). The other 5 - **b F30, b F32,
+   b F34, b F35, ls F38** - are implementable now. Both files now say
+   `PARTIALLY-BLOCKED-ON-DECISION(D-25)` and name the 3 gated findings; new
+   subsection `tier2-tier3-plan.md` 2.1a carries the detail.
+
+3. `critical-path.md` NOT rewritten. Added a dated STALE header note: the
+   criticals are being executed on a separate branch by a separate agent;
+   Tier 2/Tier 3 planning is complete; `planning/README.md` is the current
+   entry point; all status columns and line-number citations in that file are
+   historical (snapshot `f8763a5`). Landed work packages named from
+   `git log --oneline -30` on `master`: WP-01, WP-03, WP-06, WP-13, WP-14,
+   WP-15, WP-21, WP-25, WP-36, WP-37, WP-39, WP-41, WP-44 - with this
+   `specs-LOG.md` declared authoritative on any disagreement.
+
+No `rust/` file read or written. No cargo/git mutation run. Only
+`git log --oneline -30` (read-only) was executed.
+
+---
+
+## 2026-07-26 - Decision-recording unit (Lead)
+
+Michael answered all 34 open decisions. This unit records them authoritatively
+and clears the blocks they gate. Read-only against `rust/`; no cargo, no git
+mutation. (Commit SHAs are not branch-stable here - a concurrent agent rebases
+`rust/` - so this log does not cite them.)
+
+### Entry 1 - answered-decisions record created
+
+- **Created `planning/decisions-ANSWERED.md`.** All 34 rows in the original
+  order of `open-decisions-for-user.md`, each stating the ruling plus attached
+  constraints/rationale. Carries a "changed rulings" table at the top for the
+  five that supersede prior text: D-7 (OVERRULED), D-8 (REFINED), D-15
+  (REDESIGNED), D-16 (OVERRULED), D-37 (CORRECTED). Ends with six standing
+  constraints extracted from the rulings (dependency-upgrade-first, macro
+  restraint, parser simplicity, no Sentry functionality loss, lib/cost tests,
+  parity park still in force per game).
+- Three verification notes are marked PENDING pending a Worker: the D-16
+  full-page-load mechanism, the D-20 concrete crate name, and the e F30
+  evidence question.
+- **Replaced `planning/open-decisions-for-user.md` with a 4-line stub**
+  pointing at the new file, so nothing follows a stale open-questions doc.
+- Recorded the coordinator's mid-unit correction on `d F37`: it is simply
+  REJECTED, no follow-up. `suits()` already returns canonical top-to-bottom
+  order (Lite Metal top, Krypto bottom), so the "value-board order vs array
+  index" caveat is resolved and was dropped rather than left open.
+
+### Entry 2 - Worker returned (D-16 / D-20 / e F30 / d F37 verification)
+
+One Worker, read-only against `rust/` and `~/.cargo/registry/`. Results
+recorded in `decisions-ANSWERED.md` under "Verification notes":
+
+1. **D-16 mechanism CONFIRMED.** `leptos = 0.8.20`, `leptos_router = 0.8.14`
+   (lock-resolved). `leptos_router-0.8.14/src/location/mod.rs` reads the DOM
+   `rel` attribute, splits on space/tab, and returns early for `external` (or
+   `download`) - so `rel="external"` DOES opt out of client-side routing.
+   Crucially, a **plain `<a>` is NOT enough**: interception is a window-level
+   click listener (`src/location/history.rs`) walking `composed_path()` for
+   any `HtmlAnchorElement`, regardless of `<A>` vs `<a>`. `<A>` has no `rel`
+   prop, so use `attr:rel="external"` (spreading is already proven in
+   `rust/web/src/app.rs`) or a plain `<a href rel="external">`.
+   **NEW GAP recorded against WP-55:** three `/login` navigations go through
+   `use_navigate` and touch no anchor, so no `rel` can cover them -
+   `components/layout.rs` (post-logout), `settings.rs`, `admin.rs`. WP-55
+   must convert those to hard navigations too.
+2. **D-20 name settled: `rust/lib/game_bin`, `[package] name =
+   "brdgme_game_bin"`.** Convention is snake dirs under `lib/`/`tools/` with
+   `brdgme_<snake_dir>` package names (10/10); hyphens are the game-crate
+   convention. `game-bin`/`brdgme-game-bin` REJECTED. Also noted: the 4 bins
+   live inside each game crate as `[[bin]]` targets today, so per-game wrapper
+   bin crates are a structural change.
+3. **e F30 CONDITION SATISFIED -> FIX NOW.** `red7-1/DATA_DOCS.md` documents
+   the second tie-break ("then by the highest card overall in the palette")
+   and official rules agree; the code never implements it. Not subjective.
+   Cause: `leader()` only ever receives already-filtered winning sets, so the
+   full palette is unreachable. D-29's half stays parked.
+4. **d F37 rejection corroborated.** `end_round` scans `suits()` in declared
+   order with a strict `>`; `suits()` returns
+   `[LiteMetal, Yoko, ChristineP, KarlGitter, Krypto]`, which Michael confirms
+   IS canonical top-to-bottom. Caveat dropped, as instructed.
+
+### Entry 3 - decisions-needed.md updated
+
+- New top-level banner **"ANSWERED - 2026-07-26 session (ALL remaining
+  decisions)"** after the REFINEMENTS index: lists what closed, a
+  supersession table for the five changed rulings (D-7/D-8/D-15/D-16/D-37),
+  the five parity outcomes, and the five new standing constraints.
+- Per-item `ANSWERED (2026-07-26)` blocks added in place for: **D-7**
+  (OVERRULED, explicitly naming the superseded option A), **D-8** (REFINED -
+  restart resolves to latest non-deprecated; the no-op fallback is explicitly
+  NOT the restart answer), **D-9**, **D-10** (option A + the two visible
+  links, headers unchanged), **D-11**, **D-14** (CONFIRMED non-goal; 6-digit
+  code kept, correcting the 2026-07-25 answer's "confirmation link" wording),
+  **D-15** (REDESIGNED - parser-first + small escape-hatch set; the "A-plus"
+  reserved-list recommendation explicitly superseded; WP-59 Task 14 ungated
+  but its content must be REWRITTEN), **D-16** (OVERRULED to option B, with
+  the full `rel="external"` verification and the `use_navigate` gap),
+  **D-17..D-25**, **D-37** (CORRECTED to `{{lbrace}}`), **D-38** (+ the
+  parser-simplicity constraint on WP-04 generally), **D-39**, **D-40** (+
+  WP-81 named, + the clean-slate rationale), **D-35** (park kept, per-game
+  priority order recorded).
+- **Group C gained a standing-process banner** from D-17: upgrade all
+  dependencies to latest FIRST, then decide - binding on WP-64..WP-73.
+- **Group D banner rewritten.** New "RESOLVED 2026-07-26" ruling table for the
+  five egregious candidates ahead of the original flagging table, which is
+  retained as historical context and explicitly declared superseded where the
+  two disagree (notably b F4's "asymmetric by seat" reasoning and d F37's "not
+  producible by any rulebook" claim). b F4 carries the user's binding
+  correction (7 Wonders resources are NOT depleted by trade) plus the residual
+  simultaneity question, parked not scheduled.
+
+### Entry 4 - work-packages.md updated
+
+- New 2026-07-26 banner near the top: all decisions answered,
+  `BLOCKED-ON-DECISION` declared EXTINCT (with a note on the legend line that
+  any surviving occurrences are historical narrative), the five standing
+  constraints, and the parity outcomes.
+- **16 packages flipped to READY**, each heading rewritten and each gaining an
+  inline answer note: WP-04 (D-38 + parser-simplicity constraint), WP-05
+  (D-39), WP-17 (D-25 - `PARTIALLY-BLOCKED` retired, + the lib/cost testing
+  constraint), WP-46 (D-11 + the web-only-players rationale), WP-48 (D-7),
+  WP-50 (D-9), WP-55 (D-16), WP-58 (D-10), WP-64 (D-19), WP-66 (D-17), WP-67
+  (D-18 + no-functionality-loss as an acceptance criterion), WP-69 (D-23),
+  WP-70 (D-21), WP-71 (D-22), WP-72 (D-24), WP-73 (D-20 + the verified
+  `rust/lib/game_bin` / `brdgme_game_bin` name + the macro constraint).
+- **Scope changes recorded:** WP-48 **SHRANK** (no `--redact-private`, no
+  user-facing path; wd F7 becomes "make the export admin-only"); WP-55
+  **GREW** (three `use_navigate` `/login` redirects in `layout.rs`,
+  `settings.rs`, `admin.rs` must also become hard navigations - `rel` cannot
+  reach them); WP-58 **GREW** (two visible links, additional to the headers).
+  WP-59's Task 14 is ungated but flagged **rewrite, do not execute as
+  specced** for D-15's parser-first design.
+- **New section + WP-81** "dead per-game stats machinery removal", READY,
+  scope `c F12` + `e F39` + `e F40` re-homed from WP-20/WP-30. Coverage
+  bookkeeping written into all three package entries (WP-20 5->4, WP-30 5->3,
+  WP-81 +3; the 570 sum and one-package-per-finding invariant hold).
+- **Parity outcomes written into the owning packages:** WP-12 heading + note
+  (`a F1` FIX NOW, other 8 parked), WP-16 heading + note (`b F7` FIX NOW;
+  `b F4` re-parked with the user's binding correction and the residual
+  simultaneity question), WP-26 note (`d F37` REJECTED, no follow-up), WP-30
+  heading + note (`e F30` seat-order FIX NOW with the DATA_DOCS.md evidence
+  and the `leader()` cause; D-29 half still parked).
+- WP-62 gained the answered `bo F25` rider (k8s v1.36.0 -> pin `v1_36`,
+  confirm the flag exists at fix time).
+- WP-75's "REQUIRES A LEAD/USER RULING" is answered by N-4, with the
+  bot-difficulty-tiering rationale that the `RULES_AUTHORING.md` amendment
+  must carry.
+- New standing-process banner on the "Dependencies and build" section
+  (upgrade to latest FIRST), plus a totals block recording the 16 flips, the
+  1 new package, the 3 scope changes and the N-1..N-4 blessings.
+- WP-74's sequencing note de-referenced from the stale
+  `BLOCKED-ON-DECISION(D-29, D-40)` wording.
+
+### Entry 5 - README.md updated, unit complete
+
+- New STATUS 2026-07-26 banner at the top: all 34 decisions closed,
+  `decisions-ANSWERED.md` is the entry point and outranks every other file,
+  `BLOCKED-ON-DECISION` extinct, 16 flips + WP-81, the three scope changes,
+  the park kept with its three released carve-outs, the five standing
+  constraints, and an explicit "specs for the newly unblocked packages are not
+  yet written - that is the next unit".
+- File map: `decisions-ANSWERED.md` added as the first row and marked
+  authoritative; `open-decisions-for-user.md` re-described as a stub;
+  `decisions-needed.md` row updated to D-1..D-41 with both answer sessions.
+- Execution order step 1 rewritten from "get the decisions answered" to
+  "DONE", naming the three carve-outs that may be picked up out of the park.
+- Tiering corrections updated: the 8 Tier 2 and 7 Tier 3 formerly
+  decision-blocked packages are now READY-but-unspecced, plus WP-17's 3 D-25
+  rows, WP-81, and the three carve-outs.
+- Implementer rules: N-5/N-6 recorded as approved with N-5's re-read-and-
+  renumber condition, and a rule that `decisions-ANSWERED.md` outranks specs
+  written under the five superseded recommendations.
+
+**UNIT COMPLETE.** Files changed, all inside `planning/`:
+`decisions-ANSWERED.md` (new), `open-decisions-for-user.md` (reduced to a
+stub), `decisions-needed.md`, `work-packages.md`, `README.md`, `specs-LOG.md`.
+No file under `rust/` was written; no cargo, build, test, clippy, fmt or git
+mutation was run. Verified: `grep -n "BLOCKED-ON-DECISION" work-packages.md`
+returns only the legend line (now annotated EXTINCT), the new banner, the
+totals blocks, and one historical narrative line in WP-17's note.
+
+---
+
+## 2026-07-26 - Lead unit: WP-04 + WP-05 specs (D-38 / D-39 unblocked)
+
+Lead batch covering the two packages unblocked by D-38 and D-39. Workers run
+on opus, one at a time, serially. Writes confined to `planning/`; nothing
+under `rust/` touched; no cargo/git mutation run at any tier.
+
+### Worker 1 - WP-04 (lib/game parser design) - ACCEPTED
+
+Wrote `specs/WP-04-game-parser-design.md` (176 lines - over the ~120 Tier 2
+cap, accepted as the deliberately large package of this batch; dense, not
+padded). Covers lg F7 (major), lg F13, lg F14 (minor), lg F17, lg F19 (nit).
+
+Findings status re-derived against LIVE source, not the `f8763a5` snapshot:
+**all five confirmed still present and correct as written.** Specifically
+`impl Parser for OneOf` and the `CommandSpec::OneOf` arm are the only
+non-zero-offset construction sites and are provably 0 by induction;
+`CommandSpec::expected`'s `Doc` arm still returns `vec![name.clone()]` and its
+`Many` arm still returns the bare inner `expected`; `suggest_spec`'s
+`Spec::Token` arm still uses `to_lowercase` while `Token::parse` uses UniCase.
+WP-03's fixes (progress guards, `Many` max check, suggest dedup, `Int`
+saturating range) are **already applied live**, so the spec assumes them and
+lists them as non-goals.
+
+Three substantive outcomes:
+
+1. **D-38(iii) NARROWED - recorded so nobody widens it back.** "Adopt UniCase
+   in `suggest`" is correct **only for the `Spec::Token` arm**. `Enum::parse`
+   folds via `shared_prefix`, which compares per-char `char::to_lowercase`, so
+   converting the `Spec::Enum` / `Spec::Player` arms to UniCase would *create*
+   a divergence rather than remove one. The spec restricts UniCase to the
+   Token arm (`UniCase::to_folded_case()`, unicase 2.9, already a direct dep)
+   and requires a comment on each remaining arm naming the parser it mirrors.
+2. **THIRD `expected()` DIVERGENCE FOUND - not named in any finding.**
+   `AfterSpace::to_spec()` is `Chain([Space, inner])`, typed
+   `AfterSpace::expected` returns `inner.expected`, but the
+   `CommandSpec::Chain` arm returns the *first* spec's, i.e. `["whitespace"]`.
+   The new `expected()` parity assertion required by D-38(ii) fails on it.
+   **LEAD RULING: fix it as `Chain` returning the first non-`Space` spec's
+   `expected`**, with a fallback to the first spec if a chain is all-`Space`
+   so the function stays total. It falls inside D-38(ii) ("align spec
+   `expected()` to typed behaviour"), so no new decision is needed. The
+   rejected alternative - changing typed `AfterSpace::expected` to return
+   `["whitespace"]` - aligns the two by making user-facing text worse.
+   Spec edited by the Lead to state this as a ruling, not an open question.
+3. **Standing constraint (D-38, keep the parser obvious) HONOURED.** Offset
+   propagation is one `pub(crate) fn add_offset` applied at four call sites
+   (`chain_2`; the `Chain3`/`Chain4` tail calls; the `CommandSpec::Chain` arm;
+   the two `Many` min-check errors). No wrapper type, no trait change, and
+   **neither `OneOf` body is edited** - they already emit
+   `offset: error_consumed`; the WP only makes that number non-zero. The
+   Worker judged no conflict with D-38 here and the Lead agrees.
+
+D-38(iv) (spec depth guard) recorded in Non-goals with its no-trust-boundary
+reason, and as the package's single rider row. No line numbers cited; the
+standard "read the named function, STOP on mismatch" warning box is present.
+
+### Worker 2 - WP-05 (lib/color dead parse API) - ACCEPTED
+
+Wrote `specs/WP-05-color-dead-parse-api.md` (**128 lines** final - the Worker
+trimmed from 137 after the Lead's first read; all six sections and the
+no-live-caller evidence survived the trim, re-verified). Covers ls F12 (major), ls F13/F14/F15 (minor),
+ls F16/F17/F18 (nit). Deletions are specified **by item name only, never by
+line range** - the explicit guard against the two earlier specs whose delete
+ranges would have destroyed live code.
+
+**D-39's no-live-caller precondition is SATISFIED.** `rg` over the whole
+`rust/` tree for `from_hex`, `parse::<Color>`, `Color::from_str`, `named(`,
+`regex`, `lazy_static` found: the only `from_hex` callers outside lib/color are
+inside `rust/lib/markup/src/transform.rs`'s `#[cfg(test)] mod tests`; the only
+`Color::from_str` uses are lib/color's own tests; `named()` is private and
+reached only from `impl FromStr for Color`; `regex`/`lazy_static` appear in no
+other manifest. Deletion endorsed.
+
+Cleanup surface named in the spec, per the Lead's requirement:
+- `lib.rs`: `Color::from_hex`, `impl FromStr for Color`, private `fn named`,
+  the three now-dead `use`s, and the two tests of the deleted API (delete, do
+  not port).
+- `rust/lib/color/Cargo.toml`: drop `lazy_static` and `regex`. **There is no
+  `[workspace.dependencies]` table in `rust/Cargo.toml`** - verified - so
+  there is no second manifest edit. `Cargo.lock` is not hand-edited.
+- **`rust/lib/color/src/error.rs` SURVIVES UNCHANGED.** `ColorError` is still
+  returned by `NamedColor::from_str` in `palette.rs`, so it stays exported.
+  (The Lead's brief speculated it might die entirely; reading the source
+  disproved that.)
+- Fallout: `rust/lib/markup/src/transform.rs` test-only `from_hex` calls become
+  `Color { .. }` literals - same values, no behaviour change.
+
+Two refinements worth carrying forward:
+- **F14 is disposed of, but not literally "by deletion" as D-39's wording
+  implies.** Deleting `named()` removes one of the three alias tables; the
+  remaining two are not independent - markup's `resolve_named` **delegates to**
+  `NamedColor::from_str`, so one table effectively remains and cannot diverge.
+  Net effect matches D-39's intent. The spec forbids touching either survivor.
+- **F15's numbers are corrected in the spec** per the verification file: 379
+  `Color {` literals / ~2,000 literal lines (not ~3,000), and a `const fn rgb`
+  rewrite lands the file near ~2,300 lines (not ~400). The palette rewrite is
+  specified as a value-preserving scripted transform with the existing
+  `gate_contrast_all_themes` / `gate_cvd_simulation` tests as the safety net.
+
+F13 (`mono`) fix is concrete and derived from the live body: mean in `u16`
+with round-to-nearest, existing `>= 128` boundary kept, boundary tests at
+127/128 required. F16/F17/F18 are rider rows.
+
+**UNIT COMPLETE.** Files changed, all inside `planning/`:
+`specs/WP-04-game-parser-design.md` (new), `specs/WP-05-color-dead-parse-api.md`
+(new), `specs-LOG.md`. No file under `rust/` was written; no cargo, build,
+test, clippy, fmt or git mutation was run at any tier.
+
+**For the Orchestrator:** one Lead ruling was made inline (WP-04's third
+`expected()` divergence, `CommandSpec::Chain` vs `AfterSpace`) under D-38(ii);
+it needs no new decision but should be noticed. Nothing else is blocked.
+
+---
+
+## WP-46 sweep delivery semantics (Worker, 2026-07-26)
+
+Wrote `specs/WP-46-sweep-delivery-semantics.md` (229 lines) in WP-47 house
+style. Read live `rust/web/src/email/sweep.rs`, `email/outbound.rs`,
+`proposals.rs` (mailer + sweep helpers), `db.rs`
+(`delete_expired_unverified_emails`), `web/migrations/014_email_play.sql`, plus
+WP-51/WP-57/landing-order 6.2 for fencing. Nothing under `rust/` was written; no
+cargo/git command was run.
+
+**All 12 findings verified CORRECT against live code. None rejected.** Live
+`sweep.rs` matches the snapshot the findings cite (`FOR UPDATE SKIP LOCKED` on
+`fetch_all(pool)`, `send_reminder` returning `true` on both suppression paths,
+`should_email_recipient` = `email.is_some() && !is_bot && turn_emails_enabled`,
+`fetch_auto_decline_candidates` keyed on `gp.created_at`,
+`cancel_proposal_for_expiry` reading owner *after* the UPDATE with
+`.ok().flatten()`, no `LIMIT` anywhere, no `processed_webhook_events` DELETE in
+the tree - only the INSERT at `inbound.rs::mark_event_processed`).
+
+**Brief correction carried into the spec.** The Worker brief said D-2 =
+"mark-before-do". `decisions-needed.md` D-2's ANSWERED block says the opposite:
+mark **after** success, claim-then-send in a real transaction, never mark on a
+retryable skip. Mark-before-do is the *bug*, not the fix. The spec implements
+per-row `SELECT ... FOR UPDATE SKIP LOCKED` inside a transaction, send, then
+mark-and-commit / rollback-on-Retry, with a three-way
+`ReminderOutcome { Sent, PermanentSkip, Retry }`.
+
+**D-11 resolution shape.** `should_email_recipient` is left alone (turn mails in
+`notify.rs` depend on it; WP-60 owns `outbound.rs`). The reminder gate becomes a
+local check on a new `EmailRecipient.reminder_emails_enabled` field - one
+`outbound.rs` edit, flagged in the spec as the single exception to WP-60's
+fence.
+
+**Ordering constraints surfaced (appended to `landing-order.md` 6.2):**
+WP-51 -> WP-46. WP-51 rewrites `send_reminder`'s body, the six
+`RealInviteMailer` methods and the five `spawn_*` loops; WP-46 changes
+`send_reminder`'s return type and gate, splits `send_invite` into an awaited
+core plus spawn wrapper, and adds a `resend` parameter to
+`spawn_invite_auto_decline_sweep` (hence to `spawn_periodic_sweeps`, which
+WP-38 also parameterises). Either order compiles; second to land rebases.
+
+WP-57 (inbound side of D-2) and WP-76 (email moves never call
+`notify_game_emails`) were checked: **no collision.** WP-46 touches `inbound.rs`
+not at all; the `processed_webhook_events` prune lives in `sweep.rs` + `db.rs`,
+which is exactly where WP-57's non-goals section assigns it.
+
+---
+
+## 2026-07-26 - T2-B5 Lead (WP-46 / WP-50 / WP-58 batch)
+
+**WP-46 ACCEPTED.** `specs/WP-46-sweep-delivery-semantics.md`, 229 lines.
+Over the ~120 Tier 2 cap but judged proportionate: 12 findings, 3 majors, 3
+source files, ~19 lines per finding vs WP-47's 60 lines for 2 findings. No
+padding found on read-through; every section is load-bearing. Shape checks
+passed: no line numbers, WP-47 header block, six sections in order, riders
+table present, all 12 findings endorsed as correct with the code cited.
+
+**Lead brief was WRONG, Worker was right - recorded so it is not re-introduced.**
+The Lead brief paraphrased D-2 as "mark-before-do". That is the **bug**, not
+the ruling. `decisions-needed.md` D-2 ANSWERED = at-least-once, **do not mark
+`sent` on skip paths** - i.e. claim-then-send, mark only after success. The
+spec implements the correct reading. `work-packages.md`'s WP-46 bullet
+("Mark-before-do in every sweep, ...") is a list of **defects**, not of fixes;
+it reads ambiguously and misled the brief.
+
+Ordering constraint **WP-51 -> WP-46** added to `landing-order.md` 6.2.
+
+---
+
+## 2026-07-26 - WP-50 Worker (email canonicalization)
+
+**Written:** `specs/WP-50-email-canonicalization.md`, 170 lines. Over the ~120
+target after two trim passes; three moving parts (helper + 6 server boundaries
++ 2 client boundaries + migration) and ~20 lines are verbatim SQL/Rust quoted
+on purpose - the implementer is a cheap model and the `RAISE EXCEPTION` block
+must not be improvised. Flagged for the Lead rather than cut further.
+
+**All four findings (ws F9, wd F37, F60, F72) confirmed correct against live
+source.** None rejected.
+
+**Lead brief fact CORRECTED (record so it is not re-introduced).** The brief,
+following the ws F9 verification row, says `user_emails.email` is a "text
+primary key (migration 005)". It is not. Migration `005_login_confirmations.sql`
+creates `login_confirmations (email TEXT PRIMARY KEY, ...)`. `user_emails`
+(migration `001`) has `id uuid` as PK and a plain case-sensitive
+`UNIQUE (email)` (`user_emails_email_key`, 001:274-275, approximate). Practical
+consequence: the lowercasing UPDATE is much safer than feared. Grep of
+`rust/web/migrations/*.sql` finds **no** FK referencing `user_emails.email`,
+`user_emails.id` or `login_confirmations.email`; the only FK on the table is
+`user_emails_user_id_fkey -> users(id)`.
+
+**Duplicate-row disposition: ABORT, never auto-resolve.** Migration 023 runs a
+`DO $$ ... RAISE EXCEPTION $$` block listing every colliding canonical address
+*before* the UPDATE. Rationale: two rows differing only by case are usually
+owned by two different `users` rows, and collapsing them is an account merge
+(games, ratings, friendships) that no migration can do deterministically. D-9
+says surface the risk "once, deliberately" - a loud, named failure is exactly
+that. A pre-flight operator query is included in the spec.
+
+`login_confirmations` gets a blanket `DELETE FROM` instead, because its PK *is*
+the address so lowercasing could collide there too; rows are 1-hour ephemeral
+codes the app already GCs opportunistically.
+
+**Policy chosen:** `raw.trim().to_lowercase()` - Unicode lowercase, not ASCII,
+so it agrees with Postgres `lower()` in the new functional index. The helper
+does not reject empty; each caller keeps its own existing validation and runs it
+after canonicalizing.
+
+**Scope held:** the `LOWER(email) = LOWER($2)` sites in `email/inbound.rs`
+become redundant but are left alone (WP-56/WP-59 own that file). The
+`emails add/confirm/active/remove` call sites in `email/commands.rs`
+(`find_email_owner` / `insert_unverified_email` / `mark_email_verified` /
+`set_primary_email`) are deleted by WP-56 Task 4 and marked no-op.
+
+**Ordering constraints added** to `landing-order.md` 6.4: WP-50 is independent
+of WP-56/WP-59, but **WP-50 and WP-56 both add a new migration and both assume
+022 is the highest** - whichever lands second must renumber.
+
+### Lead acceptance - WP-50
+
+**ACCEPTED.** 170 lines; over the ~120 cap but ~20 of those are verbatim
+SQL/Rust the spec deliberately quotes so a cheap model does not improvise the
+`RAISE EXCEPTION` block. Shape checks passed.
+
+**A finding-verification row was WRONG and the Worker corrected it.** Recorded
+so nobody re-imports the error: `findings/verification/web-server.md`'s ws F9
+row says "text PK (migration 005)". That is a **conflation**. Migration
+`005_login_confirmations.sql` gives **`login_confirmations`** a `TEXT PRIMARY
+KEY` on `email`; **`user_emails`** has a `uuid` PK plus a plain case-sensitive
+`UNIQUE (email)` from migration 001. No FK anywhere references
+`user_emails.email`, `user_emails.id` or `login_confirmations.email` - the only
+FK on the table is `user_emails_user_id_fkey -> users(id)`. The lowercasing
+UPDATE is therefore materially safer than the verification row implies.
+
+**For the Orchestrator's awareness (no decision requested):** the migration's
+duplicate disposition is **abort, never auto-resolve** - a `DO $$ ... RAISE
+EXCEPTION $$` block listing every colliding canonical address, run before the
+UPDATE, with a pre-flight operator query supplied. Rationale: two rows differing
+only by case normally belong to two different `users`, so collapsing them is an
+account merge (games, ratings, friendships), which is not something a migration
+can decide. This satisfies D-9's "surface the collision risk once, deliberately,
+during the migration", but it does mean a deploy **blocks** if a collision
+exists. `login_confirmations` is exempt - blanket `DELETE FROM`, since its rows
+are 1-hour ephemeral codes the app already GCs.
+
+---
+
+## WP-58 - RFC 8058 one-click unsubscribe (Worker, 2026-07-26)
+
+Wrote `planning/specs/WP-58-unsubscribe-rfc8058.md` (217 lines). Covers wfe F3
+(major) and wfe F25 (minor) plus D-10's grown scope: an HTTPS one-click
+endpoint, two visible links, a new migration and a router change.
+
+**Both findings verified correct against live source; neither is stale.** F3's
+two header sites both exist: `render_game_email` (`email/render.rs`) emits
+`List-Unsubscribe`/`List-Unsubscribe-Post` unconditionally, and
+`send_rules_reply_response` (`email/inbound.rs`) hand-builds the same pair in a
+`BTreeMap`. F25 verified: `subscribe_toggle` is called only from the game-scoped
+`dispatch_email_command`; `dispatch_standalone_server_command` special-cases
+`new` and `bump` and then delegates to `dispatch_settings_standalone`, whose
+rejection string is "new, list, name, colors, theme, emails on/off, settings,
+help".
+
+**F3's own recommendation is superseded, not wrong-on-facts.** It asks for
+`unsubscribe@` detection in the settings fallback. D-10 chose the HTTPS
+endpoint, and WP-56's spec already routes `unsubscribe@brdg.me` to the ignore
+arm and tells WP-58 not to add the special case. The spec deletes the mailto URI
+entirely rather than trying to honour it.
+
+**Type-discriminator mechanism chosen: a new public
+`enum EmailKind { Turn, GameEvent, Reminder, Invite }` in `email/render.rs`,
+passed as an explicit 7th parameter to `render_game_email`
+(`unsubscribe: Option<Unsubscribe<'_>>`, where `Unsubscribe { kind, token }`).**
+No inference anywhere. Reasons: (1) `render_game_email` is the single choke
+point that emits the header, so the kind must reach it regardless; (2)
+`notify.rs::NotifyKind` is private and covers only 3 of the ~6 real email
+families, so it cannot serve; (3) an `Option` makes the transactional case
+(every `inbound.rs` reply) fall out naturally - `None` means emit neither
+header nor links, which is also the fix for the duplicated second header site.
+`EmailKind` carries `slug()`, `from_slug()`, `pref_column()` and `link_label()`
+so the mail and the endpoint share one mapping. Column mapping follows D-11:
+`Reminder -> reminder_emails_enabled`, `Turn`/`GameEvent -> turn_emails_enabled`,
+`Invite -> invite_emails_enabled`.
+
+**Second header site disposition:** `send_rules_reply_response` is NOT rerouted
+through `render_game_email` (its body is bespoke pre-rendered HTML, not
+`EmailContent` blocks); its two header inserts are simply deleted.
+
+**Token design:** new per-user `users.unsubscribe_token` (new migration, next
+free number) + partial unique index, lazily populated by a new
+`outbound::ensure_unsubscribe_token` copied from `ensure_email_token` and
+reusing the private `generate_email_token`. Deliberately **not** WP-56's
+`users.settings_email_token`: the one-click URL is POSTed by Gmail's
+infrastructure and GET-fetched by link scanners, so the credential is
+semi-public and must authorise nothing but "set one named preference column to
+`false`". The db helper only ever writes `false`, so replay cannot re-subscribe.
+GET renders a confirm form and never mutates; POST is the RFC 8058 target.
+Endpoint mounted **before** `session_layer` beside `/api/webhooks/resend` - the
+session layer attaches a session but never redirects, so D-10's "no auth
+redirect" holds, and unlike `/healthz` this handler needs Postgres anyway.
+
+**Ordering constraints surfaced (appended to `landing-order.md` 6.5):**
+WP-59 -> WP-58; WP-56 -> WP-58; WP-51/WP-46/WP-38 vs WP-58 rebase-not-fork on
+`notify.rs`/`sweep.rs`; WP-58 added to the 6.4 migration-numbering collision
+note (now WP-50, WP-56, WP-58); WP-58 takes a second documented exception to
+WP-60's `outbound.rs` fence (one new fn), alongside WP-46's.
+
+**No decision requested.** One thing the Lead may want to confirm: the spec
+drops `List-Unsubscribe` from all inbound command replies (transactional). That
+is a deliberate reduction in header coverage versus today, justified by those
+mails being user-initiated replies rather than bulk mail.
+
+### Lead acceptance - WP-58
+
+**ACCEPTED.** 214 lines; over the ~120 cap, and the largest overrun in this
+batch, but D-10's addition turned a 2-finding package into endpoint + GET/POST
+split + migration + token helper + a signature change across ~13 production and
+~12 test call sites. Shape checks passed; no line numbers; both findings
+endorsed as correct.
+
+**Lead ruling on the one flagged item: the `List-Unsubscribe` reduction is
+CORRECT - keep it.** Dropping the header from inbound command replies is right,
+not a regression. Those mails are transactional (a direct reply to a message the
+user just sent), and RFC 8058 / the Gmail and Yahoo bulk-sender rules that D-10
+cites apply to bulk and notification mail. Attaching a one-click unsubscribe to
+a transactional reply is what invites an accidental unsubscribe. The
+`Option<Unsubscribe>` parameter shape makes this fall out as `None` at those
+call sites, which also disposes of the duplicated second header site in
+`inbound.rs` (`send_rules_reply_response`) by deletion rather than by rerouting
+bespoke pre-rendered HTML through the choke point. Both are the right calls.
+
+**Type discriminator (D-10's explicit "how does the link know its type"
+requirement) is satisfied:** public `EmailKind { Turn, GameEvent, Reminder,
+Invite }` in `email/render.rs`, passed **explicitly**, never inferred, carrying
+`slug()`/`from_slug()`/`pref_column()`/`link_label()` as the single shared
+mapping between the mail and the endpoint. Column choice follows D-11:
+Reminder -> `reminder_emails_enabled`, Turn/GameEvent -> `turn_emails_enabled`,
+Invite -> `invite_emails_enabled`.
+
+**wfe F3's recommendation is superseded, not wrong.** It asks for `unsubscribe@`
+detection in the inbound settings fallback; D-10 chose the HTTPS endpoint and
+WP-56 routes that recipient to the ignore arm. The spec forbids adding the
+inbound case. Recorded so nobody re-adds it from the finding text.
+
+---
+
+## 2026-07-26 - T2-B5 Lead: UNIT COMPLETE
+
+Three specs written and accepted, all inside `planning/`:
+`specs/WP-46-sweep-delivery-semantics.md`, `specs/WP-50-email-canonicalization.md`,
+`specs/WP-58-unsubscribe-rfc8058.md`, plus `landing-order.md` sections 6.2
+(amended), 6.4 and 6.5, plus this log. No file under `rust/` was written; no
+cargo, build, test, clippy, fmt or git mutation was run at any tier.
+
+**Cross-batch item the Orchestrator must sequence: three packages each add a
+migration and each assume `022` is the highest** - WP-50 (`canonical_emails`),
+WP-56 (`users.settings_email_token`), WP-58 (`users.unsubscribe_token`).
+Whichever land second and third must renumber. Recorded in `landing-order.md`
+6.4/6.5.
+
+**Two corrections to source material surfaced by this batch, both recorded
+above:** `work-packages.md`'s WP-46 bullet reads as if "mark-before-do" were the
+D-2 ruling when it is the defect; and `findings/verification/web-server.md`'s
+ws F9 row conflates `login_confirmations`' text PK with `user_emails`, which has
+a uuid PK.
+
+## WP-48 export/import (worker session, 2026-07-26)
+
+**Read:** `decisions-ANSWERED.md` D-7 (OVERRULED), `work-packages.md` WP-48
+(scope shrank), `findings/web-domain.md` (wd F7, F10-F13 - no
+`findings/verification/web-domain.md` exists), and the LIVE source:
+`rust/web/src/game/export.rs`, `rust/web/src/game/import.rs`,
+`rust/web/src/router.rs`, `rust/web/src/components/game.rs`,
+`rust/web/src/admin.rs` (`require_admin`), `rust/web/src/db.rs`
+(`is_user_admin`), `rust/web/src/bin/import_game.rs`,
+`rust/web/migrations/001_initial_schema.sql`, `rust/web/tests/ssr_pages.rs`.
+
+**Wrote:** `specs/WP-48-export-import.md` (129 lines).
+
+**Answer to the "is there a user-facing export path to remove?" question:
+NO - nothing to delete.** The sole entrypoint is
+`GET /admin/games/{id}/export` (registered in `router.rs::build_router`) ->
+`export.rs::admin_export_game`, which already runs
+`get_user_from_session` -> `validate_session_token` -> `db::is_user_admin`
+(401/401/403). The one UI link lives in `components/game.rs` behind
+`<Show when=viewer_is_admin>`. No leptos server fn, no CLI export binary, no
+other referrer of `build_export_bundle`/`ExportBundle` outside `import.rs` and
+`bin/import_game.rs`. F7's access-control half is therefore already satisfied;
+the residual work is a module-doc rewrite only.
+
+**Live code contradicted a finding:** wd F13's recommendation to "leave
+`last_turn_at` at the column default/NULL" is impossible -
+`game_players.is_turn_at`/`last_turn_at` are `timestamp NOT NULL` with no
+default (migration 001). Spec substitutes `bundle.game.updated_at` for both.
+Also confirmed all `update_*_updated_at`/`is_turn_at`/`last_turn_at` triggers
+are BEFORE **UPDATE** only, so F12's explicit-INSERT fix is valid.
+
+### 2026-07-26 - Lead (WP-48/WP-55 batch): WP-48 ACCEPTED
+
+Sanity-checked the load-bearing claim by reading live source directly
+(read-only): `rust/web/src/router.rs` registers exactly one export route,
+`GET /admin/games/{id}/export` -> `game/export.rs::admin_export_game`, and that
+handler's first three checks are `get_user_from_session` (401),
+`validate_session_token` (401), `db::is_user_admin` (403), in that order,
+before `build_export_bundle` is ever called. Matches the Worker's trace
+verbatim. **No user-facing export path exists; nothing to delete.**
+`specs/WP-48-export-import.md` accepted as landed (129 lines, house style).
+Next: WP-55.
+
+### 2026-07-26 - Lead (WP-48/WP-55 batch): WP-55 ACCEPTED
+
+Sanity-checked the load-bearing claims by reading live source directly
+(read-only): `grep -rn '"/login"' rust/web/src/` returns **exactly five** hits
+and no more - `components/layout.rs` (logout `navigate`, and the `<A>` nav
+link), `admin.rs` (anonymous redirect `navigate`), `settings.rs` (anonymous
+redirect `navigate`), `app.rs` (the `index-cta` `<A ... attr:class>`). No sixth
+site, no server-side `/login` redirect. `web-sys` in `rust/web/Cargo.toml` is a
+**non-optional** dependency carrying both `"Window"` and `"Location"` features,
+so the specced `hard_navigate` needs no `#[cfg]`; `app.rs::set_theme_client` is
+the existing `let Some(window) = web_sys::window() else { return; }` idiom the
+helper copies. All three `use_navigate` sites confirmed.
+
+`specs/WP-55-turnstile-spa-rendering.md` accepted as landed (160 lines - over
+the ~120 cap, allowed: the package's scope grew to five call sites, and the
+text is dense with no padding). `landing-order.md` gained **section 6.6**
+recording WP-54 -> WP-55 (same `SidebarMenu` logout effect) and
+WP-37 -> WP-38 -> WP-55 (`admin.rs`), with `app.rs`/`settings.rs` verified
+disjoint.
+
+**Batch complete.** Both newly-unblocked packages in this batch (WP-48, WP-55)
+now have Tier 2 specs.
+
+## WP-55 Turnstile SPA rendering (T2-B6 Worker, 2026-07-26)
+Read: `WP-48`/`WP-47` specs (style model), `decisions-ANSWERED.md` D-16 row +
+the "D-16 mechanism" verification note, `work-packages.md` WP-55 entry,
+`findings/web-frontend-email.md` (the wfe F53 entry - there is **no**
+`findings/verification/web-frontend-email.md`, so the raw finding stands
+unverified by a second pass; I re-verified it against live source myself).
+Live source read: `rust/web/src/app.rs` (`shell`, `HomePage`, `LoginPage`,
+`set_theme_client`, `get_turnstile_response`), `components/layout.rs`,
+`settings.rs`, `admin.rs`, `rust/web/Cargo.toml`, `rust/web/tests/ssr_pages.rs`.
+Wrote: `specs/WP-55-turnstile-spa-rendering.md` (148 lines) and a new
+`landing-order.md` section 6.6.
+- **No fourth `use_navigate`-to-`/login` site.** `grep -rn '"/login"'` over
+  `rust/web/src/` returns exactly five hits: two `<A>` anchors (`app.rs`
+  `index-cta`, `layout.rs` nav) and the three known `use_navigate` calls
+  (`layout.rs` post-logout, `settings.rs`, `admin.rs`). No server-side
+  redirect to `/login` anywhere in the crate.
+- **Hard-navigation idiom:** the crate has **no** existing
+  `location().set_href` call. Spec'd a new `pub(crate) fn hard_navigate` in
+  `app.rs` beside `set_theme_client`, copying that fn's `let Some(window) =
+  web_sys::window() else { return; }` SSR guard. `web-sys` is non-optional
+  with `"Window"` + `"Location"` already enabled - no cfg gating needed.
+- **Collision: REAL.** WP-54 Task 4 rewrites the *same* `SidebarMenu` logout
+  effect WP-55 edits, and WP-54 already fences "do not convert `/login` links
+  to hard navigations" - recorded as WP-54 -> WP-55 in 6.6, plus
+  WP-37 -> WP-38 -> WP-55 for `admin.rs` (WP-37 rewrites the adjacent `"/"`
+  bounce in the same `AdminPage` statement block). `app.rs` and `settings.rs`
+  edits are disjoint from WP-54's.
+
+---
+
+## 2026-07-26 - db.rs module split unit (Lead)
+
+Unit: spec the split of `rust/web/src/db.rs` (review finding `ws F42`),
+escalated by Michael from DEFERRED to high priority ("becoming problematic
+due to its size and complexity"). Must land as a hard predecessor for the
+remaining web cluster, since most remaining web WPs write into `db.rs`.
+
+Scope fences carried into every Worker brief: writes confined to
+`planning/`; `rust/` is READ ONLY; no cargo/git-mutating commands; identify
+code by **function name only**, never by line range (33-46% of line-number
+citations in earlier specs were wrong).
+
+- **Numbering.** `WP-78 db.rs module split - DEFERRED` already exists in the
+  "Unowned / newly discovered" section of `work-packages.md`, and
+  `landing-order.md` 6.4 already references `WP-50 -> WP-78`. Per the
+  Orchestrator brief the split gets a proper owned number continuing the
+  sequence: **WP-82** (WP-81 is the current highest). WP-78's entry will be
+  marked SUPERSEDED BY WP-82 rather than deleted, so the existing 6.4
+  cross-reference still resolves.
+- **Measured before speccing.** WP-41 has landed (+1397/-125) so the review's
+  size numbers are stale. Live `rust/web/src/db.rs` is **8149 lines**.
+- Worker 1 dispatched: full symbol/coupling/caller inventory of `db.rs`, to
+  `raw/db-split-inventory.md`, including the split-axis recommendation, the
+  central-layer symbol list, the `.sqlx` cache question, the `mod.rs` vs
+  `foo.rs`+`foo/` convention question, and test-module binding.
+- Created `architecture-observations.md` (header + append rules). It is the
+  parking file for the deferred architectural review; later Leads append a
+  `##` section each. Seeded from Worker 1's section H once it returns.
+- Web-cluster packages that touch `web/src/db.rs` per `work-packages.md`:
+  **WP-35, WP-40, WP-45, WP-47, WP-49, WP-50, WP-52, WP-53, WP-59** (paths
+  list `db.rs`), plus **WP-42** which consumes WP-47's `db.rs` predicate.
+  This is the same set WP-78's old entry named.
+- **ORDERING INVERSION - flag to Orchestrator.** The old `WP-78` entry says
+  the split must land *AFTER* all of those. Michael's instruction reverses
+  it: the split is a **hard predecessor** for the remaining web cluster, so
+  those packages rebase onto the new module layout instead of the split
+  rebasing onto ten moved-file edits. `landing-order.md` 6.4's
+  `WP-50 -> WP-78` constraint is therefore **reversed** to
+  `WP-82 -> WP-50`. Recording this explicitly so nobody "restores" the old
+  order from the stale WP-78 note.
+- **Worker 1 returned.** `raw/db-split-inventory.md` (633 lines) written and
+  verified present. Key measured facts (all post-WP-41, live tree):
+  - **8149 lines total**, but the single `#[cfg(all(test, feature = "ssr"))]
+    mod tests` is **4838 of them (59%)**. Production is only **~3311 lines**.
+    This materially changes the framing: the file is big mostly because of
+    its test module.
+  - 107 top-level production fns (90 `pub async fn`), 9 structs, 3 enums,
+    2 impls, 3 consts, 1 type alias. Largest: `create_game_with_users_tx`
+    (~205), `apply_rating_changes` (~151), `update_game_command_success`
+    (~115), `find_game_extended` (~113).
+  - **28 intra-file call edges. Domain axis crosses 6 module pairs;
+    operation-kind axis crosses ~19.** Domain axis wins decisively.
+  - **293 external `db::` refs across 22 files, but only 5 `use` lines** -
+    everything else is fully-qualified `crate::db::foo(...)`. `pub use`
+    re-exports from `db/mod.rs` keep **100%** of callers compiling.
+  - **`.sqlx` cache is NOT affected.** Entry keys are `db_name/describe/
+    hash/query`; no path or module field, filename is the query-text sha256.
+    A pure move needs no `cargo sqlx prepare`.
+  - `mod.rs` style is **7/7** in `web/src/` - no `foo.rs` + `foo/` pairs.
+    So: `db/mod.rs` + `db/*.rs`, delete `db.rs`.
+  - Only **3** private items are directly tested (`choose_colors`,
+    `elo_rating_change`, `apply_rating_changes`). The real test-split risk
+    is ~12 shared fixture helpers (`make_user`, `make_game_with_players`, ...).
+  - **`validate_username` is the only ungated item** (shared with the client
+    build). A module-level `ssr` gate on its new home would break the client.
+  - `Result` is `anyhow::Result` (Lead-verified: `use anyhow::Result;` in
+    db.rs). Worker 1's "unverified" note on this is now resolved.
+- Lead rulings handed to Worker 2 (so the implementer does not invent them):
+  keep **per-item** `#[cfg(feature = "ssr")]` gates, never module-level;
+  `db/mod.rs` uses `mod x; pub use x::*;` per submodule; tests move with
+  their code into per-module `#[cfg(all(test, feature = "ssr"))] mod tests`
+  with the shared fixtures hoisted to one `db/test_support.rs`.
+- Lead writes landed (verified by re-reading each file):
+  - `architecture-observations.md` - seeded with Worker 1's section H:
+    oversized fns, the 4838-line test module, the four `*_conn`/`*_tx`
+    duplicate pairs, the inverted `db.rs -> crate::game::server_fns`
+    dependency, no transaction/repository boundary,
+    `is_user_recently_active` swallowing errors.
+  - `work-packages.md` - **WP-78 marked SUPERSEDED BY WP-82** (retained so
+    `landing-order.md` 6.4's reference resolves, with both of its now-wrong
+    claims called out), and a new **`## Escalated by the user 2026-07-26`**
+    section holding the full **WP-82** entry: READY, ws F42, 0 added to the
+    570 sum, measured numbers, domain axis, no-`sqlx-prepare` note, and the
+    hard-predecessor list.
+  - `landing-order.md` - new **section 7**: WP-82 is a hard predecessor for
+    WP-35, WP-40, WP-42, WP-45, WP-47, WP-49, WP-50, WP-52, WP-53, WP-59;
+    7.3 explicitly **withdraws and reverses** 6.4's `WP-50 -> WP-78`; 7.4
+    lists what is unaffected.
+- Worker 2 dispatched to draft `specs/WP-82-db-module-split.md` in WP-47
+  house style, with the Lead rulings above stated as decided.
+- **Worker 2 returned; spec ACCEPTED by the Lead.**
+  `specs/WP-82-db-module-split.md`, 291 lines (prose well under the ~120
+  cap; the 12-row module table and its symbol lists carry the length).
+  Verified present, ASCII-clean, and **zero line-number code citations** -
+  line numbers appear only as measurements in section 1.
+- Lead sanity checks performed by reading source directly:
+  - Confirmed the `db.rs` `//!` block contains exactly the three parts the
+    spec says it does: the `updated_at` trigger convention (14 triggered
+    tables, the untriggered `bots`/`llm_providers`/`game_proposals*`, the
+    three conditional triggers), the "# Module map" section - which
+    literally says *"This file is deliberately one module (a split is
+    tracked as review finding ws F42, deferred ...)"* and so **must** be
+    rewritten - and the `ssr`-gating note with the `validate_username`
+    carve-out.
+  - Confirmed `use anyhow::Result;`.
+- Worker 2's own additional rulings, accepted: `active_within_window` stays
+  in `db/users.rs`; `cap_digest` plus its `cap_digest_*` tests go to
+  `db/common.rs`, not `emails.rs`; test fixtures hoist to
+  `db/test_support.rs` (`pub(crate)`, not re-exported); formerly-private
+  cross-module callees become `pub(crate)` and nothing widens to `pub`.
+- `README.md` file map gained a row for `architecture-observations.md`.
+- **Unit complete.** Deliverables, all verified on disk:
+  `specs/WP-82-db-module-split.md`, `raw/db-split-inventory.md`,
+  `architecture-observations.md`, plus edits to `work-packages.md`
+  (WP-78 SUPERSEDED + new WP-82 entry), `landing-order.md` (section 7),
+  `README.md`.
+- **For the Orchestrator:** the only open item is scheduling. WP-82 now
+  gates ten web packages, several of which are on the critical path
+  (WP-40, WP-47). It is a pure move and should be cheap, but nothing in
+  that cluster should start until it lands.
+
+---
+
+## 2026-07-26 - dependency cluster spec unit (Lead)
+
+Unit: specs for WP-64, WP-66, WP-67, WP-69, WP-70, WP-71, WP-72 - the seven
+packages unblocked by D-19, D-17, D-18, D-23, D-21, D-22, D-24.
+
+**Grouping decision (Lead, up front):** seven packages, five spec files, three
+Workers. These are mechanical dependency packages; one spec per package would
+have been padding.
+
+- Worker 1 -> `specs/WP-64-workspace-tables.md`
+- Worker 2 -> `specs/WP-66-sqlx-unification.md`,
+  `specs/WP-67-sentry-feature-trim.md`,
+  `specs/WP-69-deny-toml-hardening.md` (**WP-72 folded in**)
+- Worker 3 -> `specs/WP-70-serde-yaml-ng.md`, `specs/WP-71-warp-to-axum.md`
+
+**WP-72 gets no file.** D-24 reduces the whole package to "record `combine` 4.6
+as an accepted risk in `deny.toml`". That is one section of the WP-69 spec.
+Recorded in `landing-order.md` 8.1 so nobody hunts for `WP-72-*.md`.
+
+**Worker 1 returned:** `WP-64-workspace-tables.md`, 149 lines. Accepted after
+one Lead correction (below). Verified live against the tree: 41 manifests (root
++ 40 members), zero `[workspace.dependencies]`/`workspace = true` usage, zero
+`[lints]` tables, and **zero crate-level `#![deny]`/`#![warn]`/`#![allow]`
+attributes anywhere under `rust/`** - so `[workspace.lints]` has nothing to
+preserve and nothing to conflict with. Findings' manifest counts were slightly
+stale (tokio/rand are 32 not 33). `authors` is absent from `bot`, `web`,
+`operator` and will be gained by inheritance. Hoist list is the 24 keys used by
+2+ members. `dp F9` ownership resolved in spec section 3d: the three keys are
+`web`-only so they never enter the root table, WP-64 does not perform the
+downgrade, and the pin-back-vs-stay-latest tension is flagged for **escalation
+to Michael** rather than silently picked.
+
+**Lead correction applied to WP-64:** the draft's regression section called for
+`cargo build --workspace --all-targets` and `cargo clippy --workspace
+--all-targets`. `AGENTS.md` "Resource constraints" **forbids workspace-wide
+cargo runs** on this host (links ~30 binaries, spikes RAM/disk). Replaced with
+per-crate `cargo check -p <crate>` during the sweep, the CI clippy split
+(`--workspace --exclude web`, then `-p web --features ssr`), and
+`scripts/rust-test.sh` as the single sanctioned full gate. **This constraint
+was added verbatim to Workers 2 and 3's briefs.**
+
+**`landing-order.md` gained section 8** (dependency cluster), covering: the
+binding upgrade-to-latest precondition on WP-64..WP-73; WP-64 first; WP-66/67
+unordered between themselves; WP-69 last with only the stale-advisory-ignore
+clearance ungated; WP-70 as a two-crate atomic change (bot + lib/game_client
+move together); and a **new constraint, WP-06 -> WP-71**, since both touch
+`rust/lib/cmd/src/http.rs`. WP-06's spec already records the handoff
+(SystemError mapping + 16 MiB body cap must survive the axum port); sequencing
+them adjacently satisfies D-22's "touch the surface once" without merging them,
+and avoids writing the ls F19 fix twice.
+
+---
+
+## 2026-07-26 - WP-66 / WP-67 / WP-69(+WP-72) specs written by dependency-cluster Worker 2
+
+Three Tier 2 specs written to `planning/specs/`: `WP-66-sqlx-unification.md`
+(134 lines), `WP-67-sentry-feature-trim.md` (135), and
+`WP-69-deny-toml-hardening.md` (151, WP-72 folded in as section 3d per the
+Lead's ruling that D-24 reduces WP-72 to a `deny.toml` comment). All three open
+with the binding "Step 0 - upgrade to latest FIRST" section from D-17 and state
+what the spec collapses to if the upgrade resolves the issue. All three state
+their landing-order position (WP-64 first; WP-66/67 unordered between
+themselves; WP-69 last, with only its stale-ignore clearance ungated) and use
+only the sanctioned per-crate cargo forms plus the CI clippy split and
+`scripts/rust-test.sh`.
+
+**Verified against live files (no cargo run; reading only):**
+
+- `rust/web/Cargo.toml` sqlx 0.8 (`runtime-tokio-rustls`, postgres, uuid,
+  migrate, optional), `rust/bot/Cargo.toml` sqlx 0.9 (`runtime-tokio`,
+  `tls-rustls`, postgres, uuid, time, json), `rust/operator/Cargo.toml` sqlx
+  0.9 (same minus time/json; dev-deps add macros+migrate). Feature divergence
+  is real, so WP-66 must reconcile features, not just versions - the spec says
+  so and gives the intersection.
+- `rust/Cargo.lock` genuinely carries `sqlx 0.8.6` **and** `sqlx 0.9.0`. dp F6
+  is correct as written, cause guess included.
+- Session store call site named concretely:
+  `rust/web/src/auth/session.rs::create_session_layer` (`PostgresStore::new` +
+  `.migrate()` + `SessionManagerLayer` with secure/SameSite=Lax/
+  `Expiry::OnInactivity(30 days)`). There is **no**
+  `continuously_delete_expired` sweeper in web today - noted so a vendoring
+  port neither adds nor drops one.
+- Vendoring is concrete and small: upstream
+  `tower-sessions-sqlx-store 0.15.0` is MIT, and only `src/lib.rs` (50 lines)
+  + `src/postgres_store.rs` (266 lines) are needed; MySQL/SQLite stores are
+  dropped. Schema is `tower_sessions`.`session`, created by the store's own
+  `migrate()`, not by `rust/web/migrations/` - must stay byte-identical.
+  Proposed home `rust/lib/session_store/` (`brdgme_session_store`), path dep.
+- Currency check (crates.io, 2026-07-26): `tower-sessions-sqlx-store` newest is
+  still **0.15.0** and it requires `sqlx = "0.8.0"` and tower-sessions 0.14,
+  while `tower-sessions` itself is now **0.15.0**. So Step 0 most likely does
+  **not** resolve dp F6 and the vendor branch is the live one - the spec still
+  makes the implementer re-check rather than assume.
+- `rust/deny.toml` is the only deny config (no repo-root copy). Current values
+  confirmed: `[bans] multiple-versions = "warn"`, `wildcards = "allow"`, empty
+  `skip`/`skip-tree`; `[sources] unknown-registry`/`unknown-git` both `"warn"`.
+- **The 4 advisory ignores are genuinely stale.** `diesel` and `encoding` both
+  have grep count **0** in `rust/Cargo.lock`, and the `members` array in
+  `rust/Cargo.toml` (40 members) contains no `api` crate. dp F25 confirmed.
+- `wildcards = "deny"` confirmed free: zero `= "*"` / `version = "*"` reqs in
+  any manifest under `rust/`.
+- Ignore accounting reconciled with `WP-68-term-size-replacement.md`: WP-68
+  owns RUSTSEC-2020-0163 only, WP-69 owns the 4 diesel/encoding entries, 2
+  (paste, proc-macro-error2) remain. No double-counting.
+
+**Where the findings are stale or wrong:**
+
+- **dp F12 (sentry) is probably wrong on its central mechanism.** In sentry
+  0.48.5 `default = [backtrace, contexts, debug-images, panic, transport,
+  release-health]` and `transport = [reqwest, native-tls]`. **`actix` and
+  `ureq` are NOT default features**, so the claim that default features "drag
+  actix-web 4 and ureq 3 into every server build" does not follow from the
+  manifest. Both `sentry-actix` and `ureq` nonetheless appear under the
+  `sentry` package in `rust/Cargo.lock`, while other unused optionals of the
+  same crate (`curl`, `sentry-log`, `sentry-slog`, `sentry-anyhow`,
+  `sentry-opentelemetry`, `embedded-svc`) do **not** - so the lock is at least
+  partly feature-pruned and the contradiction is unresolved. **Unresolved -
+  flagged for the Lead.** The spec therefore makes measurement
+  (`cargo tree -p bot -i actix-web`, `-i ureq`, plus web/ssr and a game bin)
+  the first implementation action, and says explicitly that if those come back
+  empty then dp F12's build-bloat claim is false, it should be downgraded from
+  major, and the package reduces to spelling the current defaults explicitly.
+  I could not run cargo to settle this (read-only brief).
+- Under D-18's no-functionality-loss constraint the honest trim list is exactly
+  the current defaults spelled out - `["backtrace", "contexts",
+  "debug-images", "panic", "release-health", "reqwest", "native-tls"]`.
+  `debug-images` (native symbolication) and `release-health` (session health)
+  are real functionality and are kept, contra the findings' suggested list
+  which omitted `release-health`.
+- Sentry usage enumerated from live call sites: `sentry::init` +
+  `ClientOptions{release, send_default_pii:false, traces_sample_rate:0.1}` in
+  `web/src/main.rs::init_sentry`, `bot/src/main.rs::main`,
+  `lib/cmd/src/http.rs::serve`; `TransactionContext::continue_from_headers` +
+  `start_transaction` in `lib/cmd/src/http.rs` and `bot/src/main.rs`;
+  `configure_scope` in `web/src/router.rs`, `web/src/game/mod.rs`,
+  `lib/game_client/src/lib.rs`; `sentry_tracing::layer()` in web and bot;
+  `sentry_tower::{NewSentryLayer, SentryHttpLayer}` in `web/src/router.rs`.
+  All four crates declare an identical `sentry = "0.48"` default-feature set,
+  so the WP-64 hoist is clean and WP-67 is a one-line root edit after it.
+  `sentry-tower` (web only, `features = ["http"]`) and `sentry-tracing` are
+  separate crates and untouched.
+- **dp F8/dp F19 confirmed as monitor items, as work-packages says.** WP-66
+  removes only the sqlx-0.8-driver copies; rand 0.8/0.9 also arrive via
+  nkeys/nuid, leptos, governor, sentry-core and tungstenite. The one
+  first-party action is `bot`'s direct `getrandom = "0.3"` (bump to 0.4 or drop
+  for `aes-gcm::generate_nonce`), carried as a rider.
+- **dp F18's timing is wrong** (flipping `multiple-versions` to deny now would
+  fail CI immediately); D-23 already corrects it and the spec records that.
+
+**Unresolved / for the Lead:**
+
+1. The dp F12 lock-vs-features contradiction above. If the Lead can authorise
+   one `cargo tree -p bot -i actix-web` run, WP-67's severity and scope can be
+   settled before implementation instead of during it.
+2. WP-66 will almost certainly land on the vendor branch, which adds a 41st
+   workspace member (`rust/lib/session_store`). That member must inherit
+   WP-64's `[workspace.package]` and `[lints]` tables, so WP-64 -> WP-66 is a
+   hard ordering, and WP-64's "40 members" assertions become 41 afterwards.
+
+**Worker 2 returned** (Lead review, accepted all three, no corrections needed):
+
+- `specs/WP-66-sqlx-unification.md`, 165 lines
+- `specs/WP-67-sentry-feature-trim.md`, 154 lines
+- `specs/WP-69-deny-toml-hardening.md`, 167 lines (WP-72 is its section 3d)
+
+Substantive findings from Worker 2's live verification:
+
+- **WP-66:** `rust/Cargo.lock` genuinely carries sqlx 0.8.6 **and** 0.9.0.
+  `web` is held at 0.8 by `tower-sessions-sqlx-store 0.15.0`, whose manifest
+  requires `sqlx = "0.8.0"` and `tower-sessions 0.14`. On current crates.io
+  evidence 0.15.0 is newest, so **Step 0 probably does NOT resolve dp F6 and
+  the vendor branch is the live one** - but the spec still makes the check the
+  first action and re-verifies at implementation time. Feature sets diverge as
+  well as versions (`web` uses the 0.8 spelling `runtime-tokio-rustls`, which
+  must be respelled as `runtime-tokio` + `tls-rustls`, not carried over).
+  Vendor target is `rust/lib/session_store/` (`brdgme_session_store`), minimal
+  port of two files, MIT attribution preserved, DDL byte-identical so existing
+  session rows survive. Call site is `create_session_layer` in
+  `rust/web/src/auth/session.rs`. dp F8/dp F19 confirmed as re-audit-only:
+  rand 0.8/0.9 also arrive via nkeys/nuid, leptos, governor, sentry-core and
+  tungstenite, none of which WP-66 touches.
+- **WP-67:** all four sentry declarations are bare `"0.48"` with defaults and
+  **no crate sets `default-features = false`** - so WP-64's hoist is clean and
+  this becomes a one-line root edit. **Worker 2 caught a real problem with the
+  finding:** in sentry 0.48.5 `actix` and `ureq` are *not* default features
+  (`default = [backtrace, contexts, debug-images, panic, transport,
+  release-health]`, `transport = [reqwest, native-tls]`), yet the lock lists
+  `sentry-actix` and `ureq`. The spec therefore makes **measurement the first
+  action** (`cargo tree -i actix-web` / `-i ureq` per crate, recorded in the
+  PR) and says plainly that if they come back empty, **dp F12's build-bloat
+  claim is false and the finding is downgraded from major**. No deletion until
+  measured. The no-functionality-loss constraint is discharged by a six-point
+  end-to-end check against a real DSN (panic capture, backtrace frames,
+  tracing breadcrumbs, release/environment/server-name contexts, the
+  `sentry_tower` router layers, and **distributed-trace continuation via
+  `continue_from_headers`**), each field compared against an event from an
+  untrimmed build. `debug-images` and `release-health` are explicitly retained
+  because dropping them loses functionality; `native-tls` is non-negotiable.
+- **WP-69:** the 4 stale ignores are **confirmed genuinely stale** - zero
+  `diesel`/`encoding` entries in `rust/Cargo.lock`, no `api` member in the
+  40-member array. Ignore accounting reconciled with WP-68: 7 today, 2 after
+  both land (paste, proc-macro-error2). `wildcards = "deny"` verified free
+  (zero wildcard reqs in any manifest). Config file is `rust/deny.toml`; there
+  is no repo-root one. The spec forbids blanket skips and requires every
+  skip entry to carry cause + exit condition. Section 3c records that a
+  WP-66 vendored path dep trips neither `[sources]` nor `[licenses]`.
+
+## 2026-07-26 - WP-64 spec written by dependency-cluster Worker 1
+
+- Wrote `planning/specs/WP-64-workspace-tables.md` (120 lines, Tier 2, WP-47
+  house style). Findings dp F1 / dp F2 / dp F3, decision D-19 option A.
+- Verified by reading live manifests only (no cargo, no writes under `rust/`):
+  root `rust/Cargo.toml` has none of the three tables and lists 40 members;
+  41 `Cargo.toml` files total; zero `[lints]`/`[workspace.lints]` tables and
+  zero crate-level `#![deny]`/`#![warn]`/`#![allow]` attributes anywhere under
+  `rust/`, so `[workspace.lints]` has nothing to preserve or conflict with.
+- All three findings are correct as written. Only correction: dp F1's counts
+  are slightly stale vs live (tokio 32 and rand 32 manifests, not 33; serde 36,
+  serde_json 19, thiserror 9 confirmed). Mixed version spellings confirmed
+  (tokio `1.52.3` x27 + `1` x8, serde_json in three spellings, etc.).
+- Verified dp F2's metadata claims exactly: all 40 members carry
+  `version = "0.1.0"` / `publish = false` / `edition = "2024"`; `authors` in 37,
+  absent from `bot`, `web`, `operator`. No `license`, `repository` or
+  `rust-version` field exists anywhere - spec says do NOT add them
+  (`rust-toolchain.toml` already pins channel 1.97.0).
+- Decided the hoist list explicitly rather than giving a rule: the 24 keys used
+  by 2+ member manifests, enumerated in the spec. `path = ...` (`brdgme_*`) and
+  single-consumer deps stay put.
+- `dp F9` resolution: the three keys (`tower-http`, `gloo-net`, `gloo-timers`)
+  are `web`-only so they do NOT enter `[workspace.dependencies]`; they stay in
+  `rust/web/Cargo.toml`. WP-64 owns writing the value once and recording the
+  `cargo tree -d` result; it does NOT perform the downgrade. WP-65's T3-B8 row
+  is closed out by whatever WP-64 records.
+- UNRESOLVED TENSION flagged in the spec, deliberately not decided: dp F9 wants
+  a pin *back* to tower-http 0.6 / gloo-net 0.6 / gloo-timers 0.3 to dedupe,
+  which contradicts the standing "stay on latest" strategy. Step 0 may dissolve
+  it (if leptos/reqwest/kube-client move up); if duplicates persist the
+  implementer must escalate to Michael - WASM bundle size vs latest-first - and
+  must not pick silently.
+- Section 5 originally cited bare `cargo build --workspace`; corrected to the
+  per-crate sweep plus `scripts/rust-ci-commands.sh` clippy split and
+  `scripts/rust-test.sh` as final gate, per AGENTS.md "Resource constraints"
+  which forbids workspace-wide cargo runs.
+
+**LOG CORRECTION (Lead), same session.** Two entries above are inaccurate:
+
+1. `WP-64-workspace-tables.md` is **120 lines**, not 149. Worker 1 rewrote and
+   trimmed the file to the cap after the Lead's mid-flight edits, so the final
+   on-disk version supersedes them. Verified: no duplicated text, one
+   build-command block at section 5.
+2. The workspace-wide-cargo correction was **Worker 1's own**, caught in its
+   self-review, not solely the Lead's. The Lead independently made the same
+   edit; both converged. The final text cites `scripts/rust-ci-commands.sh`
+   for the CI clippy split (confirmed to exist alongside `rust-test.sh`,
+   `setup-kind-cluster.sh`, `render-compare` under
+   `/home/beefsack/Development/brdgme/scripts/`), which is more precise than
+   the Lead's inline spelling of the two clippy invocations.
+
+The constraint was still propagated verbatim into Workers 2 and 3's briefs, so
+all five specs in this cluster carry it.
+
+**Worker 3 returned** (Lead review, accepted both, no corrections needed):
+
+- `specs/WP-70-serde-yaml-ng.md`, 116 lines
+- `specs/WP-71-warp-to-axum.md`, 180 lines
+
+Substantive findings from Worker 3's live verification:
+
+- **WP-70 is genuinely tiny.** Exactly two call sites, both **serialise-only**:
+  `rust/bot/src/prompt.rs::spec_to_yaml` and
+  `rust/lib/game_client/src/lib.rs::json_to_yaml`, each calling
+  `serde_yaml::to_string` on a `serde_json::Value`. **No `from_str`, no
+  `Value`, no `Mapping`, no deserialisation anywhere in the workspace** - so
+  the drop-in risk is near zero and `to_string` is the only API to port. Both
+  manifests declare `serde_yaml = "0.9"` plain, non-optional, no features.
+  Step 0 explicitly cannot help (archived at `0.9.34+deprecated`, no newer
+  version). Acceptance criterion is **byte-identical YAML** before/after, since
+  the bot's system prompt documents the shape. The spec also requires
+  recording whether `serde_yaml_ng` still drags the archived `unsafe-libyaml`,
+  rather than claiming dp F14 closed if it does. bo F17's "or emit as JSON"
+  half is called out as rejected by D-21 so nobody "improves" it.
+- **WP-71: WP-06 Task 1 is ALREADY LIVE.** See `landing-order.md` 8.5. The
+  8.3 gate is satisfied today; the spec still makes the implementer re-verify
+  and STOP on mismatch.
+- **WP-71 caught a real deployment risk the findings missed.** warp's
+  `warp::post()` matches POST on **any path**, and game-service URIs come from
+  the `game_versions.uri` database column - operator-configured, unknown at
+  compile time. A naive axum port to `.route("/", post(...))` would **silently
+  break every deployed game version whose URI carries a path**. The spec
+  mandates `Router::new().fallback(...)` with a method guard and adds an
+  end-to-end check that POSTs to a non-root path.
+- **Sentry call made, not hedged:** keep the hand-rolled
+  `continue_from_headers` -> `start_transaction` -> `set_span` ->
+  `finish()` code; do **not** adopt `sentry_tower::{NewSentryLayer,
+  SentryHttpLayer}`. Reason: it adds a dependency to a crate compiled into 28
+  binaries and renames transactions by route path - here a single catch-all -
+  losing the explicit `"game.request"`/`"http.server"` naming, for no gain.
+  Distributed trace continuation must keep working;
+  `lib/game_client::send_with_retry` injects `sentry-trace`/`baggage` via
+  `span.iter_headers()`.
+- **One accepted behaviour change recorded:** warp's `content_length_limit`
+  *required* a `Content-Length` header (411 without it); axum's
+  `DefaultBodyLimit` does not. Chunked requests are accepted again and only
+  413 above the cap. That is a relaxation of a WP-06 side effect, not a loss
+  of the cap.
+- Honest scoping enforced: axum 0.8.9 is already in the lock, and warp 0.4
+  already shares hyper 1 / http 1.x with axum, so this is a **dedupe of one
+  framework layer**, not removal of a second HTTP stack. The spec forbids
+  overselling it in the PR text.
+- Two pre-existing issues recorded as riders, explicitly not fixed by WP-71:
+  `env_logger` is an ungated dep in `lib/cmd` used only by the gated
+  `http.rs::serve` (flagged for WP-65), and `sentry::configure_scope` sets the
+  span on a shared hub with no per-request `Hub::run` (same in warp today, so
+  not a regression).
+
+## Dependency cluster unit CLOSED - 2026-07-26
+
+Five spec files for seven packages, three Workers:
+
+| File | Lines | Packages |
+|---|---|---|
+| `specs/WP-64-workspace-tables.md` | 120 | WP-64 |
+| `specs/WP-66-sqlx-unification.md` | 165 | WP-66 |
+| `specs/WP-67-sentry-feature-trim.md` | 154 | WP-67 |
+| `specs/WP-69-deny-toml-hardening.md` | 167 | WP-69 **+ WP-72** |
+| `specs/WP-70-serde-yaml-ng.md` | 116 | WP-70 |
+| `specs/WP-71-warp-to-axum.md` | 180 | WP-71 |
+
+WP-72 has no file by design. `landing-order.md` gained sections 8.0-8.5.
+Every spec opens with the binding Step 0 (upgrade to latest first) and states
+what it collapses to if the upgrade resolves the issue. Every spec uses the
+per-crate cargo forms and `scripts/rust-test.sh`; none prescribes a bare
+workspace-wide build. No file under `rust/` was written by this unit.
+
+**Open items for the Orchestrator:** (1) `dp F9` pin-back-vs-latest-first is
+escalated to Michael, unresolved by design; (2) dp F12's actix/ureq bloat claim
+is unverified and may be false - WP-67 makes measurement the gate and may
+downgrade the finding from major; (3) WP-66's vendor branch looks likely to be
+the live one, which creates a new workspace member `rust/lib/session_store/`.
+
+## 2026-07-26 - WP-70 / WP-71 specs written by dependency-cluster Worker 3
+
+Files: `specs/WP-70-serde-yaml-ng.md` (98 lines), `specs/WP-71-warp-to-axum.md`
+(152 lines - **over the 120-line brief cap**; three compression passes were run
+and the residue is all mandated content: WP-06's five behaviours, the
+sentry-tower ruling, the `serve` blast radius, the `http-server` feature delta,
+the three ported tests and the four-part end-to-end. Cutting further would have
+dropped an instruction, so this is flagged to the Lead rather than silently
+trimmed. Siblings WP-66/WP-67 are 140/142 lines.). Both match the WP-66/WP-67
+shape (Step 0 opener, landing-order header line, no line-number citations).
+
+Verified against live files, not the snapshot:
+
+- `serde_yaml` has exactly two consumers, both plain non-optional `"0.9"`:
+  `rust/bot/Cargo.toml` and `rust/lib/game_client/Cargo.toml`. Exactly two call
+  sites, `rust/bot/src/prompt.rs::spec_to_yaml` and
+  `rust/lib/game_client/src/lib.rs::json_to_yaml`, and **both are
+  serialise-only** (`to_string` on a `serde_json::Value`). No `from_str`, no
+  `Value`, no `Mapping`, no deserialisation anywhere in `rust/`. The
+  `serde_yaml_ng` swap therefore touches one API only. Neither output leaves the
+  process: both end up interpolated into the bot's LLM prompt, so D-21's
+  file-format concern is about the prompt contract, not an ops artefact.
+- **WP-06 Task 1 HAS ALREADY LANDED** in `rust/lib/cmd/src/http.rs`. The live
+  file has private `route::<G>()`, `content_length_limit(MAX_CONTENT_LENGTH)` at
+  16 MiB, the `unwrap_or_else -> Response::SystemError` mapping, no
+  `impl Reject`, and the three named tests. `lib/cmd/src/lib.rs` has
+  `#[cfg(test)] mod test_game`. WP-71's spec describes that post-WP-06 state and
+  still tells the implementer to re-verify before starting.
+- `lib/cmd` gating live: `default = ["http-server"]`,
+  `http-server = ["warp", "tokio", "sentry"]`. `env_logger` is NOT gated despite
+  being used only inside the gated `http.rs::serve` - logged as a WP-65 rider,
+  not fixed.
+- `axum 0.8.9`, `tower 0.5.3` and `sentry-tower 0.48.5` are already in the lock;
+  `tower-http` is already duplicated 0.6.11/0.7.0 independently of this work.
+  The port needs no `tower-http` (axum's `DefaultBodyLimit` suffices).
+
+Where the findings were stale or wrong:
+
+- `bo F17`'s recommendation offers "maintained fork **or** JSON". JSON is
+  rejected by D-21; the spec says so explicitly so nobody re-litigates it.
+- `dp F16`'s recommendation calls the lib/cmd surface "a couple of routes" - it
+  is one catch-all POST handler. More importantly, dp F16's own caveat (the
+  saving is one framework layer, not a second HTTP stack) is **correct** and the
+  spec forbids overselling it.
+- `ls F34`'s rationale says "only bot shares it", citing bot's Cargo.toml - it
+  omits that game_client is itself the second consumer. `dp F14` has the
+  complete picture.
+
+Decisions taken inside the specs:
+
+- **Hand-rolled sentry transaction kept over `sentry-tower` layers** in WP-71.
+  Adding `sentry-tower` to a crate compiled into 28 binaries, and letting the
+  layer name transactions by route path (a single catch-all here), would lose
+  the explicit `"game.request"`/`"http.server"` naming for no gain.
+- **New hard constraint discovered and written in: the axum router must be a
+  catch-all (`Router::fallback`), not `route("/")`.** warp's `warp::post()`
+  matched POST on any path, and game-service URIs come from the
+  `game_versions.uri` database column, so paths are operator-configured and
+  unknown at compile time. `route("/", post(..))` would silently break every
+  deployed game version whose URI carries a path. This was not in any finding.
+- Recorded as an accepted behaviour change: WP-06's warp `content_length_limit`
+  requires a `Content-Length` header (411 without it); axum's `DefaultBodyLimit`
+  does not. The port relaxes that side effect while keeping the 16 MiB cap.
+
+Unresolved / for the Lead:
+
+- Whether `serde_yaml_ng` still depends on the archived `unsafe-libyaml 0.2.11`
+  could not be determined offline. If it does, the backend half of `dp F14` is
+  not closed by WP-70. The spec makes recording this a regression step rather
+  than assuming either way.
+- The exact `serde_yaml_ng` version is written as `<latest>` - Step 0 resolves
+  it.
+- Pre-existing, not fixed: `sentry::configure_scope` in `http.rs` sets the span
+  on a shared hub with no per-request `Hub::run`, so concurrent requests can
+  bleed scope. Identical under warp today, so not a port regression; logged as a
+  WP-71 rider only.
+
+**Addendum from Worker 2's final report (Lead, same session).** Two items not
+captured in the Worker 2 entry above:
+
+1. **The vendor branch adds a 41st workspace member**, which upgrades
+   `WP-64 -> WP-66` from convenience to a **hard** ordering and makes
+   `WP-64-workspace-tables.md`'s "40 members" regression assertions stale once
+   WP-66 vendors. Recorded as `landing-order.md` 8.6.
+2. Worker 2 reported its own line counts as 134/135/151; `wc -l` on disk gives
+   165/154/167. The on-disk numbers are authoritative. Worker 2 flagged that
+   all three overshoot the ~120 cap by 12-30%, said it compressed twice, and
+   judged further cuts would remove load-bearing content. **Lead agrees and
+   accepted them as-is** - the overshoot is concentrated in the branch logic
+   (WP-66's two branches), the measurement-first protocol (WP-67) and the
+   ignore-accounting table (WP-69), all of which a cheap executing model needs
+   spelled out.
+
+Worker 2 also confirmed it ran no cargo commands and wrote nothing under
+`rust/`; its conclusions came from reading live manifests, `rust/Cargo.lock`,
+`rust/deny.toml`, and the vendored registry copies of `sentry-0.48.5` and
+`tower-sessions-sqlx-store-0.15.0`. The store's port surface is concrete:
+MIT, `src/lib.rs` ~50 lines + `src/postgres_store.rs` ~266 lines.
+
+---
+
+## HANDOVER - dependency cluster Lead, 2026-07-26
+
+**Status: the unit is COMPLETE. Nothing is partially drafted, nothing is
+unwritten, no Worker was running when the stop order arrived.** All three
+Workers had already returned and all writes were verified on disk before this
+entry. This handover exists for continuity only; a successor picks up nothing
+half-finished from this unit.
+
+### Per-package status - all seven
+
+| Package | Status | File |
+|---|---|---|
+| WP-64 | **DONE** | `specs/WP-64-workspace-tables.md` (120 lines) |
+| WP-66 | **DONE** | `specs/WP-66-sqlx-unification.md` (165) |
+| WP-67 | **DONE** | `specs/WP-67-sentry-feature-trim.md` (154) |
+| WP-69 | **DONE** | `specs/WP-69-deny-toml-hardening.md` (167) |
+| WP-70 | **DONE** | `specs/WP-70-serde-yaml-ng.md` (116) |
+| WP-71 | **DONE** | `specs/WP-71-warp-to-axum.md` (180) |
+| WP-72 | **DONE, no file by design** | section 3d of the WP-69 spec |
+
+Also written: `landing-order.md` sections 8.0-8.6 (new), appends to
+`architecture-observations.md` (now 101 lines). No file under `rust/` was
+written or modified by this unit; verified by `git status`.
+
+### Grouping decisions already made - do not redo
+
+- **Five files for seven packages, three Workers.** One spec per package would
+  have been padding on mechanical dependency work.
+- **WP-72 gets no file.** D-24 reduces it to "record `combine` 4.6 as an
+  accepted risk in `deny.toml`" - one section of WP-69. Flagged at the top of
+  the WP-69 spec and in `landing-order.md` 8.1 so nobody hunts for
+  `WP-72-*.md`.
+- Worker split: W1 = WP-64; W2 = WP-66 + WP-67 + WP-69(+72); W3 = WP-70 + WP-71.
+
+### What a successor would otherwise have to rediscover
+
+**Live manifest state (read, not run - no cargo was executed by this unit):**
+- 41 `Cargo.toml` files: root + 40 members. Zero `[workspace.dependencies]`,
+  zero `workspace = true`, zero `[lints]` tables, and **zero crate-level
+  `#![deny]`/`#![warn]`/`#![allow]` attributes anywhere under `rust/`** - so
+  `[workspace.lints]` has nothing to preserve or collide with.
+- No `license`, `repository` or `rust-version` field exists in any manifest.
+  The channel is pinned in `rust-toolchain.toml` (1.97.0).
+- `authors` is absent from `bot`, `web`, `operator`; they gain it by
+  inheritance. 24 dependency keys are used by 2+ members (the hoist list).
+- dp F1's counts were stale: tokio and rand appear in 32 manifests, not 33.
+- `rust/Cargo.lock` genuinely carries **sqlx 0.8.6 and 0.9.0**. `web` is held
+  at 0.8 by `tower-sessions-sqlx-store 0.15.0`, whose manifest requires
+  `sqlx = "0.8.0"` and `tower-sessions 0.14`. Feature sets also diverge: `web`
+  uses the 0.8 spelling `runtime-tokio-rustls` (must be respelled as
+  `runtime-tokio` + `tls-rustls`), `bot` adds `time` + `json`.
+- All four sentry declarations are bare `"0.48"` with defaults; **no crate sets
+  `default-features = false`**. `sentry-tower` is web-only (`features =
+  ["http"]`); `sentry-tracing` is web + bot.
+- `serde_yaml = "0.9"` in exactly two manifests (`bot`, `lib/game_client`),
+  plain, non-optional, no features. Exactly two call sites, **both
+  serialise-only**: `bot/src/prompt.rs::spec_to_yaml` and
+  `lib/game_client/src/lib.rs::json_to_yaml`, each `to_string` on a
+  `serde_json::Value`. No deserialisation anywhere in the workspace.
+- `rust/deny.toml` is the config file; there is **no repo-root `deny.toml`**.
+  7 advisory ignores today; the 4 diesel/encoding ones are **confirmed stale**
+  (`diesel` and `encoding` grep to 0 in the lock, no `api` member). 2 remain
+  after WP-68 + WP-69. Zero wildcard reqs in any manifest, so
+  `wildcards = "deny"` is free.
+- `lib/cmd`: `http-server = ["warp", "tokio", "sentry"]`, default-on.
+  `env_logger` is **not** gated despite being used only by the gated
+  `http.rs::serve` - noted as a WP-65 rider, not fixed.
+
+**Did the full-upgrade-first step resolve anything?** **Unknown - it was never
+run.** This unit wrote specs only and executed no cargo. Every spec makes the
+upgrade its Step 0 and states what it collapses to if the upgrade resolves the
+issue. Best available evidence, from reading registry metadata only:
+- **WP-66: the upgrade probably does NOT resolve it.** crates.io shows
+  `tower-sessions-sqlx-store` newest = 0.15.0 (still sqlx 0.8, still
+  tower-sessions 0.14) while `tower-sessions` itself has moved to 0.15.0. The
+  **vendor branch is almost certainly live.** Port surface is small: MIT,
+  `src/lib.rs` ~50 lines + `src/postgres_store.rs` ~266 lines. Schema
+  `tower_sessions`.`session`, created by the store's own `migrate()`, called
+  from `create_session_layer` in `rust/web/src/auth/session.rs`.
+- **WP-70: the upgrade cannot help** - `serde_yaml` is archived at
+  `0.9.34+deprecated`; there is no newer version.
+- **WP-71: the upgrade cannot help** - warp-vs-axum is a framework choice, not
+  a version skew.
+
+**Live source state:** **WP-06 Task 1 has ALREADY LANDED** in
+`rust/lib/cmd/src/http.rs` (private `route::<G>()`, 16 MiB
+`MAX_CONTENT_LENGTH`, `unwrap_or_else(... SystemError)`, no `impl Reject`, its
+three tests present). So WP-71's gate is satisfied today. Recorded in
+`landing-order.md` 8.5, with a STOP-on-mismatch instruction because the tree is
+under concurrent edit.
+
+### Open items handed to the Orchestrator
+
+1. **`dp F9`** - pin-back-to-dedupe vs stay-latest is a genuine contradiction.
+   **Escalated to Michael by design, deliberately not decided.**
+2. **dp F12 may be false and may downgrade from major.** In sentry 0.48.5
+   `actix` and `ureq` are NOT default features, yet both are in the lock.
+   WP-67 makes one `cargo tree -i` run the gate before any deletion.
+3. **WP-66's vendor branch adds a 41st member**, hardening `WP-64 -> WP-66`
+   and stalings WP-64's "40 members" assertions (see 8.6).
+4. **WP-71 risk the findings missed:** warp matches POST on *any* path and
+   game-service URIs come from the `game_versions.uri` DB column, so a naive
+   port to `.route("/")` would silently break every deployed game version whose
+   URI carries a path. The spec mandates a catch-all fallback.
+
+---
+
+## Batch 5 - WP-73 game binary consolidation (Lead session, 2026-07-26)
+
+**Goal:** one Tier 2 spec at `planning/specs/WP-73-game-binary-consolidation.md`.
+D-20 answered: generic bin crate `rust/lib/game_bin` / `brdgme_game_bin`
+parameterised over `Gamer`, plus thin per-game wrappers. NOT the macro option.
+
+**Plan:** W1 = read-only inventory of the real per-game bin shape ->
+`planning/raw/wp73-game-bin-inventory.md`. W2 = draft the spec from that
+inventory. Lead sanity-checks and lands.
+
+- W1 DISPATCHED. Brief covers: true shape + divergence across >=5 game crates,
+  `lib/cmd` entry-point signatures and feature gates, per-game Cargo.toml
+  `[[bin]]` stanzas and bin-only deps, whether fuzz resists the generic
+  treatment, workspace members wiring, DOWNSTREAM CONSUMERS of the binary
+  names (deploy risk), and the four findings dp F11 / dp F26 / e F45 / e F46.
+
+**Lead-side facts gathered directly (read-only) while W1 runs:**
+- `rust/Cargo.toml` members are an EXPLICIT list (no globs), 27 game crates +
+  7 `lib/` + 3 `tools/` + bot/web/operator = 40. So `lib/game_bin` needs an
+  explicit `members` entry, and any NEW per-game wrapper crate would too.
+  Cheapest design therefore keeps the wrappers as `[[bin]]` targets INSIDE the
+  existing game crates - no new members, no k8s/Docker churn.
+- **HARD CONSTRAINT found by the Lead: `rust/Dockerfile` hardcodes the binary
+  file name `<snake_game>_http` in ~26 per-game distroless stages** (e.g.
+  `COPY --from=builder /app/target/release/acquire_1_http .` +
+  `CMD ["./acquire_1_http"]`). Renaming or collapsing the `_http` bin target
+  breaks every game image. Either keep the `_http` target name or update the
+  Dockerfile in the same commit.
+- Apparent gap: the Dockerfile has stages for 26 games; `lords-of-vegas-1`
+  appears to have NO stage. Flagged for W1 to confirm, not acted on.
+- `rust/Dockerfile` builds games via `cargo build --release --workspace
+  --exclude web`, i.e. it links ALL ~108 bins including cli/repl/fuzz. Cutting
+  bin count is a real build-time win - worth stating as the motivation.
+- k8s `k8s/base/game/<game>/deployment.yaml` sets `ADDR=0.0.0.0:8080` and no
+  `command:`, so it relies purely on the image `CMD`. No k8s change needed if
+  the Dockerfile CMD is preserved.
+- Ordering: `landing-order.md` 8.4 puts WP-73 after WP-64. WP-71 (warp->axum)
+  rewrites `lib/cmd/src/http.rs::serve`, which is exactly what the generic bin
+  calls - so WP-73 should also follow WP-71 or explicitly not depend on the
+  signature. To be settled in the spec.
+
+**W1 RETURNED.** `planning/raw/wp73-game-bin-inventory.md` written (~308 lines).
+Lead sanity-check: its Dockerfile, `[[bin]]`-absence, explicit-members and
+missing-`lords-of-vegas-1` claims were independently confirmed by the Lead
+before W1 returned. Accepted.
+
+Decisive facts:
+- **27 crates x 4 bins = 108 files, ZERO structural deviation.** Normalised-md5
+  bucketing: cli 27/27 identical, fuzz 27/27, http 27/27, repl 27/27. The only
+  textual variation is rustfmt import ORDER of `use <crate>::Game;`. No crate
+  is missing or has an extra bin. This is the best possible case for WP-73.
+- Sizes: cli 13 ln, http 13 ln, repl 8 ln, fuzz 5 ln.
+- Bounds: `G: Gamer + Debug + Clone + Serialize + DeserializeOwned + 'static`
+  (from `requester::gamer::new` and `http::serve`).
+- `lib/cmd` features: `default = ["http-server"]`,
+  `http-server = ["warp","tokio","sentry"]`, `test-support`.
+- All 27 manifests are byte-identical in `[dependencies]` bar 4 additive
+  outliers (acquire-1 thiserror; lords-of-vegas-1 thiserror+lazy_static;
+  seven-wonders-1 brdgme_cost; cathedral-2 has NO rand).
+- All 27 keep a `test-support` dev-dep for `tests/contract.rs` - must survive.
+- **No in-repo crate depends on a game crate as a library** (0 hits). So
+  e F45's transitive-cost argument is vacuous; the realisable win is the
+  27x tokio-"full" compile, not consumer bloat.
+- `tools/fuzz` is a hand-rolled fuzzer, NOT afl/libfuzzer - `fuzz_gamer::<G>()`
+  is a plain generic fn. Fuzz does NOT resist the generic treatment.
+- Findings: **dp F11 CORRECT, dp F26 CORRECT, e F46 CORRECT** (and sharper than
+  written - distroless stages run `USER 65532` so the port-80 default is
+  unusable in the shipped image; only k8s `ADDR=0.0.0.0:8080` saves it).
+  **e F45 facts correct, recommendation INVALID - reconfirmed** (dev-deps do
+  not link into `src/bin`); `findings/verification/games-batch-e.md` already
+  records it ADJUSTED.
+
+**Design the Lead settled from this (handed to W2):** because the bins are
+identical, `brdgme_game_bin` exposes exactly four generic fns
+(`cli_main/repl_main/fuzz_main/http_main`, each `<G: ...>`), every `src/bin`
+file collapses to one 3-line `fn main()`, **the bin FILE NAMES are unchanged**
+(Dockerfile safety), game manifests drop `brdgme_cmd`/`brdgme_fuzz`/`tokio`
+from `[dependencies]` and gain `brdgme_game_bin`, and `#[tokio::main]` moves
+into `game_bin` so tokio-"full" x27 dies (dp F11). e F46's port default becomes
+a one-line change in one place. NO MACRO.
+
+- W2 DISPATCHED to draft `specs/WP-73-game-binary-consolidation.md`, ~120 ln.
+
+**W2 RETURNED and the spec is ACCEPTED.**
+`planning/specs/WP-73-game-binary-consolidation.md`, 200 lines.
+
+Lead sanity-check found and FIXED two things before landing it:
+1. **Real defect.** The draft wrote the four entry points as
+   `cli_main::<G>()` etc. in a *declaration* position. Turbofish in a `fn`
+   definition does not compile, and a cheap model would have copied it
+   verbatim. Rewritten to `pub fn cli_main<G: ...>()` plus an explicit
+   "Syntax, do not get this wrong" note, and the bound now offers the
+   one-`GameBin`-supertrait alternative so it is not repeated four times.
+2. **Cap.** 218 -> 188 by W2, now 200 after the Lead's two additions. Over the
+   ~120 Tier 2 cap, so an explicit Lead-accepted justification was added at the
+   top rather than leaving it silent: 3a is a deployment-breaking constraint
+   that must not be compressed, and the package spans 27 crates.
+
+Everything else verified sound: crate-relative dep paths (`../cmd`, `../game`,
+`../../tools/fuzz`) are right for `rust/lib/game_bin`; the
+`grep -rn '0.0.0.0:80"' rust/` check does NOT false-positive on `0.0.0.0:8080`
+because of the trailing quote; `[dev-dependencies]` test-support preservation is
+called out; no macros anywhere.
+
+**Spec's key decisions:**
+- Wrappers stay as `src/bin/*.rs` files INSIDE the existing game crates - NOT
+  new wrapper crates. Consequence: workspace `members` gains exactly one line,
+  and Dockerfile / docker-bake.hcl / Tiltfile / k8s need NO change.
+- All 108 bin FILE NAMES are frozen (section 3a) because `rust/Dockerfile`
+  copies `target/release/<snake>_http` by flat filename.
+- `#[tokio::main]` on a private async inner fn inside `game_bin`; game crates
+  lose `brdgme_cmd`, `brdgme_fuzz` and `tokio`-"full" from `[dependencies]`.
+- `tokio = { features = ["macros","rt-multi-thread"] }`, `"full"` banned.
+- e F46's port default moves to `0.0.0.0:8080` in the one shared place.
+
+**OPEN - needs Michael (recorded as a non-goal, NOT decided):** `tools/fuzz` and
+`tools/repl` are already generic out-of-process drivers, so the 27 `_fuzz` and
+27 `_repl` bins are arguably 54 deletable files. WP-73 deliberately keeps them.
+
+Architecture observations appended for the deferred review (duplicate
+in-process vs out-of-process fuzz/repl paths; `lords-of-vegas-1` undeployed;
+44 k8s game dirs vs 26 live crates; `lib/cmd`'s default-on `http-server`).
+
+**Batch 5 COMPLETE.**
+
+---
+
+## Batch 6 Lead (2026-07-26) - WP-81 + WP-17 + WP-83 parity fixes
+
+Lead brief: three separate deliverables, serial Workers, opus, read-only outside
+`planning/`. Context read: ORCHESTRATOR-HANDOVER, README, decisions-ANSWERED
+(D-25/D-35/D-40), specs-LOG tail, WP-73 spec as style reference.
+
+### Deliverable 1 - WP-81 stats deletions (D-40 option B)
+
+- W1 DISPATCHED to confirm-then-draft `specs/WP-81-stats-deletions.md`.
+  Brief: read live acquire-1 `to_brdgme_stats` + prove zero callers by grep;
+  identify exactly which lost-cities-1/-2 `Stats` fields are never read
+  (distinguishing written-but-never-read from never-touched); identify the one
+  increment that counts the wrong thing; read `findings/verification/` batch-c
+  and batch-e; STOP and report if any of the three claims is false rather than
+  improvising. Target ~60-90 lines, no padding.
+
+**Lead-side fact for deliverable 2 (gathered read-only while W1 ran):**
+`rust/lib/cost/src/lib.rs` ALREADY has a substantial `#[cfg(test)] mod tests`
+(~290 of its ~493 lines): add/inv/sub/pos_neg/can_afford/take/drop/keys/
+to_keys/is_zero/trim/sum/from_keys plus 10 `can_afford_perm` cases. So D-25's
+"suitable automated testing" constraint is NOT "build a suite from nothing" -
+it binds on (a) the new generic `get`/`set`, (b) equivalence coverage proving
+the splendor port is behaviour-preserving. The spec must say this so nobody
+either skips tests or rewrites the existing ones.
+
+Also noted: `Cost::new()` sits in the `K: Hash + Eq + Clone` impl block while
+`Default` needs only `Hash + Eq` - that is exactly `ls F38`, and it is a T3-B3
+checklist row, NOT part of WP-17's D-25 three. Do not pull it in.
+
+**W1 RETURNED. `specs/WP-81-stats-deletions.md` (123 lines) ACCEPTED as written.**
+
+Lead sanity-check, done independently read-only before acceptance - all four
+load-bearing claims confirmed:
+- `grep -rn to_brdgme_stats rust/` -> exactly ONE hit, its own definition in
+  `game/acquire-1/src/stats.rs`. Zero callers CONFIRMED.
+- `game/acquire-1/src/lib.rs` has `mod stats;` and `use crate::stats::Stats;`.
+- lost-cities-1 AND -2 both declare `pub investments: usize` in `struct Stats`,
+  both have `self.stats[player].expeditions += 1;`, and both have
+  `fn player_stats` (so `Stats` must SURVIVE in those two crates - the spec is
+  right to delete only two fields, not the struct).
+
+**All three findings CONFIRMED CORRECT** (c F12, e F39, e F40). Nothing
+disproved. Sharpening the Worker added, worth recording:
+- `e F39` and `e F40` are the SAME code seen twice - `expeditions` is written
+  by exactly one increment and never read, so deleting the field deletes the
+  wrong increment. There is no separate third edit.
+- What the increment actually counts: it fires when the player's whole
+  `expeditions[player]` played-card vec is empty, and that vec resets per
+  round, so it counts ROUNDS IN WHICH THE PLAYER PLAYED A CARD, not
+  expeditions started.
+- acquire-1's `Stats` becomes ENTIRELY unused, so `src/stats.rs` is deleted as
+  a file, not left as a husk.
+
+**REAL CROSS-PACKAGE COLLISION FOUND (new ordering fact, was not in
+landing-order.md):** WP-19 Task 5 fixes `c F11` ("Trades stat reports merges")
+with a one-token edit INSIDE `stats.rs::to_brdgme_stats`, and even adds "the
+crate's first stats.rs test". WP-81 DELETES that whole file. Verified against
+`specs/WP-19-acquire-fixes.md` lines 15/425/468/791. Resolution recorded in
+WP-81 section 4 and propagated to `landing-order.md`: land WP-81 first, drop
+WP-19 Task 5; whichever lands second must NOT resurrect `stats.rs`.
+
+Spec also correctly states the non-design-statement framing (clean-slate
+revisit, do not substitute option A) and the scope guard (no gameplay/scoring
+change, no `RULES.md` - WP-20/WP-30 rules halves stay parked).
+
+**Deliverable 1 LANDED.** Planning files updated by the Lead:
+- `landing-order.md` gained **section 9 - WP-81 vs WP-19** (full resolution).
+- `work-packages.md` WP-19 entry now marks `c F11` **SUPERSEDED by WP-81**,
+  stays listed (not reassigned) so the 570 sum and one-package-per-finding
+  invariant hold.
+
+### Deliverable 2 - WP-17 `lib/cost` (D-25 option A)
+
+- W2 DISPATCHED to draft `specs/WP-17-lib-cost.md`, ~100-120 lines.
+  Brief: add generic `get`/`set` to `lib/cost`; replace splendor-2's
+  `src/cost.rs` with `pub type Cost = brdgme_cost::Cost<Resource>;` plus the
+  RETAINED crate-local gold-joker `can_afford` (splendor-specific, MUST NOT go
+  in the shared lib); add the `brdgme_cost` dep. Scope is EXACTLY `b F31`,
+  `ls F39`, `dp F27` - the other five (`b F30`, `b F32`, `b F34`, `b F35`,
+  `ls F38`) stay in `checklists/T3-B3-splendor-libcost-holdem.md` and the split
+  must be stated in the spec. Given the Lead fact that `lib/cost` already has a
+  ~290-line test module, the D-25 testing constraint was scoped to (a) full
+  coverage of the new `get`/`set` incl. missing-key/zero/overwrite, (b)
+  equivalence coverage proving the port is behaviour-preserving plus direct
+  tests on the crate-local gold-joker `can_afford`; existing lib tests must NOT
+  be churned. W2 told to independently CHECK the checklist's "semantically
+  equivalent" claim for from_resources/add/inv/sub/sum/can_afford and STOP if
+  any function differs. Also told to check `seven-wonders-1` (the existing
+  `brdgme_cost` consumer) does not regress.
+
+**W2 RETURNED. `specs/WP-17-lib-cost.md` ACCEPTED** after two Lead fixes.
+
+Lead sanity-check, done independently read-only:
+- `rust/lib/cost/Cargo.toml` package name is `brdgme_cost`. CONFIRMED.
+- Only ONE crate depends on it today: `game/seven-wonders-1/Cargo.toml`.
+  `dp F27` CONFIRMED. splendor-2's `[dependencies]` has no `brdgme_cost`.
+- Read `game/splendor-2/src/cost.rs` in full and CHECKED the equivalence claim
+  myself rather than trusting the checklist:
+  - splendor `Cost::can_afford` = `self.sub(other).0.values().all(|v| v >= 0)`;
+    lib `can_afford` = `sub(other).pos_neg().1.is_empty()` and `pos_neg` files
+    into `neg` exactly when `v < 0`. **Same predicate. EQUIVALENT.**
+  - `from_resources(&[Resource])` maps onto lib `from_keys(impl IntoIterator)`;
+    `add`/`inv`/`sub`/`sum` are line-for-line the same algorithm.
+  - Both are newtype tuple structs over `HashMap<_, i32>`, so serde shape is
+    identical and persisted states survive. CONFIRMED.
+  Nothing disproved; `b F31`, `ls F39`, `dp F27` all CORRECT.
+- The gold-joker free fn `can_afford(a, c)` really is Splendor-specific (it
+  subtracts `Resource::Gold` against a summed shortfall). Correctly kept
+  crate-local; the spec says loudly it must NEVER move into the lib.
+
+**Lead fix 1 - REAL TRAP the draft would have set for a cheap model.** The
+draft said to delete "the now-unused `use std::collections::HashMap`" from
+`cost.rs`. But the retained `#[cfg(test)] mod tests` (which MUST keep
+`test_can_afford`, the gold-joker test - no lib counterpart) builds fixtures
+with `Cost(HashMap::from([..]))`. Blanket-deleting the import breaks the test
+build. Rewritten to "move the import into the test module, do not drop it".
+
+**Lead fix 2 - cap.** 172 lines, over the ~120 Tier 2 cap, so an explicit
+Lead-accepted justification was added at the top rather than left silent:
+section 4 is Michael's binding D-25 testing constraint and section 1 carries
+the equivalence proof. Final 185 lines.
+
+**Spec's key decisions:**
+- `get(&self, k: &K) -> i32` takes `&K` (generic lib must not force non-`Copy`
+  keys to be cloned for a read) - hence splendor call sites become `.get(&x)`.
+  `set(&mut self, k: K, v: i32)` unchanged in shape.
+- Both go in the EXISTING `impl<K: Hash + Eq + Clone>` block, not a new one,
+  so they do not collide with `ls F38`'s later bound rearrangement.
+- `cost.rs` survives as a module (type alias + gold-joker fn) so importers'
+  `use crate::cost::{self, Cost}` needs no change.
+- Testing constraint discharged as: (a) full new `get`/`set` coverage
+  (missing key, present, explicit zero, insert, overwrite incl. negative,
+  `set(k,0)` interaction with `trim`/`keys`/`sum`); (b) per-test equivalence
+  check before deleting any splendor test, gold-joker `test_can_afford`
+  RETAINED and extended to 6 cases, plus a serde round-trip of a serialized
+  splendor `Game` to pin persisted-state compatibility. Existing lib tests
+  must not be churned.
+- Non-goals restate the five T3-B3 findings by ID and "no seven-wonders-1
+  change" (`cargo test -p seven-wonders-1` is the no-regression gate).
+
+**Deliverable 2 COMPLETE.**
+
+### Deliverable 3 - WP-83 three released parity fixes
+
+- W3 DISPATCHED to draft `specs/WP-83-parity-fixes-released.md`, ONE spec with
+  three sections, ~110-130 lines total. Fixes: `a F1` roll-through-the-ages
+  (`roll()` re-reads phase after `keep_skulls()` may have advanced it, so a
+  previous player's roll decrements the NEXT player's `remaining_rolls`);
+  `b F7` seven-wonders (`cities()` lists all 14 A/B entries so both sides of one
+  PHYSICAL wonder board can be in play - ensure one of each physical board);
+  `e F30` red7 seat-order tie-break when all palettes are empty.
+  Brief requires: top-of-spec framing that all three were individually RELEASED
+  from the parity park by D-35 and are FIX NOW (so nobody re-parks them); that
+  `b F4` is re-parked and `d F37` is REJECTED-not-a-bug and neither is in scope;
+  that `e F30`'s release evidence - red7-1's own `DATA_DOCS.md` documenting the
+  "highest card overall in the palette" tie-break - be QUOTED in the spec; per
+  section a confirmed-against-live-code statement, the fix, and a concrete test
+  case; a scope guard forbidding any `RULES.md` edit or widening into the parked
+  rules questions in the same crates; STOP-and-report if any finding does not
+  reproduce.
+
+**W3 RETURNED. `specs/WP-83-parity-fixes-released.md` ACCEPTED** (183 lines
+after one Lead addition). All three findings CONFIRMED CORRECT; none disproved.
+
+Lead sanity-check, done independently read-only:
+- **Crate-name correction the Worker caught and the Lead confirmed:** the crate
+  is **`roll-through-the-ages-2`**. There is NO `roll-through-the-ages-1` in the
+  tree (`ls -d game/roll-through-the-ages-*` -> one dir). Package names verified
+  from all three manifests: `roll-through-the-ages-2`, `seven-wonders-1`,
+  `red7-1`.
+- `a F1`: confirmed `game/roll-through-the-ages-2/src/lib.rs` has BOTH a
+  `logs.extend(self.keep_skulls());` inside `keep_skulls`' own caller AND the
+  one in `fn roll` immediately followed by `self.remaining_rolls -= 1;`. The
+  stale-phase re-match is real.
+- `b F7`: confirmed `pub fn cities() -> Vec<City>` in
+  `game/seven-wonders-1/src/card.rs` and `all_cities.shuffle(&mut rng)` in
+  `lib.rs::start_game`.
+- `e F30`: **release evidence verified verbatim.** `game/red7-1/DATA_DOCS.md`
+  contains exactly "Ties within a rule are broken by the highest card in the
+  winning set, then by the highest card overall in the palette." The second
+  clause is unimplemented - `card::leader(palettes: &[Vec<Card>])` is fed
+  `rule_fn(&self.palettes[p])` (the WINNING SET, not the palette) by
+  `Game::leader_with_suit`, so it cannot apply it. This is a code/doc mismatch
+  inside red7-1's own data docs, NOT an open rules question. **That is why
+  D-35 released it. Do not re-park it.**
+
+**Lead addition:** a cap note. 177 -> 183 lines, over the ~120 Tier 2 cap, but
+it is three independent fixes in three crates in one file (~59 lines each),
+so the note records that and says the sections are self-contained and can land
+as three commits.
+
+**Key fixes as specced:**
+- `a F1`: capture `phase_before` prior to `keep_skulls()` and skip the
+  post-roll `match` entirely if the phase changed - `roll_phase()` already
+  resets `remaining_rolls` for the new player. Two named failure modes: the
+  non-Leadership cascade decrements the NEXT player to 1, and the Leadership
+  path silently consumes the `ExtraRoll`.
+- `b F7`: group the 14 entries into 7 physical boards by stripping the
+  `" A"`/`" B"` name suffix (pairing is carried ONLY in `name: String` - there
+  is no `Side` enum), shuffle BOARDS, then pick one side each. **Must use
+  `BTreeMap`, not `HashMap`** - grouping order must be deterministic or the
+  seeded RNG stops reproducing games.
+- `e F30`: change `card::leader` to take `(winning_set, full_palette)` pairs
+  and compare the full documented key (set len, max rank in set, max rank in
+  palette), still returning the winning set. Keeps strict `>` and seat order
+  as final fallback - reachable only when every palette is literally empty,
+  since card ranks are unique.
+
+**Deliverable 3 COMPLETE. BATCH 6 COMPLETE.**
+
+Batch 6 summary: 3 specs written and landed
+(`WP-81-stats-deletions.md` 123 ln, `WP-17-lib-cost.md` 178 ln,
+`WP-83-parity-fixes-released.md` 183 ln). Six findings confirmed correct
+(c F12, e F39, e F40, b F31, ls F39, dp F27) plus three parity (a F1, b F7,
+e F30). Zero findings disproved. One new cross-package ordering constraint
+discovered and recorded (WP-81 before WP-19; `c F11` superseded).
+
+**CORRECTION to the WP-83 entry above.** W3 continued after the Lead's cap note
+landed and trimmed the body itself: final file is **155 lines**, not 183 (~50
+lines per fix). It kept the Lead's cap note. Re-verified: `phase_before`,
+`BTreeMap` and the DATA_DOCS quote all still present after the trim. Spec
+remains ACCEPTED.
+
+**Extra observations W3 flagged and deliberately did NOT touch** (correct
+behaviour under the scope guard) - appended to
+`architecture-observations.md` where structural, recorded here in full:
+- `roll-through-the-ages-2::keep_skulls` has an `if self.players == 1 { return }`
+  branch that is DEAD (`player_counts()` is `[2,3,4]`). Documented in-crate as
+  deliberate Go-source fidelity, so left alone.
+- `red7-1::card::leader` returns `(0, vec![])` for an EMPTY `palettes` slice - a
+  silent fallback that would mask an all-eliminated state. Not in scope for
+  `e F30`; flagged only.
+- `seven-wonders-1` uses stringly-typed names for wonder STAGES too
+  (`"Rhodes A Wonder Stage 1"`), keyed into the card map by string - the same
+  weakness as the A/B side encoding, one level deeper.
+
+---
+
+## Batch 7 - WP-73 amendment for D-41 / D-42 (Lead unit)
+
+**Dispatched W1** (opus): Part A dependency sweep gating the D-41 deletion of
+the 27 `_fuzz` + 27 `_repl` per-game bins. Brief: confirm by reading that
+`rust/tools/fuzz` and `rust/tools/repl` are generic out-of-process drivers
+shelling out to a game's `_cli`, then sweep the WHOLE repo (Dockerfile,
+docker-bake.hcl, Tiltfile, k8s, CI, scripts, docs, test harnesses, Go side)
+for any reference to the per-game `_fuzz`/`_repl` bins. Instruction: if ANY
+dependency exists, report BLOCKED - do not spec the deletion. Output ->
+`raw/wp73-fuzz-repl-dependency-sweep.md`.
+
+**W1 RETURNED - verdict CLEAN.** `raw/wp73-fuzz-repl-dependency-sweep.md` written.
+Premise confirmed by source read: `tools/fuzz/src/main.rs` and
+`tools/repl/src/main.rs` are 3-line wrappers around
+`brdgme_cmd::requester::parse_args`, which accepts only `local <path>` and builds
+a `LocalRequester` spawning that path as a child process per JSON request.
+Nothing hardcodes a `_fuzz`/`_repl` target. Zero references in `rust/Dockerfile`,
+`docker-bake.hcl`, `Tiltfile`, `k8s/`, `.github/`, `scripts/`, `infra/`,
+`devenv.nix`, `brdgme-go/`; no justfile/Makefile exists in the repo. Game bins
+are auto-discovered from `src/bin/`, so no `[[bin]]` stanzas to remove.
+Only fallout: the 27 `brdgme_fuzz` manifest lines become unused, `fuzz_gamer` in
+`rust/tools/fuzz/src/lib.rs` becomes dead (all 27 callers deleted), and
+`docs/porting/GAME_PORTING.md` documents the removed bins. **Accepted cost flagged
+for Michael:** `LocalRequester` spawns one process per API request, so
+out-of-process fuzzing is materially slower than the in-process `fuzz_gamer` path.
+LEAD: sweep accepted. Deletion authorised.
+
+**Dispatched W2** (opus): Part B - amend
+`specs/WP-73-game-binary-consolidation.md` in place for D-41 (two entry points
+`cli_main`/`http_main`; add the 54-file deletion section; `brdgme_fuzz` leaves
+both the game crates and `game_bin`) and D-42 (`lords-of-vegas-1` gets the
+consolidation, stays undeployed). Frozen-filename rule extended explicitly to
+`_cli` as well as `_http`. Spec must get SHORTER (target 160-180 ln).
+`work-packages.md` WP-73 entry to be updated; `landing-order.md` 8.4 only if
+sequencing actually changed.
+
+**W2 RETURNED. LEAD ACCEPTED with three Lead edits.**
+`specs/WP-73-game-binary-consolidation.md` now 221 lines (was 199). Two entry
+points (`cli_main`, `http_main`); new 3d is the D-41 deletion with the sweep as
+evidence plus three follow-ons (`fuzz_gamer` deleted / `fuzz()` kept,
+`GAME_PORTING.md` updated, accepted `LocalRequester` slowdown); 3a's frozen-name
+rule now explicitly covers `_cli` as well as `_http`; `brdgme_fuzz` removed from
+`game_bin`'s deps; the "FLAGGED FOR MICHAEL" non-goal deleted; D-42 stated
+explicitly in section 4; verification counts corrected to 108-before/54-after.
+Macro-free statements strengthened, not weakened. Workspace section unchanged
+(one added member, 41-member note to WP-64 intact).
+
+Lead edits on top of W2:
+1. Verification grep `fuzz_gamer` was scoped `rust/ docs/` -> would always hit
+   `docs/reviews/`. Rescoped to `rust/ docs/porting/` with an explicit warning.
+2. `landing-order.md` 8.4: W2 correctly left sequencing alone (unchanged, still
+   after WP-64) but flagged a NEW file overlap - WP-73 deletes `fuzz_gamer` from
+   `rust/tools/fuzz/src/lib.rs` while WP-63 rewrites `fuzz()` in the same file.
+   Recorded as a re-read requirement, not a hard ordering constraint.
+3. `work-packages.md` WP-73 "Structural note" was stale and wrong on two counts
+   (claimed `[[bin]]` stanzas exist; claimed the spec creates per-game bin
+   crates). Corrected to match the spec: auto-discovered bins, wrappers stay
+   in-crate, one workspace member added, filenames frozen.
+
+**Deviation accepted:** brief targeted 160-180 lines, landed 221. W2 compressed
+sections 1/2/3b/3c/6/7 twice; the remainder is Lead-accepted load-bearing
+content (3a deployment constraint, the four finding verdicts, the new 3d
+deletion). Not worth cutting correctness to hit a line count.
+
+**BATCH 7 COMPLETE.**
+
+## 2026-07-26 - Lead: WS -> SSE evaluation unit
+
+- Unit brief: evaluate migrating WebSockets to Server-Sent Events. Deliverable
+  `planning/ws-to-sse-evaluation.md`, supporting inventory
+  `planning/raw/websocket-inventory.md`. Investigation/evaluation, not a fix spec.
+- Read for context: `ORCHESTRATOR-HANDOVER.md`, `decisions-session3.md`,
+  `specs/WP-42-websocket-auth-and-filtering.md`.
+- Worker 1 DISPATCHED: live WebSocket ground-truth inventory (server, client,
+  fan-out, infra, tests). Crux question assigned: verify whether ANY
+  client->server application traffic exists.
+- Worker 1 RETURNED and ACCEPTED: `planning/raw/websocket-inventory.md` (389 lines).
+  Key finding: **NO client->server application traffic exists.** `handle_socket`'s
+  inbound arm is `Some(Ok(_)) => {}` (value discarded); client drops leptos-use's
+  `send` handle via `..`; heartbeat is disabled (`(), DummyEncoder`). Reverse
+  direction carries only browser auto-pongs and close frames.
+  Other key facts: axum 0.8.9 `ws` feature, `/ws` route, NO handshake auth; two
+  payload shapes `{"game_id":..}` / `{"proposal_id":..}`, text frames only, no
+  binary; per-socket NATS Core wildcard subs `game.>` + `proposal.>` with zero
+  server-side filtering; 15 publish sites; Cilium/Envoy Gateway (no nginx - that
+  config is orphaned), DO LB idle timeout 120s, Cloudflare `websockets = on`;
+  HTTP protocol version NOT determinable from repo config.
+- Worker 2 DISPATCHED: draft `planning/ws-to-sse-evaluation.md`.
+- Worker 2 RETURNED and ACCEPTED: `planning/ws-to-sse-evaluation.md` (314 lines,
+  within the 320 cap). Lead sanity-check: spot-verified `rust/web/Cargo.toml`
+  dependency claims (axum 0.8.9 `["ws","macros"]` default-features-on;
+  `leptos_axum 0.8.10`; `leptos-use 0.19` default-features = false with
+  `use_websocket, use_event_listener, use_document`; `codee 0.3.5` already
+  present) - all correct as written. UNKNOWNs are explicitly marked
+  (browser-leg HTTP version, Cloudflare SSE buffering, axum-prometheus latency
+  recording for long-lived streams). No line-number citations. No files under
+  `rust/` touched.
+- Verdict: migrate to SSE, recommended but not urgent; sequence after WP-47 and
+  after WP-42's transport-independent predicate work.
+- UNIT COMPLETE.
+
+## Unit: SSE migration (D-44..D-47) - Lead session 4
+
+- Michael has COMMITTED to SSE (D-44). This unit has three serial deliverables:
+  (1) resolve D-46 connection topology -> `sse-topology-decision.md`;
+  (2) write `specs/WP-84-sse-migration.md`;
+  (3) rework `specs/WP-42-websocket-auth-and-filtering.md` + reorder
+  `landing-order.md` / `work-packages.md`.
+- Workers spawned on opus per Michael's override.
+- DISPATCHED Worker 1: topology investigation (HTTP/2 browser-leg resolution,
+  Option C reconnect cost, two-stream evaluation, third-shape search) ->
+  `sse-topology-decision.md`.
+- Worker 1 RETURNED: `sse-topology-decision.md` (234 lines). ACCEPTED by Lead.
+  Key findings:
+  - `infra/cloudflare.tf` sets only `ssl = "strict"` and `websockets = "on"`.
+    No `http2`/`http3`/`zero_rtt`/`min_tls_version` zone setting anywhere, and no
+    `cloudflare_zone_settings_override`. So browser-leg protocol is dashboard
+    default and NOT provable from the repo. Indirect evidence:
+    `docs/superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md` states
+    expected `HTTP/2 200` responses through the CF edge, but its checkboxes are
+    unticked - an expectation, not an observation. Michael must run
+    `curl -sI https://brdg.me | head -1`.
+  - Origin remains HTTP/1.1-only (axum `http2` feature enabled nowhere).
+  - Dev is permanently h1 (both Tilt modes are plain HTTP, no TLS, no ALPN),
+    so any multi-stream design must be sized for the ~6-per-origin cap in dev.
+  - Option C reconnect cost quantified as SMALL: no client state on the wire
+    (D-45), and the only reopen trigger is game-page navigation, which already
+    refetches `game_data`/`logs`/`mark_read`. Incremental cost is one extra
+    `get_sidebar_games` POST plus loss of the per-connection TTL cache.
+  - RECOMMENDATION (conditional): two streams IF h2 confirmed on the browser leg
+    - `GET /events` (private, identity-scoped, never swapped) and
+    `GET /events/public?game=<uuid>` (unauthenticated, swapped on navigation).
+    Reason is NOT reconnect cost but that `/events/public` needs no auth and no
+    visibility predicate at all, plus decoupling the private stream from
+    navigation for future chat/notifications. If h2 is NOT confirmed: one stream
+    (Option C). Hard cap: never 3 held streams.
+  - Rejected: side-channel resubscribe POST (needs replica affinity; `replicas: 2`
+    with no session affinity in `httproutes.yaml`). Held in reserve: a single
+    all-public-games stream with client-side filtering - noted as essentially
+    what production does today, since `handle_socket` currently filters nothing.
+- DISPATCHING Worker 2: `specs/WP-84-sse-migration.md` on the two-stream design
+  with a documented collapse-to-one-stream fallback.
+- Worker 2 RETURNED: `specs/WP-84-sse-migration.md` (~300 lines). ACCEPTED with a
+  Lead note: it overruns the ~120-line Tier 2 cap and the ~170 the Lead
+  authorised. Kept at length deliberately - it is a transport migration covering
+  routes, auth, shutdown, metrics, client, infra, deletions and a conditional
+  fallback shape, and the content is verified fact rather than padding. Header
+  justification rewritten by the Lead to say so.
+  Key resolutions in the spec:
+  - **`axum_prometheus` UNKNOWN RESOLVED: no distortion.** Read vendored
+    `axum-prometheus 0.10.0` `src/lib.rs`: `Traffic::on_response` records
+    `data.start.elapsed()` when the INNER SERVICE FUTURE resolves (response
+    headers), not on body completion, so a multi-hour SSE stream is recorded as a
+    sub-millisecond request. `PrometheusMetricLayer::pair()` passes `None` for the
+    body-size recorder, so no per-chunk histogram. One real effect to document:
+    `axum_http_requests_pending` IS held for the stream's lifetime (its `Pending`
+    `Arc` is cloned into the streaming body), so it becomes a free live-stream
+    gauge but stops meaning "handler still running".
+  - **Cloudflare rate-limit rule verified live:** exactly one ruleset
+    (`cloudflare_ruleset.rate_limit`, phase `http_ratelimit`), one rule `api_per_ip`,
+    expression `starts_with(http.request.uri.path, "/api/")`, block, period 10,
+    60 req/period. The prior evaluation's claim that `/ws` is exempt is CONFIRMED.
+  - Only idle timeout in the repo is `k8s/base/gateway/gateway.yaml`'s
+    `do-loadbalancer-http-idle-timeout-seconds: "120"`; axum `KeepAlive::new()`
+    verified at 15s. Cloudflare edge idle behaviour for `text/event-stream`
+    remains UNKNOWN from repo state - spec directs the implementer to verify.
+  - **Rollout: SIDE-BY-SIDE, not a cutover**, in three commits. Reason found by
+    the Worker: `/pkg/` assets are edge-cached `immutable`, so a browser holding
+    an old wasm bundle keeps requesting `/ws` after deploy; a flag-day cutover
+    breaks those clients until reload.
+  - Shutdown: `GameBroadcaster::shutdown` + the stream's `select!` arm MUST stay
+    (graceful shutdown hangs forever without it). `TaskTracker`/`drain_ws_tasks`/
+    the 5s timeout are deletion CANDIDATES only - still UNKNOWN, spec requires a
+    real-listener proof before deleting.
+  - Client API gap found: leptos-use `use_event_source` has NO `on_message_raw`;
+    the port must drive bumps from an `Effect` on the `message` signal branching
+    on `event_type`, and verify duplicate consecutive frames still fire.
+  - Deletions confirmed unused elsewhere: axum `ws` feature (`rust/bot` and
+    `rust/operator` declare plain `axum = "0.8"`), `tokio-tungstenite` dev-dep.
+- DISPATCHING Worker 3: rework WP-42 in place + reorder `landing-order.md` and
+  `work-packages.md`.
+- Worker 3 RETURNED and ACCEPTED. Three files edited in place:
+  - `specs/WP-42-websocket-auth-and-filtering.md` (143 -> 244 lines). Retitled
+    "realtime visibility predicates and per-connection filter cache"; filename
+    kept so cross-references resolve. Header carries a fate table:
+    §3a pre-upgrade auth SUPERSEDED (do not build, replaced by WP-84 §3c);
+    §3b TTL cache SURVIVES (reframed per-connection, must not depend on any
+    `axum::extract::ws` type, lives in its own module); §3c `db.rs` predicates
+    SURVIVE and are now the bulk of the package; §3d Task B ELIMINATED.
+    New §3e DECIDES the open question: **WP-42 makes NO edit to
+    `rust/web/src/websocket.rs`.** Reasoning is not "throwaway" but
+    "unbuildable" - the filter needs `viewer: Option<Uuid>`, and on the WS path
+    the only source of that is the superseded pre-upgrade dance; wiring it with
+    `viewer = None` would fail-closed and hide private games from their own
+    participants. Consequence accepted explicitly: `/ws` stays unfiltered until
+    WP-84 step 2, which is the status quo, not a new regression. Flag to the
+    Orchestrator if WP-84 slips.
+    §5 test strategy DECIDED: unit-test the predicate and the cache only; write
+    NO new tests against the WebSocket transport; defer end-to-end filtering
+    assertions to WP-84 §9's SSE tests. The previous instruction to rework
+    `live_websocket_survives_idle_past_request_timeout` is WITHDRAWN.
+  - `landing-order.md`: section 4 cluster line updated; §7.1 table gains a
+    WP-84 row; §7.4 updated; new **section 10** records the SSE pivot ordering
+    WP-82 -> WP-47 -> WP-42 (predicate only) -> WP-84, plus WP-84's HTTP/2
+    BLOCKER (WP-42 is NOT gated on it).
+  - `work-packages.md`: WP-42 entry rescoped; new WP-84 entry added in house
+    style with the blocker, rollout, consumes-not-authors list and UNKNOWNs.
+    Package-count totals earlier in the file were NOT recomputed - marked stale
+    inline rather than guessed.
+- WP-47 DEPENDENCY CLAIM VERIFIED by the Lead directly against
+  `specs/WP-47-game-visibility-gates.md` §3a: WP-47 does create
+  `is_game_visible_to_viewer(pool, game_id, viewer: Option<Uuid>)` as a thin
+  dispatcher over `is_game_publicly_visible` / `is_game_visible_to_user`.
+  The claim HOLDS. WP-47 also itself depends on WP-41 (landed) and WP-82.
+- Architectural observations appended to `architecture-observations.md`:
+  no HTTP protocol version is expressed anywhere in the repo; dev is
+  permanently h1; `httproutes.yaml` has no session affinity against
+  `replicas: 2`; the client `(id, seq)` trigger design is idempotent under
+  duplicate delivery.
+- UNIT COMPLETE.
+
+## Batch 7 - D-43 fuzz throughput evaluation + WP-73 re-amendment (Lead, 2026-07-26)
+
+- Worker 1 (fuzz throughput evaluation) RETURNED and ACCEPTED. Wrote
+  `planning/fuzz-throughput-evaluation.md` (221 lines). The Lead independently
+  read `rust/tools/fuzz/src/lib.rs`, `rust/lib/cmd/src/requester/gamer.rs` and
+  `rust/lib/cmd/src/requester/local.rs` and CONFIRMS every load-bearing claim.
+- **Headline, and it inverts the premise of D-43:** the in-process fuzz path is
+  **NOT** free of serialisation. `requester::gamer::GameRequester` implements the
+  same `api::Request`/`api::Response` contract as the out-of-process path and
+  only removes the transport. `api::Request::Play` carries game state as a JSON
+  `String`, so per move the in-process path already does
+  `serde_json::from_str::<G>`, `GameResponse::from_gamer` ->
+  `serde_json::to_string`, plus `renders()` building pub_state JSON, every
+  player's state JSON, and N+1 `brdgme_markup::to_string` renders - all of which
+  the fuzz loop discards except the acting player's `command_spec` and the
+  opaque state string.
+- Per move = exactly 1 request. So out-of-process would be 1 process spawn per
+  move x `num_cpus` threads, plus a SECOND JSON layer (the state string is
+  escaped again inside the outer Request/Response). Directionally strictly worse.
+  Magnitude UNKNOWN - nothing was measured, no cargo in this session.
+- `fuzz()` is **already parallel** - `num_cpus::get()` threads, own `Requester`,
+  own `Fuzzer`, own `ThreadRng` each; the `Arc<Mutex<F>>` is touched once per
+  thread at startup. No shared mutable hot-loop state. "Add parallelism" is NOT
+  an available win. No `Rc`/`RefCell`/`Cell` anywhere under `rust/game/*/src/`.
+- Recommendation ACCEPTED by the Lead: (1) keep fuzz in-process, do not adopt
+  `LocalRequester` for fuzz; (2) adopt generic `fuzz_main::<G>()` in
+  `brdgme_game_bin` - genuinely speed-neutral, same monomorphisation; (3) the
+  real throughput project is separate - drive `Gamer` directly, keep the game
+  live in memory, delete serde+markup from the hot loop; NEEDS MICHAEL'S
+  DECISION because it trades away incidental render/serialise-panic coverage;
+  (4) a single all-games binary is convenience, not throughput - defer.
+- Two free wins recorded in `Fuzzer::command`: a full `PlayerRender` clone to
+  take one field, and a `state.to_string()` full state clone, both per move.
+- Worker 2 (WP-73 re-amendment) RETURNED and ACCEPTED. Lead re-read all three
+  edited files in full and confirms internal consistency; a grep for the old
+  counts (`54 file`, `54 after`, `54 wrappers`, `TWO entry points`,
+  `Accepted cost`, `delete fuzz_gamer`) returns only two deliberate historical
+  back-references. Files changed:
+  - `specs/WP-73-game-binary-consolidation.md` (222 -> 253 lines). Header now
+    cites D-41 + D-43. Counts corrected THROUGHOUT: 108 before / **81** after
+    (27 `_cli` + 27 `_http` + 27 `_fuzz`), **27** deletions not 54, in section 1,
+    3a, 3d, the preamble and every row of section 7 Verification. 3b restores
+    `fuzz_main` as a THIRD entry point (`brdgme_fuzz::fuzz_gamer::<G>()`,
+    non-async, no tokio) and reverses the "`brdgme_fuzz` is NOT a dependency"
+    line - `game_bin` now takes it. 3c gains the `_fuzz` wrapper example. 3d
+    rewritten as `_repl`-only with D-43's reason; the "delete `fuzz_gamer`" and
+    "accepted LocalRequester cost" follow-ons are gone. `GAME_PORTING.md`
+    instruction inverted: KEEP the fuzz layout entry and
+    `cargo run --bin <name>_N_fuzz`, remove only the repl entry. Section 7 now
+    asserts `fuzz_gamer` grep is **non-zero** after, with "zero hits means the
+    fuzz path was deleted in error". New non-goal fences off evaluation 4(d).
+  - `work-packages.md`: WP-73 entry - D-43 added to the header, D-41 bullet
+    rewritten to `_repl`-only/27 deletions, new D-43 bullet, THREE entry points,
+    `brdgme_fuzz` IS a `game_bin` dep, `rust/tools/fuzz/src/lib.rs` dropped from
+    the Paths list.
+  - `landing-order.md` 8.4: the "NEW file overlap WP-73 x WP-63" bullet is now
+    **WITHDRAWN** - WP-73 never touches `rust/tools/fuzz/src/lib.rs` post-D-43.
+    Records the reverse consequence: WP-63's `bo F29` reasoning stays TRUE.
+  - `specs/WP-63-fuzz-tool.md` needed NO edit - verified.
+- Lead recorded a stated crate-graph cost in WP-73 3b rather than hiding it:
+  `brdgme_game_bin` -> `brdgme_fuzz` -> `brdgme_cmd`/`brdgme_rand_bot`/
+  `num_cpus`/`rand`/`anyhow`, so `_cli` and `_http` now transitively link the
+  fuzz subtree. Judged acceptable (compile time and image size, not runtime
+  surface); fallback recorded is a `fuzz` cargo feature gate if image size
+  regresses measurably.
+- `decisions-session3.md` D-43 gained a **RESOLVED** subsection closing its open
+  question, correcting its own premise (both paths serialise), and recording the
+  one thing still needing Michael: the 4(d) render-coverage tradeoff.
+- `architecture-observations.md` gained a "Fuzz / requester layering" section:
+  the `Requester` abstraction forces a JSON boundary even with no transport;
+  `renders()` is unconditional and eager with no way to ask for less;
+  `LocalRequester` spawns per request not per session and `cli.rs` is a one-shot
+  by construction; no `Rc`/`RefCell`/`Cell` anywhere under `rust/game/*/src/`.
+- UNIT COMPLETE.
+
+---
+
+## 2026-07-26 - Lead unit: finalise WP-84 on the two-stream multi-topic design
+
+Brief: fold D-48/D-49/D-50 into `specs/WP-84-sse-migration.md`, remove all
+conditionality (single-stream fallback DELETED - browser leg measured `HTTP/2 200`),
+adopt the repeatable `?topic=game:<uuid>` param with N topics from day one, name
+`event:` fields meaningfully on the private stream, re-check the whole spec for
+internal consistency, and mark D-46 RESOLVED in `sse-topology-decision.md`.
+
+- Worker 1 DISPATCHED: verify how axum 0.8.9 (as locked in `rust/Cargo.lock`)
+  handles a REPEATED query key, by reading real crate source. This is the unit's
+  one genuine unknown - flagged in D-50 as "from general knowledge, NOT source".
+- Worker 1 RETURNED - **axum repeated-query-param question RESOLVED by reading
+  real crate source** (tarballs extracted from `~/.cargo/registry/cache/`; there
+  is no `vendor/` dir and no `registry/src/`). Chain read:
+  `axum-0.8.9/src/extract/query.rs` -> `serde_urlencoded-0.7.1/src/de.rs` ->
+  `serde_core-1.0.228/src/de/value.rs` (`MapDeserializer`, `PairDeserializer`)
+  and `de/impls.rs` -> `form_urlencoded-1.2.2/src/lib.rs` (`Parse::next`).
+  - **`Query<Vec<(String, String)>>` WORKS** and preserves every repeated pair in
+    query order. `deserialize_seq` -> `visitor.visit_seq(self.inner)`;
+    `MapDeserializer::next_element_seed` hands each pair to `PairDeserializer`.
+    serde_urlencoded's own doctest covers this exact type.
+  - `Query<HashMap<String, String>>` collapses duplicates, **last wins**
+    (`visit_map` loops `insert`).
+  - `Query<HashMap<String, Vec<String>>>` and `struct { topic: Vec<String> }`
+    both **FAIL with 400** - serde_urlencoded's `Part` value deserializer
+    forwards `seq` to `deserialize_any`, which only ever visits a string.
+  - `axum-extra` is **absent from `rust/Cargo.lock`** entirely (not even
+    transitive). Latest is 0.11.0 per the local index cache; its repeated-key
+    semantics are UNKNOWN-by-read (source not on disk).
+  - `serde_qs` is in the lock at **0.15.0 but only transitively** (leptos 0.8.20,
+    server_fn 0.8.13); latest is 1.1.2, so adding it directly at latest would put
+    two majors in the tree. **Not needed.**
+  - **No house pattern:** `grep -rn "extract::Query\|RawQuery\|axum_extra"` over
+    `rust/` returns ZERO hits. `rust/web/src` never parses a query string
+    server-side. Only client-side `use_query_map()` in `new_game.rs`/`players.rs`.
+  - **CONCLUSION: D-50's flagged concern is real for the HashMap/struct forms but
+    the fix needs NO new dependency.** Use `Query<Vec<(String, String)>>` and
+    filter for key == "topic".
+  - Lead correction to the Worker's closing line: it said to put the extractor on
+    `ws_handler`; that is wrong - `/ws` is being deleted. The extractor goes on
+    the new `/events/public` handler in `rust/web/src/events.rs`.
+- Worker 2 DISPATCHED: apply all edits to WP-84 + the three companion docs.
+- Worker 2 RETURNED and **ACCEPTED by the Lead** after reading the changed
+  sections directly. `specs/WP-84-sse-migration.md` is now ~406 lines, one
+  settled design with no conditionality.
+  - BLOCKER block -> SETTLED block citing the measured `HTTP/2 200` and D-48.
+  - Old §8 (single-stream fallback) DELETED; §9 -> §8, §10 -> §9. Lead verified
+    by grep: no `§9`/`§10`/`section 8` references survive in the file, and the
+    only surviving `?game=` string is the client-side instruction "Nothing may
+    still emit `?game=<uuid>`", which is correct.
+  - §3a carries the topic URL, the no-`[]` rationale, the never-three-streams
+    hard cap, and the explicit "dev is permanently HTTP/1.1, any FUTURE increase
+    in held-stream count must be re-checked against dev, not just prod".
+  - §3c gained "Topic parsing and validation" (collection from day one, only
+    `game:`, **cap N at 16**, 400 on unknown prefix / malformed uuid / no `:` /
+    zero topics / over cap) and a dense VERIFIED subsection recording the axum
+    finding with a four-row table of which `Query` forms work and which 400.
+  - §3d fan-out is now **set membership over N ids**, not equality against one.
+  - §3e event naming upgraded to a hard requirement with the D-49 rationale.
+  - §6 upgraded "prefer" to a ruling: **`/events/public` must stay UNMATCHED by
+    any rate rule**; any rule is scoped to `/events` and matches establishment
+    only.
+  - §8 tests gained an **N>1 topics both deliver** case (explicitly flagged as
+    the test that catches a HashMap-collapsing or struct-based extractor - without
+    it the wrong extractor passes every other test) and a 400-rejection case.
+- Companion docs updated: `sse-topology-decision.md` gained a RESOLVED banner at
+  the top with confirm-items 1/3/4 marked ANSWERED and the body left intact as
+  the surviving record of WHY; `landing-order.md` §10.4 retitled to "blocker is
+  DISCHARGED"; `work-packages.md` WP-84 heading is now plain `READY`.
+- Worker 2 flagged two things for the Lead:
+  1. `specs/WP-42-...md` carries stale cross-refs to the deleted §8 shape and to
+     `WP-84 §9`. **Worker 3 DISPATCHED** to sweep them.
+  2. **The cap of 16 is the Worker's proposal within D-50's stated intent, NOT a
+     Michael ruling.** Escalate.
+- Still genuinely UNRESOLVED and deliberately left as prove-before-deleting:
+  §3g's `ws_tasks: TaskTracker` deletion (needs the real-listener graceful-
+  shutdown proof) and §6's Cloudflare edge idle behaviour for `text/event-stream`.
+- Worker 3 RETURNED and ACCEPTED. Edited **only** `specs/WP-42-...md`: the §3d
+  sentence citing "the widened single-stream `?game=` param under WP-84 §8" is
+  rewritten to the settled two-stream design (D-48/D-49/D-50), and four `WP-84 §9`
+  test references corrected to `§8`. Matched on text, not on the line numbers in
+  the brief. Verified every other WP-84 section citation in WP-42 against the live
+  heading list (§2, §3a, §3c, §3d, §3g, §5, §7 - all correct). `specs-LOG.md`
+  untouched by instruction (append-only history; stale refs in it are correct
+  history). Coverage check: `grep -rlw SSE` over `planning/` returns only 9 files,
+  all accounted for.
+- Lead applied two supersession notes itself (planning-file writes, in scope):
+  - `ws-to-sse-evaluation.md` gained a **SUPERSEDED IN ITS RECOMMENDATION** banner.
+    Its recommendation was Option C (one stream) with `/events/public` "held in
+    reserve" - the exact opposite of what D-48 settled. Body kept: the crate-source
+    findings and UNKNOWN markers are why the file exists.
+  - `architecture-observations.md`'s pre-D-46 bullet "the browser leg is not
+    determinable from config, any design assuming HTTP/2 multiplexing is
+    unverified" gained an **ANSWERED** note. The config claim stands; the open
+    question does not. Reframed the surviving architectural point: a
+    production-relevant protocol fact is discoverable only by hitting the live
+    edge, because the zone's protocol settings live in the Cloudflare dashboard
+    and not in `infra/cloudflare.tf` (which sets only `ssl` and `websockets`).
+  - `raw/websocket-inventory.md` deliberately NOT touched - it is a raw snapshot
+    and is still factually accurate about repo state.
+- UNIT COMPLETE.
+
+---
+
+## 2026-07-26 - Lead unit: apply approved doc changes + rewrite the handover
+
+**WIDER WRITE PERMISSION.** Michael explicitly authorised writes to
+`docs/CODING.md` and `docs/BACKLOG.md` for this unit only, in addition to
+`planning/`. Everything else unchanged: never touch `rust/`, no cargo/git,
+reads only for validation. Workers on model opus (Michael override).
+
+Four deliverables:
+1. Apply `CODING-md-amendment-proposal.md` -> new `## Request-Path Invariants`
+   section in `docs/CODING.md`, between `## Rust: Error Handling` and
+   `## Leptos: SSR and Hydration`. Re-verify the anchors live.
+2. Apply `BACKLOG-note-proposed.md` -> `docs/BACKLOG.md` item #53 (verify #53
+   is still free).
+3. NEW `docs/BACKLOG.md` item for the maximum-performance fuzzer, per D-51 -
+   Michael asked that the discoveries be persisted outside the archival review
+   directory.
+4. Rewrite `ORCHESTRATOR-HANDOVER.md` for the next session.
+
+- [dispatch W1] Deliverables 1-3 (the three doc edits), one Worker.
+  Lead-directed factual correction carried in the brief: the proposed #53 row's
+  clause "Five egregious cases (a F1, b F4, b F7, e F30, d F37) are flagged
+  ... as candidates for immediate fix" is STALE. Later rulings re-parked `b F4`
+  (7 Wonders resources are not depleted by trade - Michael's binding
+  correction) and REJECTED `d F37` (not a bug). Only `a F1`, `b F7`, `e F30`
+  are fix-now. Worker instructed to correct that clause and change nothing
+  else in the row.
+- [W1 done] **ACCEPTED.** Lead re-read both changed regions directly.
+  - `docs/CODING.md`: anchors HELD exactly. `## Rust: Error Handling` and
+    `## Leptos: SSR and Hydration` present, adjacent, in order, one `---`
+    between them; the Error Handling section's final paragraph still begins
+    `**DOM access in event handlers.**`. New `## Request-Path Invariants`
+    section now sits at :69-176 with a fresh `---` below it, all six rules
+    verbatim from the proposal. Worker read all 633 lines before editing.
+  - **DRIFT: `docs/BACKLOG.md` item #53 ALREADY EXISTED** in the working tree,
+    matching the proposal text exactly. Someone (Michael or the concurrent
+    agent) had already applied it. Worker correctly did NOT duplicate it and
+    applied the stale-clause correction in place instead. Provenance of the
+    pre-existing row is UNKNOWN.
+  - The `b F4` / `d F37` correction LANDED (row 53): now reads "Three cases
+    (a F1, b F7, e F30) are flagged for immediate fix and are outside the park;
+    b F4 was re-parked and d F37 was rejected as not-a-bug."
+  - **The fuzzer item is #54, not #53** (next free after the pre-existing 53).
+    Carries all seven D-51 must-survive points and links the evaluation.
+  - Open for Michael, flagged by W1: #54 is not listed in BACKLOG.md's
+    "Priority order (updated 2026-07-24)" block at the top. Left alone
+    deliberately (outside "change nothing else").
+- [dispatch W2] Deliverable 4 - rewrite `ORCHESTRATOR-HANDOVER.md`.
+- **LEAD FINDING while cross-checking (new, not previously recorded anywhere):
+  the migration-numbering collision is FOUR packages, not three.**
+  `landing-order.md` 6.4/6.5 records WP-50, WP-56 and WP-58 as each adding a
+  migration and each assuming `022` is the highest. But
+  `specs/WP-34-auth-races-session-mechanical.md` names its new migration
+  **`rust/web/migrations/023_login_email_sends.sql`** explicitly, and WP-50's
+  is **`023_canonical_emails.sql`** - a direct filename-number clash between
+  two specs. So the set is **WP-34, WP-50, WP-56, WP-58**; the second, third
+  and fourth to land must renumber. Recorded here and carried into the
+  rewritten handover. `landing-order.md` itself NOT edited - out of this
+  unit's four deliverables; flag it to the next Lead.
+- **LEAD FINDING: `README.md`'s "no spec" lists are STALE.** It claims WP-04,
+  05, 46, 55, 58, 64, 66, 67 have no spec, but `specs/WP-04-game-parser-design.md`
+  and `specs/WP-05-color-dead-parse-api.md` both exist and are complete. The
+  spec-writing unit ran after that README text was written. W2 was told to
+  establish the remaining-work picture by listing `specs/` directly rather than
+  trusting the prose, which is the right call. README not corrected here
+  (outside this unit's deliverables).
+- **LEAD FIX (planning-file write, in scope):** `decisions-session3.md` had
+  **D-42's ruling orphaned** under D-51's "Home for it" section with no heading
+  of its own, so it read as part of the fuzzer decision. Restored a
+  `## D-42 - lords-of-vegas-1 gets WP-73 too, but stays undeployed` heading with
+  a note explaining the restoration. This matters because the handover points
+  successors at that file as the authoritative D-41..D-51 record.
+- **LEAD FINDING: `specs/WP-50-email-canonicalization.md`'s header carries a
+  WITHDRAWN ordering constraint.** It still says *"WP-78 (`db.rs` split) is
+  deferred until this lands."* `landing-order.md` 7.3 explicitly **withdraws**
+  that and **reverses the direction** - the item is now WP-82, and it is
+  **WP-82 -> WP-50**, with WP-82 a hard predecessor of the whole web cluster.
+  An implementer reading only the WP-50 spec would sequence it backwards.
+  Spec NOT edited (outside this unit's deliverables) - flagged to the next Lead
+  and recorded in the rewritten handover's remaining-work notes.
+- [W2 done] **ACCEPTED.** `ORCHESTRATOR-HANDOVER.md` rewritten in place, **234
+  lines**, ASCII-clean (all `section` spelled out, no em dashes/smart quotes).
+  Lead read it in full. Ten sections, all ten required points present.
+  - W2 established REMAINING work properly: listed `planning/specs/` (**59 spec
+    files** + `notes-conventions.md`), grepped every `checklists/T3-B*.md` for WP
+    references, reconciled against a full read of `work-packages.md` and
+    `landing-order.md` 7 and 10. **Spec coverage is effectively complete**; the
+    only genuine gap is **WP-76, WP-77, WP-79, WP-80** (the unowned cluster).
+  - Correctly refused to quote package totals - `work-packages.md`'s own
+    Coverage-check disowns them (computed pre-WP-83/84). Marked UNKNOWN.
+  - Drift W2 found and recorded: **`work-packages.md` has NO entry for WP-83**
+    (only a passing mention in WP-84's package-count note) though the spec
+    exists and is complete; `README.md`'s status banner and file map are stale
+    (it says the newly-unblocked specs are unwritten - they are written - and
+    still lists both doc proposals as unapplied - both are now applied).
+  - LEAD EDIT on top of W2: folded in the two Lead findings above - the
+    migration collision corrected to **four** packages (WP-34 added, with the
+    `023` filename clash against WP-50 named), and the stale `WP-50 -> WP-78`
+    ordering in the WP-50 spec header flagged for correction.
+- **UNIT COMPLETE.** All four deliverables landed and accepted.
+
+## 2026-07-26 - Unit: planning-corpus inconsistency cleanup (Lead, opus workers)
+
+Scope: five known inconsistencies handed down from the previous Lead. NOT a
+general audit. Workers spawned serially, opus, read-only outside `planning/`.
+
+- [W1 done] **ACCEPTED.** Tasks A (migration collision) + B (WP-50 ordering).
+  - Verified by reading all four specs: **all four DO add a migration.**
+    WP-34 `023_login_email_sends.sql` (hard-coded), WP-50
+    `023_canonical_emails.sql` (hard-coded), WP-56 `0NN_settings_email_token.sql`
+    ("next free"), WP-58 `0NN_unsubscribe_token.sql` ("next free"). The WP-34 vs
+    WP-50 `023` clash is REAL.
+  - **Highest existing migration verified: `022_concede_bot_replacement.sql`**,
+    by `ls rust/web/migrations/` (read-only). `find` located exactly one
+    `migrations` dir under `rust/`. So every spec's "022 is highest" premise is
+    correct as of today. UNKNOWN: whether migrations exist embedded elsewhere
+    (nothing found).
+  - `landing-order.md` 6.4 rewritten to a four-row table + plain renumbering
+    rule (only the first lander uses `023`; 2nd/3rd/4th renumber to the
+    then-next free number and must not collide with each other; re-`ls` the
+    dir immediately before writing rather than trusting the spec's number).
+    6.5 collapsed to a pointer. 7.3 updated to include WP-34. The old
+    `WP-50 -> WP-78` bullet in 6.4 marked WITHDRAWN.
+  - Task B was **plain staleness, not a factual conflict** (landing-order 7.3
+    is the later record, explicitly withdraws the old constraint, and
+    `work-packages.md` marks WP-78 SUPERSEDED). `specs/WP-50-email-canonicalization.md`
+    header now states `WP-82 -> WP-50`.
+  - W1 flagged but did not fix: WP-50 section 4 still says "no `db.rs`
+    restructuring (WP-78)"; WP-34 and WP-50 still hard-code `023` with no
+    pointer to the renumbering rule. -> handed to W2.
+- [W2 done] **ACCEPTED.** Mop-up of the stale refs W1 flagged.
+  - `specs/WP-50-email-canonicalization.md`: section 4 non-goal now says the
+    `db.rs` restructuring is **WP-82** (WP-78 superseded by it); section 3e
+    renamed to `0NN_canonical_emails.sql` with an explicit "023 is NOT
+    guaranteed" warning, a pointer to `landing-order.md` 6.4, an instruction to
+    `ls rust/web/migrations/` immediately before writing, and a note to keep the
+    `RAISE EXCEPTION` message in step with the real number.
+  - `specs/WP-34-auth-races-session-mechanical.md`: header Files list and the
+    section 3 migration paragraph both renamed to `0NN_login_email_sends.sql`
+    with the same pointer; the old "verify nothing above 022 exists" phrasing
+    replaced by the fresh-`ls` instruction.
+  - Grep confirmed no other `WP-78` mentions in either file beyond the WP-50
+    header passage that already states the supersession.
+  - Left deliberately (recorded, not fixed): WP-50 still contains two literal
+    `023` strings inside the `DO $$` block's exception message and in a
+    regression-test description; the 3e pointer tells the implementer to update
+    them.
+- [W3 done] **ACCEPTED.** `work-packages.md` - WP-83 entry, WP-84 check, totals.
+  - **WP-83 entry ADDED** under a new `## Released from the rules park
+    2026-07-26 (D-35)` section, numerically between WP-82 and WP-84. READY,
+    spec cross-referenced, scope = `a F1` / `b F7` / `e F30` seat-order half,
+    no `RULES.md` edits, `b F4` re-parked and `d F37` rejected called out as
+    explicitly out of scope. Lead verified the heading exists.
+  - **Coverage bookkeeping settled from evidence, not assumption: WP-83 is a
+    CARVE-OUT, not a re-assignment.** The three findings STAY counted under
+    WP-12 / WP-16 / WP-30 - each of those entries still lists them in its own
+    Scope line, and WP-30's "3, was 5" drop is attributed solely to `e F39` /
+    `e F40` moving to WP-81. WP-81 is the re-assignment precedent and says so
+    explicitly; nothing equivalent exists for WP-83. **WP-83 adds 0 to the 570
+    sum; no coverage row changes.** Stated in the entry.
+  - **WP-84 entry needed ONE correction:** its landing-order bullet read
+    `WP-82 -> WP-47 -> WP-42 -> WP-84`, implying all of WP-42 gates it. The
+    spec gates only WP-42's **predicate work**. Corrected. Otherwise accurate
+    (two-stream, all conditionality removed, D-44..D-50, WP-42 Task B deleted).
+  - **TOTALS RECOUNTED RELIABLY** (grep over `^### WP-` headings; the three
+    status buckets sum exactly to the heading count):
+    **84 headings = 77 READY + 6 BLOCKED-ON-USER-RULES-REVIEW + 1 SUPERSEDED.**
+    Parked 6 = WP-11, 12, 16, 20, 26, 30. Superseded 1 = WP-78 (by WP-82).
+    **`BLOCKED-ON-DECISION`: 0 headings - extinct, confirmed by grep.**
+    Written as a dated block; the three earlier dated updates kept as history.
+    Per-package findings table and the 570 sum untouched.
+  - Noticed, NOT fixed (recorded for the handover): the prose above the
+    coverage table still names only WP-74/WP-75 as the zero-finding
+    exceptions, but that set has grown to WP-74..WP-80, WP-82, WP-83, WP-84;
+    and the file's section headings are chronological, so numeric ordering
+    only holds while each new package takes the next free number.
+
+## 2026-07-26 - Unit: planning-corpus inconsistency cleanup (RESTART Lead)
+
+The previous Lead of this unit died on quota. **Step 0 state audit, by reading
+only** (no shell mutations, nothing under `rust/` touched):
+
+- **Item 1 (four-package migration collision): ALREADY DONE.** `landing-order.md`
+  6.4 carries the four-row table (WP-34 / WP-50 / WP-56 / WP-58), names the
+  WP-34 vs WP-50 `023_*.sql` filename clash, and states the renumbering rule.
+  6.5 is a pointer; 7.3 includes WP-34. Independently re-verified by this Lead:
+  `rust/web/migrations/` highest is `022_concede_bot_replacement.sql`.
+- **Item 2 (WP-50 stale ordering): ALREADY DONE.** `specs/WP-50-*.md` header
+  now states `WP-82 -> WP-50` and calls the old `WP-50 -> WP-78` withdrawn;
+  section 3e is `0NN_canonical_emails.sql` with the renumber warning.
+- **Item 3 (WP-83 entry): ALREADY DONE.** `work-packages.md` has the
+  `## Released from the rules park 2026-07-26 (D-35)` section with WP-83;
+  WP-84's entry exists and its landing-order bullet was corrected.
+- **Item 5 (totals): ALREADY DONE.** Recount block present: 84 = 77 READY +
+  6 BLOCKED-ON-USER-RULES-REVIEW + 1 SUPERSEDED. Re-verified by heading grep.
+- **Item 4 (README): PARTIAL - this is the dead predecessor's half-applied
+  edit.** The banner and file map WERE updated (both proposals marked APPLIED,
+  totals 84, four-package collision, session-3 files listed), but two later
+  sections still contradict it: the "Corrections to the tiering" section still
+  says WP-04/05/46/55/58/64/66/67 have no spec and WP-48/50/69/70/71/72/73 have
+  no checklist (all but WP-48/72 now have specs), and the Implementer rules
+  section still says "Two doc proposals are unapplied". Verified live:
+  `docs/CODING.md` has `## Request-Path Invariants`; `docs/BACKLOG.md` has
+  items #53 and #54. -> dispatched to W4.
+- Also verified live: 59 spec files in `specs/`, 8 checklists in `checklists/`.
+
+**`specs/WP-84-sse-migration.md` integrity spot-check: PASSES.** Read by the
+Lead (406 lines). Header is complete (findings, D-44..D-50, landing order with
+"WP-42's predicate work" only, length justification, the SETTLED banner).
+Section numbering runs 1..9 with no gaps: regression tests are §8 and riders
+§9, exactly as `landing-order.md` 10.4 claims. Every internal cross-reference
+(§3a, §3c, §3d, §3e, §3g, §4, §7, §8) resolves to a heading that exists. The
+only surviving mention of the single-stream fallback is the banner sentence
+recording its deletion. No TODO/TBD/blocked markers, no orphan conditionality.
+Not redesigned; integrity only.
+
+- [Lead] `ORCHESTRATOR-HANDOVER.md` "State: what REMAINS" updated: the
+  "Package totals: UNKNOWN" paragraph replaced with the recounted 84 = 77 + 6 +
+  1 figure and its method; the "Known drift" paragraph (no WP-83 entry, stale
+  README) replaced with a drift-cleared note; a new open-items list added
+  carrying forward the three things this unit recorded but did not fix
+  (work-packages zero-finding prose, chronological heading order, WP-50's two
+  literal `023` strings).
+- [W4 done] **ACCEPTED.** `README.md` - the dead predecessor's half-applied
+  item 4 finished. Lead verified the edits landed by grep.
+  - "Corrections to the tiering" rewritten: the 8 formerly-blocked Tier 2
+    packages (WP-04, 05, 46, 55, 58, 64, 66, 67) and the formerly-blocked
+    Tier 3 set (WP-48, 50, 69, 70, 71, 73) all have specs now; WP-72 has no
+    file by design (inside `specs/WP-69-deny-toml-hardening.md`, confirmed by
+    reading that spec); WP-17, WP-81 and the three parity carve-outs are
+    specced. Closing bullet now agrees with the banner that WP-76/77/79/80 is
+    the only remaining gap.
+  - "Implementer rules": the "two doc proposals are unapplied" bullet replaced
+    with a one-line historical note (both applied 2026-07-26, do not re-apply).
+  - `## The tiering` gained a lead-in marking its three bullets as the
+    ORIGINAL plan's tiering, and a dead pointer to "note 2 in
+    `open-decisions-for-user.md`" was removed (that file is a stub - read).
+  - **Correction to the Lead's brief, accepted:** the brief said WP-48 was
+    still spec-less. It is not - `specs/WP-48-export-import.md` exists.
+    **WP-72 is the only genuinely spec-less package** among those named.
+  - W4 verified by `ls`/read: 59 `WP-*.md` specs, 8 checklists T3-B1..B8,
+    WP-69 spec's WP-72 statement, WP-83's three carve-out sections, WP-17's
+    D-25 constraint, and `open-decisions-for-user.md` being a stub.
+  - Recorded, NOT fixed (File map was off-limits, and scope discipline):
+    (a) the File map row for `decisions-needed.md` says "D-1..D-41" while
+    `decisions-session3.md` covers D-41..D-51 - possible stale range;
+    (b) whether D-41..D-51 have been folded into `decisions-ANSWERED.md` is
+    **UNKNOWN** - not verified by anyone this unit;
+    (c) `tier2-tier3-plan.md` is still stale at source - only README's
+    description of it was corrected.
+
+**UNIT COMPLETE.** All five items landed; WP-84 integrity confirmed.
+
+---
+
+## Unit: D-52 / D-53 application (Lead, 2026-07-26)
+
+Scope: apply the two rulings just confirmed by Michael in
+`decisions-session3.md`. Write-scope limited to `planning/` + `docs/BACKLOG.md`.
+One Worker, opus.
+
+- [W1 done] **ACCEPTED.** All three items landed; Lead re-verified each by
+  reading the changed regions.
+  - **D-53 - `docs/BACKLOG.md` #54 placement.** Priority block header re-dated
+    `(updated 2026-07-24)` -> `(updated 2026-07-26)`. #54 appended to the
+    **"Then"** tier after #15, reading: "#54 maximum-performance fuzzer (after
+    #31, which reworks the workspace layout the fuzz bins sit on; a faster
+    fuzzer makes every subsequent game port and remediation package cheaper to
+    validate)". Nothing reordered. Consistency fix in the #54 Status row:
+    "unscheduled, nothing measured" -> "scheduled 2026-07-26 into the Then tier
+    after #31 (D-53), nothing measured"; rest of the row untouched.
+  - **D-52 - WP-84 topic cap.** The **number was already 16** and over-cap was
+    already a **400** with no truncation anywhere in the file - no number
+    changed. One real hedge did need fixing: the cap bullet said "the
+    implementer may pick a different small number within that intent", an
+    explicit licence to deviate. `specs/WP-84-sse-migration.md` section 3c now
+    reads "**Cap N at 16 (D-52 - Michael's ruling, not a proposal).** ... the
+    implementer must use **16**", restating 400-not-truncation.
+  - **ORCHESTRATOR-HANDOVER.md open items.** Intro now says two of the four are
+    resolved and must not be re-raised. Item 1 (topic cap) struck through,
+    marked RESOLVED 2026-07-26 - D-52. Item 4 (#54 priority) struck through,
+    marked RESOLVED 2026-07-26 - D-53. Items 2 and 3 untouched, numbering
+    preserved.
+  - **Recorded, NOT fixed** (out of the unit's stated scope): the handover's
+    "Where to start reading" and "State: what is DONE" still describe
+    `decisions-session3.md` as covering **D-41..D-51**; it now runs to **D-53**.
+    Same class as the stale-range note already logged for `README.md` above.
+    Also unchanged: `decisions-session3.md` is not in numeric order - D-52 and
+    D-53 sit between D-50 and D-51, with D-42 last.
+
+**UNIT COMPLETE.** Both rulings applied and verified; no number was silently
+changed.
+
+---
+
+## 2026-07-26 - Unit: handover cleanup-pass section (Lead + 1 Worker)
+
+Scope: append one section to `ORCHESTRATOR-HANDOVER.md` instructing the successor
+Orchestrator to run a cleanup and consolidation pass. Focused unit, one document.
+
+WRITES:
+- `ORCHESTRATOR-HANDOVER.md` - appended `## NEXT SESSION: cleanup and consolidation
+  pass` at the end. File went 279 -> 374 lines (+95). Existing 279 lines untouched;
+  append-only. VERIFIED by the Lead reading lines 276-375.
+
+Section contents: six ordered items - (1) disambiguate `specs/` (~26 compact Tier 2
+vs ~25 bloated pre-tiering specs, no filename marker; highest-risk item; archive or
+delete the superseded ones; decide BY READING, not filename/date/size); (2) merge
+`decisions-needed.md` + `open-decisions-for-user.md` + `decisions-ANSWERED.md`
+(D-01..D-34) + `decisions-session3.md` (D-41..D-53) into one sorted `DECISIONS.md`
+(session3 is not in numeric order); (3) retire the process exhaust - `specs-LOG.md`,
+`ORCHESTRATOR-HANDOVER.md` itself, `tier2-tier3-plan.md`; (4) replace the handover
+with a short `EXECUTION-README.md` (landing order, WP-82-first, migration
+renumbering across FOUR packages WP-34/50/56/58, parked list plus the two
+non-reopenable parity items, line-number and proportionality lessons); (5) refresh
+`README.md` LAST; (6) decide WP-76/77/79/80 by reading `landing-order.md` and
+`work-packages.md`. Plus a `### Ground rules` subsection: same read-only/opus/serial
+rules, and destructive moves LAST and in ONE pass so a dying Lead leaves the corpus
+readable rather than half-dismantled.
+
+NOT ADDED to the section (reported to Michael instead, his call - out of brief scope):
+other retirement candidates spotted by `ls` only, contents UNKNOWN -
+`BACKLOG-note-proposed.md` and `CODING-md-amendment-proposal.md` (both already
+recorded as APPLIED/historical), `ws-to-sse-evaluation.md` (superseded in its
+recommendation), `triage-LOG.md` (4.9KB, same exhaust family), and
+`raw/cathedral-stray-edits.diff` (a diff against `rust/` living in the planning
+tree - needs a deliberate keep-or-drop call before committing). Also noted:
+`decisions-needed.md` is 81KB, by far the largest of the four decision docs, so item
+2's merge needs a real strategy and unit-sizing, not a copy-paste.
+
+Sizing observation, recorded as CORRELATION not proof: `specs/` holds 51 `WP-*`
+files plus `notes-conventions.md`; sizes cluster bimodally (~4.8-17KB vs ~30-197KB)
+and the large ones skew Jul 25 while the small ones skew Jul 26. Consistent with the
+~26/~25 split, but item 1 explicitly forbids deciding on this basis.
+
+ACCEPTED by the Lead. No `rust/` writes, no cargo, no git mutations.

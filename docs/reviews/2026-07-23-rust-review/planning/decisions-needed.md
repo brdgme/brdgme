@@ -55,6 +55,44 @@ Sequencing facts for the implementing agent live in `planning/landing-order.md`.
 
 ---
 
+## ANSWERED - 2026-07-26 session (ALL remaining decisions)
+
+**Every open decision is now closed.** The user answered the 34-row table in
+`open-decisions-for-user.md` (now a stub); the resolved record, with the
+constraints attached to each ruling, is **`planning/decisions-ANSWERED.md`** -
+read that first. Each item below also carries its own `ANSWERED (2026-07-26)`
+block.
+
+Closed in this session: **D-7, D-8 (refined), D-10 (extended), D-11, D-14,
+D-15 (redesigned), D-16, D-17, D-18, D-19, D-20, D-21, D-22, D-23, D-24,
+D-25, D-35 (park confirmed), D-37 (corrected), D-38, D-39, D-40**, plus the
+`bo F25` cluster rider and the six N-items (N-1..N-6) that lived only in the
+user-facing table. `D-9` was also confirmed (option B). `D-41` was already
+resolved by a Lead ruling.
+
+**Five rulings SUPERSEDE previously recorded text. Do not follow the old text:**
+
+| item | old position | new ruling |
+|---|---|---|
+| **D-7** | option A: `--redact-private`, default ON for a user-facing export path | **OVERRULED** - no redacted export at all; the only export is the full bundle, admin-only |
+| **D-8** | restart path exempted, falling into D-5's dangling-name no-op + admin warning | **REFINED** - restart resolves a deprecated bot to the **latest non-deprecated** version |
+| **D-15** | "A-plus": keep a reserved-verb list, game-scoped override | **REDESIGNED** - game parser first, platform commands as fallback; only a small hard-reserved escape-hatch set (`help`) always wins |
+| **D-16** | option A: explicit Turnstile `render()` from a login-component effect | **OVERRULED** - option B: `/login` is a normal unrouted link forcing a full page load |
+| **D-37** | bare `{{` as the literal-brace escape | **CORRECTED** - `{{lbrace}}`; a bare `{{` cannot be implemented soundly |
+
+**Parity outcomes for the five egregious candidates** (Group D banner updated
+in place): `a F1` FIX NOW; `b F7` FIX NOW; `e F30` CONDITIONAL; `b F4` PARKED
+with the user's correction; `d F37` REJECTED, not a bug.
+
+**Standing constraints introduced this session** (they bind more than the row
+that produced them - full text in `decisions-ANSWERED.md`): dependency work
+upgrades everything to latest FIRST (D-17); macro surfaces stay small and
+obvious (D-20); WP-04 keeps the parser straightforward and obvious (D-38); no
+Sentry functionality may be lost (D-18); `lib/cost` gains suitable automated
+tests (D-25).
+
+---
+
 ## Group A - security and data integrity
 
 ### D-1. Email From-header authentication redesign [unblocks WP-56]
@@ -255,6 +293,20 @@ Question: accept that, or add redaction?
 Recommendation: A with default-on redaction; debugging rarely needs
 other players' hidden hands, and pasted bundles are effectively public.
 
+**ANSWERED (2026-07-26): OVERRULED - NEITHER OPTION AS WRITTEN. Do not
+build a redacted user-facing export at all.**
+**This SUPERSEDES the recommendation above (option A, `--redact-private`
+default ON for a user-facing path). Do not implement it.**
+- **The only export path is the full bundle, admin-only.**
+- The `--redact-private` flag is **out of scope**.
+- The user-facing export path is **out of scope**.
+- Bug reporting is by **game ID**, not by pasted bundle.
+- The user **explicitly accepts the risk** that game state may change
+  after a report is filed and render that report useless.
+**WP-48's scope shrinks accordingly** - see its entry in
+`work-packages.md`. wd F7's privacy work becomes "make the export
+admin-only"; the remaining import nits are unchanged mechanical riders.
+
 ### D-8. Bot-slot validation choke point [unblocks WP-45]
 Context: client-supplied bot slots are unvalidated at 4 entry points
 (create_proposal, add_proposal_player, restart_core, email `new`); a
@@ -280,6 +332,22 @@ wedge the game and must NOT cause a rejection at turn time - it falls
 into D-5's dangling-name no-op path plus the admin warning. In other
 words: validate on write, tolerate on read.
 
+**REFINED (2026-07-26) - the restart path gets an ACTIVE resolution, not a
+carve-out.** Option C and "validate on write, tolerate on read" still
+stand. What changes is the game-restart case:
+- **On restart, resolve a deprecated bot to the LATEST NON-DEPRECATED
+  version of that bot**, and start the game with that.
+- **This SUPERSEDES** the proposal put to the user, which was to merely
+  exempt the restart path from write-validation and let it fall into
+  D-5's dangling-name no-op plus admin warning. **That no-op fallback is
+  NOT the answer for restart** - do not implement it there.
+- The no-op-plus-admin-warning path remains correct for the *other* case
+  D-8 describes: a bot name that goes missing or is disabled **after** a
+  game has started must not wedge the game and must not be rejected at
+  turn time.
+Reflect this in the WP-45 spec (`specs/WP-45-bot-slot-validation.md`) and
+keep WP-38's D-5 text consistent with it.
+
 ### D-9. Email canonicalization policy [unblocks WP-50]
 Context: emails are stored/compared untrimmed and case-sensitive across
 auth, invites, new-game and settings; duplicate accounts and
@@ -294,6 +362,12 @@ permanently un-matchable against new normalized input; the migration is
 small and the collision risk (two accounts differing only by case) is
 worth surfacing once, deliberately.
 
+**ANSWERED (2026-07-26): Option B**, as recommended. Trim + lowercase at
+all four input boundaries, PLUS the one-off migration lowercasing stored
+rows, PLUS the lower-index (or citext) unique constraint. Surface the
+case-collision risk once, deliberately, during the migration. Unblocks
+WP-50.
+
 ## Group B - platform behaviour
 
 ### D-10. Unsubscribe RFC 8058 compliance [unblocks WP-58]
@@ -307,6 +381,18 @@ Options:
 Recommendation: A - deliverability to Gmail/Yahoo is a real product
 concern for a turn-notification product.
 
+**ANSWERED (2026-07-26): Option A, WITH AN ADDITION.** Build the HTTPS
+one-click endpoint (tokenised, no auth redirect) as recommended, and
+additionally the mail must carry **two visible links**:
+1. A **type-specific** unsubscribe link matching the email type actually
+   received - e.g. "Unsubscribe from game reminders" on a reminder mail.
+2. A **"Manage my subscriptions"** link to the user settings page.
+The `List-Unsubscribe` / `List-Unsubscribe-Post` headers **still point at
+the one-click endpoint**; the visible links are **additional, not a
+replacement** for the headers. Also fix the help text that advertises
+subscribe/unsubscribe verbs the standalone dispatch rejects. Unblocks
+WP-58.
+
 ### D-11. Reminder preference semantics [unblocks WP-46]
 Context: the reminder sweep gates on turn_emails_enabled, but a separate
 reminder_emails_enabled flag exists.
@@ -317,6 +403,17 @@ Question: which flag governs reminders?
 Recommendation: A - it is what the flag names promise users; B silently
 makes reminder_emails_enabled dead when turn emails are off, which is
 the current bug's shape.
+
+**ANSWERED (2026-07-26): Option A.** `reminder_emails_enabled` alone
+governs reminder emails; `turn_emails_enabled` governs turn
+notifications only. The reminder sweep must **not** consult
+`turn_emails_enabled`.
+**User's rationale, which is the design intent to preserve:** some users
+play mainly by web and do not want turn emails, but reminders are still
+useful to them if they have **missed or forgotten** a game. Option B
+would make the reminder flag dead for exactly those users.
+Unblocks WP-46 - its last remaining blocker (D-2 was already answered:
+at-least-once, do not mark `sent` on skip paths).
 
 ### D-12. Fail-open posture: Turnstile + encryption key [unblocks WP-35]
 Context: Turnstile verifier errors fail open and an unset secret
@@ -512,6 +609,15 @@ Settled per sub-item:
   That flow lives in the web UI with a confirmation link (D-1 removed
   account-security commands from email).
 
+**CONFIRMED (2026-07-26) - link-vs-code is a NON-GOAL. Keep the 6-digit
+code.** The 2026-07-25 answer says "confirmation link", but the
+email-change flow already exists in live code, is already compliant, and
+uses a **6-digit code**. The specs correctly marked link-vs-code
+cosmetic. WP-35 and WP-56 ship as specced; nothing changes.
+**User's rationale:** it is "low value UI we need to maintain into the
+future." An actual link is new UI work with no security gain; if it is
+ever wanted it needs its own package.
+
 ### D-15. Reserved email verbs vs game move grammars [informs WP-59]
 Context: game-scoped email dispatch reserves verbs (undo, concede, ...)
 that could collide with a game whose move grammar uses the same word.
@@ -541,6 +647,36 @@ decision is re-made. Option A can no longer be adopted as written; it would have
 to become "A-plus": document the reservation AND fix or exempt the two colliding
 games.
 
+**ANSWERED (2026-07-26): NEITHER A NOR B NOR "A-plus". The design is
+REDESIGNED and now SETTLED.** Michael proposed the design; the
+Orchestrator ruled on it.
+
+**The ruling:**
+- **Do NOT hardcode a reserved-verb list.**
+- On **game-scoped** messages, **try the game command parser FIRST.**
+- **Platform commands are the FALLBACK**, tried only when the game parser
+  fails on that input.
+- **One carve-out:** keep a **small hard-reserved set of escape-hatch
+  verbs** (`help` and equivalents) that **always win**, even on the game
+  path. Rationale: a game with a greedy parser must not be able to
+  swallow the only command that unsticks a user. **Keep this set small
+  and obvious.**
+
+**This SUPERSEDES** the "A-plus" recommendation put to the user (keep the
+reserved-verb list and disambiguate on the game-scoped path so a
+declaring game wins there). There is **no reserved-verb list** in the new
+design beyond the escape-hatch set. Do not implement a reservation table.
+
+**Consequences:**
+- The live defect is fixed: acquire-1 and starship-catan-1 players can
+  issue `end` by email again, because the game parser is consulted before
+  `"end" => run_end(ctx)` in `rust/web/src/email/commands.rs`.
+- **WP-59 Task 14 is UNGATED**, but its content changes: the COMMANDS.md
+  section must document **parser-first dispatch plus the escape-hatch
+  set**, not a "Reserved verbs on the email path" reservation. Rewrite it
+  rather than executing it as specced.
+- `wfe F29` follows this outcome.
+
 ### D-16. Turnstile rendering after client-side nav [unblocks WP-55]
 Context: the Turnstile widget likely never renders when /login is
 reached by SPA navigation (script only scans on full page load).
@@ -550,7 +686,65 @@ Options:
 Recommendation: A - keeps SPA behaviour; B is a one-line fallback if A
 misbehaves.
 
+**ANSWERED (2026-07-26): Option B. OVERRULED in favour of the simpler
+option.**
+**This SUPERSEDES the recommendation above (option A, explicit `render()`
+from the login component effect). Do NOT call Turnstile's `render()` from
+an effect.** Make `/login` a **normal, unrouted link that forces a full
+page load**, so Turnstile's automatic rendering just works.
+**User's reasons:** complexity concern, and the login page should load
+very fast.
+
+**Mechanism VERIFIED 2026-07-26 by reading the vendored router source
+(read-only). `rel="external"` works in the version actually in the tree:**
+- `rust/web/Cargo.toml`: `leptos = "0.8.20"`, `leptos_router = "0.8.14"`
+  (`Cargo.lock` resolves 0.8.14 exactly).
+- `leptos_router-0.8.14/src/location/mod.rs` reads the DOM `rel`
+  attribute, splits on space/tab, and returns early - letting the browser
+  handle the click - if any token is `external` (or the anchor has
+  `download`). So `rel="external"` and `rel="noopener external"` both opt
+  out of client-side routing.
+- **A plain `<a>` is NOT sufficient on its own.** Interception is a
+  **window-level** click listener
+  (`leptos_router-0.8.14/src/location/history.rs`) that walks
+  `composed_path()` for any `HtmlAnchorElement` - it does not care whether
+  the anchor came from `<A>` or a literal `<a>`. `rel="external"` is
+  required either way.
+- `<A>` has **no `rel` prop**. Use either `attr:rel="external"` spread
+  onto `<A>` (attribute spreading on `<A>` is already proven in this
+  codebase - `rust/web/src/app.rs` uses `attr:class` on the `/login`
+  link), or a plain `<a href="/login" rel="external">`. The plain anchor
+  is simplest; `<A>`'s only extra behaviour is `aria-current` active
+  marking, irrelevant for a login link.
+- Current `/login` links, both `<A>` and both client-side routed today:
+  `rust/web/src/app.rs` (the `index-cta` "Start a game" link) and
+  `rust/web/src/components/layout.rs` (the "Login" nav link).
+
+**GAP - WP-55 must also close this; `rel` cannot cover it.** Three
+navigations to `/login` go through `use_navigate`, which never touches an
+anchor and is therefore never subject to the `rel` check:
+`rust/web/src/components/layout.rs` (post-logout),
+`rust/web/src/settings.rs` (anonymous redirect), and
+`rust/web/src/admin.rs` (anonymous redirect). These need a hard
+navigation (a location assignment) instead, or Turnstile will still fail
+to render for users who arrive at `/login` by those paths.
+
 ## Group C - dependencies and build
+
+> **STANDING PROCESS CHANGE (2026-07-26), from the D-17 answer, binding on
+> this WHOLE GROUP - not just D-17.**
+>
+> Michael's strategy is to stay **as close to latest dependencies as
+> possible so they never go stale.** Therefore, for this and **any similar
+> dependency problem**, the **first** step is:
+>
+> **"Upgrade all dependencies to latest and see where we stand."**
+>
+> The problem may simply resolve. Only if it does **not** should the
+> recorded workaround (vendoring, pinning, feature-juggling) be taken.
+> Apply this ordering to WP-64, WP-65, WP-66, WP-67, WP-69, WP-70, WP-71,
+> WP-72 and WP-73 alike: upgrade first, then re-assess whether the
+> workaround is still needed, and record what the upgrade changed.
 
 ### D-17. sqlx 0.8/0.9 unification [unblocks WP-66]
 Context: web is on sqlx 0.8 (pinned by tower-sessions-sqlx-store);
@@ -562,6 +756,16 @@ Options:
 Recommendation: B if no compatible release exists at fix time - the
 store is trivial; check crates.io first, A if it has shipped.
 
+**ANSWERED (2026-07-26): ACCEPTED, but with an explicit FIRST STEP that
+comes before either option.**
+1. **Upgrade all dependencies to latest and see where we stand.** The
+   sqlx 0.8/0.9 split may simply resolve.
+2. Only if it does **not**, vendor the `tower-sessions-sqlx-store`
+   (option B) and move everything to 0.9.
+**This is a standing process change, not a one-off** - see the Group C
+banner above. Michael's strategy is to stay as close to latest as
+possible so dependencies never go stale. Unblocks WP-66.
+
 ### D-18. sentry feature trim [unblocks WP-67]
 Context: sentry default features drag actix-web + ureq into every
 server build; the native-tls transport choice is deliberate.
@@ -570,6 +774,16 @@ panic, tracing/tower as used + native-tls transport), verified with
 cargo tree?
 Recommendation: Yes - mechanical once the feature list is confirmed
 against actual usage; no product trade-off.
+
+**ANSWERED (2026-07-26): Yes**, trim to explicit features (backtrace,
+contexts, panic, tracing/tower as used, native-tls transport), verified
+with `cargo tree`.
+**STANDING CONSTRAINT - it is CRITICAL that no Sentry functionality is
+lost.** The trim must be verified to **preserve current behaviour**, not
+merely to shrink the dependency tree. Enumerate the sentry features
+actually in use before removing any, and check the resulting build still
+reports what it reports today. Preserve the deliberate native-tls
+transport choice. Unblocks WP-67.
 
 ### D-19. [workspace.dependencies] migration [unblocks WP-64]
 Context: no workspace dependency/package/lints tables; shared versions
@@ -581,6 +795,12 @@ Question: proceed, and in what scope?
 - B. Dependencies table only.
 Recommendation: A - the marginal cost of package+lints inside the same
 sweep is near zero and lints enforcement helps every later package.
+
+**ANSWERED (2026-07-26): Option A.** All three tables -
+`[workspace.dependencies]`, `[workspace.package]`, `[workspace.lints]` -
+in one migration, early. Unblocks WP-64 and resolves the `dp F9`
+version-pin row in the T3-B8 checklist. Sequence per the Group C banner:
+upgrade everything to latest first, then migrate.
 
 ### D-20. 108 boilerplate game binaries [unblocks WP-73]
 Context: 27 crates x 4 near-identical bins; binary-only deps (tokio
@@ -596,6 +816,36 @@ Recommendation: B - it is the only option that actually removes the
 files and centralises the heavy deps; the k8s images already build
 per-crate so a per-game thin bin crate maps cleanly.
 
+**ANSWERED (2026-07-26): Option B - a generic bin crate parameterised
+over the `Gamer` trait, with thin per-game wrapper bin crates.
+EXPLICITLY NOT option A (the macro).**
+Michael approved B **partly because it avoids macros**. Do not
+"simplify" it back into a macro.
+
+**STANDING CONSTRAINT on macros, wider than this item:** Michael is wary
+of custom macros because of their maintenance and cognitive cost. **Keep
+any macro surface small and obvious, and PAUSE AND DISCUSS if a macro
+starts getting really complex.**
+
+**Concrete name, VERIFIED against the repo's layout (2026-07-26,
+read-only):** `rust/lib/game_bin`, with `[package] name =
+"brdgme_game_bin"`. The convention is snake_case directories under `lib/`
+and `tools/` with package names `brdgme_<snake_dir>` - consistent across
+all ten (`lib/cmd` -> `brdgme_cmd`, `lib/game_client` ->
+`brdgme_game_client`, `tools/fuzz` -> `brdgme_fuzz`, ...). Hyphens are
+the **game-crate** convention (`game/red7-1` -> `red7-1`), and
+`brdgme-operator` is the single hyphenated outlier, not under `lib/`.
+**Do NOT name it `game-bin` / `brdgme-game-bin`.**
+
+**Structural note for WP-73:** today the 4 bins are `[[bin]]` targets
+**inside each game crate** at
+`src/bin/<snake_name>_{cli,fuzz,http,repl}.rs`, each a 3-10 line
+`Gamer`-parameterised call (e.g. `http::serve::<Game>(addr)`). Moving to
+thin per-game **bin crates** is therefore a structural change to the
+workspace, not just a file move - factor that into the spec.
+
+Unblocks WP-73. Sequence after WP-64.
+
 ### D-21. serde_yaml migration [unblocks WP-70]
 Context: serde_yaml is archived; consumers are bot + lib/game_client
 (must move together).
@@ -603,6 +853,10 @@ Options: A. serde_yaml_ng. B. serde-yml. C. saphyr. D. Switch the
 surface to JSON.
 Recommendation: A (serde_yaml_ng) - drop-in API, actively maintained;
 D touches file formats users/ops may have.
+
+**ANSWERED (2026-07-26): Option A - `serde_yaml_ng`.** Drop-in API,
+maintained. Not JSON: that would change a file format ops and users may
+depend on. bot and lib/game_client move together. Unblocks WP-70.
 
 ### D-22. warp -> axum in lib/cmd [unblocks WP-71]
 Context: warp serves the game-service HTTP layer while the platform is
@@ -612,6 +866,10 @@ Question: port now or defer?
 Recommendation: Port - the handler is one endpoint; do it in the same
 window as WP-06's http.rs fixes so the surface is touched once.
 
+**ANSWERED (2026-07-26): Port now**, in the same window as WP-06's
+`http.rs` fixes so the surface is touched once. It is one endpoint,
+though it is the HTTP layer of all 28 game binaries. Unblocks WP-71.
+
 ### D-23. deny.toml hardening [unblocks WP-69]
 Context: bans are warn-level (toothless); 4 stale advisory ignores for
 crates absent from the lock.
@@ -619,6 +877,12 @@ Question: confirm flip multiple-versions to deny AFTER the dedup
 packages (WP-66/67/68) land, with the residual duplicates enumerated in
 skip/skip-tree, and clear the stale ignores now?
 Recommendation: Yes, in that order.
+
+**ANSWERED (2026-07-26): Yes, in exactly that order.** Clear the 4 stale
+advisory ignores now; flip `multiple-versions` to deny only **after**
+WP-66/67/68 land, with the residual duplicates enumerated in
+skip/skip-tree. **Land WP-69 LAST among the dependency packages** so the
+skip-list starts minimal. Unblocks WP-69.
 
 ### D-24. combine dependency posture [unblocks WP-72]
 Context: combine 4.6 is dormant and sits at the heart of markup/game
@@ -629,6 +893,11 @@ Options:
 - B. Migrate brdgme_markup to winnow / in-house now.
 Recommendation: A - it works, has no advisory, and WP-02 already
 touches markup enough for one release.
+
+**ANSWERED (2026-07-26): Option A - accept as a recorded risk.** Note it
+in `deny.toml`; migrate markup off `combine` only when the parser is next
+rewritten. WP-02 already changes markup enough for one release, and
+combine carries no advisory today. Unblocks WP-72.
 
 ### D-25. lib/cost consolidation [unblocks WP-17]
 Context: lib/cost has one consumer (seven-wonders-1) while splendor-2
@@ -641,6 +910,19 @@ Options:
 Recommendation: A - two consumers justify the lib and the API additions
 are small; B throws away the shared abstraction the next economic game
 will want.
+
+**ANSWERED (2026-07-26): Option A - port splendor-2 onto `lib/cost`.**
+Add generic `get`/`set`; keep splendor's gold-joker `can_afford` as a
+crate-local extension.
+**CONSTRAINT: the shared `lib/cost` must have a suitable amount of
+automated testing as part of the port.** It gains a second consumer, so
+it stops being incidentally covered by seven-wonders-1's tests; give it
+its own.
+**Scope reminder:** D-25 gates only **3 of WP-17's 8 findings**
+(`b F31`, `ls F39`, `dp F27` - one indivisible consolidation). The other
+5 (`b F30`, `b F32`, `b F34`, `b F35`, `ls F38`) were always
+implementable. `checklists/T3-B3-splendor-libcost-holdem.md` holds the
+authoritative row-by-row split. WP-17 is now fully unblocked.
 
 ## Group D - game port-parity vs official rules
 
@@ -686,11 +968,32 @@ will want.
 >   them separately. They are **flagged, not specced, and not unparked** until the
 >   user says so.
 >
-> ### Egregious candidates for immediate fix (flagged for the user, NOT specced)
+> ### RESOLVED 2026-07-26 - the five egregious candidates, ruled on individually
 >
-> These are plain bugs, not "which edition" questions: they produce invalid,
+> **The park itself STAYS** (D-35 answer below). The user reviewed the five
+> flagged candidates one by one; these five rulings are the **only** movement
+> out of the park. Everything else in Group D remains
+> `BLOCKED-ON-USER-RULES-REVIEW` and clears only on per-game sign-off.
+>
+> | Finding | Crate | RULING |
+> |---|---|---|
+> | **a F1** | `roll-through-the-ages-2` | **FIX NOW, outside the park.** As recommended. Cross-player state corruption (the previous player's `roll()` decrements the NEXT player's `remaining_rolls`) is in no edition. The fix must adjudicate the crate's own `test_game_keep_skulls_all_disaster_leadership`, which asserts the opposite for the `next`-command path. The **rest of WP-12 stays parked.** |
+> | **b F4** | `seven-wonders-1` | **REMOVED from this list and PARKED** under the rules review. **The user's correction is binding: 7 Wonders resources are NOT depleted by trade** - they are printed on cards and both players use them, so there is **no competition for a resource** and the "asymmetric advantage by seat" framing recorded below was **WRONG**. **Residual narrower question, recorded so it is not lost, parked for the user's review and NOT scheduled:** because players resolve in seat order against live state, player p+1 can trade for a resource card player p **built on that same turn**, which p could not have done in reverse. That is a **simultaneity** question, not a scarcity one. |
+> | **b F7** | `seven-wonders-1` | **FIX NOW, outside the park.** Ensure **only one of each physical board can be in play**. Every printing has 7 boards with one side chosen each; 14 independent boards are physically unreachable. The **rest of WP-16 stays parked.** |
+> | **e F30** | `red7-1` | **CONDITIONAL - and the condition is SATISFIED, so FIX NOW.** The user's rule: fix the seat-order tie-break only if the correct behaviour is officially described or universally accepted; if resolving it needed a **subjective judgement on our part, park it**. **It is described.** `rust/game/red7-1/DATA_DOCS.md` states the second tie-break verbatim - "Ties within a rule are broken by the highest card in the winning set, **then by the highest card overall in the palette**" - and official Red7 rules agree (card value = number then colour, exactly what `Card::rank_key` already encodes). The code simply never implements it. Cause: `leader()` in `card.rs` only ever receives the **already-filtered winning sets** (`lib.rs` pushes `rule_fn(&self.palettes[p])`), so the full palette is unreachable; all-empty means every `len()` is 0 and every max is `(0,0)`, the strict `>` never fires, and seat 0 wins. Fix = fall through to the **full palette's** `rank_key()` max, which needs the unfiltered palette plumbed into `leader()`. **The D-29 half - "can an empty winning set win at all" - STAYS PARKED.** Verified read-only 2026-07-26. |
+> | **d F37** | `modern-art-2` | **REJECTED - NOT A BUG. Do not "fix" this later.** The user: **this is the accepted way to play** - if only one artist has cards, 2nd and 3rd go to the artists **in order from the top**. `suits()` already returns the canonical top-to-bottom order (Lite Metal top, Krypto bottom), and `end_round` scans `suits()` in declared order with a strict `>`, so the first suit in that order wins among equal counts - which is the correct behaviour. **There is no value-board-order-vs-array-index discrepancy and no follow-up.** The Go-parity caveat below is moot: the behaviour is intended, not inherited by accident. |
+>
+> The original flagging table is retained below **for context only**. Where it
+> disagrees with the rulings above - in particular its `b F4` "asymmetric by
+> player index" reasoning and its `d F37` "not producible by any rulebook"
+> claim - **the rulings above win.**
+>
+> ### Egregious candidates for immediate fix (SUPERSEDED - historical context)
+>
+> These were plain bugs, not "which edition" questions: they produce invalid,
 > unreachable, or seat-order-dependent state that **no printing of the game
-> specifies**. Listed for the user's decision only.
+> specifies**. Listed for the user's decision only. **Now resolved - see the
+> ruling table immediately above.**
 >
 > | Finding | Crate | Defect | Why it is a bug, not an edition choice | Currently owned by |
 > |---|---|---|---|---|
@@ -759,6 +1062,21 @@ either, since the doc may be the thing that is wrong. **D-33 is unaffected** - i
 `pub_state` redaction answer (option A) is independent of rules parity and WP-10
 stays `READY`. See the Group D banner above for the full ruling, the two
 not-parked carve-outs, and the egregious-fix candidates.
+
+**ANSWERED (2026-07-26): KEEP THE PARK.** The user's answer to "when and
+in what order do you do the rules review":
+- **Keep the park.** Do **not** lift it globally.
+- Do the review **per game**, prioritising **acquire-1**,
+  **seven-wonders-1 / splendor-2**, **modern-art-2** and **red7-1** -
+  those four unblock the most other work.
+- `BLOCKED-ON-USER-RULES-REVIEW` remains **stronger** than
+  `BLOCKED-ON-DECISION`. It does not clear when a decision is answered,
+  only on the user's per-game sign-off.
+**The only movement out of the park** is the five individually-ruled
+egregious candidates in the Group D banner above: **`a F1` FIX NOW**,
+**`b F7` FIX NOW**, **`e F30` FIX NOW** (its condition was verified
+satisfied), **`b F4` PARKED** with the user's binding correction, and
+**`d F37` REJECTED** as not a bug. Nothing else moves.
 
 ### D-26. Modern Art cluster [unblocks WP-26] - PARKED-PENDING-USER-RULES-REVIEW
 Context: (i) round-4 end semantics underlie the critical hang + soft
@@ -921,6 +1239,18 @@ currently renders partially may start **erroring**. The spec must include
 a step to assess stored-content risk **by reading code and migrations
 only - NOT by querying any database**.
 
+**CORRECTED (2026-07-26): the escape is `{{lbrace}}`, NOT a bare `{{`.**
+Option A still stands in full (error on a non-empty parse remainder AND
+escape braces in `to_string`); only the escape token changes.
+**This SUPERSEDES the recommendation's `{{`-style escaping. Do not
+implement a bare `{{`.** The failure mode: with a bare `{{`, the parser
+cannot distinguish an escaped literal brace from the start of a closing
+tag like `{{/b}}`, so a nested `markup()` consumes its own terminator -
+it cannot be implemented soundly. `{{lbrace}}` stays inside the
+`{{...}}` family the decision asked for. `}` needs no escape.
+WP-02 (`specs/WP-02-markup-robustness-dedup.md`) already pins
+`{{lbrace}}`; that spec is correct as written.
+
 ### D-38. lib-game parser design items [unblocks WP-04]
 Context: (i) OneOf furthest-error ranking is dead code (all offsets
 provably 0) - implement offset propagation or delete the ranking; (ii)
@@ -934,6 +1264,23 @@ impls to typed behaviour and extend the existing parity tests to cover
 expected(); (iii) adopt UniCase in suggest; (iv) skip the depth guard
 unless specs ever cross a trust boundary (they do not today).
 
+**ANSWERED (2026-07-26): ACCEPTED as recommended, all four sub-items.**
+- (i) **Implement OneOf offset propagation** (do not delete the ranking).
+- (ii) **Align the spec impls to typed behaviour** and **extend the
+  existing parity tests to cover `expected()`**.
+- (iii) **Adopt UniCase in `suggest`.**
+- (iv) **Skip the depth guard** - deserialized specs cross no trust
+  boundary today.
+
+**STANDING CONSTRAINT, binding on WP-04 GENERALLY and not just these four
+items: keep the parser as straightforward and obvious as possible.** It
+is complex but critical to the app and must stay **reliable and
+maintainable**. At every choice point in WP-04, prefer the plainer
+implementation over the cleverer one - including in the offset-propagation
+plumbing, which is the item most likely to tempt an elegant abstraction.
+
+Unblocks WP-04.
+
 ### D-39. Color parse API delete-vs-keep [unblocks WP-05]
 Context: regex + lazy_static exist solely for from_hex/from_str which
 have no runtime caller; three divergent color-name alias tables exist
@@ -944,6 +1291,11 @@ Options:
 - B. Keep the API, reimplement hex parsing in std, unify the tables.
 Recommendation: A - dead public API in an internal lib; resurrect from
 git if ever needed.
+
+**ANSWERED (2026-07-26): Option A - delete the dead parse API**
+(`from_hex` / `from_str`). This drops `regex` and `lazy_static`
+workspace-wide and resolves the three-way alias-table divergence by
+deletion. Git can resurrect it if it is ever wanted. Unblocks WP-05.
 
 ### D-40. Write-only stats subsystems keep-or-drop [unblocks WP-20, WP-30 items]
 Context: acquire-1 tracks per-game stats but to_brdgme_stats has zero
@@ -957,6 +1309,19 @@ Options:
 Recommendation: B - no consumer exists today; dead-but-buggy tracking
 code is pure liability. Note the platform-level "game stats" feature as
 a future product idea instead.
+
+**ANSWERED (2026-07-26): Option B - delete the dead machinery** in
+acquire-1 (`to_brdgme_stats`, finding `c F12`) and lost-cities-1/-2
+(`e F39`, `e F40`), **and split these items out of WP-20/WP-30 into their
+own package** so they can land **ahead of the rules review**. They are
+stats questions, not rules questions.
+**For the record:** Michael wants to revisit **"game specific stats" in
+future from a CLEAN SLATE.** That is precisely why deleting the dead
+machinery now is right - there is no platform path to wire it into, and
+the future feature will not want to inherit this shape.
+**The split-out package is `WP-81` in `work-packages.md`.** WP-20 and
+WP-30 lose their D-40 blocker and their stats items; both remain
+`BLOCKED-ON-USER-RULES-REVIEW` for their rules halves.
 
 ### D-41. Friends-page select revert after a rejected change [informs WP-54, WP-53]
 Context: a rejected invite-policy or game-visibility change on `/friends`
