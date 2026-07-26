@@ -848,12 +848,26 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
                     return;
                 }
             };
+            let accepted_count = roster.iter().filter(|p| p.response == "accepted").count();
+            let fetched = match crate::game::server_fns::fetch_game_from_service(
+                &state.http_client,
+                &game_version,
+                accepted_count,
+            )
+            .await
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!("resend webhook: invite fetch game failed: {e}");
+                    return;
+                }
+            };
             match crate::proposals::start_proposal_tx(
                 &mut tx,
-                &state.http_client,
                 &proposal,
                 &roster,
                 &game_version,
+                fetched,
             )
             .await
             {

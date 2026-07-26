@@ -930,12 +930,12 @@ pub async fn find_pending_invites_for_user(
 #[cfg(feature = "ssr")]
 pub(crate) async fn start_proposal_tx(
     tx: &mut sqlx::PgConnection,
-    http_client: &reqwest::Client,
     proposal: &Proposal,
     players: &[ProposalPlayer],
     game_version: &crate::models::game::GameVersion,
+    fetched: crate::game::server_fns::FetchedGame,
 ) -> Result<Uuid, ServerFnError> {
-    use crate::game::server_fns::{BotSlot, CreateGameSeed, create_game_from_service};
+    use crate::game::server_fns::{BotSlot, CreateGameSeed};
 
     let accepted: Vec<&ProposalPlayer> = players
         .iter()
@@ -963,20 +963,17 @@ pub(crate) async fn start_proposal_tx(
         return Err(ServerFnError::new(msg));
     }
 
-    let player_count = accepted.len();
-
-    let game = create_game_from_service(
+    let game = crate::game::server_fns::insert_game_from_service(
         &mut *tx,
-        http_client,
-        game_version,
+        game_version.id,
         CreateGameSeed {
-            player_count,
             creator_id,
             opponent_ids: &opponent_ids,
             opponent_emails: &[],
             bot_slots: &bot_slots,
             all_accepted: true,
         },
+        fetched,
     )
     .await?;
 
@@ -1064,7 +1061,9 @@ pub async fn create_proposal(
     opponent_emails: Option<Vec<String>>,
     bot_slots: Option<Vec<crate::game::server_fns::BotSlot>>,
 ) -> Result<ProposalOutcome, ServerFnError> {
-    use crate::game::server_fns::{CreateGameSeed, create_game_from_service};
+    use crate::game::server_fns::{
+        CreateGameSeed, fetch_game_from_service, insert_game_from_service,
+    };
     use crate::websocket::GameBroadcaster;
     use sqlx::PgPool;
 
@@ -1100,6 +1099,12 @@ pub async fn create_proposal(
         return Err(ServerFnError::new(msg));
     }
 
+    let fetched = if opponent_ids.is_empty() && opponent_emails.is_empty() {
+        Some(fetch_game_from_service(&http_client, &game_version, player_count).await?)
+    } else {
+        None
+    };
+
     let mut tx = pool
         .begin()
         .await
@@ -1130,18 +1135,17 @@ pub async fn create_proposal(
     }
 
     if human_invitees.is_empty() {
-        let game = create_game_from_service(
+        let game = insert_game_from_service(
             &mut tx,
-            &http_client,
-            &game_version,
+            game_version.id,
             CreateGameSeed {
-                player_count,
                 creator_id: user.id,
                 opponent_ids: &[],
                 opponent_emails: &[],
                 bot_slots: &bot_slots,
                 all_accepted: false,
             },
+            fetched.expect("fetched when no human invitees"),
         )
         .await?;
         tx.commit()
@@ -1369,8 +1373,15 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
         .map_err(internal("start_proposal: game version"))?
         .ok_or_else(|| ServerFnError::new("Game version not found"))?;
 
-    let game_id =
-        start_proposal_tx(&mut tx, &http_client, &proposal, &players, &game_version).await?;
+    let accepted_count = players.iter().filter(|p| p.response == "accepted").count();
+    let fetched = crate::game::server_fns::fetch_game_from_service(
+        &http_client,
+        &game_version,
+        accepted_count,
+    )
+    .await?;
+
+    let game_id = start_proposal_tx(&mut tx, &proposal, &players, &game_version, fetched).await?;
 
     tx.commit()
         .await
@@ -3148,15 +3159,20 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        let fetched = crate::game::server_fns::FetchedGame {
+            game_info: brdgme_cmd::api::GameResponse {
+                state: String::new(),
+                points: vec![0.0, 0.0],
+                status: brdgme_game::Status::Active {
+                    whose_turn: vec![0],
+                    eliminated: vec![],
+                },
+            },
+            logs: vec![],
+        };
+
         let mut tx = pool.begin().await.unwrap();
-        let result = start_proposal_tx(
-            &mut tx,
-            &reqwest::Client::new(),
-            &proposal,
-            &players,
-            &game_version,
-        )
-        .await;
+        let result = start_proposal_tx(&mut tx, &proposal, &players, &game_version, fetched).await;
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(

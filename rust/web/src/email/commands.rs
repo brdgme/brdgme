@@ -432,23 +432,30 @@ async fn run_new_command(
         return Err(CommandError::User(msg));
     }
 
+    let fetched = crate::game::server_fns::fetch_game_from_service(
+        ctx.http_client,
+        &game_version,
+        player_count,
+    )
+    .await
+    .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: fetch game: {e}")))?;
+
     let mut tx = ctx
         .pool
         .begin()
         .await
         .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: begin tx: {e}")))?;
-    let game = crate::game::server_fns::create_game_from_service(
+    let game = crate::game::server_fns::insert_game_from_service(
         &mut tx,
-        ctx.http_client,
-        &game_version,
+        game_version.id,
         crate::game::server_fns::CreateGameSeed {
-            player_count,
             creator_id: ctx.user_id,
             opponent_ids: &human_ids,
             opponent_emails: &[],
             bot_slots: &bot_slots,
             all_accepted: false,
         },
+        fetched,
     )
     .await
     .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: create game: {e}")))?;

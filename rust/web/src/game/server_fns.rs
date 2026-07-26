@@ -595,7 +595,6 @@ pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnErr
 
 #[cfg(feature = "ssr")]
 pub(crate) struct CreateGameSeed<'a> {
-    pub(crate) player_count: usize,
     pub(crate) creator_id: Uuid,
     pub(crate) opponent_ids: &'a [Uuid],
     pub(crate) opponent_emails: &'a [String],
@@ -603,19 +602,18 @@ pub(crate) struct CreateGameSeed<'a> {
     pub(crate) all_accepted: bool,
 }
 
-/// Requests a fresh game from the game service and creates it (game row,
-/// players, logs) within the caller's transaction. Deliberately neither
-/// begins/commits the transaction nor broadcasts: `restart_game` must keep
-/// the new game atomic with its `restarted_game_id` write, so callers own
-/// the commit and the post-commit notifications.
 #[cfg(feature = "ssr")]
-pub(crate) async fn create_game_from_service(
-    tx: &mut sqlx::PgConnection,
+pub(crate) struct FetchedGame {
+    pub(crate) game_info: brdgme_cmd::api::GameResponse,
+    pub(crate) logs: Vec<brdgme_cmd::api::CliLog>,
+}
+
+#[cfg(feature = "ssr")]
+pub(crate) async fn fetch_game_from_service(
     http_client: &reqwest::Client,
     game_version: &crate::models::game::GameVersion,
-    seed: CreateGameSeed<'_>,
-) -> Result<crate::models::game::Game, ServerFnError> {
-    use crate::db::CreateGameOpts;
+    player_count: usize,
+) -> Result<FetchedGame, ServerFnError> {
     use crate::game::client;
     use brdgme_cmd::api::{Request, Response};
 
@@ -624,43 +622,55 @@ pub(crate) async fn create_game_from_service(
         &game_version.uri,
         &game_version.name,
         &Request::New {
-            players: seed.player_count,
+            players: player_count,
             seed: None,
         },
     )
     .await
-    .map_err(internal("create_game_from_service: request new game"))?;
+    .map_err(internal("fetch_game_from_service: request new game"))?;
 
     let (game_info, logs) = match resp {
         Response::New { game, logs, .. } => (game, logs),
         _ => return Err(ServerFnError::new("Unexpected response from game service")),
     };
 
-    let status = crate::game::status_fields(game_info.status);
+    Ok(FetchedGame { game_info, logs })
+}
+
+#[cfg(feature = "ssr")]
+pub(crate) async fn insert_game_from_service(
+    tx: &mut sqlx::PgConnection,
+    game_version_id: Uuid,
+    seed: CreateGameSeed<'_>,
+    fetched: FetchedGame,
+) -> Result<crate::models::game::Game, ServerFnError> {
+    use crate::db::CreateGameOpts;
+
+    let status = crate::game::status_fields(fetched.game_info.status);
 
     let game = crate::db::create_game_with_users_tx(
         &mut *tx,
         CreateGameOpts {
-            game_version_id: game_version.id,
+            game_version_id,
             whose_turn: &status.whose_turn,
             eliminated: &status.eliminated,
             placings: &status.placings,
-            points: &game_info.points,
+            points: &fetched.game_info.points,
             creator_id: seed.creator_id,
             opponent_ids: seed.opponent_ids,
             opponent_emails: seed.opponent_emails,
             bot_slots: seed.bot_slots,
             chat_id: None,
-            game_state: &game_info.state,
+            game_state: &fetched.game_info.state,
             all_accepted: seed.all_accepted,
         },
     )
     .await
-    .map_err(internal("create_game_from_service: create game"))?;
+    .map_err(internal("insert_game_from_service: create game"))?;
 
-    crate::db::insert_game_logs_tx(&mut *tx, game.id, logs)
+    crate::db::insert_game_logs_tx(&mut *tx, game.id, fetched.logs)
         .await
-        .map_err(internal("create_game_from_service: create game logs"))?;
+        .map_err(internal("insert_game_from_service: create game logs"))?;
 
     Ok(game)
 }
@@ -1078,6 +1088,12 @@ pub(crate) async fn restart_core(
         return Err(ServerFnError::new(msg));
     }
 
+    let fetched = if opponent_ids.is_empty() && opponent_emails.is_empty() {
+        Some(fetch_game_from_service(http_client, version, player_count).await?)
+    } else {
+        None
+    };
+
     let mut tx = pool
         .begin()
         .await
@@ -1137,18 +1153,17 @@ pub(crate) async fn restart_core(
     }
 
     if human_invitees.is_empty() {
-        let new_game = create_game_from_service(
+        let new_game = insert_game_from_service(
             &mut tx,
-            http_client,
-            version,
+            version.id,
             CreateGameSeed {
-                player_count,
                 creator_id: user_id,
                 opponent_ids: &[],
                 opponent_emails: &[],
                 bot_slots,
                 all_accepted: false,
             },
+            fetched.expect("fetched when no human invitees"),
         )
         .await?;
 
