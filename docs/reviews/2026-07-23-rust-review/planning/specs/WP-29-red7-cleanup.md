@@ -263,6 +263,17 @@ pub fn end_points(players: usize) -> u32 {
 
 ### Task 4: correct DATA_DOCS.md's tie-break description (e F31, minor — DOC ONLY, GATED)
 
+> **INVALIDATED - do NOT execute this task as written.** The `e F30` ruling in
+> `decisions-ANSWERED.md` holds the documented second tie-break clause ("then by
+> the highest card overall in the palette") to be **correct and officially
+> supported**, not fictional: the CODE must change to implement it (fall through
+> to the full palette's `rank_key` max). The `DATA_DOCS.md` sentence **stays**.
+> The corresponding code fix belongs to the `e F30` owner, not to this package.
+> Any implementer MUST read the `e F30` row and the `e F30 evidence` note in
+> `decisions-ANSWERED.md` before touching `DATA_DOCS.md` or `card.rs`. The text
+> below is retained only for traceability; the Lead must respec what, if
+> anything, of the Green parenthetical and the per-rule prose survives.
+
 **PRECONDITION CHECKPOINT — do this before editing anything:**
 
 - [ ] Check whether **WP-30** has landed: `git log --oneline -- rust/game/red7-1/src/card.rs` and read `rust/game/red7-1/src/card.rs:297-317` as it stands now.

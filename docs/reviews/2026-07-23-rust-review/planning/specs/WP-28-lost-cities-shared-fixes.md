@@ -1,5 +1,12 @@
 # WP-28: lost-cities-1 / lost-cities-2 shared fixes
 
+> **CITATION WARNING - line numbers in this spec are approximate and unverified.**
+> Corpus-wide they measured **33-46% wrong**, and two "delete lines A-B" ranges
+> would have destroyed live code. **Navigate by the named function, type or
+> symbol** - never by line number alone. If the code at a cited location does not
+> match this spec's description, **STOP and report**; do not improvise a fix or
+> guess at the intended target.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to execute this plan task-by-task with review checkpoints.
 
 **Goal:** Fix the one real correctness bug in lost-cities-2's 3-player support — `Status::Finished` reports stats for players 0 and 1 only (e F17) — and then repair the defects that exist **verbatim in both crates** in a single pass so the two ports stop drifting: dropped draw logs at round end (e F19 / e F37), `PlayerState.hand` documented sorted but delivered unsorted (e F20 / e F38), draw-count `usize` underflow (e F26 / e F41), `is_none()`-guarded `unwrap()` in `score()` (e F43), throwaway empty `Vec`s in the renderer (e F44). Plus the crate-specific riders: -2's regressed game-over log (e F24) and its `% MAX_PLAYERS` perspective bug (e F23), -1's bare `2` literals where `PLAYERS` exists (e F42), and the deployed blurb that still advertises a two-player-only game (e F27).

@@ -27,6 +27,13 @@ the user personally reviewing the game rules; does NOT clear when a decision is
 answered, only on the user's per-game sign-off. Added 2026-07-25 for the parked
 parity packages. An implementing agent must not pick these up, must not change
 gameplay, and must not "correct" a `RULES.md` under them.
+DEFERRED-BLOCKED-ON-MICHAEL = **a different bucket entirely, added 2026-07-26 for
+WP-85 and held by WP-85 alone.** Not a rules-review park: the work is blocked
+because Michael deliberately chose to defer a design input (WP-85's escape-hatch
+verb set) until he has lived with the current behaviour longer. Wherever this file
+enumerates "the parked packages" as **WP-11, WP-12, WP-16, WP-20, WP-26, WP-30**,
+that list is `BLOCKED-ON-USER-RULES-REVIEW` only and **WP-85 is not a member**.
+An executor must not pick WP-85 up either, but for a different reason.
 
 **2026-07-25 decision session:** the 10 critical-path gating groups (D-1,
 D-2, D-3+D-4, D-5, D-6+D-13, D-8, D-12+D-14, D-33+D-35, D-36, D-37) are
@@ -1176,6 +1183,30 @@ status suffix off the heading itself:
   to the **570** sum, so the per-package table above and the
   one-package-per-finding invariant stand.
 
+**Package totals recomputed again 2026-07-26** (after WP-85 was added; the block
+immediately above is kept as history and is **superseded by this one**). Counted
+by enumerating every `### WP-` heading in this file after the edit and reading
+the status suffix off the heading itself:
+
+- **85 headings = 77 READY + 6 `BLOCKED-ON-USER-RULES-REVIEW` + 1 `SUPERSEDED`
+  + 1 `DEFERRED-BLOCKED-ON-MICHAEL`.** Verified: 6 + 1 + 1 + 77 = 85.
+- The 6 parked: WP-11, WP-12, WP-16, WP-20, WP-26, WP-30 (three of which carry
+  carve-outs now executed by WP-83). **WP-85 is NOT one of them.**
+- The 1 superseded: WP-78 (superseded by WP-82).
+- The 1 deferred: **WP-85**. `DEFERRED-BLOCKED-ON-MICHAEL` is a **NEW status,
+  distinct from `BLOCKED-ON-USER-RULES-REVIEW`** - the park is gated on
+  Michael's per-game rules review, whereas WP-85 is gated on a design input
+  (the escape-hatch verb set) that Michael **deliberately chose to defer** until
+  he has lived with the current behaviour longer. Different bucket, different
+  reason; see the status legend at the top of this file.
+- **`BLOCKED-ON-DECISION` remains EXTINCT** - zero headings carry it.
+- Actionable-now count is **still 77** - unchanged by WP-85, which arrives
+  already blocked and adds nothing an executor may pick up. 84 packages exist as
+  live work items once the superseded WP-78 is discounted (was 83).
+- Findings coverage is unchanged: WP-85 adds **0** to the **570** sum
+  (`wfe F29` stays counted in WP-59), so the per-package table above and the
+  one-package-per-finding invariant stand.
+
 ## Unowned / newly discovered
 
 Five items with no owning package. WP-76 and WP-77 carry no review finding IDs
@@ -1381,3 +1412,44 @@ Two things in the old entry are now WRONG:
 - **Package-count note:** this entry added one package to the totals recorded
   earlier in this file. Those totals were **recomputed 2026-07-26** in the
   Coverage-check section, which now includes WP-83 and WP-84.
+
+## Added by the 2026-07-26 WP-59 Task 14 carve-out
+
+### WP-85 email dispatch: game parser first, platform commands as fallback - DEFERRED-BLOCKED-ON-MICHAEL (spec: `specs/WP-85-email-parser-first-dispatch.md`)
+- Scope (0 new findings): a carve-out of **WP-59 Task 14**, not a new body of
+  findings. Adds 0 to the **570** sum; the one-package-per-finding invariant is
+  unaffected. **Coverage bookkeeping - nothing moves:** `wfe F29` stays counted
+  in **WP-59**'s scope (16) exactly as that entry lists it, the same bookkeeping
+  stance as WP-83. No coverage row changes here.
+- Paths: `rust/web/src/email/commands.rs` (`dispatch_email_command`),
+  `docs/authoring/COMMANDS.md`.
+- **An executor must NOT pick this up.** The status is
+  DEFERRED-BLOCKED-ON-MICHAEL. The spec is a sketch of a future change, not an
+  execution script: do not implement it, do not do "just the easy half", do not
+  invent the missing input.
+- **This is NOT `BLOCKED-ON-USER-RULES-REVIEW`.** Different bucket, different
+  reason. The 6-package park (WP-11, WP-12, WP-16, WP-20, WP-26, WP-30) is
+  blocked awaiting Michael's per-game **rules review**; WP-85 is blocked because
+  Michael **deliberately chose to defer** designing the escape-hatch verb set
+  until he has lived with the current behaviour. WP-85 is not a member of the
+  parked set and must not be counted as one.
+- **Why it exists:** Michael's ruling - *"WP-59 Task 14 sounds like a risk,
+  let's pull it out to a separate item if we can."* Task 14 was written as a
+  documentation edit but implies a **behaviour change** in
+  `dispatch_email_command`; the carve-out removes that coupling.
+- **The blocker:** the escape-hatch verb set (the small hard-reserved set that
+  must win even on the game path) is undecided by choice - *"can we just defer
+  that work? No games use those verbs yet, and I think I'd like the current
+  version of brdgme in place a bit longer so I can get a feel for if and how we
+  want to do this in the future."* **Its membership must NOT be invented.**
+- **Authority:** D-15 (ANSWERED 2026-07-26) - on game-scoped messages the game
+  command parser is tried **FIRST**; platform commands are the **FALLBACK**. No
+  hardcoded reserved-verb list.
+- Fixes the acquire-1 / starship-catan-1 defect where a top-level `end` move is
+  **unplayable by email** because the dispatcher's `end` arm intercepts first -
+  with no game-crate change. When WP-85 lands, WP-59's "Known collisions" list
+  and its "there is deliberately no escape prefix ... the reservation is
+  absolute" text become **false** and must be fixed.
+- **Package-count note:** this entry added one package to the totals recorded
+  earlier in this file. Totals are recomputed in the Coverage-check section in
+  the dated block below the 2026-07-26 WP-83/WP-84 recount.

@@ -1,5 +1,12 @@
 # WP-23: jaipur-2 fixes
 
+> **CITATION WARNING - line numbers in this spec are approximate and unverified.**
+> Corpus-wide they measured **33-46% wrong**, and two "delete lines A-B" ranges
+> would have destroyed live code. **Navigate by the named function, type or
+> symbol** - never by line number alone. If the code at a cited location does not
+> match this spec's description, **STOP and report**; do not improvise a fix or
+> guess at the intended target.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to execute this plan task-by-task with review checkpoints.
 
 **Goal:** Award the bonus token for 6- and 7-card sales, which the crate currently drops on the floor (d F14, major); stop mixed-type sell input (`sell dia gold lea`) from silently executing an unintended same-type sale (d F18, minor) and remove the silent `Good::Diamond` fallback that hides parser regressions (d F20, nit); replace the one-line RULES.md stub with real rules so `Gamer::rules()` serves something (d F17, minor); delete the dead `parsers.is_empty()` branch in `command_parser` (d F19, nit); and stop the renderer claiming a fixed number of remaining rounds in a first-to-2 match (d F22, nit).

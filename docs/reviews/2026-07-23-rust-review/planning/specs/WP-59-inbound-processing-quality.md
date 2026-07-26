@@ -1,8 +1,15 @@
 # WP-59: inbound email processing quality
 
+> **CITATION WARNING - line numbers in this spec are approximate and unverified.**
+> Corpus-wide they measured **33-46% wrong**, and two "delete lines A-B" ranges
+> would have destroyed live code. **Navigate by the named function, type or
+> symbol** - never by line number alone. If the code at a cited location does not
+> match this spec's description, **STOP and report**; do not improvise a fix or
+> guess at the intended target.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to execute this plan task-by-task with review checkpoints.
 
-**Goal:** Make the Resend inbound-email pipeline parse real-world mail correctly and fail legibly. Specifically: extract the bare addr-spec from `"Display Name <addr>"` header forms before routing or matching (wfe F4); harden the quote/attribution stripping for Gmail-wrapped, Outlook top-posted and localized replies (wfe F6); honour the first-stated accept/decline intent (wfe F15); release the proposal row lock before the early-exit invite emails (wfe F7); log the silent missing-roster return (wfe F12); stop the `" invite"` subject degradation and log its causes (wfe F13); give reply addresses one domain constant and per-route builders (wfe F14); delete the superseded command-loop scaffolding (wfe F8); de-duplicate the three `RESEND_API_KEY` + `ResendInbound` blocks (wfe F9); stop `restart` and `emails confirm` from re-classifying infrastructure failures as user refusals and from emailing `ServerFnError`'s `"error running server function: ..."` Display wrapper (wfe F21, wfe F24); let `emails confirm <code>` match **any** of the user's pending addresses (wfe F23); route the remaining inline SQL in `commands.rs` through `db.rs` helpers (wfe F26); reject a self-mention in `new` instead of silently dropping it (wfe F27); disclose the `bump` digest cap (wfe F28); and document the email dispatcher's reserved-verb set for game authors (wfe F29 / D-15 option A) — **which this spec's verification proves is already violated by two live games; see "Cross-package / newly discovered".**
+**Goal:** Make the Resend inbound-email pipeline parse real-world mail correctly and fail legibly. Specifically: extract the bare addr-spec from `"Display Name <addr>"` header forms before routing or matching (wfe F4); harden the quote/attribution stripping for Gmail-wrapped, Outlook top-posted and localized replies (wfe F6); honour the first-stated accept/decline intent (wfe F15); release the proposal row lock before the early-exit invite emails (wfe F7); log the silent missing-roster return (wfe F12); stop the `" invite"` subject degradation and log its causes (wfe F13); give reply addresses one domain constant and per-route builders (wfe F14); delete the superseded command-loop scaffolding (wfe F8); de-duplicate the three `RESEND_API_KEY` + `ResendInbound` blocks (wfe F9); stop `restart` and `emails confirm` from re-classifying infrastructure failures as user refusals and from emailing `ServerFnError`'s `"error running server function: ..."` Display wrapper (wfe F21, wfe F24); let `emails confirm <code>` match **any** of the user's pending addresses (wfe F23); route the remaining inline SQL in `commands.rs` through `db.rs` helpers (wfe F26); reject a self-mention in `new` instead of silently dropping it (wfe F27); disclose the `bump` digest cap (wfe F28); and surface the email dispatcher's verb-collision problem (wfe F29) — **which this spec's verification proves is already live in two games; see "Cross-package / newly discovered". The dispatch-precedence work itself is CARVED OUT to WP-85 (D-54), so WP-59 no longer documents a reserved-verb set.**
 
 ---
 
@@ -364,7 +371,7 @@ while writing this spec, from live source.
 | **wfe F26** | Inline SQL in commands.rs instead of db helpers; drift risk with the settings path | **CONFIRMED, and MOSTLY ALREADY SOLVED IN db.rs — scope reduced accordingly.** Re-derived: db.rs **already has** `get_user_email_prefs` (:2836-2844) with SQL byte-identical to `commands.rs:827-834`, and `set_user_turn_emails_enabled`/`set_user_invite_emails_enabled`/`set_user_reminder_emails_enabled` (:2847-2886) byte-identical to `commands.rs:853`/`:866`/`:879`, **with tests already covering them** (`email_prefs_default_all_true` db.rs:6821-6836 and `set_email_prefs_toggles` db.rs:6838-6876). So four of the six sites need **no new db.rs code at all** — just deleting the local copies and calling the existing helpers, which is precisely the drift the finding warns about and removes 3 dead `updated_at = NOW()` clauses from commands.rs as a side effect. Site :732 is dissolved by Task 10 (it becomes `list_user_emails`). Only two genuinely new helpers are needed: `delete_login_confirmation` (for :751) and `find_game_version_id_for_game` (for :1149). Both are plain queries, so no `.sqlx` churn. **Neither duplicates anything WP-41 touches.** |
 | **wfe F27** | Self-mention in `new` opponents silently dropped | **CONFIRMED.** `commands.rs:382-384`: `if id == ctx.user_id { continue; }`. `new chess me myuser` silently builds a 2-player roster from 3 named slots, and the resulting `roster_error` message counts differently from what the user typed. Task 12 returns a user error instead. No existing test asserts the silent skip (checked the whole `mod tests`). |
 | **wfe F28** | `bump` reply does not mention the digest cap | **CONFIRMED; recommendation PARTIALLY OVERTURNED.** `bump_reply` (:449-475) calls `find_active_turn_games(pool, user_id, SWITCH_DIGEST_CAP)` at :455 — the cap is a SQL `LIMIT` (db.rs:3113), so the current code **cannot even tell** whether more were waiting; `cap_digest` at :458 is a second, redundant truncation. Task 13 fetches `SWITCH_DIGEST_CAP + 1` to detect the overflow. The finding's suggested wording — "reply bump again for the rest" — is **rejected as factually wrong**: `find_active_turn_games` has a deterministic `ORDER BY gp.is_turn_at ASC NULLS LAST` with no offset or cursor, so a second `bump` re-sends **the same** games. The message says the truth instead. |
-| **wfe F29** | Game-scoped dispatch reserves verbs that could collide with game move grammars | **CONFIRMED, and the hedge is RESOLVED AGAINST the finding: a real collision exists TODAY.** The reserved set is 18 verbs (`dispatch_email_command`'s `match verb_lower.as_str()` at :1215-1246, `subscribe_toggle` :42-48, `settings_verb` :224-235). `rg -oin '"(concede\|end\|undo\|restart\|rules\|help\|commands\|new\|bump\|list\|subscribe\|unsubscribe\|name\|colors\|colours\|theme\|emails\|settings)"' rust/game/*/src/command.rs` returns **3 hits, all `"end"`**: `acquire-1/src/command.rs:192-197` (`Doc::name_desc("end", "trigger the end of the game at the end of your turn", Map::new(Token::new("end"), ...))`) and `starship-catan-1/src/command.rs:309-313` (`Doc::name_desc("end", "end the flight early", Token::new("end"))`). Both are legal, player-issuable moves that email players **cannot** make: `dispatch_email_command`'s `"end"` arm (**:1217** - `"end" => return run_end(ctx).await,`) intercepts first. The `"end"` arm is **post-snapshot** (added by #47), which is why the finding could truthfully say "no current game is known to collide". Task 14 implements **D-15 option A (documentation only)** as recorded, **and** the collision is escalated to the Lead in "Cross-package / newly discovered" — option A alone does not fix acquire-1 and starship-catan-1. |
+| **wfe F29** | Game-scoped dispatch reserves verbs that could collide with game move grammars | **CONFIRMED, and the hedge is RESOLVED AGAINST the finding: a real collision exists TODAY.** The reserved set is 18 verbs (`dispatch_email_command`'s `match verb_lower.as_str()` at :1215-1246, `subscribe_toggle` :42-48, `settings_verb` :224-235). `rg -oin '"(concede\|end\|undo\|restart\|rules\|help\|commands\|new\|bump\|list\|subscribe\|unsubscribe\|name\|colors\|colours\|theme\|emails\|settings)"' rust/game/*/src/command.rs` returns **3 hits, all `"end"`**: `acquire-1/src/command.rs:192-197` (`Doc::name_desc("end", "trigger the end of the game at the end of your turn", Map::new(Token::new("end"), ...))`) and `starship-catan-1/src/command.rs:309-313` (`Doc::name_desc("end", "end the flight early", Token::new("end"))`). Both are legal, player-issuable moves that email players **cannot** make: `dispatch_email_command`'s `"end"` arm (**:1217** - `"end" => return run_end(ctx).await,`) intercepts first. The `"end"` arm is **post-snapshot** (added by #47), which is why the finding could truthfully say "no current game is known to collide". Task 14 is **CARVED OUT to WP-85** (D-54): D-15 was answered the other way — game parser FIRST, platform commands FALLBACK, plus a small hard-reserved escape-hatch set — **not** the documented reservation an earlier draft assumed. `wfe F29` **stays counted in WP-59's scope** for coverage bookkeeping even though the work moved (same stance as WP-83). The collision remains escalated to the Lead in "Cross-package / newly discovered". |
 
 Counts: **11 CONFIRMED**, **5 ADJUSTED** (F9, F14, F21, F23, F26 — F6, F24, F28
 each additionally carry a rejected sub-recommendation), **0 fully OVERTURNED
@@ -383,11 +390,14 @@ swallowing of typos vs `failure_report_header` already naming the failing line).
 If the Lead wants it treated as a user-facing choice rather than an engineering
 judgement, it must be raised as a new decision — it is **not** one today.
 
-**Also note:** the only genuine open user decision in this package is **D-15**,
-which is still **UNDECIDED** in `decisions-needed.md` (it records a
-*Recommendation*, not a Decision) and whose stated basis ("no current
-collision") this spec's verification **refutes**. See Task 14 and
-"Cross-package / newly discovered" item 1.
+**Also note (amended 2026-07-26):** **WP-59 now has NO open user decision.**
+D-15 is **ANSWERED** — see `planning/decisions-ANSWERED.md` (answered
+2026-07-26). The ruling went the *opposite* way to what Task 14 implemented: on
+game-scoped messages the **game command parser is tried FIRST and platform
+commands are the FALLBACK**, with one small hard-reserved set of escape-hatch
+verbs (`help` and equivalents) that always wins. The only task D-15 gated was
+**Task 14**, which is **carved out of this package to WP-85** (see the Task 14
+banner below). Nothing else in WP-59 depends on it.
 
 ---
 
@@ -2568,129 +2578,33 @@ points at the web UI instead.
 
 ---
 
-## Task 14: document the reserved email verbs for game authors (wfe F29 / D-15 option A)
+## Task 14: document the reserved email verbs for game authors (wfe F29 / D-15 option A) — CARVED OUT
 
-**This task implements D-15 option A — documentation only, no behaviour
-change.** The recorded text in `decisions-needed.md` ("### D-15. Reserved email
-verbs vs game move grammars [informs WP-59]") is a **Recommendation, not a
-Decision**: "A now (no current collision), B only when a real game needs it",
-where option B is a `move <text>` escape prefix that forces game-move
-interpretation.
-
-**D-15 IS STILL OPEN, and its stated basis is refuted (see below), so DO NOT
-EXECUTE THIS TASK UNTIL THE LEAD CONFIRMS D-15.** The verification below shows a
-real game *does* need option B, twice, which is exactly the trigger the
-recommendation named. Executing option A first is harmless documentation, but it
-would document a constraint the user may be about to change. **If the user
-selects option B, this task is superseded** and the documentation added here
-must be rewritten to describe the escape instead of the reservation.
-
-**The "no current collision" premise is FALSE — read this before writing the
-doc.** Verification found a live collision:
-`rg -oin '"(concede|end|undo|restart|rules|help|commands|new|bump|list|subscribe|unsubscribe|name|colors|colours|theme|emails|settings)"' rust/game/*/src/command.rs`
-returns three hits, all `"end"`:
-
-- `rust/game/acquire-1/src/command.rs:192-197` —
-  `Doc::name_desc("end", "trigger the end of the game at the end of your turn", Map::new(Token::new("end"), |_| Command::End))`
-- `rust/game/starship-catan-1/src/command.rs:309-313` —
-  `Doc::name_desc("end", "end the flight early", Token::new("end"))`, offered whenever `self.can_end(player)`
-
-`dispatch_email_command`'s `"end"` arm (`commands.rs:1217`) intercepts the line
-first, so **neither move is playable by email today**. The `"end"` arm is
-post-snapshot (added by #47; the reservation did not exist when the finding was
-written), which is why the finding could truthfully say no collision was known.
-**This is escalated to the Lead in "Cross-package / newly discovered" — option A
-alone does not fix acquire-1 or starship-catan-1.** Do not silently "fix" it
-here, and do not write the documentation as if no collision existed.
-
-**Where the documentation goes:** `/home/beefsack/Development/brdgme/docs/authoring/COMMANDS.md`
-— the existing game-author-facing command-grammar guide (48 lines; sections
-"One grammar, automatic autocomplete", "Suggest semantics", "`Enum::partial` in
-full parse", "The `remaining_input` convention", "Key files"). It is the only
-file in the repo that tells game authors what constraints their grammar must
-satisfy. (Checked and rejected: `rust/lib/game` has no docs directory;
-`docs/email.md` is an email-*rendering* guide for the web team;
-`docs/porting/GAME_PORTING.md` is about Go-parity porting mechanics.)
-
-**Files:**
-- Modify: `/home/beefsack/Development/brdgme/docs/authoring/COMMANDS.md`
-
-**Steps:**
-
-- [ ] Re-run the collision grep and record the exact output in the commit body:
-      `rg -oin '"(concede|end|undo|restart|rules|help|commands|new|bump|list|subscribe|unsubscribe|name|colors|colours|theme|emails|settings)"' /home/beefsack/Development/brdgme/rust/game/*/src/command.rs`
-      If the set of hits differs from the two files named above, update the
-      "Known collisions" list below to match reality before committing.
-
-- [ ] Insert this section into `docs/authoring/COMMANDS.md` immediately before
-      the `## Key files` heading (currently line 42):
-
-```markdown
-## Reserved verbs on the email path (platform constraint)
-
-Players can play by replying to a notification email. The email dispatcher
-(`rust/web/src/email/commands.rs`, `dispatch_email_command`) resolves its own
-server commands **before** the line ever reaches a game's
-`command_parser`, so a game grammar whose first word is one of these is
-unplayable by email for that move:
-
-`concede`, `end`, `undo`, `restart`, `rules`, `help`, `commands`, `new`,
-`bump`, `list`, `subscribe`, `unsubscribe`, `name`, `colors`, `colours`,
-`theme`, `emails`, `settings`
-
-Only the **first word** of a reply line is matched, and matching is
-ASCII-case-insensitive. A grammar that uses a reserved word in a later
-position (`buy 1 name`) is unaffected. Web and repl play are unaffected -
-this constraint is specific to the email path.
-
-**When authoring or porting a game, do not use a reserved word as a
-top-level command verb.** Pick a synonym (`finish`, `stop`, `close`) or
-require a leading noun.
-
-Known collisions (both pre-date this constraint being written down, and both
-are open):
-
-- `rust/game/acquire-1/src/command.rs` - `end` ("trigger the end of the game
-  at the end of your turn")
-- `rust/game/starship-catan-1/src/command.rs` - `end` ("end the flight
-  early")
-
-There is deliberately **no escape prefix** today: a reply cannot force
-game-move interpretation of a reserved word. Adding one (e.g. `move <text>`)
-is a possible future change; until then the reservation is absolute.
-```
-
-- [ ] Add a cross-reference in code so the constraint is discoverable from the
-      side that enforces it. Insert this comment immediately above the
-      `match verb_lower.as_str() {` in `dispatch_email_command`
-      (**`commands.rs:1215`**):
-
-```rust
-    // These verbs are resolved before any game grammar sees the line, so they
-    // are reserved platform-wide for the email path. The reservation and its
-    // known collisions are documented for game authors in
-    // docs/authoring/COMMANDS.md ("Reserved verbs on the email path").
-    // wfe F29 / D-15 option A. Adding a verb here narrows every game's email
-    // grammar - check the collision grep in that document first.
-```
-
-**Verification checkpoint:**
-
-- [ ] The verb list in the doc matches the code exactly. Cross-check all three
-      sources: `dispatch_email_command`'s match arms
-      (`rg -n 'match verb_lower.as_str' -A 32 rust/web/src/email/commands.rs`),
-      `subscribe_toggle` (commands.rs:42-48) and `settings_verb`
-      (commands.rs:224-235). 18 verbs.
-- [ ] `git diff --stat` shows **only** `docs/authoring/COMMANDS.md` and
-      `rust/web/src/email/commands.rs`. **No game crate is modified** — the
-      collision is reported, not fixed.
-- [ ] `cargo clippy -p web --all-targets --features ssr -- -D warnings` clean
-      (comment-only change to the Rust file).
-- [ ] `cargo fmt --all -- --check` clean.
-
-**Commit:**
-
-- [ ] `git add docs/authoring/COMMANDS.md rust/web/src/email/commands.rs && git commit -m "docs(email): document the reserved email verb set for game authors (wfe F29, D-15 option A)"`
+> **CARVED OUT to WP-85 (`specs/WP-85-email-parser-first-dispatch.md`), 2026-07-26.**
+>
+> Michael's ruling: *"WP-59 Task 14 sounds like a risk, let's pull it out to a
+> separate item if we can."*
+>
+> **Why:** this task was written as a documentation edit, but the work it
+> actually implies is a **behaviour change** in `dispatch_email_command`
+> (`rust/web/src/email/commands.rs`). D-15 has since been **ANSWERED**
+> (2026-07-26, `planning/decisions-ANSWERED.md`) and it settled the *opposite*
+> of what this task implemented: on game-scoped messages the **game command
+> parser is tried FIRST and platform commands are the FALLBACK**, with one
+> small hard-reserved set of escape-hatch verbs (`help` and equivalents) that
+> always wins. So the 18-verb reservation gets **deleted, not documented**.
+>
+> **WP-85 is DEFERRED — BLOCKED ON MICHAEL. Do not execute it.** Michael
+> deliberately deferred the escape-hatch verb set: no game uses those verbs
+> yet, and he wants time with the current behaviour before deciding.
+>
+> **Do NOT execute Task 14 as previously written, under any circumstances.**
+> The option-A `docs/authoring/COMMANDS.md` text it specified is now
+> known-wrong; it is deleted here (preserved in git history and summarised in
+> WP-85).
+>
+> **Nothing else in WP-59 depends on Task 14** — the rest of the package is
+> unaffected and proceeds as written.
 
 ---
 
@@ -2743,6 +2657,14 @@ Report these to the Lead. **Do not fix any of them in this package.**
    owners: **WP-59** (the dispatcher) for an escape prefix; the acquire-1 and
    starship-catan-1 fix packages for a grammar rename. **User decision
    required.**
+
+   **Amendment, 2026-07-26.** The evidence above stands; its tail is now stale.
+   **D-15 was re-opened and ANSWERED**: the game command parser runs FIRST on
+   game-scoped messages and platform commands are the FALLBACK — exactly what
+   this evidence argued for. Task 14 is **carved out to WP-85** (D-54), and
+   **WP-85 is DEFERRED pending Michael's decision on the escape-hatch verb set**
+   (D-55), so this collision stays open in the meantime. **No user decision is
+   outstanding on WP-59.**
 
 2. **`ServerFnError`'s `Display` prefix leaks into user-facing text wherever a
    `ServerFnError` is stringified.** `server_fn-0.8.13/src/error.rs:233-234`

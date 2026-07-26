@@ -79,7 +79,15 @@ any insert: `create_proposal`, `add_proposal_player` and `start_proposal_tx` in
   as write time, so rejecting here is correct.
 - `restart_core` is reached by both `restart_game_with_roster` and the email
   restart path, so one check covers both. It rebuilds slots from a finished
-  game's persisted bots - rejecting a now-disabled one is intended feedback.
+  game's persisted bots; a slot naming a **deprecated/disabled** bot must be
+  **re-resolved to the latest non-deprecated version of that same bot** before
+  validation, not rejected.
+
+**D-8 REFINED** (`decisions-ANSWERED.md`, D-8 row - authoritative, wins over any
+older restart-path wording in this spec): on restart, resolve a deprecated bot to
+the latest non-deprecated version of that bot. The restart path actively
+re-resolves; it neither rejects nor no-ops. D-8's core - validate on write,
+tolerate on read - is unchanged, so §3a and the other four call sites stand.
 
 ### 3c. Tolerate on READ
 
@@ -87,7 +95,9 @@ Do **not** add validation to any path that merely reads or replays an
 already-persisted bot slot: game rendering, `get_restart_prefill`, the bot-turn
 consumer in `rust/web/src/game/mod.rs`, `game/import.rs`. A bot disabled *after*
 the game exists must fall into D-5's dangling-name no-op plus admin warning,
-never a rejection or a panic.
+never a rejection or a panic. **Exception (D-8 REFINED):** `restart_core` is not
+a read path - it re-resolves a deprecated bot to the latest non-deprecated
+version of that bot rather than no-opping.
 
 ## 4. Non-goals
 

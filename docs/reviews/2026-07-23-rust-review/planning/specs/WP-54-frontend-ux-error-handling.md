@@ -1,5 +1,12 @@
 # WP-54: frontend UX error handling
 
+> **CITATION WARNING - line numbers in this spec are approximate and unverified.**
+> Corpus-wide they measured **33-46% wrong**, and two "delete lines A-B" ranges
+> would have destroyed live code. **Navigate by the named function, type or
+> symbol** - never by line number alone. If the code at a cited location does not
+> match this spec's description, **STOP and report**; do not improvise a fix or
+> guess at the intended target.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to execute this plan task-by-task with review checkpoints.
 
 > **Adversarial review pass, 2026-07-25.** This draft was written without a Lead review. It has since been re-verified line by line against live source and repaired in place. Notes and the full citation table: `planning/raw/WP-54-lead-review-notes.md`. Four defects that would have broken the build or the fix were corrected — do **not** revert them:

@@ -6419,3 +6419,518 @@ and the large ones skew Jul 25 while the small ones skew Jul 26. Consistent with
 ~26/~25 split, but item 1 explicitly forbids deciding on this basis.
 
 ACCEPTED by the Lead. No `rust/` writes, no cargo, no git mutations.
+
+## 2026-07-26 - Classification batch 1 (read-only, no files moved)
+
+Covered `specs/WP-59-inbound-processing-quality.md` (2795 lines) and
+`specs/notes-conventions.md` (109 lines), both read in full. Verdicts: **2 KEEP,
+0 ARCHIVE, 0 UNCERTAIN**. WP-59 is still READY in `work-packages.md`, no commit
+references it, and its only supersession is section-internal (Task 14 must be
+rewritten for D-15's parser-first ruling) - not grounds to archive the file.
+Results in `planning/.classify-batch-1.md`.
+
+## 2026-07-26 - Classification batch 2 (read-only, no files moved)
+
+Covered `specs/WP-37-admin-pass.md` (2355 lines, read in full), `WP-68-term-size-replacement.md`
+(117), `WP-70-serde-yaml-ng.md` (98), `WP-71-warp-to-axum.md` (152). Verdicts:
+**3 KEEP, 1 ARCHIVE, 0 UNCERTAIN**. WP-37 is ARCHIVE: commit `b49df61` implemented all
+14 findings and all 13 tasks are verifiable in live `web/src/admin.rs` (`require_admin`,
+`ApiKeyUpdate`, unnest reorder, `read_capped_body`, unwrap count 0) - `work-packages.md`
+still says READY, so that status line is stale, not corroborating. Drift found in WP-68:
+the `term_size` call site is now `repl.rs:219`, not the `:186` the spec cites three times.
+Results in `planning/.classify-batch-2.md`.
+
+### Classification batch 3 complete (read-only; nothing moved, renamed or deleted)
+
+Covered `specs/WP-54-frontend-ux-error-handling.md` (read in full, 2051 lines),
+`WP-05`, `WP-45`, `WP-47`, `WP-64`, `WP-81`. Verdicts: **6 KEEP, 0 ARCHIVE,
+0 UNCERTAIN** - none has landed, none is superseded whole-file. Written to
+`planning/.classify-batch-3.md`. Two items for the destructive/repair pass:
+**WP-45 §3b/§3c still carry D-8's superseded restart-path text** (D-8 REFINED -
+restart re-resolves to the latest non-deprecated bot, it does not reject or
+no-op), and `decisions-ANSWERED.md` has **no D-6 or D-13 row** despite claiming
+to cover D-01..D-34 - WP-47's ruling survives only in `work-packages.md`.
+Surprise: WP-54's citations are accurate, not rotten - all eight target files
+still match the line counts its own file table records, and `git log
+f8763a5..HEAD` over them shows only the one #47 commit its drift section
+already accounts for.
+
+## 2026-07-26 specs classification unit (Lead resumed after CLI restart)
+
+Batch 4 returned (`.classify-batch-4.md`, 7 files): WP-03 ARCHIVE (landed c39786f), WP-01 ARCHIVE (landed 9abe8b4), WP-02/04/08/09a/10 KEEP. Running total classified 19/60.
+
+Batch 5 returned (`.classify-batch-5.md`, 8 files): WP-06 ARCHIVE (all 5 tasks landed a543120), WP-07/09b/17/34/35/38/42 KEEP (WP-42 supersession section-internal, already applied). Running total 27/60.
+
+Batch 6 returned (`.classify-batch-6.md`, 5 files): WP-13/14/15 ARCHIVE (all tasks landed: 4e0abe6, c52f1a5, 52680e5), WP-46/48 KEEP. Running total 32/60.
+
+Batch 7 returned (`.classify-batch-7.md`, 4 files): WP-21 ARCHIVE (all 12 findings landed f547238), WP-19 KEEP (unlanded; Task 5 dropped per WP-81), WP-49/50 KEEP. Running total 36/60.
+
+Batch 8 returned (`.classify-batch-8.md`, 7 files; first attempt died on a session quota limit and was retried with the identical brief): WP-25 ARCHIVE (all 5 tasks landed), WP-22/23/55/57/58/62 KEEP. Running total 43/60.
+
+Batch 9 returned (`.classify-batch-9.md`, 4 files): WP-36 ARCHIVE (all 5 tasks landed), WP-28/29/63 KEEP (WP-29 Task 4 invalidated by the e F30 ruling - needs amendment, not archiving). Running total 47/60.
+
+Batch 10 returned (`.classify-batch-10.md`, 4 files): WP-41 ARCHIVE (fully landed baa5fc6), WP-40/66/67 KEEP (WP-40 note: WP-82 landing order now inverted vs the spec). Running total 51/60.
+
+Batch 11 returned (`.classify-batch-11.md`, 4 files): WP-44 ARCHIVE (all 10 tasks landed f4e7640), WP-51/56/69 KEEP (WP-56 SUBSKILL banner confirmed a false positive; WP-69 s3d carries all of WP-72). Running total 55/60.
+
+Batch 12 returned (`.classify-batch-12.md`, 5 files): WP-39 ARCHIVE (fully landed 347970a), WP-73/82/83/84 KEEP.
+
+**Unit complete.** `planning/specs-CLASSIFICATION.md` written (655 lines), covering all 60 files in `planning/specs/` - verified by diffing the directory listing against the document headings (exact match). Final counts: **47 KEEP, 13 ARCHIVE, 0 UNCERTAIN**. All 13 ARCHIVEs are specs whose work has already fully landed (WP-01, 03, 06, 13, 14, 15, 21, 25, 36, 37, 39, 41, 44), each verified in live source rather than from commit messages. Key correction to the premise: there are NO superseded bloated duplicates - exactly one spec file per WP number, so bloat/citation rot was recorded as executor risk, never as an archive verdict. Every supersession in the corpus is section-internal. The 13 `.classify-*` scratch files are listed in the document under "Delete in the destructive pass". Nothing was moved, renamed or deleted; no file under rust/ was touched.
+
+## Unit: spec amendments + citation banners (Task A / Task B)
+
+Worker 1 returned. Verified by Lead reading the files:
+- `specs/WP-19-acquire-fixes.md` - CITATION WARNING banner inserted after the H1, before the sub-skill line (verbatim standard text). Task 5 heading now carries a bold **DROPPED** banner (c F11 superseded by WP-81, which deletes `acquire-1/src/stats.rs`; WP-81 lands first). Goal paragraph's `c F11` clause annotated "(c F11 - DROPPED, see Task 5)". Task 5 body retained for traceability, not deleted.
+- `specs/WP-29-red7-cleanup.md` - Task 4 heading now carries a bold **INVALIDATED** banner: the `e F30` ruling in `decisions-ANSWERED.md` holds the DATA_DOCS.md second tie-break clause correct and requires the CODE to change instead; the sentence stays; the code fix belongs to the `e F30` owner. Body retained for traceability.
+
+Worker 2 returned. Verified by Lead reading the files:
+- `specs/WP-45-bot-slot-validation.md` - the restart-path sentence in §3b corrected (bot resolved forward, not rejected) plus a bold **D-8 REFINED** note citing `decisions-ANSWERED.md` as authoritative over older spec wording; §3c now carries an "Exception (D-8 REFINED)" clause stating `restart_core` is not a read path and re-resolves to the latest non-deprecated version. §3a and the four non-restart call sites untouched.
+- `specs/WP-62-operator.md` - all three `bo F25` sites flipped BLOCKED -> ANSWERED (~:34 summary bullet, ~:121 §4 paragraph, ~:168 riders table). "OPEN QUESTION for Michael" framing removed. Ruling recorded: cluster is k8s v1.36.0, pin `k8s-openapi` `v1_36`, or the highest flag at or below v1.36 if absent, recording the choice.
+
+Note: WP-45 grew 119 -> 129 lines with the D-8 amendment (marginally over the ~120 Tier 2 cap). WP-62 grew 166 -> 168. Both acceptable; flagged for the destructive pass.
+
+Worker 3 returned. Verified by Lead reading the files:
+- `specs/WP-40-undo-concede-toctou-ratings-integrity.md` - both inverted-ordering sites corrected. The collisions bullet (~:86) and the Non-Goals bullet (~:456) now read `WP-82 -> WP-40` (WP-82 lands first; WP-40 rebases onto the post-split `rust/web/src/db/` tree), citing `landing-order.md` 7.1. A bold HARD-PREDECESSOR line was appended to the existing SUPERSEDED NOTE block (~:34).
+- `specs/WP-50-email-canonicalization.md` - **NO EDIT NEEDED, already correct.** Lead independently confirmed: the header reads "**Landing order: WP-82 -> WP-50.**" with an explicit withdrawal of the old "WP-78 deferred until this lands" wording; the only other WP-78 mention (~:155) correctly says WP-78 is superseded by WP-82. The Task A item for WP-50 was already discharged before this unit.
+- `specs/WP-68-term-size-replacement.md` - all six `repl.rs:186` references replaced. Live call site independently re-read by the Lead: `rust/lib/cmd/src/repl.rs:219` `let (term_w, _) = term_size::dimensions().unwrap_or_default();`. Spec now cites "approximate :219, *verify*" anchored on `fn output_nodes`. The Non-Goals "beyond line 186" line is now symbol-based. The Snapshot-drift paragraph's false "repl.rs:186 identical in snapshot and live" claim is corrected and attributed to WP-06 (`a543120`). `Cargo.toml:16` and `deny.toml:31-34` re-read and left unchanged.
+
+Addendum to Worker 3: it also updated two out-of-brief but same-cause stale refs in WP-68 (the padding block, was "lines 193-200", now "approximate :226-233, *verify*"). Lead spot-checked live `rust/lib/cmd/src/repl.rs` :218-233 - `fn output_nodes` starts :218, the `if l_len < term_w` padding block is in that range. Accepted.
+
+Worker 4 returned. Verified by Lead reading the file:
+- `specs/WP-51-invite-mailer-notify-dedup.md` - CITATION WARNING banner inserted after the H1; `diff` against WP-19's banner confirms the two are byte-identical. The Snapshot-drift table's `proposals.rs` row rewritten from "**empty, exit 0**" to "**NO LONGER EMPTY - WP-44 (`f4e7640`) has landed and rewrote this file**", with the live numbers as *approximate, verify* hints and a reminder that Tasks 5-7 locate by symbol name. A one-sentence caveat was added below the table's re-verification command.
+- Lead independently verified the live numbers: `rust/web/src/proposals.rs` is 3094 lines, `pub trait InviteMailer` at :102, the `impl` `notify_owner_decline` at :278. The spec's new hints match.
+
+Worker 5 returned. Verified by Lead: the CITATION WARNING banner is now present in all six target specs - WP-19, WP-51, WP-59, WP-28, WP-23, WP-54. `diff` of lines 3-8 of each against WP-19's copy is IDENTICAL in all six. WP-54's pre-existing "Adversarial review pass" block is intact and still below the new banner.
+
+**Task B complete.** Remaining: the WP-59 Task 14 read-only finding (Task A's excluded item).
+
+### WP-59 Task 14 - the finding (Task A exclusion; NOT amended, needs a real rewrite)
+
+Read by the Lead directly: `specs/WP-59-inbound-processing-quality.md` Task 14 (~:2571-2690) and `decisions-ANSWERED.md` D-15 (rows at ~:31 and ~:46).
+
+The D-15 ruling, verbatim (`decisions-ANSWERED.md` ~:46):
+
+> **ACCEPTED, and the design is now SETTLED.** Do **not** hardcode a reserved-verb list. On game-scoped messages, **try the game command parser FIRST; platform commands are the FALLBACK when the game parser fails.** One carve-out: a **small hard-reserved set of escape-hatch verbs** (`help` and equivalents) always wins, even on the game path. | Supersedes the recommendation ("A-plus": keep the reserved list plus a game-scoped override). ... This fixes the live defect where acquire-1 and starship-catan-1 players cannot issue `end` by email. Unblocks WP-59 Task 14, whose COMMANDS.md text must be rewritten to describe parser-first dispatch, not a reservation.
+
+Task 14 as written implements the OPPOSITE. It:
+1. Is titled "document the reserved email verbs for game authors (wfe F29 / **D-15 option A**)" and states "documentation only, no behaviour change".
+2. Carries a stale gate: "**D-15 IS STILL OPEN ... DO NOT EXECUTE THIS TASK UNTIL THE LEAD CONFIRMS D-15**". This fails safe (it blocks rather than misleads), which is why the task was left alone rather than patched.
+3. Prescribes a `docs/authoring/COMMANDS.md` section headed "Reserved verbs on the email path (platform constraint)" listing 18 hardcoded verbs, telling authors "do not use a reserved word as a top-level command verb", and asserting "There is deliberately **no escape prefix** today ... until then the reservation is absolute."
+4. Prescribes a source comment above `dispatch_email_command`'s `match verb_lower.as_str()` saying those verbs "are reserved platform-wide for the email path".
+5. Lists acquire-1's `end` and starship-catan-1's `end` as "Known collisions ... both are open".
+
+**What a correct rewrite must say:**
+- Task 14 is no longer documentation-only. D-15 redesigns dispatch, so the package now needs a **behaviour change in `dispatch_email_command`** (`rust/web/src/email/commands.rs`): on a game-scoped message, run the **game's `command_parser` FIRST**; fall back to platform commands only when the game parser fails to parse the line. Whether that lands in WP-59 or is split into a new package is a Lead/Orchestrator call - it is materially larger than the documentation task it replaces.
+- Define the **escape-hatch set**: a small, explicitly-enumerated group (`help` and equivalents) that always wins even on the game path, so a greedy game grammar cannot swallow the command that unsticks a user. The ruling says keep it small and obvious; the exact membership is not yet fixed and must be decided, not invented by an implementer.
+- The 18-verb reserved list must be **deleted, not documented**. The ruling says explicitly "Do **not** hardcode a reserved-verb list."
+- The COMMANDS.md section must be rewritten from "these verbs are reserved, avoid them" to "on the email path your game's parser is tried first; these few escape-hatch verbs are the only ones you cannot use as a top-level verb". Non-game-scoped messages still route to platform commands unconditionally - that half is unchanged.
+- The acquire-1 / starship-catan-1 `end` collision stops being a documented open defect and becomes **fixed by the redesign**; the "Known collisions" list should go, and the "no escape prefix, the reservation is absolute" paragraph is now false.
+- The stale "D-15 IS STILL OPEN" gate must be removed and replaced with a pointer to the settled ruling.
+- The source comment in item 4 above must be rewritten or dropped - it documents a reservation that will no longer exist.
+
+**Not done here.** This is fresh spec-writing against a redesigned decision, not a mechanical amendment, and the current stale gate blocks execution rather than misdirecting it. Escalated to the Orchestrator for Michael.
+
+---
+
+## 2026-07-26 - WP-59 Task 14 carved out to WP-85 (Worker)
+
+**Michael's ruling:** *"WP-59 Task 14 sounds like a risk, let's pull it out to a separate item if we can."*
+
+Task 14 was written as a documentation edit but the work it implies is a behaviour change in `dispatch_email_command` (`rust/web/src/email/commands.rs`). D-15 is **ANSWERED** (2026-07-26, `decisions-ANSWERED.md`) and settled the opposite of what Task 14 implemented: game command parser FIRST, platform commands as FALLBACK, plus a small hard-reserved escape-hatch set (`help` and equivalents). The 18-verb reservation therefore gets **deleted, not documented**.
+
+Carved out to **WP-85** (`specs/WP-85-email-parser-first-dispatch.md`), which is **DEFERRED - BLOCKED ON MICHAEL**. Do not execute it: Michael deliberately deferred the escape-hatch verb set (no game uses those verbs yet; he wants time with current behaviour first). Note: the WP-85 spec file does **not exist yet** - writing it is a later unit, and it is blocked regardless.
+
+**Edits made to `specs/WP-59-inbound-processing-quality.md` (2802 -> 2708 lines):**
+
+1. **Task 14 body replaced with a carve-out banner.** The `## Task 14: ...` heading is kept for traceability with ` - CARVED OUT` appended; the entire body (old approx. :2580-2700 - rationale, the `docs/authoring/COMMANDS.md` "Reserved verbs on the email path" markdown block, the `dispatch_email_command` source comment, verification checkpoint, commit line) is deleted and replaced with a ~20-line blockquote banner recording the carve-out, Michael's quoted ruling, the D-15 reversal, the DEFERRED-BLOCKED-ON-MICHAEL status, an explicit "do NOT execute Task 14 as previously written", and the note that nothing else in WP-59 depends on it. The option-A COMMANDS.md text was **not** carried forward (git history + WP-85 preserve it).
+2. **Stale D-15 gate at approx. :393 corrected.** The paragraph claiming "the only genuine open user decision in this package is **D-15**, which is still **UNDECIDED**" now states that **WP-59 has NO open user decision**, that D-15 is ANSWERED with the parser-first ruling, and that the only task it gated (Task 14) is carved out to WP-85.
+
+**Not changed (reported, not edited - correcting them would rewrite unrelated meaning):**
+
+- `:12` Goal paragraph still ends "...document the email dispatcher's reserved-verb set for game authors (wfe F29 / D-15 option A)". Stale scope statement; does not assert D-15 is open.
+- `:374` wfe F29 disposition-table row still says "Task 14 implements **D-15 option A (documentation only)** as recorded". Stale; does not assert D-15 is open. Its live-collision evidence (acquire-1 and starship-catan-1 both expose top-level `end`) remains accurate and is the reason D-15 was answered as it was.
+- `:2650-2659` "Cross-package / newly discovered" item 1 still says the Lead "should re-open **D-15**" and ends "**User decision required.**" This *does* imply D-15 is open and is now stale, but the item is also the live-collision escalation record; left intact rather than improvised on. **Recommend a follow-up unit fold item 1, `:12` and `:374` into the WP-85 carve-out narrative.**
+
+The CITATION WARNING banner at approx. :3 was left untouched. No other content in WP-59 was modified. No files under `rust/` were touched; no builds or git mutations were run.
+
+---
+
+## 2026-07-26 - WP-85 spec written (Worker)
+
+**Created:** `specs/WP-85-email-parser-first-dispatch.md` - **120 lines** (Tier 2 cap 120).
+
+**Status recorded in the spec, at the very top and impossible to miss: `DEFERRED - BLOCKED ON MICHAEL. An executor must NOT pick this up.`** **0 findings** - WP-85 is a carve-out of **WP-59 Task 14** (2026-07-26, Michael's ruling: *"WP-59 Task 14 sounds like a risk, let's pull it out to a separate item if we can."*), exactly as WP-83 was.
+
+**Blocker, stated as the single reason for deferral:** the escape-hatch verb set (`help` and equivalents, which must win even on the game path) is undecided **by deliberate choice** - Michael: *"can we just defer that work? No games use those verbs yet..."*. The spec does **not** design it and proposes **no** candidate list. Deciding it is prerequisite 1.
+
+**Authority quoted:** D-15, ANSWERED 2026-07-26 in `decisions-ANSWERED.md` - "Do not hardcode a reserved-verb list. On game-scoped messages, try the game command parser FIRST; platform commands are the FALLBACK when the game parser fails," plus the escape-hatch carve-out.
+
+**Code verified by reading only** (no `rust/` edits, no builds, no git mutations). `dispatch_email_command` in `rust/web/src/email/commands.rs` matched the prior Worker's reported shape exactly: approx. :1204, platform-first/game-last, 10 match arms (`concede`/`end`/`undo`/`restart`/`rules`/`help|commands`/`new`/`bump`/`list` + `_ => {}`), then `subscribe_toggle` (2 verbs) then `dispatch_settings_command` (`settings_verb`: `name`, `colors|colours`, `theme`, `emails`, `settings` = 6), then `crate::game::execute_command(trimmed)`. **18 verbs total. No source comment asserting the reservation exists.** No drift.
+
+**Marked UNKNOWN in the spec:** whether `crate::game::execute_command` can distinguish a parse miss from a legitimate user error. Read at the call site: it maps `ExecuteCommandError::UserError(String)` / `::Conflict` / `::Other`, so the two are **indistinguishable at this call site**; the interior of `execute_command` was not read. Prerequisite 2.
+
+**Also recorded:** the 18-verb list is **deleted, not documented** (Task 14's option-A COMMANDS.md text lives only in git history - do not resurrect); the acquire-1 / starship-catan-1 top-level `end` collision is **fixed by** parser-first with no game-crate change (`rust/game/acquire-1/src/command.rs` approx. 192-197 verified; `rust/game/starship-catan-1/src/command.rs` approx. **316-319**, not the 309-313 supplied - both marked approximate/verify); and a loud own-heading **CONSEQUENCE** section that WP-59's "Known collisions" list and "the reservation is absolute" paragraph become FALSE on landing, with the caveat to verify what survives rather than assume. Navigate-by-symbol rule and the concurrent-edit drift warning included. No task list or commit commands - deliberately a sketch, not an execution script.
+
+---
+
+## 2026-07-26 - WP-85 added to work-packages.md (Worker)
+
+**Edited `work-packages.md` only** (plus this log). No files under `rust/` touched; no builds, no git mutations. Validation by reading.
+
+**A. New entry appended** under a new group heading `## Added by the 2026-07-26 WP-59 Task 14 carve-out`, placed after WP-84 (the file's sections are chronological): `### WP-85 email dispatch: game parser first, platform commands as fallback - DEFERRED-BLOCKED-ON-MICHAEL (spec: `specs/WP-85-email-parser-first-dispatch.md`)`. Body (~35 lines) covers: 0 new findings and `wfe F29` staying counted in **WP-59** (WP-83's bookkeeping stance - nothing moves); paths `rust/web/src/email/commands.rs` (`dispatch_email_command`) and `docs/authoring/COMMANDS.md`; an explicit **"an executor must NOT pick this up"** bullet; an explicit bullet stating this is **NOT** `BLOCKED-ON-USER-RULES-REVIEW` and giving the distinction; Michael's two quoted rulings (the carve-out and the deferral); authority D-15 (ANSWERED 2026-07-26, parser FIRST / platform FALLBACK); the acquire-1 / starship-catan-1 `end`-unplayable-by-email fix and the WP-59 text that goes false on landing; and a `**Package-count note:**` bullet in WP-84's style.
+
+**B. Coverage check - new dated recount block appended** below "Package totals recomputed 2026-07-26", which is kept as history and explicitly marked superseded (the file's established habit). Counts re-run for real after the edit:
+
+- `grep -c '^### WP-'` = **85**.
+- Read off the headings: **6** `BLOCKED-ON-USER-RULES-REVIEW` (WP-11, WP-12, WP-16, WP-20, WP-26, WP-30), **1** `SUPERSEDED` (WP-78), **1** `DEFERRED-BLOCKED-ON-MICHAEL` (WP-85), remainder **77** READY.
+- **6 + 1 + 1 + 77 = 85. Sums.** Matches the expected buckets exactly; no discrepancy.
+- `BLOCKED-ON-DECISION` remains EXTINCT (zero headings). Actionable-now is **still 77** (unchanged - WP-85 arrives already blocked). Live work items 84 once WP-78 is discounted (was 83).
+- **Findings coverage unchanged: WP-85 adds 0 to the 570 sum**; the per-package table and the one-package-per-finding invariant stand.
+
+**C. Parked-set distinction made legible.** Touched **one** place: the **status legend** near the top of the file, which now defines `DEFERRED-BLOCKED-ON-MICHAEL` as a separate bucket held by WP-85 alone and states that wherever the file enumerates "WP-11, WP-12, WP-16, WP-20, WP-26, WP-30" that list is `BLOCKED-ON-USER-RULES-REVIEW` only and **WP-85 is not a member**. The new recount block repeats the distinction. **Left untouched (dated historical narrative that was true when written, per instruction):** the "2026-07-25 refinement session" item 3 enumeration; the "2026-07-26 decision session" bullets enumerating the park; the "Updated after the 2026-07-26 decision session" 6-package bullet in the Coverage check; the "Package totals recomputed 2026-07-26" block; and WP-83's entry, which references the park as the source of its released carve-outs rather than as a current roster.
+
+---
+
+## 2026-07-26 - D-54 and D-55 recorded; WP-59 cross-package item 1 amended (Worker)
+
+**Edited two files only** (plus this log): `decisions-session3.md` and
+`specs/WP-59-inbound-processing-quality.md`. Nothing under `rust/` touched; no
+builds, no git mutations; validation by reading. **No `DECISIONS.md` created** -
+consolidation is a later unit.
+
+**Numbering proof:** `grep -rn 'D-54\|D-55\|D-56'` across `planning/` returned
+**zero hits** before the edit. Both numbers were free; **D-54** and **D-55**
+used as expected, no renumbering.
+
+**A. Two entries appended at the END of `decisions-session3.md`**, after the
+"Terminology correction on the record" section (the file remains in its
+existing non-numeric order; nothing was reordered), each in the established
+`## D-NN - <title>` + prose + bolded `**Ruling: ...**` form:
+
+- **D-54 - WP-59 Task 14 carved out into its own work package (WP-85).**
+  **Ruling: CARVE Task 14 out of WP-59 into WP-85.** Quotes Michael: *"WP-59
+  Task 14 sounds like a risk, let's pull it out to a separate item if we can."*
+  Substance: Task 14 was written as documentation but implies a **behaviour
+  change** in `dispatch_email_command` (`rust/web/src/email/commands.rs`); WP-59
+  is otherwise executable, so the coupling would block the package or invite the
+  wrong landing. Records what was done: Task 14 body deleted (heading kept,
+  `- CARVED OUT`, banner to WP-85); stale "D-15 IS STILL OPEN" gate removed
+  (D-15 answered 2026-07-26); WP-85 spec written; `work-packages.md` entry
+  added; WP-85 adds **0 findings**, `wfe F29` stays in WP-59 (WP-83 stance).
+
+- **D-55 - The email escape-hatch verb set is DEFERRED, deliberately.**
+  **Ruling: DEFER. Do not design the escape-hatch verb set now. Its membership
+  must not be invented.** Quotes Michael in full: *"can we just defer that work?
+  No games use those verbs yet, and I think I'd like the current version of
+  brdgme in place a bit longer so I can get a feel for if and how we want to do
+  this in the future."* Substance: D-15 settled parser-first/platform-fallback
+  but carved out the always-wins escape-hatch set; *membership* is the deferred
+  part, on empirical grounds. Consequences recorded: **WP-85 is DEFERRED -
+  BLOCKED ON MICHAEL**, no executor may pick it up; this is explicitly **not**
+  the `BLOCKED-ON-USER-RULES-REVIEW` park (WP-11, WP-12, WP-16, WP-20, WP-26,
+  WP-30); and the acquire-1 / starship-catan-1 `end` collision stays **open**
+  until WP-85 lands, an accepted cost.
+
+**B. WP-59 `## Cross-package / newly discovered` item 1 amended.** The item (the
+LIVE `end` reserved-verb collision, approx. :2645) was **not rewritten** - its
+evidence is accurate and load-bearing. A 6-line **"Amendment, 2026-07-26"**
+paragraph was appended directly after it, before item 2, in the file's style:
+D-15 re-opened and **ANSWERED** (parser FIRST, platform commands FALLBACK) -
+which is exactly what the evidence argued for; Task 14 **carved out to WP-85**
+(D-54); WP-85 **DEFERRED pending Michael's decision on the escape-hatch verb
+set** (D-55), so the collision stays open meanwhile; and **no user decision is
+outstanding on WP-59**, superseding the item's closing "**User decision
+required.**"
+
+**C. WP-59 residual option-A references cleaned up (2026-07-26).** Two stale
+mentions of the old "D-15 option A" framing survived the carve-out; both were
+read first and matched, then amended surgically in
+`specs/WP-59-inbound-processing-quality.md`:
+
+1. **Goal paragraph** (approx. :12, verify). Was: *"...and document the email
+   dispatcher's reserved-verb set for game authors (wfe F29 / D-15 option A) -
+   which this spec's verification proves is already violated by two live
+   games..."*. Now: *"...and surface the email dispatcher's verb-collision
+   problem (wfe F29) - ... The dispatch-precedence work itself is CARVED OUT to
+   WP-85 (D-54), so WP-59 no longer documents a reserved-verb set."* The rest of
+   the goal paragraph is untouched.
+
+2. **`wfe F29` disposition-table row** (approx. :374, verify). The row's
+   evidence (18 reserved verbs, the two live `end` collisions in `acquire-1` and
+   `starship-catan-1`) is unchanged; only its trailing disposition sentence was
+   replaced. Was: *"Task 14 implements **D-15 option A (documentation only)** as
+   recorded..."*. Now records that Task 14 is **CARVED OUT to WP-85** (D-54),
+   that D-15 was answered the other way (parser FIRST, platform FALLBACK, plus a
+   small hard-reserved escape-hatch set - not a reservation), and that `wfe F29`
+   **stays counted in WP-59's scope** for coverage bookkeeping (WP-83 stance).
+   Table layout unchanged - still one cell.
+
+Nothing else in WP-59 was touched; the CITATION WARNING banner at approx. :3 is
+untouched. No files under `rust/` were read for this unit and none were
+modified.
+
+## 2026-07-26 - Decision-record consolidation unit (Lead)
+
+### Worker 1 returned: WP-85 deferral safety check
+
+- Output: `planning/.wp85-deferral-finding.md`
+- Verdict: **indefinite deferral of WP-85 is SAFE**. WP-85 is a leaf; no package
+  names it as a predecessor; `landing-order.md` (read in full) does not mention
+  it at all; no spec assumes parser-first dispatch has landed.
+- WP-59 -> WP-58 chain attaches to WP-59 **Task 5** (`landing-order.md` 6.5 and
+  WP-58's own spec), NOT the carved-out Task 14. WP-59's other downstreams
+  (WP-57 via Tasks 1/2, WP-40 via Task 9) likewise attach elsewhere.
+- Accepted cost, already recorded in D-55: acquire-1 / starship-catan-1 top-level
+  `end` move stays unplayable by email.
+- Two stale-text nits recorded (`work-packages.md` WP-59 entry; WP-56 spec
+  Documentation-updates) - doc hygiene, not blockers.
+- UNKNOWN: whether the `end` collision is still live in `rust/` (not verified,
+  out of scope); the parse-miss-vs-user-error question inside WP-85.
+
+### Worker 2 returned: extraction of `decisions-needed.md`
+
+- Output: `planning/.merge-part-needed.md` (78832 bytes, 41 `## D-` sections)
+- **D-35..D-40 GAP RESOLVED: they exist, in `decisions-needed.md`.** IDs found in
+  source order: D-1..D-25, D-35, D-26..D-34, D-36, D-37, D-38, D-39, D-40, D-41.
+  Note D-35 sits out of order between D-25 and D-26 in the source, and D-41 is
+  present here as well as in `decisions-session3.md` (potential conflict - to be
+  resolved later-ruling-wins).
+- Source uses UNPADDED IDs (`D-1`, not `D-01`); extraction records both the
+  literal ID and a zero-padded `Normalized:` form.
+- Standing constraints / non-numbered content captured in a final section.
+
+### Worker 3 returned: extraction of the other three sources
+
+- Output: `planning/.merge-part-rest.md` (71067 bytes, 37 `## D-` sections)
+- `decisions-ANSWERED.md`: 34 IDs, but only 22 are numbered D-items (D-7..D-25,
+  D-35, D-37..D-40); the rest are finding-level rulings (`a F1`, `b F4`, `b F7`,
+  `e F30`, `d F37`, `bo F25`) and `N-1..N-6`. Its claim to hold "D-01..D-34" is
+  therefore itself inaccurate - it does not contain entries for every one of them.
+- `decisions-session3.md`: 15 IDs, D-41..D-55, non-numeric order confirmed
+  (D-52/D-53 between D-50 and D-51; D-42 after D-51; D-54/D-55 appended last).
+- `open-decisions-for-user.md`: **0 decision IDs** - a pointer stub, no content
+  of its own.
+- Union of numbered decisions across all four sources: **D-1 .. D-55, no gaps.**
+- **D-35..D-40 gap: DOES NOT EXIST.** All six are present (in
+  `decisions-needed.md`, and D-35 + D-38/D-39/D-40 also in `decisions-ANSWERED.md`).
+
+### Lead ruling: D-41 ID collision
+
+`decisions-needed.md` D-41 ("Friends-page select revert after a rejected change",
+WP-54/WP-53) and `decisions-session3.md` D-41 ("Delete the per-game `_fuzz` and
+`_repl` binaries") are two UNRELATED decisions sharing a number.
+
+Ruling: `D-41` in `DECISIONS.md` keeps the session-3 decision (later, ruled).
+The friends-page decision is renumbered **D-56**, last in ascending order, with a
+renumbering note. Recorded as a COLLISION, not a supersession.
+
+Also directed the assembly Worker to reconcile two supersessions:
+- D-15's "the `end` defect is fixed / Task 14 unblocked" text is SUPERSEDED by
+  D-54 (Task 14 -> WP-85) and D-55 (WP-85 DEFERRED). The defect stays OPEN.
+  Superseded version was held by `decisions-ANSWERED.md` and `decisions-needed.md`.
+- D-44 (SSE pivot) makes `decisions-needed.md`'s D-13 / WP-42 WebSocket-hardening
+  text non-current.
+
+And to record that `decisions-ANSWERED.md`'s banner claim to cover "D-01..D-34
+ONLY" is FALSE - "all 34" is its ROW count, not a range. It omits D-1..D-6, D-12,
+D-13, D-26..D-34, D-36 while including D-35, D-37..D-40, six `N-` items and six
+finding IDs. **This is the entire origin of the phantom D-35..D-40 gap.**
+
+### Worker 4 returned: `planning/DECISIONS.md` assembled - UNIT COMPLETE
+
+- Output: `planning/DECISIONS.md`, 1274 lines / 126461 bytes.
+- Lead-verified by reading: **56 `## D-` sections, D-01..D-56 contiguous, zero
+  duplicates** (`grep -o '^## D-[0-9]*' | sort -n` and `uniq -d` returned nothing).
+- Structure verified present: SUPERSEDES block naming the four retired files;
+  Coverage; Conflicts-resolved table (21 rows); Decisions D-01..D-56; Standing
+  constraints (10 sub-sections incl. the Group D park banner, the D-17 standing
+  process change, and the session index); Finding-level rulings (`a F1`, `b F4`,
+  `b F7`, `e F30`, `d F37`, `bo F25`); N-items (N-1..N-6); UNKNOWN / malformed.
+- Michael's verbatim words preserved in the rulings and rationale (spot-checked
+  D-41, D-56).
+- The four sources remain on disk, unmodified. Retiring them is a later,
+  separate destructive pass.
+- Intermediates left on disk for audit: `.merge-part-needed.md`,
+  `.merge-part-rest.md`, `.wp85-deferral-finding.md`.
+
+## 2026-07-26 EXECUTION-DOCS unit - W1 return (git survey + landing-order.md)
+- Branch `master`. **`rust/` working tree is CLEAN** - `git status --short -- rust/` and `git diff --stat -- rust/` both empty. The "uncommitted partially-complete rust work" premise carried in the Lead brief does NOT hold at this snapshot; the recent log is dense with landed `WP-*` fix commits instead. (DISCREPANCY 1)
+- All uncommitted work is inside `planning/`: 14 modified (incl. `work-packages.md`, `specs-LOG.md`, `decisions-session3.md`, 11 spec files) + 17 untracked (`.classify-batch-1..12.md`, `.classify-survey.md`, `.merge-part-*.md`, `.wp85-deferral-finding.md`, `DECISIONS.md`, `specs-CLASSIFICATION.md`, `specs/WP-85-*.md`). Stray untracked `a6e750b4157c5c439.output` at repo root.
+- `landing-order.md` (596 lines) read in full. It contains **no single global landing order** - only per-cluster ordering constraints (sections 1, 4, 6.1-6.6, 7.1, 8.1, 9, 10.1).
+- Migration collision section is **§6.4** (§6.5 back-references it). It **DOES already name all four** packages: WP-34 `023_login_email_sends.sql`, WP-50 `023_canonical_emails.sql`, WP-56 `0NN_settings_email_token.sql`, WP-58 `0NN_unsubscribe_token.sql`. Highest existing assumed `022_concede_bot_replacement.sql`. No gap to fix - the brief's suspicion that WP-34 is missing is WRONG.
+- §7 confirms WP-82 first, before all 11 of WP-35/40/42/45/47/49/50/52/53/59/84; pure move, `pub use` keeps 293 call sites compiling; WP-41 the landed exception. Not gated: game crates, Tier 3 checklists, WP-51, 54, 55, 56, 57, 58.
+- WP-85 is **not mentioned at all** in `landing-order.md`. WP-77/79/80 also not mentioned; WP-76 only in a negative note ("WP-57 and WP-76: checked, no collision"). None on the critical path per this file.
+- `landing-order.md` says **nothing** about `docs/BACKLOG.md` precedence (zero grep hits) - the Lead brief's "landing-order overrides BACKLOG" claim is not sourced from this file. (DISCREPANCY 2)
+- `landing-order.md`'s own claim that "`git log --oneline -40` contains zero `WP-*` commits" is now **stale**.
+
+## 2026-07-26 EXECUTION-DOCS unit - W2 return (work-packages.md + specs-CLASSIFICATION.md)
+- `work-packages.md` = 1455 lines, 85 `### WP-nn` headings, canonical. Recount verified in-file: **77 READY + 6 BLOCKED-ON-USER-RULES-REVIEW + 1 SUPERSEDED (WP-78) + 1 DEFERRED-BLOCKED-ON-MICHAEL (WP-85) = 85.** `BLOCKED-ON-DECISION` is EXTINCT.
+- Parked set CONFIRMED exactly **WP-11, 12, 16, 20, 26, 30**. Three carve-outs RELEASED and owned by **WP-83**: `a F1` (WP-12), `b F7` (WP-16), `e F30` seat-order half (WP-30). WP-85 is explicitly NOT a member of the park - separate bucket, held by WP-85 alone.
+- WP-85 blocks nothing ("actionable-now count is still 77"). Blocker is the undecided escape-hatch verb set; "its membership must NOT be invented"; "an executor must NOT pick this up".
+- **WP-76/77/79/80 have no spec** (no `spec:` ref in `work-packages.md`, no row in `specs-CLASSIFICATION.md`'s 60-file table). All four sit under `## Unowned / newly discovered`, all headings READY. None is a predecessor of anything. Their own dependencies: WP-76 after WP-51 Task 1; WP-79 after WP-40 and WP-45 (collides in `restart_core`); WP-80 instructed to "fold in" to WP-09a/WP-09b (heading still standalone READY); WP-77 no sequencing dependency. **None on the critical path.**
+- `b F4` RE-PARKED (7 Wonders resources are NOT depleted by trade; the "asymmetric by seat" framing was WRONG; residual is a simultaneity question). `d F37` **REJECTED - NOT A BUG** ("do not 'fix' this later. No fix, no follow-up."). Authority: `DECISIONS.md`, which explicitly overrules the older `decisions-needed.md` egregious table - "THE RULINGS WIN". WP-83 scope note confirms neither is in scope.
+- `work-packages.md` has **ZERO** mentions of `docs/BACKLOG.md`. Combined with W1: the "landing-order overrides BACKLOG" rule is sourced only from `README.md` and `ORCHESTRATOR-HANDOVER.md`, never from `landing-order.md` itself. (DISCREPANCY 2 confirmed.)
+- `specs-CLASSIFICATION.md` = 655 lines. Buckets **47 KEEP / 13 ARCHIVE / 0 UNCERTAIN**, 60 spec files total. The 13 ARCHIVE ids are exactly as claimed: WP-01, 03, 06, 13, 14, 15, 21, 25, 36, 37, 39, 41, 44. Verdicts were derived from **live source read directly**, deliberately overriding stale `work-packages.md` / `specs-LOG.md` status lines. Bloat and supersession were NEVER grounds to archive. Highest-risk-for-cheap-executor list: WP-51, 59, 28, 19, 23, 54. 8 KEEP-with-known-defect: WP-19, 29, 45, 59, 62, 40, 51, 68. No MISSING bucket; WP-72 (lives in WP-69 spec) and WP-78 (never had a file) are the two deliberate absences.
+
+## 2026-07-26 EXECUTION-DOCS unit - W3 return (DECISIONS.md + fact checks)
+- `DECISIONS.md` = 1274 lines, headings **D-01..D-56, no gaps, no duplicates**. The 56-from-55 arithmetic is explained in-file: `D-41` was a real ID collision; the friends-page `<select>` decision was renumbered to `D-56`. In-file: "D-35..D-40 were searched for and FOUND - there is no numbering gap. Do not re-open this as a gap."
+- No-ruling set: the brief's **D-26, 27, 28, 29, 30, 31, 32, 34** matches `DECISIONS.md`'s own self-description verbatim, but the sections are finer-grained: **fully unruled = D-26, D-28, D-30, D-31, D-32 (5)**; **partial (a carve-out IS ruled) = D-27 (`b F7` FIX NOW, `b F4` parked), D-29 (`e F30` seat-order half FIX NOW), D-34 (`a F1` FIX NOW)**. Plus a **ninth**: **D-46** has no in-section ruling but is RESOLVED by D-48. D-43 and D-49 are ruled with open sub-parts. D-55 is a ruling *to* defer, not an absent ruling.
+- `decisions-ANSWERED.md` banner **CONFIRMED FALSE**: banner reads "INCOMPLETE - this file covers D-01..D-34 ONLY" / "All 34 open decisions are CLOSED"; its table actually holds **34 data rows** whose ids include D-35/37/38/39/40, six `N-` items and six finding ids, and EXCLUDE D-1..D-6, D-12, D-13, D-26..D-34, D-36. "34" is a **row count, not a range**. Verified by reading the file directly.
+- **MAJOR: the single global execution order is `planning/BACKLOG.md`** (173 lines, "Remediation backlog - prioritized work-package ordering", **Phase 0..Phase 7**, "packages within a phase are in suggested execution order"). This is a DIFFERENT FILE from `docs/BACKLOG.md` (the product backlog, no phase headings). `README.md`'s `## Execution order` states it plainly: "Global priority order is `BACKLOG.md`'s Phase 0-7. `landing-order.md` is **not** a global order - it is a set of verified pairwise constraints ... it overrides BACKLOG.md order where the two disagree." **Same-basename collision risk: both `README.md` and `ORCHESTRATOR-HANDOVER.md` write the bare `BACKLOG.md` for the planning one.**
+- `critical-path.md` (352 lines) is **NOT authoritative** - own banner "STALE - HISTORICAL SNAPSHOT", citations against worktree `f8763a5`, points at the now-stub `open-decisions-for-user.md`.
+- `ls rust/web/migrations/` **CONFIRMS** highest present is `022_concede_bot_replacement.sql` (22 files, `003..022`). The four-way `023` collision (WP-34, 50, 56, 58) is real.
+- `planning/specs/` holds **61** files but `specs-CLASSIFICATION.md` classifies **60**. One unaccounted; plausibly `WP-85-*.md` (written later, per D-54) but NOT verified - UNKNOWN.
+
+## 2026-07-26 EXECUTION-DOCS unit - COMPLETE (W4 return + both artifacts written)
+- W4: `planning/BACKLOG.md` (173 lines) read in full. Phase 0 has no WPs (decisions batch, now done). Phases 1-7 number items 1..75 continuously; coverage is exactly WP-01..WP-75. **ABSENT from it: WP-76, 77, 78, 79, 80, 81, 82, 83, 84, 85, WP-09a, WP-09b** - it predates all of them and predates the WP-09 a/b split. WP-72 IS present (Phase 6). No date stamp, no landed/done markers, zero mentions of `landing-order.md`, and its `D-nn` blocker tags are decision-era **stale** (Phase 0 still says "get answers from Michael").
+- `README.md`'s `## Execution order` step 1 points the executor at **`decisions-ANSWERED.md`** as the ruling authority. That is the file whose banner is FALSE. The new `EXECUTION-README.md` overrides this and points at `DECISIONS.md`.
+- **ARTIFACTS WRITTEN:** `planning/EXECUTION-README.md` (495 lines) and `planning/EXECUTION-PROMPT.md` (184 lines).
+- `EXECUTION-README.md` covers: authority precedence + the non-authorities; the `planning/BACKLOG.md` vs `docs/BACKLOG.md` same-basename trap; WP-82-first; the Phase 1-7 order with stale D-tags stripped; the verified pairwise constraints; the 12 packages BACKLOG.md does not know about, each placed; the four-way `023` migration collision; the parked six plus `b F4`/`d F37` do-not-reopen; WP-85 deferred; the executor-relevant rulings and the 8 (+D-46) no-ruling decisions; citation risk; the WP-76/77/79/80 documented coverage gap plus WP-72/WP-78 by-design absences; the 13-ARCHIVE verify-first caveat; the survey-the-tree-yourself rule; working discipline.
+- `EXECUTION-PROMPT.md` is paste-ready for a cheap model's orchestrator: three-tier serial delegation, workers-only execution, survey-the-uncommitted-work-FIRST, STOP-AND-REPORT as the rewarded outcome, navigate-by-symbol, WP-82 first, migration renumbering, the parked list, never touch gameplay or RULES.md, one package -> one verification -> one commit, pushes deferred.
+- Both files deliberately contain **zero line-number citations**.
+
+## 2026-07-26 EXECUTION-DOCS unit - W5 verification pass + Lead fixes
+- **FINAL LINE COUNTS after the Lead's fixes:** `planning/EXECUTION-README.md` = **500 lines**, `planning/EXECUTION-PROMPT.md` = **195 lines** (measured by `wc -l` at verification time; supersedes the 495/184 figures in the entry above).
+- W5 read both new artifacts in full and cross-checked every load-bearing claim against `work-packages.md`, `landing-order.md`, `DECISIONS.md`, `BACKLOG.md` and `specs-CLASSIFICATION.md`. **All load-bearing claims verified CORRECT**: the parked six; the 13 ARCHIVE ids; the 47/13/0 buckets; the 85 = 77+6+1+1 recount; `BLOCKED-ON-DECISION` extinct; the WP-82 dependent list incl. WP-42 and WP-84; the realtime chain; all 15 pairwise constraints incl. their directions; the four-way `023` collision; every Phase 1-7 list item-for-item; the 8 no-ruling decisions and the D-27/D-29/D-34 partials; D-46 resolved by D-48; D-01..D-56 contiguous; the false `decisions-ANSWERED.md` banner; WP-76/77/79/80 spec-less and off the critical path; `b F4` / `d F37`; the 6 highest-risk and 8 known-defect specs.
+- **ZERO line-number citations** in either artifact (verified by grep). The five whole-file lengths quoted for provenance are all exact.
+- No broken path references; no nonexistent WP ids.
+- **8 defects found and FIXED by the Lead:** (1) `EXECUTION-PROMPT.md` told the orchestrator not to run shell commands then told it to run `git status` - now delegates the survey to a Worker explicitly; (2) s8's claim that classification's "60" was "59 files plus WP-72's fileless row" was FALSE - the 60 verdict rows are 59 WP specs + `notes-conventions.md`, and WP-72 has no row at all; (3) s0 authority table said specs were "61 files" when `WP-*.md` is 60; (4) s3 migration range `003..022` was wrong - it is `001..022` (the load-bearing "highest = 022" was correct; this error was inherited from the W3 log entry above, which still contains it); (5) s2.1 Phase 6 said WP-64 "already landed" - WP-64 is **READY**, scheduled in Phase 2, and must not be skipped; (6) `EXECUTION-PROMPT.md` used the bare `planning/` prefix without ever defining it - now defined as `docs/reviews/2026-07-23-rust-review/planning/`; (7) the "293 `crate::db::foo(...)` call sites" figure is an imprecise upstream quote (the WP-82 spec says "293 `db::` references"; a live grep for `crate::db::` gives 253) - both artifacts now mark the number indicative, not verified; (8) status label drift `DEFERRED - BLOCKED ON MICHAEL` vs the grep-able `DEFERRED-BLOCKED-ON-MICHAEL` - normalised.
+- `EXECUTION-PROMPT.md` confirmed to carry all seven required elements: authority paths, STOP-AND-REPORT, citation risk, WP-82-first, migration renumbering, the parked list, and survey-the-uncommitted-work-first.
+- `rust/` re-confirmed CLEAN on `master` at verification time.
+- **W6 RE-VERIFY DISCREPANCY (open):** fix (8) did NOT fully land. `grep -n 'DEFERRED - BLOCKED ON MICHAEL' EXECUTION-README.md` still returns 1 hit at the WP-85 status-table row (expected 0). All other re-verify greps matched expectations. Fixes (2)-(6) confirmed landed.
+- UNIT COMPLETE. Not committed - committing is a later unit's call.
+
+## 2026-07-27 destructive/cleanup pass - PHASE 1 COMPLETE (ARCHIVE re-verification)
+- The 13 ARCHIVE verdicts in `specs-CLASSIFICATION.md` were originally reached while the worktree held uncommitted remediation work, so "already landed" needed re-confirming against history rather than a dirty tree. `rust/` is now clean and committed on `master` (`git status --porcelain rust/` empty).
+- Two verification Workers split the 13 (batch A: WP-01, 03, 06, 13, 14, 15, 21; batch B: WP-25, 36, 37, 39, 41, 44). Each spec's own Task roster was enumerated from the spec file and every task checked individually against live committed source, not against the classification doc's own summary.
+- **RESULT: all 13 CONFIRMED-LANDED, 0 NOT-LANDED.** All 13 cleared for archiving; the `Counts: 47 KEEP, 13 ARCHIVE, 0 UNCERTAIN` line stands unchanged.
+- New section `## ARCHIVE re-verification against clean committed master (2026-07-27)` appended to `specs-CLASSIFICATION.md` (655 -> 820 lines). It carries the per-spec `file:line` evidence, two caveats for future verifiers (WP-44's server-only `email_token` hits at `proposals.rs:52`/`:491`; WP-41's must-keep `updated_at = NOW()` writes at `db.rs:1582`/`:1588`), and one correction to the existing WP-03 evidence (the three zero-progress guards use three different shapes).
+- `.verify-batch-A.md` / `.verify-batch-B.md` are scratch files; they are to be removed in the later scratch-cleanup step.
+- **Nothing moved or deleted yet.** No existing content in `specs-CLASSIFICATION.md` was rewritten or renumbered - append only.
+
+## 2026-07-27 - cleanup pass Phase 2 complete (archive the landed specs)
+
+- `planning/specs/archive/` created.
+- All **13** confirmed-landed specs moved from `planning/specs/` into `planning/specs/archive/`
+  with plain `mv` (not `git mv`): WP-01, WP-03, WP-06, WP-13, WP-14, WP-15, WP-21, WP-25,
+  WP-36, WP-37, WP-39, WP-41, WP-44. All 13 were found where expected; nothing missing, no
+  near-match guessing needed.
+- `planning/specs/archive/README.md` written: a hard STOP / do-not-execute banner, the reason
+  (line-addressed edits against files the landing commits have since rewritten), the
+  provenance-only framing, a pointer to the per-task evidence in `specs-CLASSIFICATION.md`
+  section `ARCHIVE re-verification against clean committed master (2026-07-27)`, and a table
+  of the 13 files with landing commit(s) and task counts copied verbatim from that section's
+  verdict table.
+- **48 files now remain directly in `planning/specs/`**: 47 live actionable WP specs plus
+  `notes-conventions.md`. The `archive/` subdirectory holds 13 specs + its own README.
+- No file under `rust/` was touched; no git mutations were run.
+
+## 2026-07-27 - Cleanup Phase 3 (destructive pass) - COMPLETE
+
+`planning/archive/` created, with its own `archive/README.md` stating that
+everything inside is RETIRED and provenance-only, naming the live entry points
+(`EXECUTION-README.md`, `EXECUTION-PROMPT.md`) and the single decision authority
+(`DECISIONS.md`).
+
+**Gate:** the read-only decision-source coverage check returned **COVERAGE PASS**
+before anything was retired - `DECISIONS.md` is a strict superset of all four
+older decision sources (D-01..D-56 contiguous, 56 sections), the absent-ID set is
+EMPTY, and 12 sampled rulings all matched in substance. That verdict, the
+per-source ID counts and the `decisions-ANSWERED.md` false-banner finding are now
+recorded permanently in `planning/archive/README.md`, so the evidence survives the
+deletion of the scratch file that held it.
+
+### MOVED to `planning/archive/`
+
+- `ORCHESTRATOR-HANDOVER.md` - superseded by the EXECUTION docs; kept as a
+  historical process record.
+- `decisions-needed.md` - superseded by `DECISIONS.md`; kept as the original
+  question-and-options framing of D-1..D-41.
+- `open-decisions-for-user.md` - superseded; 6-line CLOSED pointer stub.
+- `decisions-session3.md` - superseded by `DECISIONS.md`; kept as provenance for
+  D-41..D-55.
+- `.wp85-deferral-finding.md` - **archived, not deleted.** Its verdict is already
+  summarised in this log, but it holds detail the summary does not: the live read
+  of `docs/authoring/COMMANDS.md` showing the email/reserved-verbs section does
+  not exist in the file today, the per-downstream WP-59 chain table, WP-54's
+  explicit no-dependency disclaimer, and its UNKNOWNs.
+
+### DELETED (all were git-tracked or pure scratch)
+
+- `decisions-ANSWERED.md` - tracked, recoverable from git. Removed rather than
+  archived because its false "D-01..D-34 ONLY" banner actively misleads and
+  `README.md` pointed an executor at it. Content fully carried by `DECISIONS.md`.
+- `tier2-tier3-plan.md` - tracked, recoverable from git. Stale at source; only
+  `README.md`'s description of it was ever corrected, never the file itself.
+- `.classify-survey.md` and `.classify-batch-1.md` .. `.classify-batch-12.md`
+  (all 13 existed) - superseded by `specs-CLASSIFICATION.md`.
+- `.verify-batch-A.md`, `.verify-batch-B.md` - consolidated into
+  `specs-CLASSIFICATION.md`'s "ARCHIVE re-verification against clean committed
+  master (2026-07-27)" section, whose presence was verified before deleting.
+- `.merge-part-needed.md`, `.merge-part-rest.md` - read before deleting. Pure
+  mechanical extractions of the four decision sources, all of which are either
+  archived above or carried by `DECISIONS.md` under COVERAGE PASS. Nothing unique.
+- `.decisions-coverage-check.md` - deleted only after its numbers were transcribed
+  into `planning/archive/README.md`.
+- `a6e750b4157c5c439.output` at the repo root - untracked JSONL subagent
+  transcript (`isSidechain: true`, `agentId` matching the filename), a stray
+  harness artifact with no user content. Deleted under the Lead's explicit
+  by-name authorisation.
+
+### Deliberately NOT touched
+
+- `planning/README.md` - another unit's job. It still points at the two deleted
+  files and must be rewritten by that unit.
+- `planning/specs-LOG.md` (this file) - retired in the final step, appended to
+  only.
+- `DECISIONS.md`, `EXECUTION-README.md`, `EXECUTION-PROMPT.md`,
+  `specs-CLASSIFICATION.md`, everything under `specs/`.
+- Nothing under `rust/` was read or modified; no build, test or git-mutating
+  command was run.
+
+## 2026-07-27 - CLEANUP/DESTRUCTIVE PASS COMPLETE - this log is now RETIRED
+
+**FINAL ENTRY. This file is retired as of this entry.** It has been moved to
+`planning/archive/specs-LOG.md` as the last action of the cleanup pass. It is a
+historical crash/durability log of the planning effort - a session-by-session
+record of what each unit did - **not an instruction document**. No executor
+should read it. Read `planning/EXECUTION-README.md`,
+`planning/EXECUTION-PROMPT.md` and `planning/DECISIONS.md` instead.
+
+### The pass, end to end
+
+- **Phase 1 - verification.** All 13 specs carrying an ARCHIVE verdict were
+  re-verified against clean committed master and confirmed **CONFIRMED-LANDED**.
+  The evidence is recorded in `specs-CLASSIFICATION.md` under "ARCHIVE
+  re-verification against clean committed master (2026-07-27)".
+- **Phase 2 - archive the landed specs.** All 13 were moved to
+  `planning/specs/archive/`, which carries its own README explaining that they
+  are landed and must not be re-executed.
+- **Phase 3 - retire the process exhaust.** The four decision sources were
+  retired only behind a **COVERAGE PASS** gate: `DECISIONS.md` was shown to be a
+  strict superset of their union (D-01..D-56 contiguous, 56 sections, plus the
+  finding-level rulings and N-1..N-6), the set difference sources-minus-
+  `DECISIONS.md` was EMPTY, and 12 sampled rulings matched in substance. That
+  verdict, the per-source ID counts and the `decisions-ANSWERED.md` false-banner
+  finding are recorded permanently in `planning/archive/README.md`.
+- **Final step - retire this log.** Appended to, then moved to
+  `planning/archive/specs-LOG.md`. `planning/archive/README.md` now carries rows
+  for both this file and `wp85-deferral-finding.md`.
+
+### Note on `wp85-deferral-finding.md`
+
+Previously archived as the leading-dot file `.wp85-deferral-finding.md`, which
+made it effectively invisible to a human browsing `planning/archive/`. Renamed to
+`wp85-deferral-finding.md` (no leading dot), contents unchanged. It was archived
+rather than deleted because it holds four things no summary elsewhere carries:
+the live read of `docs/authoring/COMMANDS.md` (zero matches for `reserved` or
+`email`), the per-downstream impact table for WP-59, WP-54's verbatim
+self-disclaimer, and the exact stale wording of `work-packages.md`'s WP-59 entry.
+
+### Outstanding for the next unit
+
+- **`planning/README.md` was deliberately left untouched.** It is another unit's
+  job. As of this entry it still contains **dangling references to two deleted
+  files**: `decisions-ANSWERED.md` and `tier2-tier3-plan.md`. Both were deleted
+  in Phase 3 (git-tracked, recoverable from history). That unit must rewrite
+  `README.md` to point at the live entry points instead.

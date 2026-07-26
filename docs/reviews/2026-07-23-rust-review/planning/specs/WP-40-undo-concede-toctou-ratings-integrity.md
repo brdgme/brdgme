@@ -31,6 +31,9 @@ Likewise ws F34's own recommendation offers *"recompute on next finish"*; that
 was already established to **double-count** ratings (it re-rates against
 `game_type_users` values that already absorbed the voided deltas), and under
 option A it is doubly moot because a rated game can no longer be undone.
+**Also: WP-82 (`db.rs` module split) is now a HARD PREDECESSOR of WP-40 per
+`landing-order.md` 7.1 - this spec's older "the split lands after your db.rs
+edits" wording is WRONG and following it would do harm.**
 
 ## How to use this spec
 
@@ -79,8 +82,11 @@ packages edit the same three functions.
   `ServerFnError`; WP-54 makes them visible.
 - **File-level collisions (no ordering constraint, disjoint regions):** WP-45
   (bot-slot validation) and WP-47 (`game_visibility` gates) also edit `db.rs`
-  and `game/server_fns.rs`. The **db.rs module split (ws F42)** is a separate
-  future package that must land **after** your db.rs edits.
+  and `game/server_fns.rs`. The **db.rs module split (ws F42)** is now
+  **WP-82** and is a **HARD PREDECESSOR: WP-82 -> WP-40.** It lands **first**;
+  rebase this package onto the post-split `rust/web/src/db/` tree, where each
+  db.rs edit below lands in the relevant `db/*.rs` submodule. See
+  `landing-order.md` 7.1.
 - **Routed in from WP-41:** `concede_game`'s 2-player assumption is a
   `debug_assert!` only (hint ~db.rs:1315, *approximate, verify*), so a release
   build silently gives place 1 to every non-conceder in a 3+-player game and
@@ -447,8 +453,10 @@ run from `/home/beefsack/Development/brdgme/rust`, always single-package per
   `write_ranked_placings`, the all-pairs loop and the `ranked_placing.or(place)`
   precedence are untouched. Task 5 changes *where a zero is recorded*, nothing
   arithmetic.
-- **NO db.rs module split** (ws F42) - a separate future package that must land
-  after this one.
+- **NO db.rs module split** (ws F42) - that is **WP-82**, a separate package,
+  and it lands **before** this one (`WP-82 -> WP-40`, `landing-order.md` 7.1).
+  Do not perform or extend the split here; just target the post-split
+  `db/*.rs` submodule that now holds each named function.
 - **NO unrelated WP-41 cleanups**: do not sweep `updated_at = NOW()`, do not
   touch `send_friend_request`, `choose_colors`, `is_user_admin`,
   `build_game_type_user`, or add WP-41's coverage tests.

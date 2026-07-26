@@ -1,5 +1,12 @@
 # WP-51: invite-mailer and notify dedup
 
+> **CITATION WARNING - line numbers in this spec are approximate and unverified.**
+> Corpus-wide they measured **33-46% wrong**, and two "delete lines A-B" ranges
+> would have destroyed live code. **Navigate by the named function, type or
+> symbol** - never by line number alone. If the code at a cited location does not
+> match this spec's description, **STOP and report**; do not improvise a fix or
+> guess at the intended target.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to execute this plan task-by-task with review checkpoints.
 
 **Goal:** Remove the two silent `find_game_extended(...).ok().flatten()` before-snapshot reads by having `game::execute_command` return the snapshot it already loaded, which simultaneously kills the only real `before = None` re-notification path (wd F8, wfe F42); stop `game_log_count`'s `unwrap_or(0)` from collapsing every affected turn email onto one subject (wfe F41); load the game and the log count once per `notify_game_emails` call instead of once per recipient (wfe F43); delete `sweep::send_reminder`'s ~90-line copy of `notify::send_one` by adding a `NotifyKind::Reminder` plus an outcome-returning send (wfe F36), which also gives the reminder the same de-threaded per-turn subject its turn email uses (wfe F39); collapse the five copy-pasted `tokio::spawn`/interval loops into one helper (wfe F38); and in `proposals.rs`: apply the invite gates every other mailer applies to `notify_owner_decline` (wd F32), stop promising a reply on the four pure-notification mails whose reply address can never resolve (wd F33), and log instead of silently swallowing the mailer tasks' DB errors while eliminating blank-substitution subjects (wd F34).
@@ -47,7 +54,7 @@
 
 | File | `diff -ru` snapshot vs live | Effect on this package |
 |---|---|---|
-| `rust/web/src/proposals.rs` | **empty, exit 0** | none; all wd F32/F33/F34 line numbers are as the findings cite them |
+| `rust/web/src/proposals.rs` | **NO LONGER EMPTY — WP-44 (`f4e7640`) has landed and rewrote this file**, shifting every citation below | live is now ~3094 lines (spec says 2961); `trait InviteMailer` ~:102 (spec says :110-122); `impl` `notify_owner_decline` ~:278 (spec says :286-328) — all *approximate, verify*. Tasks 5-7 must locate every edit by symbol name, which is what they already instruct |
 | `rust/web/src/email/sweep.rs` | **empty, exit 0** | none |
 | `rust/web/src/email/notify.rs` | **empty, exit 0** | none |
 | `rust/web/src/email/outbound.rs` | **empty, exit 0** | none (read-only here) |
@@ -56,7 +63,7 @@
 | `rust/web/src/game/server_fns.rs` | **large** (#47 concede/end-game: `can_concede`/`can_end_game`/`is_replaced` fields, `count_active_humans`, `end_game`, recent-form 10 -> 5) | wd F8's `server_fns.rs:492-495` is live **:530-533**; the `end_game` server fn (:966) did not exist at snapshot time and is WP-40's, not touched here |
 | `rust/web/src/email/commands.rs` | **large** (#47: `end` verb, `run_end`, concede replacement flow) | wfe F42's `commands.rs:426` is live **:427** and is `run_new`'s game-creation site (see the disposition table); the one-token edit in Task 1 is at live **:1275** |
 
-Command used, for re-verification: `diff -ru /home/beefsack/Development/brdgme-review-snapshot/rust/web/src/<f> /home/beefsack/Development/brdgme/rust/web/src/<f>`.
+Command used, for re-verification: `diff -ru /home/beefsack/Development/brdgme-review-snapshot/rust/web/src/<f> /home/beefsack/Development/brdgme/rust/web/src/<f>`. The 2026-07-25 snapshot comparison is stale for `proposals.rs` (WP-44 landed after it), so re-run the diff for that file before trusting any of its numbers.
 
 ---
 

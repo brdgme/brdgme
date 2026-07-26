@@ -411,3 +411,54 @@ Michael referred to this as "the game-bin macro". There is **no macro**. D-20
 chose a **generic crate parameterised over the `Gamer` trait plus thin per-game
 wrappers**, explicitly rejecting the macro option - and Michael approved it
 partly *because* it avoids macros. `brdgme_game_bin` must remain macro-free.
+
+## D-54 - WP-59 Task 14 carved out into its own work package (WP-85)
+
+Michael, on reading Task 14: *"WP-59 Task 14 sounds like a risk, let's pull it
+out to a separate item if we can."*
+
+Task 14 was **written** as a documentation task - record the email dispatcher's
+reserved-verb set for game authors - but the work it actually implies is a
+**behaviour change** in `dispatch_email_command`
+(`rust/web/src/email/commands.rs`). That mismatch is the risk. WP-59 is
+otherwise executable end to end; coupling it to a behaviour change that cannot
+yet be executed would either block the whole package or invite an executor to
+land the wrong thing (documenting a reservation that D-15 has since decided
+should not exist).
+
+**Ruling: CARVE Task 14 out of WP-59 into WP-85.**
+
+Done on the record: Task 14's body deleted from
+`specs/WP-59-inbound-processing-quality.md` (heading kept and marked
+`- CARVED OUT`, with a banner pointing at WP-85); the stale
+"D-15 IS STILL OPEN" gate removed and corrected, D-15 having been answered
+2026-07-26; `specs/WP-85-email-parser-first-dispatch.md` written; and a
+`work-packages.md` entry added. WP-85 adds **0 findings** - `wfe F29` stays
+counted in WP-59, the same bookkeeping stance taken for WP-83.
+
+## D-55 - The email escape-hatch verb set is DEFERRED, deliberately
+
+Michael, in full: *"can we just defer that work? No games use those verbs yet,
+and I think I'd like the current version of brdgme in place a bit longer so I
+can get a feel for if and how we want to do this in the future."*
+
+D-15 settled the dispatch design - on game-scoped messages the game command
+parser runs FIRST and platform commands are the FALLBACK - but carved out a
+small hard-reserved set of escape-hatch verbs (`help` and equivalents) that
+always wins even on the game path. Deciding *which* verbs belong to that set is
+the deferred part. The rationale is empirical rather than indecision: no game
+currently uses those verbs, so nothing is broken by waiting, and Michael wants
+time with the shipped behaviour before committing to a design he then has to
+live with.
+
+**Ruling: DEFER. Do not design the escape-hatch verb set now. Its membership
+must not be invented.**
+
+Consequence: **WP-85 is DEFERRED - BLOCKED ON MICHAEL** and no executor may pick
+it up. Deciding the escape-hatch set is a hard prerequisite, not a nicety. This
+is a **different** block from the `BLOCKED-ON-USER-RULES-REVIEW` park (WP-11,
+WP-12, WP-16, WP-20, WP-26, WP-30); do not fold WP-85 into that bucket.
+
+Also on the record: the acquire-1 / starship-catan-1 `end` collision - both
+games' top-level `end` move is unplayable by email today - stays **open** until
+WP-85 lands. That is an accepted cost of the deferral, not an oversight.

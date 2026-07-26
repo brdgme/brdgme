@@ -12,11 +12,11 @@
   term_size = "0.3.2"
   ```
   `brdgme_cmd` is linked by every game binary (all 27 `rust/game/*` crates) and the repl, so the unmaintained crate is in every game service image — which is why dp F13 rated it major despite the tiny surface.
-- **The sole call site:** `rust/lib/cmd/src/repl.rs:186`, inside `fn output_nodes(nodes: &[Node], players: &[Player])`:
+- **The sole call site:** `rust/lib/cmd/src/repl.rs` (approximate :219, *verify*), inside `fn output_nodes(nodes: &[Node], players: &[Player])` — the symbol name is the real anchor, not the number:
   ```rust
   let (term_w, _) = term_size::dimensions().unwrap_or_default();
   ```
-  `term_w: usize` is the terminal width in columns. It is used only to pad each rendered line with background-colored spaces out to the full terminal width (lines 193-200: `if l_len < term_w { ...push " ".repeat(term_w - l_len)... }`). When the process is not attached to a tty (piped output, CI), `dimensions()` returns `None`, `unwrap_or_default()` yields `(0, 0)`, `term_w == 0`, the `l_len < term_w` guard is always false, and NO padding is emitted. That non-tty behavior must be preserved exactly.
+  `term_w: usize` is the terminal width in columns. It is used only to pad each rendered line with background-colored spaces out to the full terminal width (in the same `fn output_nodes`, approximate :226-233, *verify*: `if l_len < term_w { ...push " ".repeat(term_w - l_len)... }`). When the process is not attached to a tty (piped output, CI), `dimensions()` returns `None`, `unwrap_or_default()` yields `(0, 0)`, `term_w == 0`, the `l_len < term_w` guard is always false, and NO padding is emitted. That non-tty behavior must be preserved exactly.
   A repo-wide grep confirms there are no other `term_size` references anywhere in `rust/` (only this call site, the Cargo.toml line, Cargo.lock entries, and the deny.toml comment).
 - **API difference (re-derived, this is the whole swap):**
   - old: `term_size::dimensions() -> Option<(usize, usize)>` — (width, height) as plain `usize`, queried against **stdout**.
@@ -43,11 +43,11 @@
 
 **Non-Goals:**
 
-- Other lib/cmd findings — repl EOF spin, panic paths, warp handler, etc. (WP-06). Do not touch anything in `repl.rs` beyond line 186.
+- Other lib/cmd findings — repl EOF spin, panic paths, warp handler, etc. (WP-06). Do not touch anything in `repl.rs` beyond the single `term_size::dimensions()` call site in `fn output_nodes`.
 - Other deny.toml items — stale diesel/encoding ignores, warn->deny hardening (WP-69, BLOCKED-ON-DECISION D-23). Remove ONLY the RUSTSEC-2020-0163 entry and its comment.
 - warp->axum consolidation (ls F25 / WP-71).
 
-**Snapshot drift:** Checked 2026-07-25 against `/home/beefsack/Development/brdgme-review-snapshot/rust` (commit f8763a5). `lib/cmd/Cargo.toml:16`, `lib/cmd/src/repl.rs:186`, and the deny.toml RUSTSEC-2020-0163 entry are identical in snapshot and live tree. No drift. (One citation correction vs the finding bodies: dp F13 says the ignore is at "deny.toml:19-27" — in the live file the entry is lines 31-34 as quoted above; the findings' content is otherwise accurate.)
+**Snapshot drift:** Checked 2026-07-25 against `/home/beefsack/Development/brdgme-review-snapshot/rust` (commit f8763a5). `lib/cmd/Cargo.toml:16` and the deny.toml RUSTSEC-2020-0163 entry are identical in snapshot and live tree (both re-read 2026-07-26: still `term_size = "0.3.2"` at Cargo.toml:16, still deny.toml:31-34). **Corrected 2026-07-26:** the "repl.rs:186 identical" claim is now FALSE — WP-06 (commit `a543120`) shifted the call site down; it was observed at **approximate :219, *verify***, still inside `fn output_nodes` and still the quoted source text, which is what actually locates it. (One citation correction vs the finding bodies: dp F13 says the ignore is at "deny.toml:19-27" — in the live file the entry is lines 31-34 as quoted above; the findings' content is otherwise accurate.)
 
 ---
 
@@ -70,7 +70,7 @@
   ```toml
   terminal_size = "0.4"
   ```
-- [ ] In `rust/lib/cmd/src/repl.rs`, replace line 186:
+- [ ] In `rust/lib/cmd/src/repl.rs`, inside `fn output_nodes` (approximate :219, *verify* — locate by the source text, not the number), replace:
   ```rust
   let (term_w, _) = term_size::dimensions().unwrap_or_default();
   ```
@@ -78,7 +78,7 @@
   ```rust
   let term_w = terminal_size::terminal_size().map_or(0, |(w, _)| w.0 as usize);
   ```
-  Rationale: `terminal_size()` returns `Option<(Width, Height)>`; `w.0` is the `u16` width; `map_or(0, ...)` reproduces the old `unwrap_or_default()` -> `0` non-tty fallback so piped output still gets no padding. `term_w` stays `usize`, so the consuming code (lines 193-200: `l_len < term_w`, `term_w - l_len`) compiles unchanged — do not touch it.
+  Rationale: `terminal_size()` returns `Option<(Width, Height)>`; `w.0` is the `u16` width; `map_or(0, ...)` reproduces the old `unwrap_or_default()` -> `0` non-tty fallback so piped output still gets no padding. `term_w` stays `usize`, so the consuming code just below it (approximate :226-233, *verify*: `l_len < term_w`, `term_w - l_len`) compiles unchanged — do not touch it.
 - [ ] From `/home/beefsack/Development/brdgme/rust`, run `cargo check -p brdgme_cmd` — expected: clean compile, and the lock delta swaps `term_size` (+ its now-orphaned `winapi` edge) for `terminal_size 0.4.x`. Expected `Cargo.lock` result: no `term_size` package remains (`grep -c '^name = "term_size"' Cargo.lock` -> 0), one `terminal_size` entry appears.
 - [ ] In `rust/deny.toml`, delete lines 31-34 exactly (the four lines quoted in the Architecture section: the three comment lines and the `{ id = "RUSTSEC-2020-0163", ... },` entry). Leave every other ignore untouched.
 - [ ] Run the verification suite from `/home/beefsack/Development/brdgme/rust`:
@@ -100,7 +100,7 @@
   fix(deps): replace unmaintained term_size with terminal_size
 
   RUSTSEC-2020-0163: term_size is archived; terminal_size is the
-  advisory-recommended successor. Sole call site repl.rs:186 swapped
+  advisory-recommended successor. Sole call site, repl.rs output_nodes, swapped
   (same stdout query, same None-on-non-tty fallback to zero width).
   Drops the deny.toml advisory ignore now that the crate is gone.
 
@@ -113,5 +113,5 @@
 
 | Finding | Severity | Disposition |
 |---|---|---|
-| dp F13 — term_size 0.3.2 unmaintained (RUSTSEC-2020-0163), direct dep of brdgme_cmd; replace with terminal_size, drop deny ignore | major | FIXED by Task 1 (dependency swap + repl.rs:186 rewrite + deny.toml:31-34 removal) |
-| ls F24 — term_size unmaintained, sole call site repl.rs:186, drop-in replacement | minor | FIXED by Task 1 (same change; the two findings are the same defect seen from the deps unit and the lib/cmd unit) |
+| dp F13 — term_size 0.3.2 unmaintained (RUSTSEC-2020-0163), direct dep of brdgme_cmd; replace with terminal_size, drop deny ignore | major | FIXED by Task 1 (dependency swap + repl.rs `output_nodes` rewrite, approximate :219 *verify* + deny.toml:31-34 removal) |
+| ls F24 — term_size unmaintained, sole call site repl.rs `output_nodes` (approximate :219, *verify*), drop-in replacement | minor | FIXED by Task 1 (same change; the two findings are the same defect seen from the deps unit and the lib/cmd unit) |

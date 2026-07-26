@@ -1,8 +1,15 @@
 # WP-19: acquire-1 fixes
 
+> **CITATION WARNING - line numbers in this spec are approximate and unverified.**
+> Corpus-wide they measured **33-46% wrong**, and two "delete lines A-B" ranges
+> would have destroyed live code. **Navigate by the named function, type or
+> symbol** - never by line number alone. If the code at a cited location does not
+> match this spec's description, **STOP and report**; do not improvise a fix or
+> guess at the intended target.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to execute this plan task-by-task with review checkpoints.
 
-**Goal:** Make 6-player Acquire games offerable at all (c F7 — `player_counts()` advertises `[2,3,4,5]` while the engine fully supports 6), make the 2-player dummy shareholder die a real D6 (c F8 — it can never roll a 6 today, contradicting both the crate's own RULES.md and its own start log), remove the panic macros and `expect()` cluster from command-, render- and endgame-reachable paths (c F9, c F10, c F18, c F19), fix the `Trades` stat that reports the merge count (c F11), drop the unused `thiserror` dependency (c F16), stop deep-cloning the whole game to compute three integers on every parser build (c F20), make foundable/mergeable corporation ordering deterministic (c F21), and collapse the always-true `can_undo` expression in `handle_found_command` (c F17).
+**Goal:** Make 6-player Acquire games offerable at all (c F7 — `player_counts()` advertises `[2,3,4,5]` while the engine fully supports 6), make the 2-player dummy shareholder die a real D6 (c F8 — it can never roll a 6 today, contradicting both the crate's own RULES.md and its own start log), remove the panic macros and `expect()` cluster from command-, render- and endgame-reachable paths (c F9, c F10, c F18, c F19), fix the `Trades` stat that reports the merge count (c F11 — DROPPED, see Task 5), drop the unused `thiserror` dependency (c F16), stop deep-cloning the whole game to compute three integers on every parser build (c F20), make foundable/mergeable corporation ordering deterministic (c F21), and collapse the always-true `can_undo` expression in `handle_found_command` (c F17).
 
 **Architecture — how acquire-1 works (read this before editing):**
 
@@ -423,6 +430,11 @@ NOTE: this task shifts `lib.rs` line numbers below ~line 838 by a few lines; Tas
 ---
 
 ### Task 5: the `Trades` stat reports trades (c F11, minor)
+
+> **DROPPED - do NOT execute this task or add its test.** `c F11` is SUPERSEDED by
+> WP-81, which DELETES `rust/game/acquire-1/src/stats.rs` entirely. WP-81 lands
+> first, so there is no file left to fix and no place for the test below. The
+> text is retained only for traceability.
 
 **Problem (restated):** stats.rs:46 is `s.insert("Trades".to_string(), Stat::Int(self.merges as i32));` — a copy-paste of the `Merges` line above it (stats.rs:45). `Stats::trades` is maintained (lib.rs:1095) but never surfaced correctly.
 

@@ -31,7 +31,7 @@ WP-28's lead ruling. **Findings source:** the raw
   `#[serde(rename = "interfaceVersion")]`.
 - **bo F24** - `interceptor_uri_defaults_to_keda_proxy` depends on
   `INTERCEPTOR_URI` being unset in the ambient environment.
-- **bo F25** - `k8s-openapi` uses the `latest` feature. **BLOCKED**, see §4.
+- **bo F25** - `k8s-openapi` uses the `latest` feature. **ANSWERED**, see §4.
 
 ## 2. Why it's wrong
 
@@ -118,10 +118,12 @@ Change to `interceptor_uri(env: Option<String>) -> String` (callers pass
 
 ## 4. Non-goals
 
-- **bo F25 is BLOCKED.** **OPEN QUESTION for Michael: what Kubernetes version
-  does the deployed cluster run?** Once answered, replace `features = ["latest"]`
-  on `k8s-openapi` in `rust/operator/Cargo.toml` with the `v1_NN` feature for the
-  *oldest* cluster targeted. Do not guess; do not run `kubectl`.
+- **bo F25 is ANSWERED** (`decisions-ANSWERED.md`, `bo F25` row): the deployed
+  cluster is Kubernetes server **v1.36.0**. Replace `features = ["latest"]` on
+  `k8s-openapi` in `rust/operator/Cargo.toml` with **`v1_36`**. The implementer
+  must confirm `k8s-openapi` actually ships a `v1_36` flag at fix time; if it
+  does not, use the **highest available flag at or below v1.36** and record the
+  choice here. Do not run `kubectl`.
 - No other `rust/operator/Cargo.toml` changes: workspace-deps migration (WP-64),
   sqlx unification (WP-66) and sentry feature trim (WP-67) are
   BLOCKED-ON-DECISION and own that file.
@@ -163,4 +165,4 @@ All in the existing `#[cfg(test)] mod tests` in
 | `rust/operator/src/crd.rs` (bo F23) | Drop the redundant `rename = "interfaceVersion"` | y (serde shape test) |
 | `rust/operator/src/controller.rs` (bo F22) | `.bind(weight)`, drop `as f64` | y |
 | `rust/operator/src/controller.rs` (bo F24) | `interceptor_uri` takes `Option<String>` | y |
-| `rust/operator/Cargo.toml` (bo F25) | **BLOCKED** - pin `k8s-openapi` `v1_NN` once the cluster version is known | n |
+| `rust/operator/Cargo.toml` (bo F25) | **ANSWERED** (`decisions-ANSWERED.md`) - cluster is k8s v1.36.0; pin `k8s-openapi` `v1_36`, or the highest flag at or below v1.36 if `v1_36` is absent, recording the choice | n |
