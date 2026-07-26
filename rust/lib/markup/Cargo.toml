@@ -1,12 +1,15 @@
 [package]
 name = "brdgme_markup"
-version = "0.1.0"
-publish = false
-authors = ["Michael Alexander <beefsack@gmail.com>"]
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 
 [dependencies]
 brdgme_color = { path = "../color" }
 combine = "4.6.7"
-serde = { version = "1.0.228", features = ["derive"] }
-thiserror = "2.0.18"
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

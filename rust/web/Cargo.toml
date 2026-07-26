@@ -1,8 +1,9 @@
 [package]
 name = "web"
-version = "0.1.0"
-publish = false
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -16,39 +17,39 @@ required-features = ["ssr"]
 
 [dependencies]
 leptos = { version = "0.8.20" }
-leptos_router = { version = "0.8.14" }
-axum = { version = "0.8.9", optional = true, features = ["ws", "macros"] }
+leptos_router = { version = "0.8.15" }
+axum = { workspace = true, optional = true, features = ["ws", "macros"] }
 console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.10", optional = true }
 leptos_meta = { version = "0.8.6" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], optional = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"], optional = true }
 tokio-util = { version = "0.7", features = ["rt"], optional = true }
 wasm-bindgen = { version = "=0.2.121", optional = true }
 
 # Database dependencies
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "migrate"], optional = true }
-uuid = { version = "1.23.4", features = ["serde", "v4", "js"] }
+uuid = { workspace = true, features = ["serde", "v4", "js"] }
 getrandom = { version = "0.4", features = ["wasm_js"] }
-time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+time = { workspace = true, features = ["formatting", "parsing"] }
+serde.workspace = true
+serde_json.workspace = true
 
 # Additional server dependencies
-tracing = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", features = ["json", "env-filter"], optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, features = ["json", "env-filter"], optional = true }
 tower = { version = "0.5", features = ["util"], optional = true }
 tower-sessions = { version = "0.14.0", optional = true }
 tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"], optional = true }
 tower-http = { version = "0.7", features = ["cors", "trace", "limit", "timeout"], optional = true }
-anyhow = { version = "1.0.103", optional = true }
-thiserror = { version = "2.0.18", optional = true }
+anyhow = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 
 # Email functionality
 resend-rs = { version = "0.28", default-features = false, features = ["rustls-tls"], optional = true }
 # MJML -> email-safe HTML compiler for the #22b email render. SSR-only: never
 # in the WASM bundle (gated under the `ssr` feature, NOT `hydrate`).
 mrml = { version = "6.0.1", optional = true }
-svix = { version = "1.98", optional = true }
+svix = { version = "1.99", optional = true }
 mail-parser = { version = "0.11", optional = true }
 async-trait = { version = "0.1", optional = true }
 
@@ -68,31 +69,31 @@ brdgme_game = { path = "../lib/game", optional = true }
 brdgme_color = { path = "../lib/color", optional = true }
 brdgme_markup = { path = "../lib/markup", optional = true }
 brdgme_game_client = { path = "../lib/game_client", optional = true, features = ["sentry"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"], optional = true }
+reqwest = { workspace = true, features = ["json", "form", "rustls"], optional = true }
 # The workspace enables both rustls backends (reqwest -> aws-lc-rs;
 # sqlx/async-nats defaults -> ring), so rustls can't auto-select a
 # process-default provider. Direct dep exists solely for the
 # install_default() call in main.rs; see CODING.md's rustls section.
-rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"], optional = true }
-aes-gcm = { version = "0.10", optional = true }
-hex = { version = "0.4", optional = true }
+rustls = { workspace = true, optional = true }
+aes-gcm = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
 zeroize = { version = "1", optional = true }
-rand = "0.10.2"
-futures-util = "0.3.32"
+rand.workspace = true
+futures-util.workspace = true
 gloo-net = { version = "0.7", features = ["websocket"] }
 gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3.77", features = ["Location", "Window", "Document", "HtmlDocument", "Element", "MediaQueryList", "VisibilityState"] }
 js-sys = "0.3"
-async-nats = { version = "0.49.1", optional = true }
+async-nats = { workspace = true, optional = true }
 leptos-use = { version = "0.19", default-features = false, features = ["use_websocket", "use_event_listener", "use_document"] }
 codee = { version = "0.3.5", default-features = false }
 axum-prometheus = { version = "0.10.0", default-features = false, features = ["prometheus"], optional = true }
 
 # Error tracking (Sentry). Default features (reqwest + native-tls transport) -
 # no rustls involvement, see CODING.md's rustls crypto-provider section.
-sentry = { version = "0.48", optional = true }
+sentry = { workspace = true, optional = true }
 sentry-tower = { version = "0.48", optional = true, features = ["http"] }
-sentry-tracing = { version = "0.48", optional = true }
+sentry-tracing = { workspace = true, optional = true }
 
 [features]
 hydrate = [
@@ -159,7 +160,7 @@ panic = "abort"
 
 [dev-dependencies]
 serial_test = "3.5.0"
-tokio = { version = "1", features = ["test-util", "rt-multi-thread", "macros", "signal"] }
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "macros", "signal"] }
 tokio-tungstenite = "0.30"
 
 [package.metadata.leptos]
@@ -187,3 +188,6 @@ lib-features = ["hydrate"]
 lib-default-features = false
 lib-profile-release = "wasm-release"
 wasm-opt-features = ["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "-g"]
+
+[lints]
+workspace = true

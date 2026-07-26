@@ -1,38 +1,42 @@
 [package]
 name = "brdgme-operator"
-version = "0.1.0"
-publish = false
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 
 [[bin]]
 name = "operator"
 path = "src/main.rs"
 
 [dependencies]
-axum = "0.8"
+axum.workspace = true
 futures = "0.3"
 k8s-openapi = { version = "0.28", features = ["latest"] }
 kube = { version = "4", features = ["runtime", "derive", "client"] }
 schemars = "1"
-serde = { version = "1", features = ["derive"] }
+serde.workspace = true
 brdgme_cmd = { path = "../lib/cmd", default-features = false }
 brdgme_game_client = { path = "../lib/game_client" }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { workspace = true, features = ["json", "rustls"] }
 # The workspace enables both rustls backends (reqwest -> aws-lc-rs, sqlx/kube
 # defaults -> ring), so rustls can't auto-select a process-level provider.
 # kube builds its TLS config from the process default, so main() must install
 # one before creating the kube client or it panics at startup.
 # See docs/CODING.md "Dependency Management".
-rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
-serde_json = "1"
+rustls.workspace = true
+serde_json.workspace = true
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid"] }
-thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["serde"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 # Adds the test/migrate machinery for #[sqlx::test]; feature-unified with the
 # main sqlx dependency when building tests.
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "macros", "migrate"] }
+
+[lints]
+workspace = true

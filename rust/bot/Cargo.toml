@@ -1,37 +1,41 @@
 [package]
 name = "bot"
-version = "0.1.0"
-publish = false
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 
 [[bin]]
 name = "bot"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls"] }
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "time", "json"] }
-uuid = { version = "1", features = ["serde", "v4"] }
-anyhow = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-sentry = "0.48"
-sentry-tracing = "0.48"
+uuid = { workspace = true, features = ["serde", "v4"] }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+sentry.workspace = true
+sentry-tracing.workspace = true
 brdgme_cmd = { path = "../lib/cmd", default-features = false }
 brdgme_color = { path = "../lib/color" }
 brdgme_game = { path = "../lib/game" }
 brdgme_game_client = { path = "../lib/game_client", features = ["sentry"] }
 brdgme_markup = { path = "../lib/markup" }
 minijinja = "2"
-serde_yaml = "0.9"
-time = { version = "0.3", features = ["serde"] }
-async-nats = "0.49.1"
-futures-util = "0.3.32"
-axum = "0.8"
-aes-gcm = "0.10"
-thiserror = "2"
-hex = "0.4"
+serde_yaml.workspace = true
+time.workspace = true
+async-nats.workspace = true
+futures-util.workspace = true
+axum.workspace = true
+aes-gcm.workspace = true
+thiserror.workspace = true
+hex.workspace = true
 getrandom = "0.3"
+
+[lints]
+workspace = true

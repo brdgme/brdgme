@@ -1,9 +1,9 @@
 [package]
 name = "greed-2"
-version = "0.1.0"
-publish = false
-authors = ["Michael Alexander <beefsack@gmail.com>"]
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 
 [dependencies]
 brdgme_cmd = { path = "../../lib/cmd" }
@@ -11,9 +11,12 @@ brdgme_fuzz = { path = "../../tools/fuzz" }
 brdgme_color = { path = "../../lib/color" }
 brdgme_game = { path = "../../lib/game" }
 brdgme_markup = { path = "../../lib/markup" }
-rand = "0.10.2"
-serde = { version = "1.0.228", features = ["derive"] }
-tokio = { version = "1.52.3", features = ["full"] }
+rand.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 brdgme_cmd = { path = "../../lib/cmd", features = ["test-support"] }
+
+[lints]
+workspace = true

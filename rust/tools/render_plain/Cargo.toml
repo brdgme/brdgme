@@ -1,9 +1,9 @@
 [package]
 name = "brdgme_render_plain"
-version = "0.1.0"
-publish = false
-authors = ["Michael Alexander <beefsack@gmail.com>"]
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 
 [[bin]]
 name = "render_plain"
@@ -12,3 +12,6 @@ path = "src/main.rs"
 [dependencies]
 brdgme_color = { path = "../../lib/color" }
 brdgme_markup = { path = "../../lib/markup" }
+
+[lints]
+workspace = true
