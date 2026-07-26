@@ -375,6 +375,18 @@ async fn find_game_player_by_email_token(
     )
 }
 
+async fn find_user_by_settings_token(
+    pool: &sqlx::PgPool,
+    token: &str,
+) -> anyhow::Result<Option<uuid::Uuid>> {
+    let row =
+        sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM users WHERE settings_email_token = $1")
+            .bind(token)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row)
+}
+
 async fn from_matches_verified_email(
     pool: &sqlx::PgPool,
     user_id: uuid::Uuid,
@@ -388,19 +400,6 @@ async fn from_matches_verified_email(
     .fetch_one(pool)
     .await?;
     Ok(exists)
-}
-
-async fn resolve_user_by_verified_from(
-    pool: &sqlx::PgPool,
-    from: &str,
-) -> anyhow::Result<Option<uuid::Uuid>> {
-    let row = sqlx::query_scalar::<_, uuid::Uuid>(
-        "SELECT user_id FROM user_emails WHERE verified_at IS NOT NULL AND LOWER(email) = LOWER($1) LIMIT 1",
-    )
-    .bind(from)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row)
 }
 
 /// Insert-or-skip idempotency marker. Returns true if THIS call inserted the row
@@ -481,8 +480,12 @@ pub async fn resend_webhook(
         Some(InboundRoute::Invite(token)) => {
             handle_invite_reply(&state, &token, &event.data.from, &event.data.email_id).await;
         }
-        Some(InboundRoute::Settings(_)) | None => {
-            handle_settings_reply_route(&state, &event.data.from, &event.data.email_id).await;
+        Some(InboundRoute::Settings(token)) => {
+            handle_settings_reply_route(&state, &token, &event.data.from, &event.data.email_id)
+                .await;
+        }
+        None => {
+            tracing::info!("resend webhook: no route for recipient; ignoring");
         }
     }
     StatusCode::OK
@@ -1084,7 +1087,7 @@ async fn send_rules_reply_response(
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 
-async fn handle_settings_reply_route(state: &AppState, from: &str, email_id: &str) {
+async fn handle_settings_reply_route(state: &AppState, token: &str, from: &str, email_id: &str) {
     let api_key = match std::env::var("RESEND_API_KEY") {
         Ok(k) if !k.is_empty() => k,
         _ => {
@@ -1105,23 +1108,35 @@ async fn handle_settings_reply_route(state: &AppState, from: &str, email_id: &st
             return;
         }
     };
-    handle_settings_reply(state, from, &raw).await;
+    handle_settings_reply(state, token, from, &raw).await;
 }
 
-async fn handle_settings_reply(state: &AppState, from: &str, raw_body: &str) {
-    let user_id = match resolve_user_by_verified_from(&state.pool, from).await {
+async fn handle_settings_reply(state: &AppState, token: &str, from: &str, raw_body: &str) {
+    let user_id = match find_user_by_settings_token(&state.pool, token).await {
         Ok(Some(u)) => u,
         Ok(None) => {
+            tracing::info!("resend webhook: settings reply with unknown token; no response");
+            return;
+        }
+        Err(e) => {
+            tracing::error!("resend webhook: settings token lookup failed: {e}");
+            return;
+        }
+    };
+
+    match from_matches_verified_email(&state.pool, user_id, from).await {
+        Ok(true) => {}
+        Ok(false) => {
             tracing::info!(
-                "resend webhook: settings reply from unverified/unknown address; no response"
+                "resend webhook: settings From does not match a verified address; no response"
             );
             return;
         }
         Err(e) => {
-            tracing::error!("resend webhook: settings From resolution failed: {e}");
+            tracing::error!("resend webhook: settings From verification failed: {e}");
             return;
         }
-    };
+    }
 
     let text = extract_plain_text(raw_body).unwrap_or_default();
     let commands = parse_reply_commands(&text);
@@ -1188,7 +1203,16 @@ async fn send_settings_response(
         }
     };
     let palette = crate::email::render::palette_for_slug(theme_slug.as_deref());
-    let reply_address = format!("s-{user_id}@brdg.me");
+    let reply_address =
+        match crate::email::outbound::ensure_settings_email_token(pool, user_id).await {
+            Ok(token) => format!("s-{token}@brdg.me"),
+            Err(e) => {
+                tracing::error!(
+                    "resend webhook: settings email token unavailable; omitting reply address: {e}"
+                );
+                String::new()
+            }
+        };
     let thread_id = format!("settings-{user_id}");
     let content = crate::email::render::EmailContent {
         subject: "Your brdg.me settings".to_string(),
@@ -1888,61 +1912,6 @@ Just a plain body";
     }
 
     #[sqlx::test]
-    async fn resolve_user_by_verified_from_truth_table(pool: sqlx::PgPool) {
-        let user_a = seed_user(&pool, "user-a").await;
-        let user_b = seed_user(&pool, "user-b").await;
-        sqlx::query(
-            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
-        )
-        .bind(user_a)
-        .bind("a@brdg.me")
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NULL)",
-        )
-        .bind(user_a)
-        .bind("unv@brdg.me")
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
-        )
-        .bind(user_b)
-        .bind("b@brdg.me")
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        assert_eq!(
-            resolve_user_by_verified_from(&pool, "a@brdg.me")
-                .await
-                .unwrap(),
-            Some(user_a)
-        );
-        assert_eq!(
-            resolve_user_by_verified_from(&pool, "A@brdg.me")
-                .await
-                .unwrap(),
-            Some(user_a)
-        );
-        assert_eq!(
-            resolve_user_by_verified_from(&pool, "unv@brdg.me")
-                .await
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            resolve_user_by_verified_from(&pool, "nobody@brdg.me")
-                .await
-                .unwrap(),
-            None
-        );
-    }
-
-    #[sqlx::test]
     async fn settings_standalone_rejects_game_command(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "settings-user").await;
         match crate::email::commands::dispatch_settings_standalone(&pool, None, user_id, "concede")
@@ -1959,32 +1928,6 @@ Just a plain body";
             Ok(crate::email::commands::CommandReply::Status(_)) => {}
             _ => panic!("expected Status reply for settings command"),
         }
-    }
-
-    #[sqlx::test]
-    async fn resolve_user_by_verified_from_is_the_should_respond_gate(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "gate-user").await;
-        sqlx::query(
-            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
-        )
-        .bind(user_id)
-        .bind("gate@brdg.me")
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        assert!(
-            resolve_user_by_verified_from(&pool, "gate@brdg.me")
-                .await
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            resolve_user_by_verified_from(&pool, "unknown@brdg.me")
-                .await
-                .unwrap()
-                .is_none()
-        );
     }
 
     #[sqlx::test]
@@ -2008,6 +1951,93 @@ Just a plain body";
             crate::db::find_user_id_by_name(&pool, "nobody")
                 .await
                 .unwrap(),
+            None
+        );
+    }
+
+    #[sqlx::test]
+    async fn find_user_by_settings_token_lookup(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "token-lookup").await;
+        let token = crate::email::outbound::ensure_settings_email_token(&pool, user_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            find_user_by_settings_token(&pool, &token).await.unwrap(),
+            Some(user_id)
+        );
+        assert!(
+            find_user_by_settings_token(&pool, "tok-missing")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            find_user_by_settings_token(&pool, "")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn settings_token_is_not_the_user_id(pool: sqlx::PgPool) {
+        let u = seed_user(&pool, "token-not-id").await;
+        let token = crate::email::outbound::ensure_settings_email_token(&pool, u)
+            .await
+            .unwrap();
+
+        assert_ne!(token, u.to_string());
+        assert!(
+            find_user_by_settings_token(&pool, &u.to_string())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn settings_reply_requires_token_and_from(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "settings-auth").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("verified@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let token = crate::email::outbound::ensure_settings_email_token(&pool, user_id)
+            .await
+            .unwrap();
+
+        let resolved = find_user_by_settings_token(&pool, &token).await.unwrap();
+        assert_eq!(resolved, Some(user_id));
+        assert!(
+            from_matches_verified_email(&pool, user_id, "verified@brdg.me")
+                .await
+                .unwrap()
+        );
+
+        assert!(
+            !from_matches_verified_email(&pool, user_id, "foreign@brdg.me")
+                .await
+                .unwrap()
+        );
+
+        assert!(
+            find_user_by_settings_token(&pool, "tok-wrong")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unrouted_recipient_is_ignored() {
+        assert_eq!(select_route(&["hello@brdg.me".to_string()], &[]), None);
+        assert_eq!(
+            select_route(&["unsubscribe@brdg.me".to_string()], &[]),
             None
         );
     }

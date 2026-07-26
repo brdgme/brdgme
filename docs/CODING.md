@@ -482,6 +482,36 @@ require regenerating the `.sqlx` cache against a live database (not always
 available). Follow this convention for any new query touching a column not
 already covered by an existing macro query.
 
+## Inbound and Webhook Authentication
+
+**Identity on a non-interactive channel comes from a server-generated secret,
+never from sender-supplied metadata.** Inbound email, webhooks and queue
+messages are routed by a random token the server minted and mailed/handed out
+(`game_players.email_token`, `game_proposal_players.email_token`,
+`users.settings_email_token` — all 32-char `[A-Za-z0-9]` from
+`email::outbound::generate_email_token`). The sender's `From` address is
+checked *in addition* (`from_matches_verified_email`) as defense in depth, and
+is never sufficient on its own: SMTP `From` is attacker-controlled. A lookup
+that resolves a user from a header value with no token in scope is a
+vulnerability, not a shortcut.
+
+**A provider signature authenticates the provider, not the sender.** The svix
+verification on `/api/webhooks/resend` proves Resend sent the request. It says
+nothing about who sent the email. SPF/DKIM verdicts are checked separately, and
+a failure rejects before any routing.
+
+**Unroutable input terminates.** Ingress routing must not fall through to its
+weakest-authenticated handler for input it cannot classify: log and ignore.
+
+**Credential-mutating operations are web-only.** Adding, confirming, switching
+or removing an email address, and anything else that changes where credentials
+are delivered or what can authenticate, lives behind `get_current_user` in a
+server fn. The email command surface carries game moves, notification
+preferences and display preferences only (`email::commands`) — display name,
+theme, colours, and the per-notification-type toggles all remain available by
+email. This is a deliberate capability boundary drawn at *credentials*, not a
+blanket ban on settings over email, and not an unfinished feature.
+
 ---
 
 ## Dependency Management

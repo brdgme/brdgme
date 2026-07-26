@@ -173,10 +173,7 @@ pub fn help_text() -> String {
      colors <c1,c2,c3> - set your 3 preferred colours (alias: colours)\n\
      theme <name> - set your theme (or 'theme system' for the default)\n\
      emails - list your email addresses\n\
-     emails add <address> - add a new email address\n\
-     emails confirm <code> - confirm a pending address\n\
-     emails active <address> - make an address your active one (alias: emails use)\n\
-     emails remove <address> - remove an address\n\
+     email addresses - add, confirm, switch or remove on the website under Settings\n\
      emails on | emails off - toggle turn-notification emails\n\
      emails invite on | emails invite off - toggle invite-notification emails\n\
      emails reminder on | emails reminder off - toggle reminder-notification emails\n\
@@ -546,7 +543,7 @@ async fn run_settings_theme(
 
 async fn run_settings_emails(
     pool: &sqlx::PgPool,
-    resend: Option<&resend_rs::Resend>,
+    _resend: Option<&resend_rs::Resend>,
     user_id: uuid::Uuid,
     arg: Option<&str>,
 ) -> Result<CommandReply, CommandError> {
@@ -560,22 +557,6 @@ async fn run_settings_emails(
     match sub.to_ascii_lowercase().as_str() {
         "on" => run_emails_toggle(pool, user_id, true).await,
         "off" => run_emails_toggle(pool, user_id, false).await,
-        "add" => {
-            let addr = rest.unwrap_or("");
-            run_emails_add(pool, resend, user_id, addr).await
-        }
-        "confirm" => {
-            let code = rest.unwrap_or("");
-            run_emails_confirm(pool, user_id, code).await
-        }
-        "active" | "use" => {
-            let addr = rest.unwrap_or("");
-            run_emails_active(pool, user_id, addr).await
-        }
-        "remove" => {
-            let addr = rest.unwrap_or("");
-            run_emails_remove(pool, user_id, addr).await
-        }
         "invite" => {
             let sub_arg = rest.unwrap_or("");
             match sub_arg.to_ascii_lowercase().as_str() {
@@ -597,7 +578,7 @@ async fn run_settings_emails(
             }
         }
         _ => Err(CommandError::User(
-            "Usage: emails | emails on | emails off | emails invite on | emails invite off | emails reminder on | emails reminder off | emails add <address> | emails confirm <code> | emails active <address> | emails remove <address>".to_string(),
+            "Usage: emails | emails on | emails off | emails invite on | emails invite off | emails reminder on | emails reminder off. Email addresses are managed on the website under Settings.".to_string(),
         )),
     }
 }
@@ -675,140 +656,6 @@ async fn run_emails_reminder_toggle(
         "Reminder-notification emails are now off."
     };
     Ok(CommandReply::Status(msg.to_string()))
-}
-
-async fn run_emails_add(
-    pool: &sqlx::PgPool,
-    resend: Option<&resend_rs::Resend>,
-    user_id: uuid::Uuid,
-    addr: &str,
-) -> Result<CommandReply, CommandError> {
-    let addr = addr.trim();
-    if addr.is_empty() || !addr.contains('@') {
-        return Err(CommandError::User(
-            "Usage: emails add <address>".to_string(),
-        ));
-    }
-    match crate::db::find_email_owner(pool, addr)
-        .await
-        .map_err(CommandError::Internal)?
-    {
-        Some(owner) if owner == user_id => {
-            return Err(CommandError::User(
-                "Address already on your account.".to_string(),
-            ));
-        }
-        Some(_) => {
-            return Err(CommandError::User("Address unavailable.".to_string()));
-        }
-        None => {}
-    }
-    if crate::db::insert_unverified_email(pool, user_id, addr)
-        .await
-        .map_err(CommandError::Internal)?
-        .is_none()
-    {
-        return Err(CommandError::User("Address unavailable.".to_string()));
-    }
-    crate::auth::server::request_confirmation_code(pool, resend, addr)
-        .await
-        .map_err(|e| CommandError::Internal(anyhow::anyhow!("emails add: send code: {e}")))?;
-    Ok(CommandReply::Status(format!(
-        "Confirmation code sent to {addr}. Reply 'emails confirm <code>' to verify."
-    )))
-}
-
-async fn run_emails_confirm(
-    pool: &sqlx::PgPool,
-    user_id: uuid::Uuid,
-    code: &str,
-) -> Result<CommandReply, CommandError> {
-    let code = code.trim();
-    if code.is_empty() {
-        return Err(CommandError::User(
-            "Usage: emails confirm <code>".to_string(),
-        ));
-    }
-    let email: Option<String> = sqlx::query_scalar(
-        "SELECT email FROM user_emails WHERE user_id = $1 AND verified_at IS NULL ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| CommandError::Internal(anyhow::anyhow!("emails confirm: find unverified: {e}")))?;
-    let Some(email) = email else {
-        return Err(CommandError::User(
-            "No unverified address to confirm. Add one first with 'emails add <address>'."
-                .to_string(),
-        ));
-    };
-    crate::auth::server::validate_confirmation_code(pool, &email, code)
-        .await
-        .map_err(|_| CommandError::User("Invalid or expired confirmation code.".to_string()))?;
-    crate::db::mark_email_verified(pool, user_id, &email)
-        .await
-        .map_err(CommandError::Internal)?;
-    sqlx::query("DELETE FROM login_confirmations WHERE email = $1")
-        .bind(&email)
-        .execute(pool)
-        .await
-        .map_err(|e| CommandError::Internal(anyhow::anyhow!("emails confirm: cleanup: {e}")))?;
-    Ok(CommandReply::Status(format!("Address {email} confirmed.")))
-}
-
-async fn run_emails_active(
-    pool: &sqlx::PgPool,
-    user_id: uuid::Uuid,
-    addr: &str,
-) -> Result<CommandReply, CommandError> {
-    let addr = addr.trim();
-    if addr.is_empty() {
-        return Err(CommandError::User(
-            "Usage: emails active <address>".to_string(),
-        ));
-    }
-    match crate::db::set_primary_email(pool, user_id, addr)
-        .await
-        .map_err(CommandError::Internal)?
-    {
-        crate::db::SetPrimaryOutcome::Switched => Ok(CommandReply::Status(format!(
-            "Active address set to {addr}."
-        ))),
-        crate::db::SetPrimaryOutcome::NotFound => Err(CommandError::User(format!(
-            "Address {addr} is not on your account."
-        ))),
-        crate::db::SetPrimaryOutcome::Unverified => Err(CommandError::User(format!(
-            "Address {addr} is not verified yet. Confirm it first with 'emails confirm <code>'."
-        ))),
-    }
-}
-
-async fn run_emails_remove(
-    pool: &sqlx::PgPool,
-    user_id: uuid::Uuid,
-    addr: &str,
-) -> Result<CommandReply, CommandError> {
-    let addr = addr.trim();
-    if addr.is_empty() {
-        return Err(CommandError::User(
-            "Usage: emails remove <address>".to_string(),
-        ));
-    }
-    match crate::db::remove_user_email(pool, user_id, addr)
-        .await
-        .map_err(CommandError::Internal)?
-    {
-        crate::db::RemoveEmailOutcome::Removed => {
-            Ok(CommandReply::Status(format!("Address {addr} removed.")))
-        }
-        crate::db::RemoveEmailOutcome::NotFound => Err(CommandError::User(format!(
-            "Address {addr} is not on your account."
-        ))),
-        crate::db::RemoveEmailOutcome::IsPrimary => Err(CommandError::User(
-            "Cannot remove your active address. Switch first with 'emails active <address>'."
-                .to_string(),
-        )),
-    }
 }
 
 async fn run_settings_summary(
@@ -1689,10 +1536,6 @@ mod tests {
     #[test]
     fn emails_subcommands_in_help_text() {
         let text = help_text();
-        assert!(text.contains("emails add"));
-        assert!(text.contains("emails confirm"));
-        assert!(text.contains("emails active"));
-        assert!(text.contains("emails remove"));
         assert!(text.contains("emails on"));
         assert!(text.contains("emails off"));
     }
@@ -1751,303 +1594,6 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn emails_add_inserts_unverified(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        let reply =
-            dispatch_settings_command_for_user(&pool, None, user_id, "emails add new@example.com")
-                .await
-                .unwrap()
-                .unwrap();
-        let text = status_msg(reply);
-        assert!(text.contains("Confirmation code sent to new@example.com"));
-
-        let row: (bool, Option<time::PrimitiveDateTime>) = sqlx::query_as(
-            "SELECT is_primary, verified_at FROM user_emails WHERE user_id = $1 AND email = $2",
-        )
-        .bind(user_id)
-        .bind("new@example.com")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert!(!row.0);
-        assert!(row.1.is_none());
-    }
-
-    #[sqlx::test]
-    async fn emails_add_rejects_invalid(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        let err = expect_user_err(
-            dispatch_settings_command_for_user(&pool, None, user_id, "emails add notanemail").await,
-        );
-        assert!(err.contains("Usage: emails add"));
-    }
-
-    #[sqlx::test]
-    async fn emails_add_rejects_duplicate_on_same_account(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("existing@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let err = expect_user_err(
-            dispatch_settings_command_for_user(
-                &pool,
-                None,
-                user_id,
-                "emails add existing@example.com",
-            )
-            .await,
-        );
-        assert!(err.contains("already on your account"));
-    }
-
-    #[sqlx::test]
-    async fn emails_add_rejects_owned_by_other(pool: sqlx::PgPool) {
-        let u1 = seed_user(&pool, "player-one").await;
-        let u2 = seed_user(&pool, "player-two").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(u1)
-            .bind("taken@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let err = expect_user_err(
-            dispatch_settings_command_for_user(&pool, None, u2, "emails add taken@example.com")
-                .await,
-        );
-        assert!(err.contains("unavailable"));
-    }
-
-    #[sqlx::test]
-    async fn emails_confirm_verifies_address(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("primary@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
-            .bind(user_id)
-            .bind("pending@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO login_confirmations (email, code, sent_count, last_sent_at) VALUES ($1, $2, 1, NOW())")
-            .bind("pending@example.com")
-            .bind("123456")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let reply =
-            dispatch_settings_command_for_user(&pool, None, user_id, "emails confirm 123456")
-                .await
-                .unwrap()
-                .unwrap();
-        assert_eq!(status_msg(reply), "Address pending@example.com confirmed.");
-
-        let verified: Option<time::PrimitiveDateTime> = sqlx::query_scalar(
-            "SELECT verified_at FROM user_emails WHERE user_id = $1 AND email = $2",
-        )
-        .bind(user_id)
-        .bind("pending@example.com")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert!(verified.is_some());
-    }
-
-    #[sqlx::test]
-    async fn emails_confirm_no_unverified(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("primary@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let err = expect_user_err(
-            dispatch_settings_command_for_user(&pool, None, user_id, "emails confirm 123456").await,
-        );
-        assert!(err.contains("No unverified address"));
-    }
-
-    #[sqlx::test]
-    async fn emails_confirm_wrong_code(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
-            .bind(user_id)
-            .bind("pending@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO login_confirmations (email, code, sent_count, last_sent_at) VALUES ($1, $2, 1, NOW())")
-            .bind("pending@example.com")
-            .bind("123456")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let err = expect_user_err(
-            dispatch_settings_command_for_user(&pool, None, user_id, "emails confirm 999999").await,
-        );
-        assert!(err.contains("Invalid or expired"));
-    }
-
-    #[sqlx::test]
-    async fn emails_active_switches_primary(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("old@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NOW())")
-            .bind(user_id)
-            .bind("new@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let reply = dispatch_settings_command_for_user(
-            &pool,
-            None,
-            user_id,
-            "emails active new@example.com",
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(status_msg(reply), "Active address set to new@example.com.");
-
-        let is_primary: bool = sqlx::query_scalar(
-            "SELECT is_primary FROM user_emails WHERE user_id = $1 AND email = $2",
-        )
-        .bind(user_id)
-        .bind("new@example.com")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert!(is_primary);
-    }
-
-    #[sqlx::test]
-    async fn emails_use_alias_works(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("old@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NOW())")
-            .bind(user_id)
-            .bind("new@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let reply =
-            dispatch_settings_command_for_user(&pool, None, user_id, "emails use new@example.com")
-                .await
-                .unwrap()
-                .unwrap();
-        assert_eq!(status_msg(reply), "Active address set to new@example.com.");
-    }
-
-    #[sqlx::test]
-    async fn emails_active_rejects_unverified(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("primary@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
-            .bind(user_id)
-            .bind("unverified@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let err = expect_user_err(
-            dispatch_settings_command_for_user(
-                &pool,
-                None,
-                user_id,
-                "emails active unverified@example.com",
-            )
-            .await,
-        );
-        assert!(err.contains("not verified"));
-    }
-
-    #[sqlx::test]
-    async fn emails_remove_non_primary(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("primary@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, false, NOW())")
-            .bind(user_id)
-            .bind("secondary@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let reply = dispatch_settings_command_for_user(
-            &pool,
-            None,
-            user_id,
-            "emails remove secondary@example.com",
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(status_msg(reply), "Address secondary@example.com removed.");
-
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_emails WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[sqlx::test]
-    async fn emails_remove_rejects_primary(pool: sqlx::PgPool) {
-        let user_id = seed_user(&pool, "test-player").await;
-        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())")
-            .bind(user_id)
-            .bind("primary@example.com")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let err = expect_user_err(
-            dispatch_settings_command_for_user(
-                &pool,
-                None,
-                user_id,
-                "emails remove primary@example.com",
-            )
-            .await,
-        );
-        assert!(err.contains("Cannot remove your active address"));
-    }
-
-    #[sqlx::test]
     async fn emails_on_off_still_works(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "test-player").await;
 
@@ -2071,6 +1617,137 @@ mod tests {
             dispatch_settings_command_for_user(&pool, None, user_id, "emails bogus").await,
         );
         assert!(err.contains("Usage:"));
+    }
+
+    #[sqlx::test]
+    async fn run_settings_emails_rejects_removed_subcommands(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_emails WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        for arg in [
+            "add x@y.com",
+            "confirm 123456",
+            "active x@y.com",
+            "use x@y.com",
+            "remove x@y.com",
+        ] {
+            match run_settings_emails(&pool, None, user_id, Some(arg)).await {
+                Err(CommandError::User(msg)) => {
+                    assert!(msg.to_lowercase().contains("website"));
+                }
+                Err(CommandError::Internal(e)) => {
+                    panic!("expected User error for {arg}, got Internal: {e}")
+                }
+                Ok(_) => panic!("expected User error for {arg}, got Ok"),
+            }
+        }
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_emails WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn help_text_omits_address_management() {
+        let t = help_text();
+        assert!(!t.contains("emails add"));
+        assert!(!t.contains("emails confirm"));
+        assert!(!t.contains("emails active"));
+        assert!(!t.contains("emails remove"));
+        assert!(t.contains("emails on"));
+    }
+
+    #[sqlx::test]
+    async fn retained_settings_verbs_still_work(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "test-player").await;
+        for line in [
+            "name Bob",
+            "theme system",
+            "colors green,red,blue",
+            "emails on",
+            "emails off",
+            "emails invite on",
+            "emails reminder off",
+            "emails",
+            "settings",
+        ] {
+            match dispatch_settings_standalone(&pool, None, user_id, line).await {
+                Ok(_) => {}
+                Err(e) => panic!("expected Ok for {line}, got {e}"),
+            }
+        }
+    }
+
+    #[sqlx::test]
+    async fn game_path_cannot_manage_addresses(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "game-path-player").await;
+        let opp = seed_user(&pool, "game-path-opp").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: user_id,
+                opponent_ids: &[opp],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "initial_state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        let (game_player_id, position): (uuid::Uuid, i32) = sqlx::query_as(
+            "SELECT id, position FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_emails WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = EmailCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            game_id: game.id,
+            game_player_id,
+            user_id,
+            position: position as usize,
+        };
+        match dispatch_email_command(&ctx, "emails add attacker@evil.com").await {
+            Err(CommandError::User(msg)) => {
+                assert!(msg.to_lowercase().contains("website"));
+            }
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_emails WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(before, after);
     }
 
     async fn make_game_version(pool: &sqlx::PgPool) -> uuid::Uuid {

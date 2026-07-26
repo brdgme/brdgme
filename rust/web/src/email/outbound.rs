@@ -95,7 +95,7 @@ pub async fn send_rendered_email(
 
 /// 32-char `[a-zA-Z0-9]` (url-safe) reply token for the per-player Reply-To
 /// address (`g-{token}@brdg.me`).
-fn generate_email_token() -> String {
+pub(crate) fn generate_email_token() -> String {
     use rand::RngExt as _;
     rand::rng()
         .sample_iter(&rand::distr::Alphanumeric)
@@ -120,6 +120,27 @@ pub async fn ensure_email_token(pool: &PgPool, game_player_id: Uuid) -> anyhow::
     sqlx::query("UPDATE game_players SET email_token = $1, updated_at = NOW() WHERE id = $2")
         .bind(&token)
         .bind(game_player_id)
+        .execute(pool)
+        .await?;
+    Ok(token)
+}
+
+/// Returns the user's `settings_email_token`, generating and persisting one on
+/// first use (lazy population, per the WP-56 migration). Plain query, matching
+/// `ensure_email_token`.
+pub async fn ensure_settings_email_token(pool: &PgPool, user_id: Uuid) -> anyhow::Result<String> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT settings_email_token FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+    if let Some((Some(tok),)) = row {
+        return Ok(tok);
+    }
+    let token = generate_email_token();
+    sqlx::query("UPDATE users SET settings_email_token = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&token)
+        .bind(user_id)
         .execute(pool)
         .await?;
     Ok(token)
@@ -347,6 +368,27 @@ mod tests {
         let stored: Option<String> =
             sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
                 .bind(game_player_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, Some(first));
+    }
+
+    // Runs only where a Postgres is available (CI); expected to fail to connect
+    // locally (backlog #40). Plain queries throughout to avoid `.sqlx` churn.
+    #[sqlx::test]
+    async fn ensure_settings_email_token_generates_and_reuses(pool: PgPool) {
+        let user_id = seed_user(&pool).await;
+
+        let first = ensure_settings_email_token(&pool, user_id).await.unwrap();
+        let second = ensure_settings_email_token(&pool, user_id).await.unwrap();
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert_eq!(first, second);
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT settings_email_token FROM users WHERE id = $1")
+                .bind(user_id)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
