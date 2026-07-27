@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 pub use crate::css::{IN_USE_MIXES, IN_USE_SOFTENS, MixExpression, palette_css_vars};
 pub use crate::error::ColorError;
 pub use crate::palette::{
-    DARK, DRACULA, LIGHT, NamedColor, Palette, ThemeCategory, contrast, contrast_ratio, mix,
-    soften, themes,
+    DARK, DRACULA, LIGHT, NamedColor, PLAYER_COUNT, Palette, ThemeCategory, contrast,
+    contrast_ratio, mix, soften, themes,
 };
 
 mod css;

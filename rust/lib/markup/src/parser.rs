@@ -51,7 +51,10 @@ where
     Input: Stream<Token = char>,
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    many1(digit()).map(|s: String| s.parse::<u8>().unwrap())
+    many1(digit()).and_then(|s: String| {
+        s.parse::<u8>()
+            .map_err(|_| <StreamErrorFor<Input>>::message_static_message("u8 overflow"))
+    })
 }
 
 /// Parses a percentage, valid only from 0 through 100 inclusive. Shared by
@@ -76,7 +79,10 @@ where
     Input: Stream<Token = char>,
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    many1(digit()).map(|s: String| s.parse::<usize>().unwrap())
+    many1(digit()).and_then(|s: String| {
+        s.parse::<usize>()
+            .map_err(|_| <StreamErrorFor<Input>>::message_static_message("usize overflow"))
+    })
 }
 
 fn fg<Input>() -> impl Parser<Input, Output = Node>
@@ -260,16 +266,10 @@ fn rgb_reverse_map(r: u8, g: u8, b: u8) -> ColType {
     };
     match named {
         Some((color, soften)) => ColType::Named { color, soften },
-        None => {
-            eprintln!(
-                "warning: unknown rgb colour rgb({},{},{}), falling back to foreground",
-                r, g, b
-            );
-            ColType::Named {
-                color: NamedColor::Foreground,
-                soften: None,
-            }
-        }
+        None => ColType::Named {
+            color: NamedColor::Foreground,
+            soften: None,
+        },
     }
 }
 
@@ -297,14 +297,13 @@ where
 {
     (
         attempt(string(" | ")),
-        choice([string("mono"), string("inv"), string("contrast")]),
+        choice((
+            attempt(string("mono")).map(|_| ColTrans::Mono),
+            attempt(string("inv")).map(|_| ColTrans::Inv),
+            attempt(string("contrast")).map(|_| ColTrans::Contrast),
+        )),
     )
-        .map(|(_, t)| match t {
-            "mono" => ColTrans::Mono,
-            "inv" => ColTrans::Inv,
-            "contrast" => ColTrans::Contrast,
-            _ => panic!("invalid transform"),
-        })
+        .map(|(_, t)| t)
 }
 
 /// Backwards compatibility with Go brdgme's legacy `{{c name}}` colour tag.
@@ -456,7 +455,11 @@ where
     Input: Stream<Token = char>,
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    choice([string("left"), string("center"), string("right")]).map(|s| Align::from_str(s).unwrap())
+    choice((
+        attempt(string("left")).map(|_| Align::Left),
+        attempt(string("center")).map(|_| Align::Center),
+        attempt(string("right")).map(|_| Align::Right),
+    ))
 }
 
 fn text<Input>() -> impl Parser<Input, Output = Node>
@@ -464,7 +467,11 @@ where
     Input: Stream<Token = char>,
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-    many1(none_of("{".chars())).map(Node::Text)
+    many1(choice((
+        none_of("{".chars()),
+        attempt(string("{{lbrace}}")).map(|_| '{'),
+    )))
+    .map(|chars: Vec<char>| Node::Text(chars.into_iter().collect()))
 }
 
 #[cfg(test)]
@@ -726,5 +733,41 @@ mod tests {
                 "out-of-range soften must not produce a background node: {nodes:?}"
             );
         }
+    }
+
+    #[test]
+    fn overflowing_u8_returns_err_not_panic() {
+        let result = markup().parse("{{fg rgb(999,1,1)}}x{{/fg}}");
+        assert!(
+            result.is_err() || {
+                let (nodes, _) = result.unwrap();
+                !nodes.iter().any(|n| matches!(n, N::Fg(..)))
+            }
+        );
+    }
+
+    #[test]
+    fn overflowing_usize_returns_err_not_panic() {
+        let result = markup().parse("{{player 99999999999999999999}}");
+        assert!(
+            result.is_err() || {
+                let (nodes, _) = result.unwrap();
+                !nodes.iter().any(|n| matches!(n, N::Player(..)))
+            }
+        );
+    }
+
+    #[test]
+    fn lbrace_escape_yields_text_node_with_brace() {
+        let (parsed, rest) = markup().parse("a{{lbrace}}b").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(parsed, vec![N::text("a{b")]);
+    }
+
+    #[test]
+    fn lbrace_escape_inside_bold_terminates_correctly() {
+        let (parsed, rest) = markup().parse("{{b}}x{{lbrace}}y{{/b}}").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(parsed, vec![N::Bold(vec![N::text("x{y")])]);
     }
 }

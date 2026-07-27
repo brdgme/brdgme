@@ -34,15 +34,32 @@ pub fn plain(input: &[TNode]) -> String {
     plain::render(input)
 }
 
+/// Parses a markup string into nodes. Returns `Err` on parse failure or if
+/// any input remains unconsumed.
+///
+/// Unknown `rgb(r,g,b)` values in stored content fall back to `Foreground`
+/// (legacy Go brdgme compat); this is silent by design - making it an error
+/// would break stored game logs.
 pub fn from_string(input: &str) -> Result<(Vec<Node>, &str), MarkupError> {
-    markup().parse(input).map_err(|_| MarkupError::Parse)
+    let (nodes, rest) = markup()
+        .parse(input)
+        .map_err(|e| MarkupError::Parse(e.to_string()))?;
+    if !rest.is_empty() {
+        let offset = input.len() - rest.len();
+        let snippet: String = rest.chars().take(20).collect();
+        return Err(MarkupError::Parse(format!(
+            "unexpected input at byte {}: {:?}",
+            offset, snippet
+        )));
+    }
+    Ok((nodes, rest))
 }
 
 pub fn to_string(input: &[Node]) -> String {
     input
         .iter()
         .map(|n| match *n {
-            Node::Text(ref t) => t.to_owned(),
+            Node::Text(ref t) => t.replace('{', "{{lbrace}}"),
             Node::Bold(ref children) => format!("{{{{b}}}}{}{{{{/b}}}}", to_string(children)),
             Node::Fg(ref c, ref children) => format!(
                 "{{{{fg {}}}}}{}{{{{/fg}}}}",
@@ -260,5 +277,31 @@ mod tests {
                 ),],]),],
             ),])],)
         );
+    }
+
+    #[test]
+    fn from_string_rejects_unmatched_brace() {
+        assert!(from_string("a{b").is_err());
+    }
+
+    #[test]
+    fn from_string_rejects_unterminated_tag() {
+        assert!(from_string("{{b}}x").is_err());
+    }
+
+    #[test]
+    fn from_string_well_formed_returns_empty_rest() {
+        let (nodes, rest) = from_string("{{b}}x{{/b}}").unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(nodes, vec![N::Bold(vec![N::text("x")])]);
+    }
+
+    #[test]
+    fn round_trip_text_with_braces() {
+        let nodes = vec![N::text("a{{b}}c")];
+        let s = to_string(&nodes);
+        let (parsed, rest) = from_string(&s).unwrap();
+        assert_eq!(rest, "");
+        assert_eq!(parsed, nodes);
     }
 }

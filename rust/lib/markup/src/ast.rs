@@ -194,7 +194,7 @@ impl<C> TNode<C> {
         TNode::Text(t.into())
     }
 
-    /// Calculates the length of the containing text.  Panics if it detects an untransformed node.
+    /// Calculates the length of the containing text.
     pub fn len(nodes: &[TNode<C>]) -> usize {
         nodes.iter().fold(0, |sum, n| {
             sum + match *n {
@@ -322,6 +322,11 @@ pub fn comma_list_and(items: &[Vec<Node>]) -> Vec<Node> {
 /// Joins node lists into "a, b or c" style output.
 pub fn comma_list_or(items: &[Vec<Node>]) -> Vec<Node> {
     comma_list(items, " or ")
+}
+
+pub(crate) fn player_name(name: Option<&str>, p: usize) -> String {
+    name.map(|n| n.to_string())
+        .unwrap_or_else(|| format!("Player {}", p))
 }
 
 #[cfg(test)]

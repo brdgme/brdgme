@@ -1,10 +1,8 @@
-use brdgme_color::{IN_USE_MIXES, IN_USE_SOFTENS, NamedColor};
+use brdgme_color::{IN_USE_MIXES, IN_USE_SOFTENS, NamedColor, PLAYER_COUNT};
 
 use crate::ast::TNode;
+use crate::html::escape;
 use crate::semantic::{SemanticCol, SemanticColType};
-
-/// Number of player colour slots (matches `Palette::player_colors`).
-const PLAYER_COUNT: usize = 8;
 
 /// Generates the static structural CSS rules for every `mk-fg-*`/`mk-bg-*`
 /// class this renderer can emit: named colours, the in-use soften variants,
@@ -58,13 +56,6 @@ fn rule(buf: &mut String, token: &str, var: &str) {
         ".mk-bg-{}{{background-color:var({})}}\n",
         token, var
     ));
-}
-
-fn escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 /// Builds the CSS class token for a colour, e.g. `red`, `soften-pink-75`,
@@ -267,5 +258,25 @@ mod tests {
     #[test]
     fn escaping_works() {
         assert_eq!(html_class(&[TNode::text("<a & b>")]), "&lt;a &amp; b&gt;");
+    }
+
+    #[test]
+    fn markup_class_css_player_count_matches_palette() {
+        let css = markup_class_css();
+        let palette = &brdgme_color::LIGHT;
+        for (n, _) in palette.player_colors().iter().enumerate() {
+            assert!(
+                css.contains(&format!(".mk-fg-player-{}{{", n)),
+                "missing player-{} rule",
+                n
+            );
+        }
+        assert!(
+            !css.contains(&format!(
+                ".mk-fg-player-{}{{",
+                palette.player_colors().len()
+            )),
+            "extra player rule beyond PLAYER_COUNT"
+        );
     }
 }

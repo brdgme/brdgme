@@ -17,7 +17,7 @@ fn b(content: &str) -> String {
     format!("<b>{}</b>", content)
 }
 
-fn escape(input: &str) -> String {
+pub(crate) fn escape(input: &str) -> String {
     input
         .replace('&', "&amp;")
         .replace('<', "&lt;")

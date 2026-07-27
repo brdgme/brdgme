@@ -85,10 +85,7 @@ pub fn transform_with_palette(input: &[Node], players: &[Player], palette: &Pale
 }
 
 fn player(p: usize, players: &[Player], palette: &Palette) -> Vec<TNode> {
-    let p_name = players
-        .get(p)
-        .map(|p| p.name.to_string())
-        .unwrap_or_else(|| format!("Player {}", p));
+    let p_name = crate::ast::player_name(players.get(p).map(|p| p.name.as_str()), p);
     let p_col = players
         .get(p)
         .map(|p| p.color)

@@ -1,4 +1,5 @@
-/// Wraps text to a maximum width, preserving existing newlines.
+/// Wraps text to a maximum width in characters, preserving existing newlines.
+/// Runs of spaces at line starts and wrap points are collapsed.
 pub fn word_wrap(s: &str, width: usize) -> String {
     s.split('\n')
         .map(|segment| wrap_segment(segment, width))
@@ -13,7 +14,7 @@ fn wrap_segment(s: &str, width: usize) -> String {
     for word in s.split(' ') {
         if current.is_empty() {
             current = word.to_owned();
-        } else if current.len() + 1 + word.len() <= width {
+        } else if current.chars().count() + 1 + word.chars().count() <= width {
             current.push(' ');
             current.push_str(word);
         } else {
@@ -66,5 +67,12 @@ mod tests {
             word_wrap("hi superlongword bye", 5),
             "hi\nsuperlongword\nbye"
         );
+    }
+
+    #[test]
+    fn multibyte_chars_wrap_at_char_width() {
+        let input = "héllo wörld föo";
+        let result = word_wrap(input, 11);
+        assert_eq!(result, "héllo wörld\nföo");
     }
 }

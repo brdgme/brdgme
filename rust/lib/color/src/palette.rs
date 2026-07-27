@@ -98,6 +98,8 @@ pub struct Palette {
     pub background: Color,
 }
 
+pub const PLAYER_COUNT: usize = 8;
+
 impl Palette {
     pub fn color(&self, named: NamedColor) -> Color {
         match named {
@@ -116,7 +118,7 @@ impl Palette {
         }
     }
 
-    pub fn player_colors(&self) -> [Color; 8] {
+    pub fn player_colors(&self) -> [Color; PLAYER_COUNT] {
         [
             self.green,
             self.red,

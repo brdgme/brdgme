@@ -95,10 +95,7 @@ pub fn transform_semantic(input: &[Node], players: &[SemanticPlayer]) -> Vec<TNo
 }
 
 fn player(p: usize, players: &[SemanticPlayer]) -> Vec<TNode<SemanticCol>> {
-    let p_name = players
-        .get(p)
-        .map(|p| p.name.to_string())
-        .unwrap_or_else(|| format!("Player {}", p));
+    let p_name = crate::ast::player_name(players.get(p).map(|p| p.name.as_str()), p);
     let p_col = SemanticCol {
         color: SemanticColType::Player(p),
         contrast: false,
