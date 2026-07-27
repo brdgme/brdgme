@@ -171,22 +171,22 @@ fn deck_count_row(pub_state: &PubState) -> Row {
 /// Rows shared by every render, from the round/leader summary through to the
 /// market. Excludes the deck count line, which is always last.
 fn common_rows(pub_state: &PubState) -> Vec<Row> {
-    let remaining_rounds = 3u8.saturating_sub(pub_state.round_wins[0] + pub_state.round_wins[1]);
-    let leader_text = if pub_state.round_wins[0] > pub_state.round_wins[1] {
-        "Player 0 is in the lead."
-    } else if pub_state.round_wins[1] > pub_state.round_wins[0] {
-        "Player 1 is in the lead."
+    let (w0, w1) = (pub_state.round_wins[0], pub_state.round_wins[1]);
+    // No "N rounds remaining": the match ends at the first player to reach 2
+    // round wins, and a fully tied round is replayed without incrementing
+    // either counter, so no count derived from round_wins is trustworthy.
+    let leader_text = if w0 > w1 {
+        format!("Player 0 leads {w0} - {w1}.")
+    } else if w1 > w0 {
+        format!("Player 1 leads {w1} - {w0}.")
     } else {
-        "Scores are level."
+        format!("Round wins are level at {w0} - {w1}.")
     };
 
     vec![
-        centered_row(vec![N::Bold(vec![N::text(format!(
-            "There {} {} {} remaining.",
-            pluralize(remaining_rounds as u64, "is", "are"),
-            remaining_rounds,
-            pluralize(remaining_rounds as u64, "round", "rounds"),
-        ))])]),
+        centered_row(vec![N::Bold(vec![N::text(
+            "First to 2 round wins takes the game.",
+        )])]),
         centered_row(vec![N::text(leader_text)]),
         blank_row(),
         heading_row("Sale prices"),

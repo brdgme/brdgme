@@ -518,7 +518,11 @@ impl Game {
 
         let mut suffix = String::new();
         let mut bonus_taken: Option<u32> = None;
-        if let Some(bonuses) = self.bonuses.get_mut(&quantity)
+        // Bonus piles only exist for sale sizes 3, 4 and 5, but the 7-card hand
+        // limit makes 6- and 7-card sales legal; those take from the 5-pile,
+        // which is why the renderer labels that column "5 or more".
+        let bonus_key = quantity.min(MAX_TRADE_BONUS);
+        if let Some(bonuses) = self.bonuses.get_mut(&bonus_key)
             && let Some(bonus) = bonuses.first().copied()
         {
             self.tokens[player].push(bonus);
@@ -1549,5 +1553,124 @@ mod tests {
         let resp = g.command(player, "sell 2 gold and then", &[]).unwrap();
         assert_eq!(resp.remaining_input, " and then");
         assert!(!resp.can_undo);
+    }
+
+    #[test]
+    fn sell_six_takes_bonus_from_the_five_or_more_pile() {
+        // d F14: bonus piles exist only for sale sizes 3/4/5, but the 7-card
+        // hand limit makes 6- and 7-card sales ordinary play. Official rules
+        // and this crate's own renderer ("5 or more", render.rs) say such a
+        // sale takes a token from the 5-sale pile.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        g.hands[player] = vec![Good::Leather; 6];
+        let pile_before = g.bonuses[&MAX_TRADE_BONUS].len();
+        g.sell(player, Good::Leather, 6).unwrap();
+        assert_eq!(
+            g.bonuses[&MAX_TRADE_BONUS].len(),
+            pile_before - 1,
+            "a 6-card sale must consume a token from the 5-or-more bonus pile"
+        );
+        assert_eq!(g.bonus_tokens[player], 1, "the bonus token must be counted");
+        // 6 leather tokens (4+3+2+1+1+1) plus the one bonus token.
+        assert_eq!(g.tokens[player].len(), 7);
+    }
+
+    #[test]
+    fn sell_seven_takes_bonus_from_the_five_or_more_pile() {
+        // d F14: the maximum legal sale (a full hand of 7) must also earn a
+        // bonus token rather than falling off the end of the map.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        g.hands[player] = vec![Good::Spice; 7];
+        let pile_before = g.bonuses[&MAX_TRADE_BONUS].len();
+        g.sell(player, Good::Spice, 7).unwrap();
+        assert_eq!(g.bonuses[&MAX_TRADE_BONUS].len(), pile_before - 1);
+        assert_eq!(g.bonus_tokens[player], 1);
+    }
+
+    #[test]
+    fn small_sales_still_earn_no_bonus_token() {
+        // Guard for d F14's clamp: clamping must not start handing bonus
+        // tokens to sales below the 3-card minimum.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        g.hands[player] = vec![Good::Leather, Good::Leather];
+        g.sell(player, Good::Leather, 2).unwrap();
+        assert_eq!(g.bonus_tokens[player], 0);
+        assert_eq!(g.bonuses[&MIN_TRADE_BONUS].len(), 7);
+        assert_eq!(g.bonuses[&MAX_TRADE_BONUS].len(), 5);
+    }
+
+    #[test]
+    fn sell_parser_rejects_mixed_good_types() {
+        // d F18: `sell dia gold lea` used to parse as Sell { Diamond, 3 } -
+        // the type list after the first entry was silently discarded.
+        let g = Game::start(2, 0).unwrap().0;
+        let parser = g.command_parser(g.current_player).unwrap();
+        let err = parser
+            .parse("sell dia gold lea", &[])
+            .expect_err("a mixed-type sell must not parse");
+        assert!(
+            err.to_string().contains("only sell one type of good"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn command_rejects_mixed_type_sell_without_selling_anything() {
+        // d F18: the real damage is at the command level - the coerced parse
+        // executed an irreversible sale the player never asked for.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        g.hands[player] = vec![Good::Diamond, Good::Diamond, Good::Diamond, Good::Gold];
+        let hand_before = g.hands[player].clone();
+        let tokens_before = g.tokens[player].clone();
+        assert!(g.command(player, "sell dia gold lea", &[]).is_err());
+        assert_eq!(
+            g.hands[player], hand_before,
+            "no cards may leave the hand on a rejected sale"
+        );
+        assert_eq!(g.tokens[player], tokens_before);
+    }
+
+    #[test]
+    fn sell_parser_still_parses_repeated_same_good() {
+        // Regression guard for d F18's fix: the legitimate bare-goods form
+        // must keep working.
+        let g = Game::start(2, 0).unwrap().0;
+        let parser = g.command_parser(g.current_player).unwrap();
+        let output = parser.parse("sell dia dia", &[]).unwrap();
+        match output.value {
+            Command::Sell { good, quantity } => {
+                assert_eq!(good, Good::Diamond);
+                assert_eq!(quantity, 2);
+            }
+            _ => panic!("expected Sell command"),
+        }
+    }
+
+    #[test]
+    fn render_does_not_claim_a_fixed_number_of_remaining_rounds() {
+        // d F22: at 1-0 the renderer said "There are 2 rounds remaining", but
+        // the match ends the moment a player reaches 2 round wins.
+        use brdgme_game::Renderer;
+        let ps = PubState {
+            round_wins: [1, 0],
+            ..PubState::default()
+        };
+        let markup = brdgme_markup::to_string(&ps.render());
+        assert!(
+            !markup.contains("rounds remaining"),
+            "must not claim a number of remaining rounds, got: {markup}"
+        );
+        assert!(
+            markup.contains("First to 2 round wins"),
+            "expected the first-to-2 wording, got: {markup}"
+        );
+        assert!(
+            markup.contains("1 - 0"),
+            "the round-win counts must still be visible, got: {markup}"
+        );
     }
 }
