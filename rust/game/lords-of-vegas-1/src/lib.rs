@@ -115,7 +115,11 @@ impl Gamer for Game {
                         board.set(loc, BoardTile::Owned { player: p });
                         acc + TILES[&loc].starting_cash
                     }
-                    Card::GameEnd => unreachable!(),
+                    // shuffled_deck inserts GameEnd in the last quarter of the
+                    // deck (position >= 38 even for 2 players; see card.rs),
+                    // while starting hands drain at most 12 cards from the
+                    // front, so GameEnd can never be dealt here.
+                    Card::GameEnd => unreachable!("GameEnd cannot be in a starting hand"),
                 });
                 logs.push(Log::public(vec![
                     N::Player(p),
@@ -169,7 +173,6 @@ impl Gamer for Game {
         }
     }
 
-    #[allow(unused_variables)]
     fn command(
         &mut self,
         player: usize,
@@ -177,15 +180,7 @@ impl Gamer for Game {
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
         let output = self.command_parser(player).parse(input, players)?;
-        let (logs, can_undo) = match output.value {
-            Command::Build { loc, casino } => self.build(player, &loc, casino)?,
-            Command::Remodel { loc, casino } => unimplemented!(),
-            Command::Reorg { loc } => unimplemented!(),
-            Command::Sprawl { from, to } => unimplemented!(),
-            Command::Gamble { player, amount } => unimplemented!(),
-            Command::Raise { loc } => unimplemented!(),
-            Command::Done => self.done(player)?,
-        };
+        let (logs, can_undo) = self.dispatch(player, output.value)?;
         Ok(CommandResponse {
             logs,
             can_undo,
@@ -248,6 +243,28 @@ impl Game {
         player == self.current_player
     }
 
+    fn dispatch(&mut self, player: usize, cmd: Command) -> Result<(Vec<Log>, bool), GameError> {
+        match cmd {
+            Command::Build { loc, casino } => self.build(player, &loc, casino),
+            Command::Remodel { .. } => Err(GameError::InvalidInput {
+                message: "remodel is not implemented yet".to_string(),
+            }),
+            Command::Reorg { .. } => Err(GameError::InvalidInput {
+                message: "reorg is not implemented yet".to_string(),
+            }),
+            Command::Sprawl { .. } => Err(GameError::InvalidInput {
+                message: "sprawl is not implemented yet".to_string(),
+            }),
+            Command::Gamble { .. } => Err(GameError::InvalidInput {
+                message: "gamble is not implemented yet".to_string(),
+            }),
+            Command::Raise { .. } => Err(GameError::InvalidInput {
+                message: "raise is not implemented yet".to_string(),
+            }),
+            Command::Done => self.done(player),
+        }
+    }
+
     fn build(
         &mut self,
         p: usize,
@@ -281,6 +298,11 @@ impl Game {
         if self.players[p].cash < TILES[loc].build_cost {
             return Err(GameError::InvalidInput {
                 message: "you don't have enough cash".to_string(),
+            });
+        }
+        if self.board.casino_tile_count(casino) >= CASINO_TILES {
+            return Err(GameError::InvalidInput {
+                message: format!("there are no {} tiles remaining", casino),
             });
         }
         self.players[p].cash -= TILES[loc].build_cost;
@@ -348,5 +370,147 @@ mod tests {
             .expect("could not create game with 3 players")
             .0;
         serde_json::to_string(&game).expect("could not serialise game to JSON");
+    }
+
+    #[test]
+    fn unimplemented_commands_error_instead_of_panicking() {
+        // d F1: the five unwired command arms must return a GameError, not
+        // panic the process, so that wiring their parsers in later can never
+        // turn a valid player command into a crash.
+        use crate::board::Block;
+        use crate::command::Command;
+
+        let mut g = Game::start(2, 1).expect("could not start game").0;
+        let p = g.current_player;
+        let loc: Loc = (Block::A, 1).into();
+        let cmds = vec![
+            Command::Remodel {
+                loc,
+                casino: Casino::Albion,
+            },
+            Command::Reorg { loc },
+            Command::Sprawl {
+                from: loc,
+                to: (Block::A, 2).into(),
+            },
+            Command::Gamble {
+                player: (p + 1) % 2,
+                amount: 5,
+            },
+            Command::Raise { loc },
+        ];
+        for cmd in cmds {
+            match g.dispatch(p, cmd) {
+                Err(GameError::InvalidInput { message }) => assert!(
+                    message.contains("not implemented"),
+                    "unexpected message: {}",
+                    message
+                ),
+                Ok(_) => panic!("expected InvalidInput error, got Ok"),
+                Err(e) => panic!("expected InvalidInput error, got: {}", e),
+            }
+        }
+    }
+
+    #[test]
+    fn build_rejects_when_casino_tile_supply_exhausted() {
+        // d F4: there are only 9 tiles per casino colour; the 10th build of a
+        // colour must be rejected instead of corrupting the board.
+        use crate::board::Block;
+
+        let mut board = Board::default();
+        for loc in [
+            (Block::A, 1),
+            (Block::A, 2),
+            (Block::A, 3),
+            (Block::A, 4),
+            (Block::A, 5),
+            (Block::A, 6),
+            (Block::B, 1),
+            (Block::B, 2),
+            (Block::B, 3),
+        ] {
+            board.set(
+                loc.into(),
+                BoardTile::Built {
+                    casino: Casino::Albion,
+                    owner: None,
+                    height: 1,
+                },
+            );
+        }
+        board.set((Block::F, 5).into(), BoardTile::Owned { player: 0 });
+        let mut g = Game {
+            players: vec![
+                Player {
+                    cash: 100,
+                    points: 0,
+                },
+                Player {
+                    cash: 100,
+                    points: 0,
+                },
+            ],
+            current_player: 0,
+            deck: vec![],
+            played: vec![],
+            board,
+            finished: false,
+            rng: GameRng::seed_from_u64(1),
+        };
+        match g.build(0, &(Block::F, 5).into(), Casino::Albion) {
+            Err(GameError::InvalidInput { message }) => assert!(
+                message.contains("no Albion tiles remaining"),
+                "unexpected message: {}",
+                message
+            ),
+            Ok(_) => panic!("10th Albion build must fail: the supply is 9 tiles"),
+            Err(e) => panic!("expected InvalidInput, got: {}", e),
+        }
+        // A different colour still has tiles and must build fine.
+        assert!(
+            g.build(0, &(Block::F, 5).into(), Casino::Vega).is_ok(),
+            "other colours must be unaffected by an exhausted Albion supply"
+        );
+    }
+
+    #[test]
+    fn render_saturates_when_supplies_exceeded() {
+        // d F4: legacy saved states can already exceed the supplies; the
+        // renderer must saturate at zero instead of underflowing usize.
+        // 13 built Albion tiles owned by player 0 exceed both the 9-tile
+        // casino supply and the 12-die player supply.
+        use crate::board::Block;
+
+        let mut board = Board::default();
+        let mut locs: Vec<Loc> = vec![(Block::C, 1).into()];
+        for lot in 1..=6 {
+            locs.push((Block::A, lot).into());
+            locs.push((Block::B, lot).into());
+        }
+        for loc in &locs {
+            board.set(
+                *loc,
+                BoardTile::Built {
+                    casino: Casino::Albion,
+                    owner: Some(TileOwner { die: 1, player: 0 }),
+                    height: 1,
+                },
+            );
+        }
+        let ps = PubState {
+            players: vec![Player::default()],
+            current_player: 0,
+            remaining_deck: 0,
+            played: vec![],
+            board,
+            finished: false,
+        };
+        // Pre-fix both of these panic in debug builds with
+        // "attempt to subtract with overflow".
+        let player_table = ps.render_player_table(0);
+        let casino_table = ps.render_casino_table();
+        assert!(matches!(player_table, N::Table(_)));
+        assert!(matches!(casino_table, N::Table(_)));
     }
 }

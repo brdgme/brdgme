@@ -48,10 +48,12 @@ There are five casinos, each with its own colour:
 | Casino  | Colour        |
 |---------|---------------|
 | Albion  | Purple        |
-| Sphinx  | Tan/olive     |
+| Sphinx  | Orange        |
 | Vega    | Green         |
 | Tivoli  | Grey          |
-| Pioneer | Brick red     |
+| Pioneer | Brown         |
+
+(Colours approximate the physical game's tan and brick-red tiles.)
 
 A casino on the board is one contiguous group of built lots of the same
 colour (regardless of who built them) at the same building height. Building

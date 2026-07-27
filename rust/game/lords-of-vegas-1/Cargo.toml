@@ -12,14 +12,13 @@ brdgme_color = { path = "../../lib/color" }
 brdgme_game = { path = "../../lib/game" }
 brdgme_markup = { path = "../../lib/markup" }
 thiserror.workspace = true
-lazy_static.workspace = true
 rand.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 brdgme_cmd = { path = "../../lib/cmd", features = ["test-support"] }
+serde_json.workspace = true
 
 [lints]
 workspace = true

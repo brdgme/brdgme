@@ -1,6 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
-use std::iter::FromIterator;
 
 use serde::de::{Error as DeError, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -13,7 +12,7 @@ use crate::casino::Casino;
 use crate::roll;
 use crate::tile::TILES;
 
-const BLOCK_WIDTH: usize = 3;
+pub const BLOCK_WIDTH: usize = 3;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum Block {
@@ -242,15 +241,13 @@ impl Board {
             _ => return None,
         };
 
-        let mut queue: HashSet<Loc> = HashSet::new();
+        let mut queue: BTreeSet<Loc> = BTreeSet::new();
         queue.insert(*loc);
         let mut visited: HashSet<Loc> = HashSet::new();
         let mut tiles: Vec<CasinoTile> = vec![];
 
-        while !queue.is_empty() {
-            let next = *queue.iter().next().expect("queue shouldn't be empty");
+        while let Some(next) = queue.pop_first() {
             visited.insert(next);
-            queue.remove(&next);
             match self.get(&next) {
                 BoardTile::Built {
                     casino: c,
@@ -278,7 +275,9 @@ impl Board {
     pub fn casinos(&self) -> Vec<BoardCasino> {
         let mut visited: HashSet<Loc> = HashSet::new();
         let mut casinos: Vec<BoardCasino> = vec![];
-        for loc in TILES.keys() {
+        let mut locs: Vec<Loc> = TILES.keys().cloned().collect();
+        locs.sort();
+        for loc in &locs {
             if visited.contains(loc) {
                 continue;
             }
@@ -331,7 +330,20 @@ impl Board {
             }
             boss_tie = true;
             for bt in &boss_tiles {
-                self.reroll_at(&bt.loc, rng);
+                if let Some(die) = self.reroll_at(&bt.loc, rng)
+                    && let Some(TileOwner { player, .. }) = bt.owner
+                {
+                    logs.push(Log::public(vec![
+                        N::text("Boss tie at "),
+                        bc.casino.render(),
+                        N::text(": "),
+                        N::Player(player),
+                        N::text("'s die at "),
+                        bt.loc.render(),
+                        N::text(" rerolled to "),
+                        N::Bold(vec![N::text(die.to_string())]),
+                    ]));
+                }
             }
         }
 
@@ -544,5 +556,121 @@ mod tests {
             },
         );
         assert_eq!(1, b.casinos().len());
+    }
+
+    #[test]
+    fn resolve_boss_ties_is_deterministic_per_seed() {
+        // d F2: identical board + identical seed must produce identical
+        // reroll outcomes on every run. Pre-fix, the BFS queue is a fresh
+        // HashSet per call whose iteration order varies per instance, so the
+        // reroll order (and via re-tie cascades, the draw count) diverges.
+        use self::Block::*;
+
+        let locs: Vec<Loc> = vec![(A, 1).into(), (A, 2).into(), (A, 3).into(), (A, 6).into()];
+        let dice_at = |b: &Board| -> Vec<Option<usize>> {
+            locs.iter()
+                .map(|l| match b.get(l) {
+                    BoardTile::Built {
+                        owner: Some(TileOwner { die, .. }),
+                        ..
+                    } => Some(die),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let mut outcomes: Vec<Vec<Option<usize>>> = vec![];
+        for _ in 0..100 {
+            let mut b = Board::default();
+            for (i, l) in locs.iter().enumerate() {
+                // A1-A2-A3-A6 is one contiguous Albion casino (A3 and A6 are
+                // vertical neighbours); four distinct players tied on die 4.
+                b.set(
+                    *l,
+                    BoardTile::Built {
+                        casino: Casino::Albion,
+                        owner: Some(TileOwner { die: 4, player: i }),
+                        height: 1,
+                    },
+                );
+            }
+            let mut rng = GameRng::seed_from_u64(7);
+            assert!(
+                b.resolve_boss_ties(&mut rng).is_some(),
+                "a four-way boss tie must trigger resolution"
+            );
+            outcomes.push(dice_at(&b));
+        }
+        for o in &outcomes[1..] {
+            assert_eq!(
+                &outcomes[0], o,
+                "same board and seed must produce identical rerolls (d F2)"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_boss_ties_logs_each_reroll() {
+        // d F3: rerolls are player-facing (RULES.md) and disable undo, so
+        // every rerolled die must appear in the logs.
+        let mut b = Board::default();
+        for (lot, player) in [(1, 0), (2, 1)] {
+            b.set(
+                (Block::A, lot).into(),
+                BoardTile::Built {
+                    casino: Casino::Albion,
+                    owner: Some(TileOwner { die: 5, player }),
+                    height: 1,
+                },
+            );
+        }
+        let mut rng = GameRng::seed_from_u64(1);
+        let logs = b
+            .resolve_boss_ties(&mut rng)
+            .expect("a two-way boss tie must trigger resolution");
+        assert!(
+            logs.len() >= 2,
+            "each rerolled die must be logged, got {} logs",
+            logs.len()
+        );
+        let text: String = logs
+            .iter()
+            .map(|l| brdgme_markup::plain(&brdgme_markup::transform(&l.content, &[])))
+            .collect::<Vec<String>>()
+            .join("\n");
+        assert!(text.contains("rerolled"), "got: {}", text);
+        assert!(
+            text.contains("A1") && text.contains("A2"),
+            "both rerolled locations must be named, got: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn casinos_iterates_in_sorted_loc_order() {
+        // Lock-in for d F2: casinos() must scan the board in Loc order so the
+        // reroll pass is deterministic across processes (TILES is a HashMap
+        // whose key order differs per process).
+        let mut b = Board::default();
+        b.set(
+            (Block::F, 9).into(),
+            BoardTile::Built {
+                casino: Casino::Tivoli,
+                owner: None,
+                height: 1,
+            },
+        );
+        b.set(
+            (Block::A, 1).into(),
+            BoardTile::Built {
+                casino: Casino::Albion,
+                owner: None,
+                height: 1,
+            },
+        );
+        let cs = b.casinos();
+        assert_eq!(2, cs.len());
+        assert_eq!(Casino::Albion, cs[0].casino, "A1 casino must come first");
+        assert_eq!(Casino::Tivoli, cs[1].casino);
     }
 }

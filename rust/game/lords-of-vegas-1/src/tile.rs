@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
 
 use crate::board::{Block, Loc};
 use crate::casino::Casino;
@@ -20,9 +19,7 @@ pub struct Tile {
 
 type TileMap = HashMap<Loc, Tile>;
 
-lazy_static! {
-    pub static ref TILES: TileMap = tiles();
-}
+pub static TILES: LazyLock<TileMap> = LazyLock::new(tiles);
 
 fn tiles() -> TileMap {
     let mut map: TileMap = HashMap::new();

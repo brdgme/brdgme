@@ -3516,7 +3516,6 @@ dependencies = [
  "brdgme_fuzz",
  "brdgme_game",
  "brdgme_markup",
- "lazy_static",
  "rand 0.10.2",
  "serde",
  "serde_json",

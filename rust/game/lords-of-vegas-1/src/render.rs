@@ -10,7 +10,7 @@ use crate::PLAYER_OWNER_TOKENS;
 use crate::POINT_STOPS;
 use crate::PlayerState;
 use crate::PubState;
-use crate::board::{BLOCKS, Block, Board, BoardTile, Loc, TileOwner};
+use crate::board::{BLOCK_WIDTH, BLOCKS, Block, Board, BoardTile, Loc, TileOwner};
 use crate::card::casino_card_count;
 use crate::casino::CASINOS;
 use crate::tile::TILES;
@@ -77,12 +77,18 @@ impl PubState {
                 (A::Left, vec![]),
                 (
                     A::Center,
-                    vec![N::text(format!("{}", PLAYER_DICE - used.dice))],
+                    vec![N::text(format!(
+                        "{}",
+                        PLAYER_DICE.saturating_sub(used.dice)
+                    ))],
                 ),
                 (A::Left, vec![]),
                 (
                     A::Center,
-                    vec![N::text(format!("{}", PLAYER_OWNER_TOKENS - used.tokens))],
+                    vec![N::text(format!(
+                        "{}",
+                        PLAYER_OWNER_TOKENS.saturating_sub(used.tokens)
+                    ))],
                 ),
                 (A::Left, vec![]),
                 (
@@ -114,7 +120,7 @@ impl PubState {
                 A::Center,
                 vec![N::text(format!(
                     "{}",
-                    CASINO_TILES - self.board.casino_tile_count(*casino)
+                    CASINO_TILES.saturating_sub(self.board.casino_tile_count(*casino))
                 ))],
             ));
         }
@@ -151,8 +157,8 @@ impl Board {
         let mut layers = vec![];
         for lot in 1..=block.max_lot() {
             let loc = Loc { block, lot };
-            let x = (lot - 1) % 3;
-            let y = (lot - 1) / 3;
+            let x = (lot - 1) % BLOCK_WIDTH;
+            let y = (lot - 1) / BLOCK_WIDTH;
             layers.push((
                 x * TILE_WIDTH,
                 y * TILE_HEIGHT,
