@@ -3,9 +3,8 @@
 //! See docs/superpowers/specs/2026-07-16-35-settings-page-design.md.
 
 use leptos::prelude::*;
-use leptos_router::{NavigateOptions, hooks::use_navigate};
 
-use crate::app::{local_data_theme, set_theme_client};
+use crate::app::{hard_navigate, local_data_theme, set_theme_client};
 use crate::components::MainLayout;
 
 #[component]
@@ -15,10 +14,9 @@ pub fn SettingsPage() -> impl IntoView {
 
     // Logged-in only: once the user resource resolves to anonymous, bounce
     // to /login. SSR/hydration render normally (resource is None there).
-    let navigate = use_navigate();
     Effect::new(move |_| {
         if matches!(current_user.get(), Some(Ok(None))) {
-            navigate("/login", NavigateOptions::default());
+            hard_navigate("/login");
         }
     });
 

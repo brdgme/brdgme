@@ -333,6 +333,17 @@ pub(crate) fn local_data_theme() -> Option<String> {
         .get_attribute("data-theme")
 }
 
+/// Assigns `window.location`, forcing a full page load rather than a
+/// client-side route change. `/login` needs this: Turnstile's implicit
+/// rendering only scans the DOM when `api.js` runs (wfe F53 / D-16). No-op
+/// under SSR, where `web_sys::window()` is `None`.
+pub(crate) fn hard_navigate(path: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let _ = window.location().set_href(path);
+}
+
 #[component]
 fn HomePage() -> impl IntoView {
     use crate::components::game::GameBoard;
@@ -372,7 +383,7 @@ fn HomePage() -> impl IntoView {
             <div class="content-page index-logged-out" hidden=logged_in>
                 <h1>{title}</h1>
                 <p class="index-subheading">"Lo-fi board games by email and web"</p>
-                <A href="/login" attr:class="index-cta">"Start a game"</A>
+                <A href="/login" attr:class="index-cta" attr:rel="external">"Start a game"</A>
                 <div class="index-game-section" hidden=move || !has_game()>
                     {move || {
                         public_index.get().and_then(|r| r.ok()).flatten().map(|game| {

@@ -1239,10 +1239,9 @@ pub fn AdminPage() -> impl IntoView {
         expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
 
     let navigate = use_navigate();
-    let navigate2 = navigate.clone();
     Effect::new(move |_| {
         if matches!(current_user.get(), Some(Ok(None))) {
-            navigate("/login", NavigateOptions::default());
+            crate::app::hard_navigate("/login");
         }
     });
 
@@ -1265,7 +1264,7 @@ pub fn AdminPage() -> impl IntoView {
         if let Some(Err(ServerFnError::ServerError(msg))) = bots.get()
             && msg == ADMIN_REQUIRED
         {
-            navigate2("/", NavigateOptions::default());
+            navigate("/", NavigateOptions::default());
         }
     });
 

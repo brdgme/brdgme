@@ -125,7 +125,6 @@ pub fn MainLayout(
 #[component]
 pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>) -> impl IntoView {
     let logout_action = expect_context::<ServerAction<crate::auth::Logout>>();
-    let navigate = use_navigate();
     // wfe F59: a failed logout used to leave the user apparently signed in
     // with no signal at all. The sidebar is on every page, so this slot is
     // the app-wide one.
@@ -133,7 +132,7 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
     Effect::new(move |_| match logout_action.value().get() {
         Some(Ok(_)) => {
             logout_error.set(None);
-            navigate("/login", NavigateOptions::default());
+            crate::app::hard_navigate("/login");
         }
         Some(Err(e)) => logout_error.set(Some(format!(
             "Logout failed: {}",
@@ -201,7 +200,7 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
                     }}
                 </div>
                 <div hidden=logged_in>
-                    <A href="/login">"Login"</A>
+                    <a href="/login" rel="external">"Login"</a>
                 </div>
             </div>
             <div><A href="/games/new">"New game"</A></div>

@@ -243,6 +243,42 @@ async fn home_page_anonymous(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn home_page_anonymous_login_links_external(pool: PgPool) {
+    let app = build_router(make_state(pool).await).await;
+    let (status, _content_type, body) = get(app, "/", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let external_count = body.matches("rel=\"external\"").count();
+    assert_eq!(
+        external_count, 2,
+        "expected 2 rel=\"external\" links, got {external_count}: {body}"
+    );
+    let login_count = body.matches("href=\"/login\"").count();
+    assert_eq!(
+        login_count, 2,
+        "expected 2 href=\"/login\" links, got {login_count}: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn home_page_logged_in_login_links_still_present(pool: PgPool) {
+    let user = make_user(&pool, "external-link-player").await;
+    let cookie = login_cookie(&pool, &user, "external-link-player@example.com").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, _content_type, body) = get(app, "/", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    let external_count = body.matches("rel=\"external\"").count();
+    assert_eq!(
+        external_count, 2,
+        "expected 2 rel=\"external\" links when logged in, got {external_count}: {body}"
+    );
+    let login_count = body.matches("href=\"/login\"").count();
+    assert_eq!(
+        login_count, 2,
+        "expected 2 href=\"/login\" links when logged in, got {login_count}: {body}"
+    );
+}
+
+#[sqlx::test]
 async fn home_page_logged_in_renders_index_shell(pool: PgPool) {
     let user = make_user(&pool, "index-player").await;
     let cookie = login_cookie(&pool, &user, "index-player@example.com").await;
