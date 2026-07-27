@@ -1,6 +1,6 @@
 use std::cmp;
 
-use super::{PlayerState, PubState, ROUNDS, START_ROUND, opponent};
+use super::{PLAYERS, PlayerState, PubState, ROUNDS, START_ROUND, opponent};
 use crate::card::{Card, by_expedition, expeditions};
 
 use brdgme_color::NamedColor;
@@ -36,7 +36,7 @@ fn render(pub_state: &PubState, player: Option<usize>, hand: Option<&[Card]>) ->
     }
     // Scores
     let persp = match player {
-        Some(p) if p < 2 => p,
+        Some(p) if p < PLAYERS => p,
         _ => 0,
     };
     let mut scores: Vec<Row> = vec![];
@@ -182,7 +182,7 @@ fn render_tableau_cards(cards: &[Card], header: &N) -> Vec<Row> {
     let by_exp = by_expedition(cards);
     let mut largest: usize = 1;
     for e in expeditions() {
-        largest = cmp::max(largest, by_exp.get(&e).unwrap_or(&vec![]).len());
+        largest = cmp::max(largest, by_exp.get(&e).map_or(0, Vec::len));
     }
     for row_i in 0..largest {
         let mut row: Row = vec![if row_i == 0 {
@@ -193,7 +193,7 @@ fn render_tableau_cards(cards: &[Card], header: &N) -> Vec<Row> {
         for e in expeditions() {
             // Column spacing
             row.push((A::Left, vec![]));
-            match by_exp.get(&e).unwrap_or(&vec![]).get(row_i) {
+            match by_exp.get(&e).and_then(|cards| cards.get(row_i)) {
                 Some(c) => row.push((A::Center, vec![card(c)])),
                 None => row.push((A::Left, vec![])),
             }

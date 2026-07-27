@@ -6,7 +6,7 @@ use brdgme_markup::ast::Cell;
 use brdgme_markup::{Align as A, Node as N, Row};
 
 use crate::card::{Card, by_expedition, expeditions};
-use crate::{END_ROUND, MAX_PLAYERS, PlayerState, PubState, ROUNDS, START_ROUND, next_player};
+use crate::{END_ROUND, PlayerState, PubState, ROUNDS, START_ROUND, next_player};
 
 const EXP_SPACER: &str = "  ";
 const TABLEAU_HEADER_SPACER: &str = "   ";
@@ -127,7 +127,10 @@ impl Renderer for PlayerState {
 
 impl PubState {
     fn render_tableau(&self, player: Option<usize>) -> Vec<N> {
-        let p = player.unwrap_or(0) % MAX_PLAYERS;
+        let p = match player {
+            Some(p) if p < self.players => p,
+            _ => 0,
+        };
         let mut layout: Vec<N> = vec![];
         let mut rows: Vec<Row> = vec![];
 
@@ -261,7 +264,7 @@ fn render_tableau_cards(cards: &[Card], header: &N) -> Vec<Row> {
     let by_exp = by_expedition(cards);
     let mut largest: usize = 1;
     for e in expeditions() {
-        largest = cmp::max(largest, by_exp.get(&e).unwrap_or(&vec![]).len());
+        largest = cmp::max(largest, by_exp.get(&e).map_or(0, Vec::len));
     }
     for row_i in 0..largest {
         let mut row: Row = vec![if row_i == 0 {
@@ -279,7 +282,7 @@ fn render_tableau_cards(cards: &[Card], header: &N) -> Vec<Row> {
                     EXP_SPACER
                 })],
             ));
-            match by_exp.get(&e).unwrap_or(&vec![]).get(row_i) {
+            match by_exp.get(&e).and_then(|cards| cards.get(row_i)) {
                 Some(c) => row.push((A::Center, vec![card(c)])),
                 None => row.push((
                     A::Left,
@@ -328,4 +331,30 @@ pub fn comma_cards(cards: &[Card]) -> Vec<N> {
         output.push(card(c));
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use brdgme_game::Gamer;
+
+    use crate::Game;
+
+    #[test]
+    fn render_tableau_clamps_perspective_to_player_count() {
+        // e F23: `% MAX_PLAYERS` (3) let a perspective index of 2 through in a
+        // 2-player game, so `expeditions.get(2)` was None and the bottom half
+        // - the viewer's own tableau - rendered as nothing.
+        let g = Game::start(2, 1).unwrap().0;
+        let out = brdgme_markup::to_string(&g.pub_state().render_tableau(Some(2)));
+        assert!(
+            out.contains("{{player 0}}"),
+            "own tableau (clamped to player 0) missing: {}",
+            out
+        );
+        assert!(
+            out.contains("{{player 1}}"),
+            "opponent tableau missing: {}",
+            out
+        );
+    }
 }

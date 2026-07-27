@@ -194,7 +194,39 @@ impl Game {
     }
 
     fn game_over_log(&self) -> Log {
-        Log::public(vec![N::Bold(vec![N::text("The game is over.")])])
+        // Sorted for determinism: leaders() returns a HashSet and this text is
+        // written into the permanent log stream.
+        let mut leaders: Vec<usize> = self.leaders().into_iter().collect();
+        leaders.sort_unstable();
+        let mut log_text = vec![N::text("The game is over, ")];
+        match leaders.as_slice() {
+            [winner] => {
+                let winner = *winner;
+                let winner_score = self.player_score(winner);
+                // Margin over the best non-winner. unwrap_or covers the
+                // degenerate single-player state without panicking.
+                let runner_up = (0..self.players)
+                    .filter(|&p| p != winner)
+                    .map(|p| self.player_score(p))
+                    .max()
+                    .unwrap_or(winner_score);
+                log_text.push(N::Player(winner));
+                log_text.push(N::text(format!(
+                    " won by {} points",
+                    winner_score - runner_up
+                )));
+            }
+            tied => {
+                log_text.push(N::text("scores tied at "));
+                log_text.push(N::text(format!(
+                    "{}",
+                    tied.first()
+                        .map(|&p| self.player_score(p))
+                        .unwrap_or_default()
+                )));
+            }
+        }
+        Log::public(vec![N::Bold(log_text)])
     }
 
     fn assert_phase(&self, phase: Phase) -> Result<(), GameError> {
@@ -394,7 +426,7 @@ impl Game {
         let mut logs: Vec<Log> = vec![];
         match self.hands.get_mut(player) {
             Some(hand) => {
-                let mut num = hand_size(self.players) - hand.len();
+                let mut num = hand_size(self.players).saturating_sub(hand.len());
                 let dl = self.deck.len();
                 if num > dl {
                     num = dl;
@@ -428,10 +460,9 @@ impl Game {
             None => return Err(GameError::internal("invalid player number")),
         };
         if self.deck.is_empty() {
-            self.end_round()
-        } else {
-            Ok(logs)
+            logs.extend(self.end_round()?);
         }
+        Ok(logs)
     }
 
     fn player_score(&self, player: usize) -> isize {
@@ -549,7 +580,7 @@ impl Gamer for Game {
         if self.round >= START_ROUND + ROUNDS {
             Status::Finished {
                 placings: self.placings(),
-                stats: vec![self.player_stats(0), self.player_stats(1)],
+                stats: (0..self.players).map(|p| self.player_stats(p)).collect(),
             }
         } else {
             Status::Active {
@@ -585,7 +616,15 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            hand: self.hands[player].clone(),
+            // Documented (and DATA_DOCS.md) contract: sorted by expedition
+            // then value, which is exactly Card's derived Ord. Indexing is
+            // left unchecked deliberately - the bounds fix for a crafted
+            // PlayerRender is WP-09's (e F18 / e F36), not ours.
+            hand: {
+                let mut hand = self.hands[player].clone();
+                hand.sort();
+                hand
+            },
         }
     }
 
@@ -734,16 +773,11 @@ pub fn score(players: usize, cards: &[Card]) -> isize {
         }
     }
     expeditions().iter().fold(0, |acc, &e| {
-        let cards = exp_cards.get(&e);
-        if cards.is_none() {
+        let Some(&cards) = exp_cards.get(&e) else {
             return acc;
-        }
+        };
         acc + (exp_sum.get(&e).unwrap_or(&0) - exp_cost) * (exp_inv.get(&e).unwrap_or(&0) + 1)
-            + if *cards.unwrap() >= exp_bonus_size {
-                exp_cost
-            } else {
-                0
-            }
+            + if cards >= exp_bonus_size { exp_cost } else { 0 }
     })
 }
 
@@ -921,5 +955,134 @@ mod test {
         let mut game = Game::start(2, 1).unwrap().0;
         game.current_player = game.players;
         assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn finished_status_reports_stats_for_every_player() {
+        // e F17: `status()` hardcoded stats for players 0 and 1, so finished
+        // 3-player games silently omitted player 2. A 3p deck is 60 cards and
+        // the 3x7 opening deal leaves 39, so 39 discard+draw turns end a round
+        // and 39 * ROUNDS end the game.
+        let mut game = Game::start(3, 1).expect("3 players must be supported").0;
+        assert_eq!(39, game.deck.len(), "3p deal must leave 39 cards");
+        for _ in 0..(39 * ROUNDS) {
+            let p = game.current_player;
+            let c = game.hands[p][0];
+            game.discard(p, c).unwrap();
+            game.draw(p).unwrap();
+        }
+        assert!(game.is_finished());
+        match game.status() {
+            Status::Finished { placings, stats } => {
+                assert_eq!(3, placings.len(), "placings must cover all players");
+                assert_eq!(3, stats.len(), "stats must cover all players");
+                for (p, s) in stats.iter().enumerate() {
+                    assert!(
+                        s.contains_key("Discards"),
+                        "player {} has no stats: {:?}",
+                        p,
+                        s
+                    );
+                }
+            }
+            s => panic!("expected Finished, got {:?}", s),
+        }
+    }
+
+    #[test]
+    fn final_draw_of_a_round_keeps_its_logs() {
+        // e F37: draw_hand_full dropped its accumulated logs when the draw
+        // emptied the deck, so the last draw of every round was invisible.
+        // Pre-fix the returned logs start with the round-score log instead of
+        // the draw log.
+        let mut game = Game::start(3, 1).unwrap().0;
+        let mut logs: Vec<Log> = vec![];
+        for _ in 0..39 {
+            let p = game.current_player;
+            let c = game.hands[p][0];
+            game.discard(p, c).unwrap();
+            logs = game.draw(p).unwrap();
+        }
+        assert_eq!(
+            START_ROUND + 1,
+            game.round,
+            "the 39th draw must end the round"
+        );
+        let text: Vec<String> = logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect();
+        assert!(
+            text[0].contains("drew a card"),
+            "the final draw's public log must come first, got: {:?}",
+            text
+        );
+        assert!(
+            logs.iter().any(|l| !l.public),
+            "the final draw's private log must be present, got: {:?}",
+            text
+        );
+    }
+
+    #[test]
+    fn player_state_hand_is_sorted_as_documented() {
+        // e F38 / e F20: PlayerState.hand's rustdoc and DATA_DOCS.md both
+        // promise "sorted by expedition then value"; player_state() returned
+        // acquisition order. Card's derived Ord is (expedition, value) with
+        // Red < Green < White < Blue < Yellow and Investment < N(_).
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.hands[0] = vec![
+            (Expedition::Yellow, Value::N(9)).into(),
+            (Expedition::Red, Value::Investment).into(),
+            (Expedition::Green, Value::N(2)).into(),
+            (Expedition::Red, Value::N(4)).into(),
+        ];
+        let hand = game.player_state(0).hand;
+        let mut expected = hand.clone();
+        expected.sort();
+        assert_eq!(expected, hand, "hand must be sorted");
+        assert_eq!(
+            vec!["RX", "R4", "G2", "Y9"],
+            hand.iter().map(|c| c.to_string()).collect::<Vec<String>>()
+        );
+    }
+
+    #[test]
+    fn game_over_log_announces_the_winner() {
+        // e F24: lost-cities-2 regressed to a bare "The game is over."; -1
+        // announced the winner and margin. Generalized here over self.players.
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.scores = vec![vec![10, 10, 10], vec![5, 5, 5], vec![0, 0, 0]];
+        let won = brdgme_markup::to_string(&g.game_over_log().content);
+        assert!(
+            won.contains("{{player 0}}"),
+            "winner must be named: {}",
+            won
+        );
+        assert!(won.contains("won by 15 points"), "got: {}", won);
+
+        g.scores = vec![vec![10], vec![10], vec![0]];
+        let tied = brdgme_markup::to_string(&g.game_over_log().content);
+        assert!(tied.contains("scores tied at 10"), "got: {}", tied);
+    }
+
+    #[test]
+    fn draw_hand_full_does_not_underflow_on_an_oversized_hand() {
+        // e F41 / e F26: `HAND_SIZE - hand.len()` panics in debug builds if a
+        // hand ever exceeds the hand size. Unreachable in normal play, so this
+        // constructs the state directly.
+        let mut game = Game::start(2, 1).unwrap().0;
+        let extra = game.deck.pop().expect("deck must not be empty");
+        game.hands[0].push(extra);
+        let over = game.hands[0].len();
+        let logs = game
+            .draw_hand_full(0)
+            .expect("drawing into an over-full hand must not error");
+        assert_eq!(
+            over,
+            game.hands[0].len(),
+            "no cards may be drawn into an over-full hand"
+        );
+        assert!(!logs.is_empty(), "the draw attempt must still be logged");
     }
 }

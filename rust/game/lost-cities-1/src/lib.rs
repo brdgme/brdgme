@@ -139,7 +139,7 @@ impl Game {
     fn end_round(&mut self) -> Result<Vec<Log>, GameError> {
         self.round += 1;
         let mut logs: Vec<Log> = vec![];
-        for p in 0..2 {
+        for p in 0..PLAYERS {
             let mut round_score: isize = 0;
             if let Some(p_exp) = self.expeditions.get(p) {
                 round_score = score(p_exp);
@@ -225,7 +225,7 @@ impl Game {
     }
 
     fn next_player(&mut self) {
-        self.current_player = (self.current_player + 1) % 2;
+        self.current_player = (self.current_player + 1) % PLAYERS;
         self.start_turn();
     }
 
@@ -382,7 +382,7 @@ impl Game {
         let mut logs: Vec<Log> = vec![];
         match self.hands.get_mut(player) {
             Some(hand) => {
-                let mut num = HAND_SIZE - hand.len();
+                let mut num = HAND_SIZE.saturating_sub(hand.len());
                 let dl = self.deck.len();
                 if num > dl {
                     num = dl;
@@ -416,10 +416,9 @@ impl Game {
             None => return Err(GameError::internal("invalid player number".to_string())),
         };
         if self.deck.is_empty() {
-            self.end_round()
-        } else {
-            Ok(logs)
+            logs.extend(self.end_round()?);
         }
+        Ok(logs)
     }
 
     fn player_score(&self, player: usize) -> isize {
@@ -482,7 +481,7 @@ impl Game {
 }
 
 pub fn opponent(player: usize) -> usize {
-    (player + 1) % 2
+    (player + 1) % PLAYERS
 }
 
 impl Gamer for Game {
@@ -492,8 +491,8 @@ impl Gamer for Game {
     fn start(players: usize, seed: u64) -> Result<(Self, Vec<Log>), GameError> {
         if players != PLAYERS {
             return Err(GameError::PlayerCount {
-                min: 2,
-                max: 2,
+                min: PLAYERS,
+                max: PLAYERS,
                 given: players,
             });
         }
@@ -547,7 +546,15 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            hand: self.hands[player].clone(),
+            // Documented (and DATA_DOCS.md) contract: sorted by expedition
+            // then value, which is exactly Card's derived Ord. Indexing is
+            // left unchecked deliberately - the bounds fix for a crafted
+            // PlayerRender is WP-09's (e F18 / e F36), not ours.
+            hand: {
+                let mut hand = self.hands[player].clone();
+                hand.sort();
+                hand
+            },
         }
     }
 
@@ -596,8 +603,9 @@ impl Gamer for Game {
                 ..
             }) => self.draw(player).map(|mut l| {
                 if self.is_finished() {
-                    let scores: Vec<(usize, i32)> =
-                        (0..2).map(|p| (p, self.player_score(p) as i32)).collect();
+                    let scores: Vec<(usize, i32)> = (0..PLAYERS)
+                        .map(|p| (p, self.player_score(p) as i32))
+                        .collect();
                     l.push(placings_log(&self.placings(), Some(&scores)));
                 }
                 CommandResponse {
@@ -619,11 +627,11 @@ impl Gamer for Game {
     }
 
     fn player_counts() -> Vec<usize> {
-        vec![2]
+        vec![PLAYERS]
     }
 
     fn player_count(&self) -> usize {
-        2
+        PLAYERS
     }
 
     fn rules() -> String {
@@ -662,12 +670,11 @@ pub fn score(cards: &[Card]) -> isize {
         }
     }
     expeditions().iter().fold(0, |acc, &e| {
-        let cards = exp_cards.get(&e);
-        if cards.is_none() {
+        let Some(&cards) = exp_cards.get(&e) else {
             return acc;
-        }
+        };
         acc + (exp_sum.get(&e).unwrap_or(&0) - 20) * (exp_inv.get(&e).unwrap_or(&0) + 1)
-            + if cards.unwrap() >= &8 { 20 } else { 0 }
+            + if cards >= 8 { 20 } else { 0 }
     })
 }
 
@@ -814,5 +821,83 @@ mod test {
         assert_eq!(vec![2, 1], g.placings());
         g.scores = vec![vec![100, 50, 40], vec![100, 50, 40]];
         assert_eq!(vec![1, 1], g.placings());
+    }
+
+    #[test]
+    fn final_draw_of_a_round_keeps_its_logs() {
+        // e F37: draw_hand_full dropped its accumulated logs when the draw
+        // emptied the deck, so the last draw of every round was invisible.
+        // Pre-fix the returned logs start with the round-score log instead of
+        // the draw log.
+        let mut game = Game::start(2, 1).unwrap().0;
+        let mut logs: Vec<Log> = vec![];
+        for _ in 0..44 {
+            let p = game.current_player;
+            let c = game.hands[p][0];
+            game.discard(p, c).unwrap();
+            logs = game.draw(p).unwrap();
+        }
+        assert_eq!(
+            START_ROUND + 1,
+            game.round,
+            "the 44th draw must end the round"
+        );
+        let text: Vec<String> = logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect();
+        assert!(
+            text[0].contains("drew a card"),
+            "the final draw's public log must come first, got: {:?}",
+            text
+        );
+        assert!(
+            logs.iter().any(|l| !l.public),
+            "the final draw's private log must be present, got: {:?}",
+            text
+        );
+    }
+
+    #[test]
+    fn player_state_hand_is_sorted_as_documented() {
+        // e F38 / e F20: PlayerState.hand's rustdoc and DATA_DOCS.md both
+        // promise "sorted by expedition then value"; player_state() returned
+        // acquisition order. Card's derived Ord is (expedition, value) with
+        // Red < Green < White < Blue < Yellow and Investment < N(_).
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.hands[0] = vec![
+            (Expedition::Yellow, Value::N(9)).into(),
+            (Expedition::Red, Value::Investment).into(),
+            (Expedition::Green, Value::N(2)).into(),
+            (Expedition::Red, Value::N(4)).into(),
+        ];
+        let hand = game.player_state(0).hand;
+        let mut expected = hand.clone();
+        expected.sort();
+        assert_eq!(expected, hand, "hand must be sorted");
+        assert_eq!(
+            vec!["RX", "R4", "G2", "Y9"],
+            hand.iter().map(|c| c.to_string()).collect::<Vec<String>>()
+        );
+    }
+
+    #[test]
+    fn draw_hand_full_does_not_underflow_on_an_oversized_hand() {
+        // e F41 / e F26: `HAND_SIZE - hand.len()` panics in debug builds if a
+        // hand ever exceeds the hand size. Unreachable in normal play, so this
+        // constructs the state directly.
+        let mut game = Game::start(2, 1).unwrap().0;
+        let extra = game.deck.pop().expect("deck must not be empty");
+        game.hands[0].push(extra);
+        let over = game.hands[0].len();
+        let logs = game
+            .draw_hand_full(0)
+            .expect("drawing into an over-full hand must not error");
+        assert_eq!(
+            over,
+            game.hands[0].len(),
+            "no cards may be drawn into an over-full hand"
+        );
+        assert!(!logs.is_empty(), "the draw attempt must still be logged");
     }
 }
