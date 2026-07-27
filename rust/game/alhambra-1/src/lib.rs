@@ -796,6 +796,18 @@ impl Game {
         }
         Ok(self.next_phase())
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.human_players)
+            .map(|p| (p, self.boards[p].points))
+            .collect();
+        let placings = gen_placings(
+            &(0..self.human_players)
+                .map(|p| vec![self.boards[p].points])
+                .collect::<Vec<Vec<i32>>>(),
+        );
+        logs.push(placings_log(&placings, Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -844,6 +856,7 @@ impl Gamer for Game {
         input: &str,
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
+        let was_finished = self.is_finished();
         let output = match self.command_parser(player) {
             Some(cp) => cp,
             None => {
@@ -853,147 +866,47 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Take { cards },
                 ..
-            }) => {
-                let mut logs = self.take(player, &cards)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.human_players)
-                        .map(|p| (p, self.boards[p].points))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..self.human_players)
-                            .map(|p| vec![self.boards[p].points])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.take(player, &cards)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Spend { cards },
                 ..
-            }) => {
-                let mut logs = self.spend(player, &cards)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.human_players)
-                        .map(|p| (p, self.boards[p].points))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..self.human_players)
-                            .map(|p| vec![self.boards[p].points])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.spend(player, &cards)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Place { tile, coord },
                 ..
-            }) => {
-                let mut logs = self.place(player, tile, coord)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.human_players)
-                        .map(|p| (p, self.boards[p].points))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..self.human_players)
-                            .map(|p| vec![self.boards[p].points])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.place(player, tile, coord)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Swap { tile, coord },
                 ..
-            }) => {
-                let mut logs = self.swap(player, tile, coord)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.human_players)
-                        .map(|p| (p, self.boards[p].points))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..self.human_players)
-                            .map(|p| vec![self.boards[p].points])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.swap(player, tile, coord)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Remove { coord },
                 ..
-            }) => {
-                let mut logs = self.remove(player, coord)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.human_players)
-                        .map(|p| (p, self.boards[p].points))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..self.human_players)
-                            .map(|p| vec![self.boards[p].points])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.remove(player, coord)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Done,
                 ..
-            }) => {
-                let mut logs = self.done(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.human_players)
-                        .map(|p| (p, self.boards[p].points))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..self.human_players)
-                            .map(|p| vec![self.boards[p].points])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.done(player)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn status(&self) -> Status {
@@ -1827,6 +1740,64 @@ mod tests {
                 points: 1
             }],
             scores
+        );
+    }
+
+    fn is_placings_log(l: &Log) -> bool {
+        let s = log_plain(l);
+        s.contains("wins!") || s.contains("tie!")
+    }
+
+    fn setup_near_end(g: &mut Game) {
+        g.phase = Phase::FinalPlace;
+        g.current_player = 0;
+        for b in g.boards.iter_mut() {
+            b.place = vec![];
+        }
+    }
+
+    #[test]
+    fn finish_epilogue_single_placings_log() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        setup_near_end(&mut g);
+        let resp = g.command(0, "done", &[]).unwrap();
+        assert!(!resp.can_undo);
+        let placings_count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, placings_count, "exactly one placings log");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        let (mut g2, _) = Game::start(3, 42).unwrap();
+        g2.phase = Phase::FinalPlace;
+        g2.current_player = 0;
+        for b in g2.boards.iter_mut() {
+            b.place = vec![];
+        }
+        g2.boards[0].place = vec![Tile::new(TileType::Pavillion, 5, &[])];
+        let resp2 = g2.command(0, "place 1 a2", &[]).unwrap();
+        assert!(!resp2.can_undo);
+        let placings_count2 = resp2.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(
+            1, placings_count2,
+            "exactly one placings log from place arm"
+        );
+        assert!(is_placings_log(resp2.logs.last().unwrap()));
+        assert!(matches!(g2.status(), Status::Finished { .. }));
+    }
+
+    #[test]
+    fn non_finishing_command_has_no_placings_log() {
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        let card = g.cards[0];
+        let resp = g.command(0, &format!("take {}", card), &[]).unwrap();
+        assert!(
+            resp.logs.iter().all(|l| !is_placings_log(l)),
+            "non-finishing command must not emit a placings log"
         );
     }
 

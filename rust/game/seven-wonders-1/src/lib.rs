@@ -761,6 +761,16 @@ impl Game {
 
         Ok(logs)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players).map(|p| (p, self.player_vp(p))).collect();
+        let placings = gen_placings(
+            &(0..self.players)
+                .map(|p| vec![self.player_vp(p), self.coins[p]])
+                .collect::<Vec<Vec<i32>>>(),
+        );
+        logs.push(placings_log(&placings, Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -825,141 +835,60 @@ impl Gamer for Game {
                 ));
             }
         };
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Build { card },
                 ..
-            }) => {
-                let mut logs = self.choose_build(player, card, false, false)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> =
-                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
-                    let placings = gen_placings(
-                        &(0..self.players)
-                            .map(|p| vec![self.player_vp(p), self.coins[p]])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (
+                self.choose_build(player, card, false, false)?,
+                false,
+                remaining,
+            ),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Free { card },
                 ..
-            }) => {
-                let mut logs = self.choose_build(player, card, true, false)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> =
-                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
-                    let placings = gen_placings(
-                        &(0..self.players)
-                            .map(|p| vec![self.player_vp(p), self.coins[p]])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (
+                self.choose_build(player, card, true, false)?,
+                false,
+                remaining,
+            ),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Wonder { card },
                 ..
-            }) => {
-                let mut logs = self.choose_build(player, card, false, true)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> =
-                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
-                    let placings = gen_placings(
-                        &(0..self.players)
-                            .map(|p| vec![self.player_vp(p), self.coins[p]])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (
+                self.choose_build(player, card, false, true)?,
+                false,
+                remaining,
+            ),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Discard { card },
                 ..
-            }) => {
-                let mut logs = self.choose_discard(player, card)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> =
-                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
-                    let placings = gen_placings(
-                        &(0..self.players)
-                            .map(|p| vec![self.player_vp(p), self.coins[p]])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.choose_discard(player, card)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Deal { deal },
                 ..
-            }) => {
-                let mut logs = self.choose_deal(player, deal)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> =
-                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
-                    let placings = gen_placings(
-                        &(0..self.players)
-                            .map(|p| vec![self.player_vp(p), self.coins[p]])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.choose_deal(player, deal)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Take { card },
                 ..
-            }) => {
-                let mut logs = self.take_from_discard(player, card)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> =
-                        (0..self.players).map(|p| (p, self.player_vp(p))).collect();
-                    let placings = gen_placings(
-                        &(0..self.players)
-                            .map(|p| vec![self.player_vp(p), self.coins[p]])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.take_from_discard(player, card)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn status(&self) -> Status {
@@ -1664,6 +1593,75 @@ mod tests {
             }
         }
         assert_eq!(g.round, 3);
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(placings.len(), 3),
+            s => panic!("expected finished status, got {:?}", s),
+        }
+    }
+
+    #[test]
+    fn finish_epilogue_appended_once_on_transition() {
+        let is_placings =
+            |log: &Log| brdgme_markup::to_string(&log.content).contains("Final scores:");
+
+        // Discard arm: an all-discard game finishes via the Discard command.
+        let p = players();
+        let (mut g, _) = Game::start_game(3, 7).unwrap();
+        let mut guard = 0;
+        let finishing = 'outer: loop {
+            guard += 1;
+            assert!(guard < 1000, "game did not finish - state machine stalled");
+            for pl in g.whose_turn() {
+                let before = g.is_finished();
+                let resp = g.command(pl, "discard 1", &p).unwrap();
+                if !before && g.is_finished() {
+                    break 'outer resp;
+                }
+                assert!(
+                    !resp.logs.iter().any(&is_placings),
+                    "non-finishing command must not carry a placings log"
+                );
+            }
+        };
+        assert_eq!(
+            finishing.logs.iter().filter(|l| is_placings(l)).count(),
+            1,
+            "exactly one placings log on finish"
+        );
+        assert!(
+            is_placings(finishing.logs.last().unwrap()),
+            "placings log last"
+        );
+        assert!(!finishing.can_undo, "finishing can_undo unchanged (false)");
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(placings.len(), 3),
+            s => panic!("expected finished status, got {:?}", s),
+        }
+
+        // Build arm: a controlled age-3 hand finishes via the Build command.
+        let mut g = new_game();
+        g.round = 3;
+        g.hands = vec![
+            vec![db_card("Lumber Yard")],
+            vec![db_card("Clay Pool")],
+            vec![db_card("Ore Vein")],
+        ];
+        g.cards = vec![vec![], vec![], vec![]];
+        g.actions = vec![None; 3];
+        g.to_resolve = vec![];
+
+        let r0 = cmd(&mut g, MICK, "build 1").unwrap();
+        assert!(!r0.logs.iter().any(&is_placings));
+        let r1 = cmd(&mut g, STEVE, "build 1").unwrap();
+        assert!(!r1.logs.iter().any(&is_placings));
+        let r2 = cmd(&mut g, GREG, "build 1").unwrap();
+        assert_eq!(
+            r2.logs.iter().filter(|l| is_placings(l)).count(),
+            1,
+            "exactly one placings log on build finish"
+        );
+        assert!(is_placings(r2.logs.last().unwrap()), "placings log last");
+        assert!(!r2.can_undo, "finishing can_undo unchanged (false)");
         match g.status() {
             Status::Finished { placings, .. } => assert_eq!(placings.len(), 3),
             s => panic!("expected finished status, got {:?}", s),

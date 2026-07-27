@@ -643,6 +643,13 @@ impl Game {
             .collect();
         gen_placings(&metrics)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_total_money(p)))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -710,99 +717,43 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 value: Command::AllIn,
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.all_in(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_total_money(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.all_in(player)?, false, remaining),
             Ok(ParseOutput {
                 value: Command::Call,
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.call(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_total_money(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.call(player)?, false, remaining),
             Ok(ParseOutput {
                 value: Command::Check,
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.check(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_total_money(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.check(player)?, false, remaining),
             Ok(ParseOutput {
                 value: Command::Fold,
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.fold(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_total_money(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.fold(player)?, false, remaining),
             Ok(ParseOutput {
                 value: Command::Raise(amount),
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.raise(player, amount)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_total_money(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: true,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(e),
+            }) => (self.raise(player, amount)?, true, remaining),
+            Err(e) => return Err(e),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1319,5 +1270,137 @@ mod tests {
         g.player_money = vec![40, 60];
         g.bets = vec![10, 0];
         assert_eq!(vec![50.0, 60.0], g.points());
+    }
+
+    fn is_placings_log(l: &Log) -> bool {
+        brdgme_markup::plain(&brdgme_markup::transform(&l.content, &[])).contains("Final scores:")
+    }
+
+    fn no_pair_board() -> Deck {
+        vec![
+            card::Card {
+                suit: card::Suit::Clubs,
+                rank: card::RANK_2,
+            },
+            card::Card {
+                suit: card::Suit::Diamonds,
+                rank: 7,
+            },
+            card::Card {
+                suit: card::Suit::Hearts,
+                rank: 9,
+            },
+            card::Card {
+                suit: card::Suit::Spades,
+                rank: card::RANK_JACK,
+            },
+            card::Card {
+                suit: card::Suit::Diamonds,
+                rank: card::RANK_KING,
+            },
+        ]
+    }
+
+    fn aces() -> Deck {
+        vec![
+            card::Card {
+                suit: card::Suit::Spades,
+                rank: card::RANK_ACE_HIGH,
+            },
+            card::Card {
+                suit: card::Suit::Hearts,
+                rank: card::RANK_ACE_HIGH,
+            },
+        ]
+    }
+
+    fn rag() -> Deck {
+        vec![
+            card::Card {
+                suit: card::Suit::Diamonds,
+                rank: 3,
+            },
+            card::Card {
+                suit: card::Suit::Clubs,
+                rank: 4,
+            },
+        ]
+    }
+
+    #[test]
+    fn command_finish_appends_single_last_placings_log() {
+        let names2 = vec!["Mick".to_string(), "Steve".to_string()];
+        let names3 = vec!["Mick".to_string(), "Steve".to_string(), "BJ".to_string()];
+
+        // A non-finishing Raise keeps can_undo == true (the package's only
+        // true) and appends no placings log.
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.current_player = 0;
+        g.first_betting_player = 0;
+        g.bets = vec![0, 10, 0];
+        g.player_money = vec![100, 100, 100];
+        g.largest_raise = 10;
+        let resp = g.command(0, "raise 10", &names3).unwrap();
+        assert!(
+            resp.can_undo,
+            "non-finishing raise must keep can_undo == true"
+        );
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "non-finishing command must not append a placings log"
+        );
+        assert!(!g.is_finished());
+
+        // Finishing AllIn: exactly one placings log, last; can_undo stays false.
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.community_cards = no_pair_board();
+        g.player_hands[0] = aces();
+        g.player_hands[1] = rag();
+        g.bets = vec![20, 10];
+        g.player_money = vec![80, 10];
+        g.current_player = 1;
+        g.first_betting_player = 1;
+        g.everyone_has_bet_once = true;
+        let resp = g.command(1, "allin", &names2).unwrap();
+        assert!(!resp.can_undo, "AllIn can_undo must stay false");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings log"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log must be last"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
+            _ => panic!("expected finished status"),
+        }
+
+        // Finishing Call: exactly one placings log, last; can_undo stays false.
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.community_cards = no_pair_board();
+        g.player_hands[0] = rag();
+        g.player_hands[1] = aces();
+        g.bets = vec![20, 10];
+        g.player_money = vec![0, 30];
+        g.current_player = 1;
+        g.first_betting_player = 1;
+        g.everyone_has_bet_once = true;
+        let resp = g.command(1, "call", &names2).unwrap();
+        assert!(!resp.can_undo, "Call can_undo must stay false");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings log"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log must be last"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![2, 1], placings),
+            _ => panic!("expected finished status"),
+        }
     }
 }

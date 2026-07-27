@@ -371,6 +371,16 @@ impl Game {
         })
     }
 
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = self
+            .scores()
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| (i, s as i32))
+            .collect();
+        logs.push(placings_log(&self.calc_placings(), Some(&scores)));
+    }
+
     /// Port of Game.RollForPlayer (roll_command.go).
     pub fn roll_action(
         &mut self,
@@ -485,68 +495,34 @@ impl Gamer for Game {
         input: &str,
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
+        let was_finished = self.is_finished();
         let output = match self.command_parser(player) {
             Some(cp) => cp,
             None => return Err(GameError::invalid_input("not your turn")),
         }
         .parse(input, players);
-        match output {
+        let mut resp = match output {
             Ok(ParseOutput {
                 value: Command::Attack { castle },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.attack(player, castle, remaining)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s as i32))
-                        .collect();
-                    resp.logs
-                        .push(placings_log(&self.calc_placings(), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.attack(player, castle, remaining)?,
             Ok(ParseOutput {
                 value: Command::Line { line },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.line_action(player, line, remaining)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s as i32))
-                        .collect();
-                    resp.logs
-                        .push(placings_log(&self.calc_placings(), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.line_action(player, line, remaining)?,
             Ok(ParseOutput {
                 value: Command::Roll,
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.roll_action(player, remaining)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s as i32))
-                        .collect();
-                    resp.logs
-                        .push(placings_log(&self.calc_placings(), Some(&scores)));
-                }
-                Ok(resp)
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => self.roll_action(player, remaining)?,
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut resp.logs);
         }
+        Ok(resp)
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -862,5 +838,116 @@ mod test {
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
 
         assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+    }
+
+    fn log_plain(log: &Log) -> String {
+        brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
+    }
+
+    fn is_placings_log(l: &Log) -> bool {
+        let s = log_plain(l);
+        s.contains("wins!") || s.contains("tie!")
+    }
+
+    fn setup_one_castle_from_end(g: &mut Game) {
+        let n = castle::castles().len();
+        for i in 0..n {
+            if i == 2 {
+                continue;
+            }
+            g.conquered[i] = true;
+            g.castle_owners[i] = Some(g.current_player);
+        }
+    }
+
+    #[test]
+    fn finish_epilogue_single_placings_log_via_line() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current_player;
+        setup_one_castle_from_end(&mut g);
+        g.currently_attacking = Some(2);
+        g.completed_lines.clear();
+        g.current_roll = vec![Die::Inf3, Die::Inf3, Die::Inf3, Die::Inf1];
+        let p = players(2);
+        let resp = g.command(cur, "line 1", &p).unwrap();
+        assert!(!resp.can_undo);
+        let count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, count, "exactly one placings log");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log last"
+        );
+        assert!(matches!(g.status(), Status::Finished { .. }));
+    }
+
+    #[test]
+    fn finish_epilogue_single_placings_log_via_attack() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current_player;
+        setup_one_castle_from_end(&mut g);
+        g.currently_attacking = None;
+        g.completed_lines.clear();
+        g.completed_lines.insert(0);
+        let p = players(2);
+        let resp = g.command(cur, "attack odani", &p).unwrap();
+        assert!(resp.can_undo);
+        let count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, count, "exactly one placings log");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log last"
+        );
+        assert!(matches!(g.status(), Status::Finished { .. }));
+    }
+
+    #[test]
+    fn finish_epilogue_single_placings_log_via_roll() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current_player;
+        setup_one_castle_from_end(&mut g);
+        g.currently_attacking = Some(2);
+        g.completed_lines.clear();
+        g.completed_lines.insert(0);
+        g.current_roll = vec![Die::Inf3, Die::Inf3, Die::Inf3];
+        let p = players(2);
+        let resp = g.command(cur, "roll", &p).unwrap();
+        assert!(!resp.can_undo);
+        let count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, count, "exactly one placings log");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log last"
+        );
+        assert!(matches!(g.status(), Status::Finished { .. }));
+    }
+
+    #[test]
+    fn non_finishing_command_has_no_placings_log() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current_player;
+        let p = players(2);
+        let resp = g.command(cur, "attack azuchi", &p).unwrap();
+        assert!(resp.logs.iter().all(|l| !is_placings_log(l)));
+    }
+
+    #[test]
+    fn post_finish_roll_appends_zero_placings_logs() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current_player;
+        setup_one_castle_from_end(&mut g);
+        g.currently_attacking = Some(2);
+        g.completed_lines.clear();
+        g.current_roll = vec![Die::Inf3, Die::Inf3, Die::Inf3, Die::Inf1];
+        let p = players(2);
+        let resp = g.command(cur, "line 1", &p).unwrap();
+        assert_eq!(1, resp.logs.iter().filter(|l| is_placings_log(l)).count());
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        let resp2 = g.command(g.current_player, "roll", &p).unwrap();
+        assert_eq!(
+            0,
+            resp2.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "post-finish roll must append zero placings logs"
+        );
     }
 }

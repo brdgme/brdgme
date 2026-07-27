@@ -662,6 +662,18 @@ impl Game {
             vec![]
         }
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..2)
+            .map(|p| (p, self.tokens[p].iter().sum::<u32>() as i32))
+            .collect();
+        let placings = gen_placings(
+            &(0..NUM_PLAYERS)
+                .map(|p| vec![i32::from(self.winners().contains(&p))])
+                .collect::<Vec<Vec<i32>>>(),
+        );
+        logs.push(placings_log(&placings, Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -744,59 +756,38 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Take { take, give },
                 ..
             }) => {
-                let mut logs = if take.len() == 1 && take[0] == Good::Camel && give.is_empty() {
+                let logs = if take.len() == 1 && take[0] == Good::Camel && give.is_empty() {
                     self.take_camels(player)?
                 } else {
                     self.take_goods(player, take, give)?
                 };
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..2)
-                        .map(|p| (p, self.tokens[p].iter().sum::<u32>() as i32))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..NUM_PLAYERS)
-                            .map(|p| vec![i32::from(self.winners().contains(&p))])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
+                (logs, false, remaining)
             }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Sell { good, quantity },
                 ..
             }) => {
-                let mut logs = self.sell(player, good, quantity)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..2)
-                        .map(|p| (p, self.tokens[p].iter().sum::<u32>() as i32))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..NUM_PLAYERS)
-                            .map(|p| vec![i32::from(self.winners().contains(&p))])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
+                let logs = self.sell(player, good, quantity)?;
+                (logs, false, remaining)
             }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<brdgme_game::command::Spec> {
@@ -1672,5 +1663,79 @@ mod tests {
             markup.contains("1 - 0"),
             "the round-win counts must still be visible, got: {markup}"
         );
+    }
+
+    #[test]
+    fn command_appends_exactly_one_placings_log_on_finish() {
+        fn is_placings_log(log: &Log) -> bool {
+            brdgme_markup::to_string(&log.content).contains("Final scores:")
+        }
+
+        // A non-finishing command emits no placings log.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        g.hands[player] = vec![Good::Gold, Good::Gold];
+        let resp = g.command(player, "sell 2 gold", &[]).unwrap();
+        assert!(!resp.logs.iter().any(is_placings_log));
+
+        // A Sell command that finishes the match appends exactly one
+        // placings log, last.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        let opp = opponent(player);
+        g.round_wins[player] = 1;
+        g.tokens[player] = vec![10, 10];
+        g.tokens[opp] = vec![];
+        g.camels = [0, 0];
+        g.bonus_tokens = [0, 0];
+        g.good_tokens = [0, 0];
+        g.goods.insert(Good::Diamond, vec![]);
+        g.goods.insert(Good::Gold, vec![]);
+        g.goods.insert(Good::Silver, vec![5]);
+        g.goods.insert(Good::Cloth, vec![1]);
+        g.hands[player] = vec![Good::Cloth];
+        let resp = g.command(player, "sell 1 cloth", &[]).unwrap();
+        assert_eq!(
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            1,
+            "expected exactly one placings log"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "the placings log must be last"
+        );
+        assert!(!resp.can_undo);
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(placings[player], 1),
+            _ => panic!("expected finished"),
+        }
+
+        // A Take command that finishes the match appends exactly one
+        // placings log, last.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        g.round_wins[player] = 1;
+        g.tokens[player] = vec![10];
+        g.tokens[opponent(player)] = vec![];
+        g.camels = [0, 0];
+        g.bonus_tokens = [0, 0];
+        g.good_tokens = [0, 0];
+        g.market = vec![Good::Camel];
+        g.deck = vec![];
+        let resp = g.command(player, "take camel", &[]).unwrap();
+        assert_eq!(
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            1,
+            "expected exactly one placings log"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "the placings log must be last"
+        );
+        assert!(!resp.can_undo);
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(placings[player], 1),
+            _ => panic!("expected finished"),
+        }
     }
 }

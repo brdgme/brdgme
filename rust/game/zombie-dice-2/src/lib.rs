@@ -397,6 +397,16 @@ impl Game {
         let metrics: Vec<Vec<i32>> = (0..self.players).map(|p| vec![self.scores[p]]).collect();
         gen_placings(&metrics)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = self
+            .scores
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| (i, s))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -515,51 +525,28 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Roll,
                 ..
-            }) => {
-                let mut logs = self.player_roll(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.player_roll(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Keep,
                 ..
-            }) => {
-                let mut logs = self.keep(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.keep(player)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1058,5 +1045,76 @@ mod test {
 
         g.roll_off_players = vec![g.players];
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_finish_epilogue_exactly_once_and_last() {
+        let p: Vec<String> = vec![];
+
+        // Keep-finishing: player 1 keeps, wrapping the round; player 0 is
+        // unique leader at WIN_SCORE.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.scores = vec![WIN_SCORE, 5];
+        g.current_turn = 1;
+        g.round_brains = 0;
+        g.round_shotguns = 0;
+        g.kept = vec![];
+        g.current_roll = vec![];
+        g.cup = all_dice();
+        let resp = g.command(1, "keep", &p).unwrap();
+        assert!(!resp.can_undo);
+        let rendered: Vec<String> = resp
+            .logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect();
+        let placings_count = rendered.iter().filter(|r| r.contains("wins!")).count();
+        assert_eq!(1, placings_count);
+        assert!(rendered.last().unwrap().contains("wins!"));
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        // Roll-finishing: player 1 rolls, gets 3 shotguns (bust), wrapping
+        // the round; player 0 is unique leader at WIN_SCORE.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.scores = vec![WIN_SCORE, 5];
+        g.current_turn = 1;
+        g.round_brains = 0;
+        g.round_shotguns = 2;
+        g.kept = vec![];
+        g.current_roll = vec![];
+        g.cup = all_dice();
+        let seed = seed_where(&g, |probe| {
+            let mut probe = probe.clone();
+            probe
+                .roll()
+                .iter()
+                .any(|l| brdgme_markup::to_string(&l.content).contains("got shot three times"))
+        });
+        g.rng = GameRng::seed_from_u64(seed);
+        let resp = g.command(1, "roll", &p).unwrap();
+        assert!(!resp.can_undo);
+        let rendered: Vec<String> = resp
+            .logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect();
+        let placings_count = rendered.iter().filter(|r| r.contains("wins!")).count();
+        assert_eq!(1, placings_count);
+        assert!(rendered.last().unwrap().contains("wins!"));
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        // Non-finishing command: no placings log.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let resp = g.command(g.current_turn, "roll", &p).unwrap();
+        let rendered: Vec<String> = resp
+            .logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect();
+        assert!(
+            !rendered
+                .iter()
+                .any(|r| r.contains("wins!") || r.contains("tie!"))
+        );
     }
 }

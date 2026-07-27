@@ -715,153 +715,78 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining_input) = match output {
             Ok(ParseOutput {
                 value: Command::Princess,
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_princess(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.play_princess(player)?, false, remaining.to_string()),
             Ok(ParseOutput {
                 value: Command::Countess,
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_countess(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.play_countess(player)?, false, remaining.to_string()),
             Ok(ParseOutput {
                 value: Command::King(target),
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_king(player, target)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (
+                self.play_king(player, target)?,
+                false,
+                remaining.to_string(),
+            ),
             Ok(ParseOutput {
                 value: Command::Prince(target),
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_prince(player, target)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (
+                self.play_prince(player, target)?,
+                false,
+                remaining.to_string(),
+            ),
             Ok(ParseOutput {
                 value: Command::Handmaid,
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_handmaid(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.play_handmaid(player)?, false, remaining.to_string()),
             Ok(ParseOutput {
                 value: Command::Baron(target),
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_baron(player, target)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (
+                self.play_baron(player, target)?,
+                false,
+                remaining.to_string(),
+            ),
             Ok(ParseOutput {
                 value: Command::Priest(target),
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_priest(player, target)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (
+                self.play_priest(player, target)?,
+                false,
+                remaining.to_string(),
+            ),
             Ok(ParseOutput {
                 value: Command::Guard(target, card),
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play_guard(player, target, card)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p] as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(e),
+            }) => (
+                self.play_guard(player, target, card)?,
+                false,
+                remaining.to_string(),
+            ),
+            Err(e) => return Err(e),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input,
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -948,6 +873,13 @@ impl Game {
                 .map(|&p| vec![p as i32])
                 .collect::<Vec<Vec<i32>>>(),
         )
+    }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_points[p] as i32))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
     }
 }
 
@@ -1239,5 +1171,66 @@ mod test {
         let g = Game::start(3, 1).unwrap().0;
         let err = g.assert_target(MICK, false, g.players).unwrap_err();
         assert!(matches!(err, GameError::InvalidInput { .. }));
+    }
+
+    fn placings_content(g: &Game) -> Vec<N> {
+        let scores: Vec<(usize, i32)> = (0..g.players)
+            .map(|p| (p, g.player_points[p] as i32))
+            .collect();
+        placings_log(&g.placings(), Some(&scores)).content
+    }
+
+    #[test]
+    fn finish_epilogue_appends_single_placings_log_last() {
+        let players3 = vec!["Mick".to_string(), "Steve".to_string(), "BJ".to_string()];
+
+        // Finishing via the Prince arm (3p): Steve is one point short; Mick
+        // playing Prince on himself is eliminated by the Princess, leaving
+        // Steve to win the round and the game.
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.player_points[STEVE] = end_score_of(3) - 1;
+        g.hands[MICK] = vec![Card::Prince, Card::Princess];
+        g.hands[STEVE] = vec![Card::Prince];
+        g.protected[STEVE] = true;
+        g.eliminated[BJ] = true;
+        let resp = g.command(MICK, "prince mick", &players3).unwrap();
+        let expected = placings_content(&g);
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| l.content == expected).count()
+        );
+        assert_eq!(&expected, &resp.logs.last().unwrap().content);
+        assert!(!resp.can_undo);
+        if let Status::Finished { placings, .. } = g.status() {
+            assert_eq!(g.placings(), placings);
+        } else {
+            panic!("expected finished status");
+        }
+
+        // Finishing via the Baron arm (2p): Mick is one point short and
+        // eliminates Steve, winning the round and the game.
+        let players2 = vec!["Mick".to_string(), "Steve".to_string()];
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.player_points[MICK] = end_score_of(2) - 1;
+        g.hands[MICK] = vec![Card::Baron, Card::King];
+        g.hands[STEVE] = vec![Card::Prince];
+        let resp = g.command(MICK, "baron steve", &players2).unwrap();
+        let expected = placings_content(&g);
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| l.content == expected).count()
+        );
+        assert_eq!(&expected, &resp.logs.last().unwrap().content);
+        assert!(!resp.can_undo);
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        // A non-finishing command appends no placings log.
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.hands[MICK] = vec![Card::Priest, Card::King];
+        g.hands[STEVE] = vec![Card::Guard];
+        let resp = g.command(MICK, "priest steve", &players3).unwrap();
+        let expected = placings_content(&g);
+        assert!(!resp.logs.iter().any(|l| l.content == expected));
+        assert!(!g.is_finished());
     }
 }

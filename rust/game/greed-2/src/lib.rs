@@ -375,6 +375,16 @@ impl Game {
         let metrics: Vec<Vec<i32>> = (0..self.players).map(|p| vec![self.scores[p]]).collect();
         gen_placings(&metrics)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = self
+            .scores
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| (i, s))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -478,63 +488,33 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Score { dice },
                 ..
-            }) => {
-                let logs = self.score(player, &dice)?;
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: true,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.score(player, &dice)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Roll,
                 ..
-            }) => {
-                let mut logs = self.player_roll(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.player_roll(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Done,
                 ..
-            }) => {
-                let mut logs = self.done(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.done(player)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -784,6 +764,71 @@ mod test {
         ];
         g.command(current, "done", &p).unwrap();
         assert_eq!(1000, g.scores[current]);
+    }
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn test_finish_epilogue_dedup() {
+        let p = players(2);
+
+        // Non-finishing command emits no placings log.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let current = g.current_player;
+        g.remaining_dice = vec![Die::D, Die::R, Die::R];
+        let resp = g.command(current, "score d", &p).unwrap();
+        assert!(!resp.logs.iter().any(is_placings_log));
+        assert!(resp.can_undo);
+
+        // Finish via done: exactly one placings log, last, can_undo false.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.first_player = 0;
+        g.current_player = 1;
+        g.scores = vec![0, 4900];
+        g.remaining_dice = vec![Die::D];
+        let resp = g.command(1, "done", &p).unwrap();
+        let placings_count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, placings_count, "exactly one placings log");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        assert!(!resp.can_undo);
+        assert_eq!(
+            Status::Finished {
+                placings: vec![2, 1],
+                stats: vec![],
+            },
+            g.status()
+        );
+
+        // Finish via roll (bust advances player to first_player).
+        // Find a seed where rolling 1 die busts (no scoring combo).
+        let mut roll_resp = None;
+        for seed in 0..100u64 {
+            let (mut g, _) = Game::start(2, seed).unwrap();
+            g.first_player = 0;
+            g.current_player = 1;
+            g.scores = vec![5000, 0];
+            g.taken_this_roll = true;
+            g.remaining_dice = vec![Die::R];
+            let resp = g.command(1, "roll", &p).unwrap();
+            if g.is_finished() {
+                roll_resp = Some((g, resp));
+                break;
+            }
+        }
+        let (g, resp) = roll_resp.expect("some seed must bust a single die");
+        let placings_count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, placings_count, "exactly one placings log via roll");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        assert!(!resp.can_undo);
+        assert!(matches!(g.status(), Status::Finished { .. }));
     }
 
     #[test]

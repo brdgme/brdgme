@@ -205,6 +205,13 @@ impl Game {
         )
     }
 
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_boards[p].prestige()))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
+
     fn main_phase(&mut self) {
         self.phase = Phase::Main;
     }
@@ -627,99 +634,43 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Buy(loc),
                 ..
-            }) => {
-                let mut logs = self.buy(player, loc)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].prestige()))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.buy(player, loc)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Discard(tokens),
                 ..
-            }) => {
-                let mut logs = self.discard(player, &tokens)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].prestige()))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.discard(player, &tokens)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Reserve(loc),
                 ..
-            }) => {
-                let mut logs = self.reserve(player, loc)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].prestige()))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.reserve(player, loc)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Take(tokens),
                 ..
-            }) => {
-                let mut logs = self.take(player, &tokens)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].prestige()))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.take(player, &tokens)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Visit(noble),
                 ..
-            }) => {
-                let mut logs = self.visit(player, noble)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].prestige()))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(e),
+            }) => (self.visit(player, noble)?, false, remaining),
+            Err(e) => return Err(e),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1314,5 +1265,70 @@ mod tests {
             g.phase = Phase::Visit;
             g.command(0, "visit 1", &p).unwrap();
         }
+    }
+
+    fn is_placings_log(l: &Log) -> bool {
+        let s = brdgme_markup::to_string(&l.content);
+        s.contains("wins!") || s.contains("tie!")
+    }
+
+    /// A 2-player game where player 0 already has >= 15 prestige and it is
+    /// player 1's turn, so any command that advances the turn wraps back to
+    /// player 0 and finishes the game.
+    fn setup_near_end() -> Game {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.player_boards[0].cards = vec![Card {
+            resource: Resource::Diamond,
+            prestige: 15,
+            cost: Cost::new(),
+        }];
+        g.current_player = 1;
+        g.phase = Phase::Main;
+        g
+    }
+
+    #[test]
+    fn finish_epilogue_single_placings_log() {
+        let p = players(2);
+
+        // Finishing via the Take arm.
+        let mut g = setup_near_end();
+        let resp = g.command(1, "take Diamond Diamond", &p).unwrap();
+        assert!(!resp.can_undo);
+        let placings_count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, placings_count, "exactly one placings log");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
+            _ => panic!("expected finished status"),
+        }
+
+        // Finishing via the Reserve arm.
+        let mut g2 = setup_near_end();
+        let resp2 = g2.command(1, "reserve A1", &p).unwrap();
+        assert!(!resp2.can_undo);
+        let placings_count2 = resp2.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(
+            1, placings_count2,
+            "exactly one placings log from reserve arm"
+        );
+        assert!(is_placings_log(resp2.logs.last().unwrap()));
+        match g2.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
+            _ => panic!("expected finished status"),
+        }
+    }
+
+    #[test]
+    fn non_finishing_command_has_no_placings_log() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let resp = g.command(0, "take Diamond Diamond", &players(2)).unwrap();
+        assert!(
+            resp.logs.iter().all(|l| !is_placings_log(l)),
+            "non-finishing command must not emit a placings log"
+        );
     }
 }

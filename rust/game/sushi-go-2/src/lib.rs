@@ -277,6 +277,13 @@ impl Game {
         gen_placings(&metrics)
     }
 
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_points[p]))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
+
     pub fn start_round(&mut self) -> Vec<Log> {
         let mut logs = vec![];
         self.round += 1;
@@ -835,45 +842,28 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Play(cards),
                 ..
-            }) => {
-                let mut logs = self.play(player, cards)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p]))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.play(player, cards)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Dummy(card),
                 ..
-            }) => {
-                let mut logs = self.dummy(player, card)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points[p]))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.dummy(player, card)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1583,5 +1573,84 @@ mod test {
         }
         assert!(g.is_finished());
         assert_eq!(3, g.round);
+    }
+
+    fn is_placings_log(log: &Log) -> bool {
+        fn contains(nodes: &[N]) -> bool {
+            nodes.iter().any(|n| match n {
+                N::Text(t) => t.contains("Final scores:"),
+                N::Fg(_, c) | N::Bg(_, c) | N::Group(c) | N::Bold(c) => contains(c),
+                _ => false,
+            })
+        }
+        contains(&log.content)
+    }
+
+    fn assert_finish_response(g: &Game, resp: &CommandResponse) {
+        let placings_count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(1, placings_count);
+        assert!(is_placings_log(resp.logs.last().unwrap()));
+        assert!(!resp.can_undo);
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(g.placings(), placings),
+            _ => panic!("expected finished status"),
+        }
+    }
+
+    #[test]
+    fn test_finish_epilogue_single_placings_log() {
+        let n3 = names();
+        let (mut g3, _) = Game::start(3, 1).unwrap();
+
+        let resp = g3.command(MICK, "play 1", &n3).unwrap();
+        assert!(!resp.logs.iter().any(is_placings_log));
+        assert!(!g3.is_finished());
+
+        // Play arm finishes a 3-player game
+        g3.round = 3;
+        g3.hands = vec![
+            vec![Card::Tempura],
+            vec![Card::Sashimi],
+            vec![Card::Dumpling],
+        ];
+        g3.playing = vec![None, None, None];
+        g3.command(MICK, "play 1", &n3).unwrap();
+        g3.command(STEVE, "play 1", &n3).unwrap();
+        let resp = g3.command(BJ, "play 1", &n3).unwrap();
+        assert!(g3.is_finished());
+        assert_finish_response(&g3, &resp);
+
+        // Dummy arm finishes a 2-player game (controller plays dummy last)
+        let n2 = vec!["Mick".to_string(), "Steve".to_string()];
+        let (mut g2, _) = Game::start(2, 1).unwrap();
+        g2.round = 3;
+        g2.hands = vec![
+            vec![Card::Tempura, Card::EggNigiri],
+            vec![Card::Sashimi],
+            vec![Card::Dumpling],
+        ];
+        g2.playing = vec![None, None, None];
+        g2.controller = MICK;
+        g2.command(MICK, "play 1", &n2).unwrap();
+        g2.command(STEVE, "play 1", &n2).unwrap();
+        let resp = g2.command(MICK, "dummy 2", &n2).unwrap();
+        assert!(g2.is_finished());
+        assert_finish_response(&g2, &resp);
+
+        // Play arm finishes a 2-player game (non-controller plays last)
+        let (mut g2b, _) = Game::start(2, 1).unwrap();
+        g2b.round = 3;
+        g2b.hands = vec![
+            vec![Card::Tempura],
+            vec![Card::Sashimi, Card::EggNigiri],
+            vec![Card::Dumpling],
+        ];
+        g2b.playing = vec![None, None, None];
+        g2b.controller = STEVE;
+        g2b.command(STEVE, "play 1", &n2).unwrap();
+        g2b.command(STEVE, "dummy 2", &n2).unwrap();
+        let resp = g2b.command(MICK, "play 1", &n2).unwrap();
+        assert!(g2b.is_finished());
+        assert_finish_response(&g2b, &resp);
     }
 }

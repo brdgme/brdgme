@@ -1481,6 +1481,17 @@ impl Game {
     fn scores(&self) -> Vec<i32> {
         self.boards.iter().map(|b| b.score()).collect()
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = self
+            .scores()
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| (i, s))
+            .collect();
+        let metrics: Vec<Vec<i32>> = self.scores().into_iter().map(|s| vec![s]).collect();
+        logs.push(placings_log(&gen_placings(&metrics), Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -1532,229 +1543,69 @@ impl Gamer for Game {
             None => return Err(GameError::invalid_input("you have no commands available")),
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.finished;
+        let mut resp = match output {
             Ok(ParseOutput {
                 value: Command::Next,
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.next_command(player, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.next_command(player, remaining)?,
             Ok(ParseOutput {
                 value: Command::Roll { dice },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.roll_command(player, dice, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.roll_command(player, dice, remaining)?,
             Ok(ParseOutput {
                 value: Command::Preserve,
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.preserve_command(player, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.preserve_command(player, remaining)?,
             Ok(ParseOutput {
                 value: Command::Build { amount, target },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.build_command(player, amount, target, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.build_command(player, amount, target, remaining)?,
             Ok(ParseOutput {
                 value: Command::Trade { amount },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.trade_command(player, amount, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.trade_command(player, amount, remaining)?,
             Ok(ParseOutput {
                 value: Command::Buy { development, goods },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.buy_command(player, development, goods, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.buy_command(player, development, goods, remaining)?,
             Ok(ParseOutput {
                 value: Command::Take { actions },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.take_command(player, actions, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.take_command(player, actions, remaining)?,
             Ok(ParseOutput {
                 value: Command::Discard { amount, good },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.discard_command(player, amount, good, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.discard_command(player, amount, good, remaining)?,
             Ok(ParseOutput {
                 value: Command::Invade { amount },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.invade_command(player, amount, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.invade_command(player, amount, remaining)?,
             Ok(ParseOutput {
                 value: Command::Sell { amount },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.sell_command(player, amount, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
+            }) => self.sell_command(player, amount, remaining)?,
             Ok(ParseOutput {
                 value: Command::Swap { amount, from, to },
                 remaining,
                 ..
-            }) => {
-                let mut resp = self.swap_command(player, from, to, amount, remaining)?;
-                if self.finished {
-                    let scores: Vec<(usize, i32)> = self
-                        .scores()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &s)| (i, s))
-                        .collect();
-                    let metrics: Vec<Vec<i32>> =
-                        self.scores().into_iter().map(|s| vec![s]).collect();
-                    resp.logs
-                        .push(placings_log(&gen_placings(&metrics), Some(&scores)));
-                }
-                Ok(resp)
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => self.swap_command(player, from, to, amount, remaining)?,
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.finished {
+            self.finish_epilogue(&mut resp.logs);
         }
+        Ok(resp)
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -3287,5 +3138,75 @@ mod test {
         assert!(res.is_ok());
         assert_eq!(MICK, g.current_player);
         assert_eq!(Phase::ExtraRoll, g.phase);
+    }
+
+    #[test]
+    fn finish_epilogue_pushes_exactly_one_placings_log_on_transition() {
+        let p = vec!["Mick".to_string(), "Steve".to_string()];
+
+        let expected_placings_content = |g: &Game| -> Vec<N> {
+            let scores: Vec<(usize, i32)> = g
+                .scores()
+                .iter()
+                .enumerate()
+                .map(|(i, &s)| (i, s))
+                .collect();
+            let metrics: Vec<Vec<i32>> = g.scores().into_iter().map(|s| vec![s]).collect();
+            placings_log(&gen_placings(&metrics), Some(&scores)).content
+        };
+
+        // Finishing via `next` from Buy phase.
+        let mut g = new_blank(2);
+        g.current_player = STEVE;
+        g.final_round = true;
+        g.phase = Phase::Buy;
+        let resp = g.command(STEVE, "next", &p).unwrap();
+        assert!(!resp.can_undo);
+        let expected_content = expected_placings_content(&g);
+        let placings_count = resp
+            .logs
+            .iter()
+            .filter(|l| l.content == expected_content)
+            .count();
+        assert_eq!(1, placings_count);
+        assert_eq!(&expected_content, &resp.logs.last().unwrap().content);
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                let metrics: Vec<Vec<i32>> = g.scores().into_iter().map(|s| vec![s]).collect();
+                assert_eq!(gen_placings(&metrics), placings);
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // Finishing via `discard` from Discard phase.
+        let mut g = new_blank(2);
+        g.current_player = STEVE;
+        g.final_round = true;
+        g.phase = Phase::Discard;
+        g.boards[STEVE].goods.insert(Good::Wood, 8);
+        let resp = g.command(STEVE, "discard 2 wood", &p).unwrap();
+        assert!(!resp.can_undo);
+        let expected_content = expected_placings_content(&g);
+        let placings_count = resp
+            .logs
+            .iter()
+            .filter(|l| l.content == expected_content)
+            .count();
+        assert_eq!(1, placings_count);
+        assert_eq!(&expected_content, &resp.logs.last().unwrap().content);
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                let metrics: Vec<Vec<i32>> = g.scores().into_iter().map(|s| vec![s]).collect();
+                assert_eq!(gen_placings(&metrics), placings);
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // Non-finishing command produces no placings log.
+        let mut g = new_blank(2);
+        g.kept_dice = vec![Die::Workers];
+        let resp = g.command(MICK, "next", &p).unwrap();
+        let placings_content = expected_placings_content(&g);
+        assert!(!resp.logs.iter().any(|l| l.content == placings_content));
     }
 }
