@@ -103,6 +103,10 @@ pub trait Gamer: Sized {
         }
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        Ok(())
+    }
+
     fn assert_player_turn(&self, player: usize) -> Result<(), GameError> {
         match self.whose_turn().iter().position(|&p| p == player) {
             Some(_) => Ok(()),
@@ -198,5 +202,64 @@ mod tests {
             vec![1, 2],
             super::gen_placings(&[vec![12i32, 35i32, 0i32], vec![12i32, 35i32]])
         );
+    }
+
+    #[test]
+    fn validate_default_is_ok() {
+        use super::*;
+        use crate::command::Spec;
+        use brdgme_markup::Node;
+
+        #[derive(Clone, Debug)]
+        struct StubGame;
+
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct StubState;
+
+        impl Renderer for StubState {
+            fn render(&self) -> Vec<Node> {
+                vec![]
+            }
+        }
+
+        impl Gamer for StubGame {
+            type PubState = StubState;
+            type PlayerState = StubState;
+
+            fn start(_players: usize, _seed: u64) -> Result<(Self, Vec<Log>), GameError> {
+                Ok((StubGame, vec![]))
+            }
+            fn pub_state(&self) -> StubState {
+                StubState
+            }
+            fn player_state(&self, _player: usize) -> StubState {
+                StubState
+            }
+            fn command(
+                &mut self,
+                _player: usize,
+                _input: &str,
+                _players: &[String],
+            ) -> Result<CommandResponse, GameError> {
+                Err(GameError::invalid_input("no"))
+            }
+            fn status(&self) -> Status {
+                Status::Active {
+                    whose_turn: vec![0],
+                    eliminated: vec![],
+                }
+            }
+            fn command_spec(&self, _player: usize) -> Option<Spec> {
+                None
+            }
+            fn player_count(&self) -> usize {
+                1
+            }
+            fn player_counts() -> Vec<usize> {
+                vec![1]
+            }
+        }
+
+        assert!(StubGame.validate().is_ok());
     }
 }

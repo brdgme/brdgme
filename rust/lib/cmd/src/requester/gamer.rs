@@ -21,13 +21,32 @@ pub fn new<G: Gamer + Debug + Clone + Serialize + DeserializeOwned>() -> GameReq
     GameRequester { gamer: PhantomData }
 }
 
+fn check_player<G: Gamer>(player: usize, game: &G) -> Option<Response> {
+    if player >= game.player_count() {
+        Some(Response::UserError {
+            message: format!(
+                "invalid player {}, game has {} players",
+                player,
+                game.player_count()
+            ),
+        })
+    } else {
+        None
+    }
+}
+
 impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for GameRequester<G> {
     fn request(&mut self, req: &Request) -> Result<Response, RequestError> {
         match *req {
             Request::New { players, seed } => Ok(handle_new::<G>(players, seed)),
             Request::PlayerCounts => Ok(handle_player_counts::<G>()),
             Request::Status { ref game } => {
-                let game = serde_json::from_str(game)?;
+                let game: G = serde_json::from_str(game)?;
+                if let Err(e) = game.validate() {
+                    return Ok(Response::SystemError {
+                        message: e.to_string(),
+                    });
+                }
                 Ok(handle_status::<G>(&game))
             }
             Request::Play {
@@ -36,15 +55,36 @@ impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for Game
                 ref names,
                 ref game,
             } => {
-                let mut game = serde_json::from_str(game)?;
+                let mut game: G = serde_json::from_str(game)?;
+                if let Err(e) = game.validate() {
+                    return Ok(Response::SystemError {
+                        message: e.to_string(),
+                    });
+                }
+                if let Some(resp) = check_player(player, &game) {
+                    return Ok(resp);
+                }
                 Ok(handle_play::<G>(player, command, names, &mut game))
             }
             Request::PubRender { ref game } => {
-                let game = serde_json::from_str(game)?;
+                let game: G = serde_json::from_str(game)?;
+                if let Err(e) = game.validate() {
+                    return Ok(Response::SystemError {
+                        message: e.to_string(),
+                    });
+                }
                 Ok(handle_pub_render::<G>(&game))
             }
             Request::PlayerRender { player, ref game } => {
-                let game = serde_json::from_str(game)?;
+                let game: G = serde_json::from_str(game)?;
+                if let Err(e) = game.validate() {
+                    return Ok(Response::SystemError {
+                        message: e.to_string(),
+                    });
+                }
+                if let Some(resp) = check_player(player, &game) {
+                    return Ok(resp);
+                }
                 Ok(handle_player_render::<G>(player, &game))
             }
             Request::Rules => Ok(handle_rules::<G>()),
@@ -263,6 +303,247 @@ mod tests {
         match r.request(&Request::Status { game: state }).unwrap() {
             Response::Status { player_renders, .. } => assert_eq!(2, player_renders.len()),
             resp => panic!("expected Status, got {:?}", resp),
+        }
+    }
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    struct PanicGame {
+        players: usize,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct PanicState;
+
+    impl brdgme_game::Renderer for PanicState {
+        fn render(&self) -> Vec<brdgme_markup::Node> {
+            vec![]
+        }
+    }
+
+    impl Gamer for PanicGame {
+        type PubState = PanicState;
+        type PlayerState = PanicState;
+
+        fn start(players: usize, _seed: u64) -> Result<(Self, Vec<brdgme_game::Log>), GameError> {
+            Ok((PanicGame { players }, vec![]))
+        }
+        fn pub_state(&self) -> PanicState {
+            PanicState
+        }
+        fn player_state(&self, player: usize) -> PanicState {
+            if player >= self.players {
+                panic!("player out of range");
+            }
+            PanicState
+        }
+        fn command(
+            &mut self,
+            _player: usize,
+            _input: &str,
+            _players: &[String],
+        ) -> Result<brdgme_game::CommandResponse, GameError> {
+            Ok(brdgme_game::CommandResponse {
+                logs: vec![],
+                can_undo: false,
+                remaining_input: String::new(),
+            })
+        }
+        fn status(&self) -> brdgme_game::Status {
+            brdgme_game::Status::Active {
+                whose_turn: vec![0],
+                eliminated: vec![],
+            }
+        }
+        fn command_spec(&self, _player: usize) -> Option<brdgme_game::command::Spec> {
+            None
+        }
+        fn player_count(&self) -> usize {
+            self.players
+        }
+        fn player_counts() -> Vec<usize> {
+            vec![2]
+        }
+    }
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    struct InvalidGame;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct InvalidState;
+
+    impl brdgme_game::Renderer for InvalidState {
+        fn render(&self) -> Vec<brdgme_markup::Node> {
+            vec![]
+        }
+    }
+
+    impl Gamer for InvalidGame {
+        type PubState = InvalidState;
+        type PlayerState = InvalidState;
+
+        fn start(_players: usize, _seed: u64) -> Result<(Self, Vec<brdgme_game::Log>), GameError> {
+            Ok((InvalidGame, vec![]))
+        }
+        fn pub_state(&self) -> InvalidState {
+            InvalidState
+        }
+        fn player_state(&self, _player: usize) -> InvalidState {
+            InvalidState
+        }
+        fn command(
+            &mut self,
+            _player: usize,
+            _input: &str,
+            _players: &[String],
+        ) -> Result<brdgme_game::CommandResponse, GameError> {
+            Ok(brdgme_game::CommandResponse {
+                logs: vec![],
+                can_undo: false,
+                remaining_input: String::new(),
+            })
+        }
+        fn status(&self) -> brdgme_game::Status {
+            brdgme_game::Status::Active {
+                whose_turn: vec![0],
+                eliminated: vec![],
+            }
+        }
+        fn command_spec(&self, _player: usize) -> Option<brdgme_game::command::Spec> {
+            None
+        }
+        fn player_count(&self) -> usize {
+            2
+        }
+        fn player_counts() -> Vec<usize> {
+            vec![2]
+        }
+        fn validate(&self) -> Result<(), GameError> {
+            Err(GameError::internal("bad state"))
+        }
+    }
+
+    #[test]
+    fn player_render_out_of_range_returns_user_error() {
+        let state = serde_json::to_string(&PanicGame { players: 2 }).unwrap();
+        let mut r = new::<PanicGame>();
+        match r
+            .request(&Request::PlayerRender {
+                player: 2,
+                game: state,
+            })
+            .unwrap()
+        {
+            Response::UserError { message } => {
+                assert!(message.contains("invalid player 2"), "got: {}", message);
+            }
+            resp => panic!("expected UserError, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn play_out_of_range_returns_user_error() {
+        let state = serde_json::to_string(&PanicGame { players: 2 }).unwrap();
+        let mut r = new::<PanicGame>();
+        match r
+            .request(&Request::Play {
+                player: 2,
+                command: "play".to_string(),
+                names: vec!["a".to_string(), "b".to_string()],
+                game: state,
+            })
+            .unwrap()
+        {
+            Response::UserError { message } => {
+                assert!(message.contains("invalid player 2"), "got: {}", message);
+            }
+            resp => panic!("expected UserError, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn player_render_in_range_unchanged() {
+        let state = serde_json::to_string(&PanicGame { players: 2 }).unwrap();
+        let mut r = new::<PanicGame>();
+        match r
+            .request(&Request::PlayerRender {
+                player: 0,
+                game: state,
+            })
+            .unwrap()
+        {
+            Response::PlayerRender { .. } => {}
+            resp => panic!("expected PlayerRender, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn play_in_range_unchanged() {
+        let state = serde_json::to_string(&PanicGame { players: 2 }).unwrap();
+        let mut r = new::<PanicGame>();
+        match r
+            .request(&Request::Play {
+                player: 0,
+                command: "play".to_string(),
+                names: vec!["a".to_string(), "b".to_string()],
+                game: state,
+            })
+            .unwrap()
+        {
+            Response::Play { .. } => {}
+            resp => panic!("expected Play, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn validate_error_returns_system_error_for_all_request_types() {
+        let state = serde_json::to_string(&InvalidGame).unwrap();
+        let mut r = new::<InvalidGame>();
+
+        match r
+            .request(&Request::Play {
+                player: 0,
+                command: "x".to_string(),
+                names: vec![],
+                game: state.clone(),
+            })
+            .unwrap()
+        {
+            Response::SystemError { message } => {
+                assert!(message.contains("bad state"), "got: {}", message)
+            }
+            resp => panic!("expected SystemError for Play, got {:?}", resp),
+        }
+
+        match r
+            .request(&Request::PlayerRender {
+                player: 0,
+                game: state.clone(),
+            })
+            .unwrap()
+        {
+            Response::SystemError { message } => {
+                assert!(message.contains("bad state"), "got: {}", message)
+            }
+            resp => panic!("expected SystemError for PlayerRender, got {:?}", resp),
+        }
+
+        match r
+            .request(&Request::Status {
+                game: state.clone(),
+            })
+            .unwrap()
+        {
+            Response::SystemError { message } => {
+                assert!(message.contains("bad state"), "got: {}", message)
+            }
+            resp => panic!("expected SystemError for Status, got {:?}", resp),
+        }
+
+        match r.request(&Request::PubRender { game: state }).unwrap() {
+            Response::SystemError { message } => {
+                assert!(message.contains("bad state"), "got: {}", message)
+            }
+            resp => panic!("expected SystemError for PubRender, got {:?}", resp),
         }
     }
 }

@@ -483,6 +483,11 @@ impl Game {
         if player == target {
             return Err(GameError::invalid_input("can't steal from yourself"));
         }
+        if target >= self.players {
+            return Err(GameError::invalid_input(
+                "that is not a player in this game",
+            ));
+        }
         let len = match kind {
             TileType::Blue => self.player_blue_tiles[target].len(),
             TileType::Red => self.player_red_tiles[target].len(),
@@ -1889,5 +1894,49 @@ mod test {
             "the roll path must emit the placings log, got: {}",
             text
         );
+    }
+
+    #[test]
+    fn steal_blue_out_of_range_target_returns_error() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.current_player = MICK;
+        g.player_blue_tiles[BJ] = vec![Tile {
+            kind: TileType::Blue,
+            value: 1,
+        }];
+        g.rolled_dice = vec![
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+            DieFace::BlueChopsticks,
+        ];
+        let result = g.steal_blue(MICK, 3, Some(1));
+        match result {
+            Err(GameError::InvalidInput { message }) => {
+                assert!(message.contains("not a player"), "got: {}", message);
+            }
+            other => panic!("expected InvalidInput, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn steal_red_out_of_range_target_returns_error() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.current_player = MICK;
+        g.player_red_tiles[BJ] = vec![Tile {
+            kind: TileType::Red,
+            value: -1,
+        }];
+        g.rolled_dice = vec![
+            DieFace::RedChopsticks,
+            DieFace::RedChopsticks,
+            DieFace::RedChopsticks,
+        ];
+        let result = g.steal_red(MICK, 3, Some(1));
+        match result {
+            Err(GameError::InvalidInput { message }) => {
+                assert!(message.contains("not a player"), "got: {}", message);
+            }
+            other => panic!("expected InvalidInput, got {:?}", other),
+        }
     }
 }

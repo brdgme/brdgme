@@ -948,7 +948,7 @@ impl Game {
                 at,
                 turn_player,
             } => (player, corp, into, at, turn_player),
-            _ => panic!("must be Phase::SellOrTrade"),
+            _ => return Err(GameError::internal("expected Phase::SellOrTrade")),
         };
         player = self.next_player(player);
         if player == turn_player {
@@ -977,7 +977,7 @@ impl Game {
                 turn_player,
                 ..
             } => (corp, into, at, turn_player),
-            _ => panic!("must be Phase::SellOrTrade"),
+            _ => return Err(GameError::internal("expected Phase::SellOrTrade")),
         };
         self.board.convert_corp(corp, into);
         self.choose_merger_phase(turn_player, at)
@@ -1366,5 +1366,23 @@ mod tests {
              ..F"
             .into()
         );
+    }
+
+    #[test]
+    fn end_sell_trade_phase_wrong_phase_returns_internal_error() {
+        let mut g = Game {
+            phase: Phase::Play(0),
+            ..Default::default()
+        };
+        match g.end_sell_trade_phase() {
+            Err(GameError::Internal { message }) => {
+                assert!(
+                    message.contains("expected Phase::SellOrTrade"),
+                    "got: {}",
+                    message
+                );
+            }
+            other => panic!("expected Internal error, got {:?}", other),
+        }
     }
 }
