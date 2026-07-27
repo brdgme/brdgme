@@ -413,6 +413,30 @@ impl Gamer for Game {
         Ok((g, vec![]))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.boards.len() != self.players {
+            return Err(GameError::internal(format!(
+                "battleship-2: boards.len() {} != players {}",
+                self.boards.len(),
+                self.players
+            )));
+        }
+        if self.left_to_place.len() != self.players {
+            return Err(GameError::internal(format!(
+                "battleship-2: left_to_place.len() {} != players {}",
+                self.left_to_place.len(),
+                self.players
+            )));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(format!(
+                "battleship-2: current_player {} >= players {}",
+                self.current_player, self.players
+            )));
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         if self.is_finished() {
             Status::Finished {
@@ -1002,5 +1026,22 @@ mod test {
         assert_eq!(STEVE, g.current_player);
         g.command(STEVE, "shoot a1", &p).unwrap();
         assert_eq!(MICK, g.current_player);
+    }
+
+    #[test]
+    fn test_validate() {
+        assert!(Game::start(2, 1).unwrap().0.validate().is_ok());
+
+        let mut g = mock_game();
+        g.boards.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = mock_game();
+        g.left_to_place.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = mock_game();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

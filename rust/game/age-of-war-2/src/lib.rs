@@ -331,7 +331,7 @@ impl Game {
         }
         let idx = self
             .currently_attacking
-            .expect("can_line implies currently_attacking");
+            .ok_or_else(|| GameError::internal("no attack in progress"))?;
         let all_castles = castle::castles();
         let lines = all_castles[idx].calc_lines(self.conquered[idx]);
         let line0 = line - 1;
@@ -414,6 +414,33 @@ impl Gamer for Game {
         };
         let log = g.start_turn();
         Ok((g, vec![log]))
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "age-of-war-2: current_player out of range",
+            ));
+        }
+        let n_castles = castle::castles().len();
+        if self.conquered.len() != n_castles {
+            return Err(GameError::internal(
+                "age-of-war-2: conquered has wrong length",
+            ));
+        }
+        if self.castle_owners.len() != n_castles {
+            return Err(GameError::internal(
+                "age-of-war-2: castle_owners has wrong length",
+            ));
+        }
+        for i in 0..n_castles {
+            if self.conquered[i] && self.castle_owners[i].is_none() {
+                return Err(GameError::internal(
+                    "age-of-war-2: conquered castle has no owner",
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn status(&self) -> Status {
@@ -823,5 +850,17 @@ mod test {
         assert!(matches!(g.status(), Status::Finished { .. }));
         let p = players(2);
         assert!(g.command(g.current_player, "roll", &p).is_ok());
+    }
+
+    #[test]
+    fn validate_catches_inconsistent_state() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        assert!(g.validate().is_ok());
+
+        g.conquered[0] = true;
+        g.castle_owners[0] = None;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
     }
 }

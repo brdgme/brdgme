@@ -72,10 +72,9 @@ fn render(pub_state: &PubState, player: Option<usize>, own_chips: Option<i32>) -
     let mut out: Vec<N> = vec![];
 
     if !pub_state.finished {
-        out.push(N::Bold(vec![
-            N::text("Current card:  "),
-            render_card(pub_state.current_card.unwrap()),
-        ]));
+        if let Some(c) = pub_state.current_card {
+            out.push(N::Bold(vec![N::text("Current card:  "), render_card(c)]));
+        }
         out.push(N::text(format!(
             " ({} cards remaining)\n",
             pub_state.remaining_after

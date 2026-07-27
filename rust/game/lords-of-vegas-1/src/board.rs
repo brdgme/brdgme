@@ -87,6 +87,9 @@ impl Loc {
         let lot: Lot = lot_str
             .parse()
             .map_err(|_| "Loc lot must be a number".to_string())?;
+        if lot < 1 || lot > block.max_lot() {
+            return Err(format!("Loc lot must be between 1 and {}", block.max_lot()));
+        }
         Ok((block, lot).into())
     }
 }
@@ -399,6 +402,12 @@ mod tests {
         assert_neighbours((A, 5), vec![(A, 2), (A, 4), (A, 6)]);
         assert_neighbours((A, 6), vec![(A, 3), (A, 5)]);
         assert_neighbours((C, 8), vec![(C, 5), (C, 7), (C, 9), (C, 11)]);
+    }
+
+    #[test]
+    fn loc_parse_str_rejects_out_of_bounds_lot() {
+        assert!(Loc::parse_str("a0").is_err());
+        assert!(Loc::parse_str("A7").is_err());
     }
 
     #[test]

@@ -187,6 +187,22 @@ impl Gamer for Game {
         ))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.players != NUM_PLAYERS {
+            return Err(GameError::internal(format!(
+                "tic-tac-toe-2: players must be {NUM_PLAYERS}, got {}",
+                self.players
+            )));
+        }
+        if self.start_player >= NUM_PLAYERS {
+            return Err(GameError::internal(format!(
+                "tic-tac-toe-2: start_player must be < {NUM_PLAYERS}, got {}",
+                self.start_player
+            )));
+        }
+        Ok(())
+    }
+
     fn pub_state(&self) -> Self::PubState {
         PubState {
             players: self.players,
@@ -656,5 +672,18 @@ mod tests {
         assert_eq!(game.winner(), Some(1));
         assert_eq!(game.placings(), vec![2, 1]);
         assert_eq!(game.points(), vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn validate_rejects_inconsistent_state() {
+        assert!(Game::start(NUM_PLAYERS, 1).unwrap().0.validate().is_ok());
+
+        let mut game = Game::start(NUM_PLAYERS, 1).unwrap().0;
+        game.players = NUM_PLAYERS + 1;
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        let mut game = Game::start(NUM_PLAYERS, 1).unwrap().0;
+        game.start_player = NUM_PLAYERS;
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
     }
 }

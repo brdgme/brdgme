@@ -130,6 +130,9 @@ impl Game {
 
     pub fn start_buying_round(&mut self) -> Vec<Log> {
         let n = self.players;
+        if self.building_deck.len() < n {
+            return vec![];
+        }
         self.open_cards = self.building_deck.split_off(self.building_deck.len() - n);
         self.open_cards.sort();
         self.clear_bids();
@@ -141,6 +144,9 @@ impl Game {
 
     pub fn start_selling_round(&mut self) -> Vec<Log> {
         let n = self.players;
+        if self.cheque_deck.len() < n {
+            return vec![];
+        }
         self.open_cards = self.cheque_deck.split_off(self.cheque_deck.len() - n);
         self.open_cards.sort();
         self.clear_bids();
@@ -381,6 +387,32 @@ impl Gamer for Game {
         }
         logs.extend(g.start_round());
         Ok((g, logs))
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if self.hands.len() != self.players {
+            return Err(GameError::internal("for-sale-2: hands length mismatch"));
+        }
+        if self.chips.len() != self.players {
+            return Err(GameError::internal("for-sale-2: chips length mismatch"));
+        }
+        if self.cheques.len() != self.players {
+            return Err(GameError::internal("for-sale-2: cheques length mismatch"));
+        }
+        if self.bids.len() != self.players {
+            return Err(GameError::internal("for-sale-2: bids length mismatch"));
+        }
+        if self.finished_bidding.len() != self.players {
+            return Err(GameError::internal(
+                "for-sale-2: finished_bidding length mismatch",
+            ));
+        }
+        if self.bidding_player >= self.players {
+            return Err(GameError::internal(
+                "for-sale-2: bidding_player out of range",
+            ));
+        }
+        Ok(())
     }
 
     fn status(&self) -> Status {
@@ -842,5 +874,18 @@ mod test {
         g.open_cards = vec![];
         let ps = g.pub_state();
         assert!(ps.finished);
+    }
+
+    #[test]
+    fn test_validate() {
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.chips.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.bidding_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

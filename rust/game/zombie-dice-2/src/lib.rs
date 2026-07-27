@@ -421,6 +421,30 @@ impl Gamer for Game {
         Ok((g, logs))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.players < 2 {
+            return Err(GameError::internal("zombie-dice-2: players < 2"));
+        }
+        if self.scores.len() != self.players {
+            return Err(GameError::internal(
+                "zombie-dice-2: scores length does not match players",
+            ));
+        }
+        if self.current_turn >= self.players {
+            return Err(GameError::internal(
+                "zombie-dice-2: current_turn out of range",
+            ));
+        }
+        for &p in &self.roll_off_players {
+            if p >= self.players {
+                return Err(GameError::internal(
+                    "zombie-dice-2: roll_off_players entry out of range",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         if self.finished {
             Status::Finished {
@@ -991,5 +1015,22 @@ mod test {
         assert_eq!(g.round_brains, ps.round_brains);
         assert_eq!(g.round_shotguns, ps.round_shotguns);
         assert_eq!(g.finished, ps.finished);
+    }
+
+    #[test]
+    fn test_validate() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        assert!(g.validate().is_ok());
+
+        g.current_turn = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        g.current_turn = 0;
+
+        g.scores.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        g.scores.push(0);
+
+        g.roll_off_players = vec![g.players];
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

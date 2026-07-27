@@ -286,6 +286,11 @@ impl Game {
     /// players are only excluded from `available_targets`, which drives the
     /// "must target yourself" fallback when no unprotected targets remain.
     fn assert_target(&self, player: usize, inc_self: bool, target: usize) -> Result<(), GameError> {
+        if target >= self.players {
+            return Err(GameError::invalid_input(
+                "that is not a player in this game",
+            ));
+        }
         let available_targets = self.available_targets(player);
         if available_targets.is_empty() {
             if target == player {
@@ -875,6 +880,48 @@ impl Gamer for Game {
         self.players
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal("love-letter-2: players out of range"));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "love-letter-2: current_player out of range",
+            ));
+        }
+        if self.discards.len() != self.players {
+            return Err(GameError::internal(
+                "love-letter-2: discards length mismatch",
+            ));
+        }
+        if self.player_points.len() != self.players {
+            return Err(GameError::internal(
+                "love-letter-2: player_points length mismatch",
+            ));
+        }
+        if self.eliminated.len() != self.players {
+            return Err(GameError::internal(
+                "love-letter-2: eliminated length mismatch",
+            ));
+        }
+        if self.protected.len() != self.players {
+            return Err(GameError::internal(
+                "love-letter-2: protected length mismatch",
+            ));
+        }
+        if self.hands.len() != self.players {
+            return Err(GameError::internal("love-letter-2: hands length mismatch"));
+        }
+        for p in 0..self.players {
+            if !self.eliminated[p] && self.hands[p].is_empty() {
+                return Err(GameError::internal(
+                    "love-letter-2: non-eliminated player has empty hand",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
     }
@@ -1168,5 +1215,29 @@ mod test {
         assert!(obj.contains_key("player_points"));
         assert!(obj.contains_key("eliminated"));
         assert!(obj.contains_key("protected"));
+    }
+
+    #[test]
+    fn validate_rejects_inconsistent_state() {
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.player_points.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.players = 5;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn assert_target_rejects_out_of_range_target() {
+        let g = Game::start(3, 1).unwrap().0;
+        let err = g.assert_target(MICK, false, g.players).unwrap_err();
+        assert!(matches!(err, GameError::InvalidInput { .. }));
     }
 }

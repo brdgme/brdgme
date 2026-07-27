@@ -369,6 +369,66 @@ impl Gamer for Game {
         Ok((g, logs))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        for row in &self.board {
+            if row.is_empty() {
+                return Err(GameError::internal("category-5-2: empty board row"));
+            }
+        }
+        if self.player_points.len() != self.players {
+            return Err(GameError::internal(
+                "category-5-2: player_points length mismatch",
+            ));
+        }
+        if self.hands.len() != self.players {
+            return Err(GameError::internal("category-5-2: hands length mismatch"));
+        }
+        if self.player_cards.len() != self.players {
+            return Err(GameError::internal(
+                "category-5-2: player_cards length mismatch",
+            ));
+        }
+        if self.plays.len() != self.players {
+            return Err(GameError::internal("category-5-2: plays length mismatch"));
+        }
+        if self.choose_player >= self.players {
+            return Err(GameError::internal(
+                "category-5-2: choose_player out of range",
+            ));
+        }
+        let check_card = |c: &Card| -> Result<(), GameError> {
+            if !(1..=DECK_SIZE).contains(&c.0) {
+                return Err(GameError::internal("category-5-2: card out of range"));
+            }
+            Ok(())
+        };
+        for row in &self.board {
+            for c in row {
+                check_card(c)?;
+            }
+        }
+        for hand in &self.hands {
+            for c in hand {
+                check_card(c)?;
+            }
+        }
+        for cards in &self.player_cards {
+            for c in cards {
+                check_card(c)?;
+            }
+        }
+        for c in self.plays.iter().flatten() {
+            check_card(c)?;
+        }
+        for c in &self.deck {
+            check_card(c)?;
+        }
+        for c in &self.discard {
+            check_card(c)?;
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         if self.is_finished() {
             Status::Finished {
@@ -819,5 +879,26 @@ mod test {
         let ps = g.player_state(0);
         assert_eq!(g.hands[0], ps.hand);
         assert_eq!(0, ps.player);
+    }
+
+    #[test]
+    fn test_validate() {
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.hands.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.choose_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.board[0] = vec![];
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.deck.push(Card(0));
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

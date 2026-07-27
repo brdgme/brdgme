@@ -475,6 +475,29 @@ impl Gamer for Game {
         self.players
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.scores.len() != self.players {
+            return Err(GameError::internal(format!(
+                "farkle-2: scores len {} != players {}",
+                self.scores.len(),
+                self.players
+            )));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(format!(
+                "farkle-2: current_player {} >= players {}",
+                self.current_player, self.players
+            )));
+        }
+        if self.first_player >= self.players {
+            return Err(GameError::internal(format!(
+                "farkle-2: first_player {} >= players {}",
+                self.first_player, self.players
+            )));
+        }
+        Ok(())
+    }
+
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
     }
@@ -671,5 +694,22 @@ mod test {
         g.command(current, "done", &p).unwrap();
         // Only the 1000 from the explicit score is banked, not the unused 50.
         assert_eq!(before + 1000, g.scores[current]);
+    }
+
+    #[test]
+    fn test_validate() {
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.scores.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.first_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

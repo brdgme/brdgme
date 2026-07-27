@@ -527,6 +527,35 @@ impl Gamer for Game {
         Ok((g, logs))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "lost-cities-2: players {} out of range",
+                self.players
+            )));
+        }
+        if self.hands.len() != self.players {
+            return Err(GameError::internal("lost-cities-2: hands length mismatch"));
+        }
+        if self.scores.len() != self.players {
+            return Err(GameError::internal("lost-cities-2: scores length mismatch"));
+        }
+        if self.expeditions.len() != self.players {
+            return Err(GameError::internal(
+                "lost-cities-2: expeditions length mismatch",
+            ));
+        }
+        if self.stats.len() != self.players {
+            return Err(GameError::internal("lost-cities-2: stats length mismatch"));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "lost-cities-2: current_player out of range",
+            ));
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         if self.round >= START_ROUND + ROUNDS {
             Status::Finished {
@@ -885,5 +914,23 @@ mod test {
         assert_eq!(vec![2, 1], g.placings());
         g.scores = vec![vec![100, 50, 40], vec![100, 50, 40]];
         assert_eq!(vec![1, 1], g.placings());
+    }
+
+    #[test]
+    fn validate_works() {
+        assert!(Game::start(2, 1).unwrap().0.validate().is_ok());
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.players = 4;
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.hands.pop();
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.current_player = game.players;
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
     }
 }

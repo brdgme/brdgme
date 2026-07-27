@@ -226,6 +226,25 @@ impl Gamer for Game {
         Ok((g, vec![]))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.player_hands.len() != self.players {
+            return Err(GameError::internal(
+                "no-thanks-2: player_hands length mismatch",
+            ));
+        }
+        if self.player_chips.len() != self.players {
+            return Err(GameError::internal(
+                "no-thanks-2: player_chips length mismatch",
+            ));
+        }
+        if self.currently_moving >= self.players {
+            return Err(GameError::internal(
+                "no-thanks-2: currently_moving out of range",
+            ));
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         if self.remaining_cards.is_empty() {
             Status::Finished {
@@ -532,5 +551,22 @@ mod test {
         g.command(BJ, "taKE", &p).unwrap();
         assert_eq!(vec![top_card], g.player_hands[BJ]);
         assert_eq!(12, g.player_chips[BJ]);
+    }
+
+    #[test]
+    fn test_validate() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        assert!(g.validate().is_ok());
+
+        g.player_hands.push(vec![]);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        g.player_hands.pop();
+
+        g.player_chips.push(0);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        g.player_chips.pop();
+
+        g.currently_moving = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

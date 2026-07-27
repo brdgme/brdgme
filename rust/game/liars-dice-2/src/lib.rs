@@ -249,6 +249,29 @@ impl Gamer for Game {
         Ok((g, vec![]))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.player_dice.len() != self.players {
+            return Err(GameError::internal(format!(
+                "liars-dice-2: player_dice length {} does not match players {}",
+                self.player_dice.len(),
+                self.players
+            )));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(format!(
+                "liars-dice-2: current_player {} out of range for players {}",
+                self.current_player, self.players
+            )));
+        }
+        if self.bid_player >= self.players {
+            return Err(GameError::internal(format!(
+                "liars-dice-2: bid_player {} out of range for players {}",
+                self.bid_player, self.players
+            )));
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         let active = self.active_players();
         if active.len() < 2 {
@@ -415,5 +438,22 @@ mod test {
         assert_eq!(2, eliminated.len());
         assert_eq!(0, eliminated[0]);
         assert_eq!(2, eliminated[1]);
+    }
+
+    #[test]
+    fn test_validate() {
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.player_dice.push(vec![1]);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.bid_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

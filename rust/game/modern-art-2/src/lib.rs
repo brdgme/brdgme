@@ -739,6 +739,49 @@ impl Gamer for Game {
         self.players
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "modern-art-2: players {} out of range {}..={}",
+                self.players, MIN_PLAYERS, MAX_PLAYERS
+            )));
+        }
+        if self.round >= ROUNDS {
+            return Err(GameError::internal(format!(
+                "modern-art-2: round {} out of range",
+                self.round
+            )));
+        }
+        if self.player_money.len() != self.players {
+            return Err(GameError::internal(format!(
+                "modern-art-2: player_money length {} != players {}",
+                self.player_money.len(),
+                self.players
+            )));
+        }
+        if self.player_hands.len() != self.players {
+            return Err(GameError::internal(format!(
+                "modern-art-2: player_hands length {} != players {}",
+                self.player_hands.len(),
+                self.players
+            )));
+        }
+        if self.player_purchases.len() != self.players {
+            return Err(GameError::internal(format!(
+                "modern-art-2: player_purchases length {} != players {}",
+                self.player_purchases.len(),
+                self.players
+            )));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(format!(
+                "modern-art-2: current_player {} >= players {}",
+                self.current_player, self.players
+            )));
+        }
+        Ok(())
+    }
+
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
     }
@@ -1275,6 +1318,37 @@ mod test {
         assert!(ps.auctioning.is_empty());
         assert_eq!(None, ps.auction_type);
         assert_eq!(None, ps.current_bid, "no bogus $0 bid on the final screen");
+    }
+
+    #[test]
+    fn validate_catches_inconsistent_state() {
+        assert!(Game::start(3, 1).unwrap().0.validate().is_ok());
+        assert!(Game::start(4, 1).unwrap().0.validate().is_ok());
+        assert!(Game::start(5, 1).unwrap().0.validate().is_ok());
+
+        let mut g = mock_game();
+        g.player_money.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = mock_game();
+        g.player_hands.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = mock_game();
+        g.player_purchases.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = mock_game();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = mock_game();
+        g.players = 2;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = mock_game();
+        g.round = 4;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 
     #[test]

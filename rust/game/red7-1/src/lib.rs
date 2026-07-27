@@ -544,6 +544,28 @@ impl Gamer for Game {
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.num_players) {
+            return Err(GameError::internal("red7-1: num_players out of range"));
+        }
+        if self.hands.len() != self.num_players {
+            return Err(GameError::internal("red7-1: hands length mismatch"));
+        }
+        if self.palettes.len() != self.num_players {
+            return Err(GameError::internal("red7-1: palettes length mismatch"));
+        }
+        if self.scored_cards.len() != self.num_players {
+            return Err(GameError::internal("red7-1: scored_cards length mismatch"));
+        }
+        if self.eliminated.len() != self.num_players {
+            return Err(GameError::internal("red7-1: eliminated length mismatch"));
+        }
+        if self.current_player >= self.num_players {
+            return Err(GameError::internal("red7-1: current_player out of range"));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -747,6 +769,19 @@ mod tests {
         use brdgme_game::Renderer;
         let rendered = g.pub_state().render();
         assert!(!rendered.is_empty());
+    }
+
+    #[test]
+    fn test_validate() {
+        let (mut g, _) = Game::start(3, 0).unwrap();
+        assert!(g.validate().is_ok());
+
+        g.hands.push(vec![]);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.current_player = g.num_players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 
     #[test]

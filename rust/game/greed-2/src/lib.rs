@@ -403,6 +403,29 @@ impl Gamer for Game {
         Ok((g, logs))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.scores.len() != self.players {
+            return Err(GameError::internal(format!(
+                "greed-2: scores length {} does not match players {}",
+                self.scores.len(),
+                self.players
+            )));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(format!(
+                "greed-2: current_player {} out of range for players {}",
+                self.current_player, self.players
+            )));
+        }
+        if self.first_player >= self.players {
+            return Err(GameError::internal(format!(
+                "greed-2: first_player {} out of range for players {}",
+                self.first_player, self.players
+            )));
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         if self.finished() {
             Status::Finished {
@@ -761,5 +784,22 @@ mod test {
         ];
         g.command(current, "done", &p).unwrap();
         assert_eq!(1000, g.scores[current]);
+    }
+
+    #[test]
+    fn test_validate() {
+        assert!(Game::start(2, 1).unwrap().0.validate().is_ok());
+
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.scores.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.first_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }
