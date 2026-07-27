@@ -2,7 +2,7 @@ use brdgme_color as color;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
-use crate::{Colour, Dice, DiceResult, PlayerState, PubState};
+use crate::{Colour, DiceResult, PlayerState, PubState};
 
 /// Port of Go `brdgme.CommaList` over markup nodes: "a", "a and b",
 /// "a, b and c".
@@ -48,17 +48,13 @@ pub fn render_dice_result_list(drl: &[DiceResult]) -> N {
 /// Renders the cup contents as a comma-list of "N colour" entries, coloured
 /// and bolded by colour. Empty cup renders as grey "None". Faithful port of
 /// the Go `PubRender` cup section.
-fn render_cup(cup: &[Dice]) -> N {
-    if cup.is_empty() {
+fn render_cup(counts: &[(Colour, usize)]) -> N {
+    if counts.iter().all(|(_, n)| *n == 0) {
         return N::Fg(color::NamedColor::Grey.into(), vec![N::text("None")]);
     }
-    let counts = cup_counts(cup);
-    let order = [Colour::Green, Colour::Yellow, Colour::Red];
     let mut parts: Vec<N> = vec![];
-    for c in order {
-        if let Some(&count) = counts.get(&c)
-            && count > 0
-        {
+    for &(c, count) in counts {
+        if count > 0 {
             parts.push(N::Fg(
                 c.to_color().into(),
                 vec![N::Bold(vec![N::text(format!(
@@ -70,14 +66,6 @@ fn render_cup(cup: &[Dice]) -> N {
         }
     }
     comma_list(parts)
-}
-
-fn cup_counts(cup: &[Dice]) -> std::collections::HashMap<Colour, usize> {
-    let mut counts = std::collections::HashMap::new();
-    for d in cup {
-        *counts.entry(d.colour).or_insert(0) += 1;
-    }
-    counts
 }
 
 fn colour_name(c: Colour) -> &'static str {
@@ -119,7 +107,7 @@ impl Renderer for PubState {
                 ],
                 vec![
                     (A::Right, vec![N::text("In cup:")]),
-                    (A::Left, vec![render_cup(&self.cup)]),
+                    (A::Left, vec![render_cup(&self.cup_counts)]),
                 ],
             ],
             2,

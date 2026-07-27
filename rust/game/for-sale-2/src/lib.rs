@@ -80,6 +80,8 @@ pub struct PlayerState {
     pub hand: Vec<i32>,
     /// Cheque values collected during the selling phase
     pub cheques: Vec<i32>,
+    /// The viewer's own bid or played building value.
+    pub bid: i32,
 }
 
 fn building_deck() -> Vec<i32> {
@@ -441,7 +443,11 @@ impl Gamer for Game {
             sell_rounds_remaining: self.cheque_deck.len() / self.players,
             open_cards: self.open_cards.clone(),
             bidding_player: self.bidding_player,
-            bids: self.bids.clone(),
+            bids: if self.current_phase() == Phase::Selling {
+                vec![0; self.players]
+            } else {
+                self.bids.clone()
+            },
             finished_bidding: self.finished_bidding.clone(),
         }
     }
@@ -453,6 +459,7 @@ impl Gamer for Game {
             chips: self.chips[player],
             hand: self.hands[player].clone(),
             cheques: self.cheques[player].clone(),
+            bid: self.bids[player],
         }
     }
 
@@ -864,6 +871,37 @@ mod test {
         assert_eq!(g.hands[0], pls.hand);
         assert_eq!(g.cheques[0], pls.cheques);
         assert_eq!(g.chips[0], pls.chips);
+    }
+
+    #[test]
+    fn test_selling_phase_redacts_bids() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        let p = players(3);
+        g.building_deck = vec![];
+        g.cheque_deck = vec![0, 0, 3];
+        g.open_cards = vec![4, 5, 6];
+        g.hands[MICK] = vec![17];
+        g.hands[STEVE] = vec![18];
+        g.hands[BJ] = vec![16];
+        assert_eq!(Phase::Selling, g.current_phase());
+        g.command(MICK, "play 17", &p).unwrap();
+        let ps = g.pub_state();
+        assert_eq!(vec![0, 0, 0], ps.bids);
+        let mick_state = g.player_state(MICK);
+        assert_eq!(17, mick_state.bid);
+        let steve_state = g.player_state(STEVE);
+        assert_eq!(0, steve_state.bid);
+    }
+
+    #[test]
+    fn test_buying_phase_bids_are_public() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        let p = players(3);
+        assert_eq!(Phase::Buying, g.current_phase());
+        g.command(MICK, "bid 3", &p).unwrap();
+        let ps = g.pub_state();
+        assert_eq!(g.bids, ps.bids);
+        assert_eq!(3, ps.bids[MICK]);
     }
 
     #[test]

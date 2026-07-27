@@ -190,8 +190,8 @@ pub struct PubState {
     pub current_turn: usize,
     /// Banked brain scores for each player, indexed by player.
     pub scores: Vec<i32>,
-    /// Dice remaining in the cup, in draw order. Each die has a colour (Green, Yellow, Red).
-    pub cup: Vec<Dice>,
+    /// Number of dice remaining in the cup by colour, in fixed order Green, Yellow, Red.
+    pub cup_counts: Vec<(Colour, usize)>,
     /// Dice showing footprints from the latest roll; these will be re-rolled on the next roll.
     pub current_roll: DiceResultList,
     /// Dice set aside this turn (brains eaten and shotguns taken).
@@ -464,7 +464,23 @@ impl Gamer for Game {
             players: self.players,
             current_turn: self.current_turn,
             scores: self.scores.clone(),
-            cup: self.cup.clone(),
+            cup_counts: {
+                let mut green = 0;
+                let mut yellow = 0;
+                let mut red = 0;
+                for d in &self.cup {
+                    match d.colour {
+                        Colour::Green => green += 1,
+                        Colour::Yellow => yellow += 1,
+                        Colour::Red => red += 1,
+                    }
+                }
+                vec![
+                    (Colour::Green, green),
+                    (Colour::Yellow, yellow),
+                    (Colour::Red, red),
+                ]
+            },
             current_roll: self.current_roll.clone(),
             kept: self.kept.clone(),
             round_brains: self.round_brains,
@@ -1009,7 +1025,17 @@ mod test {
         assert_eq!(g.players, ps.players);
         assert_eq!(g.current_turn, ps.current_turn);
         assert_eq!(g.scores, ps.scores);
-        assert_eq!(g.cup, ps.cup);
+        let green = g.cup.iter().filter(|d| d.colour == Colour::Green).count();
+        let yellow = g.cup.iter().filter(|d| d.colour == Colour::Yellow).count();
+        let red = g.cup.iter().filter(|d| d.colour == Colour::Red).count();
+        assert_eq!(
+            ps.cup_counts,
+            vec![
+                (Colour::Green, green),
+                (Colour::Yellow, yellow),
+                (Colour::Red, red),
+            ]
+        );
         assert_eq!(g.current_roll, ps.current_roll);
         assert_eq!(g.kept, ps.kept);
         assert_eq!(g.round_brains, ps.round_brains);

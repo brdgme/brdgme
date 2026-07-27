@@ -98,12 +98,12 @@ fn render(pub_state: &PubState, player: Option<usize>, own: Option<&PlayerState>
             out.push(N::text("Cheques available: "));
             out.push(cards(&pub_state.open_cards, false));
             out.push(N::text("\n"));
-            if let Some(p) = player
-                && pub_state.bids[p] != 0
+            if let Some(own) = own
+                && own.bid != 0
             {
                 out.push(N::Group(vec![
                     N::text("You are playing: "),
-                    building(pub_state.bids[p]),
+                    building(own.bid),
                     N::text("\n"),
                 ]));
             }

@@ -1859,7 +1859,11 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            peeking: self.peeking.clone(),
+            peeking: if player == self.current_player {
+                self.peeking.clone()
+            } else {
+                vec![]
+            },
         }
     }
 
@@ -2667,6 +2671,19 @@ mod tests {
         );
         let public = brdgme_markup::to_string(&g.pub_state().render());
         assert!(!public.contains("Peeked cards") && !public.contains("Test Colony"));
+    }
+
+    #[test]
+    fn peeking_only_visible_to_current_player() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Flight;
+        g.current_player = 0;
+        g.current_sector = 1;
+        g.peeking = vec![colony_card(), pirate_card()];
+        let current = g.player_state(g.current_player);
+        assert!(!current.peeking.is_empty());
+        let opponent = g.player_state(1 - g.current_player);
+        assert!(opponent.peeking.is_empty());
     }
 
     #[test]

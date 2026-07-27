@@ -5,7 +5,7 @@
 - `players` (usize): Number of players in this game (2 to 8).
 - `current_turn` (usize): Index of the player whose turn it is.
 - `scores` (Vec<i32>): Banked brain scores for each player, indexed by player. Brains are only added to this total when a player chooses to keep.
-- `cup` (Vec<Dice>): Dice remaining in the cup, in draw order. Each die has a `colour` field (Green, Yellow, or Red). At game start: 6 green, 4 yellow, 3 red (13 total).
+- `cup_counts` (Vec<(Colour, usize)>): Number of dice remaining in the cup by colour, always exactly three entries in fixed order Green, Yellow, Red (zeros included). At game start: 6 green, 4 yellow, 3 red (13 total). The cup composition is public; the draw order is not.
 - `current_roll` (DiceResultList): Dice showing footprints from the latest roll. These stay in front of the player and are re-rolled on the next `roll` command. Each entry has a `dice` (colour) and `face` (always Footprints here).
 - `kept` (DiceResultList): Dice set aside this turn. Includes both brains eaten (Face::Brain) and shotguns taken (Face::Shotgun). Each entry has a `dice` (colour) and `face`.
 - `round_brains` (i32): Number of brains eaten this turn, not yet banked. Lost if the player busts (3 shotguns).
@@ -15,7 +15,7 @@
 
 ## PlayerState (player-private information)
 
-- `public` (PubState): The full public game state, as described above. Zombie Dice has no hidden information per player; PlayerState is just a wrapper around PubState.
+- `public` (PubState): The full public game state, as described above. The cup composition is public but the draw order is hidden; PlayerState is a wrapper around PubState with no additional per-player secrets.
 
 ## Dice
 
