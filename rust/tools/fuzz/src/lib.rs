@@ -1,8 +1,8 @@
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::sync::mpsc::{Sender, TryRecvError, channel};
-use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use rand::prelude::*;
@@ -15,20 +15,23 @@ use brdgme_game::{Gamer, command};
 
 pub fn fuzz<F, R>(new_requester: F)
 where
-    F: Fn() -> R + Send + 'static,
+    F: Fn() -> R + Send + Sync + 'static,
     R: requester::Requester + 'static,
 {
     let mut exit_txs: Vec<Sender<()>> = vec![];
-    let new_requester = Arc::new(Mutex::new(new_requester));
+    let new_requester = Arc::new(new_requester);
     let (step_tx, step_rx) = channel();
 
-    for _ in 0..num_cpus::get() {
+    for _ in 0..std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+    {
         let (exit_tx, exit_rx) = channel();
         let step_tx = step_tx.clone();
         let new_requester = new_requester.clone();
         exit_txs.push(exit_tx);
         thread::spawn(move || {
-            let client = new_requester.lock().unwrap()();
+            let client = new_requester();
             let mut fuzzer = Fuzzer::try_new(Box::new(client)).expect("expected to create fuzzer");
             loop {
                 step_tx
@@ -41,51 +44,54 @@ where
             }
         });
     }
+    drop(step_tx);
 
     let mut tally = FuzzTally::default();
-    let mut last_output_at = SystemTime::now();
+    let mut last_output_at = Instant::now();
     let output_interval = Duration::from_secs(1);
 
     loop {
-        let now = SystemTime::now();
-        if now
-            .duration_since(last_output_at)
-            .expect("failed to get duration")
-            > output_interval
-        {
+        if last_output_at.elapsed() > output_interval {
             eprintln!("{}", tally.render());
-            last_output_at = now;
+            last_output_at = Instant::now();
         }
-        match step_rx.recv().expect("failed to get step") {
-            FuzzStep::Created => tally.started += 1,
-            FuzzStep::Finished => tally.finished += 1,
-            FuzzStep::CommandOk => tally.commands += 1,
-            FuzzStep::UserError { .. } => {
-                tally.commands += 1;
-                tally.invalid_input += 1;
-            }
-            FuzzStep::Error {
-                game,
-                command,
-                error,
-                seed,
-                commands,
-            } => {
-                println!(
-                    "\nError detected: {}\n\nSeed: {:?}\nCommands: {:#?}\n\nCommand: {}\n\nGame: {:?}",
+        match step_rx.recv() {
+            Ok(step) => match step {
+                FuzzStep::Created => tally.started += 1,
+                FuzzStep::Finished => tally.finished += 1,
+                FuzzStep::CommandOk => tally.commands += 1,
+                FuzzStep::UserError { .. } => {
+                    tally.commands += 1;
+                    tally.invalid_input += 1;
+                }
+                FuzzStep::Error {
+                    game,
+                    command,
                     error,
                     seed,
                     commands,
-                    command.unwrap_or_else(|| "none".to_string()),
-                    game
-                );
+                } => {
+                    println!(
+                        "\nError detected: {}\n\nSeed: {:?}\nCommands: {:#?}\n\nCommand: {}\n\nGame: {:?}",
+                        error,
+                        seed,
+                        commands,
+                        command.unwrap_or_else(|| "none".to_string()),
+                        game
+                    );
+                    break;
+                }
+            },
+            Err(_) => {
+                eprintln!("{}", tally.render());
+                eprintln!("all fuzz workers exited");
                 break;
             }
         }
     }
 
     for tx in exit_txs {
-        tx.send(()).unwrap();
+        let _ = tx.send(());
     }
 }
 
@@ -195,10 +201,10 @@ impl Fuzzer {
                     ));
                 }
                 let player_render = &player_renders[player];
-                if player_render.command_spec.is_none() {
+                let Some(spec) = player_render.command_spec.clone() else {
                     return Err(anyhow!("player {}'s command_spec is None", player));
-                }
-                (player, player_render.clone().command_spec.unwrap(), state)
+                };
+                (player, spec, state)
             }
             Some(FuzzGame {
                 game:
@@ -295,6 +301,7 @@ struct FuzzGame {
     player_renders: Vec<api::PlayerRender>,
 }
 
+#[derive(Debug)]
 enum CommandResponse {
     Ok(FuzzGame),
     UserError { message: String },
@@ -347,4 +354,82 @@ fn exec_command(
 
 fn rand_command(command_spec: &command::Spec, players: &[String], rng: &mut ThreadRng) -> String {
     brdgme_rand_bot::spec_to_command(command_spec, command_spec, players, rng).join("")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use brdgme_cmd::api::{GameResponse, PlayerRender, PubRender, Request, Response};
+    use brdgme_cmd::requester::Requester;
+    use brdgme_cmd::requester::error::RequestError;
+
+    struct StubRequester;
+
+    impl Requester for StubRequester {
+        fn request(&mut self, _req: &Request) -> Result<Response, RequestError> {
+            Err(RequestError::Stdin)
+        }
+    }
+
+    #[test]
+    fn fuzz_returns_when_all_workers_exit() {
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            fuzz(|| StubRequester);
+            let _ = done_tx.send(());
+        });
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(10)).is_ok(),
+            "fuzz must return once every worker exits, not hang"
+        );
+    }
+
+    struct NoneSpecRequester;
+
+    impl Requester for NoneSpecRequester {
+        fn request(&mut self, req: &Request) -> Result<Response, RequestError> {
+            match req {
+                Request::PlayerCounts => Ok(Response::PlayerCounts {
+                    player_counts: vec![2],
+                }),
+                Request::New { .. } => Ok(Response::New {
+                    game: GameResponse {
+                        state: String::new(),
+                        points: vec![0.0, 0.0],
+                        status: brdgme_game::Status::Active {
+                            whose_turn: vec![0],
+                            eliminated: vec![],
+                        },
+                    },
+                    logs: vec![],
+                    public_render: PubRender {
+                        pub_state: String::new(),
+                        render: String::new(),
+                    },
+                    player_renders: vec![
+                        PlayerRender {
+                            player_state: String::new(),
+                            render: String::new(),
+                            command_spec: None,
+                        },
+                        PlayerRender {
+                            player_state: String::new(),
+                            render: String::new(),
+                            command_spec: None,
+                        },
+                    ],
+                    seed: 0,
+                }),
+                _ => Err(RequestError::Stdin),
+            }
+        }
+    }
+
+    #[test]
+    fn command_returns_error_when_command_spec_is_none() {
+        let mut fuzzer = Fuzzer::try_new(Box::new(NoneSpecRequester)).unwrap();
+        fuzzer.new_game().unwrap();
+        let err = fuzzer.command().unwrap_err();
+        assert_eq!("player 0's command_spec is None", err.to_string());
+    }
 }
