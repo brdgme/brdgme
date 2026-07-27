@@ -56,6 +56,28 @@ fn prefill_to_slots(opponents: &[PrefillSlot]) -> Vec<OpponentSlot> {
         .collect()
 }
 
+/// Picks which offered player count to use when a restart prefill asks for a
+/// count the game type no longer offers (wd F66). Exact match wins; failing
+/// that, the nearest offered count, with distance ties broken **upward**:
+/// clamping up leaves an obviously-empty opponent slot, which `on_submit`
+/// already refuses with a clear message, whereas clamping down would
+/// silently truncate a real opponent out of the roster. Returns `wanted`
+/// unchanged when the type offers no counts at all - there is nothing to
+/// clamp to, and no radio renders either way.
+///
+/// Distance is computed in i64 so `abs()` cannot panic on a pathological
+/// value (`i32::MIN.abs()` panics).
+fn clamp_player_count(counts: &[i32], wanted: i32) -> i32 {
+    counts
+        .iter()
+        .copied()
+        .min_by_key(|&c| {
+            let distance = (i64::from(c) - i64::from(wanted)).abs();
+            (distance, -i64::from(c))
+        })
+        .unwrap_or(wanted)
+}
+
 /// Client-side filter + sort over the already-fetched list. `sort_key` is
 /// one of "alpha" (default), "weight-asc", "weight-desc"; weight ties break
 /// alphabetically.
@@ -267,11 +289,33 @@ fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
         set_opponent_slots.update(|v| v.resize_with(n, OpponentSlot::default));
     });
 
+    // wd F59: `Err` used to be discarded here, leaving a blank default form
+    // headed "Restarting <name>". wd F66: the requested count used to be
+    // applied verbatim, so a count the game type no longer offers left every
+    // radio unchecked while the form still submitted the stale value.
+    let gt_counts = StoredValue::new(gt.player_counts.clone());
     Effect::new(move |_| {
-        let Some(Some(Ok(pf))) = prefill.get() else {
+        let Some(Some(result)) = prefill.get() else {
             return;
         };
-        let count = (pf.opponents.len() + 1) as i32;
+        let pf = match result {
+            Ok(pf) => pf,
+            Err(e) => {
+                set_form_error.set(Some(format!(
+                    "Could not load the previous game's setup: {}",
+                    crate::error::action_error_message(&e)
+                )));
+                return;
+            }
+        };
+        let wanted = (pf.opponents.len() + 1) as i32;
+        let count = gt_counts.with_value(|counts| clamp_player_count(counts, wanted));
+        if count != wanted {
+            set_form_error.set(Some(format!(
+                "The previous game had {wanted} players, which this game does not offer. \
+                 Set up for {count} instead."
+            )));
+        }
         let slots = prefill_to_slots(&pf.opponents);
         set_selected_version_id.set(Some(pf.version_id));
         set_opponent_slots.set(slots);
@@ -319,6 +363,15 @@ fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
                 navigate_create(&format!("/games/{}", gid), NavigateOptions::default());
             } else if let Some(pid) = outcome.proposal_id {
                 navigate_create(&format!("/invites/{}", pid), NavigateOptions::default());
+            } else {
+                // wd F64: a successful mutation that carries neither id used
+                // to leave the user on the form with the button re-enabled,
+                // indistinguishable from nothing having happened.
+                set_form_error.set(Some(
+                    "Created, but no game or invite link came back. \
+                     Check your games in the menu."
+                        .to_string(),
+                ));
             }
         }
     });
@@ -332,6 +385,12 @@ fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
                         navigate_restart(&format!("/games/{gid}"), NavigateOptions::default());
                     } else if let Some(pid) = po.proposal_id {
                         navigate_restart(&format!("/invites/{pid}"), NavigateOptions::default());
+                    } else {
+                        set_form_error.set(Some(
+                            "Created, but no game or invite link came back. \
+                             Check your games in the menu."
+                                .to_string(),
+                        ));
                     }
                 }
                 RestartOutcome::AlreadyRestarted {
@@ -345,14 +404,27 @@ fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
                 } => {
                     navigate_restart(&format!("/invites/{p}"), NavigateOptions::default());
                 }
-                RestartOutcome::AlreadyRestarted { .. } => {}
+                // wd F64: same both-None case as the create path above.
+                RestartOutcome::AlreadyRestarted { .. } => {
+                    set_form_error.set(Some(
+                        "This game was already restarted, but no link came back. \
+                         Check your games in the menu."
+                            .to_string(),
+                    ));
+                }
             }
         }
     });
 
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
+        // wd F63: this used to be a bare `return`, so clicking the button did
+        // literally nothing when no version was selected - unlike every other
+        // validation path below, which sets `form_error`.
         let Some(version_id) = selected_version_id.get_untracked() else {
+            set_form_error.set(Some(
+                "No game version is available for this game type.".to_string(),
+            ));
             return;
         };
         let mut ids = Vec::new();
@@ -603,6 +675,39 @@ mod tests {
         assert_eq!(player_range(&[2, 3, 4]), "2-4 players");
         assert_eq!(player_range(&[2, 4, 6]), "2, 4, 6 players");
         assert_eq!(player_range(&[]), "");
+    }
+
+    #[test]
+    fn clamp_player_count_keeps_offered_counts() {
+        assert_eq!(clamp_player_count(&[2, 3, 4], 3), 3);
+        assert_eq!(clamp_player_count(&[2, 3, 4], 2), 2);
+        assert_eq!(clamp_player_count(&[2, 3, 4], 4), 4);
+    }
+
+    #[test]
+    fn clamp_player_count_clamps_above_max_and_below_min() {
+        // Above the offered maximum.
+        assert_eq!(clamp_player_count(&[2, 3, 4], 6), 4);
+        // Below the offered minimum.
+        assert_eq!(clamp_player_count(&[3, 4, 5], 2), 3);
+        // Single offered count absorbs anything.
+        assert_eq!(clamp_player_count(&[2], 9), 2);
+    }
+
+    #[test]
+    fn clamp_player_count_handles_non_contiguous_sets_and_breaks_ties_upward() {
+        // 3 is equidistant from 2 and 4; A3 says pick the higher, so the
+        // shortfall shows up as an empty slot rather than a dropped opponent.
+        assert_eq!(clamp_player_count(&[2, 4, 6], 3), 4);
+        assert_eq!(clamp_player_count(&[2, 4, 6], 5), 6);
+        // Unambiguous nearest inside a gap.
+        assert_eq!(clamp_player_count(&[2, 6], 3), 2);
+        assert_eq!(clamp_player_count(&[2, 6], 5), 6);
+    }
+
+    #[test]
+    fn clamp_player_count_passes_through_when_nothing_is_offered() {
+        assert_eq!(clamp_player_count(&[], 7), 7);
     }
 
     #[test]

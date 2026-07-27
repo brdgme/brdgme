@@ -1,6 +1,3 @@
-// Components module - placeholder for UI components
-// This will be expanded in later milestones
-
 pub mod confirm;
 pub mod form;
 pub mod game;

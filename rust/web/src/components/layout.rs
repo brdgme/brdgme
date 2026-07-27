@@ -15,6 +15,15 @@ pub struct SubMenuOpen {
     pub set_open: WriteSignal<bool>,
 }
 
+/// The sidebar's incoming-friend-request count. Created in `App` and provided
+/// via context - like `active_games`/`current_user` - so it survives the
+/// per-page `<MainLayout>` remount instead of refetching and blanking the
+/// `(N new)` badge on every navigation (wfe F57). Newtype so the context
+/// can't collide with another `LocalResource<Result<usize, ServerFnError>>`
+/// provider.
+#[derive(Clone, Copy)]
+pub struct FriendRequestCount(pub LocalResource<Result<usize, ServerFnError>>);
+
 /// Picks the game that has been awaiting the player's turn the longest -
 /// the "Next game" button's target.
 fn next_game_id(games: &[GameSummary]) -> Option<uuid::Uuid> {
@@ -117,10 +126,20 @@ pub fn MainLayout(
 pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>) -> impl IntoView {
     let logout_action = expect_context::<ServerAction<crate::auth::Logout>>();
     let navigate = use_navigate();
-    Effect::new(move |_| {
-        if logout_action.value().get().is_some_and(|r| r.is_ok()) {
+    // wfe F59: a failed logout used to leave the user apparently signed in
+    // with no signal at all. The sidebar is on every page, so this slot is
+    // the app-wide one.
+    let logout_error = RwSignal::new(None::<String>);
+    Effect::new(move |_| match logout_action.value().get() {
+        Some(Ok(_)) => {
+            logout_error.set(None);
             navigate("/login", NavigateOptions::default());
         }
+        Some(Err(e)) => logout_error.set(Some(format!(
+            "Logout failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
 
     // Provided once in `App` (outside the router) so these resources survive
@@ -132,8 +151,7 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
         expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
     let logged_in = move || matches!(current_user.get(), Some(Ok(Some(_))));
 
-    let friend_request_count: LocalResource<Result<usize, ServerFnError>> =
-        LocalResource::new(crate::friends::get_incoming_friend_request_count);
+    let friend_request_count = expect_context::<FriendRequestCount>().0;
 
     // Close the mobile menu overlay on every route change - covers
     // "navigating closes it" for every link without per-link handlers.
@@ -163,13 +181,22 @@ pub fn SidebarMenu(#[prop(into)] open: Signal<bool>, set_open: WriteSignal<bool>
                         view! {
                             <A href=href>{name}</A>
                             " ("
+                            // href="#" + prevent_default is this codebase's
+                            // click-link idiom and is what puts the element in
+                            // the tab order (wfe F61). `cursor: pointer` comes
+                            // from the global `a` rule in main.scss, so the
+                            // inline style is redundant.
                             <a
-                                on:click=move |_| {
+                                href="#"
+                                on:click=move |ev| {
+                                    ev.prevent_default();
                                     logout_action.dispatch(crate::auth::Logout {});
                                 }
-                                style="cursor:pointer"
                             >"logout"</a>
                             ")"
+                            {move || logout_error.get().map(|e| view! {
+                                <div class="form-error">{e}</div>
+                            })}
                         }
                     }}
                 </div>

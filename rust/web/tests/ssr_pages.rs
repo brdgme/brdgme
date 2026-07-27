@@ -253,6 +253,20 @@ async fn home_page_logged_in_renders_index_shell(pool: PgPool) {
     // panic). "Recent games" is the history section heading, unique to the
     // logged-in index (the sidebar uses "Active/Pending/Finished games").
     assert_clean_html_body(status, &content_type, &body, "Recent games");
+    // wfe F61: the sidebar logout link is rendered on EVERY page - the
+    // wrapper div's `hidden` attribute toggles, not its children (see the
+    // comment at components/layout.rs:151-153) - so this is where the layout
+    // half of the fix is observable server-side. The logged-in test is used
+    // rather than the anonymous one only because the marker reads naturally
+    // here; either would catch a regression.
+    assert!(
+        body.contains("logout"),
+        "expected the sidebar logout link: {body}"
+    );
+    assert!(
+        !body.contains("cursor:pointer"),
+        "the sidebar logout anchor still has no href: {body}"
+    );
 }
 
 #[sqlx::test]
@@ -264,6 +278,17 @@ async fn login_page_anonymous(pool: PgPool) {
         &content_type,
         &body,
         "Enter your email address to start",
+    );
+    // wfe F61: the click-only anchors on this page were not focusable. Their
+    // inline `style="cursor:pointer"` is the marker that they lacked an href;
+    // the codebase has no other inline cursor style.
+    assert!(
+        !body.contains("cursor:pointer"),
+        "a click-only anchor without href is still present: {body}"
+    );
+    assert!(
+        body.contains("I already have a login code"),
+        "expected the code-entry link in the login page body: {body}"
     );
 }
 
@@ -355,6 +380,17 @@ async fn game_page_anonymous_visitor_gets_clean_error_not_panic(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert!(content_type.starts_with("text/html"));
     assert!(!body.to_lowercase().contains("panicked at"), "body: {body}");
+    // wfe F55: the Err branch of GamePage renders into the SSR HTML (blocking
+    // resource inside a Transition), so `e.to_string()`'s framework prefix
+    // used to ship to the browser. Guard both directions.
+    assert!(
+        !body.contains("error running server function"),
+        "raw ServerFnError Display text reached the SSR HTML: {body}"
+    );
+    assert!(
+        body.contains("Failed to load this game."),
+        "expected the generic game-load error in the SSR body: {body}"
+    );
 }
 
 #[sqlx::test]

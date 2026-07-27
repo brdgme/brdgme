@@ -126,12 +126,66 @@ pub fn OpponentSlotEditor(
             return None;
         }
         match search_action.value().get() {
-            Some((tag, Err(e))) if *tag == current => Some(format!("Search failed: {e}")),
+            Some((tag, Err(e))) if *tag == current => Some(format!(
+                "Search failed: {}",
+                crate::error::action_error_message(&e)
+            )),
             _ => None,
         }
     };
 
     let (search_seq, set_search_seq) = signal(0u32);
+
+    // wfe F58, half 1: the <select> below must be built exactly once, with an
+    // option list that never changes afterwards. When `bot_names` resolves,
+    // `collect_view()`'s Vec rebuild rewrites the existing <option> elements'
+    // `value` attributes in place while the DOM's selectedness stays on the
+    // same element - so the visible choice silently diverges from state. The
+    // `prop:value` RenderEffect does not re-run (it tracks `slot()`, not
+    // `bot_names`), and making it track `bot_names` would not help: attributes
+    // are built before children (tachys html/element/mod.rs:352 vs :357) and a
+    // reactive prop's RenderEffect runs immediately on creation
+    // (reactive_graph effect/render_effect.rs:61-62). docs/CODING.md also
+    // forbids per-<option> `selected=`. So: gate the element on the *settled*
+    // resource, and its option list is fixed for its whole lifetime.
+    //
+    // `None` while the resource is still loading; after that the list is
+    // fixed. `bot_names` is created once per page (new_game.rs:235) and never
+    // refetched, so this transitions exactly once.
+    let bot_name_options = move || -> Option<Vec<String>> {
+        let settled = bot_names.get()?;
+        Some(match settled {
+            Ok(b) if !b.is_empty() => b,
+            _ => vec!["easy".to_string(), "medium".to_string(), "hard".to_string()],
+        })
+    };
+
+    // The single source of truth for what the difficulty select should show.
+    // Used by both `prop:value` and the post-mount effect below, so the two
+    // cannot drift.
+    let bot_name_value = move || match slot() {
+        OpponentSlot::Bot { bot_name, .. } => bot_name,
+        _ => "medium".to_string(),
+    };
+
+    // wfe F58, half 2: `prop:value` alone can never select anything on first
+    // build. The property is written during `attributes.build`
+    // (tachys html/element/mod.rs:352) BEFORE `children.build` (:357), and the
+    // reactive prop's RenderEffect runs immediately, so it targets a <select>
+    // with no <option> children - a no-op - after which the browser selects
+    // the FIRST option as the children are inserted. Effects, unlike
+    // RenderEffects created during build, run after the render pass, so by
+    // the time this body executes the element has its options. It re-runs on
+    // mount (the NodeRef is a signal) and on every later `slot()` change.
+    let bot_select = NodeRef::<leptos::html::Select>::new();
+    Effect::new(move |_| {
+        // NodeRef::get() is Option - never unwrap it (docs/CODING.md:63-65).
+        // None on SSR and before mount.
+        let Some(el) = bot_select.get() else {
+            return;
+        };
+        el.set_value(&bot_name_value());
+    });
 
     view! {
         <div class="form-field opponent-slot">
@@ -312,29 +366,19 @@ pub fn OpponentSlotEditor(
             </Show>
             <Show when=move || mode() == SlotMode::Bot>
                 <div class="form-control">
-                    <select
-                        aria-label="Bot difficulty"
-                        prop:value=move || match slot() {
-                            OpponentSlot::Bot { bot_name, .. } => bot_name,
-                            _ => "medium".to_string(),
-                        }
-                        on:change=move |ev| {
-                            let val = event_target_value(&ev);
-                            if let OpponentSlot::Bot { name, .. } = get.get_untracked() {
-                                set.run(OpponentSlot::Bot { name, bot_name: val });
+                    {move || bot_name_options().map(|names| view! {
+                        <select
+                            aria-label="Bot difficulty"
+                            node_ref=bot_select
+                            prop:value=bot_name_value
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev);
+                                if let OpponentSlot::Bot { name, .. } = get.get_untracked() {
+                                    set.run(OpponentSlot::Bot { name, bot_name: val });
+                                }
                             }
-                        }
-                    >
-                        {move || {
-                            let names = match bot_names.get() {
-                                Some(Ok(b)) if !b.is_empty() => b,
-                                _ => vec![
-                                    "easy".to_string(),
-                                    "medium".to_string(),
-                                    "hard".to_string(),
-                                ],
-                            };
-                            names
+                        >
+                            {names
                                 .into_iter()
                                 .map(|n| {
                                     let text = n.clone();
@@ -342,9 +386,9 @@ pub fn OpponentSlotEditor(
                                         <option value=n>{text}</option>
                                     }
                                 })
-                                .collect_view()
-                        }}
-                    </select>
+                                .collect_view()}
+                        </select>
+                    })}
                 </div>
             </Show>
         </div>

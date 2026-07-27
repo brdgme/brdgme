@@ -52,36 +52,79 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
     let bump_bot_action = ServerAction::<BumpBotTurns>::new();
     let force_delete_action = ServerAction::<ForceDeleteGame>::new();
 
-    // Trigger re-fetch after undo/concede. Local bump makes the own action
-    // refetch even if the WS is down; the trigger bump is still needed for
-    // the layout header.
-    Effect::new(move |_| {
-        if let Some(Ok(())) = undo_action.value().get() {
+    // Shared error slot for every mutation on this panel (wfe F52). One slot,
+    // not one per action: the prefix names the action that failed. Written
+    // only from the Effects below, so it is None during SSR and on the first
+    // hydration pass - the render site emits nothing on both sides.
+    let meta_error = RwSignal::new(None::<String>);
+
+    // Trigger re-fetch after undo/concede/end-game. Local bump makes the own
+    // action refetch even if the WS is down; the trigger bump is still needed
+    // for the layout header. On Err the shared slot is filled instead: a
+    // failed mutation produces no WS bump, so without this the page simply
+    // does not change and the user cannot tell failure from latency.
+    Effect::new(move |_| match undo_action.value().get() {
+        Some(Ok(())) => {
+            meta_error.set(None);
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
         }
+        Some(Err(e)) => meta_error.set(Some(format!(
+            "Undo failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
-    Effect::new(move |_| {
-        if let Some(Ok(())) = concede_action.value().get() {
+    Effect::new(move |_| match concede_action.value().get() {
+        Some(Ok(())) => {
+            meta_error.set(None);
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
         }
+        Some(Err(e)) => meta_error.set(Some(format!(
+            "Concede failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
-    Effect::new(move |_| {
-        if let Some(Ok(())) = end_game_action.value().get() {
+    Effect::new(move |_| match end_game_action.value().get() {
+        Some(Ok(())) => {
+            meta_error.set(None);
             trigger.set_last_update.update(|n| *n += 1);
             crate::websocket_client::bump_game_update(game_update, game_id);
         }
+        Some(Err(e)) => meta_error.set(Some(format!(
+            "End game failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
+    });
+    // No refetch on success: bumping bot turns has never triggered one and
+    // adding it is out of scope. Error reporting only.
+    Effect::new(move |_| match bump_bot_action.value().get() {
+        Some(Ok(())) => meta_error.set(None),
+        Some(Err(e)) => meta_error.set(Some(format!(
+            "Bump bot failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
 
     // Navigate away after force delete (spec D3); bump the sidebar trigger so
-    // the deleted game drops out of the active-games list.
+    // the deleted game drops out of the active-games list. On Err stay put and
+    // say so - this is the most destructive action on the page.
     let navigate_after_delete = use_navigate();
-    Effect::new(move |_| {
-        if let Some(Ok(())) = force_delete_action.value().get() {
+    Effect::new(move |_| match force_delete_action.value().get() {
+        Some(Ok(())) => {
+            meta_error.set(None);
             trigger.set_last_update.update(|n| *n += 1);
             navigate_after_delete("/", NavigateOptions::default());
         }
+        Some(Err(e)) => meta_error.set(Some(format!(
+            "Delete failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
 
     // Header "Sub menu" button state, provided by `MainLayout`. Drives the
@@ -108,6 +151,9 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                     }
                     <div class="game-actions">
                         <h3>"Actions"</h3>
+                        {move || meta_error.get().map(|e| view! {
+                            <div class="form-error">{e}</div>
+                        })}
                         <div>
                             <A href=format!("/rules/{}", version_id)>"View rules"</A>
                         </div>
@@ -123,10 +169,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                             <div>
                                 <a href="#" on:click=move |ev| {
                                     ev.prevent_default();
-                                    let confirmed = web_sys::window()
-                                        .and_then(|w| w.confirm_with_message("Are you sure you want to concede?").ok())
-                                        .unwrap_or(false);
-                                    if confirmed {
+                                    if crate::components::confirm("Are you sure you want to concede?") {
                                         concede_action.dispatch(ConcedeGame { game_id });
                                     }
                                 }>"Concede"</a>
@@ -136,10 +179,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                             <div>
                                 <a href="#" on:click=move |ev| {
                                     ev.prevent_default();
-                                    let confirmed = web_sys::window()
-                                        .and_then(|w| w.confirm_with_message("End this game?").ok())
-                                        .unwrap_or(false);
-                                    if confirmed {
+                                    if crate::components::confirm("End this game?") {
                                         end_game_action.dispatch(EndGame { game_id });
                                     }
                                 }>"End game"</a>
@@ -188,10 +228,7 @@ pub fn GameMeta(data: GameViewData) -> impl IntoView {
                             <div>
                                 <a href="#" on:click=move |ev| {
                                     ev.prevent_default();
-                                    let confirmed = web_sys::window()
-                                        .and_then(|w| w.confirm_with_message("Permanently delete this game for all players? This cannot be undone.").ok())
-                                        .unwrap_or(false);
-                                    if confirmed {
+                                    if crate::components::confirm("Permanently delete this game for all players? This cannot be undone.") {
                                         force_delete_action.dispatch(ForceDeleteGame { game_id });
                                     }
                                 }>"Delete game (admin)"</a>
@@ -307,8 +344,28 @@ fn window_key(dt: time::PrimitiveDateTime) -> i64 {
     dt.assume_utc().unix_timestamp() / 600
 }
 
-// Formats in the browser's local time zone via Date.toLocaleString, e.g. "Jul 11, 10:50 AM".
-// Only runs client-side (render_log_entries is reached via LocalResource).
+// Formats in the browser's local time zone AND the browser's own locale via
+// Date.toLocaleString, e.g. "Jul 11, 10:50 AM" (en-US) or "11 Jul, 22:50"
+// (en-GB). The locale comes from navigator.language rather than being pinned
+// to en-US (wfe F60); `hour12` is left to the locale's own convention.
+// Only runs client-side: render_log_entries is reached exclusively through
+// GameLogs/RecentGameLogs, both of which gate all output behind their
+// `mounted` signal, so neither SSR nor the first hydration pass ever calls
+// this. No hydration mismatch is possible.
+//
+// navigator.language is read through js_sys::Reflect off the JS global, not
+// through web_sys::Window::navigator(): the `Navigator` web-sys feature is
+// not enabled anywhere in this crate's dependency graph, so that method does
+// not exist here. Same technique as get_turnstile_response in app.rs.
+fn browser_locale() -> String {
+    js_sys::Reflect::get(&js_sys::global(), &"navigator".into())
+        .ok()
+        .and_then(|nav| js_sys::Reflect::get(&nav, &"language".into()).ok())
+        .and_then(|lang| lang.as_string())
+        .filter(|l| !l.is_empty())
+        .unwrap_or_else(|| "en-US".to_string())
+}
+
 fn format_log_time(window: i64) -> String {
     let date = js_sys::Date::new(&((window * 600_000) as f64).into());
     let options = js_sys::Object::new();
@@ -320,8 +377,8 @@ fn format_log_time(window: i64) -> String {
     ] {
         let _ = js_sys::Reflect::set(&options, &key.into(), &value.into());
     }
-    let _ = js_sys::Reflect::set(&options, &"hour12".into(), &true.into());
-    date.to_locale_string("en-US", &options.into()).into()
+    date.to_locale_string(&browser_locale(), &options.into())
+        .into()
 }
 
 fn render_log_entries(

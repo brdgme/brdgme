@@ -133,7 +133,23 @@ fn ColorsSection(
     });
 
     let save_action = ServerAction::<crate::auth::SetPrefColors>::new();
+    // The UI updates optimistically, so a rejected save has to be undone
+    // (wd F73). Snapshot is non-reactive: nothing should re-render on it.
+    let error = RwSignal::new(None::<String>);
+    let before_pick = StoredValue::new(Vec::<String>::new());
+    Effect::new(move |_| match save_action.value().get() {
+        Some(Ok(())) => error.set(None),
+        Some(Err(e)) => {
+            colors.set(before_pick.get_value());
+            error.set(Some(format!(
+                "Could not save your colours: {}",
+                crate::error::action_error_message(&e)
+            )));
+        }
+        None => {}
+    });
     let pick = move |i: usize, val: String| {
+        before_pick.set_value(colors.get_untracked());
         colors.update(|c| {
             if let Some(j) = c.iter().position(|x| *x == val)
                 && j != i
@@ -149,6 +165,7 @@ fn ColorsSection(
 
     view! {
         <h2>"Preferred colours"</h2>
+        {move || error.get().map(|e| view! { <div class="form-error">{e}</div> })}
         {["1st choice", "2nd choice", "3rd choice"]
             .into_iter()
             .enumerate()
@@ -201,14 +218,56 @@ fn EmailPreferencesSection(
     let invite_action = ServerAction::<crate::auth::SetEmailInviteEnabled>::new();
     let reminder_action = ServerAction::<crate::auth::SetEmailReminderEnabled>::new();
 
+    // Each toggle flips its signal before dispatching, so a rejected save has
+    // to be undone (wd F73). One shared error slot, one snapshot per toggle.
+    let error = RwSignal::new(None::<String>);
+    let before_turn = StoredValue::new(true);
+    let before_invite = StoredValue::new(true);
+    let before_reminder = StoredValue::new(true);
+    Effect::new(move |_| match turn_action.value().get() {
+        Some(Ok(())) => error.set(None),
+        Some(Err(e)) => {
+            turn.set(before_turn.get_value());
+            error.set(Some(format!(
+                "Could not save turn notifications: {}",
+                crate::error::action_error_message(&e)
+            )));
+        }
+        None => {}
+    });
+    Effect::new(move |_| match invite_action.value().get() {
+        Some(Ok(())) => error.set(None),
+        Some(Err(e)) => {
+            invite.set(before_invite.get_value());
+            error.set(Some(format!(
+                "Could not save invite notifications: {}",
+                crate::error::action_error_message(&e)
+            )));
+        }
+        None => {}
+    });
+    Effect::new(move |_| match reminder_action.value().get() {
+        Some(Ok(())) => error.set(None),
+        Some(Err(e)) => {
+            reminder.set(before_reminder.get_value());
+            error.set(Some(format!(
+                "Could not save reminder notifications: {}",
+                crate::error::action_error_message(&e)
+            )));
+        }
+        None => {}
+    });
+
     view! {
         <h2>"Email notifications"</h2>
+        {move || error.get().map(|e| view! { <div class="form-error">{e}</div> })}
         <FormField label="Turn notifications">
             <input
                 type="checkbox"
                 prop:checked=move || turn.get()
                 on:change=move |ev| {
                     let val = event_target_checked(&ev);
+                    before_turn.set_value(turn.get_untracked());
                     turn.set(val);
                     turn_action.dispatch(crate::auth::SetEmailTurnEnabled { enabled: val });
                 }
@@ -220,6 +279,7 @@ fn EmailPreferencesSection(
                 prop:checked=move || invite.get()
                 on:change=move |ev| {
                     let val = event_target_checked(&ev);
+                    before_invite.set_value(invite.get_untracked());
                     invite.set(val);
                     invite_action.dispatch(crate::auth::SetEmailInviteEnabled { enabled: val });
                 }
@@ -231,6 +291,7 @@ fn EmailPreferencesSection(
                 prop:checked=move || reminder.get()
                 on:change=move |ev| {
                     let val = event_target_checked(&ev);
+                    before_reminder.set_value(reminder.get_untracked());
                     reminder.set(val);
                     reminder_action.dispatch(crate::auth::SetEmailReminderEnabled { enabled: val });
                 }
@@ -283,7 +344,7 @@ fn EmailSection(
                     addresses.refetch();
                 }
                 Err(e) => {
-                    error.set(Some(e.to_string()));
+                    error.set(Some(crate::error::action_error_message(&e)));
                     success.set(None);
                 }
             }
@@ -299,7 +360,7 @@ fn EmailSection(
                     addresses.refetch();
                 }
                 Err(e) => {
-                    error.set(Some(e.to_string()));
+                    error.set(Some(crate::error::action_error_message(&e)));
                     success.set(None);
                 }
             }
@@ -314,7 +375,7 @@ fn EmailSection(
                     addresses.refetch();
                 }
                 Err(e) => {
-                    error.set(Some(e.to_string()));
+                    error.set(Some(crate::error::action_error_message(&e)));
                     success.set(None);
                 }
             }
@@ -329,7 +390,7 @@ fn EmailSection(
                     addresses.refetch();
                 }
                 Err(e) => {
-                    error.set(Some(e.to_string()));
+                    error.set(Some(crate::error::action_error_message(&e)));
                     success.set(None);
                 }
             }
@@ -344,7 +405,7 @@ fn EmailSection(
                     error.set(None);
                 }
                 Err(e) => {
-                    error.set(Some(e.to_string()));
+                    error.set(Some(crate::error::action_error_message(&e)));
                     success.set(None);
                 }
             }
@@ -499,6 +560,21 @@ fn ThemeSection() -> impl IntoView {
         expect_context::<LocalResource<Result<Option<crate::auth::AuthUser>, ServerFnError>>>();
     let set_theme_action = ServerAction::<crate::auth::SetTheme>::new();
 
+    // Profile sync only: `set_theme_client` in `select` below has already
+    // written <html data-theme> and the year-long `theme` cookie (app.rs
+    // :255-271), so the choice IS applied and IS persisted on this device.
+    // Do not revert it - only the account-level sync failed (wd F73,
+    // adjusted). The generic message is used deliberately: the server text
+    // adds nothing a user can act on for a background profile write.
+    let sync_error = RwSignal::new(None::<String>);
+    Effect::new(move |_| match set_theme_action.value().get() {
+        Some(Ok(())) => sync_error.set(None),
+        Some(Err(_)) => sync_error.set(Some(
+            "Theme applied on this device, but saving it to your profile failed.".to_string(),
+        )),
+        None => {}
+    });
+
     // Drives the .selected highlight; None = System. Initialized from the
     // <html data-theme> attribute on hydrate (Effects are inert during SSR,
     // so SSR renders no selection - class-only change, no structural
@@ -555,6 +631,7 @@ fn ThemeSection() -> impl IntoView {
 
     view! {
         <h2>"Theme"</h2>
+        {move || sync_error.get().map(|e| view! { <div class="form-error">{e}</div> })}
         <div class="theme-category">
             <div class="theme-tiles">
                 <div

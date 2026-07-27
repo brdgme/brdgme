@@ -369,41 +369,102 @@ pub fn FriendsPage() -> impl IntoView {
 
     let (add_name, set_add_name) = signal(String::new());
 
-    // Any successful mutation refetches the overview.
-    Effect::new(move |_| {
-        if let Some(Ok(())) = add_action.value().get() {
+    // One error slot for every mutation on this page (wd F57). The prefix
+    // names the action that failed. Written only from the Effects below, so
+    // it is None during SSR and on the first hydration pass.
+    let mutation_error = RwSignal::new(None::<String>);
+
+    // Every mutation refetches the overview on success, and reports failure
+    // into the shared slot instead of silently doing nothing (wd F57). No
+    // refetch on the failure arm: a rejected mutation returns identical data,
+    // so tachys writes nothing to the DOM and it would re-sync nothing (see
+    // the Task 2 preamble in the spec) - it would just be a wasted request.
+    Effect::new(move |_| match add_action.value().get() {
+        Some(Ok(())) => {
+            mutation_error.set(None);
             set_add_name.set(String::new());
             set_refresh.update(|n| *n += 1);
         }
+        Some(Err(e)) => mutation_error.set(Some(crate::error::action_error_message(&e))),
+        None => {}
     });
-    Effect::new(move |_| {
-        if let Some(Ok(())) = respond_action.value().get() {
+    Effect::new(move |_| match respond_action.value().get() {
+        Some(Ok(())) => {
+            mutation_error.set(None);
             set_refresh.update(|n| *n += 1);
         }
+        Some(Err(e)) => mutation_error.set(Some(format!(
+            "Could not respond to that request: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
-    Effect::new(move |_| {
-        if let Some(Ok(())) = unfriend_action.value().get() {
+    Effect::new(move |_| match unfriend_action.value().get() {
+        Some(Ok(())) => {
+            mutation_error.set(None);
             set_refresh.update(|n| *n += 1);
         }
+        Some(Err(e)) => mutation_error.set(Some(format!(
+            "Unfriend failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
-    Effect::new(move |_| {
-        if let Some(Ok(())) = unblock_action.value().get() {
+    Effect::new(move |_| match unblock_action.value().get() {
+        Some(Ok(())) => {
+            mutation_error.set(None);
             set_refresh.update(|n| *n += 1);
         }
+        Some(Err(e)) => mutation_error.set(Some(format!(
+            "Unblock failed: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
+    // wd F58: this effect was missing entirely, so after a successful policy
+    // change the client's cached `overview.invite_policy` stayed stale -
+    // unlike all five siblings, which refetch.
     Effect::new(move |_| {
-        if let Some(Ok(())) = visibility_action.value().get() {
+        match policy_action.value().get() {
+            Some(Ok(())) => {
+                mutation_error.set(None);
+                set_refresh.update(|n| *n += 1);
+            }
+            // No refetch here: see the comment at the top of this block. The
+            // select keeps showing the rejected pick until the page reloads
+            // or this component remounts (spec assumption A6 /
+            // cross-package #7) - that is a known, recorded residual.
+            Some(Err(e)) => mutation_error.set(Some(format!(
+                "Could not save the invite policy: {}",
+                crate::error::action_error_message(&e)
+            ))),
+            None => {}
+        }
+    });
+    Effect::new(move |_| match visibility_action.value().get() {
+        Some(Ok(())) => {
+            mutation_error.set(None);
             set_refresh.update(|n| *n += 1);
         }
+        Some(Err(e)) => mutation_error.set(Some(format!(
+            "Could not save the visibility setting: {}",
+            crate::error::action_error_message(&e)
+        ))),
+        None => {}
     });
 
     view! {
         <MainLayout>
             <div class="friends content-page">
                 <h1>"Friends"</h1>
+                {move || mutation_error.get().map(|e| view! {
+                    <div class="form-error">{e}</div>
+                })}
                 {move || match overview.get() {
                     None => view! { <p>"Loading..."</p> }.into_any(),
-                    Some(Err(e)) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
+                    Some(Err(e)) => view! {
+                        <p class="error">{crate::error::user_facing_server_error(&e)}</p>
+                    }.into_any(),
                     Some(Ok(o)) => view! {
                         <section class="friends-add">
                             <h2>"Add a friend"</h2>
@@ -423,9 +484,6 @@ pub fn FriendsPage() -> impl IntoView {
                                 <input type="submit" value="Send request"
                                     disabled=move || add_action.pending().get() />
                             </form>
-                            {move || add_action.value().get().and_then(|r| r.err()).map(|e| view! {
-                                <p class="error">{e.to_string()}</p>
-                            })}
                         </section>
 
                         <section class="friends-incoming">

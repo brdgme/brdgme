@@ -146,33 +146,65 @@ pub fn App() -> impl IntoView {
         });
     provide_context(current_user);
 
-    // Profile theme sync: once the current user resolves to logged-in for
-    // the first time this session, fetch their stored theme (if any) and
-    // apply it - the profile wins over whatever was showing pre-login
-    // (system default or a locally-set-but-unsaved theme). If the profile has
-    // no stored preference, instead push the local choice (if any) up to the
-    // profile, so the local choice syncs to the account and follows the user
-    // to new devices. No-ops for anonymous visitors. Runs only on hydrate
-    // (Effects are inert during SSR), so `set_theme_client`'s/`web_sys` calls
-    // are safe here.
-    let applied_profile_theme = RwSignal::new(false);
+    // Hoisted for the same reason as `active_games`/`current_user` above: the
+    // sidebar remounts on every navigation, and a local resource there
+    // refetched and blanked the "(N new)" badge each time (wfe F57).
+    // Tracking `last_update` also makes the badge live, matching
+    // `active_games`.
+    let friend_request_count: LocalResource<Result<usize, ServerFnError>> =
+        LocalResource::new(move || async move {
+            let _ = last_update.get();
+            crate::friends::get_incoming_friend_request_count().await
+        });
+    provide_context(crate::components::layout::FriendRequestCount(
+        friend_request_count,
+    ));
+
+    // Profile theme sync: once the current user resolves to logged-in, fetch
+    // their stored theme (if any) and apply it - the profile wins over
+    // whatever was showing pre-login (system default or a locally-set-but-
+    // unsaved theme). If the profile has no stored preference, instead push
+    // the local choice (if any) up to the profile, so the local choice syncs
+    // to the account and follows the user to new devices. No-ops for
+    // anonymous visitors. Runs only on hydrate (Effects are inert during
+    // SSR), so `set_theme_client`'s/`web_sys` calls are safe here.
+    //
+    // wfe F54: the latch holds the user id it ran for, and is cleared on a
+    // resolved logged-out state, so logging out and back in - as the same
+    // user or a different one - re-runs the sync. A plain bool never reset,
+    // so a second user in the same tab never got their stored theme.
+    let applied_profile_theme = RwSignal::new(None::<Uuid>);
     Effect::new(move |_| {
-        if matches!(current_user.get(), Some(Ok(Some(_)))) && !applied_profile_theme.get_untracked()
-        {
-            applied_profile_theme.set(true);
-            leptos::task::spawn_local(async move {
-                match crate::auth::get_user_theme().await {
-                    Ok(Some(theme)) => set_theme_client(Some(&theme)),
-                    Ok(None) => {
-                        if let Some(local) = local_data_theme()
-                            && crate::theme::is_known_slug(&local)
-                        {
-                            let _ = crate::auth::set_theme(Some(local)).await;
-                        }
-                    }
-                    Err(_) => {}
+        match current_user.get() {
+            // Resolved anonymous: re-arm. Guarded so an always-anonymous
+            // page does not notify on every resource change.
+            Some(Ok(None)) => {
+                if applied_profile_theme.get_untracked().is_some() {
+                    applied_profile_theme.set(None);
                 }
-            });
+            }
+            Some(Ok(Some(user))) => {
+                if applied_profile_theme.get_untracked() == Some(user.id) {
+                    return;
+                }
+                applied_profile_theme.set(Some(user.id));
+                leptos::task::spawn_local(async move {
+                    match crate::auth::get_user_theme().await {
+                        Ok(Some(theme)) => set_theme_client(Some(&theme)),
+                        Ok(None) => {
+                            if let Some(local) = local_data_theme()
+                                && crate::theme::is_known_slug(&local)
+                            {
+                                let _ = crate::auth::set_theme(Some(local)).await;
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                });
+            }
+            // Still loading, or the fetch failed: no information, leave the
+            // latch as it is.
+            None | Some(Err(_)) => {}
         }
     });
 
@@ -180,10 +212,24 @@ pub fn App() -> impl IntoView {
     // active every 5 min. No Page Visibility gating - an open page counts.
     // Runs only on hydrate (Effects are inert during SSR). The loop breaks once
     // the user is no longer logged in, so it can't outlive the session.
-    let presence_started = RwSignal::new(false);
-    Effect::new(move |_| {
-        if matches!(current_user.get(), Some(Ok(Some(_)))) && !presence_started.get_untracked() {
-            presence_started.set(true);
+    //
+    // wfe F54: same id-keyed latch as the theme sync above. With a plain bool
+    // the loop broke on logout and never respawned, so a logout -> login in
+    // the same tab reported no presence at all until a full reload. The old
+    // loop may still be sleeping when a new one starts; it exits at its next
+    // check and `ping_active` is idempotent, so the overlap is harmless.
+    let presence_started = RwSignal::new(None::<Uuid>);
+    Effect::new(move |_| match current_user.get() {
+        Some(Ok(None)) => {
+            if presence_started.get_untracked().is_some() {
+                presence_started.set(None);
+            }
+        }
+        Some(Ok(Some(user))) => {
+            if presence_started.get_untracked() == Some(user.id) {
+                return;
+            }
+            presence_started.set(Some(user.id));
             leptos::task::spawn_local(async move {
                 loop {
                     if !matches!(current_user.get_untracked(), Some(Ok(Some(_)))) {
@@ -194,6 +240,7 @@ pub fn App() -> impl IntoView {
                 }
             });
         }
+        None | Some(Err(_)) => {}
     });
 
     // Derived from the same active-games data the sidebar renders, not a
@@ -551,7 +598,10 @@ fn LoginPage() -> impl IntoView {
         confirm_action.dispatch((email_value, token));
     };
 
-    let show_code_link = move |_| {
+    // Takes the event so the anchor below can be a real, focusable
+    // `href="#"` link without the browser appending a hash (wfe F61).
+    let show_code_link = move |ev: leptos::ev::MouseEvent| {
+        ev.prevent_default();
         set_show_code_input.set(true);
     };
 
@@ -605,7 +655,7 @@ fn LoginPage() -> impl IntoView {
                             <crate::components::Spinner/>
                         </Show>
                         <div class="hasCode">
-                            <a on:click=show_code_link style="cursor:pointer">"I already have a login code"</a>
+                            <a href="#" on:click=show_code_link>"I already have a login code"</a>
                         </div>
                     </form>
                     <Show when=move || login_action.value().get().is_some_and(|r| r.is_err())>
@@ -625,7 +675,16 @@ fn LoginPage() -> impl IntoView {
             <Show when=move || show_code_input.get()>
                 <div>
                     <Show when=move || !email.get().is_empty()>
-                        <div>"Logging in as " <a on:click=move |_| set_show_code_input.set(false) style="cursor:pointer">{email.get()}</a></div>
+                        <div>
+                            "Logging in as "
+                            <a
+                                href="#"
+                                on:click=move |ev| {
+                                    ev.prevent_default();
+                                    set_show_code_input.set(false);
+                                }
+                            >{email.get()}</a>
+                        </div>
                     </Show>
                     <div>
                         <div>"A login code has been sent to your email, please enter it here"</div>
@@ -764,7 +823,12 @@ fn GamePage() -> impl IntoView {
                         {move || {
                             let base = game_data.get();
                             base.map(|res| match res {
-                        Err(e) => view! { <div class="error">"Error: " {e.to_string()}</div> }.into_any(),
+                        // Never leak the raw ServerFnError text - its Display
+                        // impl prefixes "error running server function: " and
+                        // this branch renders into the SSR HTML (wfe F55).
+                        Err(_) => view! {
+                            <div class="error">"Failed to load this game."</div>
+                        }.into_any(),
                         // game_data is stale-while-revalidate: during a game-to-game
                         // navigation refetch, .get() still returns the previous game's
                         // data. Show the loading spinner instead of the stale board.
