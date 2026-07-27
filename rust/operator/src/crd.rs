@@ -14,8 +14,7 @@ fn default_interface_version() -> i32 {
     kind = "GameVersion",
     namespaced,
     status = "GameVersionStatus",
-    printcolumn = r#"{"name":"Display Name","type":"string","jsonPath":".spec.typeName"}"#,
-    printcolumn = r#"{"name":"Players","type":"string","jsonPath":".spec.playerCounts"}"#
+    printcolumn = r#"{"name":"Display Name","type":"string","jsonPath":".spec.typeName"}"#
 )]
 pub struct GameVersionSpec {
     /// Human-readable game type name stored in game_types.name (e.g. "Acquire").
@@ -31,7 +30,7 @@ pub struct GameVersionSpec {
     #[serde(default)]
     pub is_deprecated: bool,
     /// Game interface version (1 = legacy, 2 = data docs + strategies).
-    #[serde(rename = "interfaceVersion", default = "default_interface_version")]
+    #[serde(default = "default_interface_version")]
     pub interface_version: i32,
 }
 

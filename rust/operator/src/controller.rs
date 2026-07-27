@@ -6,14 +6,19 @@ use futures::StreamExt;
 use kube::{
     Api, Client, ResourceExt,
     api::{Patch, PatchParams},
-    runtime::{Controller, controller::Action, watcher},
+    runtime::{
+        Controller,
+        controller::Action,
+        finalizer::{Event, finalizer},
+        watcher,
+    },
 };
 use serde_json::json;
 use sqlx::PgPool;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::crd::GameVersion;
+use crate::crd::{GameVersion, GameVersionStatus};
 
 const FINALIZER: &str = "brdgme.com/game-version";
 
@@ -25,6 +30,8 @@ pub enum Error {
     Sql(#[from] sqlx::Error),
     #[error("Game service error: {0}")]
     GameService(String),
+    #[error("Finalizer error: {0}")]
+    Finalizer(Box<kube::runtime::finalizer::Error<Error>>),
 }
 
 pub struct Ctx {
@@ -55,8 +62,8 @@ async fn game_service_request(
         .map_err(|e| Error::GameService(format!("{e:#}")))
 }
 
-fn interceptor_uri() -> String {
-    std::env::var("INTERCEPTOR_URI").unwrap_or_else(|_| {
+fn interceptor_uri(env: Option<String>) -> String {
+    env.unwrap_or_else(|| {
         "http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080".to_string()
     })
 }
@@ -65,45 +72,40 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
     let name = obj.name_any();
     let ns = obj.namespace().unwrap_or_else(|| "brdgme".to_string());
     let api: Api<GameVersion> = Api::namespaced(ctx.client.clone(), &ns);
+    let generation = obj.metadata.generation;
 
-    if obj.metadata.deletion_timestamp.is_some() {
-        info!(name, "Marking game version unavailable");
-        sqlx::query(
-            "UPDATE game_versions SET is_public = false, updated_at = NOW() \
-             WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2)",
-        )
-        .bind(&name)
-        .bind(&obj.spec.type_name)
-        .execute(&ctx.pool)
-        .await?;
-
-        let finalizers: Vec<String> = obj
-            .finalizers()
-            .iter()
-            .filter(|f| f.as_str() != FINALIZER)
-            .cloned()
-            .collect();
-        api.patch(
-            &name,
-            &PatchParams::default(),
-            &Patch::Merge(json!({ "metadata": { "finalizers": finalizers } })),
-        )
-        .await?;
-
-        return Ok(Action::await_change());
+    match finalizer(&api, FINALIZER, obj, |event| async {
+        match event {
+            Event::Apply(obj) => apply(obj, ctx).await,
+            Event::Cleanup(obj) => cleanup(obj, ctx).await,
+        }
+    })
+    .await
+    {
+        Ok(action) => Ok(action),
+        Err(err) => {
+            let status = GameVersionStatus {
+                ready: false,
+                message: Some(err.to_string()),
+                observed_generation: generation,
+            };
+            if let Err(e) = api
+                .patch_status(
+                    &name,
+                    &PatchParams::default(),
+                    &Patch::Merge(json!({ "status": status })),
+                )
+                .await
+            {
+                error!(name, error = %e, "Failed to patch failure status");
+            }
+            Err(Error::Finalizer(Box::new(err)))
+        }
     }
+}
 
-    if !obj.finalizers().contains(&FINALIZER.to_string()) {
-        let mut finalizers = obj.finalizers().to_vec();
-        finalizers.push(FINALIZER.to_string());
-        api.patch(
-            &name,
-            &PatchParams::default(),
-            &Patch::Merge(json!({ "metadata": { "finalizers": finalizers } })),
-        )
-        .await?;
-    }
-
+async fn apply(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
+    let name = obj.name_any();
     let generation = obj.metadata.generation;
     let observed_generation = obj.status.as_ref().and_then(|s| s.observed_generation);
     if generation.is_some() && generation == observed_generation {
@@ -111,7 +113,7 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
         return Ok(requeue_with_jitter());
     }
 
-    let uri = interceptor_uri();
+    let uri = interceptor_uri(std::env::var("INTERCEPTOR_URI").ok());
     info!(name, uri, "Upserting game version");
 
     let player_counts =
@@ -152,14 +154,35 @@ async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error
     )
     .await?;
 
+    let ns = obj.namespace().unwrap_or_else(|| "brdgme".to_string());
+    let api: Api<GameVersion> = Api::namespaced(ctx.client.clone(), &ns);
+    let status = GameVersionStatus {
+        ready: true,
+        message: None,
+        observed_generation: generation,
+    };
     api.patch_status(
         &name,
         &PatchParams::default(),
-        &Patch::Merge(json!({ "status": { "ready": true, "observedGeneration": generation } })),
+        &Patch::Merge(json!({ "status": status })),
     )
     .await?;
 
     Ok(requeue_with_jitter())
+}
+
+async fn cleanup(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
+    let name = obj.name_any();
+    info!(name, "Marking game version unavailable");
+    sqlx::query(
+        "UPDATE game_versions SET is_public = false, updated_at = NOW() \
+         WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2)",
+    )
+    .bind(&name)
+    .bind(&obj.spec.type_name)
+    .execute(&ctx.pool)
+    .await?;
+    Ok(Action::await_change())
 }
 
 // Splitting these into a params struct would be a larger refactor than warranted here.
@@ -181,16 +204,13 @@ async fn upsert_game_type_and_version(
         INSERT INTO game_types (name, player_counts, weight, blurb)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (name) DO UPDATE
-            SET player_counts = EXCLUDED.player_counts,
-                weight        = EXCLUDED.weight,
-                blurb         = EXCLUDED.blurb,
-                updated_at    = NOW()
+            SET updated_at = NOW()
         RETURNING id
         "#,
     )
     .bind(type_name)
     .bind(player_counts)
-    .bind(weight as f64)
+    .bind(weight)
     .bind(blurb)
     .fetch_one(pool)
     .await?;
@@ -216,6 +236,38 @@ async fn upsert_game_type_and_version(
     .bind(rules)
     .execute(pool)
     .await?;
+
+    if !is_deprecated {
+        sqlx::query(
+            r#"
+            UPDATE game_types
+            SET player_counts = $2,
+                weight        = $3,
+                blurb         = $4,
+                updated_at    = NOW()
+            WHERE id = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM game_versions newer
+                  WHERE newer.game_type_id = $1
+                    AND newer.is_deprecated = false
+                    AND (newer.created_at, newer.name) > (
+                        SELECT cur.created_at, cur.name
+                        FROM game_versions cur
+                        WHERE cur.game_type_id = $1
+                          AND cur.name = $5
+                    )
+              )
+            "#,
+        )
+        .bind(game_type_id)
+        .bind(player_counts)
+        .bind(weight)
+        .bind(blurb)
+        .bind(version_name)
+        .execute(pool)
+        .await?;
+    }
 
     Ok(())
 }
@@ -245,12 +297,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn interceptor_uri_defaults_to_keda_proxy() {
-        // INTERCEPTOR_URI is not set in the test environment.
+    fn interceptor_uri_fallback_and_override() {
         assert_eq!(
-            interceptor_uri(),
+            interceptor_uri(None),
             "http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080"
         );
+        assert_eq!(interceptor_uri(Some("x".to_string())), "x");
+    }
+
+    #[test]
+    fn status_and_spec_serde_shape() {
+        use crate::crd::{GameVersionSpec, GameVersionStatus};
+
+        let status = GameVersionStatus {
+            ready: true,
+            message: None,
+            observed_generation: Some(2),
+        };
+        assert_eq!(
+            serde_json::to_value(&status).unwrap(),
+            json!({"ready": true, "observedGeneration": 2})
+        );
+
+        let status_msg = GameVersionStatus {
+            ready: true,
+            message: Some("boom".to_string()),
+            observed_generation: Some(2),
+        };
+        let val = serde_json::to_value(&status_msg).unwrap();
+        assert_eq!(val["message"], json!("boom"));
+        assert_eq!(val["ready"], json!(true));
+        assert_eq!(val["observedGeneration"], json!(2));
+
+        let spec: GameVersionSpec =
+            serde_json::from_value(json!({"typeName": "X", "interfaceVersion": 2})).unwrap();
+        assert_eq!(spec.interface_version, 2);
+
+        let spec_default: GameVersionSpec =
+            serde_json::from_value(json!({"typeName": "X"})).unwrap();
+        assert_eq!(spec_default.interface_version, 1);
     }
 
     // Applies the web crate's migrations so the schema matches production.
@@ -261,7 +346,7 @@ mod tests {
             &pool,
             "Test Game",
             &[2, 3],
-            2.5,
+            2.7,
             "A test blurb.",
             "test-game-1",
             "http://localhost:0/mock",
@@ -277,7 +362,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(weight, 2.5);
+        assert_eq!(weight, 2.7f32);
         assert_eq!(blurb, "A test blurb.");
 
         // Upsert path: a second reconcile updates the existing row in place.
@@ -309,5 +394,160 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(versions, 1);
+    }
+
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn authoritative_version_wins_regardless_of_order_deprecated_first(pool: PgPool) {
+        upsert_game_type_and_version(
+            &pool,
+            "Lost Cities",
+            &[2],
+            1.0,
+            "old blurb",
+            "lost-cities-1",
+            "http://localhost:0/mock",
+            true,
+            1,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        upsert_game_type_and_version(
+            &pool,
+            "Lost Cities",
+            &[2, 3],
+            2.0,
+            "new blurb",
+            "lost-cities-2",
+            "http://localhost:0/mock",
+            false,
+            1,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        let player_counts: Vec<i32> =
+            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Lost Cities'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(player_counts, vec![2, 3]);
+        let (weight, blurb): (f32, String) =
+            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Lost Cities'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(weight, 2.0f32);
+        assert_eq!(blurb, "new blurb");
+
+        upsert_game_type_and_version(
+            &pool,
+            "Lost Cities",
+            &[2],
+            1.0,
+            "old blurb",
+            "lost-cities-1",
+            "http://localhost:0/mock",
+            true,
+            1,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        let player_counts: Vec<i32> =
+            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Lost Cities'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(player_counts, vec![2, 3]);
+        let (weight, blurb): (f32, String) =
+            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Lost Cities'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(weight, 2.0f32);
+        assert_eq!(blurb, "new blurb");
+    }
+
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn authoritative_version_wins_regardless_of_order_non_deprecated_first(pool: PgPool) {
+        upsert_game_type_and_version(
+            &pool,
+            "Lost Cities",
+            &[2, 3],
+            2.0,
+            "new blurb",
+            "lost-cities-2",
+            "http://localhost:0/mock",
+            false,
+            1,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        upsert_game_type_and_version(
+            &pool,
+            "Lost Cities",
+            &[2],
+            1.0,
+            "old blurb",
+            "lost-cities-1",
+            "http://localhost:0/mock",
+            true,
+            1,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        let player_counts: Vec<i32> =
+            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Lost Cities'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(player_counts, vec![2, 3]);
+        let (weight, blurb): (f32, String) =
+            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Lost Cities'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(weight, 2.0f32);
+        assert_eq!(blurb, "new blurb");
+    }
+
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn first_write_deprecated_only_still_writes_values(pool: PgPool) {
+        upsert_game_type_and_version(
+            &pool,
+            "Solo Game",
+            &[1],
+            0.5,
+            "solo blurb",
+            "solo-game-1",
+            "http://localhost:0/mock",
+            true,
+            1,
+            "rules text",
+        )
+        .await
+        .unwrap();
+
+        let player_counts: Vec<i32> =
+            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Solo Game'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(player_counts, vec![1]);
+        let (weight, blurb): (f32, String) =
+            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Solo Game'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(weight, 0.5f32);
+        assert_eq!(blurb, "solo blurb");
     }
 }
