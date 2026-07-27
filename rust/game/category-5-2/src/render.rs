@@ -112,12 +112,14 @@ fn render(pub_state: &PubState, hand: Option<&[Card]>) -> Vec<N> {
     out.push(render_legend());
     out.push(N::text("\n\n"));
     out.push(render_scores(pub_state));
-    let max_points = pub_state.player_points.iter().copied().max().unwrap_or(0);
-    out.push(N::text("\n\n"));
-    out.push(N::Group(vec![
-        N::Bold(vec![N::text(format!("{} points", END_SCORE - max_points))]),
-        N::text(" until the end of the game."),
-    ]));
+    if !pub_state.finished {
+        let max_points = pub_state.player_points.iter().copied().max().unwrap_or(0);
+        out.push(N::text("\n\n"));
+        out.push(N::Group(vec![
+            N::Bold(vec![N::text(format!("{} points", END_SCORE - max_points))]),
+            N::text(" until the end of the game."),
+        ]));
+    }
     out
 }
 

@@ -5,7 +5,7 @@ A 3-5 player property auction game. Two phases: buy buildings with chips, then s
 ## Setup
 
 - 30 building cards numbered 1 to 30, shuffled. (20 are used here.)
-- 30 cheques: two 0s, then 2..=20.
+- 20 cheques: two 0s, then 3..=20.
 - Each player starts with 15 chips.
 - For 3 players, two building and two cheque cards are removed.
 
@@ -28,7 +28,7 @@ When all players have played, buildings are compared highest-to-lowest: the high
 
 ## Scoring
 
-Final score = total of your cheques + your remaining chips. Highest score wins. Ties share a place.
+Final score = total of your cheques + your remaining chips. Highest score wins. Ties are broken by remaining chips.
 
 ## Commands
 

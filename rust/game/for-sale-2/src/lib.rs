@@ -40,6 +40,8 @@ pub struct Game {
     pub bidding_player: usize,
     pub bids: Vec<i32>,
     pub finished_bidding: Vec<bool>,
+    #[serde(default)]
+    pub phase: Option<Phase>,
     // Migration shim: pre-seed games get a fresh RNG on first load.
     // Remove once no pre-RNG games remain active.
     #[serde(default = "GameRng::from_entropy")]
@@ -93,7 +95,7 @@ fn cheque_deck() -> Vec<i32> {
 }
 
 impl Game {
-    pub fn current_phase(&self) -> Phase {
+    fn infer_phase(&self) -> Phase {
         if !self.building_deck.is_empty()
             || (!self.open_cards.is_empty() && self.cheque_deck.len() >= SELL_THRESHOLD)
         {
@@ -105,8 +107,14 @@ impl Game {
         }
     }
 
-    pub fn start_round(&mut self) -> Vec<Log> {
-        match self.current_phase() {
+    fn current_phase(&self) -> Phase {
+        self.phase.unwrap_or_else(|| self.infer_phase())
+    }
+
+    fn start_round(&mut self) -> Vec<Log> {
+        let phase = self.infer_phase();
+        self.phase = Some(phase);
+        match phase {
             Phase::Buying => self.start_buying_round(),
             Phase::Selling => self.start_selling_round(),
             Phase::Finished => {
@@ -115,10 +123,7 @@ impl Game {
                 for p in 0..self.players {
                     rows.push(vec![
                         (A::Left, vec![N::Player(p)]),
-                        (
-                            A::Left,
-                            vec![render::bold_num(Self::deck_value(&self.cheques[p]))],
-                        ),
+                        (A::Left, vec![render::bold_num(self.player_points(p))]),
                     ]);
                 }
                 vec![Log::public(vec![
@@ -130,7 +135,7 @@ impl Game {
         }
     }
 
-    pub fn start_buying_round(&mut self) -> Vec<Log> {
+    fn start_buying_round(&mut self) -> Vec<Log> {
         let n = self.players;
         if self.building_deck.len() < n {
             return vec![];
@@ -144,7 +149,7 @@ impl Game {
         ])]
     }
 
-    pub fn start_selling_round(&mut self) -> Vec<Log> {
+    fn start_selling_round(&mut self) -> Vec<Log> {
         let n = self.players;
         if self.cheque_deck.len() < n {
             return vec![];
@@ -156,7 +161,7 @@ impl Game {
             N::text("Drew new cheques: "),
             render::cards(&self.open_cards, false),
         ])];
-        if self.hands.first().is_some_and(|h| h.len() == 1) {
+        if self.hands.iter().all(|h| h.len() == 1) {
             for p in 0..self.players {
                 let card = self.hands[p][0];
                 if let Ok(play_logs) = self.play(p, card) {
@@ -167,18 +172,18 @@ impl Game {
         logs
     }
 
-    pub fn clear_bids(&mut self) {
+    fn clear_bids(&mut self) {
         for p in 0..self.players {
             self.bids[p] = 0;
             self.finished_bidding[p] = false;
         }
     }
 
-    pub fn deck_value(deck: &[i32]) -> i32 {
+    fn deck_value(deck: &[i32]) -> i32 {
         deck.iter().sum()
     }
 
-    pub fn whose_turn_inner(&self) -> Vec<usize> {
+    fn whose_turn_inner(&self) -> Vec<usize> {
         match self.current_phase() {
             Phase::Buying => vec![self.bidding_player],
             Phase::Selling => (0..self.players)
@@ -188,21 +193,21 @@ impl Game {
         }
     }
 
-    pub fn can_bid(&self, player: usize) -> bool {
+    fn can_bid(&self, player: usize) -> bool {
         self.current_phase() == Phase::Buying && self.bidding_player == player
     }
 
-    pub fn can_pass(&self, player: usize) -> bool {
+    fn can_pass(&self, player: usize) -> bool {
         self.can_bid(player)
     }
 
-    pub fn can_play(&self, player: usize) -> bool {
+    fn can_play(&self, player: usize) -> bool {
         self.current_phase() == Phase::Selling
             && player < self.players
             && !self.finished_bidding[player]
     }
 
-    pub fn bid(&mut self, player: usize, amount: i32) -> Result<Vec<Log>, GameError> {
+    fn bid(&mut self, player: usize, amount: i32) -> Result<Vec<Log>, GameError> {
         if !self.can_bid(player) {
             return Err(GameError::invalid_input(
                 "you are not able to bid at the moment",
@@ -231,7 +236,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn pass(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
+    fn pass(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
         if !self.can_pass(player) {
             return Err(GameError::invalid_input(
                 "you are not able to pass at the moment",
@@ -252,7 +257,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play(&mut self, player: usize, building: i32) -> Result<Vec<Log>, GameError> {
+    fn play(&mut self, player: usize, building: i32) -> Result<Vec<Log>, GameError> {
         if !self.can_play(player) {
             return Err(GameError::invalid_input(
                 "you are not able to play a building card at the moment",
@@ -286,14 +291,14 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn take_first_open_card(&mut self, player: usize) -> i32 {
+    fn take_first_open_card(&mut self, player: usize) -> i32 {
         let c = self.open_cards.remove(0);
         self.hands[player].push(c);
         self.hands[player].sort();
         c
     }
 
-    pub fn next_bidder(&mut self) -> Vec<Log> {
+    fn next_bidder(&mut self) -> Vec<Log> {
         let remaining = (0..self.players)
             .filter(|p| !self.finished_bidding[*p])
             .count();
@@ -321,7 +326,7 @@ impl Game {
         vec![]
     }
 
-    pub fn highest_bid(&self) -> (usize, i32) {
+    fn highest_bid(&self) -> (usize, i32) {
         let mut player = 0;
         let mut amount: i32 = -1;
         for p in 0..self.players {
@@ -333,18 +338,18 @@ impl Game {
         (player, amount)
     }
 
-    pub fn player_points(&self, player: usize) -> i32 {
+    fn player_points(&self, player: usize) -> i32 {
         Self::deck_value(&self.cheques[player]) + self.chips[player]
     }
 
-    pub fn placings(&self) -> Vec<usize> {
+    fn placings(&self) -> Vec<usize> {
         let metrics: Vec<Vec<i32>> = (0..self.players)
             .map(|p| vec![self.player_points(p), self.chips[p]])
             .collect();
         gen_placings(&metrics)
     }
 
-    pub fn points_int(&self) -> Vec<i32> {
+    fn points_int(&self) -> Vec<i32> {
         let finished = self.is_finished();
         (0..self.players)
             .map(|p| if finished { self.player_points(p) } else { 0 })
@@ -375,6 +380,7 @@ impl Gamer for Game {
             finished_bidding: vec![false; players],
             bidding_player: 0,
             open_cards: vec![],
+            phase: None,
             rng: GameRng::seed_from_u64(seed),
         };
         g.building_deck.shuffle(&mut g.rng);
@@ -418,10 +424,7 @@ impl Gamer for Game {
     }
 
     fn status(&self) -> Status {
-        if self.open_cards.is_empty()
-            && self.building_deck.is_empty()
-            && self.cheque_deck.is_empty()
-        {
+        if self.current_phase() == Phase::Finished {
             Status::Finished {
                 placings: self.placings(),
                 stats: vec![],
@@ -456,10 +459,10 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            chips: self.chips[player],
-            hand: self.hands[player].clone(),
-            cheques: self.cheques[player].clone(),
-            bid: self.bids[player],
+            chips: self.chips.get(player).copied().unwrap_or(0),
+            hand: self.hands.get(player).cloned().unwrap_or_default(),
+            cheques: self.cheques.get(player).cloned().unwrap_or_default(),
+            bid: self.bids.get(player).copied().unwrap_or(0),
         }
     }
 
@@ -767,6 +770,7 @@ mod test {
         g.hands[MICK] = vec![17];
         g.hands[STEVE] = vec![18];
         g.hands[BJ] = vec![16];
+        g.phase = Some(Phase::Selling);
         // Selling phase, all players can play
         assert_eq!(vec![MICK, STEVE, BJ], g.whose_turn());
         g.command(BJ, "play 16", &p).unwrap();
@@ -788,6 +792,7 @@ mod test {
         g.hands[MICK] = vec![17];
         g.hands[STEVE] = vec![18];
         g.hands[BJ] = vec![16];
+        g.phase = Some(Phase::Selling);
         // Don't have that card
         assert!(g.command(MICK, "play 99", &p).is_err());
         // After playing, can't play again
@@ -806,6 +811,7 @@ mod test {
         g.cheque_deck = vec![];
         g.open_cards = vec![];
         g.hands = vec![vec![], vec![], vec![]];
+        g.phase = Some(Phase::Finished);
         assert!(g.is_finished());
         assert!(g.command(0, "pass", &p).is_err());
         assert!(g.command(0, "bid 1", &p).is_err());
@@ -854,6 +860,7 @@ mod test {
         g.building_deck = vec![];
         g.cheque_deck = vec![];
         g.open_cards = vec![];
+        g.phase = Some(Phase::Finished);
         let pts = g.points();
         assert_eq!(19.0, pts[0]);
     }
@@ -883,6 +890,7 @@ mod test {
         g.hands[MICK] = vec![17];
         g.hands[STEVE] = vec![18];
         g.hands[BJ] = vec![16];
+        g.phase = Some(Phase::Selling);
         assert_eq!(Phase::Selling, g.current_phase());
         g.command(MICK, "play 17", &p).unwrap();
         let ps = g.pub_state();
@@ -910,6 +918,7 @@ mod test {
         g.building_deck = vec![];
         g.cheque_deck = vec![];
         g.open_cards = vec![];
+        g.phase = Some(Phase::Finished);
         let ps = g.pub_state();
         assert!(ps.finished);
     }

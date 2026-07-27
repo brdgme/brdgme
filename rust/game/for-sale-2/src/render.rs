@@ -46,7 +46,11 @@ fn highest_bid(pub_state: &PubState) -> Option<(usize, i32)> {
             best = pub_state.bids[p];
         }
     }
-    if best > 0 { Some((best_p, best)) } else { None }
+    if best >= 0 {
+        Some((best_p, best))
+    } else {
+        None
+    }
 }
 
 fn rounds_remaining_line(pub_state: &PubState) -> N {

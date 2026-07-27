@@ -1,6 +1,6 @@
 # Category 5
 
-A 2-10 player card game (also known as 6 nimmt!). Players are dealt a hand of 10 cards numbered 1 to 104. Each round, everyone picks a card to play simultaneously. Cards are resolved from lowest to highest: each card goes into the row whose ending card is the highest below it. If a card is lower than every row's ending card, the player must choose a row to take. Taking a row scores its bullheads. When a row reaches 5 cards, the next card played into it takes the whole row. The game ends when someone reaches 66 bullheads; the player with the fewest bullheads wins.
+A 2-8 player card game (also known as 6 nimmt!). Players are dealt a hand of 10 cards numbered 1 to 104. Each round, everyone picks a card to play simultaneously. Cards are resolved from lowest to highest: each card goes into the row whose ending card is the highest below it. If a card is lower than every row's ending card, the player must choose a row to take. Taking a row scores its bullheads. When a row reaches 5 cards, the next card played into it takes the whole row. The game ends when someone reaches 66 bullheads; the player with the fewest bullheads wins.
 
 ## Card Bullheads
 

@@ -225,6 +225,7 @@ impl Game {
             self.plays[lowest_player] = None;
         }
         self.resolving = false;
+        // All hands have equal size by construction (dealt simultaneously each round).
         match self.hands[0].len() {
             0 => logs.extend(self.end_round()),
             1 => {
@@ -268,6 +269,11 @@ impl Game {
     }
 
     pub fn draw_cards(&mut self, n: usize) -> Vec<Card> {
+        if self.deck.len() + self.discard.len() < n {
+            let mut cards: Vec<Card> = self.deck.drain(..).collect();
+            cards.append(&mut self.discard);
+            return cards;
+        }
         if self.deck.len() >= n {
             self.deck.drain(..n).collect()
         } else {
@@ -534,6 +540,7 @@ impl Gamer for Game {
         self.command_parser(player).map(|cp| cp.to_spec())
     }
 
+    /// Returns raw bullhead totals (lower is better). ELO ratings use placings, not these values.
     fn points(&self) -> Vec<f32> {
         self.player_points.iter().map(|&p| p as f32).collect()
     }
@@ -649,7 +656,7 @@ mod test {
         assert_eq!(1, Card(7).heads());
         assert_eq!(1, Card(104).heads());
         // 55 is a multiple of 11 and 5; 7 wins. 50 is a multiple of 10 and 5;
-        // 10 wins (3 bulls). 11 is a multiple of 1 only; 5 wins.
+        // 10 wins (3 bulls). 11 is a multiple of 11 only; 5 wins.
     }
 
     #[test]
