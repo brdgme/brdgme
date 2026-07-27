@@ -2,63 +2,86 @@
 
 Tree started clean at 37118d3. 13 pre-landed: WP-01, 03, 06, 13, 14, 15, 21, 25, 36, 37, 39, 41, 44.
 
+## PROCESS (current)
+Commit after each package (one commit per package, message names the WP id, stage only intended paths). Push DEFERRED to the very end - do not push. Everything up to and including WP-23 is COMMITTED (see ~/Development/brdgme-commit-plan.md for SHAs). Safety ref: branch `pre-catchup-backup`.
+
 ## Landed this session
 | WP | Commit | Notes |
 |---|---|---|
 | WP-82 | 4d31f6e | db.rs module split. Pure move. All verification green. |
 | WP-56 (partial) | da1ea24 | Tasks 1,3,4,5,6 landed. Task 2 (SPF/DKIM) PARKED - see below. Migration used: 023. Follow-up details in Lead report: touches email/inbound.rs + resend_webhook. |
+| WP-56 Task 2 | 4ca73ec | SPF/DKIM inbound auth classification COMPLETE - WP-56 now fully landed. AuthVerdict + classify_inbound_auth (topmost Authentication-Results, amazonses.com only, lenient Fail rule), gate after per-handler token/From lookup (Path 2, user-ruled), InboundText gained AuthFailed arm. 8 unit tests; 4 integration tests unchanged + green. |
 | WP-59 | f56ff37 | 12 tasks. Dropped dead: Task 10, Task 11 delete_login_confirmation (WP-56), Task 14 (WP-85 deferred per D-15). classify_server_fn_error exists (private in email/commands.rs - WP-40 may need pub(crate)). fetch_inbound_text(state, email_id) -> Option<String> ready for WP-57 widening. Unsubscribe untouched for WP-58. |
+| WP-28 | ed88fab | lost-cities-1/-2 e F17 F19 F20 F23 F24 F26 F27 F37 F38 F41 F42 F43 F44 (6 files + 2 k8s blurbs). Task 3 kept the deliberate self.hands[player] panic. Surfaced, NOT fixed: player_counts/blurb last-writer-wins across same-typeName versions (routed to WP-62); LC1 command() flattens parser errors vs LC2; LC1 score() hardcodes 20/8; duplicate who-won via placings_log + game_over_log. |
+| WP-19 | 07ad476 | acquire-1 c F7 F8 F9 F10 F16 F17 F18 F19 F20 F21; c F11/Task 5 DROPPED (WP-81 deleted stats.rs). 10 new tests. |
+| WP-76 | bc05116 | notify_game_emails wired into dispatch_email_command's game-move arm (email/commands.rs, +11/-1). Email-originated moves now notify other players. Item 2 (game-start paths) parked for user - see below. No test added: no notify spy infra in commands.rs harness. |
+| WP-60 | e5513ec | wfe F44-F51+F63: atomic UPDATE..RETURNING ensure_email_token (+_tx), metric after send + game_emails_failed_total, mrml/render_block warn-on-fallback, escape_html_attr on hrefs, parse_duration moved outbound->sweep, SliceRandom shuffle in theme.rs, js_string_escape <-escape in app.rs. |
+| WP-52 | f374434 | wd F21 F46-F53 F55 F62 F74 F75: batched ANY() hide-add-friend, page clamps, INITIAL_RATING const, nullable game_type_name filter, anon-endpoint caps (100/200/50), ELIGIBILITY_PREDICATE doc-const, LATERAL join collapse, try_join! concurrency, .take(20) friend bound. .sqlx cache: 82 stale removed + 4 updated. NULLS LAST dead-SQL item not touched (query not rewritten). |
+| WP-53 | 3610b95 | wd F6 F19 F20 F22 F23 F24 F25 F54 F61 F65 F77 F78 fixed; wd F18 DROPPED (resolved by WP-79); wd F56 DROPPED (WP-41-owned ws F39 dupe). is_eliminated CASE guard, restart membership check, block_user existence check, percent-encoding, viz viewBox consts. |
+| WP-50 | 33f22f1 | Email canonicalization per D-09: auth/email_addr.rs canonicalize_email (trim+lowercase), 6 server fns + invites + client forms canonicalize at boundary, migration 026 (delete login_confirmations, abort on case-dups, lower+btrim, unique index on lower(email)). 9 new tests. |
+| WP-48 | 7092294 | wd F7 F10 F11 F12 F13 per D-07 (admin-only full bundle, no redacted export): export doc rewritten, placeholder_user unique-violation retry, BundlePlayer.bot_name doc, import preserves created_at/updated_at + turn timestamps. .sqlx 6 files updated. |
+| WP-61 | 4f5f6d4 | bo F4 F6 F7 F9 F10 F11 F12 F13 F14 F15 F16 + dp F7: RFC 7396 merge_patch, is_me flag not name equality, trace both prompts, try_get nullable cols, LoadedKey enum, aes-gcm generate_nonce (getrandom dep REMOVED - dp F7 resolved), markup AST player resolve, current()/fail_over() rename, LazyLock template env, time dep dropped. D-17 cargo update: kube 4.0->4.2 etc. |
+| WP-62 | e682f6b | bo F18-F25 + N-3 item: kube finalizer() helper (hand-built finalizer patches deleted), game_types newest-non-deprecated-wins guard on player_counts/weight/blurb, typed GameVersionStatus patches, f32 weight, v1_36 k8s-openapi pin (confirmed exists in 0.28.0; spec not amended), printcolumn removed, interceptor_uri env param. 6 operator tests. |
+| WP-63 | d2decf8 | bo F26-F31 + dp F20: hang-forever fixed (drop step_tx, match recv, final tally on channel close), Instant timing, available_parallelism (num_cpus+hermit-abi REMOVED from lock), Arc without Mutex, let-else command_spec, send without unwrap. ls F41 deferred-half ruled out per spec. 2 regression tests. |
+| WP-48 follow-up | 5e9bae2 | De-flake import_bundle_preserves_timestamps (test-only: override created_at on ALL bundle logs; random UUID tiebreak made read-back a coin-flip). Orchestrator-authorized out-of-scope fix; gate now deterministic (20/20 + full gate 598 green). |
+| WP-08 | f13450a | Epilogue dedup 11 crates: a F6, b F11, b F22, b F33, c F6, d F21, d F33, e F1, e F13, e F14 (amplification gate), f F7, f F35. Hoisted epilogue + !was_finished transition gate; can_undo preserved; byte-identical except e F14 by design. |
+| WP-08b | c14bc65 | Spec riders: acquire-1 (.map collapse, 9 arms unchanged) + starship-catan-1 (finish_epilogue helper, deliberate 5->17-arm coverage widening per spec). 2 regression tests. |
+| WP-27 | eb49cec | e F5-F8 (love-letter: check_finished parser+cmd guard, baron no-op removal, play_* crate-private; e F7 already documented in PORTING_NOTES) + e F11 F12 F15 F16 (age-of-war: BTreeSet completed_lines, NotYourTurn kind, clan_conquered_data helper, die/reroll wording). |
+| WP-24 | 6605315 | d F26-F32 sushi-go-2: F26 doc-only RULES.md pudding tiebreak sentence (no official-rule claim), vacuous test deleted, exhaustive draw_count match (player_draw_counts dead table removed), 2p pudding hint, maki 2nd-place cap dropped (score byte-identical), shared render_name helper, dummy guard reorder. |
+| WP-18 | 84b68b9 | c F1 F3 F4 F5 texas-holdem-2: raise_parser min_raise() fix + test, bet_up_to expect documented (Go parity), panic sites commented, Category Default-derive replacing Option<Category>. c F2 NOT touched (WP-20 parked). |
+| WP-31 | f16cb02 | f F3 F5 F6 F8 F10 F11 F12: zombie-dice roll_off_players in PubState (+render+DATA_DOCS), roll_inner extraction (no recursion), full-equality rolloff guard; battleship shoot bounds check, ship expect->internal error, Direction::all() &'static slice, usize hits remaining. |
+| WP-32 | 807ab4e | f F16 F17 F18 F20 F22 F23 F24 F25 F27 F28 F30 F31: for-sale RULES.md cheque/tie fixes, player_points in Finished log, Option<Phase> serde migration (infer_phase fallback), all-hands empty guard, render sentinel align, 19 methods privatized; category-5 RULES.md 2-10->2-8, draw_cards guard, footer finished-gate, points() label-only, comment fixes. |
 
 ## Planned sequence (from EXECUTION-README s2, constraints applied)
 1. ~~WP-56~~ done (partial; Task 2 parked)
 2. ~~WP-59~~ done
-3. WP-40  <- NEXT (WP-59 now landed; classify_server_fn_error may need visibility bump)
-4. WP-45
-5. WP-79 (no spec; after WP-40+WP-45)
-6. WP-64
-7. WP-68
-8. WP-38
-9. WP-46
-10. WP-57 (after WP-59)
-11. WP-47
-12. WP-42 (predicate work ONLY; D-44 SSE, D-45 no id:, D-48/49 two streams)
-13. WP-84 (end of realtime chain)
-14. WP-34 (migr: re-ls)
-15. WP-35
-16. WP-49
-17. WP-07
-18. WP-83 (parity carve-outs a F1, b F7, e F30 seat-order; independent)
-19. WP-09a (fold in WP-80; D-36 before bulk of Phase 3; do NOT fix WP-28's deliberate panic)
-20. WP-09b
-21. WP-81 (before WP-19; D-40)
-22. WP-22
-23. WP-23
-24. WP-28 (leave self.hands[player] panic in Task 3)
-25. WP-19 (drop c F11 / Task 5 per WP-81)
-26. WP-10 (N-2)
-27. WP-02
-28. WP-58 (migr: re-ls; after WP-59+WP-56 - both satisfied)
-29. WP-17 (D-25: only 3 of 8 findings gated; lib/cost must gain tests)
-30. WP-29 (only if its own spec satisfies the WP-30 ordering note)
-31. WP-54
-32. WP-55 (rebase onto WP-54's arm, keep WP-37's "/" bounce)
-33. WP-51
-34. WP-76 (no spec; after WP-51 Task 1; 5-line change; NOT into WP-59/WP-40)
-35. WP-60
-36. WP-52
-37. WP-53
-38. WP-50 (migr: re-ls)
-39. WP-48
-40. WP-61
-41. WP-62 (bo F25: confirm k8s-openapi feature flag at fix time)
-42. WP-63
-43. WP-08
-44. WP-27
-45. WP-24
-46. WP-18
-47. WP-31
-48. WP-32
-49. WP-33
+3. ~~WP-40~~ done (9ba3736; ActingPlayer/concede_core/undo_core pub(crate) in game/server_fns.rs; GameAlreadyFinished pub in db/game_write.rs)
+4. ~~WP-45~~ done (c1c1d20; minus restart_core re-resolution - PARKED, see below. validate_bot_slots at crate::db::validate_bot_slots)
+5. ~~WP-79~~ done (91c723d; create_game_from_service split into fetch/insert; FetchedGame struct)
+6. ~~WP-64~~ done (4fb252d; workspace deps/package/lints hoisted; sqlx+getrandom NOT hoisted - WP-66 owns unification; incompatible upgrades deferred to WP-66)
+7. ~~WP-68~~ done (618156a; term_size->terminal_size 0.4, dropped RUSTSEC-2020-0163 ignore)
+8. ~~WP-38~~ done (914aa0c; spawn_periodic_sweeps gained jetstream param; admin guard test at 16; handover doc planning/wp38-handover.md)
+9. ~~WP-46~~ done (69bcd1e; tx-aware send_reminder, ReminderOutcome; handover planning/wp46-handover.md)
+10. ~~WP-57~~ done (STAGED, patch WP-57.patch; InboundText three-state, RouteOutcome, mark-after-Done, 5xx-on-Retry; fetch_inbound_text now private -> InboundText)
+11. ~~WP-47~~ done (STAGED, WP-47.patch; is_game_visible_to_viewer, visible_user_ids, stats anonymization)
+12. ~~WP-42~~ done (STAGED, WP-42.patch; is_proposal_visible_to_user + VisibilityCache 30s TTL in visibility_cache.rs; WS work skipped per D-44)
+13. ~~WP-84~~ done (STAGED, WP-84.patch; two SSE streams, WS deleted incl ws_tasks after shutdown test passed; NOTE: patch includes WP-42's lib.rs line - overlap documented in plan; Cloudflare edge idle for SSE UNKNOWN - flagged in parked items)
+14. ~~WP-34~~ done (STAGED, WP-34.patch; migration used 024; verify_turnstile_token now takes &reqwest::Client)
+15. ~~WP-35~~ done (STAGED, WP-35.patch; crypto MissingKey gate, Turnstile startup check, logout_everywhere, revoke-all-sessions per D-14)
+16. ~~WP-49~~ done (STAGED, WP-49.patch; rules version ordering, is_public/is_deprecated filters, D-6 auth gate removed; ssr_pages.rs patch includes WP-47 hunk - noted)
+17. ~~WP-07~~ done (STAGED, WP-07.patch; GameClientError enum, 90s timeout, DNS-label version validation, rand_bot panic-free, chrono deleted)
+18. ~~WP-83~~ done (STAGED, WP-83.patch; a F1 rtta-2 phase guard, b F7 7wonders board grouping, e F30 red7 leader 3-part key)
+19. ~~WP-09a~~ done (STAGED, WP-09a.patch; Gamer::validate() default + check_player boundary in gamer.rs; acquire-1 + sushizock-2 fixes; WP-80 folded: validate() hook is the mechanism, per-crate halves in WP-09b)
+20. ~~WP-09b~~ done (STAGED, WP-09b.patch; validate() in 14 crates + Tier 2 guards; f F46 ttt-2 completes WP-80 fold; red7-1 patch includes WP-83 hunk)
+21. ~~WP-81~~ done (STAGED, WP-81.patch; acquire-1 stats.rs deleted, lost-cities-1/-2 Stats trimmed)
+22. ~~WP-22~~ done (STAGED, WP-22.patch; lords-of-vegas-1 d F1-F11; NOTE: RULES.md color-name corrections per spec d F11 with rationale note)
+23. ~~WP-23~~ done (a692b63; jaipur-2 d F14-F22; RULES.md written per spec d F17)
+24. ~~WP-28~~ done (ed88fab; lost-cities-1/-2 shared fixes)
+25. ~~WP-19~~ done (07ad476; acquire-1 c F7-F21 minus c F11 dropped per WP-81)
+26. ~~WP-10~~ done (90dae6d; f F1 zombie-dice-2 cup_counts per N-2, f F13 for-sale-2 bid redaction, starship-catan-1 Sensor peek scoping)
+27. ~~WP-02~~ done (91f2682; markup robustness ls F2-F11, D-37 {{lbrace}}, D-38 no depth guard)
+28. ~~WP-58~~ done (390dd3b; RFC 8058 one-click unsubscribe, wfe F3+F25, migration 025)
+29. WP-17 (D-25: only 3 of 8 findings gated; lib/cost must gain tests)  <- NEXT
+30. ~~WP-29~~ done PARTIAL (071ace6; e F33 F35 F34 F32 landed. Task 4 / e F31 DATA_DOCS.md PARKED - see below)
+31. ~~WP-54~~ done (fddc42d; frontend UX error handling, 17 findings + riders; Turnstile block left byte-identical for WP-55)
+32. ~~WP-55~~ done (f0a468b; hard navigation for /login, D-16)
+33. ~~WP-51~~ done (dcd8844; invite-mailer/notify dedup wd F8 F32 F33 F34 + wfe F36 F38 F39 F41 F42 F43. Task 3 full dedup NOT done - would regress WP-46; threading bug fixed directly. execute_command now returns pre-command GameExtended - WP-76 UNBLOCKED)
+34. ~~WP-76~~ done (bc05116; email-originated moves now call notify_game_emails with pre-command snapshot; item 2 parked)
+35. ~~WP-60~~ done (e5513ec)
+36. ~~WP-52~~ done (f374434)
+37. ~~WP-53~~ done (3610b95)
+38. ~~WP-50~~ done (33f22f1; migration 026)
+39. ~~WP-48~~ done (7092294)
+40. ~~WP-61~~ done (4f5f6d4)
+41. ~~WP-62~~ done (e682f6b; v1_36 pin confirmed; N-3 guard landed)
+42. ~~WP-63~~ done (d2decf8 + 5e9bae2 WP-48 de-flake follow-up)
+43. ~~WP-08~~ done (f13450a + c14bc65 WP-08b riders)
+44. ~~WP-27~~ done (eb49cec)
+45. ~~WP-24~~ done (6605315)
+46. ~~WP-18~~ done (84b68b9)
+47. ~~WP-31~~ done (f16cb02)
+48. ~~WP-32~~ done (807ab4e)
+49. WP-33  <- NEXT (paused here 2026-07-28 for user review; HEAD 807ab4e)
 50. WP-04
 51. WP-05
 52. WP-43
@@ -71,8 +94,33 @@ Tree started clean at 37118d3. 13 pre-landed: WP-01, 03, 06, 13, 14, 15, 21, 25,
 59. WP-72 (content lives in WP-69 spec; D-24: accept combine 4.6 in deny.toml)
 60. WP-65
 61. WP-69 LAST (D-23: flip multiple-versions to deny only after 66/67/68)
-62. Phase 7 WP-74, WP-75: EFFECTIVELY BLOCKED (WP-30 parked) - do not force; report to user
+62. Phase 7 WP-74, WP-75: SKIPPED per user ruling 2026-07-28 (P4) - queued behind parked WP-30
 63. Tier 3 checklists T3-B1..B8
+
+## USER RULINGS 2026-07-28 (binding, from decision review of this session's landings)
+- A1 RATIFIED: WP-48 de-flake commit 5e9bae2 kept.
+- A2 RATIFIED: WP-08b c14bc65 kept. POLICY (new, binding): do not modify/update deprecated game crates unless unavoidable (e.g. trait/API change). acquire-1/starship-catan-1 are NOT deprecated so WP-08b stands. Deprecated = 18 crates with isDeprecated:true manifests (all -1s with -2 successors). lost-cities-1 (WP-28, prior session) was explicitly in scope (deprecated but serving live games).
+- A3 RATIFIED: love-letter-2 post-finish guard kept; age-of-war-2 quirk preserved.
+- A4 RATIFIED: all three RULES.md edits (sushi-go-2, for-sale-2, category-5-2).
+- A5 RATIFIED: WP-52 caps (100/200/50/20).
+- A6 RATIFIED: zombie-dice-2 PubState roll_off_players.
+- A7 RATIFIED (kept): for-sale-2 phase: Option<Phase>. POLICY (new, binding): NO breaking changes to stored game state shapes going forward. For a breaking shape change, release a NEW game version (-2 -> -3) and do it cleanly there, rather than Option-field/backward-compat workarounds in the live crate.
+
+## USER RULINGS 2026-07-28 on parked items (P1-P7)
+- P1 (WP-29 Task 4 / e F31 DATA_DOCS.md): DEFER entirely to WP-30 (parked). Do NOT do the minimal (c) fix. red7-1 DATA_DOCS.md stays as-is until the rules review.
+- P2 (WP-58 wording): DROP the word `rules` from the standalone rejection/help string. NEW follow-up task T-a (small, email/commands.rs string edit per WP-58 spec location).
+- P3 (D-47 empirical SSE test): USER will run it himself AFTER deployment (not currently deployed): hold `curl -N https://brdg.me/events/public` open >120s, confirm 15s keepalives. Stays recorded as user-owned post-deploy item; not a session task.
+- P4 (Phase 7 WP-74/75): SKIP entirely this run; stays queued behind parked WP-30. Do not force.
+- P5 (WP-51 item 2, game-start notify): WIRE ALL THREE game-start paths (proposals.rs solo-vs-bots creation, start_proposal all-accept, inbound.rs invite-accept-by-email) with notify_game_emails after broadcast_and_trigger. NEW work item T-b. Pattern: the email `new`/`restart` paths (email/commands.rs run_new ~:427, restart ~:1120) and server_fns.rs:1226 already notify after creating a game - mirror them.
+- P6 (rust-test.sh container leak): FIX NOW. NEW task T-c: scripts/rust-test.sh ends with `exec rust-ci-commands.sh` which replaces the shell so `trap cleanup EXIT` never fires; drop the exec or explicitly rm the brdgme-test-{pg,nats}-* containers before exec'ing. Own commit. Do this FIRST in the resumed session - every later gate run benefits.
+- P7 (web tiebreak): ALIGN web `find_latest_non_deprecated_game_version` (rust/web/src/db/game_types.rs) with the operator guard: ORDER BY created_at DESC, name DESC. NEW task T-d (one-line + .sqlx regen if compile-checked).
+
+## NEW TASK QUEUE for resumed session (in order, before continuing the WP sequence)
+1. T-c: fix rust-test.sh container leak (P6). Own commit, e.g. `fix(scripts): clean up test containers on exit`.
+2. T-a: drop `rules` from standalone rejection string (P2). Own commit, e.g. `fix(web): WP-58 follow-up - drop standalone rules from help text`.
+3. T-d: web game_types name tiebreak (P7). Own commit, e.g. `fix(web): align latest-version pick with operator tiebreak`.
+4. T-b: wire notify_game_emails at 3 game-start paths (P5). Own commit, e.g. `feat(web): notify on game start paths`. Mirror run_new/restart notify shape; before=None (new game, first-turn notification).
+Then resume the WP sequence at WP-33.
 
 ## Parked / skip
 - WP-11, 12, 16, 20, 26, 30 (BLOCKED-ON-USER-RULES-REVIEW)
@@ -85,5 +133,30 @@ Tree started clean at 37118d3. 13 pre-landed: WP-01, 03, 06, 13, 14, 15, 21, 25,
 Highest on disk at start: 022. WP-34, WP-50, WP-56, WP-58 all add migrations.
 First to land gets 023; rest renumber. Re-ls rust/web/migrations/ immediately before writing.
 
+## Decisions made on user's behalf (unsupervised window from 2026-07-27; user to review)
+- WP-58 Lead decisions (all minor, recorded in its report): migration 025 (spec said 022); spec shorthand `set_turn_emails_enabled` -> real `set_user_turn_emails_enabled`; new db helper placed in db/users.rs (WP-82 split); None user_id -> no unsubscribe token in bulk mail; restored `updated_at = NOW()` in helper SQL for spec fidelity; added private html_escape for the GET confirm page; UnsubscribeQuery made pub (E0446); skipped an unobservable "assert absent" test on private send_rules_reply_response (grep-verified deletion instead).
+- OPEN QUESTION parked from WP-58 (wording-only, needs user call): the standalone-path rejection string now lists `rules` per the spec's explicit instruction, but standalone `rules` is not actually wired (only in-game via run_rules). Either wire standalone rules or drop the word from the help text. Not blocking anything.
+- WP-51 Lead decisions: Task 3 full dedup of sweep's send_reminder NOT done (would regress WP-46's ReminderOutcome/D-11 gating/tx tokens/unsubscribe wiring - threading bug wfe F39 fixed directly in sweep.rs instead, notify-side infra added); #[allow(clippy::too_many_arguments)] on send_one_loaded (8 args); spawn_bot_turn_sweep (WP-38's 6th spawn) included in the Task 4 dedup.
+- WP-60 Lead decisions: wfe F49 chose attribute-escaping (escape_html_attr on hrefs) over documenting the trusted-URL precondition; wfe F51 used rand SliceRandom (compiler-confirmed correct trait for Vec::shuffle in rand 0.10.2).
+- WP-52 Lead decisions: F50 documented-const (not format! interpolation - SQLX_OFFLINE checked-in cache); F53 kept runtime query_as with rationale comments; F49 caps 100 finished_games / 200 rating_series / 50 head_to_head; F74 index friend bound 20 (name-ordered, stable truncation); F75 futures_util::try_join_all (only futures-util in tree); .sqlx cache hygiene (82 stale removed, 4 updated).
+- WP-53 Lead decisions: wd F25 used existing is_player_in_game EXISTS helper (smaller diff, equivalent); wd F61 no integration test (server fns need full Leptos context; db layer already tested); wd F65 pinned percent-encoding 2.3.2 matching Cargo.lock.
+- WP-50 Lead decisions: migration 026 (spec said 023, taken); new_game.rs empty-email error string mirrors adjacent Player arm; migration tests placed in db/emails.rs mod tests; regression tests adapted to callable harness units (confirm_login test inlines boundary canonicalize - server fns need session context harness lacks); create_proposal empty-email rejection has no direct test (harness limits), indirect coverage only.
+- WP-48 Lead decisions: ssr_pages content-disposition check as second inline request (pool cloned) rather than modifying shared get helper. SURFACED (not fixed, infra bug): scripts/rust-test.sh leaks its own containers - `exec rust-ci-commands.sh` replaces the shell so `trap cleanup EXIT` never fires; this is the source of the recurring "port already allocated" failures. Candidate backlog item.
+- WP-61 Lead decisions: bo F13 used brdgme_markup AST walk (already a declared dep) over raw string replacement; bo F13 test changed {{fg rgb(255,0,0)}} to {{fg red}} (parser normalizes rgb() to foreground, breaks round-trip); bo F12 aes-gcm 0.10.3 default features already include getrandom - no explicit flag needed. D-17 cargo update committed (kube 4.0->4.2, cc, libc, jiff; 148+/145- in Cargo.lock).
+- WP-62 Lead decisions: operator N-3 guard orders (created_at, name) DESC per spec's explicit SQL while web's find_latest_non_deprecated_game_version has NO name tiebreak (SURFACED, not fixed - theoretical divergence on equal-created_at tie, effectively impossible); finalizer Error boxed (recursive through type param). bo F25: v1_36 exists in k8s-openapi 0.28.0, latest already resolved to it; spec NOT amended (flag matched).
+- WP-63 Lead decisions: derive(Debug) on private CommandResponse (test unwrap_err); F31 optional test added; no fresh cargo update. ls F41 deferred half RULED OUT per WP-63 spec s4 (commands() private, returns BotCommand wrapper; spec_to_command already shared).
+- ORCHESTRATOR decision (2026-07-28): authorized out-of-scope TEST-ONLY fix to WP-48's flaky import_bundle_preserves_timestamps as separate commit 5e9bae2 - the flake (random uuid_generate_v4 tiebreak on identical logged_at) would have poisoned every remaining package's gate at ~50%. WP-63 Lead had recommended retry-first; judged the deterministic fix clearly correct and cheaper long-term. Recorded for user review.
+- ORCHESTRATOR decision (2026-07-28): WP-08 spec riders table routed acquire-1 + starship-catan-1 into WP-08 beyond work-packages.md's 11-crate path list; executed as WP-08b (c14bc65) since the spec is the task detail and the shape was proven. Recorded for user review.
+- WP-27 Lead decisions: e F5 assessed defence-in-depth not rules adjudication (GameError::Finished + parser None); e F8 chose crate-private play_* over error-when-absent (no behaviour change); e F15 helper named clan_conquered_data pub(crate).
+- WP-32 Lead decisions: F18 phase: Option<Phase> field placement + 6 tests set g.phase explicitly; F22 best >= 0 sentinel align; F24 RULES.md-only (no MAX_PLAYERS change); F25 guard drains available cards instead of panicking.
+- (none else yet)
+
 ## Needs user input (parked items)
-- **WP-56 Task 2 (SPF/DKIM inbound auth classification):** Resend's `email.received` webhook carries NO auth verdict field; verdicts only exist as raw headers in the already-fetched raw MIME. Spec mandates STOP before writing a fallback. NEED: the trusted authserv-id / matching rule for identifying Resend's receiving-MTA `Authentication-Results` header as topmost-trusted (a sender can inject lower ones). Once ruled, implement `classify_inbound_auth` gating in `resend_webhook` after body fetch (spec Task 2). Also note Phase 7 (WP-74/75) is effectively blocked by parked WP-30 - needs a call at the end.
+- ~~**WP-56 Task 2 (SPF/DKIM inbound auth classification):**~~ LANDED 2026-07-27 (4ca73ec). Rulings applied: no verdict field in webhook (Resend docs confirmed); trust ONLY topmost `Authentication-Results` with authserv-id `amazonses.com` (empirically confirmed from real raw sample); lenient Fail rule (dmarc=fail OR spf+dkim both fail) per user; placement Path 2 per user (gate after select_route + token/From lookup, before body processing - identical security, preserves junk short-circuit + committed WP-57 tests). Resend offers NO server-side inbound auth filtering (docs confirmed). Item closed.
+- ~~**WP-45 restart_core bot re-resolution (D-08):**~~ RESOLVED by user 2026-07-27: no code change. Bots are manually managed by admins; an orphaned game bot reference correctly resolves once a new bot is created with the same name. Restart keeps pre-existing behavior; this is the intended design, not a gap. Item closed.
+- ~~**WP-29 Task 4 (e F31, DATA_DOCS.md):**~~ RULED 2026-07-28 (P1): DEFER entirely to WP-30. No minimal fix. red7-1 DATA_DOCS.md untouched until the rules review.
+- ~~**WP-58 wording (`rules` in standalone rejection string):**~~ RULED 2026-07-28 (P2): drop the word. Now task T-a.
+- ~~**WP-51 item 2 (game-start paths never notify):**~~ RULED 2026-07-28 (P5): wire all three. Now task T-b.
+- ~~**Phase 7 (WP-74/75):**~~ RULED 2026-07-28 (P4): SKIP this run; queued behind parked WP-30.
+- **D-47 verification gap (WP-84):** ANSWERED from infra/cloudflare.tf (2026-07-27): zone FREE plan, edge idle not configurable, no edge rules on /events*, 15s keepalive << ~100s timeout. RESIDUAL: empirical SSE test - USER-owned, to run AFTER next deploy (P3, 2026-07-28): `curl -N https://brdg.me/events/public` held >120s, confirm keepalives.
+- **RULES.md edits confirmed:** user approved (2026-07-27) WP-22 and WP-23; (2026-07-28, A4) WP-24 sushi-go-2, WP-32 for-sale-2 + category-5-2.
