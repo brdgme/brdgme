@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,7 @@ pub struct Game {
 
     pub currently_attacking: Option<usize>,
     /// Line indices completed on the currently-attacked castle this turn.
-    pub completed_lines: HashSet<usize>,
+    pub completed_lines: BTreeSet<usize>,
     pub current_roll: Vec<Die>,
 
     // Migration shim: pre-seed games get a fresh RNG on first load.
@@ -71,6 +71,32 @@ pub struct PlayerState {
     pub player: usize,
 }
 
+pub(crate) fn clan_conquered_data(
+    conquered: &[bool],
+    castle_owners: &[Option<usize>],
+    clan: Clan,
+) -> (bool, Option<usize>) {
+    let all_castles = castle::castles();
+    let mut player: Option<usize> = None;
+    for (i, c) in all_castles.iter().enumerate() {
+        if c.clan != clan {
+            continue;
+        }
+        if !conquered[i] {
+            return (false, None);
+        }
+        match player {
+            None => player = castle_owners[i],
+            Some(p) => {
+                if castle_owners[i] != Some(p) {
+                    return (false, player);
+                }
+            }
+        }
+    }
+    (true, player)
+}
+
 impl Game {
     /// Port of Game.CanAttack (attack_command.go).
     pub fn can_attack(&self, player: usize) -> bool {
@@ -91,25 +117,7 @@ impl Game {
     /// caller when it returns false; the player value on a false result
     /// mirrors Go's (possibly stale) return exactly.
     pub fn clan_conquered(&self, clan: Clan) -> (bool, Option<usize>) {
-        let all_castles = castle::castles();
-        let mut player: Option<usize> = None;
-        for (i, c) in all_castles.iter().enumerate() {
-            if c.clan != clan {
-                continue;
-            }
-            if !self.conquered[i] {
-                return (false, None);
-            }
-            match player {
-                None => player = self.castle_owners[i],
-                Some(p) => {
-                    if self.castle_owners[i] != Some(p) {
-                        return (false, player);
-                    }
-                }
-            }
-        }
-        (true, player)
+        clan_conquered_data(&self.conquered, &self.castle_owners, clan)
     }
 
     /// Port of Game.Scores (game.go).
@@ -468,8 +476,7 @@ impl Gamer for Game {
     }
 
     fn pub_state(&self) -> Self::PubState {
-        let mut completed: Vec<usize> = self.completed_lines.iter().cloned().collect();
-        completed.sort_unstable();
+        let completed: Vec<usize> = self.completed_lines.iter().cloned().collect();
         PubState {
             players: self.players,
             current_player: self.current_player,
@@ -498,7 +505,7 @@ impl Gamer for Game {
         let was_finished = self.is_finished();
         let output = match self.command_parser(player) {
             Some(cp) => cp,
-            None => return Err(GameError::invalid_input("not your turn")),
+            None => return Err(GameError::NotYourTurn),
         }
         .parse(input, players);
         let mut resp = match output {

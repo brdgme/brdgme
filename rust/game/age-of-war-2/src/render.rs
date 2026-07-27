@@ -3,30 +3,12 @@ use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::castle::{self, ALL_CLANS, Clan, Die};
-use crate::{PlayerState, PubState};
+use crate::{PlayerState, PubState, clan_conquered_data};
 
 /// Port of Game.ClanConquered (game.go), operating on the public fields
 /// carried by `PubState` instead of `Game`.
 fn clan_conquered(state: &PubState, clan: Clan) -> (bool, Option<usize>) {
-    let all_castles = castle::castles();
-    let mut player: Option<usize> = None;
-    for (i, c) in all_castles.iter().enumerate() {
-        if c.clan != clan {
-            continue;
-        }
-        if !state.conquered[i] {
-            return (false, None);
-        }
-        match player {
-            None => player = state.castle_owners[i],
-            Some(p) => {
-                if state.castle_owners[i] != Some(p) {
-                    return (false, player);
-                }
-            }
-        }
-    }
-    (true, player)
+    clan_conquered_data(&state.conquered, &state.castle_owners, clan)
 }
 
 /// Port of Game.RenderCastle (render.go).

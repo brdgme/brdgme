@@ -26,6 +26,12 @@
    the current highest card, matching Go's uninitialized-int-defaults-to-0
    behaviour.
 
+4. **Guard self-target ordering.** In Go (`PlayGuard`), the self-target
+   fallback (when all other players are protected/eliminated) runs before
+   the Guard-card validation, so `guard <self> guard` succeeds as a plain
+   discard rather than returning the "can't use Guard against other Guards"
+   error. Preserved verbatim in `Game::play_guard` in `src/lib.rs`.
+
 ## Other decisions
 
 - **`PubState`/`PlayerState` are hand-built, not literal ports of Go's

@@ -24,6 +24,9 @@ impl Game {
         if self.current_player != player {
             return None;
         }
+        if self.check_finished() {
+            return None;
+        }
         let mut parsers: Vec<Box<dyn Parser<T = Command>>> = vec![];
         let hand = self.hands.get(player).cloned().unwrap_or_default();
         if hand.contains(&Card::Princess) {

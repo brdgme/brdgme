@@ -344,7 +344,7 @@ impl Game {
         }
     }
 
-    pub fn play_princess(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
+    fn play_princess(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
         self.assert_can_play(player)?;
         let cur_round = self.round;
 
@@ -359,7 +359,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play_countess(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
+    fn play_countess(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
         self.assert_can_play(player)?;
         let cur_round = self.round;
 
@@ -378,7 +378,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play_king(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
+    fn play_king(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
         self.assert_can_play(player)?;
         self.assert_must_not_play_countess(player)?;
         self.assert_target(player, false, target)?;
@@ -429,7 +429,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play_prince(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
+    fn play_prince(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
         self.assert_can_play(player)?;
         self.assert_must_not_play_countess(player)?;
         self.assert_target(player, true, target)?;
@@ -456,7 +456,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play_handmaid(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
+    fn play_handmaid(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
         self.assert_can_play(player)?;
         let cur_round = self.round;
 
@@ -476,7 +476,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play_baron(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
+    fn play_baron(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
         self.assert_can_play(player)?;
         self.assert_target(player, false, target)?;
         let cur_round = self.round;
@@ -531,10 +531,8 @@ impl Game {
         let diff = player_card.number() as i32 - target_card.number() as i32;
         if diff < 0 {
             eliminate = Some(player);
-            self.hands[player] = vec![player_card];
         } else if diff > 0 {
             eliminate = Some(target);
-            self.hands[target] = vec![target_card];
         }
 
         match eliminate {
@@ -552,7 +550,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play_priest(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
+    fn play_priest(&mut self, player: usize, target: usize) -> Result<Vec<Log>, GameError> {
         self.assert_can_play(player)?;
         self.assert_target(player, false, target)?;
         let cur_round = self.round;
@@ -586,7 +584,7 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn play_guard(
+    fn play_guard(
         &mut self,
         player: usize,
         target: usize,
@@ -706,6 +704,9 @@ impl Gamer for Game {
         input: &str,
         players: &[String],
     ) -> Result<CommandResponse, GameError> {
+        if self.check_finished() {
+            return Err(GameError::Finished);
+        }
         let output = match self.command_parser(player) {
             Some(cp) => cp,
             None => {

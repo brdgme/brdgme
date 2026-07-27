@@ -114,7 +114,7 @@ fn roll_parser() -> impl Parser<T = Command> {
     Map::new(
         Doc::name_desc(
             "roll",
-            "discard one dice and roll the rest",
+            "discard one die and reroll the rest",
             Token::new("roll"),
         ),
         |_| Command::Roll,
