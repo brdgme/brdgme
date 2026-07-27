@@ -1333,6 +1333,7 @@ async fn admin_export_route_returns_bundle_without_emails(pool: PgPool) {
     .await
     .unwrap();
 
+    let pool2 = pool.clone();
     let app = build_router(make_state(pool).await).await;
     let (status, content_type, body) = get(
         app,
@@ -1351,6 +1352,23 @@ async fn admin_export_route_returns_bundle_without_emails(pool: PgPool) {
     // Spec D4: no email addresses in the bundle, ever.
     assert!(!body.contains("boss@example.com"));
     assert!(!body.contains('@'));
+
+    let app = build_router(make_state(pool2).await).await;
+    let req = Request::builder()
+        .uri(format!("/admin/games/{}/export", game.id))
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let disposition = resp
+        .headers()
+        .get("content-disposition")
+        .map(|v| v.to_str().unwrap().to_string())
+        .unwrap_or_default();
+    assert!(
+        disposition.contains("attachment"),
+        "expected content-disposition to contain attachment, got: {disposition}"
+    );
 }
 
 #[sqlx::test]

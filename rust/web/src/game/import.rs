@@ -57,12 +57,14 @@ pub async fn import_bundle(pool: &PgPool, bundle: &ExportBundle) -> anyhow::Resu
     let mut tx = pool.begin().await?;
 
     let game_id: Uuid = sqlx::query_scalar!(
-        "INSERT INTO games (game_version_id, is_finished, finished_at, game_state)
-         VALUES ($1, $2, $3, $4) RETURNING id",
+        "INSERT INTO games (game_version_id, is_finished, finished_at, game_state, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
         local_version.id,
         bundle.game.is_finished,
         bundle.game.finished_at,
-        bundle.game.game_state
+        bundle.game.game_state,
+        bundle.game.created_at,
+        bundle.game.updated_at
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -105,7 +107,7 @@ pub async fn import_bundle(pool: &PgPool, bundle: &ExportBundle) -> anyhow::Resu
                (game_id, user_id, game_bot_id, position, color, has_accepted,
                 is_turn, is_turn_at, last_turn_at, place, is_eliminated, is_read,
                 points, undo_game_state, rating_change)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), $8, $9, true, $10, $11, $12)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12, $13, $14)
              RETURNING id",
             game_id,
             user_id,
@@ -114,6 +116,8 @@ pub async fn import_bundle(pool: &PgPool, bundle: &ExportBundle) -> anyhow::Resu
             player.color,
             player.has_accepted,
             player.is_turn,
+            bundle.game.updated_at,
+            bundle.game.updated_at,
             player.place,
             player.is_eliminated,
             player.points,
@@ -139,12 +143,13 @@ pub async fn import_bundle(pool: &PgPool, bundle: &ExportBundle) -> anyhow::Resu
 
     for log in &bundle.logs {
         let log_id: Uuid = sqlx::query_scalar!(
-            "INSERT INTO game_logs (game_id, body, is_public, logged_at)
-             VALUES ($1, $2, $3, $4) RETURNING id",
+            "INSERT INTO game_logs (game_id, body, is_public, logged_at, created_at)
+             VALUES ($1, $2, $3, $4, $5) RETURNING id",
             game_id,
             log.body,
             log.is_public,
-            log.logged_at
+            log.logged_at,
+            log.created_at
         )
         .fetch_one(&mut *tx)
         .await?;
@@ -182,14 +187,30 @@ async fn placeholder_user(tx: &mut sqlx::PgConnection, name: &str) -> anyhow::Re
             .await
             .context("generate placeholder username")?
     };
-    let id = sqlx::query_scalar!(
+    let insert_res = sqlx::query_scalar!(
         "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
         final_name,
         &Vec::<String>::new()
     )
     .fetch_one(&mut *tx)
-    .await?;
-    Ok(id)
+    .await;
+    match insert_res {
+        Ok(id) => Ok(id),
+        Err(sqlx::Error::Database(de)) if de.is_unique_violation() => {
+            let fallback_name = crate::db::generate_unique_username(&mut *tx)
+                .await
+                .context("generate placeholder username after unique violation")?;
+            let id = sqlx::query_scalar!(
+                "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+                fallback_name,
+                &Vec::<String>::new()
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            Ok(id)
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[cfg(test)]
@@ -365,5 +386,63 @@ mod tests {
 
         let result = import_bundle(&pool, &bundle).await;
         assert!(result.is_err());
+    }
+
+    #[sqlx::test]
+    async fn import_bundle_preserves_timestamps(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        let past = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2020, time::Month::January, 1).unwrap(),
+            time::Time::MIDNIGHT,
+        );
+        bundle.game.created_at = past;
+        bundle.game.updated_at = past;
+        bundle.logs[0].created_at = past;
+
+        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+
+        let game_row = sqlx::query!(
+            "SELECT created_at, updated_at FROM games WHERE id = $1",
+            outcome.game_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(game_row.created_at, bundle.game.created_at);
+        assert_eq!(game_row.updated_at, bundle.game.updated_at);
+
+        let log_created_at: time::PrimitiveDateTime = sqlx::query_scalar!(
+            "SELECT created_at FROM game_logs WHERE game_id = $1 ORDER BY logged_at, id LIMIT 1",
+            outcome.game_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(log_created_at, bundle.logs[0].created_at);
+    }
+
+    #[sqlx::test]
+    async fn import_bundle_sets_turn_timestamps_from_bundle(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        let past = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2020, time::Month::January, 1).unwrap(),
+            time::Time::MIDNIGHT,
+        );
+        bundle.game.updated_at = past;
+
+        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+
+        let rows = sqlx::query!(
+            "SELECT is_turn_at, last_turn_at FROM game_players WHERE game_id = $1 ORDER BY position",
+            outcome.game_id
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(row.is_turn_at, bundle.game.updated_at);
+            assert_eq!(row.last_turn_at, bundle.game.updated_at);
+        }
     }
 }

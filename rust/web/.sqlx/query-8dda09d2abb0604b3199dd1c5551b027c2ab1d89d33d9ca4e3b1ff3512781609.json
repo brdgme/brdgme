@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO game_logs (game_id, body, is_public, logged_at)\n             VALUES ($1, $2, $3, $4) RETURNING id",
+  "query": "INSERT INTO games (game_version_id, is_finished, finished_at, game_state, created_at, updated_at)\n         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -12,8 +12,10 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
         "Bool",
+        "Timestamp",
+        "Text",
+        "Timestamp",
         "Timestamp"
       ]
     },
@@ -21,5 +23,5 @@
       false
     ]
   },
-  "hash": "925c2d676ab468e2b8a78b70776ebf04e7148abe58336c9a7a1ae6f51bdc9054"
+  "hash": "8dda09d2abb0604b3199dd1c5551b027c2ab1d89d33d9ca4e3b1ff3512781609"
 }

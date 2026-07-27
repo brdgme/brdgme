@@ -1,7 +1,9 @@
 //! #34 admin game export (spec D4): a versioned JSON bundle for pulling a
 //! prod game into a local dev environment. Served from an admin-guarded
 //! plain Axum route (not a leptos server fn) because it downloads as a file.
-//! Never includes email addresses - the bundle may get pasted into issues.
+//! The bundle contains private log bodies, their target positions, and the
+//! raw `game_state` blob - all hidden information. Admin-only; must not be
+//! posted publicly. Email addresses are the one thing still excluded.
 #![cfg(feature = "ssr")]
 
 use crate::state::AppState;
@@ -50,7 +52,9 @@ pub struct BundlePlayer {
     pub position: i32,
     /// Display name only - user name or bot name, never an email.
     pub name: String,
-    /// `Some(game_bots.name)` when this seat is a bot; `None` for humans.
+    /// `Some(game_bots.name)` - the per-game seat name - when this seat is a
+    /// bot; `None` for humans. This is NOT `game_bots.bot_name` (the bot type),
+    /// which is carried in `BundleBot.bot_name`.
     pub bot_name: Option<String>,
     pub color: String,
     pub has_accepted: bool,
