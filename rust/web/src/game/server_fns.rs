@@ -453,7 +453,10 @@ pub(crate) async fn render_game_public(
         .map_err(internal("render_game_public: load logs"))?
         .into_iter()
         .map(|log| {
-            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
+            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|e| {
+                tracing::warn!(game_id = %game_id, log_id = %log.id, error = %e, "failed to parse log markup");
+                (vec![], "")
+            });
             let body_html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
                 &nodes,
                 &semantic_players,
@@ -691,6 +694,7 @@ pub(crate) fn roster_error(player_counts: &[i32], player_count: usize) -> Option
     ))
 }
 
+// Intentionally anonymous: generates a random bot name for the new-game form.
 #[server(GenerateBotName, "/api")]
 pub async fn generate_bot_name() -> Result<String, ServerFnError> {
     Ok(petname::petname(1, "-").unwrap_or_else(|| "Bot".to_string()))
@@ -746,12 +750,15 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
     let entries = logs
         .into_iter()
         .map(|log| {
-            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|_| (vec![], ""));
+            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|e| {
+                tracing::warn!(game_id = %game_id, log_id = %log.id, error = %e, "failed to parse log markup");
+                (vec![], "")
+            });
             let body_html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
                 &nodes,
                 &semantic_players,
             ));
-            let is_new = log.created_at >= last_turn_at;
+            let is_new = log.logged_at >= last_turn_at;
             GameLogEntry {
                 body_html,
                 logged_at: log.logged_at,
@@ -1109,6 +1116,13 @@ pub(crate) async fn restart_core(
     let (is_finished, restarted_game_id) =
         row.ok_or_else(|| ServerFnError::new("Game not found"))?;
 
+    if !crate::db::is_player_in_game(pool, old_game_id, user_id)
+        .await
+        .map_err(internal("restart_core: check membership"))?
+    {
+        return Err(ServerFnError::new("You are not a player in this game"));
+    }
+
     if !is_finished {
         return Err(ServerFnError::new("Game is not finished"));
     }
@@ -1325,16 +1339,18 @@ pub async fn restart_game_with_roster(
         }
         if let Some(pid) = created.proposal_id {
             broadcaster.broadcast_proposal_update(pid).await;
-            if let Ok(players) = crate::proposals::find_proposal_players(&pool, pid).await {
-                for p in players
-                    .iter()
-                    .filter(|p| p.user_id.is_some() && p.response == "pending")
-                {
-                    crate::proposals::mailer().send_invite(
-                        pid,
-                        p.user_id.unwrap(),
-                        p.email_token.clone(),
-                    );
+            match crate::proposals::find_proposal_players(&pool, pid).await {
+                Ok(players) => {
+                    for (user_id, email_token) in players
+                        .iter()
+                        .filter(|p| p.response == "pending")
+                        .filter_map(|p| p.user_id.map(|uid| (uid, p.email_token.clone())))
+                    {
+                        crate::proposals::mailer().send_invite(pid, user_id, email_token);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(proposal_id = %pid, error = %e, "failed to fetch proposal players for restart invite emails");
                 }
             }
         }
@@ -2139,6 +2155,37 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("players"), "unexpected error: {err}");
+    }
+
+    // restart_core itself rejects a caller who is not a player of the old game,
+    // independent of the caller-side guards.
+    #[sqlx::test]
+    async fn restart_core_rejects_non_player(pool: PgPool) {
+        let (game_id, creator_id) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+        let stranger = make_user(&pool, "stranger").await;
+        let http_client = reqwest::Client::new();
+
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let version = ge.game_version.clone();
+
+        let result = restart_core(
+            &pool,
+            &http_client,
+            stranger,
+            game_id,
+            &version,
+            &[creator_id],
+            &[],
+            &[],
+        )
+        .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not a player"), "unexpected error: {err}");
     }
 
     #[sqlx::test]

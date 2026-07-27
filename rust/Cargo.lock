@@ -7462,6 +7462,7 @@ dependencies = [
  "leptos_router",
  "mail-parser",
  "mrml",
+ "percent-encoding",
  "petname",
  "pulldown-cmark",
  "rand 0.10.2",

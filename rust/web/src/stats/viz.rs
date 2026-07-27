@@ -131,7 +131,7 @@ pub fn RatingChart(points: Vec<RatingPoint>) -> impl IntoView {
         .collect_view();
 
     view! {
-        <svg class="rating-chart" viewBox="0 0 320 120" role="img">
+        <svg class="rating-chart" viewBox=format!("0 0 {} {}", CHART_WIDTH as i32, CHART_HEIGHT as i32) role="img">
             <line
                 class="chart-axis"
                 x1=format!("{:.1}", CHART_PAD)
@@ -213,7 +213,7 @@ pub fn Histogram(buckets: Vec<HistogramBucket>) -> impl IntoView {
         .collect_view();
 
     view! {
-        <svg class="histogram" viewBox="0 0 320 120">
+        <svg class="histogram" viewBox=format!("0 0 {} {}", HIST_WIDTH as i32, HIST_HEIGHT as i32)>
             <line
                 class="chart-axis"
                 x1=format!("{:.1}", HIST_PAD)

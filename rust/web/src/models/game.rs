@@ -39,6 +39,7 @@ pub struct Game {
     pub restarted_game_id: Option<Uuid>,
 }
 
+/// Deliberate projection: omits `created_at`/`updated_at` (constructed field-by-field in db).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameBot {
     pub id: Uuid,

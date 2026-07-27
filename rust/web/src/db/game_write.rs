@@ -735,10 +735,12 @@ pub async fn update_game_command_success(
 
         sqlx::query(
             r#"UPDATE game_players
-               SET is_turn = $1, place = $2, is_eliminated = $3, points = $4,
+               SET is_turn = $1, place = $2,
+                   is_eliminated = CASE WHEN $9 THEN is_eliminated ELSE $3 END,
+                   points = $4,
                    undo_game_state = $5, last_turn_at = $6, is_turn_at = $7,
                    turn_reminder_sent_at = NULL,
-                   left_at = CASE WHEN is_eliminated = false AND $3 = true
+                   left_at = CASE WHEN is_eliminated = false AND $3 = true AND NOT $9
                                   THEN NOW() ELSE left_at END
                WHERE id = $8"#,
         )
@@ -750,6 +752,7 @@ pub async fn update_game_command_success(
         .bind(last_turn_at)
         .bind(is_turn_at)
         .bind(p_id)
+        .bind(status.is_finished)
         .execute(&mut *tx)
         .await?;
     }

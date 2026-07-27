@@ -225,6 +225,10 @@ pub async fn block_user(user_id: Uuid) -> Result<(), ServerFnError> {
     if user_id == user.id {
         return Err(ServerFnError::new("You cannot block yourself"));
     }
+    crate::db::get_user(&pool, user_id)
+        .await
+        .map_err(internal("block_user: find user"))?
+        .ok_or_else(|| ServerFnError::new("User not found"))?;
     crate::db::block_user(&pool, user.id, user_id)
         .await
         .map_err(internal("block_user: block"))

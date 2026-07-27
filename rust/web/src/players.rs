@@ -31,18 +31,16 @@ pub(crate) fn rating_trend(current: Option<i32>, results: &[FormResult]) -> Vec<
     series
 }
 
-/// Percent-encodes a string for use as a single URL path segment.
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+
+const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
 pub fn encode_path_segment(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
+    utf8_percent_encode(s, PATH_SEGMENT_ENCODE_SET).to_string()
 }
 
 /// English ordinal suffix for a 1-based placing (1st, 2nd, 3rd, 4th, 11th..13th).
