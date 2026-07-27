@@ -154,6 +154,70 @@ pub fn extract_addr_spec(value: &str) -> Option<String> {
     Some(addr.to_string())
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum AuthVerdict {
+    Pass,
+    Fail,
+    Unknown,
+}
+
+pub fn classify_inbound_auth(raw: &str) -> AuthVerdict {
+    let msg = match mail_parser::MessageParser::default().parse(raw) {
+        Some(msg) => msg,
+        None => return AuthVerdict::Unknown,
+    };
+
+    // Trust only the topmost Authentication-Results header; lower ones may be forged.
+    let header = match msg
+        .headers()
+        .iter()
+        .find(|h| h.name().eq_ignore_ascii_case("Authentication-Results"))
+    {
+        Some(h) => h,
+        None => return AuthVerdict::Unknown,
+    };
+
+    let value = match header.value().as_text() {
+        Some(v) => v,
+        None => return AuthVerdict::Unknown,
+    };
+
+    let mut parts = value.split(';');
+    let authserv_id = parts.next().unwrap_or("").trim();
+    if !authserv_id.eq_ignore_ascii_case("amazonses.com") {
+        return AuthVerdict::Unknown;
+    }
+
+    let mut spf: Option<String> = None;
+    let mut dkim: Option<String> = None;
+    let mut dmarc: Option<String> = None;
+    for part in parts {
+        let (method, result) = match part.trim().split_once('=') {
+            Some((m, r)) => (m.trim(), r.trim()),
+            None => continue,
+        };
+        let result = result
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if method.eq_ignore_ascii_case("spf") && spf.is_none() {
+            spf = Some(result);
+        } else if method.eq_ignore_ascii_case("dkim") && dkim.is_none() {
+            dkim = Some(result);
+        } else if method.eq_ignore_ascii_case("dmarc") && dmarc.is_none() {
+            dmarc = Some(result);
+        }
+    }
+
+    let failed = |r: &Option<String>| r.as_deref() == Some("fail");
+    if failed(&dmarc) || (failed(&spf) && failed(&dkim)) {
+        AuthVerdict::Fail
+    } else {
+        AuthVerdict::Pass
+    }
+}
+
 #[async_trait::async_trait]
 pub trait InboundEmailSource: Send + Sync {
     async fn fetch_raw_email(&self, email_id: &str) -> anyhow::Result<String>;
@@ -614,35 +678,54 @@ enum InboundText {
     Text(String),
     NoBody,
     FetchFailed,
+    AuthFailed,
 }
 
-/// Fetches an inbound email's raw MIME source from Resend and returns its
-/// plain-text body as `InboundText::Text`, `InboundText::NoBody` if the email
-/// has no plain-text part, or `InboundText::FetchFailed` (already logged) if
-/// the key is unconfigured or the fetch fails. The single place the inbound
-/// direction reads `RESEND_API_KEY`; this block used to be duplicated verbatim
-/// in all three routes (wfe F9).
-async fn fetch_inbound_text(state: &AppState, email_id: &str) -> InboundText {
-    let api_key = match std::env::var("RESEND_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
-            tracing::error!("resend webhook: RESEND_API_KEY not configured; cannot fetch body");
-            return InboundText::FetchFailed;
-        }
-    };
+/// Fetches an inbound email's raw MIME source from Resend. The single place the
+/// inbound direction reads `RESEND_API_KEY` and performs the fetch; this block
+/// used to be duplicated verbatim in all three routes (wfe F9).
+async fn fetch_inbound_raw(state: &AppState, email_id: &str) -> anyhow::Result<String> {
+    let api_key = std::env::var("RESEND_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("RESEND_API_KEY not configured"))?;
     let source = ResendInbound {
         api_key,
         http: state.http_client.clone(),
     };
-    match source.fetch_raw_email(email_id).await {
-        Ok(raw) => match extract_plain_text(&raw) {
-            Some(text) => InboundText::Text(text),
-            None => InboundText::NoBody,
-        },
+    source.fetch_raw_email(email_id).await
+}
+
+/// Lookup-first fetch+classify+extract step shared by all three route handlers.
+/// Each handler does its token/From lookup first, then calls this: fetches the
+/// raw MIME once (wfe F9 single fetch), runs SPF/DKIM auth classification, and
+/// extracts the plain-text body. `FetchFailed` is transient (handler retries);
+/// `AuthFailed` is a permanent drop (handler returns Done, no reply).
+async fn fetch_inbound_text(state: &AppState, from: &str, email_id: &str) -> InboundText {
+    let raw = match fetch_inbound_raw(state, email_id).await {
+        Ok(raw) => raw,
         Err(e) => {
             tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
-            InboundText::FetchFailed
+            return InboundText::FetchFailed;
         }
+    };
+    match classify_inbound_auth(&raw) {
+        AuthVerdict::Fail => {
+            tracing::warn!(
+                "resend webhook: inbound auth failed; permanently rejecting from={from} email_id={email_id}"
+            );
+            return InboundText::AuthFailed;
+        }
+        AuthVerdict::Unknown => {
+            tracing::warn!(
+                "resend webhook: inbound auth unknown; proceeding from={from} email_id={email_id}"
+            );
+        }
+        AuthVerdict::Pass => {}
+    }
+    match extract_plain_text(&raw) {
+        Some(text) => InboundText::Text(text),
+        None => InboundText::NoBody,
     }
 }
 
@@ -698,8 +781,9 @@ async fn handle_game_reply(
         }
     }
 
-    let text = match fetch_inbound_text(state, email_id).await {
+    let text = match fetch_inbound_text(state, from, email_id).await {
         InboundText::FetchFailed => return RouteOutcome::Retry,
+        InboundText::AuthFailed => return RouteOutcome::Done,
         InboundText::NoBody => {
             send_game_reply_response(state, &player, token, from, no_command_header_text()).await;
             return RouteOutcome::Done;
@@ -800,8 +884,9 @@ async fn handle_invite_reply(
         }
     }
 
-    let text = match fetch_inbound_text(state, email_id).await {
+    let text = match fetch_inbound_text(state, from, email_id).await {
         InboundText::FetchFailed => return RouteOutcome::Retry,
+        InboundText::AuthFailed => return RouteOutcome::Done,
         InboundText::NoBody => {
             send_invite_reply_response(
                 state,
@@ -1307,8 +1392,9 @@ async fn handle_settings_reply_route(
     from: &str,
     email_id: &str,
 ) -> RouteOutcome {
-    let text = match fetch_inbound_text(state, email_id).await {
+    let text = match fetch_inbound_text(state, from, email_id).await {
         InboundText::FetchFailed => return RouteOutcome::Retry,
+        InboundText::AuthFailed => return RouteOutcome::Done,
         InboundText::NoBody => return RouteOutcome::Done,
         InboundText::Text(text) => text,
     };
@@ -1650,6 +1736,71 @@ Just a plain body";
             extract_plain_text(raw),
             Some("Just a plain body".to_string())
         );
+    }
+
+    #[test]
+    fn classify_inbound_auth_pass() {
+        let raw = "Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=pass header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Pass);
+    }
+
+    #[test]
+    fn classify_inbound_auth_fail_dmarc() {
+        let raw = "Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=fail header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
+    }
+
+    #[test]
+    fn classify_inbound_auth_fail_spf_and_dkim() {
+        let raw = "Authentication-Results: amazonses.com; spf=fail smtp.mailfrom=x.com; dkim=fail header.i=@x.com; dmarc=pass header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
+    }
+
+    #[test]
+    fn classify_inbound_auth_absent_header() {
+        let raw = "From: a@x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Unknown);
+    }
+
+    #[test]
+    fn classify_inbound_auth_wrong_authserv_id() {
+        let raw = "Authentication-Results: mx.google.com; spf=fail smtp.mailfrom=x.com; dkim=fail header.i=@x.com; dmarc=fail header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Unknown);
+    }
+
+    #[test]
+    fn classify_inbound_auth_ignores_injected_lower_header() {
+        let raw = "Authentication-Results: amazonses.com; spf=fail smtp.mailfrom=x.com; dkim=fail header.i=@x.com; dmarc=fail header.from=x.com\r\n\
+Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=pass header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
+    }
+
+    #[test]
+    fn classify_inbound_auth_softfail_is_not_fail() {
+        let raw = "Authentication-Results: amazonses.com; spf=softfail smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=none header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Pass);
+    }
+
+    #[test]
+    fn classify_inbound_auth_single_fail_is_not_fail() {
+        let raw = "Authentication-Results: amazonses.com; spf=fail smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=pass header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Pass);
     }
 
     #[test]
