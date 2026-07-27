@@ -36,6 +36,21 @@ pub async fn find_open_restart_proposal(pool: &PgPool, old_game_id: Uuid) -> Res
     .map_err(Into::into)
 }
 
+#[cfg(feature = "ssr")]
+pub async fn is_proposal_visible_to_user(
+    pool: &PgPool,
+    proposal_id: Uuid,
+    viewer_id: Uuid,
+) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM game_proposal_players WHERE proposal_id = $1 AND user_id = $2)",
+    )
+    .bind(proposal_id)
+    .bind(viewer_id)
+    .fetch_one(pool)
+    .await?)
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
@@ -150,6 +165,52 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn is_proposal_visible_to_user_participant_is_visible(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let owner = make_user(&pool, "owner").await;
+        let player = make_user(&pool, "player").await;
+        let proposal = make_proposal(&pool, gv, owner.id).await;
+        add_proposal_player(&pool, proposal, 0, Some(owner.id), None, "accepted").await;
+        add_proposal_player(&pool, proposal, 1, Some(player.id), None, "pending").await;
+
+        assert!(
+            is_proposal_visible_to_user(&pool, proposal, owner.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            is_proposal_visible_to_user(&pool, proposal, player.id)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[sqlx::test]
+    async fn is_proposal_visible_to_user_non_participant_is_not_visible(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let owner = make_user(&pool, "owner").await;
+        let stranger = make_user(&pool, "stranger").await;
+        let proposal = make_proposal(&pool, gv, owner.id).await;
+        add_proposal_player(&pool, proposal, 0, Some(owner.id), None, "accepted").await;
+
+        assert!(
+            !is_proposal_visible_to_user(&pool, proposal, stranger.id)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[sqlx::test]
+    async fn is_proposal_visible_to_user_nonexistent_proposal_is_not_visible(pool: PgPool) {
+        let owner = make_user(&pool, "owner").await;
+        assert!(
+            !is_proposal_visible_to_user(&pool, Uuid::new_v4(), owner.id)
+                .await
+                .unwrap()
         );
     }
 }
