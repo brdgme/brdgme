@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO login_email_sends (email) VALUES ($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c51f2f85be8d52ed14d07ee5c871e696769a8fa972a3b1667a36f2305ac3a1d3"
+}

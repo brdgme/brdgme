@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COALESCE(SUM(sent_count), 0) AS \"total!\" FROM login_confirmations",
+  "query": "SELECT COUNT(*) AS \"total!\" FROM login_email_sends",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       null
     ]
   },
-  "hash": "a8254a33960c71f865a3e93c4e807a452757df2a893211cedc9a43ffc735484d"
+  "hash": "7044ba606dee5f65d6afb3b95d50575eaadc8abfc247b1342c7631d52412a94f"
 }

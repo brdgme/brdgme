@@ -148,6 +148,11 @@ pub(crate) async fn request_confirmation_code(
     .await
     .map_err(internal("login: gc stale confirmations"))?;
 
+    sqlx::query!("DELETE FROM login_email_sends WHERE sent_at < NOW() - INTERVAL '24 hours'")
+        .execute(&mut *tx)
+        .await
+        .map_err(internal("login: gc stale send records"))?;
+
     let generic_success = LoginResponse {
         success: true,
         message: "Login email sent".to_string(),
@@ -183,13 +188,13 @@ pub(crate) async fn request_confirmation_code(
     }
 
     let sent_last_24h = sqlx::query_scalar!(
-        r#"SELECT COALESCE(SUM(sent_count), 0) AS "total!"
-           FROM login_confirmations
-           WHERE last_sent_at > NOW() - INTERVAL '24 hours'"#
+        r#"SELECT COUNT(*) AS "total!"
+           FROM login_email_sends
+           WHERE sent_at > NOW() - INTERVAL '24 hours'"#
     )
     .fetch_one(&mut *tx)
     .await
-    .map_err(internal("login: sum sends for global cap"))?;
+    .map_err(internal("login: count sends for global cap"))?;
     if sent_last_24h >= LOGIN_GLOBAL_MAX_SENDS_PER_DAY {
         tx.commit()
             .await
@@ -201,7 +206,8 @@ pub(crate) async fn request_confirmation_code(
         });
     }
 
-    let fresh_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
+    use rand::RngExt;
+    let fresh_code = format!("{:06}", rand::rng().random_range(0..1_000_000));
     let code = sqlx::query_scalar!(
         r#"INSERT INTO login_confirmations (email, code, sent_count, last_sent_at)
            VALUES ($1, $2, 1, NOW())
@@ -222,6 +228,11 @@ pub(crate) async fn request_confirmation_code(
     .await
     .map_err(internal("login: upsert confirmation"))?;
 
+    sqlx::query!("INSERT INTO login_email_sends (email) VALUES ($1)", email)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal("login: record send"))?;
+
     tx.commit()
         .await
         .map_err(internal("login: commit transaction"))?;
@@ -232,11 +243,10 @@ pub(crate) async fn request_confirmation_code(
 }
 
 #[cfg(feature = "ssr")]
-async fn verify_turnstile_token(secret: &str, token: &str) -> bool {
+async fn verify_turnstile_token(client: &reqwest::Client, secret: &str, token: &str) -> bool {
     if secret.is_empty() || token.is_empty() {
         return secret.is_empty();
     }
-    let client = reqwest::Client::new();
     let resp = client
         .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
         .form(&[("secret", secret), ("response", token)])
@@ -262,8 +272,9 @@ pub async fn get_turnstile_site_key() -> Result<String, ServerFnError> {
 
 #[server(Login, "/api")]
 pub async fn login(email: String, turnstile_token: String) -> Result<LoginResponse, ServerFnError> {
+    let client = expect_context::<reqwest::Client>();
     let secret = std::env::var("TURNSTILE_SECRET_KEY").unwrap_or_default();
-    if !verify_turnstile_token(&secret, &turnstile_token).await {
+    if !verify_turnstile_token(&client, &secret, &turnstile_token).await {
         return Ok(LoginResponse {
             success: false,
             message: "CAPTCHA verification failed. Please try again.".to_string(),
@@ -319,8 +330,21 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
         .await
         .map_err(internal("confirm_login: extract session"))?;
 
+    if token.len() != 6
+        || !token.chars().all(|c| c.is_ascii_digit())
+        || email.is_empty()
+        || !email.contains('@')
+    {
+        return Err(ServerFnError::new("Invalid or expired token".to_string()));
+    }
+
     let pool = expect_context::<PgPool>();
     let confirmed = confirm_login_inner(&pool, &email, &token).await?;
+
+    session
+        .cycle_id()
+        .await
+        .map_err(internal("confirm_login: cycle session"))?;
 
     set_user_session(
         &session,
@@ -360,7 +384,7 @@ pub(crate) async fn validate_confirmation_code(
 
     let confirmation = sqlx::query_as!(
         LoginConfirmation,
-        "SELECT * FROM login_confirmations WHERE email = $1",
+        "UPDATE login_confirmations SET attempts = attempts + 1 WHERE email = $1 RETURNING *",
         email
     )
     .fetch_optional(pool)
@@ -371,18 +395,11 @@ pub(crate) async fn validate_confirmation_code(
     if confirmation.created_at <= OffsetDateTime::now_utc() - time::Duration::hours(1) {
         return Err(invalid());
     }
-    if confirmation.attempts >= CONFIRM_MAX_ATTEMPTS_PER_CODE {
+    if confirmation.attempts > CONFIRM_MAX_ATTEMPTS_PER_CODE {
         axum_prometheus::metrics::counter!("login_confirm_attempt_cap_hit_total").increment(1);
         return Err(invalid());
     }
     if confirmation.code != token {
-        sqlx::query!(
-            "UPDATE login_confirmations SET attempts = attempts + 1 WHERE email = $1",
-            email
-        )
-        .execute(pool)
-        .await
-        .map_err(internal("confirm_login: count failed attempt"))?;
         return Err(invalid());
     }
 
@@ -508,19 +525,20 @@ pub async fn get_current_user() -> Result<Option<AuthUser>, ServerFnError> {
 
     if let Some(user) = session_user {
         let pool = expect_context::<PgPool>();
-        // Validate token matches database
-        if validate_session_token(&pool, user.auth_token_id)
-            .await
-            .unwrap_or(false)
-        {
-            return Ok(Some(AuthUser {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-            }));
-        } else {
-            // Token invalid, clear session
-            let _ = clear_user_session(&session).await;
+        match validate_session_token(&pool, user.auth_token_id).await {
+            Ok(true) => {
+                return Ok(Some(AuthUser {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                }));
+            }
+            Ok(false) => {
+                let _ = clear_user_session(&session).await;
+            }
+            Err(e) => {
+                return Err(internal("get_current_user: validate token")(e));
+            }
         }
     }
 
@@ -533,15 +551,20 @@ pub async fn logout() -> Result<bool, ServerFnError> {
         .await
         .map_err(internal("logout: extract session"))?;
 
-    // Get user to check for auth token to invalidate
     if let Some(user) = get_user_from_session(&session).await {
         let pool = expect_context::<PgPool>();
-        let _ = invalidate_auth_token(&pool, user.auth_token_id).await;
+        if let Err(e) = invalidate_auth_token(&pool, user.auth_token_id).await {
+            tracing::error!("logout: failed to invalidate auth token: {e}");
+        }
     }
 
     clear_user_session(&session)
         .await
         .map_err(internal("logout: clear session"))?;
+    session
+        .flush()
+        .await
+        .map_err(internal("logout: flush session"))?;
 
     Ok(true)
 }
@@ -826,7 +849,10 @@ pub async fn add_email_address(email: String) -> Result<(), ServerFnError> {
     }
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
-    request_confirmation_code(&pool, resend.as_ref(), &email).await?;
+    let resp = request_confirmation_code(&pool, resend.as_ref(), &email).await?;
+    if !resp.success {
+        return Err(ServerFnError::new(resp.message));
+    }
     Ok(())
 }
 
@@ -933,6 +959,7 @@ mod tests {
         owner.with(|| {
             provide_context(pool.clone());
             provide_context(None::<resend_rs::Resend>);
+            provide_context(reqwest::Client::new());
         });
         owner
             .with(|| leptos::reactive::computed::ScopedFuture::new(f()))
@@ -1056,18 +1083,12 @@ mod tests {
 
     #[sqlx::test]
     async fn login_global_cap_refuses_honestly(pool: PgPool) {
-        // 10 other emails with 5 sends each in the last 24h = 50 total.
-        for i in 0..10 {
-            seed_confirmation(
-                &pool,
-                &format!("burner-{i}@example.com"),
-                "222222",
-                time::Duration::minutes(30),
-                0,
-                5,
-                time::Duration::minutes(30),
-            )
-            .await;
+        for i in 0..50 {
+            sqlx::query("INSERT INTO login_email_sends (email) VALUES ($1)")
+                .bind(format!("burner-{i}@example.com"))
+                .execute(&pool)
+                .await
+                .unwrap();
         }
 
         let email = "legit@example.com";
@@ -1177,25 +1198,14 @@ mod tests {
 
     #[sqlx::test]
     async fn login_concurrent_requests_do_not_overshoot_global_cap(pool: PgPool) {
-        // 9 other emails * 5 sends = 45 already counted in the 24h window.
-        for i in 0..9 {
-            seed_confirmation(
-                &pool,
-                &format!("burner-{i}@example.com"),
-                "222222",
-                time::Duration::minutes(30),
-                0,
-                5,
-                time::Duration::minutes(30),
-            )
-            .await;
+        for i in 0..45 {
+            sqlx::query("INSERT INTO login_email_sends (email) VALUES ($1)")
+                .bind(format!("burner-{i}@example.com"))
+                .execute(&pool)
+                .await
+                .unwrap();
         }
 
-        // 6 distinct new emails logging in concurrently: only 5 more sends
-        // fit under the 50 global cap (45 + 5 = 50), so exactly one of these
-        // must be honestly refused. Without a lock spanning all rows (not
-        // just one email's), concurrent requests across different emails can
-        // each read the same pre-upsert SUM and all pass.
         let calls = (0..6).map(|i| {
             with_pool_context(&pool, move || {
                 login(format!("legit-{i}@example.com"), String::new())
@@ -1212,12 +1222,11 @@ mod tests {
             "exactly one request must be refused at the boundary"
         );
 
-        let total: i64 = sqlx::query_scalar!(
-            r#"SELECT COALESCE(SUM(sent_count), 0) AS "total!" FROM login_confirmations"#
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let total: i64 =
+            sqlx::query_scalar!(r#"SELECT COUNT(*) AS "total!" FROM login_email_sends"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(
             total, LOGIN_GLOBAL_MAX_SENDS_PER_DAY,
             "concurrent requests must not overshoot the global cap"
@@ -1526,5 +1535,158 @@ mod tests {
         let result = confirm_login_inner(&pool, "unverified@example.com", "123456").await;
         assert!(result.is_err(), "unverified address cannot log in");
         assert_eq!(user_count(&pool).await, 1, "no new user created");
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_concurrent_wrong_code_enforces_cap(pool: PgPool) {
+        let email = "race@example.com";
+        seed_confirmation(
+            &pool,
+            email,
+            "123456",
+            time::Duration::minutes(1),
+            0,
+            1,
+            time::Duration::minutes(1),
+        )
+        .await;
+
+        let calls = (0..15).map(|_| confirm_login_inner(&pool, email, "000000"));
+        let results = futures_util::future::join_all(calls).await;
+        for r in &results {
+            assert!(r.is_err());
+        }
+
+        let row = get_confirmation(&pool, email).await.unwrap();
+        assert!(
+            row.attempts >= CONFIRM_MAX_ATTEMPTS_PER_CODE,
+            "cap must have been reached: got {}",
+            row.attempts
+        );
+        let correct = confirm_login_inner(&pool, email, "123456").await;
+        assert!(
+            correct.is_err(),
+            "correct code must be rejected once cap is reached"
+        );
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_allows_tenth_attempt_with_correct_code(pool: PgPool) {
+        let email = "tenth@example.com";
+        seed_confirmation(
+            &pool,
+            email,
+            "123456",
+            time::Duration::minutes(1),
+            9,
+            1,
+            time::Duration::minutes(1),
+        )
+        .await;
+
+        let result = confirm_login_inner(&pool, email, "123456").await;
+        assert!(
+            result.is_ok(),
+            "10th attempt (attempts=9 -> 10) must succeed with correct code"
+        );
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_rejects_eleventh_attempt_even_with_correct_code(pool: PgPool) {
+        let email = "eleventh@example.com";
+        seed_confirmation(
+            &pool,
+            email,
+            "123456",
+            time::Duration::minutes(1),
+            10,
+            1,
+            time::Duration::minutes(1),
+        )
+        .await;
+
+        let result = confirm_login_inner(&pool, email, "123456").await;
+        assert!(
+            result.is_err(),
+            "11th attempt (attempts=10 -> 11) must be rejected"
+        );
+    }
+
+    #[sqlx::test]
+    async fn login_global_cap_counts_windowed_sends_not_cumulative(pool: PgPool) {
+        let email = "windowed@example.com";
+        seed_confirmation(
+            &pool,
+            email,
+            "111111",
+            time::Duration::hours(2),
+            0,
+            49,
+            time::Duration::hours(2),
+        )
+        .await;
+
+        let resp = with_pool_context(&pool, || login(email.to_string(), String::new()))
+            .await
+            .unwrap();
+        assert!(
+            resp.success,
+            "cumulative sent_count=49 must not block: windowed counter is separate"
+        );
+    }
+
+    #[sqlx::test]
+    async fn login_global_cap_blocks_at_50_windowed_sends(pool: PgPool) {
+        for i in 0..50 {
+            sqlx::query("INSERT INTO login_email_sends (email) VALUES ($1)")
+                .bind(format!("recent-{i}@example.com"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let resp = with_pool_context(&pool, || {
+            login("new@example.com".to_string(), String::new())
+        })
+        .await
+        .unwrap();
+        assert!(!resp.success);
+    }
+
+    #[sqlx::test]
+    async fn login_global_cap_ignores_sends_older_than_24h(pool: PgPool) {
+        for i in 0..50 {
+            sqlx::query(
+                "INSERT INTO login_email_sends (email, sent_at) VALUES ($1, NOW() - INTERVAL '25 hours')",
+            )
+            .bind(format!("old-{i}@example.com"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let resp = with_pool_context(&pool, || {
+            login("new@example.com".to_string(), String::new())
+        })
+        .await
+        .unwrap();
+        assert!(resp.success, "sends older than 24h must not count");
+    }
+
+    #[sqlx::test]
+    async fn request_confirmation_code_returns_failure_at_global_cap(pool: PgPool) {
+        for i in 0..50 {
+            sqlx::query("INSERT INTO login_email_sends (email) VALUES ($1)")
+                .bind(format!("cap-{i}@example.com"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let resp = request_confirmation_code(&pool, None, "victim@example.com")
+            .await
+            .unwrap();
+        assert!(!resp.success);
+        assert!(resp.message.contains("temporarily limited"));
     }
 }
