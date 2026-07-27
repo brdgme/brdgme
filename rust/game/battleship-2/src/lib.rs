@@ -115,8 +115,8 @@ pub enum Direction {
 }
 
 impl Direction {
-    pub fn all() -> Vec<Direction> {
-        vec![
+    pub fn all() -> &'static [Direction] {
+        &[
             Direction::Up,
             Direction::Right,
             Direction::Down,
@@ -312,6 +312,11 @@ impl Game {
             ));
         }
         let Loc { y, x } = loc;
+        if y >= BOARD_SIZE || x >= BOARD_SIZE {
+            return Err(GameError::invalid_input(
+                "can't shoot there because it's off the board",
+            ));
+        }
         let op = other_player(player);
         let mut logs = vec![];
         match self.boards[op][y][x] {
@@ -328,7 +333,11 @@ impl Game {
                 self.boards[op][y][x] = Cell::Miss;
             }
             ship_cell => {
-                let ship = ship_cell.to_ship().expect("cell is a ship");
+                let Some(ship) = ship_cell.to_ship() else {
+                    return Err(GameError::internal(
+                        "battleship-2: non-ship cell in shoot match",
+                    ));
+                };
                 self.boards[op][y][x] = Cell::Hit;
                 if self.player_ship_hits_remaining(op, ship) == 0 {
                     logs.push(Log::public(vec![N::Bold(vec![
@@ -347,8 +356,8 @@ impl Game {
         Ok(logs)
     }
 
-    pub fn player_hits_remaining(&self, player: usize) -> i32 {
-        let mut remaining = 0;
+    pub fn player_hits_remaining(&self, player: usize) -> usize {
+        let mut remaining: usize = 0;
         for y in 0..BOARD_SIZE {
             for x in 0..BOARD_SIZE {
                 if self.boards[player][y][x].is_ship() {
@@ -359,8 +368,8 @@ impl Game {
         remaining
     }
 
-    pub fn player_ship_hits_remaining(&self, player: usize, ship: Ship) -> i32 {
-        let mut remaining = 0;
+    pub fn player_ship_hits_remaining(&self, player: usize, ship: Ship) -> usize {
+        let mut remaining: usize = 0;
         for y in 0..BOARD_SIZE {
             for x in 0..BOARD_SIZE {
                 if self.boards[player][y][x] == ship.to_cell() {
@@ -385,7 +394,7 @@ impl Game {
 
     fn placings(&self) -> Vec<usize> {
         let metrics: Vec<Vec<i32>> = (0..self.players)
-            .map(|p| vec![self.player_hits_remaining(p)])
+            .map(|p| vec![self.player_hits_remaining(p) as i32])
             .collect();
         gen_placings(&metrics)
     }
@@ -522,7 +531,7 @@ impl Gamer for Game {
                 let mut logs = self.shoot(player, loc)?;
                 if self.is_finished() {
                     let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_hits_remaining(p)))
+                        .map(|p| (p, self.player_hits_remaining(p) as i32))
                         .collect();
                     logs.push(placings_log(&self.placings(), Some(&scores)));
                 }
@@ -850,9 +859,9 @@ mod test {
         let mut g = mock_game();
         place_all(&mut g, MICK);
         let total: usize = Ship::all().iter().map(|s| s.size()).sum();
-        assert_eq!(total as i32, g.player_hits_remaining(MICK));
+        assert_eq!(total, g.player_hits_remaining(MICK));
         g.boards[MICK][1][2] = Cell::Hit;
-        assert_eq!(total as i32 - 1, g.player_hits_remaining(MICK));
+        assert_eq!(total - 1, g.player_hits_remaining(MICK));
     }
 
     #[test]

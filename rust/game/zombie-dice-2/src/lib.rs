@@ -204,6 +204,8 @@ pub struct PubState {
     pub finished: bool,
     /// Final placings for each player. Only populated when the game is finished; empty during play.
     pub placings: Vec<usize>,
+    /// Players participating in a tie-breaker rolloff. Empty when no rolloff is active.
+    pub roll_off_players: Vec<usize>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -264,33 +266,44 @@ impl Game {
 
     pub fn next_player(&mut self) -> Vec<Log> {
         let mut logs: Vec<Log> = vec![];
-        self.current_turn = (self.current_turn + 1) % self.players;
-        if self.current_turn == 0 {
-            // Check for game end (round complete).
-            let (score, leaders) = self.leaders();
-            if score >= WIN_SCORE {
-                if leaders.len() == 1 {
-                    self.finished = true;
-                    return logs;
+        loop {
+            self.current_turn = (self.current_turn + 1) % self.players;
+            if self.current_turn == 0 {
+                let (score, leaders) = self.leaders();
+                if score >= WIN_SCORE {
+                    if leaders.len() == 1 {
+                        self.finished = true;
+                        return logs;
+                    }
+                    if self.roll_off_players != leaders {
+                        self.roll_off_players = leaders.clone();
+                        let parts: Vec<N> = leaders.iter().map(|&l| N::Player(l)).collect();
+                        logs.push(Log::public(vec![
+                            N::text("It's a tied score of "),
+                            N::Bold(vec![N::text(score.to_string())]),
+                            N::text(" between "),
+                            render::comma_list(parts),
+                            N::text(", tie breaker round!"),
+                        ]));
+                    }
                 }
-                // Roll off!
-                self.roll_off_players = leaders.clone();
-                let parts: Vec<N> = leaders.iter().map(|&l| N::Player(l)).collect();
-                logs.push(Log::public(vec![
-                    N::text("It's a tied score of "),
-                    N::Bold(vec![N::text(score.to_string())]),
-                    N::text(" between "),
-                    render::comma_list(parts),
-                    N::text(", tie breaker round!"),
-                ]));
             }
+            if self.should_skip_in_rolloff(self.current_turn) {
+                continue;
+            }
+            self.cup = all_dice();
+            self.shake_cup();
+            self.kept = vec![];
+            self.current_roll = vec![];
+            self.round_brains = 0;
+            self.round_shotguns = 0;
+            let (roll_logs, busted) = self.roll_inner();
+            logs.extend(roll_logs);
+            if busted {
+                continue;
+            }
+            return logs;
         }
-        if self.should_skip_in_rolloff(self.current_turn) {
-            logs.extend(self.next_player());
-        } else {
-            logs.extend(self.start_turn());
-        }
-        logs
     }
 
     pub fn player_roll(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
@@ -301,8 +314,15 @@ impl Game {
     }
 
     pub fn roll(&mut self) -> Vec<Log> {
+        let (mut logs, busted) = self.roll_inner();
+        if busted {
+            logs.extend(self.next_player());
+        }
+        logs
+    }
+
+    fn roll_inner(&mut self) -> (Vec<Log>, bool) {
         let mut logs: Vec<Log> = vec![];
-        // Collect the footprint dice to re-roll.
         let dice: Vec<Dice> = self.current_roll.iter().map(|dr| dr.dice).collect();
         let dice_len = dice.len();
         let mut dice = dice;
@@ -344,8 +364,7 @@ impl Game {
                 N::Bold(vec![N::text(self.round_brains.to_string())]),
                 N::text(" brains!"),
             ]));
-            logs.extend(self.next_player());
-            return logs;
+            return (logs, true);
         } else if was_shot {
             logs.push(Log::public(vec![
                 N::Player(self.current_turn),
@@ -358,7 +377,7 @@ impl Game {
         }
         self.round_brains += new_brains;
         self.current_roll = run;
-        logs
+        (logs, false)
     }
 
     pub fn keep(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
@@ -501,6 +520,7 @@ impl Gamer for Game {
             } else {
                 vec![]
             },
+            roll_off_players: self.roll_off_players.clone(),
         }
     }
 
@@ -1028,6 +1048,7 @@ mod test {
         assert_eq!(g.round_brains, ps.round_brains);
         assert_eq!(g.round_shotguns, ps.round_shotguns);
         assert_eq!(g.finished, ps.finished);
+        assert_eq!(g.roll_off_players, ps.roll_off_players);
     }
 
     #[test]

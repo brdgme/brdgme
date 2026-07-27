@@ -12,6 +12,7 @@
 - `round_shotguns` (i32): Number of shotguns taken this turn. At 3, the turn ends immediately and all round_brains are lost.
 - `finished` (bool): True when the game is over (a player reached 13+ brains with a unique lead, or won a rolloff).
 - `placings` (Vec<usize>): Final placings for each player (1 = first place). Only populated when `finished` is true; empty vec during play.
+- `roll_off_players` (Vec<usize>): Players participating in a tie-breaker rolloff. Empty when no rolloff is active; otherwise lists the player indices still in the rolloff (those tied at the winning score when the round completed).
 
 ## PlayerState (player-private information)
 

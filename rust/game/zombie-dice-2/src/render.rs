@@ -128,6 +128,16 @@ impl Renderer for PubState {
         }
         out.push(table_with_gap(&rows, 2));
 
+        if !self.roll_off_players.is_empty() {
+            let parts: Vec<N> = self
+                .roll_off_players
+                .iter()
+                .map(|&p| N::Player(p))
+                .collect();
+            out.push(N::Bold(vec![N::text("\n\nTie breaker: ")]));
+            out.push(comma_list(parts));
+        }
+
         out
     }
 }

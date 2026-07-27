@@ -65,7 +65,7 @@ impl Game {
                 AfterSpace::new(Doc::name_desc(
                     "direction",
                     "the direction to place the ship",
-                    Enum::partial(Direction::all()),
+                    Enum::partial(Direction::all().to_vec()),
                 )),
             ),
             |(_, ship, loc, dir)| Command::Place { ship, loc, dir },
