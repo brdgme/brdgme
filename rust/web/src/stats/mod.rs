@@ -193,7 +193,7 @@ pub async fn get_player_profile(
     let totals = overall_totals(&pool, user.user_id, include_single_human)
         .await
         .map_err(internal("get_player_profile: totals"))?;
-    let game_types = game_type_stats(&pool, user.user_id, include_single_human)
+    let game_types = game_type_stats(&pool, user.user_id, include_single_human, None)
         .await
         .map_err(internal("get_player_profile: game_types"))?;
     let recent_form = recent_form(&pool, user.user_id, 10, include_single_human)
@@ -263,11 +263,11 @@ pub async fn get_player_game_type_stats(
         None => return Ok(None),
     };
 
-    let stats = game_type_stats(&pool, user.user_id, include_single_human)
+    let stats = game_type_stats(&pool, user.user_id, include_single_human, Some(&canonical))
         .await
         .map_err(internal("get_player_game_type_stats: stats"))?
         .into_iter()
-        .find(|s| s.game_type_name == canonical)
+        .next()
         .unwrap_or_else(|| GameTypeStats {
             game_type_name: canonical.clone(),
             games: 0,
@@ -278,7 +278,7 @@ pub async fn get_player_game_type_stats(
             peak_rating: None,
         });
 
-    let rating_series = rating_series(&pool, user.user_id, &canonical)
+    let mut rating_series = rating_series(&pool, user.user_id, &canonical)
         .await
         .map_err(internal("get_player_game_type_stats: rating_series"))?;
     let finished_games = finished_games(
@@ -286,12 +286,12 @@ pub async fn get_player_game_type_stats(
         user.user_id,
         Some(&canonical),
         include_single_human,
-        None,
+        Some(100),
         viewer_user_id,
     )
     .await
     .map_err(internal("get_player_game_type_stats: finished_games"))?;
-    let head_to_head = head_to_head(
+    let mut head_to_head = head_to_head(
         &pool,
         user.user_id,
         &canonical,
@@ -300,6 +300,13 @@ pub async fn get_player_game_type_stats(
     )
     .await
     .map_err(internal("get_player_game_type_stats: head_to_head"))?;
+    head_to_head.truncate(50);
+
+    let rating_series = if rating_series.len() > 200 {
+        rating_series.split_off(rating_series.len() - 200)
+    } else {
+        rating_series
+    };
 
     Ok(Some(PlayerGameTypeData {
         user,
@@ -333,8 +340,15 @@ pub async fn get_player_history(
         None => return Ok(None),
     };
 
+    let game_type = match game_type {
+        Some(ref gt) if !gt.is_empty() => find_game_type_name(&pool, gt)
+            .await
+            .map_err(internal("get_player_history: find game type"))?,
+        _ => None,
+    };
+
     let page_size: i64 = 50;
-    let page = page.max(1);
+    let page = page.clamp(1, 1_000_000);
     let offset = (page - 1) * page_size;
 
     let total = game_history_count(

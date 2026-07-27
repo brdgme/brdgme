@@ -4,6 +4,21 @@ use std::collections::HashMap;
 use time::PrimitiveDateTime;
 use uuid::Uuid;
 
+/// Canonical eligibility predicate shared by the stats queries below
+/// (`overall_totals`, `game_type_stats`, `finished_games`, `game_history`,
+/// `game_history_count`, `head_to_head`, `recent_form`): a game qualifies only
+/// if it has enough non-null `user_id` seats - at least 2 (human-vs-human), or
+/// at least 1 when `$include_single_human` is set (human-vs-bot counts).
+///
+/// This is documentation, not a substitute: the queries use the compile-time
+/// `sqlx::query!` macro against the offline `.sqlx` cache, which requires a
+/// string literal and so cannot interpolate this fragment. The SQL is therefore
+/// inlined at each call site (aliased `gp_elig`/`gp2`/`gp3` to avoid collisions)
+/// and MUST be kept in sync with this constant by hand. Each inlined occurrence
+/// is tagged with an `ELIGIBILITY_PREDICATE` comment.
+#[allow(dead_code)]
+const ELIGIBILITY_PREDICATE: &str = "(SELECT count(*) FROM game_players gp_elig WHERE gp_elig.game_id = g.id AND gp_elig.user_id IS NOT NULL) >= CASE WHEN $include_single_human THEN 1 ELSE 2 END";
+
 pub async fn get_profile_user(pool: &PgPool, name: &str) -> Result<Option<super::ProfileUser>> {
     let row = sqlx::query!(
         r#"SELECT id, name, pref_colors, created_at FROM users WHERE lower(name) = lower($1)"#,
@@ -45,6 +60,7 @@ pub async fn overall_totals(
     user_id: Uuid,
     include_single_human: bool,
 ) -> Result<super::OverallTotals> {
+    // ELIGIBILITY_PREDICATE (see const at top of file)
     let row = sqlx::query!(
         r#"
         SELECT
@@ -82,7 +98,9 @@ pub async fn game_type_stats(
     pool: &PgPool,
     user_id: Uuid,
     include_single_human: bool,
+    game_type_name: Option<&str>,
 ) -> Result<Vec<super::GameTypeStats>> {
+    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows = sqlx::query!(
         r#"
         WITH qualifying AS (
@@ -97,6 +115,7 @@ pub async fn game_type_stats(
             JOIN game_types gt ON gt.id = gv.game_type_id
             WHERE gp.user_id = $1
               AND g.is_finished = true
+              AND ($3::text IS NULL OR gt.name = $3)
               AND (
                   SELECT count(*) FROM game_players gp3
                   WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL
@@ -128,7 +147,8 @@ pub async fn game_type_stats(
         ORDER BY "game_type_name!"
         "#,
         user_id,
-        include_single_human
+        include_single_human,
+        game_type_name
     )
     .fetch_all(pool)
     .await?;
@@ -180,7 +200,7 @@ pub async fn rating_series(
     .fetch_all(pool)
     .await?;
 
-    let mut rating = 1200;
+    let mut rating = crate::db::INITIAL_RATING;
     Ok(rows
         .into_iter()
         .map(|row| {
@@ -209,6 +229,7 @@ async fn opponents_by_game(
     user_id: Uuid,
     viewer: Option<Uuid>,
 ) -> Result<HashMap<Uuid, Vec<super::OpponentWithPlace>>> {
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
     let rows: Vec<OpponentRow> = sqlx::query_as(
         r#"
         SELECT
@@ -267,6 +288,7 @@ pub async fn finished_games(
     limit: Option<i64>,
     viewer: Option<Uuid>,
 ) -> Result<Vec<super::FinishedGameRow>> {
+    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows = sqlx::query!(
         r#"
         SELECT
@@ -287,7 +309,7 @@ pub async fn finished_games(
               SELECT count(*) FROM game_players gp3
               WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL
           ) >= CASE WHEN $2 THEN 1 ELSE 2 END
-        ORDER BY g.finished_at DESC, g.id
+        ORDER BY g.finished_at DESC NULLS LAST, g.id
         LIMIT $4::bigint
         "#,
         user_id,
@@ -404,19 +426,28 @@ pub async fn game_history(
     offset: i64,
     viewer: Option<Uuid>,
 ) -> Result<Vec<super::HistoryRow>> {
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows: Vec<GameHistoryRow> = sqlx::query_as(
         r#"
         SELECT g.id AS game_id, gt.name AS game_type_name, g.is_finished AS is_finished,
                g.created_at AS started_at, g.finished_at AS finished_at,
                gp.place AS my_place, gp.rating_change AS my_rating_change,
-               (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
-               (SELECT min(r.rating_before) FROM game_players r WHERE r.game_id = g.id AND r.rating_before IS NOT NULL) AS match_min,
-               (SELECT max(r.rating_before) FROM game_players r WHERE r.game_id = g.id AND r.rating_before IS NOT NULL) AS match_max,
-               (SELECT avg(r.rating_before)::int FROM game_players r WHERE r.game_id = g.id AND r.rating_before IS NOT NULL) AS match_avg
+               agg.player_count AS player_count,
+               agg.match_min AS match_min,
+               agg.match_max AS match_max,
+               agg.match_avg AS match_avg
         FROM game_players gp
         JOIN games g          ON g.id = gp.game_id
         JOIN game_versions gv ON gv.id = g.game_version_id
         JOIN game_types gt    ON gt.id = gv.game_type_id
+        LEFT JOIN LATERAL (
+            SELECT count(*) AS player_count,
+                   min(rating_before) AS match_min,
+                   max(rating_before) AS match_max,
+                   avg(rating_before)::int AS match_avg
+            FROM game_players WHERE game_id = g.id
+        ) agg ON true
         WHERE gp.user_id = $1
           AND ($2::boolean IS NULL OR g.is_finished = $2)
           AND ($3::text    IS NULL OR gt.name = $3)
@@ -475,6 +506,8 @@ pub async fn game_history_count(
     game_type: Option<&str>,
     include_single_human: bool,
 ) -> Result<i64> {
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    // ELIGIBILITY_PREDICATE (see const at top of file)
     let (count,): (i64,) = sqlx::query_as(
         r#"
         SELECT count(*)
@@ -505,6 +538,7 @@ pub async fn head_to_head(
     include_single_human: bool,
     viewer: Option<Uuid>,
 ) -> Result<Vec<super::HeadToHead>> {
+    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows = sqlx::query!(
         r#"
         WITH qualifying AS (
@@ -589,6 +623,7 @@ pub async fn recent_form(
     per_type: i64,
     include_single_human: bool,
 ) -> Result<Vec<super::GameTypeForm>> {
+    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows = sqlx::query!(
         r#"
         WITH qualifying AS (
@@ -600,7 +635,7 @@ pub async fn recent_form(
                 gp.rating_change,
                 (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
                 row_number() OVER (
-                    PARTITION BY gt.id ORDER BY g.finished_at DESC, g.id
+                    PARTITION BY gt.id ORDER BY g.finished_at DESC NULLS LAST, g.id
                 ) AS rn
             FROM game_players gp
             JOIN games g ON g.id = gp.game_id
@@ -662,6 +697,8 @@ pub async fn recent_form_for_game_type(
     game_type_id: Uuid,
     per_user: i64,
 ) -> Result<HashMap<Uuid, Vec<super::FormResult>>> {
+    // Single-human games deliberately excluded (>= 2 hardcoded): this fn serves
+    // the game-type page's multi-user form, which only shows human-vs-human games.
     let rows = sqlx::query!(
         r#"
         WITH qualifying AS (
@@ -986,7 +1023,9 @@ mod tests {
         set_game_type_rating(&pool, gt_zebra, user, 1300, 1350).await;
         set_game_type_rating(&pool, gt_camel, user, 1100, 1150).await;
 
-        let stats = game_type_stats(&pool, user, false).await.expect("query ok");
+        let stats = game_type_stats(&pool, user, false, None)
+            .await
+            .expect("query ok");
         assert_eq!(stats.len(), 2);
 
         assert_eq!(stats[0].game_type_name, "Camel Up");
@@ -1033,7 +1072,9 @@ mod tests {
         )
         .await;
 
-        let stats = game_type_stats(&pool, user, true).await.expect("query ok");
+        let stats = game_type_stats(&pool, user, true, None)
+            .await
+            .expect("query ok");
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].avg_place_percentile, Some(0.5));
 
@@ -1046,7 +1087,9 @@ mod tests {
         )
         .await;
 
-        let stats2 = game_type_stats(&pool, user, true).await.expect("query ok");
+        let stats2 = game_type_stats(&pool, user, true, None)
+            .await
+            .expect("query ok");
         let duel = stats2
             .iter()
             .find(|s| s.game_type_name == "Duel")
@@ -1071,7 +1114,9 @@ mod tests {
         let (gt_other, _gv_other) = make_game_type(&pool, "Zebra Game").await;
         set_game_type_rating(&pool, gt_other, other, 1400, 1450).await;
 
-        let stats = game_type_stats(&pool, user, false).await.expect("query ok");
+        let stats = game_type_stats(&pool, user, false, None)
+            .await
+            .expect("query ok");
 
         assert!(
             !stats.iter().any(|s| s.game_type_name == "Zebra Game"),
@@ -1144,7 +1189,7 @@ mod tests {
         assert_eq!(series[2].finished_at, datetime!(2026-01-04 00:00:00));
         assert_eq!(series[2].rating, 1228);
 
-        let final_row = game_type_stats(&pool, user, false)
+        let final_row = game_type_stats(&pool, user, false, None)
             .await
             .expect("query ok")
             .into_iter()

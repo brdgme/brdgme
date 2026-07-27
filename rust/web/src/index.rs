@@ -47,21 +47,32 @@ pub async fn get_logged_in_index() -> Result<LoggedInIndexData, ServerFnError> {
     let friends = crate::db::list_friends(&pool, user.id)
         .await
         .map_err(internal("get_logged_in_index: friends"))?;
-    let mut friend_entries = Vec::new();
-    for (friend_id, friend_name) in friends {
-        let visible = crate::db::friend_recent_visible_game(&pool, friend_id, user.id, 10)
-            .await
-            .map_err(internal("get_logged_in_index: friend recent game"))?;
-        friend_entries.push(FriendRecentGame {
-            friend_user_id: friend_id,
-            friend_name,
-            game_id: visible.as_ref().map(|(id, _, _)| *id),
-            game_type_name: visible.as_ref().map(|(_, name, _)| name.clone()),
-            updated_at: visible.as_ref().map(|(_, _, ts)| *ts),
-        });
-    }
+    let friends: Vec<_> = friends.into_iter().take(20).collect();
+    let friend_futures: Vec<_> = friends
+        .iter()
+        .map(|(friend_id, friend_name)| {
+            let pool = pool.clone();
+            let friend_id = *friend_id;
+            let friend_name = friend_name.clone();
+            let viewer_id = user.id;
+            async move {
+                let visible =
+                    crate::db::friend_recent_visible_game(&pool, friend_id, viewer_id, 10).await?;
+                Ok::<_, anyhow::Error>(FriendRecentGame {
+                    friend_user_id: friend_id,
+                    friend_name,
+                    game_id: visible.as_ref().map(|(id, _, _)| *id),
+                    game_type_name: visible.as_ref().map(|(_, name, _)| name.clone()),
+                    updated_at: visible.as_ref().map(|(_, _, ts)| *ts),
+                })
+            }
+        })
+        .collect();
+    let friend_entries = futures_util::future::try_join_all(friend_futures)
+        .await
+        .map_err(internal("get_logged_in_index: friend recent game"))?;
 
-    let stats = crate::stats::game_type_stats(&pool, user.id, false)
+    let stats = crate::stats::game_type_stats(&pool, user.id, false, None)
         .await
         .map_err(internal("get_logged_in_index: game_type_stats"))?;
     let form = crate::stats::recent_form(&pool, user.id, 10, false)

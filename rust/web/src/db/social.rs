@@ -179,6 +179,29 @@ pub async fn should_hide_add_friend(pool: &PgPool, viewer: Uuid, target: Uuid) -
 }
 
 #[cfg(feature = "ssr")]
+pub async fn should_hide_add_friend_many(
+    pool: &PgPool,
+    viewer: Uuid,
+    targets: &[Uuid],
+) -> Result<std::collections::HashSet<Uuid>> {
+    if targets.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT DISTINCT target_user_id FROM friends
+         WHERE source_user_id = $1 AND target_user_id = ANY($2)
+         UNION
+         SELECT DISTINCT source_user_id FROM friends
+         WHERE target_user_id = $1 AND has_accepted = TRUE AND source_user_id = ANY($2)",
+    )
+    .bind(viewer)
+    .bind(targets)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+#[cfg(feature = "ssr")]
 pub async fn list_friends(pool: &PgPool, user_id: Uuid) -> Result<Vec<(Uuid, String)>> {
     Ok(sqlx::query_as(
         "SELECT u.id, u.name FROM friends f

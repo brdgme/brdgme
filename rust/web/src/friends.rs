@@ -96,24 +96,15 @@ pub async fn get_friends_overview() -> Result<FriendsOverview, ServerFnError> {
     use sqlx::PgPool;
     let pool = expect_context::<PgPool>();
     let user = require_user().await?;
-    let friends = crate::db::list_friends(&pool, user.id)
-        .await
-        .map_err(internal("get_friends_overview: friends"))?;
-    let incoming = crate::db::list_incoming_friend_requests(&pool, user.id)
-        .await
-        .map_err(internal("get_friends_overview: incoming"))?;
-    let outgoing = crate::db::list_outgoing_friend_requests(&pool, user.id)
-        .await
-        .map_err(internal("get_friends_overview: outgoing"))?;
-    let blocked = crate::db::list_blocked(&pool, user.id)
-        .await
-        .map_err(internal("get_friends_overview: blocked"))?;
-    let invite_policy = crate::db::get_invite_policy(&pool, user.id)
-        .await
-        .map_err(internal("get_friends_overview: policy"))?;
-    let game_visibility = crate::db::get_game_visibility(&pool, user.id)
-        .await
-        .map_err(internal("get_friends_overview: visibility"))?;
+    let (friends, incoming, outgoing, blocked, invite_policy, game_visibility) = tokio::try_join!(
+        crate::db::list_friends(&pool, user.id),
+        crate::db::list_incoming_friend_requests(&pool, user.id),
+        crate::db::list_outgoing_friend_requests(&pool, user.id),
+        crate::db::list_blocked(&pool, user.id),
+        crate::db::get_invite_policy(&pool, user.id),
+        crate::db::get_game_visibility(&pool, user.id),
+    )
+    .map_err(internal("get_friends_overview: queries"))?;
     let entry = |(user_id, name): (Uuid, String)| FriendEntry { user_id, name };
     Ok(FriendsOverview {
         friends: friends.into_iter().map(entry).collect(),

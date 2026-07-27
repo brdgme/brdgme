@@ -308,16 +308,14 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
     .await
     .map_err(internal("get_game_details: recent form"))?;
 
-    let mut hide_add_friend = std::collections::HashSet::new();
-    for uid in &human_user_ids {
-        if *uid != user.id
-            && crate::db::should_hide_add_friend(&pool, user.id, *uid)
-                .await
-                .map_err(internal("get_game_details: friend status"))?
-        {
-            hide_add_friend.insert(*uid);
-        }
-    }
+    let other_human_ids: Vec<Uuid> = human_user_ids
+        .iter()
+        .copied()
+        .filter(|uid| *uid != user.id)
+        .collect();
+    let hide_add_friend = crate::db::should_hide_add_friend_many(&pool, user.id, &other_human_ids)
+        .await
+        .map_err(internal("get_game_details: friend status"))?;
 
     let previous_game_id = crate::db::find_predecessor_game_id(&pool, game_id)
         .await

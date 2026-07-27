@@ -772,7 +772,7 @@ pub fn PlayerHistoryPage() -> impl IntoView {
             let q = query.get();
             let name = p.get("name").unwrap_or_default();
             let page: i64 = q.get("page").as_deref().unwrap_or("1").parse().unwrap_or(1);
-            let page = page.max(1);
+            let page = page.clamp(1, 1_000_000);
             let status = match q.get("status").as_deref() {
                 Some("finished") => Some(true),
                 Some("active") => Some(false),

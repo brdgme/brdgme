@@ -6,6 +6,12 @@ use anyhow::Result;
 #[cfg(feature = "ssr")]
 use uuid::Uuid;
 
+/// Starting rating for a player in a game type. Matches the
+/// `game_type_users.rating` column default and the synthetic-row value in
+/// `build_game_type_user`; rating reconstruction (`stats::queries::rating_series`)
+/// seeds its running total from the same value.
+pub const INITIAL_RATING: i32 = 1200;
+
 #[cfg(feature = "ssr")]
 pub(crate) fn build_user_from_row(
     id: Option<Uuid>,
@@ -115,8 +121,8 @@ pub(crate) fn build_game_type_user(
             game_type_id: default_game_type_id,
             user_id: default_user_id.unwrap_or(Uuid::nil()),
             last_game_finished_at: None,
-            rating: 1200,
-            peak_rating: 1200,
+            rating: INITIAL_RATING,
+            peak_rating: INITIAL_RATING,
         },
     }
 }
