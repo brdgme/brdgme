@@ -70,11 +70,9 @@ pub const PLAYER_COLOR_NAMES: [&str; 8] = [
 /// shuffle of the full palette, truncated to 3 (so the trio is always valid
 /// and duplicate-free). Randomised so new users don't all share one default.
 pub fn random_pref_colors() -> Vec<String> {
+    use rand::seq::SliceRandom;
     let mut colors: Vec<String> = PLAYER_COLOR_NAMES.iter().map(|s| s.to_string()).collect();
-    for i in (1..colors.len()).rev() {
-        let j = rand::random::<u32>() as usize % (i + 1);
-        colors.swap(i, j);
-    }
+    colors.shuffle(&mut rand::rng());
     colors.truncate(3);
     colors
 }

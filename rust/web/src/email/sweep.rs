@@ -15,15 +15,39 @@ const REMINDER_SWEEP_LIMIT: i64 = 200;
 pub fn reminder_threshold() -> std::time::Duration {
     std::env::var("TURN_REMINDER_AFTER")
         .ok()
-        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .and_then(|v| parse_duration(&v))
         .unwrap_or(DEFAULT_REMINDER_THRESHOLD)
 }
 
 pub fn sweep_interval() -> std::time::Duration {
     std::env::var("TURN_REMINDER_SWEEP_INTERVAL")
         .ok()
-        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .and_then(|v| parse_duration(&v))
         .unwrap_or(DEFAULT_SWEEP_INTERVAL)
+}
+
+pub fn parse_duration(raw: &str) -> Option<std::time::Duration> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let num_end = raw
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map(|(i, _)| i)
+        .unwrap_or(raw.len());
+    if num_end == 0 {
+        return None;
+    }
+    let n: u64 = raw[..num_end].parse().ok()?;
+    let mult: u64 = match raw[num_end..].trim().to_ascii_lowercase().as_str() {
+        "" | "s" | "sec" | "second" | "seconds" => 1,
+        "m" | "min" | "minute" | "minutes" => 60,
+        "h" | "hour" | "hours" => 3600,
+        "d" | "day" | "days" => 86400,
+        _ => return None,
+    };
+    Some(std::time::Duration::from_secs(n.saturating_mul(mult)))
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -324,14 +348,14 @@ pub const DEFAULT_BOT_TURN_SWEEP_INTERVAL: std::time::Duration =
 pub fn bot_turn_threshold() -> std::time::Duration {
     std::env::var("BOT_TURN_THRESHOLD")
         .ok()
-        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .and_then(|v| parse_duration(&v))
         .unwrap_or(DEFAULT_BOT_TURN_THRESHOLD)
 }
 
 pub fn bot_turn_sweep_interval() -> std::time::Duration {
     std::env::var("BOT_TURN_SWEEP_INTERVAL")
         .ok()
-        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .and_then(|v| parse_duration(&v))
         .unwrap_or(DEFAULT_BOT_TURN_SWEEP_INTERVAL)
 }
 
@@ -450,14 +474,14 @@ pub const DEFAULT_INVITE_EXPIRY_THRESHOLD: std::time::Duration =
 pub fn invite_reminder_threshold() -> std::time::Duration {
     std::env::var("INVITE_REMINDER_AFTER")
         .ok()
-        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .and_then(|v| parse_duration(&v))
         .unwrap_or(DEFAULT_INVITE_REMINDER_THRESHOLD)
 }
 
 pub fn invite_expiry_threshold() -> std::time::Duration {
     std::env::var("INVITE_EXPIRE_AFTER")
         .ok()
-        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .and_then(|v| parse_duration(&v))
         .unwrap_or(DEFAULT_INVITE_EXPIRY_THRESHOLD)
 }
 
@@ -467,7 +491,7 @@ pub const DEFAULT_INVITE_AUTO_DECLINE_THRESHOLD: std::time::Duration =
 pub fn invite_auto_decline_threshold() -> std::time::Duration {
     std::env::var("INVITE_AUTO_DECLINE_AFTER")
         .ok()
-        .and_then(|v| crate::email::outbound::parse_duration(&v))
+        .and_then(|v| parse_duration(&v))
         .unwrap_or(DEFAULT_INVITE_AUTO_DECLINE_THRESHOLD)
 }
 
@@ -588,6 +612,34 @@ pub fn spawn_periodic_sweeps(
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_duration_parses_units() {
+        assert_eq!(
+            parse_duration("1 hour"),
+            Some(std::time::Duration::from_secs(3600))
+        );
+        assert_eq!(
+            parse_duration("30m"),
+            Some(std::time::Duration::from_secs(1800))
+        );
+        assert_eq!(
+            parse_duration("3600"),
+            Some(std::time::Duration::from_secs(3600))
+        );
+        assert_eq!(
+            parse_duration("2 days"),
+            Some(std::time::Duration::from_secs(172800))
+        );
+        assert_eq!(
+            parse_duration("90 seconds"),
+            Some(std::time::Duration::from_secs(90))
+        );
+        assert_eq!(parse_duration(""), None);
+        assert_eq!(parse_duration("garbage"), None);
+        assert_eq!(parse_duration("12 parsecs"), None);
+    }
+
     #[test]
     fn reminder_threshold_defaults_to_24h() {
         unsafe { std::env::remove_var("TURN_REMINDER_AFTER") };

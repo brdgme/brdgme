@@ -53,7 +53,9 @@ fn sentry_dsn_and_release() -> Option<(String, Option<String>)> {
 /// DSNs/release strings are not expected to contain quotes, but this is
 /// cheap enough to apply unconditionally rather than assume that.
 fn js_string_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('<', "\\u003c")
 }
 
 fn sentry_init_snippet(dsn: &str, release: Option<&str>) -> String {

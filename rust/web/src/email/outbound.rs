@@ -5,35 +5,6 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Parses a human duration like `"1 hour"`, `"30m"`, `"3600"`, `"2 days"` into
-/// a `Duration`. A bare number is seconds; units (case-insensitive) are
-/// `s`/`sec`/`second`/`seconds`, `m`/`min`/`minute`/`minutes`, `h`/`hour`/
-/// `hours`, `d`/`day`/`days`. Returns `None` on empty input, no leading number,
-/// an unknown unit, or trailing junk.
-pub fn parse_duration(raw: &str) -> Option<std::time::Duration> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let num_end = raw
-        .char_indices()
-        .find(|(_, c)| !c.is_ascii_digit())
-        .map(|(i, _)| i)
-        .unwrap_or(raw.len());
-    if num_end == 0 {
-        return None;
-    }
-    let n: u64 = raw[..num_end].parse().ok()?;
-    let mult: u64 = match raw[num_end..].trim().to_ascii_lowercase().as_str() {
-        "" | "s" | "sec" | "second" | "seconds" => 1,
-        "m" | "min" | "minute" | "minutes" => 60,
-        "h" | "hour" | "hours" => 3600,
-        "d" | "day" | "days" => 86400,
-        _ => return None,
-    };
-    Some(std::time::Duration::from_secs(n.saturating_mul(mult)))
-}
-
 /// Per-recipient web-presence suppression for AUTOMATED emails only: true iff
 /// the recipient has a user who pinged the server within the presence window
 /// (i.e. has a page open). Bots and addressless slots have no user (`None`) and
@@ -62,7 +33,6 @@ pub async fn try_send_rendered_email(
         );
         return true;
     };
-    axum_prometheus::metrics::counter!("game_emails_sent_total").increment(1);
     let from_addr =
         std::env::var("EMAIL_FROM").unwrap_or_else(|_| "brdg.me <mail@brdg.me>".to_string());
     let mut opts = resend_rs::types::CreateEmailBaseOptions::new(
@@ -77,8 +47,12 @@ pub async fn try_send_rendered_email(
         opts = opts.with_header(&k, &v);
     }
     match resend.emails.send(opts).await {
-        Ok(_) => true,
+        Ok(_) => {
+            axum_prometheus::metrics::counter!("game_emails_sent_total").increment(1);
+            true
+        }
         Err(e) => {
+            axum_prometheus::metrics::counter!("game_emails_failed_total").increment(1);
             tracing::error!("Failed to send email to {}: {}", to, e);
             false
         }
@@ -105,49 +79,42 @@ pub(crate) fn generate_email_token() -> String {
 }
 
 /// Returns the player's `email_token`, generating and persisting one on first
-/// use (lazy population, per migration 014). Plain query, matching
-/// `db::get_user_theme`.
+/// use (lazy population, per migration 014). Atomic COALESCE prevents races.
 pub async fn ensure_email_token(pool: &PgPool, game_player_id: Uuid) -> anyhow::Result<String> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT email_token FROM game_players WHERE id = $1")
-            .bind(game_player_id)
-            .fetch_optional(pool)
-            .await?;
-    if let Some((Some(tok),)) = row {
-        return Ok(tok);
-    }
     let token = generate_email_token();
-    sqlx::query("UPDATE game_players SET email_token = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&token)
-        .bind(game_player_id)
-        .execute(pool)
-        .await?;
-    Ok(token)
+    let row: Option<(String,)> = sqlx::query_as(
+        "UPDATE game_players SET email_token = COALESCE(email_token, $1), updated_at = NOW() WHERE id = $2 RETURNING email_token",
+    )
+    .bind(&token)
+    .bind(game_player_id)
+    .fetch_optional(pool)
+    .await?;
+    match row {
+        Some((tok,)) => Ok(tok),
+        None => anyhow::bail!("game_player {} not found", game_player_id),
+    }
 }
 
-/// Transaction-aware [`ensure_email_token`]: identical select-then-update, but on
-/// the caller's connection so it can run inside a held transaction (the reminder
-/// sweep's `FOR UPDATE` claim) instead of deadlocking against that claim's row
-/// lock on the shared pool. Mirrors `sweep::mark_reminder_sent_tx`.
+/// Transaction-aware [`ensure_email_token`]: identical atomic COALESCE update,
+/// but on the caller's connection so it can run inside a held transaction (the
+/// reminder sweep's `FOR UPDATE` claim) instead of deadlocking against that
+/// claim's row lock on the shared pool. Mirrors `sweep::mark_reminder_sent_tx`.
 pub async fn ensure_email_token_tx(
     tx: &mut sqlx::PgConnection,
     game_player_id: Uuid,
 ) -> anyhow::Result<String> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT email_token FROM game_players WHERE id = $1")
-            .bind(game_player_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    if let Some((Some(tok),)) = row {
-        return Ok(tok);
-    }
     let token = generate_email_token();
-    sqlx::query("UPDATE game_players SET email_token = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&token)
-        .bind(game_player_id)
-        .execute(&mut *tx)
-        .await?;
-    Ok(token)
+    let row: Option<(String,)> = sqlx::query_as(
+        "UPDATE game_players SET email_token = COALESCE(email_token, $1), updated_at = NOW() WHERE id = $2 RETURNING email_token",
+    )
+    .bind(&token)
+    .bind(game_player_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    match row {
+        Some((tok,)) => Ok(tok),
+        None => anyhow::bail!("game_player {} not found", game_player_id),
+    }
 }
 
 /// Returns the user's `settings_email_token`, generating and persisting one on
@@ -255,33 +222,6 @@ mod tests {
             user_id: None,
             is_bot,
         }
-    }
-
-    #[test]
-    fn parse_duration_parses_units() {
-        assert_eq!(
-            parse_duration("1 hour"),
-            Some(std::time::Duration::from_secs(3600))
-        );
-        assert_eq!(
-            parse_duration("30m"),
-            Some(std::time::Duration::from_secs(1800))
-        );
-        assert_eq!(
-            parse_duration("3600"),
-            Some(std::time::Duration::from_secs(3600))
-        );
-        assert_eq!(
-            parse_duration("2 days"),
-            Some(std::time::Duration::from_secs(172800))
-        );
-        assert_eq!(
-            parse_duration("90 seconds"),
-            Some(std::time::Duration::from_secs(90))
-        );
-        assert_eq!(parse_duration(""), None);
-        assert_eq!(parse_duration("garbage"), None);
-        assert_eq!(parse_duration("12 parsecs"), None);
     }
 
     #[test]

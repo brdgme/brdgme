@@ -131,7 +131,14 @@ pub fn player_for_slot(name: &str, color_name: &str, palette: &Palette) -> Playe
 }
 
 fn render_block(markup: &str, players: &[Player], palette: &Palette) -> (String, String) {
-    let (nodes, _) = brdgme_markup::from_string(markup).unwrap_or_default();
+    let nodes = match brdgme_markup::from_string(markup) {
+        Ok((nodes, _)) => nodes,
+        Err(e) => {
+            let prefix: String = markup.chars().take(80).collect();
+            tracing::warn!("email: markup parse failed: {e}; prefix: {prefix:?}");
+            Vec::new()
+        }
+    };
     let tnodes = brdgme_markup::transform_with_palette(&nodes, players, palette);
     (brdgme_markup::html(&tnodes), brdgme_markup::plain(&tnodes))
 }
@@ -140,6 +147,20 @@ fn fallback_html(bg: &str, fg: &str, body: &str) -> String {
     format!(
         "<html><body style=\"background-color:{bg};\"><pre style=\"background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;line-height:1.2em;white-space:pre;\">{body}</pre></body></html>",
     )
+}
+
+fn escape_html_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Renders one outbound game email. `palette`/`players` are the recipient's
@@ -215,11 +236,13 @@ pub fn render_game_email(
         body.push('\n');
     }
     if let Some(url) = &content.browser_url {
+        let url = escape_html_attr(url);
         body.push_str(&format!(
             "<a href=\"{url}\" style=\"color:{accent};\">Play in your browser</a>\n\n"
         ));
     }
     if let Some(url) = &content.rules_url {
+        let url = escape_html_attr(url);
         body.push_str(&format!(
             "<a href=\"{url}\" style=\"color:{muted};font-size:12px;\">View rules</a>\n\n"
         ));
@@ -252,14 +275,22 @@ pub fn render_game_email(
         r#"<mjml><mj-body background-color="{bg}"><mj-section><mj-column><mj-raw><tr><td style="padding:0;font-size:13px;"><pre style="background-color:{bg};color:{fg};font-family:'DejaVu Sans Mono','Lucida Console',monospace;font-size:13px;line-height:1.2em;white-space:pre;padding:16px;margin:0;">{body}</pre></td></tr></mj-raw></mj-column></mj-section></mj-body></mjml>"#,
     );
 
-    let html = mrml::parse(&mjml)
-        .ok()
-        .and_then(|p| {
-            p.element
-                .render(&mrml::prelude::render::RenderOptions::default())
-                .ok()
-        })
-        .unwrap_or_else(|| fallback_html(&bg, &fg, &body));
+    let html = match mrml::parse(&mjml) {
+        Ok(p) => match p
+            .element
+            .render(&mrml::prelude::render::RenderOptions::default())
+        {
+            Ok(html) => html,
+            Err(e) => {
+                tracing::warn!("email: mrml render failed, using fallback html: {e}");
+                fallback_html(&bg, &fg, &body)
+            }
+        },
+        Err(e) => {
+            tracing::warn!("email: mrml parse failed, using fallback html: {e}");
+            fallback_html(&bg, &fg, &body)
+        }
+    };
 
     let mut text = String::new();
     if let Some((_, p)) = &header {
