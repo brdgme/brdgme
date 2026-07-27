@@ -28,9 +28,6 @@ pub struct GameInfoData {
 #[cfg(feature = "ssr")]
 mod queries;
 
-#[cfg(feature = "ssr")]
-pub use queries::*;
-
 #[server(GetGameInfo, "/api")]
 pub async fn get_game_info(name: String) -> Result<Option<GameInfoData>, ServerFnError> {
     use sqlx::PgPool;

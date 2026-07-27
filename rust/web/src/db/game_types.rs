@@ -65,10 +65,12 @@ pub async fn find_game_type_player_counts(
 /// cache churn; there is no local DB to `cargo sqlx prepare` against.
 #[cfg(feature = "ssr")]
 pub async fn find_game_version_rules(pool: &PgPool, id: Uuid) -> Result<Option<String>> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT rules FROM game_versions WHERE id = $1")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT rules FROM game_versions WHERE id = $1 AND is_public = true AND is_deprecated = false",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
     Ok(row.map(|(rules,)| rules))
 }
 
@@ -80,11 +82,13 @@ pub async fn find_game_version_render_meta(
     pool: &PgPool,
     id: Uuid,
 ) -> Result<Option<(String, String, i32)>> {
-    sqlx::query_as("SELECT uri, name, interface_version FROM game_versions WHERE id = $1")
-        .bind(id)
-        .fetch_optional(pool)
-        .await
-        .map_err(Into::into)
+    sqlx::query_as(
+        "SELECT uri, name, interface_version FROM game_versions WHERE id = $1 AND is_public = true AND is_deprecated = false",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
 }
 
 #[cfg(feature = "ssr")]

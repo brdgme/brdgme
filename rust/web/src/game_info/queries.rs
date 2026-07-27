@@ -15,7 +15,7 @@ pub async fn game_info_rules_version_id(pool: &PgPool, game_type_id: Uuid) -> Re
     let row: Option<(Uuid,)> = sqlx::query_as(
         "SELECT id FROM game_versions
          WHERE game_type_id = $1 AND is_public = true AND is_deprecated = false
-         ORDER BY name LIMIT 1",
+         ORDER BY created_at DESC LIMIT 1",
     )
     .bind(game_type_id)
     .fetch_optional(pool)
@@ -333,5 +333,101 @@ mod tests {
         assert_eq!(ranking[0].2, 1210);
         assert_eq!(ranking[9].1, "player-01");
         assert_eq!(ranking[9].2, 1201);
+    }
+
+    #[sqlx::test]
+    async fn rules_version_id_picks_newest_created_at(pool: PgPool) {
+        // Two public, non-deprecated versions. '10.0.0' has the OLDER created_at,
+        // '2.0.0' the NEWER. Lexicographic name order would pick '10.0.0' (wrong);
+        // created_at DESC must pick '2.0.0'.
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (id, name, player_counts)
+             VALUES (uuid_generate_v4(), $1, '{2,3,4}') RETURNING id",
+        )
+        .bind("Newest Game")
+        .fetch_one(&pool)
+        .await
+        .expect("insert game_type");
+
+        let older: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated, created_at)
+             VALUES (uuid_generate_v4(), $1, '10.0.0', 'http://localhost:0/mock', true, false, now() - interval '1 day')
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert older version");
+
+        let newer: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated, created_at)
+             VALUES (uuid_generate_v4(), $1, '2.0.0', 'http://localhost:0/mock', true, false, now())
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert newer version");
+
+        let picked = game_info_rules_version_id(&pool, game_type_id)
+            .await
+            .expect("query ok")
+            .expect("a version is picked");
+        assert_eq!(picked, newer, "must pick newest created_at, not name order");
+        assert_ne!(picked, older);
+    }
+
+    #[sqlx::test]
+    async fn rules_version_id_skips_non_public_and_deprecated(pool: PgPool) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (id, name, player_counts)
+             VALUES (uuid_generate_v4(), $1, '{2,3,4}') RETURNING id",
+        )
+        .bind("Visibility Game")
+        .fetch_one(&pool)
+        .await
+        .expect("insert game_type");
+
+        // The only public + non-deprecated version, deliberately the OLDEST.
+        let good: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated, created_at)
+             VALUES (uuid_generate_v4(), $1, '1.0.0', 'http://localhost:0/mock', true, false, now() - interval '2 days')
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert good version");
+
+        // Newer but non-public: must never be returned.
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated, created_at)
+             VALUES (uuid_generate_v4(), $1, '2.0.0', 'http://localhost:0/mock', false, false, now() - interval '1 day')
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert non-public version");
+
+        // Newest but deprecated: must never be returned.
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated, created_at)
+             VALUES (uuid_generate_v4(), $1, '3.0.0', 'http://localhost:0/mock', true, true, now())
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert deprecated version");
+
+        let picked = game_info_rules_version_id(&pool, game_type_id)
+            .await
+            .expect("query ok")
+            .expect("a version is picked");
+        assert_eq!(
+            picked, good,
+            "non-public and deprecated versions must be skipped"
+        );
     }
 }

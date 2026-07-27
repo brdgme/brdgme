@@ -1328,6 +1328,44 @@ async fn rules_page_anonymous_renders_shell(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn rules_page_anonymous_renders_rules(pool: PgPool) {
+    // V1 version (interface_version default 1) -> strategy fetch is skipped, so
+    // the uri is never dereferenced. Rules content is authored markdown.
+    let game_version_id = make_game_version(&pool, "http://localhost:0/mock").await;
+    sqlx::query("UPDATE game_versions SET rules = $1 WHERE id = $2")
+        .bind("# How to Play\n\nSome rules text.")
+        .bind(game_version_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    // No cookie: the auth gate is gone (D-6 makes rules public), and
+    // Resource::new_blocking + Suspense means SSR renders the actual rules
+    // (not a spinner), so the heading is present in the server HTML.
+    let (status, content_type, body) = get(app, &format!("/rules/{}", game_version_id), None).await;
+    assert_clean_html_body(status, &content_type, &body, "How to Play");
+}
+
+#[sqlx::test]
+async fn rules_page_renders_when_strategy_fetch_fails(pool: PgPool) {
+    // interface_version 2 makes get_rendered_rules attempt a live strategy
+    // fetch; the uri points at a dead address so that fetch fails. The page
+    // must still return 200 with the rules section present (graceful degrade).
+    let game_version_id = make_game_version(&pool, "http://127.0.0.1:9").await;
+    sqlx::query("UPDATE game_versions SET rules = $1, interface_version = 2 WHERE id = $2")
+        .bind("# How to Play\n\nRules here.")
+        .bind(game_version_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/rules/{}", game_version_id), None).await;
+    assert_clean_html_body(status, &content_type, &body, "How to Play");
+}
+
+#[sqlx::test]
 async fn create_proposal_without_opponent_emails_succeeds(pool: PgPool) {
     let uri = spawn_mock_new_game_service().await;
     let game_version_id = make_game_version(&pool, &uri).await;

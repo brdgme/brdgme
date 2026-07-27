@@ -29,43 +29,47 @@ pub fn RulesPage() -> impl IntoView {
             .and_then(|id| Uuid::parse_str(id).ok())
     };
 
-    let docs: LocalResource<Result<RenderedDocs, ServerFnError>> =
-        LocalResource::new(move || async move {
-            match version_id() {
-                Some(id) => get_rendered_rules(id).await,
-                None => Err(ServerFnError::new("Invalid version ID")),
-            }
-        });
+    let docs = Resource::new_blocking(version_id, |id| async move {
+        match id {
+            Some(id) => get_rendered_rules(id).await,
+            None => Err(ServerFnError::new("Invalid version ID")),
+        }
+    });
 
     view! {
         <MainLayout>
             <div class="rules-page content-page">
                 <h1>"Rules"</h1>
-                {move || match docs.get() {
-                    None => view! { <crate::components::Spinner/> }.into_any(),
-                    Some(Err(e)) => view! { <div class="error">"Error: " {e.to_string()}</div> }.into_any(),
-                    Some(Ok(docs)) => {
-                        let RenderedDocs { rules, basic_strategy, advanced_strategy } = docs;
-                        view! {
-                            <section class="rules-section">
-                                <h2 id="rules">"Rules"</h2>
-                                <div class="rules-doc" inner_html=rules></div>
-                            </section>
-                            {basic_strategy.map(|html| view! {
-                                <section class="rules-section">
-                                    <h2 id="basic-strategy">"Basic Strategy"</h2>
-                                    <div class="rules-doc" inner_html=html></div>
-                                </section>
-                            })}
-                            {advanced_strategy.map(|html| view! {
-                                <section class="rules-section">
-                                    <h2 id="advanced-strategy">"Advanced Strategy"</h2>
-                                    <div class="rules-doc" inner_html=html></div>
-                                </section>
-                            })}
-                        }.into_any()
-                    }
-                }}
+                <Suspense fallback=|| view! { <div></div> }>
+                    {move || {
+                        docs.get().map(|res| match res {
+                            Err(e) => view! {
+                                <div class="error">"Error: " {crate::error::user_facing_server_error(&e)}</div>
+                            }.into_any(),
+                            Ok(docs) => {
+                                let RenderedDocs { rules, basic_strategy, advanced_strategy } = docs;
+                                view! {
+                                    <section class="rules-section">
+                                        <h2 id="rules">"Rules"</h2>
+                                        <div class="rules-doc" inner_html=rules></div>
+                                    </section>
+                                    {basic_strategy.map(|html| view! {
+                                        <section class="rules-section">
+                                            <h2 id="basic-strategy">"Basic Strategy"</h2>
+                                            <div class="rules-doc" inner_html=html></div>
+                                        </section>
+                                    })}
+                                    {advanced_strategy.map(|html| view! {
+                                        <section class="rules-section">
+                                            <h2 id="advanced-strategy">"Advanced Strategy"</h2>
+                                            <div class="rules-doc" inner_html=html></div>
+                                        </section>
+                                    })}
+                                }.into_any()
+                            }
+                        })
+                    }}
+                </Suspense>
             </div>
         </MainLayout>
     }
@@ -78,6 +82,8 @@ pub enum RenderError {
     Markup,
     #[error("render block references player {index} but only {count} players exist")]
     PlayerOutOfRange { index: usize, count: usize },
+    #[error("unterminated brdgme fence")]
+    UnterminatedFence,
 }
 
 /// Recursively asserts every `{{player N}}` reference (both `Node::Player` and
@@ -146,6 +152,11 @@ fn render_fence(
 }
 
 /// Renders a non-fence markdown chunk to HTML via pulldown-cmark.
+///
+/// Trust boundary: pulldown-cmark passes raw HTML straight through into the
+/// `inner_html` output unsanitized. Sources are trusted authored content only
+/// - the `rules` DB column populated at deploy and game-side `include_str!`
+/// - and must never be user-supplied markdown.
 #[cfg(feature = "ssr")]
 fn render_markdown(markdown: &str, out: &mut String) {
     let mut opts = pulldown_cmark::Options::empty();
@@ -197,6 +208,9 @@ pub fn render_doc(
             }
             prose.push_str(line);
         }
+    }
+    if in_fence {
+        return Err(RenderError::UnterminatedFence);
     }
     if !prose.is_empty() {
         render_markdown(&prose, &mut html);
@@ -299,15 +313,11 @@ pub(crate) async fn fetch_strategy(
 
 #[server(GetRenderedRules, "/api")]
 pub async fn get_rendered_rules(version_id: Uuid) -> Result<RenderedDocs, ServerFnError> {
-    use crate::auth::server::get_current_user;
     use crate::error::internal;
     use sqlx::PgPool;
 
     let pool = expect_context::<PgPool>();
     let http_client = expect_context::<reqwest::Client>();
-    let _user = get_current_user()
-        .await?
-        .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
     let rules_src = crate::db::find_game_version_rules(&pool, version_id)
         .await
@@ -330,9 +340,14 @@ pub async fn get_rendered_rules(version_id: Uuid) -> Result<RenderedDocs, Server
     let rules = render_doc(&rules_src, &players, &player_style)
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
-    let (basic_src, advanced_src) = fetch_strategy(&http_client, &uri, &name, interface_version)
-        .await
-        .map_err(internal("get_rendered_rules: fetch strategy"))?;
+    let (basic_src, advanced_src) =
+        match fetch_strategy(&http_client, &uri, &name, interface_version).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::error!("get_rendered_rules: fetch strategy: {e}");
+                (None, None)
+            }
+        };
 
     let basic_strategy = match basic_src {
         Some(src) => Some(
@@ -427,6 +442,15 @@ mod tests {
         let err = render_doc(md, &players(2), STYLE).unwrap_err();
         assert!(
             matches!(err, RenderError::PlayerOutOfRange { index: 5, count: 2 }),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unterminated_fence_errors_loudly() {
+        let err = render_doc("```brdgme\n{{player 0}}", &players(2), STYLE).unwrap_err();
+        assert!(
+            matches!(err, RenderError::UnterminatedFence),
             "got: {err:?}"
         );
     }
