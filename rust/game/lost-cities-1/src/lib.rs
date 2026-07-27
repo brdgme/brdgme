@@ -41,8 +41,6 @@ pub struct Stats {
     pub takes: usize,
     pub draws: usize,
     pub turns: usize,
-    pub investments: usize,
-    pub expeditions: usize,
 }
 
 #[derive(Default, PartialEq, Debug, Clone, Serialize, Deserialize)]
@@ -360,20 +358,6 @@ impl Game {
                     }
                 }
             }
-        }
-        let invalid_expedition = || {
-            GameError::internal(format!(
-                "could not find player expedition for player {}",
-                player
-            ))
-        };
-        if self
-            .expeditions
-            .get(player)
-            .ok_or_else(invalid_expedition)?
-            .is_empty()
-        {
-            self.stats[player].expeditions += 1;
         }
         self.remove_player_card(player, c)?;
         self.expeditions

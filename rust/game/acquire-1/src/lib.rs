@@ -13,13 +13,10 @@ use brdgme_markup::Node as N;
 use crate::board::{Board, Loc, Tile};
 use crate::command::Command;
 use crate::corp::Corp;
-use crate::stats::Stats;
-
 pub mod board;
 mod command;
 pub mod corp;
 mod render;
-mod stats;
 
 pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 6;
@@ -566,7 +563,6 @@ impl Game {
                 message: format!("{} is already on the board", corp),
             });
         }
-        self.players[player].stats.founds.push(corp);
         self.board.extend_corp(&at, corp);
         {
             let corp_shares = self.shares.entry(corp).or_insert(STARTING_SHARES);
@@ -628,9 +624,6 @@ impl Game {
                 }
                 self.players[player].money -= price;
                 self.take_shares(player, n, corp)?;
-                self.players[player].stats.buy_sum += price;
-                self.players[player].stats.buys += n;
-
                 self.phase = Phase::Buy {
                     player,
                     remaining: remaining - n,
@@ -801,7 +794,6 @@ impl Game {
             N::text(" is merging into "),
             into.render(),
         ])];
-        self.players[player].stats.merges += 1;
         logs.extend(self.pay_bonuses(from));
         self.phase = Phase::SellOrTrade {
             player,
@@ -855,8 +847,6 @@ impl Game {
                 continue;
             }
             self.players[*p].money += major_per;
-            self.players[*p].stats.major_bonus_sum += major_per;
-            self.players[*p].stats.major_bonuses += 1;
         }
         if minor_len > 0 {
             // Round up to the nearest 100
@@ -867,8 +857,6 @@ impl Game {
                     continue;
                 }
                 self.players[*p].money += minor_per;
-                self.players[*p].stats.minor_bonus_sum += minor_per;
-                self.players[*p].stats.minor_bonuses += 1;
             }
         }
         logs
@@ -1031,8 +1019,6 @@ impl Game {
         }
         self.return_shares(player, n, corp)?;
         self.players[player].money += money;
-        self.players[player].stats.sell_sum += money;
-        self.players[player].stats.sells += n;
         Ok(vec![Log::public(vec![
             N::Player(player),
             N::text(" sold "),
@@ -1092,10 +1078,6 @@ impl Game {
         }
 
         let mut can_undo = true;
-        self.players[player].stats.trades += receive;
-        self.players[player].stats.trade_loss_sum += n * corp.value(self.board.corp_size(corp));
-        self.players[player].stats.trade_gain_sum +=
-            receive * into.value(self.board.corp_size(into));
         self.return_shares(player, n, corp)?;
         self.take_shares(player, receive, into)?;
         let mut logs = vec![Log::public(vec![
@@ -1207,7 +1189,6 @@ pub struct Player {
     pub money: usize,
     pub shares: HashMap<Corp, usize>,
     pub tiles: Vec<Loc>,
-    pub stats: Stats,
 }
 
 impl Default for Player {
@@ -1216,7 +1197,6 @@ impl Default for Player {
             money: STARTING_MONEY,
             shares: corp_hash_map(0),
             tiles: vec![],
-            stats: Stats::default(),
         }
     }
 }
