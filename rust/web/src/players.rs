@@ -715,13 +715,16 @@ pub fn PlayerGameTypePage() -> impl IntoView {
                                             }.into_any()
                                         } else {
                                             let rows = d.head_to_head.clone().into_iter().map(|h| {
-                                                let href = format!(
-                                                    "/players/{}",
-                                                    encode_path_segment(&h.name),
-                                                );
+                                                let name_cell = match h.user_id {
+                                                    Some(_) => {
+                                                        let href = format!("/players/{}", encode_path_segment(&h.name));
+                                                        view! { <td><A href=href>{h.name.clone()}</A></td> }.into_any()
+                                                    }
+                                                    None => view! { <td>{h.name.clone()}</td> }.into_any(),
+                                                };
                                                 view! {
                                                     <tr>
-                                                        <td><A href=href>{h.name.clone()}</A></td>
+                                                        {name_cell}
                                                         <td>{h.games}</td>
                                                         <td>{h.wins}</td>
                                                         <td>{h.losses}</td>

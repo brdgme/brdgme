@@ -1475,3 +1475,58 @@ async fn new_game_setup_page_restart_mode_renders_shell(pool: PgPool) {
     .await;
     assert_clean_html_body(status, &content_type, &body, "Back to games");
 }
+
+#[sqlx::test]
+async fn game_page_private_game_hidden_from_non_player(pool: PgPool) {
+    let uri = spawn_mock_game_service().await;
+    let game_version_id = make_game_version(&pool, &uri).await;
+    let player = make_user(&pool, "player-one").await;
+    let outsider = make_user(&pool, "outsider").await;
+
+    db::set_game_visibility(&pool, player.id, "private")
+        .await
+        .unwrap();
+
+    let game = db::create_game_with_users(
+        &pool,
+        CreateGameOpts {
+            game_version_id,
+            whose_turn: &[0],
+            eliminated: &[],
+            placings: &[],
+            points: &[],
+            creator_id: player.id,
+            opponent_ids: &[],
+            opponent_emails: &[],
+            bot_slots: &[BotSlot {
+                name: "Botty".to_string(),
+                bot_name: "easy".to_string(),
+            }],
+            chat_id: None,
+            game_state: "state",
+            all_accepted: false,
+        },
+    )
+    .await
+    .unwrap();
+
+    let outsider_cookie = login_cookie(&pool, &outsider, "outsider@example.com").await;
+    let app = build_router(make_state(pool.clone()).await).await;
+    let (status, _ct, body) =
+        get(app, &format!("/games/{}", game.id), Some(&outsider_cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("Game not found"),
+        "expected 'Game not found' for non-player viewing private game, got: {body}"
+    );
+    assert!(
+        !body.contains("mock render"),
+        "board must not render for non-player"
+    );
+
+    let player_cookie = login_cookie(&pool, &player, "player@example.com").await;
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) =
+        get(app, &format!("/games/{}", game.id), Some(&player_cookie)).await;
+    assert_clean_html_body(status, &content_type, &body, "mock render");
+}

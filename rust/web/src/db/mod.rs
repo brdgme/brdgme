@@ -76,7 +76,7 @@ mod users;
 mod visibility;
 
 #[cfg(all(test, feature = "ssr"))]
-mod test_support;
+pub(crate) mod test_support;
 
 pub use bots::*;
 pub use common::*;

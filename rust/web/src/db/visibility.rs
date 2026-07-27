@@ -116,6 +116,50 @@ pub async fn is_game_visible_to_user(
     .await?)
 }
 
+/// Thin dispatcher for WP-42's per-socket filter: `None` viewer delegates to
+/// `is_game_publicly_visible`, `Some(v)` to `is_game_visible_to_user`.
+#[cfg(feature = "ssr")]
+pub async fn is_game_visible_to_viewer(
+    pool: &PgPool,
+    game_id: Uuid,
+    viewer: Option<Uuid>,
+) -> Result<bool> {
+    match viewer {
+        None => is_game_publicly_visible(pool, game_id).await,
+        Some(v) => is_game_visible_to_user(pool, game_id, v).await,
+    }
+}
+
+/// The subset of `user_ids` whose identity may be shown to `viewer`.
+/// Cross-references the canonical per-player clause in `is_game_visible_to_user`:
+/// 'public' passes for everyone; 'friends' passes only for accepted friends
+/// (either direction); 'private' passes only for self. A NULL viewer leaves
+/// only 'public' passing. One query, no N+1.
+#[cfg(feature = "ssr")]
+pub async fn visible_user_ids(
+    pool: &PgPool,
+    user_ids: &[Uuid],
+    viewer: Option<Uuid>,
+) -> Result<std::collections::HashSet<Uuid>> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT u.id FROM users u WHERE u.id = ANY($1)
+           AND (
+             u.game_visibility = 'public'
+             OR ($2::uuid IS NOT NULL AND u.id = $2)
+             OR (u.game_visibility = 'friends' AND $2::uuid IS NOT NULL AND EXISTS(
+               SELECT 1 FROM friends f WHERE f.has_accepted = TRUE
+                 AND ((f.source_user_id = $2 AND f.target_user_id = u.id)
+                   OR (f.target_user_id = $2 AND f.source_user_id = u.id))
+             ))
+           )",
+    )
+    .bind(user_ids)
+    .bind(viewer)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// D4 + D7 enforcement choke point. Call after the roster is known but
 /// before players are attached: create_new_game and restart_game today,
 /// #24's create_proposal and any future matchmaking tomorrow.
@@ -398,5 +442,98 @@ mod tests {
                 .unwrap(),
             "a viewer friends with every 'friends' player must see the game"
         );
+    }
+
+    #[sqlx::test]
+    async fn visible_user_ids_matrix(pool: PgPool) {
+        let pub_user = make_user(&pool, "pub_user").await;
+        let friends_user = make_user(&pool, "friends_user").await;
+        let priv_user = make_user(&pool, "priv_user").await;
+        let friend_of = make_user(&pool, "friend_of").await;
+        let stranger = make_user(&pool, "stranger").await;
+
+        set_game_visibility(&pool, pub_user.id, "public")
+            .await
+            .unwrap();
+        set_game_visibility(&pool, friends_user.id, "friends")
+            .await
+            .unwrap();
+        set_game_visibility(&pool, priv_user.id, "private")
+            .await
+            .unwrap();
+        accept_friends(&pool, friends_user.id, friend_of.id).await;
+
+        let all = [pub_user.id, friends_user.id, priv_user.id];
+
+        // Anonymous viewer: only public passes
+        let vis = visible_user_ids(&pool, &all, None).await.unwrap();
+        assert!(vis.contains(&pub_user.id));
+        assert!(!vis.contains(&friends_user.id));
+        assert!(!vis.contains(&priv_user.id));
+
+        // Stranger viewer: public passes, friends/private do not
+        let vis = visible_user_ids(&pool, &all, Some(stranger.id))
+            .await
+            .unwrap();
+        assert!(vis.contains(&pub_user.id));
+        assert!(!vis.contains(&friends_user.id));
+        assert!(!vis.contains(&priv_user.id));
+
+        // Friend of friends_user: public + friends_user pass
+        let vis = visible_user_ids(&pool, &all, Some(friend_of.id))
+            .await
+            .unwrap();
+        assert!(vis.contains(&pub_user.id));
+        assert!(vis.contains(&friends_user.id));
+        assert!(!vis.contains(&priv_user.id));
+
+        // Self: private user can see themselves
+        let vis = visible_user_ids(&pool, &all, Some(priv_user.id))
+            .await
+            .unwrap();
+        assert!(vis.contains(&pub_user.id));
+        assert!(!vis.contains(&friends_user.id));
+        assert!(vis.contains(&priv_user.id));
+    }
+
+    #[sqlx::test]
+    async fn visible_user_ids_drift_guard_matches_is_game_visible_to_user(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let a = make_user(&pool, "alice").await;
+        let b = make_user(&pool, "bob").await;
+        let viewer = make_user(&pool, "viewer").await;
+        let game = make_game_with_players(&pool, gv, a.id, &[b.id], 0, &[0]).await;
+
+        set_game_visibility(&pool, a.id, "friends").await.unwrap();
+        set_game_visibility(&pool, b.id, "public").await.unwrap();
+
+        // viewer is NOT a player. The game is visible iff every human player
+        // is in visible_user_ids.
+        let game_visible = is_game_visible_to_user(&pool, game.id, viewer.id)
+            .await
+            .unwrap();
+        let vis = visible_user_ids(&pool, &[a.id, b.id], Some(viewer.id))
+            .await
+            .unwrap();
+        let all_visible = vis.contains(&a.id) && vis.contains(&b.id);
+        assert_eq!(
+            game_visible, all_visible,
+            "drift: is_game_visible_to_user says {game_visible} but visible_user_ids says {all_visible}"
+        );
+
+        // Now make viewer a friend of alice - both should agree the game is visible
+        accept_friends(&pool, a.id, viewer.id).await;
+        let game_visible = is_game_visible_to_user(&pool, game.id, viewer.id)
+            .await
+            .unwrap();
+        let vis = visible_user_ids(&pool, &[a.id, b.id], Some(viewer.id))
+            .await
+            .unwrap();
+        let all_visible = vis.contains(&a.id) && vis.contains(&b.id);
+        assert_eq!(
+            game_visible, all_visible,
+            "drift after friendship: is_game_visible_to_user says {game_visible} but visible_user_ids says {all_visible}"
+        );
+        assert!(game_visible);
     }
 }

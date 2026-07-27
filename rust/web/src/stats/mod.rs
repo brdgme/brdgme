@@ -114,7 +114,7 @@ pub struct ActiveGameRow {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HeadToHead {
-    pub user_id: Uuid,
+    pub user_id: Option<Uuid>,
     pub name: String,
     pub games: i64,
     pub wins: i64,
@@ -199,11 +199,18 @@ pub async fn get_player_profile(
     let recent_form = recent_form(&pool, user.user_id, 10, include_single_human)
         .await
         .map_err(internal("get_player_profile: recent_form"))?;
-    let recent_finished = finished_games(&pool, user.user_id, None, include_single_human, Some(20))
-        .await
-        .map_err(internal("get_player_profile: recent_finished"))?;
+    let recent_finished = finished_games(
+        &pool,
+        user.user_id,
+        None,
+        include_single_human,
+        Some(20),
+        viewer_user_id,
+    )
+    .await
+    .map_err(internal("get_player_profile: recent_finished"))?;
 
-    let active_games = active_games(&pool, user.user_id)
+    let active_games = active_games(&pool, user.user_id, viewer_user_id)
         .await
         .map_err(internal("get_player_profile: active_games"))?;
 
@@ -234,8 +241,11 @@ pub async fn get_player_game_type_stats(
     game_type: String,
     include_single_human: bool,
 ) -> Result<Option<PlayerGameTypeData>, ServerFnError> {
+    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
     let pool = expect_context::<PgPool>();
+
+    let viewer_user_id = get_current_user().await?.map(|u| u.id);
 
     let user = match get_profile_user(&pool, &name)
         .await
@@ -277,12 +287,19 @@ pub async fn get_player_game_type_stats(
         Some(&canonical),
         include_single_human,
         None,
+        viewer_user_id,
     )
     .await
     .map_err(internal("get_player_game_type_stats: finished_games"))?;
-    let head_to_head = head_to_head(&pool, user.user_id, &canonical, include_single_human)
-        .await
-        .map_err(internal("get_player_game_type_stats: head_to_head"))?;
+    let head_to_head = head_to_head(
+        &pool,
+        user.user_id,
+        &canonical,
+        include_single_human,
+        viewer_user_id,
+    )
+    .await
+    .map_err(internal("get_player_game_type_stats: head_to_head"))?;
 
     Ok(Some(PlayerGameTypeData {
         user,
@@ -302,8 +319,11 @@ pub async fn get_player_history(
     game_type: Option<String>,
     include_single_human: bool,
 ) -> Result<Option<PlayerHistoryData>, ServerFnError> {
+    use crate::auth::server::get_current_user;
     use sqlx::PgPool;
     let pool = expect_context::<PgPool>();
+
+    let viewer_user_id = get_current_user().await?.map(|u| u.id);
 
     let user = match get_profile_user(&pool, &name)
         .await
@@ -334,6 +354,7 @@ pub async fn get_player_history(
         include_single_human,
         page_size,
         offset,
+        viewer_user_id,
     )
     .await
     .map_err(internal("get_player_history: rows"))?;

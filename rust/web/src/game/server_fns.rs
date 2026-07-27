@@ -260,6 +260,14 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         .iter()
         .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
 
+    if player.is_none()
+        && !crate::db::is_game_visible_to_user(&pool, game_id, user.id)
+            .await
+            .map_err(internal("get_game_details: visibility"))?
+    {
+        return Err(ServerFnError::new("Game not found"));
+    }
+
     let render_resp = client::render(
         &http_client,
         &ge.game_version.uri,

@@ -207,6 +207,7 @@ async fn opponents_by_game(
     pool: &PgPool,
     game_ids: &[Uuid],
     user_id: Uuid,
+    viewer: Option<Uuid>,
 ) -> Result<HashMap<Uuid, Vec<super::OpponentWithPlace>>> {
     let rows: Vec<OpponentRow> = sqlx::query_as(
         r#"
@@ -227,14 +228,31 @@ async fn opponents_by_game(
     .fetch_all(pool)
     .await?;
 
+    let distinct_human_ids: Vec<Uuid> = {
+        let mut ids: Vec<Uuid> = rows.iter().filter_map(|r| r.user_id).collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    };
+    let visible = if distinct_human_ids.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        crate::db::visible_user_ids(pool, &distinct_human_ids, viewer).await?
+    };
+
     let mut by_game: HashMap<Uuid, Vec<super::OpponentWithPlace>> = HashMap::new();
     for row in rows {
+        let (uid, name) = match row.user_id {
+            Some(id) if visible.contains(&id) => (Some(id), row.name),
+            Some(_) => (None, "Anonymous".to_string()),
+            None => (None, row.name),
+        };
         by_game
             .entry(row.game_id)
             .or_default()
             .push(super::OpponentWithPlace {
-                user_id: row.user_id,
-                name: row.name,
+                user_id: uid,
+                name,
                 place: row.place,
             });
     }
@@ -247,6 +265,7 @@ pub async fn finished_games(
     game_type_name: Option<&str>,
     include_single_human: bool,
     limit: Option<i64>,
+    viewer: Option<Uuid>,
 ) -> Result<Vec<super::FinishedGameRow>> {
     let rows = sqlx::query!(
         r#"
@@ -284,7 +303,7 @@ pub async fn finished_games(
     }
 
     let game_ids: Vec<Uuid> = rows.iter().map(|row| row.game_id).collect();
-    let mut opponents = opponents_by_game(pool, &game_ids, user_id).await?;
+    let mut opponents = opponents_by_game(pool, &game_ids, user_id, viewer).await?;
 
     Ok(rows
         .into_iter()
@@ -308,7 +327,11 @@ pub async fn finished_games(
         .collect())
 }
 
-pub async fn active_games(pool: &PgPool, user_id: Uuid) -> Result<Vec<super::ActiveGameRow>> {
+pub async fn active_games(
+    pool: &PgPool,
+    user_id: Uuid,
+    viewer: Option<Uuid>,
+) -> Result<Vec<super::ActiveGameRow>> {
     let rows = sqlx::query!(
         r#"
         SELECT
@@ -333,7 +356,7 @@ pub async fn active_games(pool: &PgPool, user_id: Uuid) -> Result<Vec<super::Act
     }
 
     let game_ids: Vec<Uuid> = rows.iter().map(|row| row.game_id).collect();
-    let mut opponents = opponents_by_game(pool, &game_ids, user_id).await?;
+    let mut opponents = opponents_by_game(pool, &game_ids, user_id, viewer).await?;
 
     Ok(rows
         .into_iter()
@@ -370,6 +393,7 @@ struct GameHistoryRow {
     match_avg: Option<i32>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn game_history(
     pool: &PgPool,
     user_id: Uuid,
@@ -378,6 +402,7 @@ pub async fn game_history(
     include_single_human: bool,
     limit: i64,
     offset: i64,
+    viewer: Option<Uuid>,
 ) -> Result<Vec<super::HistoryRow>> {
     let rows: Vec<GameHistoryRow> = sqlx::query_as(
         r#"
@@ -414,7 +439,7 @@ pub async fn game_history(
     }
 
     let game_ids: Vec<Uuid> = rows.iter().map(|row| row.game_id).collect();
-    let mut opponents = opponents_by_game(pool, &game_ids, user_id).await?;
+    let mut opponents = opponents_by_game(pool, &game_ids, user_id, viewer).await?;
 
     Ok(rows
         .into_iter()
@@ -478,6 +503,7 @@ pub async fn head_to_head(
     user_id: Uuid,
     game_type_name: &str,
     include_single_human: bool,
+    viewer: Option<Uuid>,
 ) -> Result<Vec<super::HeadToHead>> {
     let rows = sqlx::query!(
         r#"
@@ -530,15 +556,29 @@ pub async fn head_to_head(
     .fetch_all(pool)
     .await?;
 
+    let opp_ids: Vec<Uuid> = rows.iter().map(|r| r.user_id).collect();
+    let visible = if opp_ids.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        crate::db::visible_user_ids(pool, &opp_ids, viewer).await?
+    };
+
     Ok(rows
         .into_iter()
-        .map(|row| super::HeadToHead {
-            user_id: row.user_id,
-            name: row.name,
-            games: row.games,
-            wins: row.wins,
-            losses: row.losses,
-            ties: row.ties,
+        .map(|row| {
+            let (uid, name) = if visible.contains(&row.user_id) {
+                (Some(row.user_id), row.name)
+            } else {
+                (None, "Anonymous".to_string())
+            };
+            super::HeadToHead {
+                user_id: uid,
+                name,
+                games: row.games,
+                wins: row.wins,
+                losses: row.losses,
+                ties: row.ties,
+            }
         })
         .collect())
 }
@@ -1151,7 +1191,7 @@ mod tests {
         )
         .await;
 
-        let all = finished_games(&pool, user, None, true, None)
+        let all = finished_games(&pool, user, None, true, None, None)
             .await
             .expect("query ok");
         assert_eq!(all.len(), 3);
@@ -1179,19 +1219,19 @@ mod tests {
         assert_eq!(row2.opponents[0].user_id, None);
         assert_eq!(row2.opponents[0].name, "bot-1");
 
-        let excluding_single = finished_games(&pool, user, None, false, None)
+        let excluding_single = finished_games(&pool, user, None, false, None, None)
             .await
             .expect("query ok");
         assert!(!excluding_single.iter().any(|r| r.game_id == game2));
         assert_eq!(excluding_single.len(), 2);
 
-        let limited = finished_games(&pool, user, None, true, Some(1))
+        let limited = finished_games(&pool, user, None, true, Some(1), None)
             .await
             .expect("query ok");
         assert_eq!(limited.len(), 1);
         assert_eq!(limited[0].game_id, game3);
 
-        let camel_only = finished_games(&pool, user, Some("Camel Up"), true, None)
+        let camel_only = finished_games(&pool, user, Some("Camel Up"), true, None, None)
             .await
             .expect("query ok");
         assert_eq!(camel_only.len(), 2);
@@ -1281,7 +1321,7 @@ mod tests {
         )
         .await;
 
-        let active = active_games(&pool, user).await.expect("query ok");
+        let active = active_games(&pool, user, None).await.expect("query ok");
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].game_id, unfinished);
         assert!(!active[0].is_turn);
@@ -1327,11 +1367,11 @@ mod tests {
         )
         .await;
 
-        let h2h = head_to_head(&pool, user, "Camel Up", false)
+        let h2h = head_to_head(&pool, user, "Camel Up", false, None)
             .await
             .expect("query ok");
         assert_eq!(h2h.len(), 1);
-        assert_eq!(h2h[0].user_id, opponent);
+        assert_eq!(h2h[0].user_id, Some(opponent));
         assert_eq!(h2h[0].name, "bob");
         assert_eq!(h2h[0].games, 3);
         assert_eq!(h2h[0].wins, 1);
@@ -1352,7 +1392,7 @@ mod tests {
         )
         .await;
 
-        let h2h = head_to_head(&pool, user, "Camel Up", true)
+        let h2h = head_to_head(&pool, user, "Camel Up", true, None)
             .await
             .expect("query ok");
         assert!(h2h.is_empty());
@@ -1806,14 +1846,14 @@ mod tests {
             .await
             .expect("set g3 created_at");
 
-        let page1 = game_history(&pool, user, None, None, true, 2, 0)
+        let page1 = game_history(&pool, user, None, None, true, 2, 0, None)
             .await
             .expect("query ok");
         assert_eq!(page1.len(), 2);
         assert_eq!(page1[0].game_id, g3);
         assert_eq!(page1[1].game_id, g2);
 
-        let page2 = game_history(&pool, user, None, None, true, 2, 2)
+        let page2 = game_history(&pool, user, None, None, true, 2, 2, None)
             .await
             .expect("query ok");
         assert_eq!(page2.len(), 1);
@@ -1850,21 +1890,21 @@ mod tests {
         )
         .await;
 
-        let only_finished = game_history(&pool, user, Some(true), None, true, 50, 0)
+        let only_finished = game_history(&pool, user, Some(true), None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(only_finished.len(), 1);
         assert_eq!(only_finished[0].game_id, finished);
         assert!(only_finished[0].is_finished);
 
-        let only_active = game_history(&pool, user, Some(false), None, true, 50, 0)
+        let only_active = game_history(&pool, user, Some(false), None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(only_active.len(), 1);
         assert_eq!(only_active[0].game_id, active);
         assert!(!only_active[0].is_finished);
 
-        let all = game_history(&pool, user, None, None, true, 50, 0)
+        let all = game_history(&pool, user, None, None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(all.len(), 2);
@@ -1892,14 +1932,14 @@ mod tests {
         )
         .await;
 
-        let camel_only = game_history(&pool, user, None, Some("Camel Up"), true, 50, 0)
+        let camel_only = game_history(&pool, user, None, Some("Camel Up"), true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(camel_only.len(), 1);
         assert_eq!(camel_only[0].game_id, camel_game);
         assert_eq!(camel_only[0].game_type_name, "Camel Up");
 
-        let all = game_history(&pool, user, None, None, true, 50, 0)
+        let all = game_history(&pool, user, None, None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(all.len(), 2);
@@ -1942,7 +1982,7 @@ mod tests {
             .expect("query ok");
         assert_eq!(count_finished, 2);
 
-        let rows = game_history(&pool, user, None, None, true, 50, 0)
+        let rows = game_history(&pool, user, None, None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(rows.len() as i64, count_all);
@@ -1969,13 +2009,13 @@ mod tests {
         )
         .await;
 
-        let excluding = game_history(&pool, user, None, None, false, 50, 0)
+        let excluding = game_history(&pool, user, None, None, false, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(excluding.len(), 1);
         assert_eq!(excluding[0].game_id, human_game);
 
-        let including = game_history(&pool, user, None, None, true, 50, 0)
+        let including = game_history(&pool, user, None, None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(including.len(), 2);
@@ -1999,7 +2039,7 @@ mod tests {
         )
         .await;
 
-        let rows = game_history(&pool, user, None, None, true, 50, 0)
+        let rows = game_history(&pool, user, None, None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(rows.len(), 1);
@@ -2053,7 +2093,7 @@ mod tests {
         )
         .await;
 
-        let rows = game_history(&pool, alice, None, None, true, 50, 0)
+        let rows = game_history(&pool, alice, None, None, true, 50, 0, None)
             .await
             .expect("query ok");
         assert_eq!(rows.len(), 2);
@@ -2072,5 +2112,130 @@ mod tests {
             .find(|r| r.game_id == unrated_game)
             .expect("unrated");
         assert_eq!(unrated_row.match_elo, None);
+    }
+
+    #[sqlx::test]
+    async fn opponents_by_game_masks_private_opponent(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let stranger = make_user(&pool, "stranger").await;
+        let friend = make_user(&pool, "friend").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        crate::db::set_game_visibility(&pool, bob, "private")
+            .await
+            .unwrap();
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+
+        // Anonymous viewer: bob masked
+        let rows = finished_games(&pool, alice, None, false, None, None)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].opponents.len(), 1);
+        assert_eq!(rows[0].opponents[0].user_id, None);
+        assert_eq!(rows[0].opponents[0].name, "Anonymous");
+
+        // Stranger viewer: bob masked
+        let rows = finished_games(&pool, alice, None, false, None, Some(stranger))
+            .await
+            .unwrap();
+        assert_eq!(rows[0].opponents[0].user_id, None);
+        assert_eq!(rows[0].opponents[0].name, "Anonymous");
+
+        // Self (alice viewing own game): bob is the opponent, alice is the
+        // subject - bob is still private to alice. But alice is the player
+        // whose games we're listing, so the opponent visibility applies.
+        // bob is private, alice is not bob, so bob is masked for alice too.
+        let rows = finished_games(&pool, alice, None, false, None, Some(alice))
+            .await
+            .unwrap();
+        assert_eq!(rows[0].opponents[0].user_id, None);
+        assert_eq!(rows[0].opponents[0].name, "Anonymous");
+
+        // Now set bob to 'friends' and make friend accepted
+        crate::db::set_game_visibility(&pool, bob, "friends")
+            .await
+            .unwrap();
+        crate::db::test_support::accept_friends(&pool, bob, friend).await;
+
+        // Friend viewer: bob visible
+        let rows = finished_games(&pool, alice, None, false, None, Some(friend))
+            .await
+            .unwrap();
+        assert_eq!(rows[0].opponents[0].user_id, Some(bob));
+        assert_eq!(rows[0].opponents[0].name, "bob");
+
+        // Stranger still masked under 'friends'
+        let rows = finished_games(&pool, alice, None, false, None, Some(stranger))
+            .await
+            .unwrap();
+        assert_eq!(rows[0].opponents[0].user_id, None);
+        assert_eq!(rows[0].opponents[0].name, "Anonymous");
+    }
+
+    #[sqlx::test]
+    async fn head_to_head_masks_private_opponent(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let stranger = make_user(&pool, "stranger").await;
+        let friend = make_user(&pool, "friend").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        crate::db::set_game_visibility(&pool, bob, "private")
+            .await
+            .unwrap();
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+
+        // Anonymous viewer: bob masked but row still present
+        let h2h = head_to_head(&pool, alice, "Camel Up", false, None)
+            .await
+            .unwrap();
+        assert_eq!(h2h.len(), 1);
+        assert_eq!(h2h[0].user_id, None);
+        assert_eq!(h2h[0].name, "Anonymous");
+        assert_eq!(h2h[0].games, 1);
+        assert_eq!(h2h[0].wins, 1);
+
+        // Stranger: masked
+        let h2h = head_to_head(&pool, alice, "Camel Up", false, Some(stranger))
+            .await
+            .unwrap();
+        assert_eq!(h2h[0].user_id, None);
+        assert_eq!(h2h[0].name, "Anonymous");
+
+        // Set bob to friends, add friend
+        crate::db::set_game_visibility(&pool, bob, "friends")
+            .await
+            .unwrap();
+        crate::db::test_support::accept_friends(&pool, bob, friend).await;
+
+        // Friend: visible
+        let h2h = head_to_head(&pool, alice, "Camel Up", false, Some(friend))
+            .await
+            .unwrap();
+        assert_eq!(h2h[0].user_id, Some(bob));
+        assert_eq!(h2h[0].name, "bob");
+
+        // Stranger still masked
+        let h2h = head_to_head(&pool, alice, "Camel Up", false, Some(stranger))
+            .await
+            .unwrap();
+        assert_eq!(h2h[0].user_id, None);
+        assert_eq!(h2h[0].name, "Anonymous");
     }
 }
