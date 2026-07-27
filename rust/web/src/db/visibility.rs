@@ -168,6 +168,7 @@ pub async fn visible_user_ids(
 /// creation with default 'open' and can have no blocks). Block-by-target
 /// uses wording identical to policy 'none' so a blocked creator cannot
 /// distinguish the two (D7 detectability).
+/// Callers must pass canonicalized addresses (see auth::email_addr::canonicalize_email).
 #[cfg(feature = "ssr")]
 pub async fn check_invite_policy_tx(
     tx: &mut sqlx::PgConnection,

@@ -68,6 +68,7 @@ pub async fn list_user_emails(pool: &PgPool, user_id: Uuid) -> Result<Vec<UserEm
 /// Which account (if any) already owns this address. Used to reject re-adding
 /// an address already on the caller's account and to reject addresses owned by
 /// another account (global UNIQUE(email)).
+/// Callers must pass a canonicalized address (see auth::email_addr::canonicalize_email).
 #[cfg(feature = "ssr")]
 pub async fn find_email_owner(pool: &PgPool, email: &str) -> Result<Option<Uuid>> {
     Ok(
@@ -608,5 +609,90 @@ mod tests {
         let remaining = list_user_emails(&pool, user.id).await.unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].email, verified);
+    }
+
+    #[sqlx::test]
+    async fn canonical_emails_migration_aborts_on_case_duplicates(pool: PgPool) {
+        const MIGRATION: &str = include_str!("../../migrations/026_canonical_emails.sql");
+
+        // The test DB already has 026 applied, so the lower() unique index
+        // exists and would reject the dirty fixture. Drop it to reconstruct the
+        // pre-migration state.
+        sqlx::query("DROP INDEX IF EXISTS user_emails_email_lower_key")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let a = make_user(&pool, "dup-a").await;
+        let b = make_user(&pool, "dup-b").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(a.id)
+        .bind("Foo@X.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(b.id)
+        .bind("foo@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = sqlx::raw_sql(MIGRATION)
+            .execute(&pool)
+            .await
+            .expect_err("case-duplicates must abort the migration");
+        assert!(
+            err.to_string().contains("foo@x.com"),
+            "the RAISE must name the canonical address: {err}"
+        );
+    }
+
+    #[sqlx::test]
+    async fn canonical_emails_migration_lowercases_and_enforces(pool: PgPool) {
+        const MIGRATION: &str = include_str!("../../migrations/026_canonical_emails.sql");
+
+        let user = make_user(&pool, "dirty").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user.id)
+        .bind(" Foo@X.com ")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(MIGRATION)
+            .execute(&pool)
+            .await
+            .expect("clean fixture must migrate");
+
+        let stored: String = sqlx::query_scalar("SELECT email FROM user_emails WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, "foo@x.com");
+
+        let other = make_user(&pool, "other").await;
+        let dup = sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(other.id)
+        .bind("FOO@X.COM")
+        .execute(&pool)
+        .await;
+        assert!(
+            dup.is_err(),
+            "the lower() unique index must reject a case variant"
+        );
     }
 }

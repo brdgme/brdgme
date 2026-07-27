@@ -284,6 +284,7 @@ pub async fn get_turnstile_site_key() -> Result<String, ServerFnError> {
 
 #[server(Login, "/api")]
 pub async fn login(email: String, turnstile_token: String) -> Result<LoginResponse, ServerFnError> {
+    let email = crate::auth::email_addr::canonicalize_email(&email);
     let client = expect_context::<reqwest::Client>();
     let secret = std::env::var("TURNSTILE_SECRET_KEY").unwrap_or_default();
     if !verify_turnstile_token(&client, &secret, &turnstile_token).await {
@@ -338,6 +339,7 @@ pub async fn login(email: String, turnstile_token: String) -> Result<LoginRespon
 
 #[server(ConfirmLogin, "/api")]
 pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, ServerFnError> {
+    let email = crate::auth::email_addr::canonicalize_email(&email);
     // Extract the session before touching the database so a harness without
     // request parts fails here, not after user/token rows were written.
     let session: Session = extract()
@@ -850,6 +852,7 @@ pub async fn list_email_addresses() -> Result<Vec<EmailAddressView>, ServerFnErr
 /// it (reusing the login-code machinery). Usable only once confirmed.
 #[server(AddEmailAddress, "/api")]
 pub async fn add_email_address(email: String) -> Result<(), ServerFnError> {
+    let email = crate::auth::email_addr::canonicalize_email(&email);
     if email.is_empty() || !email.contains('@') {
         return Err(ServerFnError::new("Invalid email address"));
     }
@@ -900,6 +903,7 @@ pub async fn add_email_address(email: String) -> Result<(), ServerFnError> {
 /// to it. Sets `verified_at` and consumes the code.
 #[server(ConfirmEmailAddress, "/api")]
 pub async fn confirm_email_address(email: String, token: String) -> Result<(), ServerFnError> {
+    let email = crate::auth::email_addr::canonicalize_email(&email);
     let pool = expect_context::<PgPool>();
     let user = get_current_user()
         .await?
@@ -924,6 +928,7 @@ pub async fn confirm_email_address(email: String, token: String) -> Result<(), S
 /// capped). Reminders are NOT reset - they track the turn, not the address.
 #[server(MakeEmailAddressActive, "/api")]
 pub async fn make_email_address_active(email: String) -> Result<(), ServerFnError> {
+    let email = crate::auth::email_addr::canonicalize_email(&email);
     let pool = expect_context::<PgPool>();
     let user = get_current_user()
         .await?
@@ -973,6 +978,7 @@ pub async fn make_email_address_active(email: String) -> Result<(), ServerFnErro
 /// Removes a non-primary address. The active address cannot be removed.
 #[server(RemoveEmailAddress, "/api")]
 pub async fn remove_email_address(email: String) -> Result<(), ServerFnError> {
+    let email = crate::auth::email_addr::canonicalize_email(&email);
     let pool = expect_context::<PgPool>();
     let user = get_current_user()
         .await?
@@ -1913,5 +1919,78 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[sqlx::test]
+    async fn login_canonicalizes_stored_confirmation(pool: PgPool) {
+        let resp = with_pool_context(&pool, || login(" Foo@X.COM ".to_string(), String::new()))
+            .await
+            .unwrap();
+        assert!(resp.success);
+
+        assert!(
+            get_confirmation(&pool, "foo@x.com").await.is_some(),
+            "login boundary stores the confirmation under the canonical key"
+        );
+        assert!(
+            get_confirmation(&pool, " Foo@X.COM ").await.is_none(),
+            "the raw, non-canonical key is never stored"
+        );
+    }
+
+    #[sqlx::test]
+    async fn confirm_login_succeeds_when_login_and_confirm_disagree_on_case(pool: PgPool) {
+        with_pool_context(&pool, || login("Mixed@Case.com".to_string(), String::new()))
+            .await
+            .unwrap();
+        let code = get_confirmation(&pool, "mixed@case.com")
+            .await
+            .expect("login stored the canonical key")
+            .code;
+
+        // confirm_login (the server-fn boundary) canonicalizes before calling
+        // confirm_login_inner; the harness can't call the server fn (it needs a
+        // session), so replicate that one-line boundary canonicalization here.
+        let confirmed = confirm_login_inner(
+            &pool,
+            &crate::auth::email_addr::canonicalize_email("MIXED@case.COM"),
+            &code,
+        )
+        .await
+        .unwrap();
+        assert_eq!(confirmed.email, "mixed@case.com");
+        assert_eq!(user_count(&pool).await, 1);
+    }
+
+    #[sqlx::test]
+    async fn case_variant_of_existing_address_resolves_to_owner(pool: PgPool) {
+        let user_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind("owner")
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("foo@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Exercises the db-layer predicate add_email_address uses to reject
+        // "Address already on your account"; the server fn itself needs a
+        // session the harness can't provide, so test the predicate directly.
+        let owner = crate::db::find_email_owner(
+            &pool,
+            &crate::auth::email_addr::canonicalize_email("FOO@X.COM "),
+        )
+        .await
+        .unwrap();
+        assert_eq!(owner, Some(user_id));
     }
 }

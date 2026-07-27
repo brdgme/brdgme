@@ -1286,6 +1286,16 @@ pub async fn restart_game_with_roster(
 
     let opponent_ids = opponent_ids.unwrap_or_default();
     let opponent_emails = opponent_emails.unwrap_or_default();
+    let opponent_emails: Vec<String> = opponent_emails
+        .into_iter()
+        .map(|e| crate::auth::email_addr::canonicalize_email(&e))
+        .collect();
+    if opponent_emails
+        .iter()
+        .any(|e| e.is_empty() || !e.contains('@'))
+    {
+        return Err(ServerFnError::new("Invalid email address"));
+    }
     let bot_slots = bot_slots.unwrap_or_default();
 
     let ge = crate::db::find_game_extended(&pool, game_id)

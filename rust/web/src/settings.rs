@@ -413,7 +413,7 @@ fn EmailSection(
     let on_add_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         if let Some(el) = add_input.get() {
-            let val = el.value();
+            let val = crate::auth::email_addr::canonicalize_email(&el.value());
             if !val.is_empty() {
                 add_action.dispatch(val);
             }

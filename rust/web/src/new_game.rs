@@ -443,7 +443,17 @@ fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
                     ));
                     return;
                 }
-                OpponentSlot::Email(email) => emails.push(email),
+                OpponentSlot::Email(email) => {
+                    let email = crate::auth::email_addr::canonicalize_email(&email);
+                    if email.is_empty() {
+                        set_form_error.set(Some(
+                            "Enter an email for each Email slot, or switch the slot to Player or Bot"
+                                .to_string(),
+                        ));
+                        return;
+                    }
+                    emails.push(email);
+                }
                 OpponentSlot::Bot { name, bot_name } => bots.push(BotSlot { name, bot_name }),
             }
         }

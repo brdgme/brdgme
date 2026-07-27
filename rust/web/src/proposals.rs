@@ -1380,6 +1380,16 @@ pub async fn create_proposal(
 
     let opponent_ids = opponent_ids.unwrap_or_default();
     let opponent_emails = opponent_emails.unwrap_or_default();
+    let opponent_emails: Vec<String> = opponent_emails
+        .into_iter()
+        .map(|e| crate::auth::email_addr::canonicalize_email(&e))
+        .collect();
+    if opponent_emails
+        .iter()
+        .any(|e| e.is_empty() || !e.contains('@'))
+    {
+        return Err(ServerFnError::new("Invalid email address"));
+    }
     let bot_slots = bot_slots.unwrap_or_default();
 
     let player_count = 1 + opponent_ids.len() + opponent_emails.len() + bot_slots.len();
@@ -3716,5 +3726,49 @@ mod tests {
             proposal_game_type_name(&pool, &proposal).await,
             UNKNOWN_GAME_TYPE_NAME
         );
+    }
+
+    #[sqlx::test]
+    async fn invite_canonical_email_resolves_to_existing_user(pool: PgPool) {
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("foo@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let users_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let resolved = find_or_create_user_by_email_tx(
+            &mut tx,
+            &crate::auth::email_addr::canonicalize_email("Foo@x.com "),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            resolved, user_id,
+            "case/space variant resolves to the owner"
+        );
+        let users_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(users_after, users_before, "no second user created");
     }
 }
