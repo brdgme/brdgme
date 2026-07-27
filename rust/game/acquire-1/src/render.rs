@@ -75,7 +75,7 @@ impl PubState {
                                 A::Left,
                                 vec![N::text(format!(
                                     "{} left",
-                                    self.shares.get(c).expect("expected corp to have shares")
+                                    self.shares.get(c).copied().unwrap_or_default()
                                 ))],
                             ),
                             (A::Left, vec![N::text(format!("${}", value * MINOR_MULT))]),
@@ -260,15 +260,9 @@ impl Board {
                                     let l = Loc { row, col };
                                     match self.get_tile(l) {
                                         Tile::Corp(tc) if tc == *c => {
-                                            if start.is_none() {
-                                                start = Some(col);
-                                            }
+                                            let s = *start.get_or_insert(col);
                                             if col == board::WIDTH - 1 {
-                                                Some((
-                                                    start.unwrap(),
-                                                    row,
-                                                    col - start.unwrap() + 1,
-                                                ))
+                                                Some((s, row, col - s + 1))
                                             } else {
                                                 None
                                             }

@@ -13,7 +13,6 @@ dependencies = [
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "thiserror 2.0.19",
  "tokio",
 ]
 

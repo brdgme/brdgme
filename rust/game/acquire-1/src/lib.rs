@@ -98,36 +98,7 @@ pub struct PubState {
 
 impl PubState {
     pub fn can_end(&self) -> CanEnd {
-        if self.finished {
-            return CanEnd::Finished;
-        }
-        if self.last_turn {
-            return CanEnd::Triggered;
-        }
-        let mut largest: usize = 0;
-        let mut has_safe: bool = false;
-        let mut unsafe_count: usize = 0;
-        for corp in Corp::iter() {
-            let size = self.board.corp_size(*corp);
-            if size > largest {
-                largest = size;
-            }
-            if size >= corp::SAFE_SIZE {
-                has_safe = true;
-            }
-            if size > 0 && size < corp::SAFE_SIZE {
-                unsafe_count += 1;
-            }
-        }
-        if largest >= corp::GAME_END_SIZE || has_safe && unsafe_count == 0 {
-            return CanEnd::True;
-        }
-        CanEndFalse {
-            largest,
-            has_safe,
-            unsafe_count,
-        }
-        .into()
+        can_end(&self.board, self.finished, self.last_turn)
     }
 }
 
@@ -307,7 +278,7 @@ able to win the game.",
     }
 
     fn player_counts() -> Vec<usize> {
-        (2..6).collect()
+        (MIN_PLAYERS..=MAX_PLAYERS).collect()
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -348,6 +319,39 @@ impl From<CanEndFalse> for CanEnd {
     fn from(val: CanEndFalse) -> Self {
         CanEnd::False(val)
     }
+}
+
+fn can_end(board: &Board, finished: bool, last_turn: bool) -> CanEnd {
+    if finished {
+        return CanEnd::Finished;
+    }
+    if last_turn {
+        return CanEnd::Triggered;
+    }
+    let mut largest: usize = 0;
+    let mut has_safe: bool = false;
+    let mut unsafe_count: usize = 0;
+    for corp in Corp::iter() {
+        let size = board.corp_size(*corp);
+        if size > largest {
+            largest = size;
+        }
+        if size >= corp::SAFE_SIZE {
+            has_safe = true;
+        }
+        if size > 0 && size < corp::SAFE_SIZE {
+            unsafe_count += 1;
+        }
+    }
+    if largest >= corp::GAME_END_SIZE || has_safe && unsafe_count == 0 {
+        return CanEnd::True;
+    }
+    CanEndFalse {
+        largest,
+        has_safe,
+        unsafe_count,
+    }
+    .into()
 }
 
 #[derive(Debug, PartialEq)]
@@ -460,12 +464,16 @@ impl Game {
         let neighbouring_corps = self.board.neighbouring_corps(loc);
         match neighbouring_corps.len() {
             1 => {
-                let n_corp = neighbouring_corps.iter().next().unwrap();
-                self.board.extend_corp(loc, *n_corp);
+                let Some(n_corp) = neighbouring_corps.iter().copied().next() else {
+                    return Err(GameError::Internal {
+                        message: "neighbouring corp set was unexpectedly empty".to_string(),
+                    });
+                };
+                self.board.extend_corp(loc, n_corp);
                 logs.push(Log::public(vec![
                     n_corp.render(),
                     N::text(" increased in size to "),
-                    N::Bold(vec![N::text(format!("{}", self.board.corp_size(*n_corp)))]),
+                    N::Bold(vec![N::text(format!("{}", self.board.corp_size(n_corp)))]),
                 ]));
                 self.buy_phase(player);
             }
@@ -579,7 +587,7 @@ impl Game {
                 N::text(" founded "),
                 corp.render(),
             ])],
-            matches!(self.phase, Phase::Buy { .. }),
+            true,
         ))
     }
 
@@ -668,12 +676,13 @@ impl Game {
                     N::text("Paying shareholder bonuses for "),
                     corp.render(),
                 ])]));
-                logs.extend(self.pay_bonuses(*corp));
+                logs.extend(self.pay_bonuses(*corp)?);
                 for player in 0..self.players.len() {
-                    let p_shares = *self.players[player]
+                    let p_shares = self.players[player]
                         .shares
                         .get(corp)
-                        .expect("could not get player shares");
+                        .copied()
+                        .unwrap_or_default();
                     if p_shares > 0 {
                         logs.extend(self.sell(player, p_shares, *corp)?);
                     }
@@ -794,7 +803,7 @@ impl Game {
             N::text(" is merging into "),
             into.render(),
         ])];
-        logs.extend(self.pay_bonuses(from));
+        logs.extend(self.pay_bonuses(from)?);
         self.phase = Phase::SellOrTrade {
             player,
             corp: from,
@@ -812,7 +821,7 @@ impl Game {
         Ok((logs, can_undo && self.players.len() > 2))
     }
 
-    fn pay_bonuses(&mut self, corp: Corp) -> Vec<Log> {
+    fn pay_bonuses(&mut self, corp: Corp) -> Result<Vec<Log>, GameError> {
         let BonusPlayers {
             major,
             minor,
@@ -830,7 +839,9 @@ impl Game {
         let major_len = major.len();
         let minor_len = minor.len();
         if major_len == 0 {
-            panic!("expected some major bonus players");
+            return Err(GameError::Internal {
+                message: "no major bonus players".to_string(),
+            });
         }
         let corp_size = self.board.corp_size(corp);
         let mut major_bonus = corp.major_bonus(corp_size);
@@ -859,7 +870,7 @@ impl Game {
                 self.players[*p].money += minor_per;
             }
         }
-        logs
+        Ok(logs)
     }
 
     fn bonus_log(players: &[usize], kind: &str, bonus: usize) -> Log {
@@ -887,7 +898,7 @@ impl Game {
         let mut major_count: usize = 0;
         let mut dummy_shares: usize = 0;
         if self.players.len() == 2 {
-            dummy_shares = self.rng.random_range(1..=5);
+            dummy_shares = self.rng.random_range(1..=6);
             major.push(DUMMY_PLAYER_OFFSET);
             major_count = dummy_shares;
         }
@@ -988,10 +999,11 @@ impl Game {
             }
         };
         let mut logs = self.sell(player, n, corp)?;
-        if *self.players[player]
+        if self.players[player]
             .shares
             .get(&corp)
-            .expect("could not get player shares")
+            .copied()
+            .unwrap_or_default()
             == 0
         {
             let (new_logs, new_can_undo) = self.next_player_sell_trade()?;
@@ -1008,10 +1020,11 @@ impl Game {
             });
         }
         let money = corp.value(self.board.corp_size(corp)) * n;
-        let player_shares = *self.players[player]
+        let player_shares = self.players[player]
             .shares
             .get(&corp)
-            .expect("could not get player shares");
+            .copied()
+            .unwrap_or_default();
         if n > player_shares {
             return Err(GameError::InvalidInput {
                 message: "you don't have that many shares".to_string(),
@@ -1058,19 +1071,15 @@ impl Game {
         let corp_shares = self.players[player]
             .shares
             .get(&corp)
-            .cloned()
-            .expect("could not get player shares");
+            .copied()
+            .unwrap_or_default();
         if corp_shares < n {
             return Err(GameError::InvalidInput {
                 message: format!("you only have {} {}", corp_shares, corp),
             });
         }
         let receive = n / 2;
-        let into_shares = self
-            .shares
-            .get(&into)
-            .cloned()
-            .expect("could not get into shares");
+        let into_shares = self.shares.get(&into).copied().unwrap_or_default();
         if receive > into_shares {
             return Err(GameError::InvalidInput {
                 message: format!("{} only has {} remaining", into, into_shares),
@@ -1098,10 +1107,7 @@ impl Game {
     }
 
     fn take_shares(&mut self, player: usize, n: usize, corp: Corp) -> Result<(), GameError> {
-        let corp_shares = *self
-            .shares
-            .get(&corp)
-            .expect("could not get corp share count");
+        let corp_shares = self.shares.get(&corp).copied().unwrap_or_default();
         if corp_shares < n {
             return Err(GameError::InvalidInput {
                 message: format!("{} only has {} left", corp, corp_shares),
@@ -1115,10 +1121,11 @@ impl Game {
     }
 
     fn return_shares(&mut self, player: usize, n: usize, corp: Corp) -> Result<(), GameError> {
-        let player_shares = *self.players[player]
+        let player_shares = self.players[player]
             .shares
             .get(&corp)
-            .expect("could not get player share count");
+            .copied()
+            .unwrap_or_default();
         if player_shares < n {
             return Err(GameError::InvalidInput {
                 message: format!("only has {} left", player_shares),
@@ -1163,7 +1170,7 @@ impl Game {
                 message: "can't end the game during another player's turn".to_string(),
             });
         }
-        if self.pub_state().can_end() != CanEnd::True {
+        if self.can_end() != CanEnd::True {
             return Err(GameError::InvalidInput {
                 message: "can't end the game at the moment".to_string(),
             });
@@ -1179,8 +1186,12 @@ impl Game {
         self.players[player].money
     }
 
+    fn can_end(&self) -> CanEnd {
+        can_end(&self.board, self.finished, self.last_turn)
+    }
+
     fn player_can_end(&self, player: usize) -> bool {
-        self.phase.main_turn_player() == player && self.pub_state().can_end() == CanEnd::True
+        self.phase.main_turn_player() == player && self.can_end() == CanEnd::True
     }
 }
 
@@ -1349,6 +1360,68 @@ mod tests {
     }
 
     #[test]
+    fn player_counts_covers_min_to_max_players() {
+        assert_eq!(vec![2, 3, 4, 5, 6], Game::player_counts());
+        for n in Game::player_counts() {
+            let (g, _logs) = Game::start(n, 1)
+                .unwrap_or_else(|e| panic!("advertised count {} must start: {}", n, e));
+            assert_eq!(n, g.player_count());
+            for p in 0..n {
+                let _ = g.player_state(p);
+                let _ = g.command_spec(p);
+            }
+        }
+        assert!(
+            Game::start(MIN_PLAYERS - 1, 1).is_err(),
+            "counts below MIN_PLAYERS must be rejected"
+        );
+        assert!(
+            Game::start(MAX_PLAYERS + 1, 1).is_err(),
+            "counts above MAX_PLAYERS must be rejected"
+        );
+    }
+
+    #[test]
+    fn dummy_shareholder_rolls_a_full_d6() {
+        let mut g = Game::start(2, 42).expect("expected 2 player game").0;
+        let mut seen = [0usize; 7];
+        for _ in 0..1000 {
+            let n = g.bonus_players(Corp::Worldwide).dummy_shares;
+            assert!(
+                (1..=6).contains(&n),
+                "dummy roll {} is outside a six-sided die",
+                n
+            );
+            seen[n] += 1;
+        }
+        for face in 1..=6 {
+            assert!(
+                seen[face] > 0,
+                "die face {} never appeared in 1000 rolls (counts: {:?})",
+                face,
+                seen
+            );
+        }
+    }
+
+    #[test]
+    fn pay_bonuses_with_no_shareholders_errors_instead_of_panicking() {
+        let mut g: Game = "AA012".into();
+        assert_eq!(3, g.players.len());
+        assert_eq!(2, g.board.corp_size(Corp::American));
+        for p in &mut g.players {
+            p.shares.insert(Corp::American, 0);
+        }
+        match g.pay_bonuses(Corp::American) {
+            Err(GameError::Internal { message }) => {
+                assert!(message.contains("major bonus"), "unexpected: {}", message)
+            }
+            Ok(_) => panic!("expected an Internal error for a corp with no shareholders"),
+            Err(e) => panic!("expected GameError::Internal, got: {}", e),
+        }
+    }
+
+    #[test]
     fn end_sell_trade_phase_wrong_phase_returns_internal_error() {
         let mut g = Game {
             phase: Phase::Play(0),
@@ -1364,5 +1437,125 @@ mod tests {
             }
             other => panic!("expected Internal error, got {:?}", other),
         }
+    }
+
+    fn game_missing_american_key() -> Game {
+        let mut g: Game = "AA01".into();
+        for p in &mut g.players {
+            p.shares.remove(&Corp::American);
+        }
+        g.shares.remove(&Corp::American);
+        g
+    }
+
+    #[test]
+    fn missing_share_key_does_not_panic_render_or_spec() {
+        use brdgme_game::Renderer;
+
+        let mut g = game_missing_american_key();
+        let _ = g.pub_state().render();
+        let _ = g.player_state(0).render();
+        g.phase = Phase::SellOrTrade {
+            player: 0,
+            corp: Corp::American,
+            into: Corp::Festival,
+            at: Loc { row: 0, col: 2 },
+            turn_player: 0,
+        };
+        let spec = g.command_spec(0);
+        assert!(spec.is_some(), "a spec must still be produced");
+    }
+
+    #[test]
+    fn missing_share_key_errors_instead_of_panicking() {
+        let mut g = game_missing_american_key();
+        assert!(g.sell(0, 1, Corp::American).is_err());
+        assert!(g.take_shares(0, 1, Corp::American).is_err());
+        assert!(g.return_shares(0, 1, Corp::American).is_err());
+        g.phase = Phase::SellOrTrade {
+            player: 0,
+            corp: Corp::American,
+            into: Corp::Festival,
+            at: Loc { row: 0, col: 2 },
+            turn_player: 0,
+        };
+        assert!(g.handle_trade_command(0, 2).is_err());
+        g.players[0].shares.insert(Corp::American, 4);
+        g.shares.remove(&Corp::Festival);
+        assert!(g.handle_trade_command(0, 2).is_err());
+        assert_eq!(None, g.shares.get(&Corp::Festival));
+    }
+
+    #[test]
+    fn end_tolerates_missing_share_keys() {
+        let mut g = game_missing_american_key();
+        g.players[0].shares.insert(Corp::American, 3);
+        let logs = g.end().expect("game end must not panic or error");
+        assert!(!logs.is_empty(), "ending the game must log bonus payouts");
+        assert!(g.finished);
+    }
+
+    #[test]
+    fn game_can_end_matches_pub_state_can_end() {
+        let mut g: Game = "AA01".into();
+        assert_eq!(g.pub_state().can_end(), g.can_end());
+        g.last_turn = true;
+        assert_eq!(g.pub_state().can_end(), g.can_end());
+        g.finished = true;
+        assert_eq!(g.pub_state().can_end(), g.can_end());
+    }
+
+    #[test]
+    fn found_parser_corp_order_is_canonical_and_stable() {
+        let players = vec!["mick".to_string(), "steve".to_string()];
+        let mut g: Game = "...
+                           #0.
+                           ..."
+        .into();
+        g.command(0, "play b2", &players)
+            .expect("expected playing tile to work");
+        assert!(matches!(g.phase, Phase::Found { .. }));
+        let first = format!("{:?}", g.command_spec(0));
+        for _ in 0..50 {
+            assert_eq!(
+                first,
+                format!("{:?}", g.command_spec(0)),
+                "command spec must not vary between builds"
+            );
+        }
+        for name in ["Worldwide", "Sackson", "Festival"] {
+            assert!(first.contains(name), "spec should list {}: {}", name, first);
+        }
+        assert!(
+            first.find("Worldwide") < first.find("Sackson")
+                && first.find("Sackson") < first.find("Festival"),
+            "corps must be listed in CORPS order: {}",
+            first
+        );
+    }
+
+    #[test]
+    fn merge_parser_corp_order_is_stable() {
+        let players = vec!["mick".to_string(), "steve".to_string()];
+        let mut g: Game = "FF0
+                           ..A
+                           ..A"
+        .into();
+        g.command(0, "play a3", &players)
+            .expect("expected 'play a3' to work");
+        assert!(matches!(g.phase, Phase::ChooseMerger { .. }));
+        let first = format!("{:?}", g.command_spec(0));
+        for _ in 0..50 {
+            assert_eq!(
+                first,
+                format!("{:?}", g.command_spec(0)),
+                "merge spec must not vary between builds"
+            );
+        }
+        assert!(
+            first.find("Festival") < first.find("American"),
+            "corps must be listed in CORPS order: {}",
+            first
+        );
     }
 }

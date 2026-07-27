@@ -30,8 +30,15 @@ impl Game {
                     parsers.push(Box::new(self.play_parser(player)));
                 }
                 Phase::Found { .. } => {
+                    let available = self.board.available_corps();
                     parsers.push(Box::new(
-                        self.found_parser(self.board.available_corps().into_iter().collect()),
+                        self.found_parser(
+                            CORPS
+                                .iter()
+                                .copied()
+                                .filter(|c| available.contains(c))
+                                .collect(),
+                        ),
                     ));
                 }
                 Phase::Buy { remaining, .. } => {
@@ -41,22 +48,21 @@ impl Game {
                     parsers.push(Box::new(done_parser()));
                 }
                 Phase::ChooseMerger { at, .. } => {
-                    parsers.push(Box::new(
-                        self.merge_parser(
-                            &self
-                                .board
-                                .neighbouring_corps(&at)
-                                .into_iter()
-                                .collect::<Vec<Corp>>(),
-                        ),
-                    ));
+                    let neighbouring = self.board.neighbouring_corps(&at);
+                    let corps: Vec<Corp> = CORPS
+                        .iter()
+                        .copied()
+                        .filter(|c| neighbouring.contains(c))
+                        .collect();
+                    parsers.push(Box::new(self.merge_parser(&corps)));
                 }
                 Phase::SellOrTrade { player, corp, .. } => {
                     parsers.push(Box::new(self.sell_parser(player, corp)));
-                    if *self.players[player]
+                    if self.players[player]
                         .shares
                         .get(&corp)
-                        .expect("could not get player shares")
+                        .copied()
+                        .unwrap_or_default()
                         >= 2
                     {
                         parsers.push(Box::new(self.trade_parser(player, corp)));
@@ -159,8 +165,8 @@ impl Game {
             1,
             self.players
                 .get(player)
-                .and_then(|p| p.shares.get(&corp).cloned())
-                .expect("could not et player shares") as i32,
+                .and_then(|p| p.shares.get(&corp).copied())
+                .unwrap_or_default() as i32,
         )
     }
 

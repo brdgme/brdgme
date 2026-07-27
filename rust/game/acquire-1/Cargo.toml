@@ -11,7 +11,6 @@ brdgme_fuzz = { path = "../../tools/fuzz" }
 brdgme_color = { path = "../../lib/color" }
 brdgme_game = { path = "../../lib/game" }
 brdgme_markup = { path = "../../lib/markup" }
-thiserror.workspace = true
 rand.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["full"] }
