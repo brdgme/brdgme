@@ -120,7 +120,7 @@ impl Card {
             Card::SalmonNigiri => "2",
             Card::SquidNigiri => "3",
             Card::EggNigiri => "1",
-            Card::Pudding => "end: most 6, least -6",
+            Card::Pudding => "end: most 6, least -6 (no penalty in 2p)",
             Card::Wasabi => "next nigiri x3",
             Card::Chopsticks => "swap for 2",
             Card::Played => "",
@@ -137,16 +137,13 @@ impl Card {
     }
 }
 
-fn player_draw_counts() -> &'static [(usize, usize)] {
-    &[(2, 9), (3, 9), (4, 8), (5, 7)]
-}
-
 fn draw_count(players: usize) -> usize {
-    player_draw_counts()
-        .iter()
-        .find(|(p, _)| *p == players)
-        .map(|(_, c)| *c)
-        .unwrap_or(9)
+    match players {
+        2 | 3 => 9,
+        4 => 8,
+        5 => 7,
+        _ => 9,
+    }
 }
 
 fn deck() -> Vec<Card> {
@@ -249,14 +246,7 @@ impl Game {
     }
 
     pub fn render_name(&self, player: usize) -> N {
-        if player > self.players - 1 {
-            N::Fg(
-                brdgme_color::NamedColor::Grey.into(),
-                vec![N::Bold(vec![N::text("<dummy>")])],
-            )
-        } else {
-            N::Player(player)
-        }
+        render::render_name(player, self.players)
     }
 
     pub fn render_names(&self, players: &[usize]) -> Vec<N> {
@@ -444,7 +434,7 @@ impl Game {
             for &p in &first_players {
                 scores[p] += first_points;
             }
-            if first_players.len() == 1 && second > 0 && second_players.len() <= 3 {
+            if first_players.len() == 1 && second > 0 {
                 let second_points = 3 / second_players.len() as i32;
                 output.push(vec![
                     render::comma_list_nodes(self.render_names(&second_players)),
@@ -679,9 +669,9 @@ impl Game {
                     "you can only play a second card if you've previously played chopsticks",
                 ));
             }
-            if player == self.controller
+            if self.players == 2
+                && player == self.controller
                 && self.playing[DUMMY].is_none()
-                && self.players == 2
                 && self.hands[player].len() == 2
             {
                 return Err(GameError::invalid_input(
@@ -1383,26 +1373,6 @@ mod test {
         // (round 1). Mick's hand went to BJ (position 2 after rotate_left).
         assert!(!g.played[MICK].contains(&Card::Chopsticks));
         assert!(g.hands[BJ].contains(&Card::Chopsticks));
-    }
-
-    #[test]
-    fn test_hand_passing_left() {
-        let (mut g, _) = Game::start(3, 1).unwrap();
-        let n = names();
-        // Round 1 passes left (rotate_left)
-        g.hands[MICK] = vec![Card::Tempura];
-        g.hands[STEVE] = vec![Card::Sashimi];
-        g.hands[BJ] = vec![Card::Dumpling];
-        g.playing[MICK] = Some(vec![Card::Tempura]);
-        g.playing[STEVE] = Some(vec![Card::Sashimi]);
-        g.playing[BJ] = Some(vec![Card::Dumpling]);
-        // Trigger end_hand by having all played (hands are 1 card, after trim -> empty -> end_round)
-        g.command(MICK, "play 1", &n).unwrap_err();
-        // Actually all already have playing set, so we need to call end_hand directly
-        g.end_hand();
-        // After end_hand, hands were 1 card each, trimmed to empty, end_round called
-        // Round 2 starts and deals new hands. So we can't easily check passing here.
-        // Instead test passing with 2-card hands.
     }
 
     #[test]

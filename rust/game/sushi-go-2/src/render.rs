@@ -36,8 +36,8 @@ pub fn comma_list_nodes(nodes: Vec<N>) -> N {
     N::Group(out)
 }
 
-fn render_name(player: usize, players: usize) -> N {
-    if player > players - 1 {
+pub(crate) fn render_name(player: usize, players: usize) -> N {
+    if player >= players {
         N::Fg(
             NamedColor::Grey.into(),
             vec![N::Bold(vec![N::text("<dummy>")])],

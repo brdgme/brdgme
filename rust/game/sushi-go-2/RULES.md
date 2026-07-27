@@ -26,6 +26,8 @@ After all players have played, hands are passed and the next hand begins.
 - **Dumpling**: 1, 3, 6, 10, 15 (capped at 15).
 - **Pudding** (end of round 3): most puddings gets 6 points; fewest gets -6 (not in 2p).
 
+If players are tied on points, the tie is broken by pudding count (the player with more puddings ranks higher).
+
 ## 2-Player Variant
 
 A dummy player joins. The controller (alternating each hand) draws an extra card from the dummy's hand, then plays one card for themselves and one for the dummy.
