@@ -49,7 +49,7 @@ fn blank_cell() -> Cell {
 fn render_amount(a: &Cost) -> Vec<N> {
     let mut parts: Vec<Vec<N>> = vec![];
     for &r in RESOURCES.iter() {
-        let n = a.get(r);
+        let n = a.get(&r);
         if n > 0 {
             parts.push(vec![N::Bold(vec![render_resource_colour(
                 n.to_string(),
@@ -213,14 +213,14 @@ fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
             your_token_row.push(cel(
                 A::Center,
                 vec![N::Bold(vec![N::text(
-                    (bonuses.get(gem) + tokens.get(gem)).to_string(),
+                    (bonuses.get(&gem) + tokens.get(&gem)).to_string(),
                 )])],
             ));
             let desc_cell = if gem != Resource::Gold {
                 vec![grey(vec![N::text(format!(
                     "({}+{})",
-                    bonuses.get(gem),
-                    tokens.get(gem)
+                    bonuses.get(&gem),
+                    tokens.get(&gem)
                 ))])]
             } else {
                 vec![]
@@ -229,7 +229,7 @@ fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
         }
         avail_token_row.push(cel(
             A::Center,
-            vec![N::text(pub_state.tokens.get(gem).to_string())],
+            vec![N::text(pub_state.tokens.get(&gem).to_string())],
         ));
     }
     let mut rows: Vec<Row> = vec![table_header];
@@ -281,7 +281,7 @@ fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
         let pb = &pub_state.player_boards[p];
         let mut row: Row = vec![cel(A::Left, vec![N::Player(p)])];
         for &gem in GEMS.iter() {
-            let text = N::text(format!("{}+{}", pb.bonuses.get(gem), pb.tokens.get(gem)));
+            let text = N::text(format!("{}+{}", pb.bonuses.get(&gem), pb.tokens.get(&gem)));
             row.push(cel(
                 A::Center,
                 if bold {
@@ -292,7 +292,7 @@ fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
             ));
         }
         let cells = [
-            pb.tokens.get(Resource::Gold).to_string(),
+            pb.tokens.get(&Resource::Gold).to_string(),
             pb.tokens.sum().to_string(),
             pb.reserve_count.to_string(),
             pb.prestige.to_string(),

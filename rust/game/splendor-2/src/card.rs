@@ -69,7 +69,7 @@ pub struct Noble {
 /// Build a `Cost` from `(Resource, i32)` pairs, e.g. `cost!(Sapphire: 1, Emerald: 1)`.
 macro_rules! cost {
     ($($r:ident: $n:expr),* $(,)?) => {
-        Cost(std::collections::HashMap::from([
+        brdgme_cost::Cost(std::collections::HashMap::from([
             $((Resource::$r, $n)),*
         ]))
     };

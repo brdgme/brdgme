@@ -5917,6 +5917,7 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
+ "brdgme_cost",
  "brdgme_fuzz",
  "brdgme_game",
  "brdgme_markup",

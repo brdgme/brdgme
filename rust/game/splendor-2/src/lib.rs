@@ -267,17 +267,19 @@ impl Game {
         );
         let offset = self.player_boards[player].bonuses().sub(amount);
         for gem in GEMS {
-            let off = offset.get(gem);
+            let off = offset.get(&gem);
             if off < 0 {
-                let new_pb_gem = self.player_boards[player].tokens.get(gem) + off;
+                let new_pb_gem = self.player_boards[player].tokens.get(&gem) + off;
                 self.player_boards[player].tokens.set(gem, new_pb_gem);
-                self.tokens.set(gem, self.tokens.get(gem) - off);
+                self.tokens.set(gem, self.tokens.get(&gem) - off);
                 if new_pb_gem < 0 {
-                    let gold = self.player_boards[player].tokens.get(Resource::Gold) + new_pb_gem;
+                    let gold = self.player_boards[player].tokens.get(&Resource::Gold) + new_pb_gem;
                     self.player_boards[player].tokens.set(Resource::Gold, gold);
-                    self.tokens.set(gem, self.tokens.get(gem) + new_pb_gem);
-                    self.tokens
-                        .set(Resource::Gold, self.tokens.get(Resource::Gold) - new_pb_gem);
+                    self.tokens.set(gem, self.tokens.get(&gem) + new_pb_gem);
+                    self.tokens.set(
+                        Resource::Gold,
+                        self.tokens.get(&Resource::Gold) - new_pb_gem,
+                    );
                     self.player_boards[player].tokens.set(gem, 0);
                 }
             }
@@ -303,7 +305,7 @@ impl Game {
                         "must take the same type of tokens when taking two",
                     ));
                 }
-                if self.tokens.get(tokens[0]) < 4 {
+                if self.tokens.get(&tokens[0]) < 4 {
                     return Err(GameError::invalid_input(
                         "can only take two when there are four or more remaining",
                     ));
@@ -321,7 +323,7 @@ impl Game {
                             "must take different tokens when taking three",
                         ));
                     }
-                    if self.tokens.get(tokens[i]) == 0 {
+                    if self.tokens.get(&tokens[i]) == 0 {
                         return Err(GameError::invalid_input(
                             "there aren't enough tokens remaning to take that",
                         ));
@@ -339,7 +341,7 @@ impl Game {
                 ));
             }
         }
-        let amount = Cost::from_resources(tokens);
+        let amount = Cost::from_keys(tokens.iter().copied());
         self.player_boards[player].tokens = self.player_boards[player].tokens.add(&amount);
         self.tokens = self.tokens.sub(&amount);
         logs.extend(self.next_phase());
@@ -433,13 +435,13 @@ impl Game {
             card_node(&c),
         ])];
         self.player_boards[player].reserve.push(c);
-        if self.tokens.get(Resource::Gold) > 0 {
-            let pb_gold = self.player_boards[player].tokens.get(Resource::Gold) + 1;
+        if self.tokens.get(&Resource::Gold) > 0 {
+            let pb_gold = self.player_boards[player].tokens.get(&Resource::Gold) + 1;
             self.player_boards[player]
                 .tokens
                 .set(Resource::Gold, pb_gold);
             self.tokens
-                .set(Resource::Gold, self.tokens.get(Resource::Gold) - 1);
+                .set(Resource::Gold, self.tokens.get(&Resource::Gold) - 1);
         }
         if !self.decks[row].is_empty() {
             self.board[row][col] = self.decks[row].remove(0);
@@ -466,7 +468,7 @@ impl Game {
                 "please specify at least one token",
             ));
         }
-        let t_cost = Cost::from_resources(tokens);
+        let t_cost = Cost::from_keys(tokens.iter().copied());
         if !self.player_boards[player].tokens.can_afford(&t_cost) {
             return Err(GameError::invalid_input("you don't have that many tokens"));
         }
@@ -767,7 +769,7 @@ mod tests {
         Card {
             resource,
             prestige: 0,
-            cost: Cost(cost.iter().cloned().collect()),
+            cost: brdgme_cost::Cost(cost.iter().cloned().collect()),
         }
     }
 
@@ -803,9 +805,9 @@ mod tests {
         for (players, expected_gems) in [(2, 4), (3, 5), (4, 7)] {
             let (g, _) = Game::start(players, 1).unwrap();
             for r in GEMS {
-                assert_eq!(expected_gems, g.tokens.get(r));
+                assert_eq!(expected_gems, g.tokens.get(&r));
             }
-            assert_eq!(MAX_GOLD, g.tokens.get(Resource::Gold));
+            assert_eq!(MAX_GOLD, g.tokens.get(&Resource::Gold));
             assert_eq!(players + 1, g.nobles.len());
         }
     }
@@ -814,11 +816,11 @@ mod tests {
     fn test_take_two_same() {
         let (mut g, _) = Game::start(3, 1).unwrap();
         let gem = GEMS[0];
-        let bank_before = g.tokens.get(gem);
+        let bank_before = g.tokens.get(&gem);
         assert!(bank_before >= 4);
         g.take(0, &[gem, gem]).unwrap();
-        assert_eq!(2, g.player_boards[0].tokens.get(gem));
-        assert_eq!(bank_before - 2, g.tokens.get(gem));
+        assert_eq!(2, g.player_boards[0].tokens.get(&gem));
+        assert_eq!(bank_before - 2, g.tokens.get(&gem));
     }
 
     #[test]
@@ -841,9 +843,9 @@ mod tests {
     fn test_take_three_distinct() {
         let (mut g, _) = Game::start(3, 1).unwrap();
         g.take(0, &[GEMS[0], GEMS[1], GEMS[2]]).unwrap();
-        assert_eq!(1, g.player_boards[0].tokens.get(GEMS[0]));
-        assert_eq!(1, g.player_boards[0].tokens.get(GEMS[1]));
-        assert_eq!(1, g.player_boards[0].tokens.get(GEMS[2]));
+        assert_eq!(1, g.player_boards[0].tokens.get(&GEMS[0]));
+        assert_eq!(1, g.player_boards[0].tokens.get(&GEMS[1]));
+        assert_eq!(1, g.player_boards[0].tokens.get(&GEMS[2]));
     }
 
     #[test]
@@ -945,10 +947,10 @@ mod tests {
         let (mut g, _) = Game::start(2, 1).unwrap();
         g.player_boards[0].tokens.set(Resource::Diamond, 3);
         g.board[0][0] = card_with_cost(Resource::Ruby, &[(Resource::Diamond, 2)]);
-        let bank_before = g.tokens.get(Resource::Diamond);
+        let bank_before = g.tokens.get(&Resource::Diamond);
         g.buy(0, ParsedLoc { row: 0, col: 0 }).unwrap();
-        assert_eq!(1, g.player_boards[0].tokens.get(Resource::Diamond));
-        assert_eq!(bank_before + 2, g.tokens.get(Resource::Diamond));
+        assert_eq!(1, g.player_boards[0].tokens.get(&Resource::Diamond));
+        assert_eq!(bank_before + 2, g.tokens.get(&Resource::Diamond));
     }
 
     #[test]
@@ -966,13 +968,13 @@ mod tests {
         g.player_boards[0].cards = vec![card_with_cost(Resource::Diamond, &[])];
         g.player_boards[0].tokens.set(Resource::Gold, 2);
         g.board[0][0] = card_with_cost(Resource::Ruby, &[(Resource::Diamond, 3)]);
-        let bank_diamond_before = g.tokens.get(Resource::Diamond);
-        let bank_gold_before = g.tokens.get(Resource::Gold);
+        let bank_diamond_before = g.tokens.get(&Resource::Diamond);
+        let bank_gold_before = g.tokens.get(&Resource::Gold);
         g.buy(0, ParsedLoc { row: 0, col: 0 }).unwrap();
-        assert_eq!(0, g.player_boards[0].tokens.get(Resource::Diamond));
-        assert_eq!(0, g.player_boards[0].tokens.get(Resource::Gold));
-        assert_eq!(bank_diamond_before, g.tokens.get(Resource::Diamond));
-        assert_eq!(bank_gold_before + 2, g.tokens.get(Resource::Gold));
+        assert_eq!(0, g.player_boards[0].tokens.get(&Resource::Diamond));
+        assert_eq!(0, g.player_boards[0].tokens.get(&Resource::Gold));
+        assert_eq!(bank_diamond_before, g.tokens.get(&Resource::Diamond));
+        assert_eq!(bank_gold_before + 2, g.tokens.get(&Resource::Gold));
     }
 
     #[test]
@@ -1025,11 +1027,11 @@ mod tests {
     #[test]
     fn test_reserve_grants_gold_and_fills_slot() {
         let (mut g, _) = Game::start(2, 1).unwrap();
-        let gold_before = g.tokens.get(Resource::Gold);
+        let gold_before = g.tokens.get(&Resource::Gold);
         let logs = g.reserve(0, ParsedLoc { row: 0, col: 0 }).unwrap();
         assert_eq!(1, g.player_boards[0].reserve.len());
-        assert_eq!(1, g.player_boards[0].tokens.get(Resource::Gold));
-        assert_eq!(gold_before - 1, g.tokens.get(Resource::Gold));
+        assert_eq!(1, g.player_boards[0].tokens.get(&Resource::Gold));
+        assert_eq!(gold_before - 1, g.tokens.get(&Resource::Gold));
         assert!(!logs.is_empty());
     }
 
@@ -1038,8 +1040,8 @@ mod tests {
         let (mut g, _) = Game::start(2, 1).unwrap();
         g.tokens.set(Resource::Gold, 0);
         g.reserve(0, ParsedLoc { row: 0, col: 0 }).unwrap();
-        assert_eq!(0, g.player_boards[0].tokens.get(Resource::Gold));
-        assert_eq!(0, g.tokens.get(Resource::Gold));
+        assert_eq!(0, g.player_boards[0].tokens.get(&Resource::Gold));
+        assert_eq!(0, g.tokens.get(&Resource::Gold));
     }
 
     #[test]
@@ -1118,7 +1120,7 @@ mod tests {
         g.phase = Phase::Discard;
         g.player_boards[0].tokens.set(Resource::Gold, 1);
         g.discard(0, &[Resource::Gold]).unwrap();
-        assert_eq!(0, g.player_boards[0].tokens.get(Resource::Gold));
+        assert_eq!(0, g.player_boards[0].tokens.get(&Resource::Gold));
     }
 
     #[test]
@@ -1136,7 +1138,7 @@ mod tests {
         let (mut g, _) = Game::start(2, 1).unwrap();
         g.nobles = vec![Noble {
             prestige: 3,
-            cost: Cost(std::collections::HashMap::from([(Resource::Diamond, 1)])),
+            cost: brdgme_cost::Cost(std::collections::HashMap::from([(Resource::Diamond, 1)])),
         }];
         g.player_boards[0].cards = vec![card_with_cost(Resource::Diamond, &[])];
         g.phase = Phase::Main;
@@ -1151,11 +1153,11 @@ mod tests {
         g.nobles = vec![
             Noble {
                 prestige: 3,
-                cost: Cost(std::collections::HashMap::from([(Resource::Diamond, 1)])),
+                cost: brdgme_cost::Cost(std::collections::HashMap::from([(Resource::Diamond, 1)])),
             },
             Noble {
                 prestige: 3,
-                cost: Cost(std::collections::HashMap::from([(Resource::Sapphire, 1)])),
+                cost: brdgme_cost::Cost(std::collections::HashMap::from([(Resource::Sapphire, 1)])),
             },
         ];
         g.player_boards[0].cards = vec![
@@ -1170,7 +1172,7 @@ mod tests {
         // Quirk 1: visiting an unaffordable noble by index still succeeds.
         g.nobles.push(Noble {
             prestige: 3,
-            cost: Cost(std::collections::HashMap::from([(Resource::Onyx, 10)])),
+            cost: brdgme_cost::Cost(std::collections::HashMap::from([(Resource::Onyx, 10)])),
         });
         g.visit(0, 2).unwrap();
         assert_eq!(1, g.player_boards[0].nobles.len());

@@ -113,6 +113,15 @@ impl<K: Hash + Eq + Clone> Cost<K> {
         self.0.values().sum()
     }
 
+    #[must_use]
+    pub fn get(&self, k: &K) -> i32 {
+        self.0.get(k).copied().unwrap_or(0)
+    }
+
+    pub fn set(&mut self, k: K, v: i32) {
+        self.0.insert(k, v);
+    }
+
     fn keys_unsorted(&self) -> Vec<K> {
         self.0
             .iter()
@@ -488,5 +497,48 @@ mod tests {
             cost(&[(TestRes::Res1, 3), (TestRes::Res2, 1)]),
         ]];
         assert_eq!(double_deep_trim(&expected), double_deep_trim(&can_with));
+    }
+
+    #[test]
+    fn test_get_missing_key_returns_zero() {
+        let c = cost(&[(TestRes::Res1, 5)]);
+        assert_eq!(0, c.get(&TestRes::Res2));
+    }
+
+    #[test]
+    fn test_get_present_key_returns_value() {
+        let c = cost(&[(TestRes::Res1, 5)]);
+        assert_eq!(5, c.get(&TestRes::Res1));
+    }
+
+    #[test]
+    fn test_get_explicit_zero_returns_zero() {
+        let c = cost(&[(TestRes::Res1, 0)]);
+        assert_eq!(0, c.get(&TestRes::Res1));
+    }
+
+    #[test]
+    fn test_set_inserts_absent_key() {
+        let mut c = cost(&[(TestRes::Res1, 5)]);
+        c.set(TestRes::Res2, 3);
+        assert_eq!(3, c.get(&TestRes::Res2));
+    }
+
+    #[test]
+    fn test_set_overwrites_existing_value() {
+        let mut c = cost(&[(TestRes::Res1, 5)]);
+        c.set(TestRes::Res1, -2);
+        assert_eq!(-2, c.get(&TestRes::Res1));
+    }
+
+    #[test]
+    fn test_set_zero_leaves_explicit_entry() {
+        let mut c = cost(&[(TestRes::Res1, 5)]);
+        c.set(TestRes::Res1, 0);
+        assert_eq!(cost(&[]), c.trim());
+        assert!(c.keys().is_empty());
+        assert_eq!(0, c.sum());
+        assert_eq!(0, c.get(&TestRes::Res1));
+        assert!(c.0.contains_key(&TestRes::Res1));
     }
 }

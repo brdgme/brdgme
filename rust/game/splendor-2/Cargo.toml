@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 brdgme_cmd = { path = "../../lib/cmd" }
+brdgme_cost = { path = "../../lib/cost" }
 brdgme_fuzz = { path = "../../tools/fuzz" }
 brdgme_color = { path = "../../lib/color" }
 brdgme_game = { path = "../../lib/game" }
