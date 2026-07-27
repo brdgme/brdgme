@@ -28,14 +28,12 @@ brdgme_game_client = { path = "../lib/game_client", features = ["sentry"] }
 brdgme_markup = { path = "../lib/markup" }
 minijinja = "2"
 serde_yaml.workspace = true
-time.workspace = true
 async-nats.workspace = true
 futures-util.workspace = true
 axum.workspace = true
 aes-gcm.workspace = true
 thiserror.workspace = true
 hex.workspace = true
-getrandom = "0.3"
 
 [lints]
 workspace = true

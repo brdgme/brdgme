@@ -105,7 +105,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     .await
     .context("Failed to fetch game from database")?;
 
-    let is_turn: bool = row.try_get("is_turn").unwrap_or(false);
+    let is_turn: bool = row
+        .try_get::<Option<bool>, _>("is_turn")
+        .context("gp.is_turn")?
+        .unwrap_or(false);
     if !is_turn {
         tracing::info!(
             elapsed_ms = turn_start.elapsed().as_millis() as u64,
@@ -119,11 +122,11 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     let game_state: String = row.try_get("game_state").context("game_state")?;
     let game_service_uri: String = row.try_get("uri").context("uri")?;
     let version_name: String = row.try_get("version_name").context("version_name")?;
-    let interface_version: i32 = row.try_get("interface_version").unwrap_or(1);
+    let interface_version: i32 = row
+        .try_get("interface_version")
+        .context("gv.interface_version")?;
     let game_player_id: Uuid = row.try_get("game_player_id").context("game_player_id")?;
-    let game_name: String = row
-        .try_get("game_name")
-        .unwrap_or_else(|_| "unknown".to_string());
+    let game_name: String = row.try_get("game_name").context("gt.name")?;
     let bot_name: String = row
         .try_get::<Option<String>, _>("bot_name")
         .unwrap_or(None)
@@ -148,14 +151,14 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
     let names: Vec<String> = player_rows
         .iter()
         .map(|p| {
-            let user_name: Option<String> = p.try_get("user_name").unwrap_or(None);
-            let bot_name: Option<String> = p.try_get("bot_name").unwrap_or(None);
-            let position: i32 = p.try_get("position").unwrap_or(0);
-            user_name
+            let user_name: Option<String> = p.try_get("user_name").context("u.name")?;
+            let bot_name: Option<String> = p.try_get("bot_name").context("gb.name")?;
+            let position: i32 = p.try_get("position").context("gp.position")?;
+            Ok(user_name
                 .or(bot_name)
-                .unwrap_or_else(|| format!("Player {}", position + 1))
+                .unwrap_or_else(|| format!("Player {}", position + 1)))
         })
-        .collect();
+        .collect::<Result<Vec<String>>>()?;
 
     tracing::info!(
         game = %game_name,
@@ -245,7 +248,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
 
     for attempt in 0..MAX_ATTEMPTS {
         let provider = router
-            .next()
+            .current()
             .ok_or_else(|| anyhow!("All LLM providers exhausted"))?;
         let url = provider.url.clone();
         let model = provider.model.clone();
@@ -273,7 +276,8 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         tracing::trace!(
             trace_id = %trace_id,
             attempt,
-            prompt = %messages.first().map(|m| m.content.as_str()).unwrap_or(""),
+            system_prompt = %messages.first().map(|m| m.content.as_str()).unwrap_or(""),
+            user_prompt = %messages.get(1).map(|m| m.content.as_str()).unwrap_or(""),
             "Rendered prompt"
         );
 
@@ -311,7 +315,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
                     error = %e,
                     "llm_request_end"
                 );
-                router.mark_failed();
+                router.fail_over();
                 continue;
             }
         };
@@ -331,7 +335,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         .await
         .context("Failed to re-check game state")?;
 
-        let is_still_turn: bool = recheck.try_get("is_turn").unwrap_or(false);
+        let is_still_turn: bool = recheck
+            .try_get::<Option<bool>, _>("is_turn")
+            .context("gp.is_turn")?
+            .unwrap_or(false);
         if !is_still_turn {
             tracing::info!(
                 elapsed_ms = turn_start.elapsed().as_millis() as u64,
@@ -533,10 +540,10 @@ async fn load_bot_context(
         .into_iter()
         .rev()
         .map(|r| {
-            let body = r.try_get::<String, _>("body").unwrap_or_default();
-            markup_resolve_players(&body, names)
+            let body = r.try_get::<String, _>("body").context("game_logs.body")?;
+            Ok(markup_resolve_players(&body, names))
         })
-        .collect();
+        .collect::<Result<Vec<String>>>()?;
 
     Ok(BotContext {
         game_state,
@@ -576,6 +583,7 @@ fn build_messages(
             name: name.clone(),
             colour: format!("{}", LIGHT.player_color(i)),
             score: bot_ctx.game_data.points.get(i).copied().unwrap_or(0.0),
+            is_me: i == player_position,
         })
         .collect();
     let command_spec = bot_ctx
@@ -610,7 +618,8 @@ fn build_messages(
 
 /// Applies a JSON Merge Patch (RFC 7396) to `target` in place: keys set to
 /// `null` in `patch` are removed from `target`, other keys are set/overwritten,
-/// recursing when both sides hold an object at the same key.
+/// recursing whenever the patch value is an object (treating a non-object
+/// target entry as empty).
 fn merge_json_patch(target: &mut serde_json::Value, patch: &serde_json::Value) {
     let Some(patch_map) = patch.as_object() else {
         *target = patch.clone();
@@ -630,7 +639,10 @@ fn merge_json_patch(target: &mut serde_json::Value, patch: &serde_json::Value) {
         let target_entry = target_map
             .entry(key.clone())
             .or_insert(serde_json::Value::Null);
-        if patch_value.is_object() && target_entry.is_object() {
+        if patch_value.is_object() {
+            if !target_entry.is_object() {
+                *target_entry = serde_json::Value::Object(serde_json::Map::new());
+            }
             merge_json_patch(target_entry, patch_value);
         } else {
             *target_entry = patch_value.clone();
@@ -785,13 +797,15 @@ async fn main() -> Result<()> {
         .with(sentry_tracing::layer())
         .init();
 
-    if crypto::using_default_key() {
-        tracing::warn!(
-            "DATABASE_ENCRYPTION_KEY not set - using insecure default key, DO NOT USE IN PRODUCTION"
-        );
-    }
-    let encryption_key = match crypto::load_key() {
-        Ok(key) => Some(key),
+    let loaded_key = match crypto::load_key() {
+        Ok(key) => {
+            if key.is_default() {
+                tracing::warn!(
+                    "DATABASE_ENCRYPTION_KEY not set - using insecure default key, DO NOT USE IN PRODUCTION"
+                );
+            }
+            Some(key)
+        }
         Err(e) => {
             tracing::warn!(
                 "DATABASE_ENCRYPTION_KEY invalid ({}); DB-stored provider API keys will be unavailable, env-var fallback only",
@@ -828,7 +842,7 @@ async fn main() -> Result<()> {
         pool,
         http,
         game_http,
-        encryption_key,
+        encryption_key: loaded_key.as_ref().map(|k| *k.bytes()),
         jetstream: jetstream.clone(),
     };
 
@@ -1006,6 +1020,19 @@ mod tests {
                 "model": "deepseek-v4-flash",
                 "thinking": {"type": "disabled"},
             })
+        );
+    }
+
+    #[test]
+    fn merge_json_patch_strips_nested_nulls_per_rfc7396() {
+        let mut target = json!({"model": "gpt"});
+        merge_json_patch(
+            &mut target,
+            &json!({"thinking": {"budget": null, "type": "disabled"}}),
+        );
+        assert_eq!(
+            target,
+            json!({"model": "gpt", "thinking": {"type": "disabled"}})
         );
     }
 

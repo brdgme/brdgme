@@ -1,4 +1,4 @@
-use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
 use aes_gcm::{Aes256Gcm, Nonce};
 use thiserror::Error;
 
@@ -16,13 +16,12 @@ pub enum CryptoError {
 
 pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let cipher = Aes256Gcm::new(key.into());
-    let nonce_bytes: [u8; 12] = rand_nonce();
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(&nonce, plaintext)
         .map_err(|_| CryptoError::EncryptionFailed)?;
     let mut out = Vec::with_capacity(12 + ciphertext.len());
-    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&nonce);
     out.extend_from_slice(&ciphertext);
     Ok(out)
 }
@@ -39,6 +38,24 @@ pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         .map_err(|_| CryptoError::DecryptionFailed)
 }
 
+#[derive(Debug)]
+pub enum LoadedKey {
+    Default([u8; 32]),
+    FromEnv([u8; 32]),
+}
+
+impl LoadedKey {
+    pub fn bytes(&self) -> &[u8; 32] {
+        match self {
+            LoadedKey::Default(k) | LoadedKey::FromEnv(k) => k,
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        matches!(self, LoadedKey::Default(_))
+    }
+}
+
 pub fn default_key() -> [u8; 32] {
     let mut key = [0u8; 32];
     let seed = b"brdgme-dev-key-not-for-prod!!!";
@@ -46,26 +63,16 @@ pub fn default_key() -> [u8; 32] {
     key
 }
 
-pub fn using_default_key() -> bool {
-    std::env::var("DATABASE_ENCRYPTION_KEY").is_err()
-}
-
-pub fn load_key() -> Result<[u8; 32], CryptoError> {
+pub fn load_key() -> Result<LoadedKey, CryptoError> {
     let hex_str = match std::env::var("DATABASE_ENCRYPTION_KEY") {
         Ok(v) => v,
-        Err(_) => return Ok(default_key()),
+        Err(_) => return Ok(LoadedKey::Default(default_key())),
     };
     let bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
     let key: [u8; 32] = bytes
         .try_into()
         .map_err(|_| CryptoError::InvalidKeyLength)?;
-    Ok(key)
-}
-
-fn rand_nonce() -> [u8; 12] {
-    let mut nonce = [0u8; 12];
-    getrandom::fill(&mut nonce).expect("getrandom failed");
-    nonce
+    Ok(LoadedKey::FromEnv(key))
 }
 
 #[cfg(test)]
@@ -110,8 +117,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let hex_key = "ab".repeat(32);
         unsafe { std::env::set_var("DATABASE_ENCRYPTION_KEY", &hex_key) };
-        let key = load_key().unwrap();
-        assert_eq!(key, [0xAB; 32]);
+        assert!(matches!(load_key().unwrap(), LoadedKey::FromEnv(k) if k == [0xAB; 32]));
         unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
     }
 
@@ -119,7 +125,7 @@ mod tests {
     fn load_key_missing_env() {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
-        assert_eq!(load_key().unwrap(), default_key());
+        assert!(matches!(load_key().unwrap(), LoadedKey::Default(k) if k == default_key()));
     }
 
     #[test]

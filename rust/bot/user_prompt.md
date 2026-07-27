@@ -5,7 +5,7 @@ You are player **{{ my_name }}** and have the colour {{ my_colour }}.
 All of the current players in the game are listed below, including yourself. If you ever need to specify a player in your command, you will need to use a name from this list.
 
 {% for player in players %}
-- {{ player.name }}{% if player.name == my_name %} (you){% endif %}
+- {{ player.name }}{% if player.is_me %} (you){% endif %}
   - Score: {{ player.score }}
   - Colour: {{ player.colour }}
 {% endfor %}

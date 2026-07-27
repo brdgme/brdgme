@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use brdgme_game::command::Spec;
 use minijinja::{Environment, context};
 use serde::Serialize;
@@ -10,6 +12,7 @@ pub struct PlayerInfo {
     pub name: String,
     pub colour: String,
     pub score: f32,
+    pub is_me: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,11 +46,51 @@ pub struct UserContext {
 /// Resolve `{{player N}}` references in brdgme markup to player names.
 /// All other markup tags are passed through unchanged.
 pub fn markup_resolve_players(markup: &str, names: &[String]) -> String {
-    let mut result = markup.to_string();
-    for (i, name) in names.iter().enumerate() {
-        result = result.replace(&format!("{{{{player {i}}}}}"), name);
+    match brdgme_markup::from_string(markup) {
+        Ok((nodes, _)) => brdgme_markup::to_string(&resolve_players(&nodes, names)),
+        Err(_) => markup.to_string(),
     }
-    result
+}
+
+fn resolve_players(nodes: &[brdgme_markup::Node], names: &[String]) -> Vec<brdgme_markup::Node> {
+    use brdgme_markup::Node;
+    nodes
+        .iter()
+        .map(|n| match n {
+            Node::Player(i) => Node::Text(
+                names
+                    .get(*i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Player {}", i + 1)),
+            ),
+            Node::Bold(children) => Node::Bold(resolve_players(children, names)),
+            Node::Fg(col, children) => Node::Fg(col.clone(), resolve_players(children, names)),
+            Node::Bg(col, children) => Node::Bg(col.clone(), resolve_players(children, names)),
+            Node::Group(children) => Node::Group(resolve_players(children, names)),
+            Node::Align(a, w, children) => {
+                Node::Align(a.clone(), *w, resolve_players(children, names))
+            }
+            Node::Indent(w, children) => Node::Indent(*w, resolve_players(children, names)),
+            Node::Table(rows) => Node::Table(
+                rows.iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|(align, children)| {
+                                (align.clone(), resolve_players(children, names))
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            ),
+            Node::Canvas(layers) => Node::Canvas(
+                layers
+                    .iter()
+                    .map(|(x, y, children)| (*x, *y, resolve_players(children, names)))
+                    .collect(),
+            ),
+            Node::Text(_) => n.clone(),
+        })
+        .collect()
 }
 
 /// Serialise a command Spec to a YAML string.
@@ -62,10 +105,22 @@ pub fn spec_to_yaml(spec: &Spec) -> String {
     serde_yaml::to_string(&json_val).unwrap_or_default()
 }
 
-pub fn render_system(ctx: &SystemContext) -> Result<String, minijinja::Error> {
+static SYSTEM_ENV: LazyLock<Environment<'static>> = LazyLock::new(|| {
     let mut env = Environment::new();
-    env.add_template("prompt", SYSTEM_TEMPLATE)?;
-    let tmpl = env.get_template("prompt")?;
+    env.add_template("prompt", SYSTEM_TEMPLATE)
+        .expect("system template is valid");
+    env
+});
+
+static USER_ENV: LazyLock<Environment<'static>> = LazyLock::new(|| {
+    let mut env = Environment::new();
+    env.add_template("prompt", USER_TEMPLATE)
+        .expect("user template is valid");
+    env
+});
+
+pub fn render_system(ctx: &SystemContext) -> Result<String, minijinja::Error> {
+    let tmpl = SYSTEM_ENV.get_template("prompt")?;
     tmpl.render(context! {
         game_rules => &ctx.game_rules,
         include_basic_strategy => ctx.include_basic_strategy,
@@ -77,9 +132,7 @@ pub fn render_system(ctx: &SystemContext) -> Result<String, minijinja::Error> {
 }
 
 pub fn render_user(ctx: &UserContext) -> Result<String, minijinja::Error> {
-    let mut env = Environment::new();
-    env.add_template("prompt", USER_TEMPLATE)?;
-    let tmpl = env.get_template("prompt")?;
+    let tmpl = USER_ENV.get_template("prompt")?;
     tmpl.render(context! {
         my_name => &ctx.my_name,
         my_colour => &ctx.my_colour,
@@ -116,11 +169,13 @@ mod tests {
                     name: "Alice".to_string(),
                     colour: "#4caf50".to_string(),
                     score: 6000.0,
+                    is_me: true,
                 },
                 PlayerInfo {
                     name: "Bob".to_string(),
                     colour: "#f44336".to_string(),
                     score: 4500.0,
+                    is_me: false,
                 },
             ],
             pub_state_yaml: "board: empty\nround: 1".to_string(),
@@ -318,9 +373,40 @@ mod tests {
     #[test]
     fn markup_resolve_players_leaves_other_tags_intact() {
         let names = vec!["Alice".to_string()];
-        let markup = "{{b}}bold{{/b}} and {{fg rgb(255,0,0)}}red{{/fg}}";
+        let markup = "{{b}}bold{{/b}} and {{fg red}}red{{/fg}}";
         let out = markup_resolve_players(markup, &names);
         assert_eq!(out, markup);
+    }
+
+    #[test]
+    fn markup_resolve_players_no_resubstitution() {
+        let names = vec!["{{player 1}}".to_string(), "Bob".to_string()];
+        let markup = "{{player 0}} said hi";
+        let out = markup_resolve_players(markup, &names);
+        assert!(!out.contains("Bob"), "re-substitution occurred: {}", out);
+    }
+
+    #[test]
+    fn render_user_marks_only_own_seat_with_duplicate_names() {
+        let mut ctx = user_ctx();
+        ctx.my_name = "Alice".to_string();
+        ctx.players = vec![
+            PlayerInfo {
+                name: "Alice".to_string(),
+                colour: "#4caf50".to_string(),
+                score: 100.0,
+                is_me: true,
+            },
+            PlayerInfo {
+                name: "Alice".to_string(),
+                colour: "#f44336".to_string(),
+                score: 200.0,
+                is_me: false,
+            },
+        ];
+        let output = render_user(&ctx).unwrap();
+        let you_count = output.matches("(you)").count();
+        assert_eq!(you_count, 1, "exactly one player should be marked (you)");
     }
 
     #[test]

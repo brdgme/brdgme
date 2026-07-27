@@ -14,11 +14,11 @@ impl ProviderRouter {
         }
     }
 
-    pub fn next(&mut self) -> Option<&ProviderConfig> {
+    pub fn current(&mut self) -> Option<&ProviderConfig> {
         self.providers.get(self.index)
     }
 
-    pub fn mark_failed(&mut self) {
+    pub fn fail_over(&mut self) {
         self.index = self.index.saturating_add(1);
     }
 }
@@ -41,7 +41,7 @@ mod tests {
     #[test]
     fn empty_router_returns_none() {
         let mut router = ProviderRouter::new(vec![]);
-        assert!(router.next().is_none());
+        assert!(router.current().is_none());
     }
 
     #[test]
@@ -49,20 +49,20 @@ mod tests {
         let mut router =
             ProviderRouter::new(vec![provider("a", 0), provider("b", 1), provider("c", 2)]);
 
-        assert_eq!(router.next().unwrap().model, "a");
-        router.mark_failed();
-        assert_eq!(router.next().unwrap().model, "b");
-        router.mark_failed();
-        assert_eq!(router.next().unwrap().model, "c");
-        router.mark_failed();
-        assert!(router.next().is_none());
+        assert_eq!(router.current().unwrap().model, "a");
+        router.fail_over();
+        assert_eq!(router.current().unwrap().model, "b");
+        router.fail_over();
+        assert_eq!(router.current().unwrap().model, "c");
+        router.fail_over();
+        assert!(router.current().is_none());
     }
 
     #[test]
-    fn mark_failed_past_end_stays_none() {
+    fn fail_over_past_end_stays_none() {
         let mut router = ProviderRouter::new(vec![provider("a", 0)]);
-        router.mark_failed();
-        router.mark_failed();
-        assert!(router.next().is_none());
+        router.fail_over();
+        router.fail_over();
+        assert!(router.current().is_none());
     }
 }

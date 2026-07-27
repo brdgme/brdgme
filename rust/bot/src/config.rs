@@ -31,19 +31,26 @@ pub async fn load_bot_config(pool: &PgPool, bot_name: &str) -> Result<Option<Bot
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|row| BotConfig {
-        name: row.try_get("name").unwrap_or_default(),
-        include_basic_strategy: row.try_get("include_basic_strategy").unwrap_or(true),
-        include_advanced_strategy: row.try_get("include_advanced_strategy").unwrap_or(false),
-        temperature: row.try_get("temperature").unwrap_or(0.2),
-    }))
+    row.map(|row| {
+        Ok(BotConfig {
+            name: row.try_get("name").context("bots.name")?,
+            include_basic_strategy: row
+                .try_get("include_basic_strategy")
+                .context("bots.include_basic_strategy")?,
+            include_advanced_strategy: row
+                .try_get("include_advanced_strategy")
+                .context("bots.include_advanced_strategy")?,
+            temperature: row.try_get("temperature").context("bots.temperature")?,
+        })
+    })
+    .transpose()
 }
 
 pub async fn bots_table_empty(pool: &PgPool) -> Result<bool> {
     let row = sqlx::query("SELECT EXISTS (SELECT 1 FROM bots) AS has_bots")
         .fetch_one(pool)
         .await?;
-    let has_bots: bool = row.try_get("has_bots").unwrap_or(true);
+    let has_bots: bool = row.try_get("has_bots").context("has_bots")?;
     Ok(!has_bots)
 }
 
@@ -68,10 +75,16 @@ pub async fn load_providers(
     for row in rows {
         let url: String = row.try_get("url").context("provider url")?;
         let model: String = row.try_get("model").context("provider model")?;
-        let reasoning_effort: Option<String> = row.try_get("reasoning_effort").unwrap_or(None);
-        let extra_body: Option<Value> = row.try_get("extra_body").unwrap_or(None);
-        let priority: i32 = row.try_get("priority").unwrap_or(0);
-        let api_key_encrypted: Option<Vec<u8>> = row.try_get("api_key_encrypted").unwrap_or(None);
+        let reasoning_effort: Option<String> = row
+            .try_get::<Option<String>, _>("reasoning_effort")
+            .context("bp.reasoning_effort")?;
+        let extra_body: Option<Value> = row
+            .try_get::<Option<Value>, _>("extra_body")
+            .context("bp.extra_body")?;
+        let priority: i32 = row.try_get("priority").context("bp.priority")?;
+        let api_key_encrypted: Option<Vec<u8>> = row
+            .try_get::<Option<Vec<u8>>, _>("api_key_encrypted")
+            .context("lp.api_key_encrypted")?;
 
         let api_key = match api_key_encrypted {
             Some(bytes) => {
@@ -100,9 +113,16 @@ pub fn env_fallback_provider() -> Option<ProviderConfig> {
     let model = std::env::var("BOT_MODEL").ok()?;
     let api_key = std::env::var("LLM_API_KEY").ok();
     let reasoning_effort = std::env::var("REASONING_EFFORT").ok();
-    let extra_body = std::env::var("LLM_EXTRA_BODY")
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok());
+    let extra_body = match std::env::var("LLM_EXTRA_BODY") {
+        Ok(raw) => match serde_json::from_str(&raw) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::warn!("LLM_EXTRA_BODY is set but not valid JSON ({}), ignoring", e);
+                None
+            }
+        },
+        Err(_) => None,
+    };
 
     Some(ProviderConfig {
         url,
