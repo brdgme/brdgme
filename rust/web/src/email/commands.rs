@@ -1063,7 +1063,17 @@ pub async fn dispatch_email_command(
     )
     .await
     {
-        Ok(_) => Ok(CommandReply::GameMove),
+        Ok(before) => {
+            crate::email::notify::notify_game_emails(
+                ctx.resend,
+                ctx.pool,
+                ctx.http_client,
+                ctx.game_id,
+                Some(before),
+            )
+            .await;
+            Ok(CommandReply::GameMove)
+        }
         Err(crate::game::ExecuteCommandError::UserError(msg)) => Err(CommandError::User(msg)),
         Err(crate::game::ExecuteCommandError::Conflict) => Err(CommandError::User(
             "Your move could not be applied because the game changed; please try again."
