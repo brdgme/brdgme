@@ -1716,7 +1716,7 @@ mod tests {
             "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false) RETURNING id",
         )
         .bind(game_type_id)
-        .bind("1.0.0")
+        .bind("test-v1")
         .bind("http://127.0.0.1:1")
         .fetch_one(pool)
         .await
@@ -1779,7 +1779,7 @@ mod tests {
             "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false)",
         )
         .bind(game_type_id)
-        .bind("1.0.0")
+        .bind("test-v1")
         .bind("http://127.0.0.1:1")
         .execute(&pool)
         .await
@@ -1946,7 +1946,7 @@ mod tests {
             "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false)",
         )
         .bind(game_type_id)
-        .bind("1.0.0")
+        .bind("test-v1")
         .bind("http://127.0.0.1:1")
         .execute(&pool)
         .await
@@ -2000,7 +2000,7 @@ mod tests {
             "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false)",
         )
         .bind(game_type_id)
-        .bind("1.0.0")
+        .bind("test-v1")
         .bind("http://127.0.0.1:1")
         .execute(&pool)
         .await

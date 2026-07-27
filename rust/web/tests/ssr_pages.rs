@@ -136,7 +136,7 @@ async fn make_game_version(pool: &PgPool, uri: &str) -> Uuid {
     .fetch_one(pool)
     .await
     .unwrap();
-    make_game_version_for_type(pool, game_type_id, "1.0.0", uri, false).await
+    make_game_version_for_type(pool, game_type_id, "test-v1", uri, false).await
 }
 
 /// Inserts a game version onto an existing game type - used to build up
@@ -598,7 +598,7 @@ async fn restart_game_with_roster_uses_passed_version(pool: PgPool) {
     .await
     .unwrap();
     let new_game_version_id =
-        make_game_version_for_type(&pool, game_type_id, "2.0.0", &new_uri, false).await;
+        make_game_version_for_type(&pool, game_type_id, "test-v2", &new_uri, false).await;
 
     let user = make_user(&pool, "player-one").await;
     let email = "player-one@example.com";
@@ -699,7 +699,7 @@ async fn make_game_type_with_fixed_name(pool: &PgPool, name: &str) -> (Uuid, Uui
     let game_version_id = make_game_version_for_type(
         pool,
         game_type_id,
-        "1.0.0",
+        "test-v1",
         "http://localhost:0/mock",
         false,
     )

@@ -46,9 +46,10 @@ pub fn spec_to_command(
             .choose(rng)
             .map(|v| vec![v.to_owned()])
             .unwrap_or_else(Vec::new),
-        command::Spec::OneOf(ref options) => {
-            spec_to_command(options.choose(rng).unwrap(), spec, players, rng)
-        }
+        command::Spec::OneOf(ref options) => options
+            .choose(rng)
+            .map(|o| spec_to_command(o, spec, players, rng))
+            .unwrap_or_default(),
         command::Spec::Chain(ref chain) => chain
             .iter()
             .flat_map(|c| spec_to_command(c, ctx, players, rng))
@@ -81,7 +82,10 @@ pub fn spec_to_command(
             parts
         }
         command::Spec::Doc { ref spec, .. } => spec_to_command(spec, ctx, players, rng),
-        command::Spec::Player => vec![players.choose(rng).unwrap().to_owned()],
+        command::Spec::Player => players
+            .choose(rng)
+            .map(|p| vec![p.to_owned()])
+            .unwrap_or_default(),
         command::Spec::Space => vec![" ".to_string()],
     }
 }
@@ -90,7 +94,7 @@ fn commands(command_spec: &command::Spec, players: &[String]) -> Vec<BotCommand>
     let mut rng = rand::rng();
     vec![
         spec_to_command(command_spec, command_spec, players, &mut rng)
-            .join(" ")
+            .join("")
             .into(),
     ]
 }
@@ -103,13 +107,15 @@ where
     I: Read,
     O: Write,
 {
-    let request = serde_json::from_reader::<_, bot_cli::Request>(input).unwrap();
+    let request = serde_json::from_reader::<_, bot_cli::Request>(input)
+        .expect("failed to parse bot request JSON from input");
     writeln!(
         output,
         "{}",
-        serde_json::to_string(&commands(&request.command_spec, &request.players)).unwrap()
+        serde_json::to_string(&commands(&request.command_spec, &request.players))
+            .expect("failed to encode bot commands as JSON")
     )
-    .unwrap();
+    .expect("failed to write bot commands to output");
 }
 
 impl<T: Gamer> Botter<T> for RandBot {
@@ -131,4 +137,58 @@ where
     O: Write,
 {
     Fuzzer::<G, _>::new(RandBot {}).fuzz(out);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use brdgme_game::command::Spec;
+
+    #[test]
+    fn empty_oneof_yields_no_tokens_instead_of_panicking() {
+        let mut rng = rand::rng();
+        let spec = Spec::OneOf(vec![]);
+        assert_eq!(
+            Vec::<String>::new(),
+            spec_to_command(&spec, &spec, &["a".to_string()], &mut rng)
+        );
+    }
+
+    #[test]
+    fn player_spec_with_no_players_yields_no_tokens() {
+        let mut rng = rand::rng();
+        let spec = Spec::Player;
+        assert_eq!(
+            Vec::<String>::new(),
+            spec_to_command(&spec, &spec, &[], &mut rng)
+        );
+    }
+
+    #[test]
+    fn space_tokens_join_without_double_spaces() {
+        let players = vec!["mick".to_string()];
+        let spec = Spec::Chain(vec![
+            Spec::Token("roll".to_string()),
+            Spec::Space,
+            Spec::Token("2".to_string()),
+        ]);
+        let bots = commands(&spec, &players);
+        assert_eq!(vec!["roll 2".to_string()], bots[0].commands);
+    }
+
+    #[test]
+    fn cli_writes_command_json_for_valid_request() {
+        let req = bot_cli::Request {
+            player: 0,
+            player_state: "{}".to_string(),
+            players: vec!["a".to_string()],
+            command_spec: Spec::Token("go".to_string()),
+            game_id: None,
+        };
+        let input = serde_json::to_vec(&req).unwrap();
+        let mut out: Vec<u8> = vec![];
+        cli(input.as_slice(), &mut out);
+        let cmds: Vec<brdgme_game::bot::BotCommand> = serde_json::from_slice(&out).unwrap();
+        assert_eq!(vec!["go".to_string()], cmds[0].commands);
+    }
 }

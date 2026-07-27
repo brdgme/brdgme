@@ -97,7 +97,7 @@ async fn make_game_version(pool: &PgPool) -> Uuid {
          VALUES ($1, $2, $3, true, false) RETURNING id",
     )
     .bind(game_type_id)
-    .bind("1.0.0")
+    .bind("test-v1")
     .bind("http://localhost:0/mock")
     .fetch_one(pool)
     .await

@@ -6,7 +6,6 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 brdgme_cmd = { path = "../cmd", default-features = false }
 brdgme_game = { path = "../game" }
 rand.workspace = true
@@ -14,7 +13,8 @@ reqwest = { workspace = true, features = ["json", "rustls"] }
 serde_json.workspace = true
 serde_yaml.workspace = true
 sentry = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["time"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "time"] }
 tracing.workspace = true
 
 [features]

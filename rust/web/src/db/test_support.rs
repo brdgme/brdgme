@@ -33,7 +33,7 @@ pub(crate) async fn make_game_type_and_version(pool: &PgPool) -> (Uuid, Uuid) {
         r#"INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
            VALUES ($1, $2, $3, true, false) RETURNING id"#,
         game_type_id,
-        "1.0.0",
+        "test-v1",
         "http://localhost:0/mock"
     )
     .fetch_one(pool)

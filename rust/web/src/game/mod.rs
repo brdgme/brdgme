@@ -122,7 +122,8 @@ pub async fn execute_command(
             names,
         },
     )
-    .await?;
+    .await
+    .map_err(anyhow::Error::from)?;
 
     let (game_response, logs, can_undo, remaining_input) = match resp {
         Response::Play {
@@ -548,7 +549,7 @@ mod tests {
             r#"INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
                VALUES ($1, $2, $3, true, false) RETURNING id"#,
             game_type_id,
-            "1.0.0",
+            "test-v1",
             uri
         )
         .fetch_one(pool)

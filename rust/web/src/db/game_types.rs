@@ -245,7 +245,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(uri, "http://localhost:0/mock");
-        assert_eq!(name, "1.0.0");
+        assert_eq!(name, "test-v1");
         assert!(
             iface >= 1,
             "interface_version should have a sane default, got {iface}"
