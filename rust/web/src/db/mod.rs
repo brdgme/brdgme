@@ -254,4 +254,35 @@ mod tests {
         insert_game_logs_tx(&mut tx, game.id, vec![]).await.unwrap();
         tx.commit().await.unwrap();
     }
+
+    #[sqlx::test]
+    async fn invalidate_all_auth_tokens_removes_every_token(pool: PgPool) {
+        use crate::auth::session::validate_session_token;
+
+        let user = make_user(&pool, "multisession").await;
+
+        let token1 = Uuid::new_v4();
+        let token2 = Uuid::new_v4();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(token1)
+            .bind(user.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(token2)
+            .bind(user.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(validate_session_token(&pool, token1).await.unwrap());
+        assert!(validate_session_token(&pool, token2).await.unwrap());
+
+        let deleted = invalidate_all_auth_tokens(&pool, user.id).await.unwrap();
+        assert_eq!(deleted, 2);
+
+        assert!(!validate_session_token(&pool, token1).await.unwrap());
+        assert!(!validate_session_token(&pool, token2).await.unwrap());
+    }
 }
