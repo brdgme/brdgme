@@ -7,7 +7,7 @@ mod trade;
 pub use card::*;
 pub use command::Command;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use brdgme_game::command::Spec as CommandSpec;
 use brdgme_game::command::parser::Output as ParseOutput;
@@ -122,9 +122,22 @@ impl Game {
 
         let mut rng = GameRng::seed_from_u64(seed);
 
-        let mut all_cities = cities();
-        all_cities.shuffle(&mut rng);
-        let assigned_cities: Vec<City> = all_cities[..players].to_vec();
+        let mut by_board: BTreeMap<String, Vec<City>> = BTreeMap::new();
+        for c in cities() {
+            let board = c
+                .name
+                .strip_suffix(" A")
+                .or_else(|| c.name.strip_suffix(" B"))
+                .unwrap_or(&c.name)
+                .to_string();
+            by_board.entry(board).or_default().push(c);
+        }
+        let mut boards: Vec<Vec<City>> = by_board.into_values().collect();
+        boards.shuffle(&mut rng);
+        let assigned_cities: Vec<City> = boards[..players]
+            .iter()
+            .map(|sides| sides[rng.random_range(0..sides.len())].clone())
+            .collect();
 
         let mut logs = vec![];
         for (p, city) in assigned_cities.iter().enumerate() {
@@ -1728,6 +1741,33 @@ mod tests {
                     !json.contains(&card.name),
                     "leaked card name: {}",
                     card.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_start_game_no_duplicate_boards() {
+        for players in 3..=4 {
+            for seed in 0..200u64 {
+                let (g, _) = Game::start_game(players, seed).unwrap();
+                let mut board_names: Vec<String> = g
+                    .cities
+                    .iter()
+                    .map(|c| {
+                        c.name
+                            .strip_suffix(" A")
+                            .or_else(|| c.name.strip_suffix(" B"))
+                            .unwrap_or(&c.name)
+                            .to_string()
+                    })
+                    .collect();
+                board_names.sort();
+                board_names.dedup();
+                assert_eq!(
+                    players,
+                    board_names.len(),
+                    "seed {seed}: duplicate board dealt"
                 );
             }
         }

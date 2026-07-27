@@ -237,17 +237,17 @@ impl Game {
     pub fn leader_with_suit(&self, suit: Suit) -> (usize, Vec<Card>) {
         let rule_fn = suit_rule(suit);
         let mut player_map: Vec<usize> = vec![];
-        let mut palettes: Vec<Vec<Card>> = vec![];
+        let mut entries: Vec<(Vec<Card>, Vec<Card>)> = vec![];
 
         for p in 0..self.num_players {
             if self.eliminated[p] {
                 continue;
             }
             player_map.push(p);
-            palettes.push(rule_fn(&self.palettes[p]));
+            entries.push((rule_fn(&self.palettes[p]), self.palettes[p].clone()));
         }
 
-        let (l_index, palette) = leader(&palettes);
+        let (l_index, palette) = leader(&entries);
         (player_map[l_index], palette)
     }
 
@@ -711,10 +711,34 @@ mod tests {
 
     #[test]
     fn test_leader() {
-        let palettes = vec![crds(&["y5", "b2"]), crds(&["r5", "b2"]), crds(&["g6"])];
-        let (leader_idx, leader_pal) = leader(&palettes);
+        let entries: Vec<(Vec<Card>, Vec<Card>)> = vec![
+            (crds(&["y5", "b2"]), crds(&["y5", "b2"])),
+            (crds(&["r5", "b2"]), crds(&["r5", "b2"])),
+            (crds(&["g6"]), crds(&["g6"])),
+        ];
+        let (leader_idx, leader_pal) = leader(&entries);
         assert_eq!(1, leader_idx);
         assert_eq!(crds(&["r5", "b2"]), leader_pal);
+    }
+
+    #[test]
+    fn test_leader_empty_winning_sets_tie_break_by_palette() {
+        let entries: Vec<(Vec<Card>, Vec<Card>)> =
+            vec![(vec![], crds(&["r3"])), (vec![], crds(&["y5"]))];
+        let (leader_idx, leader_pal) = leader(&entries);
+        assert_eq!(1, leader_idx);
+        assert!(leader_pal.is_empty());
+    }
+
+    #[test]
+    fn test_leader_equal_length_winning_sets_tie_break_by_rank() {
+        let entries: Vec<(Vec<Card>, Vec<Card>)> = vec![
+            (crds(&["r2", "b1"]), crds(&["r2", "b1"])),
+            (crds(&["y3", "g1"]), crds(&["y3", "g1"])),
+        ];
+        let (leader_idx, leader_pal) = leader(&entries);
+        assert_eq!(1, leader_idx);
+        assert_eq!(crds(&["y3", "g1"]), leader_pal);
     }
 
     #[test]

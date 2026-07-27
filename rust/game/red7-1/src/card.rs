@@ -294,24 +294,37 @@ pub fn suit_rule(suit: Suit) -> fn(&[Card]) -> Vec<Card> {
     }
 }
 
-pub fn leader(palettes: &[Vec<Card>]) -> (usize, Vec<Card>) {
-    if palettes.is_empty() {
+pub fn leader(entries: &[(Vec<Card>, Vec<Card>)]) -> (usize, Vec<Card>) {
+    if entries.is_empty() {
         return (0, vec![]);
     }
     let mut leader_idx = 0;
-    let mut leader_palette = palettes[0].clone();
+    let mut leader_winning = entries[0].0.clone();
 
-    for (i, p) in palettes.iter().enumerate().skip(1) {
-        let l_max = leader_palette
-            .iter()
-            .map(|c| c.rank_key())
-            .max()
-            .unwrap_or((0, 0));
-        let i_max = p.iter().map(|c| c.rank_key()).max().unwrap_or((0, 0));
-        if p.len() > leader_palette.len() || (p.len() == leader_palette.len() && i_max > l_max) {
+    for (i, (winning, palette)) in entries.iter().enumerate().skip(1) {
+        let l_key = (
+            leader_winning.len(),
+            leader_winning
+                .iter()
+                .map(|c| c.rank_key())
+                .max()
+                .unwrap_or((0, 0)),
+            entries[leader_idx]
+                .1
+                .iter()
+                .map(|c| c.rank_key())
+                .max()
+                .unwrap_or((0, 0)),
+        );
+        let i_key = (
+            winning.len(),
+            winning.iter().map(|c| c.rank_key()).max().unwrap_or((0, 0)),
+            palette.iter().map(|c| c.rank_key()).max().unwrap_or((0, 0)),
+        );
+        if i_key > l_key {
             leader_idx = i;
-            leader_palette = p.clone();
+            leader_winning = winning.clone();
         }
     }
-    (leader_idx, leader_palette)
+    (leader_idx, leader_winning)
 }

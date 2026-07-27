@@ -738,18 +738,21 @@ impl Game {
         let old_dice: Vec<Die> = kept.iter().cloned().chain(self.kept_dice.clone()).collect();
         let mut logs = vec![self.log_roll(rolled.clone(), old_dice)];
         self.rolled_dice = rolled.into_iter().chain(kept).collect();
+        let phase_before = self.phase;
         logs.extend(self.keep_skulls());
-        match self.phase {
-            Phase::Roll => {
-                self.remaining_rolls -= 1;
-                if self.remaining_rolls == 0 {
+        if self.phase == phase_before {
+            match phase_before {
+                Phase::Roll => {
+                    self.remaining_rolls -= 1;
+                    if self.remaining_rolls == 0 {
+                        logs.extend(self.next_phase());
+                    }
+                }
+                Phase::ExtraRoll => {
                     logs.extend(self.next_phase());
                 }
+                _ => {}
             }
-            Phase::ExtraRoll => {
-                logs.extend(self.next_phase());
-            }
-            _ => {}
         }
         Ok(logs)
     }
@@ -3258,5 +3261,31 @@ mod test {
             Ok(out) => assert_eq!(Command::Sell { amount: 5 }, out.value),
             Err(e) => panic!("expected ok, got {}", e),
         }
+    }
+
+    #[test]
+    fn test_roll_all_skulls_advances_player_without_decrementing_next() {
+        let mut g = new_blank(2);
+        g.rng = GameRng::seed_from_u64(21);
+        g.rolled_dice = vec![Die::Skull, Die::Skull];
+        let res = g.command(MICK, "roll 1 2", &test_players());
+        assert!(res.is_ok());
+        assert_eq!(MICK, g.current_player);
+        assert_eq!(Phase::Buy, g.phase);
+        assert_eq!(2, g.remaining_rolls);
+    }
+
+    #[test]
+    fn test_roll_all_skulls_leadership_stays_extra_roll() {
+        let mut g = new_blank(2);
+        g.rng = GameRng::seed_from_u64(21);
+        g.boards[MICK]
+            .developments
+            .insert(DevelopmentId::Leadership);
+        g.rolled_dice = vec![Die::Skull, Die::Skull];
+        let res = g.command(MICK, "roll 1 2", &test_players());
+        assert!(res.is_ok());
+        assert_eq!(MICK, g.current_player);
+        assert_eq!(Phase::ExtraRoll, g.phase);
     }
 }
