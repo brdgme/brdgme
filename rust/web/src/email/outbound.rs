@@ -171,6 +171,27 @@ pub async fn ensure_settings_email_token(pool: &PgPool, user_id: Uuid) -> anyhow
     Ok(token)
 }
 
+/// Returns the user's `unsubscribe_token`, generating and persisting one on
+/// first use (lazy population, per the WP-58 migration). Plain query, matching
+/// `ensure_settings_email_token`.
+pub async fn ensure_unsubscribe_token(pool: &PgPool, user_id: Uuid) -> anyhow::Result<String> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT unsubscribe_token FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+    if let Some((Some(tok),)) = row {
+        return Ok(tok);
+    }
+    let token = generate_email_token();
+    sqlx::query("UPDATE users SET unsubscribe_token = $1, updated_at = NOW() WHERE id = $2")
+        .bind(&token)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(token)
+}
+
 /// Everything needed to decide whether (and how) to email one game-player slot:
 /// the verified primary address, the recipient's theme, the account opt-out, the
 /// owning user (for the per-recipient web-presence check; `None` for bots), and
@@ -416,6 +437,25 @@ mod tests {
 
         let stored: Option<String> =
             sqlx::query_scalar("SELECT settings_email_token FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, Some(first));
+    }
+
+    #[sqlx::test]
+    async fn ensure_unsubscribe_token_generates_and_reuses(pool: PgPool) {
+        let user_id = seed_user(&pool).await;
+
+        let first = ensure_unsubscribe_token(&pool, user_id).await.unwrap();
+        let second = ensure_unsubscribe_token(&pool, user_id).await.unwrap();
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert_eq!(first, second);
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT unsubscribe_token FROM users WHERE id = $1")
                 .bind(user_id)
                 .fetch_one(&pool)
                 .await

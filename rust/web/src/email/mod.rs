@@ -6,3 +6,4 @@ pub mod notify;
 pub mod outbound;
 pub mod render;
 pub mod sweep;
+pub mod unsubscribe;

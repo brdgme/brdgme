@@ -165,6 +165,27 @@ async fn send_reminder(
         footer: Some("Reply to this email to play, or unsubscribe anytime.".to_string()),
     };
 
+    let unsub_token: Option<String> = match recipient.user_id {
+        Some(uid) => match crate::email::outbound::ensure_unsubscribe_token(pool, uid).await {
+            Ok(tok) => Some(tok),
+            Err(err) => {
+                tracing::warn!(
+                    "turn_reminder: unsubscribe token fetch failed for {}: {}",
+                    uid,
+                    err
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let unsubscribe = unsub_token
+        .as_ref()
+        .map(|tok| crate::email::render::Unsubscribe {
+            kind: crate::email::render::EmailKind::Reminder,
+            token: tok,
+        });
+
     let rendered = crate::email::render::render_game_email(
         &content,
         palette,
@@ -172,6 +193,7 @@ async fn send_reminder(
         Some(&format!("game-{game_id}")),
         false,
         &crate::email::notify::reply_address(&token),
+        unsubscribe,
     );
 
     let to = match recipient.email {

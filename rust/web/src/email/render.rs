@@ -9,6 +9,68 @@ use std::collections::BTreeMap;
 use brdgme_color::{NamedColor, Palette};
 use brdgme_markup::Player;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmailKind {
+    Turn,
+    GameEvent,
+    Reminder,
+    Invite,
+}
+
+pub struct Unsubscribe<'a> {
+    pub kind: EmailKind,
+    pub token: &'a str,
+}
+
+impl EmailKind {
+    pub fn slug(self) -> &'static str {
+        match self {
+            EmailKind::Turn => "turn",
+            EmailKind::GameEvent => "game",
+            EmailKind::Reminder => "reminder",
+            EmailKind::Invite => "invite",
+        }
+    }
+
+    pub fn pref_column(self) -> &'static str {
+        match self {
+            EmailKind::Turn => "turn_emails_enabled",
+            EmailKind::GameEvent => "turn_emails_enabled",
+            EmailKind::Reminder => "reminder_emails_enabled",
+            EmailKind::Invite => "invite_emails_enabled",
+        }
+    }
+
+    pub fn link_label(self) -> &'static str {
+        match self {
+            EmailKind::Turn => "Unsubscribe from turn notifications",
+            EmailKind::GameEvent => "Unsubscribe from game notifications",
+            EmailKind::Reminder => "Unsubscribe from turn reminders",
+            EmailKind::Invite => "Unsubscribe from game invitations",
+        }
+    }
+
+    pub fn from_slug(s: &str) -> Option<EmailKind> {
+        match s {
+            "turn" => Some(EmailKind::Turn),
+            "game" => Some(EmailKind::GameEvent),
+            "reminder" => Some(EmailKind::Reminder),
+            "invite" => Some(EmailKind::Invite),
+            _ => None,
+        }
+    }
+}
+
+pub fn unsubscribe_url(kind: EmailKind, token: &str) -> String {
+    let base = crate::config::public_base_url();
+    format!("{base}/api/unsubscribe/{}?t={token}", kind.slug())
+}
+
+pub fn manage_subscriptions_url() -> String {
+    let base = crate::config::public_base_url();
+    format!("{base}/settings")
+}
+
 /// Generic content blocks for one outbound email. Every text block is raw
 /// `brdgme_markup` text. All blocks are optional so the same renderer serves
 /// turn notifications, reminders, command responses, invites, and rules dumps.
@@ -95,6 +157,7 @@ pub fn render_game_email(
     thread_id: Option<&str>,
     is_first_message: bool,
     reply_address: &str,
+    unsubscribe: Option<Unsubscribe<'_>>,
 ) -> RenderedEmail {
     let bg = palette.background.hex();
     let fg = palette.foreground.hex();
@@ -164,6 +227,17 @@ pub fn render_game_email(
     if let Some((f, _)) = &footer {
         body.push_str(&format!("<span style=\"color:{muted};\">{f}</span>"));
     }
+    if let Some(u) = &unsubscribe {
+        let unsub = unsubscribe_url(u.kind, u.token);
+        let manage = manage_subscriptions_url();
+        body.push_str(&format!(
+            "<a href=\"{unsub}\" style=\"color:{muted};font-size:12px;\">{}</a>\n\n",
+            u.kind.link_label()
+        ));
+        body.push_str(&format!(
+            "<a href=\"{manage}\" style=\"color:{muted};font-size:12px;\">Manage my subscriptions</a>\n\n"
+        ));
+    }
 
     let body = body.replace('\n', "<br>");
 
@@ -221,6 +295,12 @@ pub fn render_game_email(
     if let Some((_, p)) = &footer {
         text.push_str(p);
     }
+    if let Some(u) = &unsubscribe {
+        let unsub = unsubscribe_url(u.kind, u.token);
+        let manage = manage_subscriptions_url();
+        text.push_str(&format!("{}: {unsub}\n\n", u.kind.link_label()));
+        text.push_str(&format!("Manage my subscriptions: {manage}\n\n"));
+    }
 
     let mut headers = BTreeMap::new();
     if let Some(thread_id) = thread_id {
@@ -232,14 +312,16 @@ pub fn render_game_email(
             headers.insert("References".to_string(), msg_id);
         }
     }
-    headers.insert(
-        "List-Unsubscribe".to_string(),
-        "<mailto:unsubscribe@brdg.me?subject=unsubscribe>".to_string(),
-    );
-    headers.insert(
-        "List-Unsubscribe-Post".to_string(),
-        "List-Unsubscribe=One-Click".to_string(),
-    );
+    if let Some(u) = &unsubscribe {
+        headers.insert(
+            "List-Unsubscribe".to_string(),
+            format!("<{}>", unsubscribe_url(u.kind, u.token)),
+        );
+        headers.insert(
+            "List-Unsubscribe-Post".to_string(),
+            "List-Unsubscribe=One-Click".to_string(),
+        );
+    }
 
     RenderedEmail {
         subject: content.subject.clone(),
@@ -319,6 +401,7 @@ mod tests {
             Some("game-abc"),
             true,
             "g-tok@brdg.me",
+            None,
         );
         assert!(!email.html.is_empty());
         assert!(email.html.contains("board-here"));
@@ -343,6 +426,7 @@ mod tests {
             Some("game-abc"),
             true,
             "g-tok@brdg.me",
+            None,
         );
         // A bare `<pre>` directly inside `<tbody>` is invalid HTML: mail
         // clients foster-parent it into the column's `font-size:0px` wrapper
@@ -372,6 +456,7 @@ mod tests {
             Some("game-abc"),
             true,
             "g-tok@brdg.me",
+            None,
         );
         assert!(
             email.html.contains("It is your turn.<br /><br />"),
@@ -414,6 +499,7 @@ mod tests {
             Some("game-abc"),
             true,
             "g-tok@brdg.me",
+            None,
         );
         assert!(!email.html.contains("Since last time:"));
         assert!(!email.html.contains("You can:"));
@@ -432,6 +518,7 @@ mod tests {
             Some("game-abc"),
             true,
             "g-tok@brdg.me",
+            None,
         );
         assert!(!email.text.contains(&DRACULA.green.hex()));
         assert!(!email.text.contains("<span"));
@@ -452,6 +539,7 @@ mod tests {
             Some("game-abc"),
             true,
             "g-tok@brdg.me",
+            None,
         );
         assert_eq!(
             email.headers.get("Message-Id").map(String::as_str),
@@ -460,17 +548,12 @@ mod tests {
         assert_eq!(email.headers.get("In-Reply-To"), None);
         assert_eq!(email.headers.get("References"), None);
         assert_eq!(email.reply_to, "g-tok@brdg.me");
-        assert_eq!(
-            email.headers.get("List-Unsubscribe").map(String::as_str),
-            Some("<mailto:unsubscribe@brdg.me?subject=unsubscribe>")
-        );
-        assert_eq!(
-            email
-                .headers
-                .get("List-Unsubscribe-Post")
-                .map(String::as_str),
-            Some("List-Unsubscribe=One-Click")
-        );
+        assert_eq!(email.headers.get("List-Unsubscribe"), None);
+        assert_eq!(email.headers.get("List-Unsubscribe-Post"), None);
+        assert!(!email.html.contains("Manage my subscriptions"));
+        assert!(!email.html.contains("/api/unsubscribe"));
+        assert!(!email.text.contains("Manage my subscriptions"));
+        assert!(!email.text.contains("/api/unsubscribe"));
     }
 
     #[test]
@@ -482,6 +565,7 @@ mod tests {
             Some("game-abc"),
             false,
             "g-tok@brdg.me",
+            None,
         );
         assert_eq!(email.headers.get("Message-Id"), None);
         assert_eq!(
@@ -503,6 +587,7 @@ mod tests {
             Some("proposal-123"),
             true,
             "i-tok@brdg.me",
+            None,
         );
         assert_eq!(
             invite.headers.get("Message-Id").map(String::as_str),
@@ -517,6 +602,7 @@ mod tests {
             Some("settings-u1"),
             false,
             "s-tok@brdg.me",
+            None,
         );
         assert_eq!(
             settings.headers.get("In-Reply-To").map(String::as_str),
@@ -534,20 +620,85 @@ mod tests {
             Some("game-abc"),
             true,
             "g-tok@brdg.me",
+            None,
         );
         assert_eq!(email.reply_to, "g-tok@brdg.me");
     }
 
     #[test]
     fn headers_none_thread_id_sets_no_threading_headers() {
-        let email = render_game_email(&minimal_content(), &LIGHT, &[], None, true, "g-tok@brdg.me");
+        let email = render_game_email(
+            &minimal_content(),
+            &LIGHT,
+            &[],
+            None,
+            true,
+            "g-tok@brdg.me",
+            None,
+        );
         assert_eq!(email.headers.get("Message-Id"), None);
         assert_eq!(email.headers.get("In-Reply-To"), None);
         assert_eq!(email.headers.get("References"), None);
         assert_eq!(email.reply_to, "g-tok@brdg.me");
+        assert_eq!(email.headers.get("List-Unsubscribe"), None);
+    }
+
+    #[test]
+    fn unsubscribe_some_reminder_emits_https_headers_and_links() {
+        let email = render_game_email(
+            &minimal_content(),
+            &LIGHT,
+            &[],
+            None,
+            true,
+            "g-tok@brdg.me",
+            Some(Unsubscribe {
+                kind: EmailKind::Reminder,
+                token: "tok",
+            }),
+        );
+        let expected_url = crate::email::render::unsubscribe_url(EmailKind::Reminder, "tok");
+        let expected_header = format!("<{expected_url}>");
         assert_eq!(
             email.headers.get("List-Unsubscribe").map(String::as_str),
-            Some("<mailto:unsubscribe@brdg.me?subject=unsubscribe>")
+            Some(expected_header.as_str())
         );
+        assert!(
+            !email
+                .headers
+                .get("List-Unsubscribe")
+                .unwrap()
+                .contains("mailto:")
+        );
+        assert_eq!(
+            email
+                .headers
+                .get("List-Unsubscribe-Post")
+                .map(String::as_str),
+            Some("List-Unsubscribe=One-Click")
+        );
+        assert!(email.html.contains("Unsubscribe from turn reminders"));
+        assert!(email.html.contains("Manage my subscriptions"));
+        assert!(email.html.contains(&expected_url));
+        assert!(email.html.contains(&manage_subscriptions_url()));
+        assert!(email.text.contains("Unsubscribe from turn reminders"));
+        assert!(email.text.contains("Manage my subscriptions"));
+    }
+
+    #[test]
+    fn email_kind_slug_roundtrip_and_columns() {
+        for k in [
+            EmailKind::Turn,
+            EmailKind::GameEvent,
+            EmailKind::Reminder,
+            EmailKind::Invite,
+        ] {
+            assert_eq!(EmailKind::from_slug(k.slug()), Some(k));
+        }
+        assert_eq!(EmailKind::from_slug("nope"), None);
+        assert_eq!(EmailKind::Reminder.pref_column(), "reminder_emails_enabled");
+        assert_eq!(EmailKind::Turn.pref_column(), "turn_emails_enabled");
+        assert_eq!(EmailKind::GameEvent.pref_column(), "turn_emails_enabled");
+        assert_eq!(EmailKind::Invite.pref_column(), "invite_emails_enabled");
     }
 }

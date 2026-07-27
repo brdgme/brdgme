@@ -151,6 +151,11 @@ pub async fn build_router(state: AppState) -> Router {
             "/api/webhooks/resend",
             axum::routing::post(crate::email::inbound::resend_webhook),
         )
+        .route(
+            "/api/unsubscribe/{kind}",
+            axum::routing::get(crate::email::unsubscribe::unsubscribe_get)
+                .post(crate::email::unsubscribe::unsubscribe_post),
+        )
         .fallback(leptos_axum::file_and_error_handler::<AppState, _>({
             let leptos_options = state.leptos_options.clone();
             move |_| shell(leptos_options.clone())

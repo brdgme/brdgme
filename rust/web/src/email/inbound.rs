@@ -1182,6 +1182,7 @@ async fn send_invite_reply_response(
         Some(&format!("proposal-{proposal_id}")),
         false,
         &crate::email::notify::invite_reply_address(player.email_token.as_deref().unwrap_or("")),
+        None,
     );
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
@@ -1260,6 +1261,7 @@ async fn send_game_reply_response(
         Some(&format!("game-{}", ge.game.id)),
         false,
         &crate::email::notify::reply_address(token),
+        None,
     );
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
@@ -1337,6 +1339,7 @@ async fn send_game_failure_report(
         None,
         false,
         &crate::email::notify::reply_address(token),
+        None,
     );
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
@@ -1367,14 +1370,6 @@ async fn send_rules_reply_response(
     let msg_id = format!("<game-{}@brdg.me>", player.game_id);
     headers.insert("In-Reply-To".to_string(), msg_id.clone());
     headers.insert("References".to_string(), msg_id);
-    headers.insert(
-        "List-Unsubscribe".to_string(),
-        "<mailto:unsubscribe@brdg.me?subject=unsubscribe>".to_string(),
-    );
-    headers.insert(
-        "List-Unsubscribe-Post".to_string(),
-        "List-Unsubscribe=One-Click".to_string(),
-    );
 
     let rendered = crate::email::render::RenderedEmail {
         subject: "Rules".to_string(),
@@ -1524,6 +1519,7 @@ async fn send_settings_response(
         Some(&thread_id),
         false,
         &reply_address,
+        None,
     );
     crate::email::outbound::send_rendered_email(resend, rendered, from).await;
 }
@@ -2255,6 +2251,7 @@ body\r\n";
             None,
             false,
             &crate::email::notify::reply_address("tok-fail"),
+            None,
         );
         assert_eq!(rendered.reply_to, "g-tok-fail@brdg.me");
         assert_eq!(rendered.headers.get("Message-Id"), None);

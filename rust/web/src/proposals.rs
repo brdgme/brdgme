@@ -247,6 +247,24 @@ impl RealInviteMailer {
             footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
         };
         let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
+        let unsub_token: Option<String> =
+            match crate::email::outbound::ensure_unsubscribe_token(pool, invitee_user_id).await {
+                Ok(tok) => Some(tok),
+                Err(err) => {
+                    tracing::warn!(
+                        "invite: unsubscribe token fetch failed for {}: {}",
+                        invitee_user_id,
+                        err
+                    );
+                    None
+                }
+            };
+        let unsubscribe = unsub_token
+            .as_ref()
+            .map(|tok| crate::email::render::Unsubscribe {
+                kind: crate::email::render::EmailKind::Invite,
+                token: tok,
+            });
         let rendered = crate::email::render::render_game_email(
             &content,
             palette,
@@ -254,6 +272,7 @@ impl RealInviteMailer {
             Some(&format!("proposal-{proposal_id}")),
             true,
             &format!("i-{token}@brdg.me"),
+            unsubscribe,
         );
         crate::email::outbound::try_send_rendered_email(resend.as_ref(), rendered, &email).await
     }
@@ -323,6 +342,25 @@ impl InviteMailer for RealInviteMailer {
                 footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
             };
             let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
+            let unsub_token: Option<String> =
+                match crate::email::outbound::ensure_unsubscribe_token(&pool, invitee_user_id).await
+                {
+                    Ok(tok) => Some(tok),
+                    Err(err) => {
+                        tracing::warn!(
+                            "invite: unsubscribe token fetch failed for {}: {}",
+                            invitee_user_id,
+                            err
+                        );
+                        None
+                    }
+                };
+            let unsubscribe = unsub_token
+                .as_ref()
+                .map(|tok| crate::email::render::Unsubscribe {
+                    kind: crate::email::render::EmailKind::Invite,
+                    token: tok,
+                });
             let rendered = crate::email::render::render_game_email(
                 &content,
                 palette,
@@ -330,6 +368,7 @@ impl InviteMailer for RealInviteMailer {
                 Some(&format!("proposal-{proposal_id}")),
                 false,
                 &format!("i-{token}@brdg.me"),
+                unsubscribe,
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
         });
@@ -367,6 +406,29 @@ impl InviteMailer for RealInviteMailer {
                 footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
             };
             let palette = crate::email::render::palette_for_slug(owner_recip.theme_slug.as_deref());
+            let unsub_token: Option<String> =
+                match crate::email::outbound::ensure_unsubscribe_token(
+                    &pool,
+                    proposal.owner_user_id,
+                )
+                .await
+                {
+                    Ok(tok) => Some(tok),
+                    Err(err) => {
+                        tracing::warn!(
+                            "invite: unsubscribe token fetch failed for {}: {}",
+                            proposal.owner_user_id,
+                            err
+                        );
+                        None
+                    }
+                };
+            let unsubscribe = unsub_token
+                .as_ref()
+                .map(|tok| crate::email::render::Unsubscribe {
+                    kind: crate::email::render::EmailKind::Invite,
+                    token: tok,
+                });
             let rendered = crate::email::render::render_game_email(
                 &content,
                 palette,
@@ -374,6 +436,7 @@ impl InviteMailer for RealInviteMailer {
                 Some(&format!("proposal-{proposal_id}")),
                 false,
                 &format!("i-{proposal_id}@brdg.me"),
+                unsubscribe,
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
         });
@@ -408,6 +471,25 @@ impl InviteMailer for RealInviteMailer {
                     footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
                 };
                 let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
+                let unsub_token: Option<String> =
+                    match crate::email::outbound::ensure_unsubscribe_token(&pool, user_id).await {
+                        Ok(tok) => Some(tok),
+                        Err(err) => {
+                            tracing::warn!(
+                                "invite: unsubscribe token fetch failed for {}: {}",
+                                user_id,
+                                err
+                            );
+                            None
+                        }
+                    };
+                let unsubscribe =
+                    unsub_token
+                        .as_ref()
+                        .map(|tok| crate::email::render::Unsubscribe {
+                            kind: crate::email::render::EmailKind::Invite,
+                            token: tok,
+                        });
                 let rendered = crate::email::render::render_game_email(
                     &content,
                     palette,
@@ -415,6 +497,7 @@ impl InviteMailer for RealInviteMailer {
                     Some(&format!("proposal-{proposal_id}")),
                     false,
                     &format!("i-{proposal_id}@brdg.me"),
+                    unsubscribe,
                 );
                 crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email)
                     .await;
@@ -453,6 +536,25 @@ impl InviteMailer for RealInviteMailer {
                     footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
                 };
                 let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
+                let unsub_token: Option<String> =
+                    match crate::email::outbound::ensure_unsubscribe_token(&pool, user_id).await {
+                        Ok(tok) => Some(tok),
+                        Err(err) => {
+                            tracing::warn!(
+                                "invite: unsubscribe token fetch failed for {}: {}",
+                                user_id,
+                                err
+                            );
+                            None
+                        }
+                    };
+                let unsubscribe =
+                    unsub_token
+                        .as_ref()
+                        .map(|tok| crate::email::render::Unsubscribe {
+                            kind: crate::email::render::EmailKind::Invite,
+                            token: tok,
+                        });
                 let rendered = crate::email::render::render_game_email(
                     &content,
                     palette,
@@ -460,6 +562,7 @@ impl InviteMailer for RealInviteMailer {
                     Some(&format!("proposal-{proposal_id}")),
                     false,
                     &format!("i-{proposal_id}@brdg.me"),
+                    unsubscribe,
                 );
                 crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email)
                     .await;
@@ -503,6 +606,29 @@ impl InviteMailer for RealInviteMailer {
                 footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
             };
             let palette = crate::email::render::palette_for_slug(owner_recip.theme_slug.as_deref());
+            let unsub_token: Option<String> =
+                match crate::email::outbound::ensure_unsubscribe_token(
+                    &pool,
+                    proposal.owner_user_id,
+                )
+                .await
+                {
+                    Ok(tok) => Some(tok),
+                    Err(err) => {
+                        tracing::warn!(
+                            "invite: unsubscribe token fetch failed for {}: {}",
+                            proposal.owner_user_id,
+                            err
+                        );
+                        None
+                    }
+                };
+            let unsubscribe = unsub_token
+                .as_ref()
+                .map(|tok| crate::email::render::Unsubscribe {
+                    kind: crate::email::render::EmailKind::Invite,
+                    token: tok,
+                });
             let rendered = crate::email::render::render_game_email(
                 &content,
                 palette,
@@ -510,6 +636,7 @@ impl InviteMailer for RealInviteMailer {
                 Some(&format!("proposal-{proposal_id}")),
                 false,
                 &format!("i-{proposal_id}@brdg.me"),
+                unsubscribe,
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
         });

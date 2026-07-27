@@ -302,6 +302,11 @@ async fn send_one(
         return;
     }
 
+    let email_kind = match &kind {
+        NotifyKind::Turn => crate::email::render::EmailKind::Turn,
+        NotifyKind::Eliminated | NotifyKind::Finished => crate::email::render::EmailKind::GameEvent,
+    };
+
     let token = match crate::email::outbound::ensure_email_token(pool, game_player_id).await {
         Ok(t) => t,
         Err(e) => {
@@ -336,6 +341,27 @@ async fn send_one(
 
     let content = build_content(pool, http_client, &ge, recipient_player, kind, subject).await;
 
+    let unsub_token: Option<String> = match recipient.user_id {
+        Some(uid) => match crate::email::outbound::ensure_unsubscribe_token(pool, uid).await {
+            Ok(tok) => Some(tok),
+            Err(err) => {
+                tracing::warn!(
+                    "notify: unsubscribe token fetch failed for {}: {}",
+                    uid,
+                    err
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let unsubscribe = unsub_token
+        .as_ref()
+        .map(|tok| crate::email::render::Unsubscribe {
+            kind: email_kind,
+            token: tok,
+        });
+
     let rendered = crate::email::render::render_game_email(
         &content,
         palette,
@@ -343,6 +369,7 @@ async fn send_one(
         thread_id.as_deref(),
         is_first_message,
         &reply_address(&token),
+        unsubscribe,
     );
 
     let to = match recipient.email.clone() {

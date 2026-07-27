@@ -335,6 +335,47 @@ pub async fn set_user_reminder_emails_enabled(
     Ok(())
 }
 
+/// RFC 8058 one-click unsubscribe (WP-58): disables the email preference that
+/// `kind` maps to for the single user holding `unsubscribe_token`. Only ever
+/// writes `false`. Returns whether exactly one row was updated; callers treat
+/// `false` (unknown/expired token) identically to `true` so a token's validity
+/// is never leaked. `Turn` and `GameEvent` share `turn_emails_enabled`. No
+/// manual `updated_at` - the `users` BEFORE UPDATE trigger maintains it (ws F36).
+#[cfg(feature = "ssr")]
+pub async fn disable_email_pref_by_unsubscribe_token(
+    pool: &PgPool,
+    token: &str,
+    kind: crate::email::render::EmailKind,
+) -> Result<bool> {
+    let result = match kind {
+        crate::email::render::EmailKind::Turn | crate::email::render::EmailKind::GameEvent => {
+            sqlx::query(
+                "UPDATE users SET turn_emails_enabled = false, updated_at = NOW() WHERE unsubscribe_token = $1",
+            )
+            .bind(token)
+            .execute(pool)
+            .await?
+        }
+        crate::email::render::EmailKind::Reminder => {
+            sqlx::query(
+                "UPDATE users SET reminder_emails_enabled = false, updated_at = NOW() WHERE unsubscribe_token = $1",
+            )
+            .bind(token)
+            .execute(pool)
+            .await?
+        }
+        crate::email::render::EmailKind::Invite => {
+            sqlx::query(
+                "UPDATE users SET invite_emails_enabled = false, updated_at = NOW() WHERE unsubscribe_token = $1",
+            )
+            .bind(token)
+            .execute(pool)
+            .await?
+        }
+    };
+    Ok(result.rows_affected() == 1)
+}
+
 // --- #22d multiple emails per account (spec 2026-07-05-22, section 22d) ---
 // Plain (non-macro) queries throughout, matching get_user_theme above.
 
