@@ -148,12 +148,20 @@ impl Game {
                 return next_player_num;
             }
         }
+        // Mirrors Go's fallthrough `panic("Could not find any valid
+        // players")`. Unreachable when `set` is non-empty and holds valid
+        // player indices (< self.players), since the loop checks every seat.
         panic!("Could not find any valid players");
     }
 
     /// Port of `BetUpTo`.
     fn bet_up_to(&mut self, player_num: usize, amount: i32) -> i32 {
         let bet_amount = amount.min(self.player_money[player_num]);
+        // `bet_amount` is clamped to `player_money[player_num]` above, so
+        // `bet`'s affordability check (`player_money < amount`) cannot fail
+        // here. Mirrors Go's `BetUpTo`, which panicked in the equivalent
+        // spot. Deliberate, documented exception to the docs/CODING.md
+        // "no `.expect()` in runtime paths" rule.
         self.bet(player_num, bet_amount)
             .expect("BetUpTo always bets an affordable amount");
         bet_amount
@@ -989,6 +997,26 @@ mod tests {
         assert!(g.can_raise(0));
         g.player_money[0] = 19;
         assert!(!g.can_raise(0));
+    }
+
+    #[test]
+    fn raise_parser_min_bound_uses_min_raise() {
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.current_player = 0;
+        g.bets = vec![0, 0, 0];
+        g.minimum_bet = 10;
+        g.largest_raise = 5;
+        g.player_money = vec![100, 100, 100];
+        assert!(g.can_raise(0));
+        assert_eq!(10, g.min_raise());
+
+        let parser = g.command_parser(0).unwrap();
+        assert!(
+            parser.parse("raise 5", &[]).is_err(),
+            "raise between largest_raise and min_raise must be rejected at parse time"
+        );
+        let out = parser.parse("raise 10", &[]).unwrap();
+        assert_eq!(Command::Raise(10), out.value);
     }
 
     #[test]

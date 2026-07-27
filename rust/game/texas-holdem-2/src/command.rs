@@ -40,15 +40,13 @@ impl Game {
 
     /// Port of `RaiseParser`.
     ///
-    /// Go quirk preserved: the `Int` bound's `min` is `g.LargestRaise`, not
-    /// `g.MinRaise()` (`max(MinimumBet, LargestRaise)`) - the raise action's
-    /// own validation (`Raise`/`raise` below) uses `MinRaise()` for both the
-    /// bound check and the error message, so the parser can accept an amount
-    /// the action then rejects. Preserved as-is per the porting correctness
-    /// rule; not fixed here.
+    /// The `Int` min bound uses `min_raise()` (`max(MinimumBet, LargestRaise)`),
+    /// matching Go's `RaiseParser` which uses `g.MinRaise()`. This rejects
+    /// too-small raises at parse time. The separate, genuine `LargestRaise`
+    /// quirk lives in `Game::can_raise`.
     fn raise_parser(&self, player: usize) -> impl Parser<T = Command> {
         let behind_current_bet = self.current_bet() - self.bets[player];
-        let min = self.largest_raise;
+        let min = self.min_raise();
         let max = self.player_money[player] - behind_current_bet;
         Map::new(
             Chain2::new(

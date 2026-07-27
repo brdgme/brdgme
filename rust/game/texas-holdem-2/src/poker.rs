@@ -12,8 +12,9 @@ use std::collections::HashMap;
 
 use crate::card::{Deck, RANK_2, RANK_ACE_HIGH, Suit};
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum Category {
+    #[default]
     None,
     HighCard,
     OnePair,
@@ -28,7 +29,7 @@ pub enum Category {
 
 #[derive(Clone, Debug, Default)]
 pub struct HandResult {
-    pub category: Option<Category>,
+    pub category: Category,
     pub cards: Deck,
     pub name: String,
 }
@@ -36,7 +37,7 @@ pub struct HandResult {
 impl HandResult {
     /// Port of `HandResult.HandScore`.
     pub fn hand_score(&self) -> Vec<i32> {
-        let mut score = vec![self.category.unwrap_or(Category::None) as i32];
+        let mut score = vec![self.category as i32];
         score.extend(self.cards.iter().map(|c| c.rank as i32));
         score
     }
@@ -50,22 +51,19 @@ pub fn result(hand: &Deck) -> HandResult {
     for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
         let suit_cards = cards_by_suit.get(&suit).cloned().unwrap_or_default();
         let (ok, cards) = is_straight(&suit_cards);
-        if ok
-            && (res.category.unwrap_or(Category::None) < Category::StraightFlush
-                || cards[0].rank > res.cards[0].rank)
-        {
-            res.category = Some(Category::StraightFlush);
+        if ok && (res.category < Category::StraightFlush || cards[0].rank > res.cards[0].rank) {
+            res.category = Category::StraightFlush;
             res.cards = cards;
         }
     }
-    if res.category.is_some() {
+    if res.category != Category::None {
         res.name = "straight flush".to_string();
         return res;
     }
     // Four of a kind.
     let (ok, cards) = is_four_of_a_kind(hand);
     if ok {
-        res.category = Some(Category::FourOfAKind);
+        res.category = Category::FourOfAKind;
         res.cards = cards;
         res.name = "four of a kind".to_string();
         return res;
@@ -73,7 +71,7 @@ pub fn result(hand: &Deck) -> HandResult {
     // Full house.
     let (ok, cards) = is_full_house(hand);
     if ok {
-        res.category = Some(Category::FullHouse);
+        res.category = Category::FullHouse;
         res.cards = cards;
         res.name = "full house".to_string();
         return res;
@@ -81,7 +79,7 @@ pub fn result(hand: &Deck) -> HandResult {
     // Flush.
     let (ok, cards) = is_flush(hand);
     if ok {
-        res.category = Some(Category::Flush);
+        res.category = Category::Flush;
         res.cards = cards;
         res.name = "flush".to_string();
         return res;
@@ -89,7 +87,7 @@ pub fn result(hand: &Deck) -> HandResult {
     // Straight.
     let (ok, cards) = is_straight(hand);
     if ok {
-        res.category = Some(Category::Straight);
+        res.category = Category::Straight;
         res.cards = cards;
         res.name = "straight".to_string();
         return res;
@@ -97,7 +95,7 @@ pub fn result(hand: &Deck) -> HandResult {
     // Three of a kind.
     let (ok, cards) = is_three_of_a_kind(hand);
     if ok {
-        res.category = Some(Category::ThreeOfAKind);
+        res.category = Category::ThreeOfAKind;
         res.cards = cards;
         res.name = "three of a kind".to_string();
         return res;
@@ -105,7 +103,7 @@ pub fn result(hand: &Deck) -> HandResult {
     // Two pair.
     let (ok, cards) = is_two_pair(hand);
     if ok {
-        res.category = Some(Category::TwoPair);
+        res.category = Category::TwoPair;
         res.cards = cards;
         res.name = "two pair".to_string();
         return res;
@@ -113,13 +111,13 @@ pub fn result(hand: &Deck) -> HandResult {
     // One pair.
     let (ok, cards) = is_one_pair(hand);
     if ok {
-        res.category = Some(Category::OnePair);
+        res.category = Category::OnePair;
         res.cards = cards;
         res.name = "one pair".to_string();
         return res;
     }
     // High card.
-    res.category = Some(Category::HighCard);
+    res.category = Category::HighCard;
     let (cards, _) = find_highest_rank(hand, 5);
     res.cards = cards;
     res.name = "high card".to_string();
@@ -191,7 +189,7 @@ pub fn is_flush(hand: &Deck) -> (bool, Deck) {
             hand_results.insert(
                 i,
                 HandResult {
-                    category: Some(Category::Flush),
+                    category: Category::Flush,
                     cards: flush,
                     name: String::new(),
                 },
@@ -351,7 +349,7 @@ pub fn winning_hand_result(hand_results: &HashMap<i32, HandResult>) -> Vec<i32> 
     let mut hand_scores: HashMap<i32, Vec<i32>> = HashMap::new();
     let mut next_pass: Vec<i32> = vec![];
     for (id, hr) in hand_results {
-        if hr.category.is_some() {
+        if hr.category != Category::None {
             hand_scores.insert(*id, hr.hand_score());
             next_pass.push(*id);
         }
@@ -451,7 +449,7 @@ mod tests {
             c(Suit::Clubs, 3),
             c(Suit::Diamonds, 5),
         ]);
-        assert_eq!(Some(Category::StraightFlush), hand_result.category);
+        assert_eq!(Category::StraightFlush, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(7, hand_result.cards[0].rank);
     }
@@ -467,7 +465,7 @@ mod tests {
             c(Suit::Clubs, 3),
             c(Suit::Diamonds, 5),
         ]);
-        assert_eq!(Some(Category::FourOfAKind), hand_result.category);
+        assert_eq!(Category::FourOfAKind, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(3, hand_result.cards[0].rank);
         assert_eq!(6, hand_result.cards[4].rank);
@@ -484,7 +482,7 @@ mod tests {
             c(Suit::Clubs, 6),
             c(Suit::Diamonds, 5),
         ]);
-        assert_eq!(Some(Category::FullHouse), hand_result.category);
+        assert_eq!(Category::FullHouse, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(3, hand_result.cards[0].rank);
         assert_eq!(6, hand_result.cards[3].rank);
@@ -501,7 +499,7 @@ mod tests {
             c(Suit::Clubs, 3),
             c(Suit::Diamonds, 5),
         ]);
-        assert_eq!(Some(Category::Flush), hand_result.category);
+        assert_eq!(Category::Flush, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(RANK_JACK, hand_result.cards[0].rank);
         assert_eq!(7, hand_result.cards[1].rank);
@@ -521,7 +519,7 @@ mod tests {
             c(Suit::Clubs, 3),
             c(Suit::Diamonds, 5),
         ]);
-        assert_eq!(Some(Category::Straight), hand_result.category);
+        assert_eq!(Category::Straight, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(5, hand_result.cards[0].rank);
     }
@@ -537,7 +535,7 @@ mod tests {
             c(Suit::Clubs, 3),
             c(Suit::Diamonds, 5),
         ]);
-        assert_eq!(Some(Category::ThreeOfAKind), hand_result.category);
+        assert_eq!(Category::ThreeOfAKind, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(3, hand_result.cards[0].rank);
     }
@@ -553,7 +551,7 @@ mod tests {
             c(Suit::Clubs, 3),
             c(Suit::Diamonds, RANK_KING),
         ]);
-        assert_eq!(Some(Category::TwoPair), hand_result.category);
+        assert_eq!(Category::TwoPair, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(RANK_KING, hand_result.cards[0].rank);
         assert_eq!(3, hand_result.cards[2].rank);
@@ -571,7 +569,7 @@ mod tests {
             c(Suit::Clubs, 9),
             c(Suit::Diamonds, RANK_KING),
         ]);
-        assert_eq!(Some(Category::OnePair), hand_result.category);
+        assert_eq!(Category::OnePair, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(RANK_KING, hand_result.cards[0].rank);
         assert_eq!(9, hand_result.cards[2].rank);
@@ -590,7 +588,7 @@ mod tests {
             c(Suit::Clubs, 9),
             c(Suit::Diamonds, RANK_QUEEN),
         ]);
-        assert_eq!(Some(Category::HighCard), hand_result.category);
+        assert_eq!(Category::HighCard, hand_result.category);
         assert_eq!(5, hand_result.cards.len());
         assert_eq!(RANK_KING, hand_result.cards[0].rank);
         assert_eq!(RANK_QUEEN, hand_result.cards[1].rank);
@@ -602,7 +600,7 @@ mod tests {
     #[test]
     fn test_hand_score() {
         let hr = HandResult {
-            category: Some(Category::Straight),
+            category: Category::Straight,
             cards: vec![c(Suit::Clubs, 3), c(Suit::Clubs, 4), c(Suit::Clubs, 5)],
             name: String::new(),
         };
