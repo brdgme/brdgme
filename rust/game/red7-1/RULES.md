@@ -18,15 +18,22 @@ starting rule is **Highest card** (red).
 
 ## Turn
 
-On your turn you may:
+On your turn, in this order:
 
-1. **Play** a card from your hand to your palette (once per turn).
-2. **Discard** a card from your hand to change the active rule. The discarded
-   card's colour determines the new rule. You must be the leader under the new
-   rule after discarding. If the discarded card's number is higher than the
-   number of cards in your palette, you draw a card.
-3. **Done** - end your turn. If you haven't played or discarded, you are
-   eliminated.
+1. **Play** at most one card from your hand to your palette (`play b4`). This
+   does not end your turn.
+2. **Discard** at most one card from your hand to change the active rule
+   (`discard b4`). The discarded card's colour becomes the new rule, and you
+   must be the leader under that new rule for the discard to be allowed. If the
+   discarded card's number is higher than the number of cards in your palette,
+   you draw a card. Discarding ends your turn immediately.
+3. **Done** (`done`) - end your turn without discarding. If you have neither
+   played nor discarded, you are eliminated.
+
+Playing and then discarding in the same turn is allowed, and is usually the
+strongest move: the played card strengthens your palette before the new rule is
+judged. Because a discard ends your turn, you cannot play after discarding, and
+`done` is only needed when you did not discard.
 
 At the end of your turn, if you are not the leader under the current rule, you
 are eliminated.
@@ -45,9 +52,13 @@ are eliminated.
 
 ## Scoring
 
-When all but one player is eliminated in a round, the remaining player (the
-leader) scores their palette cards. The first player to reach the target score
-wins the game.
+When all but one player is eliminated in a round, the remaining player scores
+the cards in their palette that meet the current rule - not their whole palette.
+Each card is worth its number, and the scored cards move out of the palette into
+that player's score pile. The game ends as soon as any player reaches the target
+score, and also ends if the deck no longer holds enough cards to deal the next
+round. The player with the most points then wins; equal totals share the
+placing.
 
 Target scores:
 - 2 players: 40 points

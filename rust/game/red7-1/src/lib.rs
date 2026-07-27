@@ -7,20 +7,23 @@ use brdgme_game::rng::GameRng;
 use brdgme_game::{Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
-use crate::card::{Card, Suit, full_deck, leader, points, sort_by_suit, suit_rule};
-
 mod card;
 mod command;
 mod render;
 
-pub use card::{Card as PubCard, Suit as PubSuit};
+pub use card::*;
 pub use command::Command;
 
 pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 4;
 
+/// Points needed to end the game: 40 for 2 players, 35 for 3, 30 for 4.
+///
+/// Only `MIN_PLAYERS..=MAX_PLAYERS` are meaningful (`Gamer::start` rejects
+/// anything else), but `Game` deserializes `num_players` unvalidated, so the
+/// arithmetic saturates at 0 rather than underflowing (e F35).
 pub fn end_points(players: usize) -> u32 {
-    (50 - players * 5) as u32
+    50usize.saturating_sub(players.saturating_mul(5)) as u32
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +237,17 @@ impl Game {
         self.leader_with_suit(self.current_rule())
     }
 
+    /// Returns the leading player index under `suit`'s rule and their
+    /// rule-fulfilling cards.
+    ///
+    /// PRECONDITION: at least one player must not be eliminated. With every
+    /// player eliminated, `player_map` is empty, `card::leader` returns index
+    /// 0 for the empty slice, and the final `player_map[l_index]` would
+    /// panic. All four call sites satisfy this: `start_round` (has just reset
+    /// `eliminated` to all-false), `end_turn` (guarded by
+    /// `!self.eliminated[self.current_player]`), `end_round` (only entered
+    /// when exactly one player remains), and `discard` (the current player is
+    /// never eliminated while current). (e F34)
     pub fn leader_with_suit(&self, suit: Suit) -> (usize, Vec<Card>) {
         let rule_fn = suit_rule(suit);
         let mut player_map: Vec<usize> = vec![];
@@ -571,7 +585,6 @@ impl Gamer for Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::card::*;
 
     fn crd(input: &str) -> Card {
         Card::parse(input).unwrap_or_else(|| panic!("could not parse card {}", input))
@@ -633,6 +646,15 @@ mod tests {
         assert_eq!(40, end_points(2));
         assert_eq!(35, end_points(3));
         assert_eq!(30, end_points(4));
+    }
+
+    #[test]
+    fn end_points_saturates_for_impossible_player_counts() {
+        // `Gamer::start` only allows 2..=4, but `Game` deserializes
+        // `num_players` unvalidated, so `end_points` must not panic.
+        assert_eq!(0, end_points(10));
+        assert_eq!(0, end_points(11));
+        assert_eq!(0, end_points(usize::MAX));
     }
 
     #[test]
