@@ -81,21 +81,14 @@ resource "cloudflare_dns_record" "resend_inbound_mx" {
 
 # Zone settings (spec W5). SSL "strict" = dashboard "Full (strict)":
 # CF connects to the origin over TLS and validates the origin cert
-# (cert-manager's Let's Encrypt cert on the Gateway). WebSockets must be
-# "on" for /ws through the proxy. Bot Fight Mode is deliberately NOT
-# managed here yet - it lands in a later, separately-verified task of
-# the 2026-07-10 WP4 plan because the free tier has no BFM exceptions
-# and it can break websockets/login.
+# (cert-manager's Let's Encrypt cert on the Gateway).
+# Bot Fight Mode is deliberately NOT managed here yet - it lands in a
+# later, separately-verified task of the 2026-07-10 WP4 plan because
+# the free tier has no BFM exceptions and it can break login.
 resource "cloudflare_zone_setting" "ssl" {
   zone_id    = cloudflare_zone.brdgme.id
   setting_id = "ssl"
   value      = "strict"
-}
-
-resource "cloudflare_zone_setting" "websockets" {
-  zone_id    = cloudflare_zone.brdgme.id
-  setting_id = "websockets"
-  value      = "on"
 }
 
 # The one free-tier rate-limiting rule (spec W5/W6): per-IP, scoped to
@@ -164,8 +157,8 @@ resource "cloudflare_ruleset" "cache_rules" {
 
 # Bot Fight Mode (spec W5) - flipped as the LAST edge toggle and
 # verified in isolation: the free tier has no BFM exceptions, and the
-# documented fallback is fight_mode = false if it breaks websockets or
-# login (spec's beta validation checklist).
+# documented fallback is fight_mode = false if it breaks login
+# (spec's beta validation checklist).
 # JS detections must be on for fight mode (API rejects fight_mode
 # without enable_js, found at apply 2026-07-11).
 resource "cloudflare_bot_management" "brdgme" {

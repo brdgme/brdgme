@@ -114,7 +114,11 @@ pub fn App() -> impl IntoView {
     provide_context(RwSignal::<Option<(Uuid, u64)>>::new(None));
     let proposal_update = RwSignal::<Option<(Uuid, u64)>>::new(None);
     provide_context(crate::websocket_client::ProposalUpdate(proposal_update));
+    provide_context(crate::websocket_client::PublicEventsUrl(RwSignal::new(
+        None,
+    )));
     crate::websocket_client::use_websocket();
+    crate::websocket_client::use_public_events();
 
     // Hoisted above <Router> so these survive client-side navigation instead
     // of being torn down and recreated by every page's own <MainLayout>
@@ -214,6 +218,7 @@ pub fn App() -> impl IntoView {
         <Title text=title_text/>
 
         <Router>
+            <crate::websocket_client::PublicEventsWatcher/>
             <Routes fallback=|| "Page not found.".into_view()>
                 <Route path=StaticSegment("") view=HomePage/>
                 <Route path=StaticSegment("login") view=LoginPage/>

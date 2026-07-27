@@ -23,11 +23,10 @@ use tower_http::trace::TraceLayer;
 const MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
 
 /// Bounds how long a request's handler future may run before the layer
-/// synthesizes a response - this does NOT bound `/ws`'s connection lifetime.
-/// `WebSocketUpgrade::on_upgrade` (axum) returns the 101 response and hands
-/// the actual socket off to a detached `tokio::spawn`ed task immediately, so
-/// the handler future this layer times completes almost instantly regardless
-/// of how long the socket stays open afterwards; a slow HTTP handler (or a
+/// synthesizes a response - this does NOT bound SSE stream lifetimes.
+/// The `Sse` value is constructed and returned immediately, so the handler
+/// future this layer times completes almost instantly regardless of how
+/// long the stream stays open afterwards; a slow HTTP handler (or a
 /// stalled leptos server-fn) is what this actually guards against.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -139,7 +138,11 @@ pub async fn build_router(state: AppState) -> Router {
                 move || shell(leptos_options.clone())
             },
         )
-        .route("/ws", axum::routing::get(crate::websocket::ws_handler))
+        .route("/events", axum::routing::get(crate::events::events_handler))
+        .route(
+            "/events/public",
+            axum::routing::get(crate::events::events_public_handler),
+        )
         .route(
             "/admin/games/{id}/export",
             axum::routing::get(crate::game::export::admin_export_game),

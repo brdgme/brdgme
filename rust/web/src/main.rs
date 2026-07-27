@@ -129,16 +129,6 @@ async fn main() {
     })
     .await
     .unwrap();
-
-    if tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        broadcaster.drain_ws_tasks(),
-    )
-    .await
-    .is_err()
-    {
-        tracing::warn!("websocket tasks did not drain within 5s of shutdown");
-    }
 }
 
 #[cfg(feature = "ssr")]

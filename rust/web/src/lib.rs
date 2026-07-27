@@ -29,6 +29,9 @@ pub mod crypto;
 pub mod db;
 
 #[cfg(feature = "ssr")]
+pub mod events;
+
+#[cfg(feature = "ssr")]
 pub mod visibility_cache;
 
 pub mod error;

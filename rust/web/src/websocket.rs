@@ -17,22 +17,12 @@ pub use ssr::*;
 #[cfg(feature = "ssr")]
 mod ssr {
     use super::*;
-    use axum::{
-        extract::{
-            State,
-            ws::{Message, WebSocket, WebSocketUpgrade},
-        },
-        response::IntoResponse,
-    };
-    use futures_util::{sink::SinkExt, stream::StreamExt};
     use tokio_util::sync::CancellationToken;
-    use tokio_util::task::TaskTracker;
 
     #[derive(Clone)]
     pub struct GameBroadcaster {
-        client: async_nats::Client,
-        shutdown: CancellationToken,
-        ws_tasks: TaskTracker,
+        pub(crate) client: async_nats::Client,
+        pub(crate) shutdown: CancellationToken,
     }
 
     impl GameBroadcaster {
@@ -40,7 +30,6 @@ mod ssr {
             Self {
                 client,
                 shutdown: CancellationToken::new(),
-                ws_tasks: TaskTracker::new(),
             }
         }
 
@@ -86,130 +75,15 @@ mod ssr {
             }
         }
 
-        /// Signals every live websocket task to send a close frame and exit,
-        /// and closes the tracker so `drain_ws_tasks` can complete. Called from
-        /// main's graceful-shutdown path (review ws F55).
         pub fn begin_shutdown(&self) {
             self.shutdown.cancel();
-            self.ws_tasks.close();
-        }
-
-        /// Resolves when all tracked websocket tasks have finished. Only
-        /// terminates after `begin_shutdown` (the tracker must be closed).
-        pub async fn drain_ws_tasks(&self) {
-            self.ws_tasks.wait().await;
-        }
-    }
-
-    pub async fn ws_handler(
-        ws: WebSocketUpgrade,
-        State(broadcaster): State<GameBroadcaster>,
-    ) -> impl IntoResponse {
-        let tracker = broadcaster.ws_tasks.clone();
-        ws.on_upgrade(move |socket| {
-            tracker
-                .clone()
-                .track_future(handle_socket(socket, broadcaster))
-        })
-    }
-
-    /// Decrements the `ws_connections` gauge on drop, so every exit path out of
-    /// `handle_socket` (the `select!` loop has several `break`s, plus the early
-    /// return on subscribe failure) decrements exactly once without scattering
-    /// manual decrements across each exit point.
-    struct WsConnectionGuard;
-
-    impl WsConnectionGuard {
-        fn new() -> Self {
-            axum_prometheus::metrics::gauge!("ws_connections").increment(1.0);
-            Self
-        }
-    }
-
-    impl Drop for WsConnectionGuard {
-        fn drop(&mut self) {
-            axum_prometheus::metrics::gauge!("ws_connections").decrement(1.0);
-        }
-    }
-
-    async fn handle_socket(socket: WebSocket, broadcaster: GameBroadcaster) {
-        let _ws_guard = WsConnectionGuard::new();
-        let (mut sender, mut receiver) = socket.split();
-
-        let mut game_sub = match broadcaster.client.subscribe("game.>").await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("NATS subscribe failed: {}", e);
-                return;
-            }
-        };
-        let mut proposal_sub = match broadcaster.client.subscribe("proposal.>").await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("NATS subscribe failed: {}", e);
-                return;
-            }
-        };
-
-        // Periodic ping to keep idle connections alive across load-balancer idle timeouts.
-        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
-        ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        ping_interval.tick().await; // first tick fires immediately, skip it
-
-        let shutdown = broadcaster.shutdown.clone();
-
-        loop {
-            tokio::select! {
-                msg = game_sub.next() => {
-                    let msg = match msg {
-                        Some(m) => m,
-                        None => break,
-                    };
-                    let payload = match std::str::from_utf8(&msg.payload) {
-                        Ok(p) => p.to_string(),
-                        Err(_) => continue,
-                    };
-                    if sender.send(Message::Text(payload.into())).await.is_err() {
-                        break;
-                    }
-                }
-                msg = proposal_sub.next() => {
-                    let msg = match msg {
-                        Some(m) => m,
-                        None => break,
-                    };
-                    let payload = match std::str::from_utf8(&msg.payload) {
-                        Ok(p) => p.to_string(),
-                        Err(_) => continue,
-                    };
-                    if sender.send(Message::Text(payload.into())).await.is_err() {
-                        break;
-                    }
-                }
-                _ = ping_interval.tick() => {
-                    if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
-                        break;
-                    }
-                }
-                // Drain inbound messages so pongs and close frames are processed; we don't
-                // act on client-sent data here.
-                incoming = receiver.next() => {
-                    match incoming {
-                        Some(Ok(_)) => {}
-                        _ => break,
-                    }
-                }
-                _ = shutdown.cancelled() => {
-                    let _ = sender.send(Message::Close(None)).await;
-                    break;
-                }
-            }
         }
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+        use futures_util::StreamExt;
         use std::time::Duration;
         use tokio::time::timeout;
 
