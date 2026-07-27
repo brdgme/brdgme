@@ -165,15 +165,84 @@ fn invite_recipient_should_send(recip: &InviteRecipient, suppressed_by_presence:
     recip.email.is_some() && recip.invite_emails_enabled && !suppressed_by_presence
 }
 
+/// Last-resort labels when a lookup fails inside a spawned mailer task. Blank
+/// substitutions produced subjects like " invite from " (wd F34).
+#[cfg(feature = "ssr")]
+const UNKNOWN_GAME_TYPE_NAME: &str = "Game";
+#[cfg(feature = "ssr")]
+const UNKNOWN_PLAYER_NAME: &str = "Someone";
+
+/// Loads a proposal for a mailer task, logging instead of returning silently:
+/// inside a spawned task a DB error is otherwise indistinguishable from
+/// "proposal deleted" and from "recipient opted out" (wd F34). `what` names the
+/// mailer method.
+#[cfg(feature = "ssr")]
+async fn mailer_proposal(pool: &PgPool, proposal_id: Uuid, what: &str) -> Option<Proposal> {
+    match find_proposal(pool, proposal_id).await {
+        Ok(Some(p)) => Some(p),
+        Ok(None) => {
+            tracing::warn!("invite mailer ({what}): proposal {proposal_id} not found; no email");
+            None
+        }
+        Err(e) => {
+            tracing::error!("invite mailer ({what}): proposal {proposal_id} lookup failed: {e}");
+            None
+        }
+    }
+}
+
+/// Same for a recipient row (wd F34).
+#[cfg(feature = "ssr")]
+async fn mailer_recipient(pool: &PgPool, user_id: Uuid, what: &str) -> Option<InviteRecipient> {
+    match fetch_invite_recipient(pool, user_id).await {
+        Ok(Some(r)) => Some(r),
+        Ok(None) => {
+            tracing::warn!("invite mailer ({what}): user {user_id} not found; no email");
+            None
+        }
+        Err(e) => {
+            tracing::error!("invite mailer ({what}): user {user_id} lookup failed: {e}");
+            None
+        }
+    }
+}
+
 #[cfg(feature = "ssr")]
 async fn proposal_game_type_name(pool: &PgPool, proposal: &Proposal) -> String {
-    let Ok(Some(gv)) = crate::db::find_game_version(pool, proposal.game_version_id).await else {
-        return String::new();
+    let game_version = match crate::db::find_game_version(pool, proposal.game_version_id).await {
+        Ok(Some(gv)) => gv,
+        Ok(None) => {
+            tracing::warn!(
+                "invite mailer: game version {} not found; using a generic label",
+                proposal.game_version_id
+            );
+            return UNKNOWN_GAME_TYPE_NAME.to_string();
+        }
+        Err(e) => {
+            tracing::error!(
+                "invite mailer: game version {} lookup failed: {e}",
+                proposal.game_version_id
+            );
+            return UNKNOWN_GAME_TYPE_NAME.to_string();
+        }
     };
-    find_game_type_name(pool, gv.game_type_id)
-        .await
-        .unwrap_or(None)
-        .unwrap_or_default()
+    match find_game_type_name(pool, game_version.game_type_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            tracing::warn!(
+                "invite mailer: game type {} not found; using a generic label",
+                game_version.game_type_id
+            );
+            UNKNOWN_GAME_TYPE_NAME.to_string()
+        }
+        Err(e) => {
+            tracing::error!(
+                "invite mailer: game type {} lookup failed: {e}",
+                game_version.game_type_id
+            );
+            UNKNOWN_GAME_TYPE_NAME.to_string()
+        }
+    }
 }
 
 #[cfg(feature = "ssr")]
@@ -196,7 +265,7 @@ impl RealInviteMailer {
         let Some(token) = email_token else {
             return true;
         };
-        let Ok(Some(recip)) = fetch_invite_recipient(pool, invitee_user_id).await else {
+        let Some(recip) = mailer_recipient(pool, invitee_user_id, "send_invite").await else {
             return true;
         };
         let suppressed =
@@ -210,7 +279,7 @@ impl RealInviteMailer {
         let Some(email) = recip.email else {
             return true;
         };
-        let Ok(Some(proposal)) = find_proposal(pool, proposal_id).await else {
+        let Some(proposal) = mailer_proposal(pool, proposal_id, "send_invite").await else {
             return true;
         };
         if proposal.status != "open" {
@@ -226,12 +295,10 @@ impl RealInviteMailer {
             return true;
         }
         let game_type_name = proposal_game_type_name(pool, &proposal).await;
-        let owner_name = fetch_invite_recipient(pool, proposal.owner_user_id)
+        let owner_name = mailer_recipient(pool, proposal.owner_user_id, "send_invite")
             .await
-            .ok()
-            .flatten()
             .map(|r| r.name)
-            .unwrap_or_default();
+            .unwrap_or_else(|| UNKNOWN_PLAYER_NAME.to_string());
         let content = crate::email::render::EmailContent {
             subject: format!("{game_type_name} invite from {owner_name}"),
             header: Some(format!(
@@ -312,7 +379,9 @@ impl InviteMailer for RealInviteMailer {
         let resend = self.resend.clone();
         tokio::spawn(async move {
             let Some(token) = email_token else { return };
-            let Ok(Some(recip)) = fetch_invite_recipient(&pool, invitee_user_id).await else {
+            let Some(recip) =
+                mailer_recipient(&pool, invitee_user_id, "notify_changed_reinvite").await
+            else {
                 return;
             };
             let suppressed =
@@ -322,7 +391,9 @@ impl InviteMailer for RealInviteMailer {
                 return;
             }
             let Some(email) = recip.email else { return };
-            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
+            let Some(proposal) =
+                mailer_proposal(&pool, proposal_id, "notify_changed_reinvite").await
+            else {
                 return;
             };
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
@@ -378,22 +449,30 @@ impl InviteMailer for RealInviteMailer {
         let pool = self.pool.clone();
         let resend = self.resend.clone();
         tokio::spawn(async move {
-            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
-                return;
-            };
-            let Ok(Some(owner_recip)) = fetch_invite_recipient(&pool, proposal.owner_user_id).await
+            let Some(proposal) = mailer_proposal(&pool, proposal_id, "notify_owner_decline").await
             else {
                 return;
             };
+            let Some(owner_recip) =
+                mailer_recipient(&pool, proposal.owner_user_id, "notify_owner_decline").await
+            else {
+                return;
+            };
+            let suppressed = crate::email::outbound::suppress_for_web_presence(
+                &pool,
+                Some(proposal.owner_user_id),
+            )
+            .await;
+            if !invite_recipient_should_send(&owner_recip, suppressed) {
+                return;
+            }
             let Some(email) = owner_recip.email else {
                 return;
             };
-            let invitee_name = fetch_invite_recipient(&pool, invitee_user_id)
+            let invitee_name = mailer_recipient(&pool, invitee_user_id, "notify_owner_decline")
                 .await
-                .ok()
-                .flatten()
                 .map(|r| r.name)
-                .unwrap_or_default();
+                .unwrap_or_else(|| UNKNOWN_PLAYER_NAME.to_string());
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
             let content = crate::email::render::EmailContent {
                 subject: format!("{game_type_name} invite"),
@@ -403,7 +482,10 @@ impl InviteMailer for RealInviteMailer {
                 you_can: None,
                 browser_url: Some(invite_browser_url(proposal_id)),
                 rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
-                footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
+                // No reply channel: these are one-way notifications and the
+                // proposal reply route needs a player email_token, which this
+                // mail has none of (wd F33).
+                footer: Some("Unsubscribe anytime.".into()),
             };
             let palette = crate::email::render::palette_for_slug(owner_recip.theme_slug.as_deref());
             let unsub_token: Option<String> =
@@ -435,7 +517,7 @@ impl InviteMailer for RealInviteMailer {
                 &[],
                 Some(&format!("proposal-{proposal_id}")),
                 false,
-                &format!("i-{proposal_id}@brdg.me"),
+                &crate::email::notify::invite_reply_address("noreply"),
                 unsubscribe,
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
@@ -446,12 +528,13 @@ impl InviteMailer for RealInviteMailer {
         let pool = self.pool.clone();
         let resend = self.resend.clone();
         tokio::spawn(async move {
-            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
+            let Some(proposal) = mailer_proposal(&pool, proposal_id, "notify_cancelled").await
+            else {
                 return;
             };
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
             for user_id in accepted_user_ids {
-                let Ok(Some(recip)) = fetch_invite_recipient(&pool, user_id).await else {
+                let Some(recip) = mailer_recipient(&pool, user_id, "notify_cancelled").await else {
                     continue;
                 };
                 let suppressed =
@@ -468,7 +551,10 @@ impl InviteMailer for RealInviteMailer {
                     you_can: None,
                     browser_url: Some(invite_browser_url(proposal_id)),
                     rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
-                    footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
+                    // No reply channel: these are one-way notifications and the
+                    // proposal reply route needs a player email_token, which this
+                    // mail has none of (wd F33).
+                    footer: Some("Unsubscribe anytime.".into()),
                 };
                 let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
                 let unsub_token: Option<String> =
@@ -496,7 +582,7 @@ impl InviteMailer for RealInviteMailer {
                     &[],
                     Some(&format!("proposal-{proposal_id}")),
                     false,
-                    &format!("i-{proposal_id}@brdg.me"),
+                    &crate::email::notify::invite_reply_address("noreply"),
                     unsubscribe,
                 );
                 crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email)
@@ -509,14 +595,14 @@ impl InviteMailer for RealInviteMailer {
         let pool = self.pool.clone();
         let resend = self.resend.clone();
         tokio::spawn(async move {
-            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
+            let Some(proposal) = mailer_proposal(&pool, proposal_id, "notify_started").await else {
                 return;
             };
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
             let base = crate::config::public_base_url();
             let game_url = format!("{base}/games/{game_id}");
             for user_id in invitee_user_ids {
-                let Ok(Some(recip)) = fetch_invite_recipient(&pool, user_id).await else {
+                let Some(recip) = mailer_recipient(&pool, user_id, "notify_started").await else {
                     continue;
                 };
                 let suppressed =
@@ -533,7 +619,10 @@ impl InviteMailer for RealInviteMailer {
                     you_can: None,
                     browser_url: Some(game_url.clone()),
                     rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
-                    footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
+                    // No reply channel: these are one-way notifications and the
+                    // proposal reply route needs a player email_token, which this
+                    // mail has none of (wd F33).
+                    footer: Some("Unsubscribe anytime.".into()),
                 };
                 let palette = crate::email::render::palette_for_slug(recip.theme_slug.as_deref());
                 let unsub_token: Option<String> =
@@ -561,7 +650,7 @@ impl InviteMailer for RealInviteMailer {
                     &[],
                     Some(&format!("proposal-{proposal_id}")),
                     false,
-                    &format!("i-{proposal_id}@brdg.me"),
+                    &crate::email::notify::invite_reply_address("noreply"),
                     unsubscribe,
                 );
                 crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email)
@@ -574,10 +663,12 @@ impl InviteMailer for RealInviteMailer {
         let pool = self.pool.clone();
         let resend = self.resend.clone();
         tokio::spawn(async move {
-            let Ok(Some(proposal)) = find_proposal(&pool, proposal_id).await else {
+            let Some(proposal) = mailer_proposal(&pool, proposal_id, "notify_owner_ready").await
+            else {
                 return;
             };
-            let Ok(Some(owner_recip)) = fetch_invite_recipient(&pool, proposal.owner_user_id).await
+            let Some(owner_recip) =
+                mailer_recipient(&pool, proposal.owner_user_id, "notify_owner_ready").await
             else {
                 return;
             };
@@ -603,7 +694,10 @@ impl InviteMailer for RealInviteMailer {
                 you_can: None,
                 browser_url: Some(invite_browser_url(proposal_id)),
                 rules_url: Some(crate::email::notify::rules_url(proposal.game_version_id)),
-                footer: Some("Reply to this email to respond, or unsubscribe anytime.".into()),
+                // No reply channel: these are one-way notifications and the
+                // proposal reply route needs a player email_token, which this
+                // mail has none of (wd F33).
+                footer: Some("Unsubscribe anytime.".into()),
             };
             let palette = crate::email::render::palette_for_slug(owner_recip.theme_slug.as_deref());
             let unsub_token: Option<String> =
@@ -635,7 +729,7 @@ impl InviteMailer for RealInviteMailer {
                 &[],
                 Some(&format!("proposal-{proposal_id}")),
                 false,
-                &format!("i-{proposal_id}@brdg.me"),
+                &crate::email::notify::invite_reply_address("noreply"),
                 unsubscribe,
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
@@ -3595,6 +3689,32 @@ mod tests {
             proposal_status(&pool, pid).await,
             "cancelled",
             "status stays cancelled and nothing changes"
+        );
+    }
+
+    // wd F34: a failed game-type lookup must not produce a blank substitution
+    // (" invite from Alice"); the mail still goes out with a generic label.
+    #[sqlx::test]
+    async fn proposal_game_type_name_falls_back_to_a_label(pool: PgPool) {
+        let midnight = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+            time::Time::MIDNIGHT,
+        );
+        let proposal = Proposal {
+            id: Uuid::new_v4(),
+            created_at: midnight,
+            updated_at: midnight,
+            // No such game_version row: find_game_version returns Ok(None).
+            game_version_id: Uuid::new_v4(),
+            owner_user_id: Uuid::new_v4(),
+            restarted_game_id: None,
+            status: "open".to_string(),
+            started_game_id: None,
+            nudged_at: None,
+        };
+        assert_eq!(
+            proposal_game_type_name(&pool, &proposal).await,
+            UNKNOWN_GAME_TYPE_NAME
         );
     }
 }

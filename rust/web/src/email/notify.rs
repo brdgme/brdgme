@@ -32,6 +32,10 @@ pub fn turn_header_text(player_name: &str) -> String {
     format!("It is your turn, {player_name}.")
 }
 
+pub fn reminder_header_text(player_name: &str) -> String {
+    format!("Still your turn, {player_name}.")
+}
+
 pub fn eliminated_header_text(player_name: &str) -> String {
     format!("{player_name}, you have been eliminated.")
 }
@@ -126,6 +130,10 @@ pub async fn render_board_and_you_can(
 
 enum NotifyKind {
     Turn,
+    /// The turn-reminder sweep's nudge for a turn already notified. Shares
+    /// `Turn`'s de-threaded per-turn subject so it groups with the mail it
+    /// nudges (wfe F39).
+    Reminder,
     Eliminated,
     Finished,
 }
@@ -171,8 +179,9 @@ async fn build_content(
     kind: NotifyKind,
     subject: String,
 ) -> crate::email::render::EmailContent {
-    let header = Some(match kind {
+    let header = Some(match &kind {
         NotifyKind::Turn => turn_header_text(recipient_player.name()),
+        NotifyKind::Reminder => reminder_header_text(recipient_player.name()),
         NotifyKind::Eliminated => eliminated_header_text(recipient_player.name()),
         NotifyKind::Finished => {
             let mut placed: Vec<&crate::db::GamePlayerExtended> = ge.game_players.iter().collect();
@@ -185,7 +194,12 @@ async fn build_content(
         }
     });
 
-    let digest = digest_since_last_turn(pool, ge, recipient_player).await;
+    // A reminder carries no digest: the turn email it nudges already showed
+    // those lines and the recipient has not moved since (wfe F36).
+    let digest = match &kind {
+        NotifyKind::Reminder => None,
+        _ => digest_since_last_turn(pool, ge, recipient_player).await,
+    };
 
     let (board, you_can) = render_board_and_you_can(
         http_client,
@@ -227,7 +241,7 @@ pub async fn failure_report_content(
     .await;
     let log_count = game_log_count(pool, ge.game.id).await;
     crate::email::render::EmailContent {
-        subject: turn_subject(&ge.game_type.name, ge.game.id, log_count),
+        subject: turn_subject_or_fallback(&ge.game_type.name, ge.game.id, log_count),
         header: Some(header),
         digest,
         board,
@@ -238,37 +252,69 @@ pub async fn failure_report_content(
     }
 }
 
-/// How many logs the game has (plain query; defaults to 0 on error). Every
-/// command appends >=1 log, so this is a monotonic turn counter used both to
-/// detect the opening turn and to build the per-turn de-threaded subject.
-async fn game_log_count(pool: &sqlx::PgPool, game_id: uuid::Uuid) -> i64 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM game_logs WHERE game_id = $1")
+/// How many logs the game has, or `None` when the count could not be read.
+/// Every command appends >=1 log, so this is a monotonic turn counter used both
+/// to detect the opening turn and to build the per-turn de-threaded subject. A
+/// failed read must NOT collapse to `0`: that gave every affected turn email the
+/// identical subject and made it claim to be the game's first message, breaking
+/// the de-threading lever documented above (wfe F41).
+pub(crate) async fn game_log_count(pool: &sqlx::PgPool, game_id: uuid::Uuid) -> Option<i64> {
+    match sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM game_logs WHERE game_id = $1")
         .bind(game_id)
         .fetch_one(pool)
         .await
-        .unwrap_or(0)
+    {
+        Ok(n) => Some(n),
+        Err(e) => {
+            tracing::error!("notify: log count failed for game {}: {}", game_id, e);
+            None
+        }
+    }
 }
 
-async fn send_one(
+/// The per-turn de-threaded subject, with a timestamped fallback when the turn
+/// counter is unavailable. Uniqueness per turn is the one property this subject
+/// may never lose (wfe F41).
+pub fn turn_subject_or_fallback(
+    game_type_name: &str,
+    game_id: uuid::Uuid,
+    turn: Option<i64>,
+) -> String {
+    match turn {
+        Some(t) => turn_subject(game_type_name, game_id, t),
+        None => format!(
+            "{game_type_name} {game_id}-t{}",
+            time::OffsetDateTime::now_utc().unix_timestamp()
+        ),
+    }
+}
+
+/// What one notification attempt did. `Suppressed` covers every deliberate
+/// non-send: opted out, bot slot, no verified address, or active on the web.
+/// Only the turn-reminder sweep currently reads this (wfe F36); every other
+/// caller is best-effort and drops it.
+pub enum SendResult {
+    Sent,
+    Suppressed,
+    Failed,
+}
+
+/// Sends one notification for an ALREADY-LOADED game. `log_count` is that
+/// game's log count (`None` = it could not be read). Split out of `send_one` so
+/// `notify_game_emails` can load the game and the count once for the whole
+/// roster instead of once per recipient (wfe F43).
+#[allow(clippy::too_many_arguments)]
+async fn send_one_loaded(
     resend: Option<&resend_rs::Resend>,
     pool: &sqlx::PgPool,
     http_client: &reqwest::Client,
-    game_id: uuid::Uuid,
+    ge: &crate::db::GameExtended,
+    log_count: Option<i64>,
     game_player_id: uuid::Uuid,
     kind: NotifyKind,
     mode: SendMode,
-) {
-    let ge = match crate::db::find_game_extended(pool, game_id).await {
-        Ok(Some(g)) => g,
-        Ok(None) => {
-            tracing::warn!("notify: game {} not found", game_id);
-            return;
-        }
-        Err(e) => {
-            tracing::error!("notify: failed to load game {}: {}", game_id, e);
-            return;
-        }
-    };
+) -> SendResult {
+    let game_id = ge.game.id;
 
     let recipient_player = match ge
         .game_players
@@ -278,14 +324,21 @@ async fn send_one(
         Some(p) => p,
         None => {
             tracing::warn!("notify: player {} not in game {}", game_player_id, game_id);
-            return;
+            return SendResult::Failed;
         }
     };
 
     let recipient = match crate::email::outbound::fetch_email_recipient(pool, game_player_id).await
     {
         Ok(Some(r)) => r,
-        _ => return,
+        Ok(None) => {
+            tracing::warn!("notify: no recipient row for player {}", game_player_id);
+            return SendResult::Failed;
+        }
+        Err(e) => {
+            tracing::error!("notify: failed to load recipient {}: {}", game_player_id, e);
+            return SendResult::Failed;
+        }
     };
 
     let should_send = match mode {
@@ -299,11 +352,12 @@ async fn send_one(
         }
     };
     if !should_send {
-        return;
+        return SendResult::Suppressed;
     }
 
     let email_kind = match &kind {
         NotifyKind::Turn => crate::email::render::EmailKind::Turn,
+        NotifyKind::Reminder => crate::email::render::EmailKind::Reminder,
         NotifyKind::Eliminated | NotifyKind::Finished => crate::email::render::EmailKind::GameEvent,
     };
 
@@ -315,7 +369,7 @@ async fn send_one(
                 game_player_id,
                 e
             );
-            return;
+            return SendResult::Failed;
         }
     };
 
@@ -326,20 +380,19 @@ async fn send_one(
         .map(|p| crate::email::render::player_for_slot(p.name(), &p.game_player.color, palette))
         .collect();
 
-    let log_count = game_log_count(pool, game_id).await;
-    let is_first_message = log_count == 0;
+    let is_first_message = log_count == Some(0);
     let (subject, thread_id) = match &kind {
-        NotifyKind::Turn => (
-            turn_subject(&ge.game_type.name, ge.game.id, log_count),
+        NotifyKind::Turn | NotifyKind::Reminder => (
+            turn_subject_or_fallback(&ge.game_type.name, game_id, log_count),
             None,
         ),
         NotifyKind::Eliminated | NotifyKind::Finished => (
-            game_subject(&ge, recipient_player),
+            game_subject(ge, recipient_player),
             Some(format!("game-{game_id}")),
         ),
     };
 
-    let content = build_content(pool, http_client, &ge, recipient_player, kind, subject).await;
+    let content = build_content(pool, http_client, ge, recipient_player, kind, subject).await;
 
     let unsub_token: Option<String> = match recipient.user_id {
         Some(uid) => match crate::email::outbound::ensure_unsubscribe_token(pool, uid).await {
@@ -372,30 +425,52 @@ async fn send_one(
         unsubscribe,
     );
 
+    // Unreachable: every `should_send` arm above requires `email.is_some()`.
     let to = match recipient.email.clone() {
         Some(e) => e,
-        None => return,
+        None => return SendResult::Suppressed,
     };
-    crate::email::outbound::send_rendered_email(resend, rendered, &to).await;
+    if crate::email::outbound::try_send_rendered_email(resend, rendered, &to).await {
+        SendResult::Sent
+    } else {
+        SendResult::Failed
+    }
 }
 
-pub async fn send_turn_notification(
+/// Loads the game and its log count, then sends one notification. Use
+/// `send_one_loaded` directly when a caller already holds both (wfe F43).
+async fn send_one(
     resend: Option<&resend_rs::Resend>,
     pool: &sqlx::PgPool,
     http_client: &reqwest::Client,
     game_id: uuid::Uuid,
     game_player_id: uuid::Uuid,
-) {
-    send_one(
+    kind: NotifyKind,
+    mode: SendMode,
+) -> SendResult {
+    let ge = match crate::db::find_game_extended(pool, game_id).await {
+        Ok(Some(g)) => g,
+        Ok(None) => {
+            tracing::warn!("notify: game {} not found", game_id);
+            return SendResult::Failed;
+        }
+        Err(e) => {
+            tracing::error!("notify: failed to load game {}: {}", game_id, e);
+            return SendResult::Failed;
+        }
+    };
+    let log_count = game_log_count(pool, game_id).await;
+    send_one_loaded(
         resend,
         pool,
         http_client,
-        game_id,
+        &ge,
+        log_count,
         game_player_id,
-        NotifyKind::Turn,
-        SendMode::Normal,
+        kind,
+        mode,
     )
-    .await;
+    .await
 }
 
 /// Sends a turn notification for one game, bypassing the active-web suppression
@@ -410,7 +485,7 @@ pub async fn send_turn_digest(
     game_id: uuid::Uuid,
     game_player_id: uuid::Uuid,
 ) {
-    send_one(
+    let _ = send_one(
         resend,
         pool,
         http_client,
@@ -433,7 +508,7 @@ pub async fn send_turn_digest_forced(
     game_id: uuid::Uuid,
     game_player_id: uuid::Uuid,
 ) {
-    send_one(
+    let _ = send_one(
         resend,
         pool,
         http_client,
@@ -445,47 +520,37 @@ pub async fn send_turn_digest_forced(
     .await;
 }
 
-pub async fn send_elimination_notification(
+/// Sends the turn REMINDER for one player, reporting what happened so the sweep
+/// can decide whether to mark the reminder as sent. Replaces the ~90-line copy
+/// of this pipeline that used to live in `email::sweep` (wfe F36).
+pub async fn send_turn_reminder(
     resend: Option<&resend_rs::Resend>,
     pool: &sqlx::PgPool,
     http_client: &reqwest::Client,
     game_id: uuid::Uuid,
     game_player_id: uuid::Uuid,
-) {
+) -> SendResult {
     send_one(
         resend,
         pool,
         http_client,
         game_id,
         game_player_id,
-        NotifyKind::Eliminated,
+        NotifyKind::Reminder,
         SendMode::Normal,
     )
-    .await;
-}
-
-pub async fn send_game_finished_notification(
-    resend: Option<&resend_rs::Resend>,
-    pool: &sqlx::PgPool,
-    http_client: &reqwest::Client,
-    game_id: uuid::Uuid,
-    game_player_id: uuid::Uuid,
-) {
-    send_one(
-        resend,
-        pool,
-        http_client,
-        game_id,
-        game_player_id,
-        NotifyKind::Finished,
-        SendMode::Normal,
-    )
-    .await;
+    .await
 }
 
 /// Diffs `before`/`after` game state and fires the appropriate notification for
 /// each human player. Mail failures are isolated: every send logs and returns;
 /// this never fails the game operation.
+///
+/// `before` is the pre-command snapshot to diff against; `game::execute_command`
+/// returns it. `None` means **brand-new game** - nobody has been notified yet,
+/// so every player currently on turn counts as newly on turn. NEVER pass `None`
+/// to mean "I could not read the snapshot": that re-notifies every player
+/// already on turn (wfe F42).
 pub async fn notify_game_emails(
     resend: Option<&resend_rs::Resend>,
     pool: &sqlx::PgPool,
@@ -495,8 +560,14 @@ pub async fn notify_game_emails(
 ) {
     let after = match crate::db::find_game_extended(pool, game_id).await {
         Ok(Some(a)) => a,
-        _ => return,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::error!("notify: failed to load game {}: {}", game_id, e);
+            return;
+        }
     };
+    // One load and one count for the whole roster (wfe F43).
+    let log_count = game_log_count(pool, game_id).await;
 
     let was_finished = before.as_ref().map(|b| b.game.is_finished).unwrap_or(false);
     if after.game.is_finished && !was_finished {
@@ -505,8 +576,17 @@ pub async fn notify_game_emails(
             .iter()
             .filter(|p| p.user.is_some() && p.game_bot.is_none())
         {
-            send_game_finished_notification(resend, pool, http_client, game_id, p.game_player.id)
-                .await;
+            send_one_loaded(
+                resend,
+                pool,
+                http_client,
+                &after,
+                log_count,
+                p.game_player.id,
+                NotifyKind::Finished,
+                SendMode::Normal,
+            )
+            .await;
         }
         return;
     }
@@ -525,14 +605,33 @@ pub async fn notify_game_emails(
             .map(|b| b.game_player.is_turn)
             .unwrap_or(false);
         if p.game_player.is_turn && !was_turn {
-            send_turn_notification(resend, pool, http_client, game_id, p.game_player.id).await;
+            send_one_loaded(
+                resend,
+                pool,
+                http_client,
+                &after,
+                log_count,
+                p.game_player.id,
+                NotifyKind::Turn,
+                SendMode::Normal,
+            )
+            .await;
         }
         let was_elim = before_player
             .map(|b| b.game_player.is_eliminated)
             .unwrap_or(false);
         if p.game_player.is_eliminated && !was_elim {
-            send_elimination_notification(resend, pool, http_client, game_id, p.game_player.id)
-                .await;
+            send_one_loaded(
+                resend,
+                pool,
+                http_client,
+                &after,
+                log_count,
+                p.game_player.id,
+                NotifyKind::Eliminated,
+                SendMode::Normal,
+            )
+            .await;
         }
     }
 }
@@ -559,6 +658,20 @@ mod tests {
     }
 
     #[test]
+    fn turn_subject_fallback_stays_unique_when_the_count_is_unknown() {
+        // wfe F41: a failed count must not collapse every turn onto
+        // "{type} {id}-0" - that is the de-threading lever at :68-73.
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(
+            turn_subject_or_fallback("Acquire", id, Some(7)),
+            turn_subject("Acquire", id, 7)
+        );
+        let fallback = turn_subject_or_fallback("Acquire", id, None);
+        assert_ne!(fallback, turn_subject("Acquire", id, 0));
+        assert!(fallback.starts_with(&format!("Acquire {id}-t")));
+    }
+
+    #[test]
     fn format_player_result_formats_rating_change() {
         assert_eq!(format_player_result("Alice", Some(16)), "Alice (+16)");
         assert_eq!(format_player_result("Bob", Some(-16)), "Bob (-16)");
@@ -576,6 +689,13 @@ mod tests {
             "Game over. Winners: Alice (+16), Bob (-16)"
         );
         assert_eq!(finished_header_text(&[]), "Game over.");
+    }
+
+    #[test]
+    fn reminder_header_contains_name() {
+        let h = reminder_header_text("Alice");
+        assert!(h.contains("Alice"));
+        assert!(h.contains("Still your turn"));
     }
 
     #[test]
@@ -710,8 +830,28 @@ mod tests {
             .unwrap();
 
         let http = reqwest::Client::new();
-        send_turn_notification(None, &pool, &http, game_id, active_gp).await;
-        send_turn_notification(None, &pool, &http, game_id, inactive_gp).await;
+        // The old per-kind wrapper is gone (wfe F43); the tests exercise the
+        // real path directly.
+        send_one(
+            None,
+            &pool,
+            &http,
+            game_id,
+            active_gp,
+            NotifyKind::Turn,
+            SendMode::Normal,
+        )
+        .await;
+        send_one(
+            None,
+            &pool,
+            &http,
+            game_id,
+            inactive_gp,
+            NotifyKind::Turn,
+            SendMode::Normal,
+        )
+        .await;
 
         assert!(
             email_token(&pool, active_gp).await.is_none(),
@@ -721,5 +861,54 @@ mod tests {
             email_token(&pool, inactive_gp).await.is_some(),
             "inactive player's automated turn email should still send"
         );
+    }
+
+    // wfe F43 lock-in: one loaded snapshot drives the whole roster, and the
+    // diff still only mails the player who is NEWLY on turn.
+    #[sqlx::test]
+    async fn notify_game_emails_only_mails_the_newly_on_turn_player(pool: sqlx::PgPool) {
+        let (game_id, players) = seed_game_with_emailable_players(&pool, 2).await;
+        let (_u0, gp0) = players[0];
+        let (_u1, gp1) = players[1];
+        let before = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE id = $1")
+            .bind(gp1)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        notify_game_emails(None, &pool, &reqwest::Client::new(), game_id, Some(before)).await;
+
+        // A reply token is minted only for a recipient we actually mail.
+        assert!(
+            email_token(&pool, gp1).await.is_some(),
+            "the newly-on-turn player must be mailed"
+        );
+        assert!(
+            email_token(&pool, gp0).await.is_none(),
+            "a player whose turn state did not change must not be mailed"
+        );
+    }
+
+    // wfe F42 companion: `None` means brand-new game, so everyone currently on
+    // turn is newly on turn. This is the ONLY intended meaning of `None`.
+    #[sqlx::test]
+    async fn notify_game_emails_treats_none_as_a_brand_new_game(pool: sqlx::PgPool) {
+        let (game_id, players) = seed_game_with_emailable_players(&pool, 2).await;
+        let (_u0, gp0) = players[0];
+        let (_u1, gp1) = players[1];
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE id = $1")
+            .bind(gp1)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        notify_game_emails(None, &pool, &reqwest::Client::new(), game_id, None).await;
+
+        assert!(email_token(&pool, gp1).await.is_some());
+        assert!(email_token(&pool, gp0).await.is_none());
     }
 }

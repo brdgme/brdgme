@@ -75,6 +75,9 @@ pub enum ExecuteCommandError {
     Other(#[from] anyhow::Error),
 }
 
+/// On success returns the pre-command `GameExtended` it loaded for its own
+/// guards, so the caller can diff it in `email::notify::notify_game_emails`
+/// without a second read that could silently fail (wd F8, wfe F42).
 #[cfg(feature = "ssr")]
 pub async fn execute_command(
     pool: &sqlx::PgPool,
@@ -84,7 +87,7 @@ pub async fn execute_command(
     game_id: uuid::Uuid,
     player_position: usize,
     command: String,
-) -> Result<(), ExecuteCommandError> {
+) -> Result<crate::db::GameExtended, ExecuteCommandError> {
     use brdgme_cmd::api::{Request, Response};
 
     let ge = crate::db::find_game_extended(pool, game_id)
@@ -168,7 +171,7 @@ pub async fn execute_command(
     }
 
     broadcast_and_trigger(pool, broadcaster, jetstream, game_id).await;
-    Ok(())
+    Ok(ge)
 }
 
 /// Publishes a `bot.turn` event (attempt 0) for every bot player whose turn
@@ -373,10 +376,6 @@ pub async fn handle_bot_command_event(
     event: &crate::nats::BotCommandEvent,
 ) -> Result<(), ExecuteCommandError> {
     let attempt = event.attempt;
-    let before = crate::db::find_game_extended(pool, event.game_id)
-        .await
-        .ok()
-        .flatten();
     let result = execute_command(
         pool,
         http_client,
@@ -389,14 +388,14 @@ pub async fn handle_bot_command_event(
     .await;
 
     match result {
-        Ok(()) => {
+        Ok(before) => {
             tracing::info!(game_id = %event.game_id, position = event.player_position, "Bot command applied");
             crate::email::notify::notify_game_emails(
                 resend.as_ref(),
                 pool,
                 http_client,
                 event.game_id,
-                before,
+                Some(before),
             )
             .await;
             Ok(())
@@ -717,6 +716,61 @@ mod tests {
             Some("initial_state")
         );
         assert!(player1.game_player.undo_game_state.is_none());
+    }
+
+    // wd F8 / wfe F42: the notification diff baseline must come from the load
+    // execute_command already does, not from a second best-effort read whose
+    // failure silently becomes "brand-new game".
+    #[sqlx::test]
+    async fn execute_command_returns_the_pre_command_snapshot(pool: PgPool) {
+        let uri = spawn_mock_game_service(|_req| play_response("new_state", vec![1], true)).await;
+        let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+        let broadcaster = make_broadcaster().await;
+        let http_client = reqwest::Client::new();
+        let jetstream = make_jetstream().await;
+
+        let before = execute_command(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            game_id,
+            0,
+            "abc".to_string(),
+        )
+        .await
+        .unwrap();
+
+        // The returned snapshot is the state BEFORE the command...
+        assert_eq!(before.game.game_state, "initial_state");
+        let before_p0 = before
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        assert!(before_p0.game_player.is_turn, "p0 held the turn before");
+        let before_p1 = before
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 1)
+            .unwrap();
+        assert!(!before_p1.game_player.is_turn, "p1 did not hold it before");
+
+        // ...while the DB now holds the state after it.
+        let after = db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.game.game_state, "new_state");
+        assert!(
+            after
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == 1)
+                .unwrap()
+                .game_player
+                .is_turn
+        );
     }
 
     #[sqlx::test]

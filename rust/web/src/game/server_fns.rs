@@ -536,11 +536,6 @@ pub async fn submit_command(
     .map_err(internal("submit_command: find player position"))?
     .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?;
 
-    let before = crate::db::find_game_extended(&pool, game_id)
-        .await
-        .ok()
-        .flatten();
-
     match super::execute_command(
         &pool,
         &http_client,
@@ -552,13 +547,13 @@ pub async fn submit_command(
     )
     .await
     {
-        Ok(()) => {
+        Ok(before) => {
             crate::email::notify::notify_game_emails(
                 resend.as_ref(),
                 &pool,
                 &http_client,
                 game_id,
-                before,
+                Some(before),
             )
             .await;
             Ok(None)

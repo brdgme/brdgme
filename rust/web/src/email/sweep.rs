@@ -26,10 +26,6 @@ pub fn sweep_interval() -> std::time::Duration {
         .unwrap_or(DEFAULT_SWEEP_INTERVAL)
 }
 
-fn reminder_header_text(player_name: &str) -> String {
-    format!("Still your turn, {player_name}.")
-}
-
 #[derive(Debug, sqlx::FromRow)]
 struct ReminderCandidate {
     game_player_id: Uuid,
@@ -144,8 +140,12 @@ async fn send_reminder(
         .map(|p| crate::email::render::player_for_slot(p.name(), &p.game_player.color, palette))
         .collect();
 
-    let subject = crate::email::notify::game_subject(&ge, recipient_player);
-    let header = Some(reminder_header_text(recipient_player.name()));
+    let log_count = crate::email::notify::game_log_count(pool, game_id).await;
+    let subject =
+        crate::email::notify::turn_subject_or_fallback(&ge.game_type.name, game_id, log_count);
+    let header = Some(crate::email::notify::reminder_header_text(
+        recipient_player.name(),
+    ));
 
     let (board, you_can) = crate::email::notify::render_board_and_you_can(
         http_client,
@@ -190,7 +190,7 @@ async fn send_reminder(
         &content,
         palette,
         &players,
-        Some(&format!("game-{game_id}")),
+        None,
         false,
         &crate::email::notify::reply_address(&token),
         unsubscribe,
@@ -284,20 +284,35 @@ async fn sweep_once(
     }
 }
 
-pub fn spawn_turn_reminder_sweep(
-    pool: PgPool,
-    resend: Option<resend_rs::Resend>,
-    http_client: reqwest::Client,
-) {
-    let interval = sweep_interval();
-    tracing::info!("turn_reminder: sweep every {:?}", interval);
+/// Spawns one periodic sweep: a `MissedTickBehavior::Skip` interval that runs
+/// `run()` every tick, forever. Six sweeps used to repeat this loop verbatim
+/// (wfe F38).
+fn spawn_sweep<F, Fut>(name: &'static str, interval: std::time::Duration, mut run: F)
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    tracing::info!("{name}: sweep every {interval:?}");
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            sweep_once(resend.as_ref(), &pool, &http_client).await;
+            run().await;
         }
+    });
+}
+
+pub fn spawn_turn_reminder_sweep(
+    pool: PgPool,
+    resend: Option<resend_rs::Resend>,
+    http_client: reqwest::Client,
+) {
+    spawn_sweep("turn_reminder", sweep_interval(), move || {
+        let pool = pool.clone();
+        let resend = resend.clone();
+        let http_client = http_client.clone();
+        async move { sweep_once(resend.as_ref(), &pool, &http_client).await }
     });
 }
 
@@ -380,15 +395,10 @@ async fn sweep_bot_turns_once(pool: &PgPool, jetstream: &async_nats::jetstream::
 }
 
 pub fn spawn_bot_turn_sweep(pool: PgPool, jetstream: async_nats::jetstream::Context) {
-    let interval = bot_turn_sweep_interval();
-    tracing::info!("bot_turn_sweep: sweep every {:?}", interval);
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(interval);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tick.tick().await;
-            sweep_bot_turns_once(&pool, &jetstream).await;
-        }
+    spawn_sweep("bot_turn_sweep", bot_turn_sweep_interval(), move || {
+        let pool = pool.clone();
+        let jetstream = jetstream.clone();
+        async move { sweep_bot_turns_once(&pool, &jetstream).await }
     });
 }
 
@@ -422,13 +432,9 @@ async fn sweep_processed_webhook_events_once(pool: &PgPool) {
 /// Periodic job deleting unverified addresses that were never confirmed
 /// (the 22d expiry cleanup). Reuses the shared `sweep_interval()` cadence.
 pub fn spawn_unverified_email_sweep(pool: PgPool) {
-    let interval = sweep_interval();
-    tracing::info!("unverified_email_expiry: sweep every {:?}", interval);
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(interval);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tick.tick().await;
+    spawn_sweep("unverified_email_expiry", sweep_interval(), move || {
+        let pool = pool.clone();
+        async move {
             sweep_unverified_emails_once(&pool).await;
             sweep_processed_webhook_events_once(&pool).await;
         }
@@ -490,15 +496,10 @@ async fn sweep_invite_nudge_once(resend: Option<&resend_rs::Resend>, pool: &PgPo
 }
 
 pub fn spawn_invite_nudge_sweep(pool: PgPool, resend: Option<resend_rs::Resend>) {
-    let interval = sweep_interval();
-    tracing::info!("invite_nudge: sweep every {:?}", interval);
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(interval);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tick.tick().await;
-            sweep_invite_nudge_once(resend.as_ref(), &pool).await;
-        }
+    spawn_sweep("invite_nudge", sweep_interval(), move || {
+        let pool = pool.clone();
+        let resend = resend.clone();
+        async move { sweep_invite_nudge_once(resend.as_ref(), &pool).await }
     });
 }
 
@@ -522,15 +523,10 @@ async fn sweep_invite_expiry_once(resend: Option<&resend_rs::Resend>, pool: &PgP
 }
 
 pub fn spawn_invite_expiry_sweep(pool: PgPool, resend: Option<resend_rs::Resend>) {
-    let interval = sweep_interval();
-    tracing::info!("invite_expiry: sweep every {:?}", interval);
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(interval);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tick.tick().await;
-            sweep_invite_expiry_once(resend.as_ref(), &pool).await;
-        }
+    spawn_sweep("invite_expiry", sweep_interval(), move || {
+        let pool = pool.clone();
+        let resend = resend.clone();
+        async move { sweep_invite_expiry_once(resend.as_ref(), &pool).await }
     });
 }
 
@@ -566,15 +562,11 @@ pub fn spawn_invite_auto_decline_sweep(
     resend: Option<resend_rs::Resend>,
     broadcaster: crate::websocket::GameBroadcaster,
 ) {
-    let interval = sweep_interval();
-    tracing::info!("invite_auto_decline: sweep every {:?}", interval);
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(interval);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tick.tick().await;
-            sweep_invite_auto_decline_once(resend.as_ref(), &pool, &broadcaster).await;
-        }
+    spawn_sweep("invite_auto_decline", sweep_interval(), move || {
+        let pool = pool.clone();
+        let resend = resend.clone();
+        let broadcaster = broadcaster.clone();
+        async move { sweep_invite_auto_decline_once(resend.as_ref(), &pool, &broadcaster).await }
     });
 }
 
@@ -620,13 +612,6 @@ mod tests {
         unsafe { std::env::set_var("TURN_REMINDER_SWEEP_INTERVAL", "5m") };
         assert_eq!(sweep_interval(), std::time::Duration::from_secs(300));
         unsafe { std::env::remove_var("TURN_REMINDER_SWEEP_INTERVAL") };
-    }
-
-    #[test]
-    fn reminder_header_contains_name() {
-        let h = reminder_header_text("Alice");
-        assert!(h.contains("Alice"));
-        assert!(h.contains("Still your turn"));
     }
 
     #[sqlx::test]
