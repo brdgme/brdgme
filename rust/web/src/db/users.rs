@@ -338,6 +338,15 @@ pub async fn set_user_reminder_emails_enabled(
 // --- #22d multiple emails per account (spec 2026-07-05-22, section 22d) ---
 // Plain (non-macro) queries throughout, matching get_user_theme above.
 
+#[cfg(feature = "ssr")]
+pub async fn invalidate_all_auth_tokens(pool: &PgPool, user_id: Uuid) -> Result<u64> {
+    let result = sqlx::query("DELETE FROM user_auth_tokens WHERE user_id = $1")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;

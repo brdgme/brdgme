@@ -30,10 +30,18 @@ async fn main() {
     // already-installed subscriber.
     let _sentry_guard = init_sentry();
 
+    web::crypto::load_key().expect("DATABASE_ENCRYPTION_KEY missing or malformed");
     if web::crypto::using_default_key() {
         tracing::warn!(
-            "DATABASE_ENCRYPTION_KEY not set - using insecure default key, DO NOT USE IN PRODUCTION"
+            "DATABASE_ENCRYPTION_KEY not set - using insecure default key (ALLOW_INSECURE_DEFAULT_KEY=true), DO NOT USE IN PRODUCTION"
         );
+    }
+
+    let turnstile_secret = std::env::var("TURNSTILE_SECRET_KEY").unwrap_or_default();
+    if turnstile_secret.is_empty()
+        && std::env::var("ALLOW_INSECURE_DEFAULT_KEY").as_deref() != Ok("true")
+    {
+        panic!("TURNSTILE_SECRET_KEY not set - refusing to start without CAPTCHA verification");
     }
 
     let pool = create_pool().await.expect("Failed to create database pool");

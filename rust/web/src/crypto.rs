@@ -13,6 +13,8 @@ pub enum CryptoError {
     DecryptionFailed,
     #[error("invalid hex encoding")]
     InvalidHex,
+    #[error("DATABASE_ENCRYPTION_KEY not set")]
+    MissingKey,
 }
 
 pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
@@ -54,7 +56,12 @@ pub fn using_default_key() -> bool {
 pub fn load_key() -> Result<Zeroizing<[u8; 32]>, CryptoError> {
     let hex_str = match std::env::var("DATABASE_ENCRYPTION_KEY") {
         Ok(v) => v,
-        Err(_) => return Ok(default_key()),
+        Err(_) => {
+            if std::env::var("ALLOW_INSECURE_DEFAULT_KEY").as_deref() == Ok("true") {
+                return Ok(default_key());
+            }
+            return Err(CryptoError::MissingKey);
+        }
     };
     let mut bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
     if bytes.len() != 32 {

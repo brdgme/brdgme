@@ -76,11 +76,15 @@ This confirmation will expire in 1 hour if not used.</pre>"#
 }
 
 #[cfg(feature = "ssr")]
-async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, token: &str) {
+async fn send_login_email(
+    resend: Option<&resend_rs::Resend>,
+    to_email: &str,
+    token: &str,
+) -> Result<(), ()> {
     let Some(resend) = resend else {
         // No RESEND_API_KEY configured (dev default): log instead of sending.
         println!("\n==> LOGIN CODE for {}: {}\n", to_email, token);
-        return;
+        return Ok(());
     };
 
     // Counts actual Resend API calls only (feeds the Resend quota alert), not
@@ -100,7 +104,9 @@ async fn send_login_email(resend: Option<&resend_rs::Resend>, to_email: &str, to
 
     if let Err(e) = resend.emails.send(email).await {
         tracing::error!("Failed to send login email to {}: {}", to_email, e);
+        return Err(());
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,7 +243,12 @@ pub(crate) async fn request_confirmation_code(
         .await
         .map_err(internal("login: commit transaction"))?;
 
-    send_login_email(resend, email, &code).await;
+    if send_login_email(resend, email, &code).await.is_err() {
+        return Ok(LoginResponse {
+            success: false,
+            message: "Could not send the login email, please try again.".to_string(),
+        });
+    }
 
     Ok(generic_success)
 }
@@ -259,8 +270,9 @@ async fn verify_turnstile_token(client: &reqwest::Client, secret: &str, token: &
             .map(|v| v["success"].as_bool().unwrap_or(false))
             .unwrap_or(false),
         Err(e) => {
-            tracing::warn!("Turnstile verification failed (fail-open): {e}");
-            true
+            tracing::warn!("Turnstile verification failed: {e}");
+            axum_prometheus::metrics::counter!("turnstile_verify_error_total").increment(1);
+            false
         }
     }
 }
@@ -310,6 +322,8 @@ pub async fn login(email: String, turnstile_token: String) -> Result<LoginRespon
         .fetch_one(&pool)
         .await
         .map_err(internal("login: check verified"))?;
+        // D-14 (ii): the differential response is deliberate. Uniform rejection
+        // would lock out existing verified users on blocked domains.
         if !is_existing_verified {
             return Ok(LoginResponse {
                 success: false,
@@ -417,8 +431,6 @@ async fn confirm_login_inner(
     email: &str,
     token: &str,
 ) -> Result<ConfirmedLogin, ServerFnError> {
-    let invalid = || ServerFnError::new("Invalid or expired token".to_string());
-
     let _confirmation = validate_confirmation_code(pool, email, token).await?;
 
     // Accepted race: two concurrent confirms with the same valid code can
@@ -442,14 +454,19 @@ async fn confirm_login_inner(
     let user_id = if let Some(user_email) = user_email {
         user_email.user_id
     } else {
-        let pending: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_emails WHERE email = $1)")
-                .bind(email)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(internal("confirm_login: check pending email"))?;
+        let pending: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM user_emails WHERE email = $1 AND verified_at IS NULL)",
+        )
+        .bind(email)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(internal("confirm_login: check pending email"))?;
         if pending {
-            return Err(invalid());
+            sqlx::query("DELETE FROM user_emails WHERE email = $1 AND verified_at IS NULL")
+                .bind(email)
+                .execute(&mut *tx)
+                .await
+                .map_err(internal("confirm_login: delete squatted email"))?;
         }
 
         let new_user_id = Uuid::new_v4();
@@ -500,8 +517,7 @@ async fn confirm_login_inner(
     .await
     .map_err(internal("confirm_login: create auth token"))?;
 
-    sqlx::query!("DELETE FROM login_confirmations WHERE email = $1", email)
-        .execute(&mut *tx)
+    crate::db::delete_login_confirmation_tx(&mut tx, email)
         .await
         .map_err(internal("confirm_login: delete confirmation"))?;
 
@@ -565,6 +581,30 @@ pub async fn logout() -> Result<bool, ServerFnError> {
         .flush()
         .await
         .map_err(internal("logout: flush session"))?;
+
+    Ok(true)
+}
+
+#[server(LogoutEverywhere, "/api")]
+pub async fn logout_everywhere() -> Result<bool, ServerFnError> {
+    let session: Session = extract()
+        .await
+        .map_err(internal("logout_everywhere: extract session"))?;
+
+    if let Some(user) = get_user_from_session(&session).await {
+        let pool = expect_context::<PgPool>();
+        crate::db::invalidate_all_auth_tokens(&pool, user.id)
+            .await
+            .map_err(internal("logout_everywhere: invalidate tokens"))?;
+    }
+
+    clear_user_session(&session)
+        .await
+        .map_err(internal("logout_everywhere: clear session"))?;
+    session
+        .flush()
+        .await
+        .map_err(internal("logout_everywhere: flush session"))?;
 
     Ok(true)
 }
@@ -873,8 +913,7 @@ pub async fn confirm_email_address(email: String, token: String) -> Result<(), S
     {
         return Err(ServerFnError::new("No pending address for that code"));
     }
-    sqlx::query!("DELETE FROM login_confirmations WHERE email = $1", email)
-        .execute(&pool)
+    crate::db::delete_login_confirmation(&pool, &email)
         .await
         .map_err(internal("confirm_email_address: delete confirmation"))?;
     Ok(())
@@ -907,9 +946,17 @@ pub async fn make_email_address_active(email: String) -> Result<(), ServerFnErro
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
     let http_client = expect_context::<reqwest::Client>();
-    let games = crate::db::find_active_turn_games(&pool, user.id, crate::db::SWITCH_DIGEST_CAP)
+    let games = crate::db::find_active_turn_games(&pool, user.id, crate::db::SWITCH_DIGEST_CAP + 1)
         .await
         .map_err(internal("make_email_address_active: find turn games"))?;
+    if games.len() > crate::db::SWITCH_DIGEST_CAP {
+        tracing::info!(
+            "switch digest capped: {} games, sending {}",
+            games.len(),
+            crate::db::SWITCH_DIGEST_CAP
+        );
+        axum_prometheus::metrics::counter!("switch_digest_capped_total").increment(1);
+    }
     for (game_id, game_player_id) in crate::db::cap_digest(games, crate::db::SWITCH_DIGEST_CAP) {
         crate::email::notify::send_turn_digest(
             resend.as_ref(),
@@ -1241,7 +1288,9 @@ mod tests {
     #[tokio::test]
     async fn send_login_email_logs_when_resend_unset() {
         // Must not panic or attempt any network I/O when `resend` is `None`.
-        send_login_email(None, "someone@example.com", "123456").await;
+        send_login_email(None, "someone@example.com", "123456")
+            .await
+            .unwrap();
     }
 
     #[test]
@@ -1506,24 +1555,24 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn confirm_login_rejects_pending_unverified_address(pool: PgPool) {
-        let user_id = Uuid::new_v4();
+    async fn confirm_login_steals_unverified_claim(pool: PgPool) {
+        let squatter_id = Uuid::new_v4();
         sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)")
-            .bind(user_id)
-            .bind("pending")
+            .bind(squatter_id)
+            .bind("squatter")
             .bind(Vec::<String>::new())
             .execute(&pool)
             .await
             .unwrap();
         sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
-            .bind(user_id)
-            .bind("unverified@example.com")
+            .bind(squatter_id)
+            .bind("victim@example.com")
             .execute(&pool)
             .await
             .unwrap();
         seed_confirmation(
             &pool,
-            "unverified@example.com",
+            "victim@example.com",
             "123456",
             time::Duration::minutes(1),
             0,
@@ -1532,9 +1581,35 @@ mod tests {
         )
         .await;
 
-        let result = confirm_login_inner(&pool, "unverified@example.com", "123456").await;
-        assert!(result.is_err(), "unverified address cannot log in");
-        assert_eq!(user_count(&pool).await, 1, "no new user created");
+        let confirmed = confirm_login_inner(&pool, "victim@example.com", "123456")
+            .await
+            .unwrap();
+        assert_ne!(
+            confirmed.user.id, squatter_id,
+            "new user created, not the squatter"
+        );
+        assert_eq!(confirmed.email, "victim@example.com");
+        assert_eq!(user_count(&pool).await, 2);
+
+        let squatter_still_has: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM user_emails WHERE user_id = $1 AND email = $2)",
+        )
+        .bind(squatter_id)
+        .bind("victim@example.com")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!squatter_still_has, "squatter's unverified row deleted");
+
+        let new_owner_verified: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM user_emails WHERE user_id = $1 AND email = $2 AND verified_at IS NOT NULL)",
+        )
+        .bind(confirmed.user.id)
+        .bind("victim@example.com")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(new_owner_verified, "new owner has verified row");
     }
 
     #[sqlx::test]
@@ -1688,5 +1763,155 @@ mod tests {
             .unwrap();
         assert!(!resp.success);
         assert!(resp.message.contains("temporarily limited"));
+    }
+
+    #[sqlx::test]
+    async fn make_active_rejects_unverified_address(pool: PgPool) {
+        let user_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind("emailchange")
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("primary@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO user_emails (user_id, email, is_primary) VALUES ($1, $2, false)")
+            .bind(user_id)
+            .bind("unverified@example.com")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let outcome = crate::db::set_primary_email(&pool, user_id, "unverified@example.com")
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, crate::db::SetPrimaryOutcome::Unverified),
+            "unverified address must not become active"
+        );
+
+        let still_primary: bool = sqlx::query_scalar(
+            "SELECT is_primary FROM user_emails WHERE user_id = $1 AND email = $2",
+        )
+        .bind(user_id)
+        .bind("primary@example.com")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(still_primary, "original primary unchanged");
+    }
+
+    #[sqlx::test]
+    async fn login_blocked_domain_asymmetry(pool: PgPool) {
+        let user_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind("blockeduser")
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("existing@mailinator.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let resp_existing = with_pool_context(&pool, || {
+            login("existing@mailinator.com".to_string(), String::new())
+        })
+        .await
+        .unwrap();
+        assert!(
+            resp_existing.success,
+            "verified user on blocked domain can still log in"
+        );
+
+        let resp_new = with_pool_context(&pool, || {
+            login("newuser@mailinator.com".to_string(), String::new())
+        })
+        .await
+        .unwrap();
+        assert!(!resp_new.success, "new user on blocked domain rejected");
+        assert!(resp_new.message.contains("domain"));
+    }
+
+    #[tokio::test]
+    async fn verify_turnstile_rejects_on_transport_error() {
+        let client = reqwest::Client::new();
+        let result = verify_turnstile_token(&client, "fake-secret", "fake-token").await;
+        assert!(!result, "transport error must fail closed");
+    }
+
+    #[tokio::test]
+    async fn verify_turnstile_empty_secret_allows_dev() {
+        let client = reqwest::Client::new();
+        let result = verify_turnstile_token(&client, "", "any-token").await;
+        assert!(result, "empty secret is the dev carve-out");
+    }
+
+    #[sqlx::test]
+    async fn invalidate_all_auth_tokens_removes_every_token(pool: PgPool) {
+        let user_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO users (id, name, pref_colors) VALUES ($1, $2, $3)")
+            .bind(user_id)
+            .bind("multisession")
+            .bind(Vec::<String>::new())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let token1 = Uuid::new_v4();
+        let token2 = Uuid::new_v4();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(token1)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(token2)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(
+            crate::auth::session::validate_session_token(&pool, token1)
+                .await
+                .unwrap()
+        );
+        assert!(
+            crate::auth::session::validate_session_token(&pool, token2)
+                .await
+                .unwrap()
+        );
+
+        let deleted = crate::db::invalidate_all_auth_tokens(&pool, user_id)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 2);
+
+        assert!(
+            !crate::auth::session::validate_session_token(&pool, token1)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !crate::auth::session::validate_session_token(&pool, token2)
+                .await
+                .unwrap()
+        );
     }
 }

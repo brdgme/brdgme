@@ -15,3 +15,5 @@ spec:
           env:
             - name: SECURE_COOKIE
               value: "false"
+            - name: ALLOW_INSECURE_DEFAULT_KEY
+              value: "true"

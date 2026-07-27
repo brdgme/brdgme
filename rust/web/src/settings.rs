@@ -272,6 +272,7 @@ fn EmailSection(
         let email = email.clone();
         async move { crate::auth::remove_email_address(email).await }
     });
+    let logout_everywhere_action = ServerAction::<crate::auth::LogoutEverywhere>::new();
 
     Effect::new(move |_| {
         if let Some(result) = add_action.value().get() {
@@ -326,6 +327,21 @@ fn EmailSection(
                     success.set(Some("Address removed.".to_string()));
                     error.set(None);
                     addresses.refetch();
+                }
+                Err(e) => {
+                    error.set(Some(e.to_string()));
+                    success.set(None);
+                }
+            }
+        }
+    });
+
+    Effect::new(move |_| {
+        if let Some(result) = logout_everywhere_action.value().get() {
+            match result {
+                Ok(_) => {
+                    success.set(Some("Logged out of all sessions.".to_string()));
+                    error.set(None);
                 }
                 Err(e) => {
                     error.set(Some(e.to_string()));
@@ -461,6 +477,15 @@ fn EmailSection(
                 </div>
             </FormField>
         </form>
+
+        <div class="form-actions">
+            <button
+                type="button"
+                on:click=move |_| { logout_everywhere_action.dispatch(crate::auth::LogoutEverywhere {}); }
+            >
+                "Log out everywhere"
+            </button>
+        </div>
     }
 }
 

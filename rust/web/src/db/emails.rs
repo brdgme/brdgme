@@ -245,6 +245,26 @@ pub async fn delete_old_processed_webhook_events(
     Ok(res.rows_affected())
 }
 
+#[cfg(feature = "ssr")]
+pub async fn delete_login_confirmation(pool: &PgPool, email: &str) -> Result<()> {
+    sqlx::query("DELETE FROM login_confirmations WHERE email = $1")
+        .bind(email)
+        .execute(pool)
+        .await
+        .map_err(Into::into)
+        .map(|_| ())
+}
+
+#[cfg(feature = "ssr")]
+pub async fn delete_login_confirmation_tx(tx: &mut sqlx::PgConnection, email: &str) -> Result<()> {
+    sqlx::query("DELETE FROM login_confirmations WHERE email = $1")
+        .bind(email)
+        .execute(&mut *tx)
+        .await
+        .map_err(Into::into)
+        .map(|_| ())
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::*;
