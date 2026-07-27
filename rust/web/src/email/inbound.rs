@@ -227,6 +227,8 @@ pub enum VerifyError {
     InvalidTimestamp,
     #[error("verification failed: {0}")]
     Other(String),
+    #[error("invalid header value")]
+    InvalidHeaderValue,
 }
 
 pub fn verify_webhook(
@@ -240,9 +242,18 @@ pub fn verify_webhook(
 
     let webhook = svix::webhooks::Webhook::new(secret).map_err(|_| VerifyError::InvalidSecret)?;
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert("svix-id", HeaderValue::from_str(msg_id).unwrap());
-    headers.insert("svix-timestamp", HeaderValue::from_str(timestamp).unwrap());
-    headers.insert("svix-signature", HeaderValue::from_str(signature).unwrap());
+    headers.insert(
+        "svix-id",
+        HeaderValue::from_str(msg_id).map_err(|_| VerifyError::InvalidHeaderValue)?,
+    );
+    headers.insert(
+        "svix-timestamp",
+        HeaderValue::from_str(timestamp).map_err(|_| VerifyError::InvalidHeaderValue)?,
+    );
+    headers.insert(
+        "svix-signature",
+        HeaderValue::from_str(signature).map_err(|_| VerifyError::InvalidHeaderValue)?,
+    );
     webhook.verify(raw_body, &headers).map_err(|e| match e {
         svix::webhooks::WebhookError::InvalidSecret(_)
         | svix::webhooks::WebhookError::EmptySecret => VerifyError::InvalidSecret,
@@ -469,8 +480,12 @@ async fn from_matches_verified_email(
     Ok(exists)
 }
 
-/// Insert-or-skip idempotency marker. Returns true if THIS call inserted the row
-/// (proceed); false if it already existed (a duplicate delivery -> skip).
+/// Insert-or-skip idempotency marker. Returns true if THIS call inserted the
+/// row (proceed); false if it already existed (a duplicate delivery -> skip).
+///
+/// The check-then-mark window (see `event_already_processed`) lets two
+/// simultaneous deliveries of one `svix-id` both process - the accepted
+/// at-least-once cost under D-2.
 async fn mark_event_processed(pool: &sqlx::PgPool, event_id: &str) -> sqlx::Result<bool> {
     let result = sqlx::query(
         "INSERT INTO processed_webhook_events (event_id) VALUES ($1) ON CONFLICT (event_id) DO NOTHING",
@@ -486,6 +501,15 @@ fn header_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
         .get(name)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
+}
+
+async fn event_already_processed(pool: &sqlx::PgPool, event_id: &str) -> sqlx::Result<bool> {
+    let (exists,): (bool,) =
+        sqlx::query_as("SELECT EXISTS(SELECT 1 FROM processed_webhook_events WHERE event_id = $1)")
+            .bind(event_id)
+            .fetch_one(pool)
+            .await?;
+    Ok(exists)
 }
 
 /// `POST /api/webhooks/resend` - Resend inbound-email webhook. Verifies the
@@ -519,9 +543,9 @@ pub async fn resend_webhook(
         return StatusCode::UNAUTHORIZED;
     }
 
-    match mark_event_processed(&state.pool, &msg_id).await {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::OK,
+    match event_already_processed(&state.pool, &msg_id).await {
+        Ok(true) => return StatusCode::OK,
+        Ok(false) => {}
         Err(e) => {
             tracing::error!("resend webhook: idempotency check failed: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR;
@@ -532,11 +556,13 @@ pub async fn resend_webhook(
         Ok(e) => e,
         Err(e) => {
             tracing::error!("resend webhook: failed to parse event payload: {e}");
+            let _ = mark_event_processed(&state.pool, &msg_id).await;
             return StatusCode::OK;
         }
     };
     if event.event_type != "email.received" {
         tracing::info!("resend webhook: ignoring event type {}", event.event_type);
+        let _ = mark_event_processed(&state.pool, &msg_id).await;
         return StatusCode::OK;
     }
 
@@ -544,37 +570,64 @@ pub async fn resend_webhook(
         tracing::warn!(
             "resend webhook: could not extract an address from the From value; no response"
         );
+        let _ = mark_event_processed(&state.pool, &msg_id).await;
         return StatusCode::OK;
     };
 
-    match select_route(&event.data.to, &event.data.received_for) {
+    let start = std::time::Instant::now();
+    let outcome = match select_route(&event.data.to, &event.data.received_for) {
         Some(InboundRoute::Game(token)) => {
-            handle_game_reply(&state, &token, &from, &event.data.email_id).await;
+            handle_game_reply(&state, &token, &from, &event.data.email_id).await
         }
         Some(InboundRoute::Invite(token)) => {
-            handle_invite_reply(&state, &token, &from, &event.data.email_id).await;
+            handle_invite_reply(&state, &token, &from, &event.data.email_id).await
         }
         Some(InboundRoute::Settings(token)) => {
-            handle_settings_reply_route(&state, &token, &from, &event.data.email_id).await;
+            handle_settings_reply_route(&state, &token, &from, &event.data.email_id).await
         }
         None => {
             tracing::info!("resend webhook: no route for recipient; ignoring");
+            RouteOutcome::Done
+        }
+    };
+    let elapsed = start.elapsed();
+    if elapsed > std::time::Duration::from_secs(10) {
+        tracing::warn!("resend webhook: dispatch took {elapsed:?} (>10s); consider option C");
+    }
+    match outcome {
+        RouteOutcome::Done => {
+            if let Err(e) = mark_event_processed(&state.pool, &msg_id).await {
+                tracing::error!("resend webhook: failed to mark event processed: {e}");
+            }
+            StatusCode::OK
+        }
+        RouteOutcome::Retry => {
+            tracing::error!(
+                "resend webhook: transient failure; not marking, returning 5xx for retry"
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
         }
     }
-    StatusCode::OK
+}
+
+enum InboundText {
+    Text(String),
+    NoBody,
+    FetchFailed,
 }
 
 /// Fetches an inbound email's raw MIME source from Resend and returns its
-/// plain-text body, or `None` (already logged) if the key is unconfigured or
-/// the fetch fails. The single place the inbound direction reads
-/// `RESEND_API_KEY`; this block used to be duplicated verbatim in all three
-/// routes (wfe F9).
-async fn fetch_inbound_text(state: &AppState, email_id: &str) -> Option<String> {
+/// plain-text body as `InboundText::Text`, `InboundText::NoBody` if the email
+/// has no plain-text part, or `InboundText::FetchFailed` (already logged) if
+/// the key is unconfigured or the fetch fails. The single place the inbound
+/// direction reads `RESEND_API_KEY`; this block used to be duplicated verbatim
+/// in all three routes (wfe F9).
+async fn fetch_inbound_text(state: &AppState, email_id: &str) -> InboundText {
     let api_key = match std::env::var("RESEND_API_KEY") {
         Ok(k) if !k.is_empty() => k,
         _ => {
             tracing::error!("resend webhook: RESEND_API_KEY not configured; cannot fetch body");
-            return None;
+            return InboundText::FetchFailed;
         }
     };
     let source = ResendInbound {
@@ -582,10 +635,13 @@ async fn fetch_inbound_text(state: &AppState, email_id: &str) -> Option<String> 
         http: state.http_client.clone(),
     };
     match source.fetch_raw_email(email_id).await {
-        Ok(raw) => Some(extract_plain_text(&raw).unwrap_or_default()),
+        Ok(raw) => match extract_plain_text(&raw) {
+            Some(text) => InboundText::Text(text),
+            None => InboundText::NoBody,
+        },
         Err(e) => {
             tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
-            None
+            InboundText::FetchFailed
         }
     }
 }
@@ -600,18 +656,33 @@ async fn rollback_invite_tx(tx: sqlx::Transaction<'_, sqlx::Postgres>, context: 
     }
 }
 
-async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: &str) {
+/// Outcome of routing an inbound webhook event.
+///
+/// `Done` = finished (successfully or failed unrecoverably); mark the event
+/// and return 200. `Retry` = transient failure before any state mutation;
+/// do not mark, return 5xx so svix retries.
+enum RouteOutcome {
+    Done,
+    Retry,
+}
+
+async fn handle_game_reply(
+    state: &AppState,
+    token: &str,
+    from: &str,
+    email_id: &str,
+) -> RouteOutcome {
     let pool = &state.pool;
 
     let player = match find_game_player_by_email_token(pool, token).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             tracing::info!("resend webhook: unknown game token; no response");
-            return;
+            return RouteOutcome::Done;
         }
         Err(e) => {
             tracing::error!("resend webhook: token lookup failed: {e}");
-            return;
+            return RouteOutcome::Retry;
         }
     };
 
@@ -619,22 +690,27 @@ async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: 
         Ok(true) => {}
         Ok(false) => {
             tracing::info!("resend webhook: From does not match a verified address; no response");
-            return;
+            return RouteOutcome::Done;
         }
         Err(e) => {
             tracing::error!("resend webhook: From verification failed: {e}");
-            return;
+            return RouteOutcome::Retry;
         }
     }
 
-    let Some(text) = fetch_inbound_text(state, email_id).await else {
-        return;
+    let text = match fetch_inbound_text(state, email_id).await {
+        InboundText::FetchFailed => return RouteOutcome::Retry,
+        InboundText::NoBody => {
+            send_game_reply_response(state, &player, token, from, no_command_header_text()).await;
+            return RouteOutcome::Done;
+        }
+        InboundText::Text(text) => text,
     };
     let commands = parse_reply_commands(&text);
 
     if commands.is_empty() {
         send_game_reply_response(state, &player, token, from, no_command_header_text()).await;
-        return;
+        return RouteOutcome::Done;
     }
 
     let ctx = crate::email::commands::EmailCommandCtx {
@@ -682,26 +758,32 @@ async fn handle_game_reply(state: &AppState, token: &str, from: &str, email_id: 
             send_game_reply_response(state, &player, token, from, header).await;
         }
     }
+    RouteOutcome::Done
 }
 
-async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id: &str) {
+async fn handle_invite_reply(
+    state: &AppState,
+    token: &str,
+    from: &str,
+    email_id: &str,
+) -> RouteOutcome {
     let pool = &state.pool;
 
     let player = match crate::proposals::find_proposal_player_by_email_token(pool, token).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             tracing::info!("resend webhook: unknown invite token; no response");
-            return;
+            return RouteOutcome::Done;
         }
         Err(e) => {
             tracing::error!("resend webhook: invite token lookup failed: {e}");
-            return;
+            return RouteOutcome::Retry;
         }
     };
 
     let Some(user_id) = player.user_id else {
         tracing::info!("resend webhook: invite token belongs to a bot slot; no response");
-        return;
+        return RouteOutcome::Done;
     };
 
     match from_matches_verified_email(pool, user_id, from).await {
@@ -710,16 +792,29 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
             tracing::info!(
                 "resend webhook: invite From does not match a verified address; no response"
             );
-            return;
+            return RouteOutcome::Done;
         }
         Err(e) => {
             tracing::error!("resend webhook: invite From verification failed: {e}");
-            return;
+            return RouteOutcome::Retry;
         }
     }
 
-    let Some(text) = fetch_inbound_text(state, email_id).await else {
-        return;
+    let text = match fetch_inbound_text(state, email_id).await {
+        InboundText::FetchFailed => return RouteOutcome::Retry,
+        InboundText::NoBody => {
+            send_invite_reply_response(
+                state,
+                &player,
+                user_id,
+                from,
+                no_command_header_text(),
+                None,
+            )
+            .await;
+            return RouteOutcome::Done;
+        }
+        InboundText::Text(text) => text,
     };
     let commands = parse_reply_commands(&text);
 
@@ -735,7 +830,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
             None,
         )
         .await;
-        return;
+        return RouteOutcome::Done;
     };
     let accept = intent == InviteIntent::Accept;
 
@@ -744,7 +839,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!("resend webhook: invite begin tx failed: {e}");
-            return;
+            return RouteOutcome::Retry;
         }
     };
 
@@ -752,11 +847,11 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
         Ok(Some(p)) => p,
         Ok(None) => {
             tracing::warn!("resend webhook: proposal {proposal_id} not found");
-            return;
+            return RouteOutcome::Done;
         }
         Err(e) => {
             tracing::error!("resend webhook: invite lock proposal failed: {e}");
-            return;
+            return RouteOutcome::Retry;
         }
     };
 
@@ -771,14 +866,14 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
             None,
         )
         .await;
-        return;
+        return RouteOutcome::Done;
     }
 
     let players = match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("resend webhook: invite players lookup failed: {e}");
-            return;
+            return RouteOutcome::Retry;
         }
     };
 
@@ -790,7 +885,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
                 player.id
             );
             rollback_invite_tx(tx, "invite player not in roster").await;
-            return;
+            return RouteOutcome::Done;
         }
     };
 
@@ -805,7 +900,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
             None,
         )
         .await;
-        return;
+        return RouteOutcome::Done;
     }
 
     let response = if accept { "accepted" } else { "declined" };
@@ -813,7 +908,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
         crate::proposals::update_proposal_player_response(&mut tx, player.id, response).await
     {
         tracing::error!("resend webhook: invite update response failed: {e}");
-        return;
+        return RouteOutcome::Done;
     }
 
     let mut started_game_id: Option<uuid::Uuid> = None;
@@ -825,7 +920,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
                 Ok(n) => n,
                 Err(e) => {
                     tracing::error!("resend webhook: invite count pending failed: {e}");
-                    return;
+                    return RouteOutcome::Done;
                 }
             };
         if pending == 0 {
@@ -834,18 +929,18 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
                     Ok(Some(gv)) => gv,
                     Ok(None) => {
                         tracing::error!("resend webhook: game version not found for proposal");
-                        return;
+                        return RouteOutcome::Done;
                     }
                     Err(e) => {
                         tracing::error!("resend webhook: invite game version lookup failed: {e}");
-                        return;
+                        return RouteOutcome::Done;
                     }
                 };
             roster = match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::error!("resend webhook: invite roster lookup failed: {e}");
-                    return;
+                    return RouteOutcome::Done;
                 }
             };
             let accepted_count = roster.iter().filter(|p| p.response == "accepted").count();
@@ -859,7 +954,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
                 Ok(f) => f,
                 Err(e) => {
                     tracing::error!("resend webhook: invite fetch game failed: {e}");
-                    return;
+                    return RouteOutcome::Done;
                 }
             };
             match crate::proposals::start_proposal_tx(
@@ -874,7 +969,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
                 Ok(gid) => started_game_id = Some(gid),
                 Err(e) => {
                     tracing::error!("resend webhook: invite start proposal failed: {e}");
-                    return;
+                    return RouteOutcome::Done;
                 }
             }
         }
@@ -882,7 +977,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
 
     if let Err(e) = tx.commit().await {
         tracing::error!("resend webhook: invite commit failed: {e}");
-        return;
+        return RouteOutcome::Done;
     }
 
     state
@@ -920,6 +1015,7 @@ async fn handle_invite_reply(state: &AppState, token: &str, from: &str, email_id
     };
 
     send_invite_reply_response(state, &player, user_id, from, header, started_game_id).await;
+    RouteOutcome::Done
 }
 
 async fn send_invite_reply_response(
@@ -1205,11 +1301,19 @@ async fn send_rules_reply_response(
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 
-async fn handle_settings_reply_route(state: &AppState, token: &str, from: &str, email_id: &str) {
-    let Some(text) = fetch_inbound_text(state, email_id).await else {
-        return;
+async fn handle_settings_reply_route(
+    state: &AppState,
+    token: &str,
+    from: &str,
+    email_id: &str,
+) -> RouteOutcome {
+    let text = match fetch_inbound_text(state, email_id).await {
+        InboundText::FetchFailed => return RouteOutcome::Retry,
+        InboundText::NoBody => return RouteOutcome::Done,
+        InboundText::Text(text) => text,
     };
     handle_settings_reply(state, token, from, &text).await;
+    RouteOutcome::Done
 }
 
 async fn handle_settings_reply(state: &AppState, token: &str, from: &str, text: &str) {
@@ -1594,6 +1698,14 @@ Just a plain body";
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn verify_webhook_rejects_invalid_header_value() {
+        let secret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+        let body = b"{}";
+        let result = verify_webhook(secret, "msg\ninjection", "sig", "123", body);
+        assert!(matches!(result, Err(VerifyError::InvalidHeaderValue)));
     }
 
     #[test]
