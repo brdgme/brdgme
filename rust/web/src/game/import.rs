@@ -397,7 +397,9 @@ mod tests {
         );
         bundle.game.created_at = past;
         bundle.game.updated_at = past;
-        bundle.logs[0].created_at = past;
+        for log in &mut bundle.logs {
+            log.created_at = past;
+        }
 
         let outcome = import_bundle(&pool, &bundle).await.unwrap();
 
