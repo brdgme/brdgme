@@ -247,29 +247,30 @@ able to win the game.",
                 message: "not your turn".to_string(),
             })?
             .parse(input, players)?;
+        let was_finished = self.is_finished();
         match output.value {
             Command::Play(loc) => self.handle_play_command(player, &loc),
             Command::Found(corp) => self.handle_found_command(player, corp),
             Command::Buy(n, corp) => self.handle_buy_command(player, n, corp),
-            Command::Done => self.handle_done_command(player).map(|mut l| {
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players.len())
-                        .map(|p| (p, self.player_score(p) as i32))
-                        .collect();
-                    l.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                (l, false)
-            }),
+            Command::Done => self.handle_done_command(player).map(|l| (l, false)),
             Command::Merge(corp, into) => self.handle_merge_command(player, corp, into),
             Command::Sell(n) => self.handle_sell_command(player, n),
             Command::Trade(n) => self.handle_trade_command(player, n),
             Command::Keep => self.handle_keep_command(player),
             Command::End => self.handle_end_command(player).map(|l| (l, false)),
         }
-        .map(|(logs, can_undo)| CommandResponse {
-            logs,
-            can_undo,
-            remaining_input: output.remaining.to_string(),
+        .map(|(mut logs, can_undo)| {
+            if !was_finished && self.is_finished() {
+                let scores: Vec<(usize, i32)> = (0..self.players.len())
+                    .map(|p| (p, self.player_score(p) as i32))
+                    .collect();
+                logs.push(placings_log(&self.placings(), Some(&scores)));
+            }
+            CommandResponse {
+                logs,
+                can_undo,
+                remaining_input: output.remaining.to_string(),
+            }
         })
     }
 

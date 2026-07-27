@@ -1738,6 +1738,18 @@ impl Game {
         }
         Ok(logs)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_boards[p].victory_points()))
+            .collect();
+        let placings = gen_placings(
+            &(0..2)
+                .map(|p| vec![self.player_boards[p].victory_points()])
+                .collect::<Vec<Vec<i32>>>(),
+        );
+        logs.push(placings_log(&placings, Some(&scores)));
+    }
 }
 
 impl AdventureCard {
@@ -1878,232 +1890,103 @@ impl Gamer for Game {
             None => return Err(GameError::invalid_input("it is not your turn")),
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Choose { module },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.choose(player, module)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.choose(player, module)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Gain { resource },
                 ..
-            }) => {
-                let mut logs = self.gain(player, resource)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].victory_points()))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..2)
-                            .map(|p| vec![self.player_boards[p].victory_points()])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: true,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.gain(player, resource)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Put { num, on },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.put(player, num, on)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.put(player, num, on)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Sector { sector },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.sector(player, sector)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.sector(player, sector)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Build { resource },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.build(player, resource)?,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.build(player, resource)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Upgrade { module },
                 ..
-            }) => {
-                let mut logs = self.upgrade(player, module)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].victory_points()))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..2)
-                            .map(|p| vec![self.player_boards[p].victory_points()])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: true,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.upgrade(player, module)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Buy { amount, resource },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.buy(player, amount, resource)?,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.buy(player, amount, resource)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Sell { amount, resource },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.sell(player, amount, resource)?,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.sell(player, amount, resource)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Take { resource },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.take(player, resource)?,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.take(player, resource)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Done,
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.done(player)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.done(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Next,
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.next(player)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.next(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::End,
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.end(player)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.end(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Found,
                 ..
-            }) => {
-                let mut logs = self.found(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].victory_points()))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..2)
-                            .map(|p| vec![self.player_boards[p].victory_points()])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.found(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Fight,
                 ..
-            }) => {
-                let mut logs = self.fight(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].victory_points()))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..2)
-                            .map(|p| vec![self.player_boards[p].victory_points()])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.fight(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Pay,
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.pay(player)?,
-                can_undo: true,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.pay(player)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Lose { module },
                 ..
-            }) => Ok(CommandResponse {
-                logs: self.lose(player, module)?,
-                can_undo: false,
-                remaining_input: remaining.to_string(),
-            }),
+            }) => (self.lose(player, module)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Complete { adventure },
                 ..
-            }) => {
-                let mut logs = self.complete(player, adventure)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_boards[p].victory_points()))
-                        .collect();
-                    let placings = gen_placings(
-                        &(0..2)
-                            .map(|p| vec![self.player_boards[p].victory_points()])
-                            .collect::<Vec<Vec<i32>>>(),
-                    );
-                    logs.push(placings_log(&placings, Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.complete(player, adventure)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn status(&self) -> Status {
@@ -2731,5 +2614,59 @@ mod tests {
         g.player_boards[0].last_sectors = vec![1, 2, 3, 4, 1];
         g.end_flight();
         assert_eq!(g.player_boards[0].last_sectors, vec![2, 1, 2, 3, 4]);
+    }
+
+    fn is_placings_log(l: &Log) -> bool {
+        let s = brdgme_markup::to_string(&l.content);
+        s.contains("wins!") || s.contains("tie!")
+    }
+
+    #[test]
+    fn finish_epilogue_single_placings_log() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::TradeAndBuild;
+        g.current_player = 0;
+        g.player_boards[0].colonies = vec![colony_card(); 9];
+        g.player_boards[0].modules.insert(Module::Sensor, 1);
+        g.player_boards[0].resources.insert(Resource::Ore, 1);
+        g.player_boards[0].resources.insert(Resource::Carbon, 1);
+        g.player_boards[0].resources.insert(Resource::Food, 2);
+        assert_eq!(g.player_boards[0].victory_points(), 9);
+        assert!(!g.is_finished());
+
+        let resp = g.command(0, "upgrade se", &players).unwrap();
+        assert!(resp.can_undo);
+        assert_eq!(g.player_boards[0].victory_points(), 10);
+        assert!(g.is_finished());
+        let placings_count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(placings_count, 1, "exactly one placings log expected");
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log must be the last log"
+        );
+        match g.status() {
+            Status::Finished { .. } => {}
+            other => panic!("expected Finished status, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn non_finishing_command_has_no_placings_log() {
+        let players = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::TradeAndBuild;
+        g.current_player = 0;
+        g.player_boards[0].resources.insert(Resource::Fuel, 2);
+        assert!(!g.is_finished());
+
+        let resp = g.command(0, "build booster", &players).unwrap();
+        assert!(resp.can_undo);
+        assert!(!g.is_finished());
+        let placings_count = resp.logs.iter().filter(|l| is_placings_log(l)).count();
+        assert_eq!(
+            placings_count, 0,
+            "no placings log on non-finishing command"
+        );
     }
 }
