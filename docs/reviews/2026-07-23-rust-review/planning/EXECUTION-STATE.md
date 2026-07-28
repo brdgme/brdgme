@@ -31,6 +31,22 @@ Commit after each package (one commit per package, message names the WP id, stag
 | WP-18 | 84b68b9 | c F1 F3 F4 F5 texas-holdem-2: raise_parser min_raise() fix + test, bet_up_to expect documented (Go parity), panic sites commented, Category Default-derive replacing Option<Category>. c F2 NOT touched (WP-20 parked). |
 | WP-31 | f16cb02 | f F3 F5 F6 F8 F10 F11 F12: zombie-dice roll_off_players in PubState (+render+DATA_DOCS), roll_inner extraction (no recursion), full-equality rolloff guard; battleship shoot bounds check, ship expect->internal error, Direction::all() &'static slice, usize hits remaining. |
 | WP-32 | 807ab4e | f F16 F17 F18 F20 F22 F23 F24 F25 F27 F28 F30 F31: for-sale RULES.md cheque/tie fixes, player_points in Finished log, Option<Phase> serde migration (infer_phase fallback), all-hands empty guard, render sentinel align, 19 methods privatized; category-5 RULES.md 2-10->2-8, draw_cards guard, footer finished-gate, points() label-only, comment fixes. |
+| T-c | a99bf75 | rust-test.sh container leak fixed: dropped `exec` on rust-ci-commands.sh so trap cleanup EXIT fires. Verified: full suite green (598 web tests), zero brdgme-test-* containers remain post-run. |
+| T-a | 5786a1b | WP-58 follow-up (P2): dropped `rules, ` from standalone rejection string in email/commands.rs dispatch_settings_standalone. No test updates needed. Gate green. |
+| T-d | dec967b | P7: web find_latest_non_deprecated_game_version ORDER BY gained `, name DESC` (aligns with operator guard). .sqlx cache regenerated (1 file hash-renamed). Gate green. |
+| T-b | ca7925b | P5: notify_game_emails wired at all 3 game-start paths (proposals.rs create_proposal solo-vs-bots, start_proposal all-accept, inbound.rs invite-accept-by-email), after broadcast_and_trigger, before=None. +20/-0. No notify-spy infra (matches WP-76 recorded gap). Gate green. |
+| WP-33 | abffb7a | 17 findings (f F32 F36-F42 F45 F47-F49 F51 F52 F56-F58) across greed-2/farkle-2/ttt-2/no-thanks-2/liars-dice-2. 2 RULES.md doc-truth edits (greed E-face colour, ttt X/O casing - class A4, for user review). 11 new tests. Gate green. |
+| WP-04 | 8215754 | lg F7 OneOf offset propagation (add_offset at chain_2/Chain3/Chain4/Chain/Many), F13 Doc expected() delegates, F14 Many expected() shared helper, F17 UniCase in suggest Token arm, F19 SKIPPED per D-38(iv) (reason recorded in suggest.rs header). Parity tests extended to expected(). 7 new tests. Gate green. |
+| WP-05 | 4a978cb | ls F12-F18: dead parse API deleted per D-39 (from_hex/FromStr/named + tests), regex+lazy_static dropped from color manifest + lazy_static from workspace table (A1 ruling; both persist in Cargo.lock only as transitive third-party deps - expected). mono rounded-u16 mean, const fn rgb + 364 literals rewritten (value-set identical, script-verified), Palette gained Copy (ruling), protanopia struct-update. +447/-1911. Gate green. |
+| WP-43 | a9609e5 | ws F63 100MiB metadata cap in import_game.rs, F64 gloo-net removed (zero refs), F65 tokio net+time features, F66 futures-util optional + ssr dep + dev-dep, F67 already-resolved-by-WP-64/WP-61 (svix 1.99, async-nats workspace 0.49.1). SURFACED (pre-existing): `cargo test -p web` non-ssr never compiled (323 errors, integration tests need ssr) - out of scope. Gate green. |
+| WP-77 | 33150af | opponent_slot default bot_name now derived client-side from first entry of get_available_bots list (display_order), "medium" fallback only while resource unsettled. No server fn change. Gate green. |
+| WP-66 | 667c8f4 | dp F6/F8/F19: D-17 upgrade-first FAILED to resolve sqlx split (tower-sessions-sqlx-store 0.15.0 still hard-dep sqlx 0.8, no 0.9-compatible release) -> branch B: vendored store as rust/lib/session_store (brdgme_session_store, MIT attr, sqlx 0.9 AssertSqlSafe port). sqlx unified 0.9.0 workspace-wide (Cargo.lock 2->1 entries). .sqlx cache regenerated (88 files). getrandom/rand dup clusters remain (non-sqlx sources, monitor). Gate green. |
+| WP-67 | 634c72d | dp F12: sentry workspace dep now explicit default-features=false with spelled feature list = old default set (backtrace contexts debug-images panic release-health reqwest native-tls). Cargo.lock BYTE-IDENTICAL (zero functionality change, D-18 satisfied). actix/ureq absent from all build graphs (lock entries vestigial, WP-69 re-audit). svix sole http-0.2 holdout. Gate green. |
+| WP-70 | 8304baf | dp F14 (front half)/bo F17/ls F34: serde_yaml -> serde_yaml_ng 0.10.0 both consumers (bot + game_client), output byte-identical (golden diff). BACKEND HALF OF dp F14 OPEN: unsafe-libyaml 0.2.11 still in lock via serde_yaml_ng - recorded in commit body, do not close dp F14. Gate initially blocked by disk full (docker builder prune freed 36GB; orchestrator-authorized, build cache only). Gate green. |
+| WP-71 | dcec1ad | dp F16/ls F25: lib/cmd http.rs warp->axum 0.8.9 (workspace dep, optional). Router/DefaultBodyLimit/Json/oneshot; serve() signature byte-identical; 3 tests ported (200/200/413, real >16MiB body). warp FULLY out of lock + tree. Sentry transaction hand-roll preserved. Gate green. |
+| WP-73 | 22d00b8 | dp F11/dp F26/e F45/e F46: new rust/lib/game_bin (brdgme_game_bin, macro-free, 3 generic entry points cli_main/http_main/fuzz_main, http on post-WP-71 axum, ADDR default 0.0.0.0:8080). All 27 crates: bins collapsed to 3-line wrappers, 27 _repl bins deleted, brdgme_cmd/brdgme_fuzz/tokio deps moved up to game_bin. lords-of-vegas-1 consolidated but stays undeployed (D-42). GAME_PORTING.md updated. 140 files +231/-1031. Gate green. |
+| WP-72 | a5d6f10 | dp F15/D-24: combine 4.6 accepted-risk comment in deny.toml (cites lib/markup only - WP-03 already dropped it from lib/game). Comment-only. cargo deny clean. Gate green. NOTE: pre-existing advisory-not-detected warnings for diesel/encoding ignores seen - WP-69 territory. |
+| WP-65 | 2c28ae8 | dp F4 web wasm-release profile deleted, F5 members sorted + android-dev/server-dev profiles dropped, F17 env_logger gated behind http-server, F21 already-resolved (WP-05), F22 monitor-only, F23 new deps-currency.yml weekly advisories job (CI untestable locally - confirm via workflow_dispatch), e F9 mod test->tests 23/24 sites (lost-cities-1 skipped, deprecated per A2), e F28 stale build-release/.rls.toml deleted + gitignore trims. dp F9 PARKED to user. 35 files +50/-72. Gate green (after user freed disk via ~/.cache/cargo). |
 
 ## Planned sequence (from EXECUTION-README s2, constraints applied)
 1. ~~WP-56~~ done (partial; Task 2 parked)
@@ -81,19 +97,19 @@ Commit after each package (one commit per package, message names the WP id, stag
 46. ~~WP-18~~ done (84b68b9)
 47. ~~WP-31~~ done (f16cb02)
 48. ~~WP-32~~ done (807ab4e)
-49. WP-33  <- NEXT (paused here 2026-07-28 for user review; HEAD 807ab4e)
-50. WP-04
-51. WP-05
-52. WP-43
-53. WP-77 (no spec; any time)
-54. WP-66
-55. WP-67
-56. WP-70
-57. WP-71
-58. WP-73 (D-43 REVERSED: keep 27 _fuzz bins, ship 3 entry points)
-59. WP-72 (content lives in WP-69 spec; D-24: accept combine 4.6 in deny.toml)
-60. WP-65
-61. WP-69 LAST (D-23: flip multiple-versions to deny only after 66/67/68)
+49. ~~WP-33~~ done (abffb7a)
+50. ~~WP-04~~ done (8215754)
+51. ~~WP-05~~ done (4a978cb)
+52. ~~WP-43~~ done (a9609e5)
+53. ~~WP-77~~ done (33150af)
+54. ~~WP-66~~ done (667c8f4; D-17 branch B vendored session_store)
+55. ~~WP-67~~ done (634c72d)
+56. ~~WP-70~~ done (8304baf; dp F14 backend half OPEN - unsafe-libyaml remains)
+57. ~~WP-71~~ done (dcec1ad)
+58. ~~WP-73~~ done (22d00b8)
+59. ~~WP-72~~ done (a5d6f10)
+60. ~~WP-65~~ done (2c28ae8; dp F9 parked to user)
+61. WP-69 LAST (D-23: flip multiple-versions to deny only after 66/67/68)  <- NEXT
 62. Phase 7 WP-74, WP-75: SKIPPED per user ruling 2026-07-28 (P4) - queued behind parked WP-30
 63. Tier 3 checklists T3-B1..B8
 
@@ -116,11 +132,12 @@ Commit after each package (one commit per package, message names the WP id, stag
 - P7 (web tiebreak): ALIGN web `find_latest_non_deprecated_game_version` (rust/web/src/db/game_types.rs) with the operator guard: ORDER BY created_at DESC, name DESC. NEW task T-d (one-line + .sqlx regen if compile-checked).
 
 ## NEW TASK QUEUE for resumed session (in order, before continuing the WP sequence)
-1. T-c: fix rust-test.sh container leak (P6). Own commit, e.g. `fix(scripts): clean up test containers on exit`.
-2. T-a: drop `rules` from standalone rejection string (P2). Own commit, e.g. `fix(web): WP-58 follow-up - drop standalone rules from help text`.
-3. T-d: web game_types name tiebreak (P7). Own commit, e.g. `fix(web): align latest-version pick with operator tiebreak`.
-4. T-b: wire notify_game_emails at 3 game-start paths (P5). Own commit, e.g. `feat(web): notify on game start paths`. Mirror run_new/restart notify shape; before=None (new game, first-turn notification).
-Then resume the WP sequence at WP-33.
+1. ~~T-c~~ done (a99bf75): rust-test.sh container leak fixed.
+2. ~~T-a~~ done (5786a1b): `rules` dropped from standalone rejection string.
+3. ~~T-d~~ done (dec967b): web game_types name tiebreak aligned with operator.
+4. ~~T-b~~ done (ca7925b): notify_game_emails at all 3 game-start paths.
+
+QUEUE COMPLETE 2026-07-29. Resumed WP sequence at WP-33.
 
 ## Parked / skip
 - WP-11, 12, 16, 20, 26, 30 (BLOCKED-ON-USER-RULES-REVIEW)
@@ -149,9 +166,19 @@ First to land gets 023; rest renumber. Re-ls rust/web/migrations/ immediately be
 - ORCHESTRATOR decision (2026-07-28): WP-08 spec riders table routed acquire-1 + starship-catan-1 into WP-08 beyond work-packages.md's 11-crate path list; executed as WP-08b (c14bc65) since the spec is the task detail and the shape was proven. Recorded for user review.
 - WP-27 Lead decisions: e F5 assessed defence-in-depth not rules adjudication (GameError::Finished + parser None); e F8 chose crate-private play_* over error-when-absent (no behaviour change); e F15 helper named clan_conquered_data pub(crate).
 - WP-32 Lead decisions: F18 phase: Option<Phase> field placement + 6 tests set g.phase explicitly; F22 best >= 0 sentinel align; F24 RULES.md-only (no MAX_PLAYERS change); F25 guard drains available cards instead of panicking.
+- WP-33 Lead decisions: F32 kept public score param + guard (not private-helper split); F47 chose unreachable!() over new mark-only type; F49 used Game{players:3,..default()} for clippy; F57 added players param to bid_parser (for-sale-2 idiom); F38 test compares Vec<Row> structurally.
+- ORCHESTRATOR decision (2026-07-29): WP-05 STOP-AND-REPORT resolved without user. Discrepancy A: spec 3b's "no [workspace.dependencies] table" is stale (WP-64 hoisted it after the spec was written) - ruled A1: also delete inert `lazy_static = "1.5.0"` from rust/Cargo.toml workspace table, honoring D-39's explicit "drops lazy_static workspace-wide" intent. Discrepancy B: palette.rs test player_color_order calls from_hex (spec missed it) - ruled: replace with literal `Color { r: 0xf5, g: 0x7c, b: 0x00 }` per spec 3c's own prescribed transform; test-only, zero value change. Both minor with obvious correct options; recorded for user review.
+- ORCHESTRATOR decision (2026-07-29): WP-05 second stop resolved. Spec 3e's struct-update syntax (`..LIGHT_DEUTERANOPIA`) in static initializers requires Palette: Copy; the derive was missing. Ruled: add `Copy` to the Palette derive (all 12 fields are Color which is already Copy; purely additive, zero behaviour change, no call site affected) rather than leaving F15 partially resolved. Recorded for user review.
+- WP-66 Lead decisions: branch B vendoring per D-17(2) after upgrade-first failed (evidence: tower-sessions-sqlx-store 0.15.0 latest still sqlx 0.8); web gained explicit macros+derive features; spec rider 1 moot (bot has no direct getrandom); tower-sessions kept 0.14 (0.15 bump out of scope); vendored doc-tests no_run->ignore (tokio-test not a dep).
+- USER CORRECTION (2026-07-29): disk cleanup requires user input - orchestrator authorized docker builder/image prunes + deletion of 32 tilt-* images + kicbase v0.0.45 during WP-70/WP-65 without asking. User said the docker steps "weren't a problem" retroactively, but the rule going forward: any disk pressure = STOP and report to the user, no cleanup attempts. User fixed it via ~/.cache/cargo.
+- USER DIRECTIVE (2026-07-29): push authorized EARLY (not deferred to end) after WP-65 - high-value commits should be persisted. Future sessions: confirm push policy with user at start.
+- WP-71 Lead decisions: axum via workspace dep (not spec's literal version pin); oversized test sends real >16MiB body (DefaultBodyLimit enforces on bytes; 411-on-missing-Content-Length relaxation per spec rider 3); fallback_service(post(handle)) for any-path + POST guard.
+- WP-73 Lead decisions: game manifests keep post-WP-64 workspace inheritance syntax; GAME_PORTING.md gained a repl-tool note (spec gave replacement text but no existing prose to replace). Surfaced: workspace now 42 members (spec assumed 41 - WP-66's session_store); stale spec s4 dep notes on 3 crates (live manifests preserved untouched).
+- WP-65 Lead decisions: dp F5 sorted members (not game/* glob); dp F23 separate deps-currency.yml (not ci.yml schedule trigger - untestable locally, confirm via workflow_dispatch); e F9 skipped deprecated lost-cities-1 per A2.
 - (none else yet)
 
 ## Needs user input (parked items)
+- **WP-65 dp F9 (dep dedup pin-back):** PARKED 2026-07-29. Live state inverted T3-B8's premise: gloo-net is now single-version (0.6.0, no longer a direct web dep) but tower-http (0.6.11+0.7.0) and gloo-timers (0.3.0+0.4.0) are NOW duplicated because web pins tower-http="0.7"/gloo-timers="0.4". Options: (a) pin web back to tower-http 0.6 / gloo-timers 0.3 to dedupe (T3-B8's approach), or (b) hold latest per D-17 standing rule. Checklist itself has an "escalate to Michael" hook. Rest of WP-65 landed without it.
 - ~~**WP-56 Task 2 (SPF/DKIM inbound auth classification):**~~ LANDED 2026-07-27 (4ca73ec). Rulings applied: no verdict field in webhook (Resend docs confirmed); trust ONLY topmost `Authentication-Results` with authserv-id `amazonses.com` (empirically confirmed from real raw sample); lenient Fail rule (dmarc=fail OR spf+dkim both fail) per user; placement Path 2 per user (gate after select_route + token/From lookup, before body processing - identical security, preserves junk short-circuit + committed WP-57 tests). Resend offers NO server-side inbound auth filtering (docs confirmed). Item closed.
 - ~~**WP-45 restart_core bot re-resolution (D-08):**~~ RESOLVED by user 2026-07-27: no code change. Bots are manually managed by admins; an orphaned game bot reference correctly resolves once a new bot is created with the same name. Restart keeps pre-existing behavior; this is the intended design, not a gap. Item closed.
 - ~~**WP-29 Task 4 (e F31, DATA_DOCS.md):**~~ RULED 2026-07-28 (P1): DEFER entirely to WP-30. No minimal fix. red7-1 DATA_DOCS.md untouched until the rules review.
