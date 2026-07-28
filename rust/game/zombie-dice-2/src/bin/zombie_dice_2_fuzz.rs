@@ -1,5 +1,3 @@
-use zombie_dice_2::Game;
-
 fn main() {
-    brdgme_fuzz::fuzz_gamer::<Game>();
+    brdgme_game_bin::fuzz_main::<zombie_dice_2::Game>();
 }

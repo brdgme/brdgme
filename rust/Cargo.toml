@@ -32,6 +32,7 @@ members = [
     "lib/color",
     "lib/cost",
     "lib/game",
+    "lib/game_bin",
     "lib/game_client",
     "lib/markup",
     "lib/rand_bot",

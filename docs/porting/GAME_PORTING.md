@@ -60,8 +60,8 @@ entries from each call.
 
 ```
 rust/game/<name>-N/
-  Cargo.toml            # deps: brdgme_cmd, brdgme_fuzz, brdgme_color,
-                        #       brdgme_game, brdgme_markup, rand, serde, tokio
+  Cargo.toml            # deps: brdgme_game_bin, brdgme_color,
+                        #       brdgme_game, brdgme_markup, rand, serde
   RULES.md              # player-facing rules text
   src/
     lib.rs              # Game struct, Gamer impl, core logic
@@ -69,9 +69,8 @@ rust/game/<name>-N/
     command.rs          # Command enum + parser combinators
     render.rs           # Renderer impls for PubState/PlayerState
     bin/
-      <name>_N_cli.rs   # 4 tiny stubs calling brdgme_cmd entry points
+      <name>_N_cli.rs   # 3 tiny stubs calling brdgme_game_bin entry points
       <name>_N_http.rs  #   (http is what runs in production)
-      <name>_N_repl.rs
       <name>_N_fuzz.rs
   tests/
     contract.rs         # assert_gamer_contract::<Game>();
@@ -213,7 +212,8 @@ rust/game/<name>-N/
      `test-support` dev-dependency feature).
    - The fuzz binary gives free crash-hunting: `cargo run --bin <name>_N_fuzz`.
      Run it for a while before shipping; it catches panics unit tests miss.
-9. **Binaries**: copy the four ~12-line stubs from lost-cities-1, rename the
+   - There is no per-game REPL binary; use the generic tool: `cargo run -p brdgme_repl -- local target/release/<name>_N_cli`.
+9. **Binaries**: copy the three 3-line stubs from lost-cities-1, rename the
    crate references.
 10. **Update tracking documents.** After all CI/registration steps pass and
     the port is deployed, update `docs/BACKLOG.md` to move the port from planned

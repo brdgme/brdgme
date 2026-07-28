@@ -8,12 +8,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -220,12 +219,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -256,13 +254,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -675,12 +672,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -842,6 +838,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "brdgme_game_bin"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_fuzz",
+ "brdgme_game",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "brdgme_game_client"
 version = "0.1.0"
 dependencies = [
@@ -947,12 +954,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -961,12 +967,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1806,12 +1811,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -1873,12 +1877,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -2204,12 +2207,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -2716,13 +2718,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -3283,12 +3284,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -3360,14 +3360,13 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
- "tokio",
 ]
 
 [[package]]
@@ -3376,12 +3375,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -3390,12 +3388,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -3404,13 +3401,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -3605,13 +3601,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -3704,12 +3699,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -4646,13 +4640,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -4823,12 +4816,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -5463,13 +5455,12 @@ dependencies = [
  "brdgme_cmd",
  "brdgme_color",
  "brdgme_cost",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -5664,13 +5655,12 @@ dependencies = [
  "brdgme_cmd",
  "brdgme_color",
  "brdgme_cost",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -5866,13 +5856,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -5904,12 +5893,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -5918,12 +5906,11 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -6073,13 +6060,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -6146,13 +6132,12 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -7321,10 +7306,9 @@ version = "0.1.0"
 dependencies = [
  "brdgme_cmd",
  "brdgme_color",
- "brdgme_fuzz",
  "brdgme_game",
+ "brdgme_game_bin",
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
- "tokio",
 ]

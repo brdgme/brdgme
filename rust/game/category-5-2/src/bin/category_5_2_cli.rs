@@ -1,13 +1,3 @@
-use std::io;
-
-use brdgme_cmd::cli::cli;
-use brdgme_cmd::requester;
-use category_5_2::Game;
-
 fn main() {
-    cli(
-        &mut requester::gamer::new::<Game>(),
-        io::stdin(),
-        &mut io::stdout(),
-    );
+    brdgme_game_bin::cli_main::<category_5_2::Game>();
 }

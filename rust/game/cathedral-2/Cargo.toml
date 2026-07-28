@@ -6,13 +6,11 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
-brdgme_cmd = { path = "../../lib/cmd" }
-brdgme_fuzz = { path = "../../tools/fuzz" }
+brdgme_game_bin = { path = "../../lib/game_bin" }
 brdgme_color = { path = "../../lib/color" }
 brdgme_game = { path = "../../lib/game" }
 brdgme_markup = { path = "../../lib/markup" }
 serde.workspace = true
-tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 brdgme_cmd = { path = "../../lib/cmd", features = ["test-support"] }

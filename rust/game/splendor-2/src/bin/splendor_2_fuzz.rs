@@ -1,5 +1,3 @@
-use splendor_2::Game;
-
 fn main() {
-    brdgme_fuzz::fuzz_gamer::<Game>();
+    brdgme_game_bin::fuzz_main::<splendor_2::Game>();
 }
