@@ -313,7 +313,7 @@ pub async fn dispatch_settings_standalone(
     }
 
     Err(CommandError::User(
-        "That command is not available by email without a game. Available commands: new, bump, list, name, colors, theme, emails on/off, subscribe, unsubscribe, rules, settings, help.".to_string(),
+        "That command is not available by email without a game. Available commands: new, bump, list, name, colors, theme, emails on/off, subscribe, unsubscribe, settings, help.".to_string(),
     ))
 }
 
