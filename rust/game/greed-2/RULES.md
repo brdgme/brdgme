@@ -15,7 +15,7 @@ Six custom faces, each shown in its own colour:
 | `$` | Dollar | grey |
 | `G` | G | yellow |
 | `R` | R | red |
-| `E` | E | black |
+| `E` | E | foreground |
 | `e` | e | green |
 | `D` | D | cyan |
 

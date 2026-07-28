@@ -292,7 +292,9 @@ impl Game {
     }
 
     pub fn score(&mut self, player: usize, dice: &[Die]) -> Result<Vec<Log>, GameError> {
-        let _ = player;
+        if player != self.current_player {
+            return Err(GameError::invalid_input("can't play at the moment"));
+        }
         let value = scores()
             .iter()
             .find(|s| dice_equals(dice, &s.dice))
@@ -304,7 +306,7 @@ impl Game {
                 return Err(GameError::invalid_input("You don't have those dice"));
             }
         };
-        self.turn_score += value;
+        self.turn_score = self.turn_score.saturating_add(value);
         self.taken_this_roll = true;
         self.remaining_dice = remaining;
         Ok(vec![Log::public(vec![
@@ -363,7 +365,7 @@ impl Game {
                 (self.scores[player] + self.turn_score).to_string(),
             )]),
         ]));
-        self.scores[player] += self.turn_score;
+        self.scores[player] = self.scores[player].saturating_add(self.turn_score);
         self.current_player = (self.current_player + 1) % self.players;
         if !self.finished() {
             logs.extend(self.start_turn());
@@ -646,6 +648,15 @@ mod test {
             .score(g.current_player, &[Die::Dollar, Die::Dollar, Die::Dollar])
             .unwrap_err();
         assert!(format!("{err}").contains("don't have those dice"));
+    }
+
+    #[test]
+    fn test_score_wrong_player_errors() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let other = 1 - g.current_player;
+        g.remaining_dice = vec![Die::D, Die::R, Die::R];
+        let err = g.score(other, &[Die::D]).unwrap_err();
+        assert!(format!("{err}").contains("can't play at the moment"));
     }
 
     #[test]

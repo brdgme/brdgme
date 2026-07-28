@@ -2,7 +2,7 @@ use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
-use crate::{PlayerState, PubState};
+use crate::{PlayerState, PubState, group_runs};
 
 pub fn render_card(card: i32) -> N {
     N::Fg(NamedColor::Blue.into(), vec![N::text(card.to_string())])
@@ -21,24 +21,7 @@ fn no_cards() -> N {
 }
 
 fn group_sorted(sorted: &[i32]) -> Vec<Vec<i32>> {
-    let mut groups: Vec<Vec<i32>> = vec![];
-    let mut cur: Vec<i32> = vec![];
-    let mut last: Option<i32> = None;
-    for &c in sorted {
-        if last == Some(c - 1) {
-            cur.push(c);
-        } else {
-            if !cur.is_empty() {
-                groups.push(std::mem::take(&mut cur));
-            }
-            cur.push(c);
-        }
-        last = Some(c);
-    }
-    if !cur.is_empty() {
-        groups.push(cur);
-    }
-    groups
+    group_runs(sorted)
 }
 
 fn render_cards(hand: &[i32], relevant: Option<i32>) -> N {

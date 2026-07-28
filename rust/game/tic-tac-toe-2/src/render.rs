@@ -2,7 +2,7 @@ use brdgme_color::NamedColor;
 use brdgme_game::Renderer;
 use brdgme_markup::Node as N;
 
-use crate::{BOARD_SIZE, Board, Cell, Loc, PlayerState, PubState};
+use crate::{BOARD_SIZE, Board, Cell, Loc, NUM_PLAYERS, PlayerState, PubState};
 
 fn render_board(board: &Board) -> Vec<N> {
     let mut nodes = vec![];
@@ -13,8 +13,8 @@ fn render_board(board: &Board) -> Vec<N> {
                     NamedColor::Blue.into(),
                     vec![N::text(Loc { row, col }.to_string())],
                 ),
-                Cell::X => N::Bold(vec![N::text("x")]),
-                Cell::O => N::Bold(vec![N::text("o")]),
+                Cell::X => N::Bold(vec![N::text("X")]),
+                Cell::O => N::Bold(vec![N::text("O")]),
             });
             if col + 1 < BOARD_SIZE {
                 nodes.push(N::Fg(NamedColor::Grey.into(), vec![N::text("|")]));
@@ -31,7 +31,7 @@ fn render_with_labels(board: &Board, start_player: usize) -> Vec<N> {
     let mut nodes = render_board(board);
     nodes.push(N::text("\n"));
     let x_player = start_player;
-    let o_player = 1 - start_player;
+    let o_player = (start_player + 1) % NUM_PLAYERS;
     nodes.push(N::Player(x_player));
     nodes.push(N::text(" is X, "));
     nodes.push(N::Player(o_player));

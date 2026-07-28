@@ -101,12 +101,15 @@ impl Game {
 
     pub fn pass(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
         if !self.can_pass(player) {
+            if self.currently_moving == player
+                && !self.remaining_cards.is_empty()
+                && self.player_chips.get(player).copied().unwrap_or(0) <= 0
+            {
+                return Err(GameError::invalid_input(
+                    "You have no chips left, you must take the card",
+                ));
+            }
             return Err(GameError::invalid_input("can't pass at the moment"));
-        }
-        if self.player_chips[player] <= 0 {
-            return Err(GameError::invalid_input(
-                "You have no chips left, you must take the card",
-            ));
         }
         self.player_chips[player] -= 1;
         self.centre_chips += 1;
@@ -155,24 +158,7 @@ impl Game {
 
     pub fn player_hand_grouped(&self, player: usize) -> Vec<Vec<i32>> {
         let sorted = self.player_hand_sorted(player);
-        let mut groups: Vec<Vec<i32>> = vec![];
-        let mut cur: Vec<i32> = vec![];
-        let mut last: Option<i32> = None;
-        for c in sorted {
-            if last == Some(c - 1) {
-                cur.push(c);
-            } else {
-                if !cur.is_empty() {
-                    groups.push(std::mem::take(&mut cur));
-                }
-                cur.push(c);
-            }
-            last = Some(c);
-        }
-        if !cur.is_empty() {
-            groups.push(cur);
-        }
-        groups
+        group_runs(&sorted)
     }
 
     pub fn player_hand_score(&self, player: usize) -> i32 {
@@ -200,6 +186,27 @@ impl Game {
         let metrics: Vec<Vec<i32>> = (0..self.players).map(|p| vec![-points[p]]).collect();
         gen_placings(&metrics)
     }
+}
+
+pub fn group_runs(sorted: &[i32]) -> Vec<Vec<i32>> {
+    let mut groups: Vec<Vec<i32>> = vec![];
+    let mut cur: Vec<i32> = vec![];
+    let mut last: Option<i32> = None;
+    for &c in sorted {
+        if last == Some(c - 1) {
+            cur.push(c);
+        } else {
+            if !cur.is_empty() {
+                groups.push(std::mem::take(&mut cur));
+            }
+            cur.push(c);
+        }
+        last = Some(c);
+    }
+    if !cur.is_empty() {
+        groups.push(cur);
+    }
+    groups
 }
 
 impl Gamer for Game {
@@ -410,8 +417,12 @@ mod test {
 
     #[test]
     fn test_init_player_chips() {
-        let mut g = Game::default();
+        let mut g = Game {
+            players: 3,
+            ..Game::default()
+        };
         g.init_player_chips();
+        assert_eq!(g.player_chips.len(), g.players);
         for p in 0..g.players {
             assert_eq!(11, g.player_chips[p]);
         }
@@ -447,6 +458,19 @@ mod test {
         assert_eq!(initial_centre_chips + 1, g.centre_chips);
         assert_eq!(initial_player_chips - 1, g.player_chips[initial_player]);
         assert_ne!(initial_player, g.currently_moving);
+    }
+
+    #[test]
+    fn test_pass_no_chips_left_message() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        let player = g.currently_moving;
+        g.player_chips[player] = 0;
+        match g.pass(player) {
+            Err(GameError::InvalidInput { message }) => {
+                assert!(message.contains("no chips left"), "got: {}", message);
+            }
+            other => panic!("expected InvalidInput, got {:?}", other),
+        }
     }
 
     #[test]

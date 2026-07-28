@@ -243,7 +243,9 @@ impl Game {
     }
 
     pub fn score(&mut self, player: usize, dice: &[Die]) -> Result<Vec<Log>, GameError> {
-        let _ = player;
+        if player != self.current_player {
+            return Err(GameError::invalid_input("can't play at the moment"));
+        }
         let value = scores()
             .iter()
             .find(|s| dice_equals(dice, &s.dice))
@@ -363,19 +365,20 @@ impl Gamer for Game {
     }
 
     fn pub_state(&self) -> Self::PubState {
+        let finished = self.finished();
         PubState {
             players: self.players,
             current_player: self.current_player,
             first_player: self.first_player,
             scores: self.scores.clone(),
-            turn_score: self.turn_score,
-            remaining_dice: self.remaining_dice.clone(),
-            finished: self.finished(),
-            placings: if self.finished() {
-                self.placings()
-            } else {
+            turn_score: if finished { 0 } else { self.turn_score },
+            remaining_dice: if finished {
                 vec![]
+            } else {
+                self.remaining_dice.clone()
             },
+            finished,
+            placings: if finished { self.placings() } else { vec![] },
         }
     }
 
@@ -605,6 +608,15 @@ mod test {
     }
 
     #[test]
+    fn test_score_wrong_player_errors() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let other = 1 - g.current_player;
+        g.remaining_dice = vec![1, 2, 3];
+        let err = g.score(other, &[1]).unwrap_err();
+        assert!(format!("{err}").contains("can't play at the moment"));
+    }
+
+    #[test]
     fn test_can_commands() {
         let (mut g, _) = Game::start(2, 1).unwrap();
         let current = g.current_player;
@@ -634,7 +646,7 @@ mod test {
         let (mut g, _) = Game::start(3, 1).unwrap();
         // Round only closes when play returns to first player with a score >= 5000.
         g.scores = vec![5000, 3000, 1000];
-        g.current_player = g.first_player + 1;
+        g.current_player = (g.first_player + 1) % 3;
         assert!(!g.finished());
         g.current_player = g.first_player;
         assert!(g.finished());
@@ -642,6 +654,23 @@ mod test {
         // Standard-competition tie ranking (Rust gen_placings): [1, 1, 3].
         g.scores = vec![5000, 5000, 1000];
         assert_eq!(vec![1, 1, 3], g.placings());
+    }
+
+    #[test]
+    fn test_finished_pub_state_clears_turn_fields() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.first_player = 0;
+        g.current_player = 1;
+        g.scores = vec![0, 4900];
+        g.turn_score = 100;
+        g.taken_this_roll = true;
+        g.remaining_dice = vec![2, 3];
+        g.done(1).unwrap();
+        assert!(g.is_finished());
+        let ps = g.pub_state();
+        assert_eq!(0, ps.turn_score);
+        assert!(ps.remaining_dice.is_empty());
+        assert_eq!(5000, ps.scores[1]);
     }
 
     #[test]

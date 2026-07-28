@@ -101,7 +101,7 @@ fn number_str(n: i32) -> String {
         parts.push(match t {
             2 => "twenty",
             3 => "thirty",
-            4 => "fourty",
+            4 => "forty",
             5 => "fifty",
             6 => "sixty",
             7 => "seventy",
@@ -191,6 +191,7 @@ mod test {
     fn test_number_str() {
         assert_eq!("two", number_str(2));
         assert_eq!("twenty five", number_str(25));
+        assert_eq!("forty", number_str(40));
         assert_eq!("one hundred and five", number_str(105));
         assert_eq!("1000", number_str(1000));
     }

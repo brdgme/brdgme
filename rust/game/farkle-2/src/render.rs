@@ -1,16 +1,16 @@
 use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
-use crate::{PlayerState, PubState, die_color};
+use crate::{Die, PlayerState, PubState, die_color, scores};
 
-pub fn render_die(d: u8) -> N {
+pub fn render_die(d: Die) -> N {
     N::Bold(vec![N::Fg(
         die_color(d).into(),
         vec![N::text(d.to_string())],
     )])
 }
 
-pub fn render_dice(dice: &[u8], delim: &str) -> N {
+pub fn render_dice(dice: &[Die], delim: &str) -> N {
     let mut nodes: Vec<N> = vec![];
     for (i, d) in dice.iter().enumerate() {
         if i > 0 {
@@ -26,17 +26,22 @@ fn scoring_table() -> Vec<Row> {
         (A::Left, vec![N::Bold(vec![N::text("Combination")])]),
         (A::Right, vec![N::Bold(vec![N::text("Points")])]),
     ]];
-    let entries: &[(&str, i32)] = &[
-        ("Single 1", 100),
-        ("Single 5", 50),
-        ("Three 1s", 1000),
-        ("Three 2s", 200),
-        ("Three 3s", 300),
-        ("Three 4s", 400),
-        ("Three 5s", 500),
-        ("Three 6s", 600),
+    let entries: &[(&[Die], &str)] = &[
+        (&[1], "Single 1"),
+        (&[5], "Single 5"),
+        (&[1, 1, 1], "Three 1s"),
+        (&[2, 2, 2], "Three 2s"),
+        (&[3, 3, 3], "Three 3s"),
+        (&[4, 4, 4], "Three 4s"),
+        (&[5, 5, 5], "Three 5s"),
+        (&[6, 6, 6], "Three 6s"),
     ];
-    for (name, pts) in entries {
+    for (dice, name) in entries {
+        let pts = scores()
+            .iter()
+            .find(|s| s.dice.as_slice() == *dice)
+            .map(|s| s.value)
+            .unwrap_or(0);
         table.push(vec![
             (A::Left, vec![N::text(*name)]),
             (A::Right, vec![N::text(pts.to_string())]),
@@ -90,5 +95,35 @@ impl Renderer for PubState {
 impl Renderer for PlayerState {
     fn render(&self) -> Vec<N> {
         self.public.render()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_scoring_table_matches_legacy_output() {
+        let legacy: &[(&str, i32)] = &[
+            ("Single 1", 100),
+            ("Single 5", 50),
+            ("Three 1s", 1000),
+            ("Three 2s", 200),
+            ("Three 3s", 300),
+            ("Three 4s", 400),
+            ("Three 5s", 500),
+            ("Three 6s", 600),
+        ];
+        let mut expected: Vec<Row> = vec![vec![
+            (A::Left, vec![N::Bold(vec![N::text("Combination")])]),
+            (A::Right, vec![N::Bold(vec![N::text("Points")])]),
+        ]];
+        for (name, pts) in legacy {
+            expected.push(vec![
+                (A::Left, vec![N::text(*name)]),
+                (A::Right, vec![N::text(pts.to_string())]),
+            ]);
+        }
+        assert_eq!(expected, scoring_table());
     }
 }

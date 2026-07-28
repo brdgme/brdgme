@@ -139,7 +139,7 @@ impl Game {
         line_winner.map(|cell| match cell {
             Cell::X => self.start_player,
             Cell::O => (self.start_player + 1) % NUM_PLAYERS,
-            Cell::Empty => self.start_player,
+            Cell::Empty => unreachable!("matching_line never returns Empty"),
         })
     }
 
@@ -603,16 +603,32 @@ mod tests {
         assert_eq!(
             brdgme_markup::to_string(&game.pub_state().render()),
             concat!(
-                "{{b}}x{{/b}}{{fg grey}}|{{/fg}}{{b}}o{{/b}}",
+                "{{b}}X{{/b}}{{fg grey}}|{{/fg}}{{b}}O{{/b}}",
                 "{{fg grey}}|{{/fg}}{{fg blue}}c{{/fg}}\n",
                 "{{fg blue}}d{{/fg}}{{fg grey}}|{{/fg}}",
-                "{{b}}x{{/b}}{{fg grey}}|{{/fg}}",
+                "{{b}}X{{/b}}{{fg grey}}|{{/fg}}",
                 "{{fg blue}}f{{/fg}}\n",
-                "{{b}}o{{/b}}{{fg grey}}|{{/fg}}",
+                "{{b}}O{{/b}}{{fg grey}}|{{/fg}}",
                 "{{fg blue}}h{{/fg}}{{fg grey}}|{{/fg}}",
-                "{{b}}x{{/b}}",
+                "{{b}}X{{/b}}",
                 "\n{{player 0}} is X, {{player 1}} is O",
             )
+        );
+    }
+
+    #[test]
+    fn render_labels_do_not_underflow_for_large_start_player() {
+        let public = PubState {
+            players: NUM_PLAYERS,
+            current_player: 2 % NUM_PLAYERS,
+            start_player: 2,
+            board: [[Cell::Empty; BOARD_SIZE]; BOARD_SIZE],
+        };
+
+        let rendered = brdgme_markup::to_string(&public.render());
+        assert!(
+            rendered.contains("{{player 2}} is X, {{player 1}} is O"),
+            "got: {rendered}"
         );
     }
 

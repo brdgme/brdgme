@@ -7,12 +7,12 @@ Tic-tac-toe is a 2-player game played on a 3x3 board. Players alternate placing 
 ## Components
 
 - One 3x3 board with squares labelled `a` through `i` in row-major order.
-- Two marks: `x` and `o`.
-- The randomly selected starting player uses `x`; the other player uses `o`.
+- Two marks: `X` and `O`.
+- The randomly selected starting player uses `X`; the other player uses `O`.
 
 ## Turn Structure
 
-1. The game randomly selects the starting player, who plays as `x`.
+1. The game randomly selects the starting player, who plays as `X`.
 2. On your turn, place your mark in any empty square with `play <square>` (for example, `play a` or `play e`). Square letters are case-insensitive.
 3. Play passes to the other player after every successful move, including a move that ends the game.
 

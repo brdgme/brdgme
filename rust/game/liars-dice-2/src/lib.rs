@@ -456,4 +456,57 @@ mod test {
         g.bid_player = g.players;
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
+
+    #[test]
+    fn pub_state_redacts_dice_player_state_reveals_own() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.player_dice = vec![vec![3, 4, 5], vec![2, 2], vec![6]];
+
+        let pub_state = g.pub_state();
+        assert_eq!(pub_state.remaining_dice, vec![3, 2, 1]);
+
+        for p in 0..3 {
+            let ps = g.player_state(p);
+            assert_eq!(ps.dice, g.player_dice[p]);
+            assert_eq!(ps.public.remaining_dice, vec![3, 2, 1]);
+        }
+        assert_ne!(g.player_state(0).dice, g.player_dice[1]);
+    }
+
+    #[test]
+    fn call_with_bid_value_one_counts_only_ones() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let p = players(2);
+        g.player_dice = vec![vec![1, 2, 3, 4, 5], vec![6, 6, 6, 6, 6]];
+        g.bid_quantity = 2;
+        g.bid_value = 1;
+        g.bid_player = 0;
+        g.current_player = 1;
+
+        g.command(1, "call", &p).unwrap();
+
+        assert_eq!(4, g.player_dice[0].len());
+        assert_eq!(5, g.player_dice[1].len());
+    }
+
+    #[test]
+    fn play_to_completion_produces_placings() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let p = players(2);
+        g.player_dice = vec![vec![2], vec![3]];
+        g.bid_quantity = 0;
+        g.bid_value = 0;
+        g.bid_player = 0;
+        g.current_player = 0;
+
+        g.command(0, "bid 1 2", &p).unwrap();
+        g.command(1, "call", &p).unwrap();
+
+        assert!(g.is_finished());
+        assert_eq!(vec![1, 2], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
+            _ => panic!("game should be finished"),
+        }
+    }
 }
