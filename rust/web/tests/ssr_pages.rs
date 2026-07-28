@@ -17,11 +17,11 @@ use axum::http::{Request, StatusCode, header};
 use axum::{Json, Router, routing::post};
 use brdgme_cmd::api::{GameResponse as GameStateResponse, PlayerRender, PubRender};
 use brdgme_cmd::api::{Request as GameRequest, Response as GameResponse};
+use brdgme_session_store::PostgresStore;
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tower::ServiceExt;
 use tower_sessions::{Expiry, Session};
-use tower_sessions_sqlx_store::PostgresStore;
 use uuid::Uuid;
 
 use web::auth::session::set_user_session;

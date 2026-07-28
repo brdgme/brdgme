@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "finished_at!",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "games",
+            "name": "finished_at"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "rating_change!",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "rating_change"
+          }
+        }
       }
     ],
     "parameters": {

@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "rating",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "rating"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "peak_rating",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "peak_rating"
+          }
+        }
       }
     ],
     "parameters": {

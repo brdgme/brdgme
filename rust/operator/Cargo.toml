@@ -26,7 +26,7 @@ reqwest = { workspace = true, features = ["json", "rustls"] }
 # See docs/CODING.md "Dependency Management".
 rustls.workspace = true
 serde_json.workspace = true
-sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid"] }
+sqlx = { workspace = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tracing.workspace = true
@@ -36,7 +36,7 @@ uuid = { workspace = true, features = ["serde"] }
 [dev-dependencies]
 # Adds the test/migrate machinery for #[sqlx::test]; feature-unified with the
 # main sqlx dependency when building tests.
-sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "macros", "migrate"] }
+sqlx = { workspace = true, features = ["macros", "migrate"] }
 
 [lints]
 workspace = true

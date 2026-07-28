@@ -14,7 +14,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 serde.workspace = true
 serde_json.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls"] }
-sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "time", "json"] }
+sqlx = { workspace = true, features = ["time", "json"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 anyhow.workspace = true
 tracing.workspace = true

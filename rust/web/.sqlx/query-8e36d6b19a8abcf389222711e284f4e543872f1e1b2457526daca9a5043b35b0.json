@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "is_turn_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "is_turn_at"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "last_turn_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "last_turn_at"
+          }
+        }
       }
     ],
     "parameters": {

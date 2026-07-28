@@ -6,182 +6,398 @@
       {
         "ordinal": 0,
         "name": "gp_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "gp_created_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "gp_updated_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "updated_at"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "gp_game_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "game_id"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "gp_user_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "user_id"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "gp_position",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "position"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "gp_color",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "color"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "gp_has_accepted",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "has_accepted"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "gp_is_turn",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "is_turn"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "gp_is_turn_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "is_turn_at"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "gp_place",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "place"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "gp_last_turn_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "last_turn_at"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "gp_is_eliminated",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "is_eliminated"
+          }
+        }
       },
       {
         "ordinal": 13,
         "name": "gp_is_read",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "is_read"
+          }
+        }
       },
       {
         "ordinal": 14,
         "name": "gp_points",
-        "type_info": "Float4"
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "points"
+          }
+        }
       },
       {
         "ordinal": 15,
         "name": "gp_undo_game_state",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "undo_game_state"
+          }
+        }
       },
       {
         "ordinal": 16,
         "name": "gp_rating_change",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "rating_change"
+          }
+        }
       },
       {
         "ordinal": 17,
         "name": "gp_ranked_placing",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "ranked_placing"
+          }
+        }
       },
       {
         "ordinal": 18,
         "name": "gp_left_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "left_at"
+          }
+        }
       },
       {
         "ordinal": 19,
         "name": "u_id?",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 20,
         "name": "u_created_at?",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 21,
         "name": "u_updated_at?",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "updated_at"
+          }
+        }
       },
       {
         "ordinal": 22,
         "name": "u_name?",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 23,
         "name": "u_pref_colors?",
-        "type_info": "TextArray"
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "pref_colors"
+          }
+        }
       },
       {
         "ordinal": 24,
         "name": "gtu_id?",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 25,
         "name": "gtu_created_at?",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 26,
         "name": "gtu_updated_at?",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "updated_at"
+          }
+        }
       },
       {
         "ordinal": 27,
         "name": "gtu_game_type_id?",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "game_type_id"
+          }
+        }
       },
       {
         "ordinal": 28,
         "name": "gtu_user_id?",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "user_id"
+          }
+        }
       },
       {
         "ordinal": 29,
         "name": "gtu_last_game_finished_at?",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "last_game_finished_at"
+          }
+        }
       },
       {
         "ordinal": 30,
         "name": "gtu_rating?",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "rating"
+          }
+        }
       },
       {
         "ordinal": 31,
         "name": "gtu_peak_rating?",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "game_type_users",
+            "name": "peak_rating"
+          }
+        }
       },
       {
         "ordinal": 32,
         "name": "gb_id?",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_bots",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 33,
         "name": "gb_game_id?",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_bots",
+            "name": "game_id"
+          }
+        }
       },
       {
         "ordinal": 34,
         "name": "gb_name?",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_bots",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 35,
         "name": "gb_bot_name?",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_bots",
+            "name": "bot_name"
+          }
+        }
       }
     ],
     "parameters": {

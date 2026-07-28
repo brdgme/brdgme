@@ -144,10 +144,13 @@ pub(crate) async fn set_stale(pool: &PgPool, user_id: Uuid) {
 /// pattern outside `mod tests`, and never pass a runtime value for `table`
 /// (ws F51(3)).
 pub(crate) async fn count_rows(pool: &PgPool, table: &str) -> i64 {
-    sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", table))
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM {}",
+        table
+    )))
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 /// `create_game_with_users` shuffles slot order before assigning

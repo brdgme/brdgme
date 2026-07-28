@@ -1,13 +1,13 @@
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use brdgme_session_store::PostgresStore;
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use sqlx::PgPool;
 use std::time::Duration;
 use tower::ServiceExt;
 use tower_sessions::{Expiry, Session};
-use tower_sessions_sqlx_store::PostgresStore;
 use uuid::Uuid;
 
 use web::auth::session::set_user_session;

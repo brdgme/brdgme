@@ -27,7 +27,7 @@ tokio-util = { version = "0.7", optional = true }
 wasm-bindgen = { version = "=0.2.121", optional = true }
 
 # Database dependencies
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "migrate"], optional = true }
+sqlx = { workspace = true, features = ["migrate", "macros", "derive"], optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "js"] }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 time = { workspace = true, features = ["formatting", "parsing"] }
@@ -40,7 +40,7 @@ tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["json", "env-filter"], optional = true }
 tower = { version = "0.5", features = ["util"], optional = true }
 tower-sessions = { version = "0.14.0", optional = true }
-tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"], optional = true }
+brdgme_session_store = { path = "../lib/session_store", optional = true }
 tower-http = { version = "0.7", features = ["cors", "trace", "limit", "timeout"], optional = true }
 anyhow = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
@@ -119,7 +119,7 @@ ssr = [
     "dep:tracing-subscriber",
     "dep:tower",
     "dep:tower-sessions",
-    "dep:tower-sessions-sqlx-store",
+    "dep:brdgme_session_store",
     "dep:anyhow",
     "dep:thiserror",
     "dep:resend-rs",

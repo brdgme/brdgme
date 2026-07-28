@@ -6,42 +6,85 @@
       {
         "ordinal": 0,
         "name": "game_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "games",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "version_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_versions",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "type_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_types",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "my_is_turn",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "is_turn"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "my_is_turn_at",
-        "type_info": "Timestamp"
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "is_turn_at"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "opp_id?",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "opp_name!",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": "Expression"
       },
       {
         "ordinal": 7,
         "name": "opp_color?",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_players",
+            "name": "color"
+          }
+        }
       }
     ],
     "parameters": {

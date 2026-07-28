@@ -1,0 +1,17 @@
+[package]
+name = "brdgme_session_store"
+version.workspace = true
+edition.workspace = true
+publish = false
+authors.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+rmp-serde = "1.1.2"
+sqlx = { workspace = true, features = ["time"] }
+thiserror = { workspace = true }
+time = { workspace = true }
+tower-sessions = "0.14"
+
+[lints]
+workspace = true

@@ -35,6 +35,7 @@ members = [
     "lib/game_client",
     "lib/markup",
     "lib/rand_bot",
+    "lib/session_store",
     "tools/fuzz",
     "tools/render_plain",
     "tools/repl",
@@ -70,6 +71,7 @@ hex = "0.4"
 futures-util = "0.3.33"
 async-nats = "0.49.1"
 aes-gcm = "0.10"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid"] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

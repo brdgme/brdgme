@@ -6,32 +6,68 @@
       {
         "ordinal": 0,
         "name": "email",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "login_confirmations",
+            "name": "email"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "code",
-        "type_info": "Bpchar"
+        "type_info": "Bpchar",
+        "origin": {
+          "Table": {
+            "table": "login_confirmations",
+            "name": "code"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "login_confirmations",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "attempts",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "login_confirmations",
+            "name": "attempts"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "sent_count",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "login_confirmations",
+            "name": "sent_count"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "last_sent_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "login_confirmations",
+            "name": "last_sent_at"
+          }
+        }
       }
     ],
     "parameters": {

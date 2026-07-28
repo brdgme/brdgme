@@ -1,5 +1,7 @@
 #[cfg(feature = "ssr")]
 use crate::models::user::User;
+#[cfg(feature = "ssr")]
+use brdgme_session_store::PostgresStore;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ssr")]
 use sqlx::PgPool;
@@ -7,8 +9,6 @@ use sqlx::PgPool;
 use tower_sessions::cookie::time::Duration;
 #[cfg(feature = "ssr")]
 use tower_sessions::{Session, SessionManagerLayer};
-#[cfg(feature = "ssr")]
-use tower_sessions_sqlx_store::PostgresStore;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
