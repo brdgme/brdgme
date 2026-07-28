@@ -14,20 +14,20 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 terminal_size = "0.4"
-warp = { version = "0.4.3", features = ["server"], optional = true }
-tokio = { workspace = true, features = ["signal"], optional = true }
+axum = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["signal", "net", "rt"], optional = true }
 sentry = { workspace = true, optional = true }
 env_logger = "0.11.11"
 rand.workspace = true
 
 [features]
 default = ["http-server"]
-http-server = ["warp", "tokio", "sentry"]
+http-server = ["axum", "tokio", "sentry"]
 test-support = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
-warp = { version = "0.4.3", features = ["server", "test"] }
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true
