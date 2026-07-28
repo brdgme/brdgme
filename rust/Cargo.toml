@@ -59,7 +59,7 @@ thiserror = "2.0.19"
 tracing = "0.1"
 time = { version = "0.3", features = ["serde"] }
 tracing-subscriber = "0.3"
-sentry = "0.48"
+sentry = { version = "0.48", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "release-health", "reqwest", "native-tls"] }
 sentry-tracing = "0.48"
 reqwest = { version = "0.13", default-features = false }
 axum = "0.8.9"
