@@ -1376,6 +1376,7 @@ pub async fn create_proposal(
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = crate::friends::require_user().await?;
 
     let opponent_ids = opponent_ids.unwrap_or_default();
@@ -1467,6 +1468,14 @@ pub async fn create_proposal(
             .await
             .map_err(internal("create_proposal: commit transaction"))?;
         crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game.id).await;
+        crate::email::notify::notify_game_emails(
+            resend.as_ref(),
+            &pool,
+            &http_client,
+            game.id,
+            None,
+        )
+        .await;
         return Ok(ProposalOutcome {
             proposal_id: None,
             game_id: Some(game.id),
@@ -1632,6 +1641,7 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
+    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = crate::friends::require_user().await?;
 
     let mut tx = pool
@@ -1704,6 +1714,8 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
 
     broadcaster.broadcast_proposal_update(proposal_id).await;
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
+    crate::email::notify::notify_game_emails(resend.as_ref(), &pool, &http_client, game_id, None)
+        .await;
 
     let invitee_ids = accepted_invitee_ids(&players, proposal.owner_user_id);
     mailer().notify_started(proposal_id, game_id, invitee_ids);

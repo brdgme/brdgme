@@ -1073,6 +1073,14 @@ async fn handle_invite_reply(
     if let Some(gid) = started_game_id {
         crate::game::broadcast_and_trigger(&state.pool, &state.broadcaster, &state.jetstream, gid)
             .await;
+        crate::email::notify::notify_game_emails(
+            state.resend.as_ref(),
+            &state.pool,
+            &state.http_client,
+            gid,
+            None,
+        )
+        .await;
         let invitee_ids: Vec<uuid::Uuid> = roster
             .iter()
             .filter(|p| p.response == "accepted")
