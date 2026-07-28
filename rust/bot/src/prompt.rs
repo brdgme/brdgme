@@ -95,14 +95,14 @@ fn resolve_players(nodes: &[brdgme_markup::Node], names: &[String]) -> Vec<brdgm
 
 /// Serialise a command Spec to a YAML string.
 ///
-/// serde_yaml 0.9 uses YAML native tags (`!Variant value`) for enum variants,
+/// serde_yaml_ng uses YAML native tags (`!Variant value`) for enum variants,
 /// which differs from the mapping style documented in the system prompt
 /// (`Variant: value`). Routing through serde_json::Value first produces the
 /// mapping style we want, since JSON's object representation maps directly to
 /// YAML mappings.
 pub fn spec_to_yaml(spec: &Spec) -> String {
     let json_val = serde_json::to_value(spec).unwrap_or_default();
-    serde_yaml::to_string(&json_val).unwrap_or_default()
+    serde_yaml_ng::to_string(&json_val).unwrap_or_default()
 }
 
 static SYSTEM_ENV: LazyLock<Environment<'static>> = LazyLock::new(|| {

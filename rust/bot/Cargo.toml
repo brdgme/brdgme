@@ -27,7 +27,7 @@ brdgme_game = { path = "../lib/game" }
 brdgme_game_client = { path = "../lib/game_client", features = ["sentry"] }
 brdgme_markup = { path = "../lib/markup" }
 minijinja = "2"
-serde_yaml.workspace = true
+serde_yaml_ng.workspace = true
 async-nats.workspace = true
 futures-util.workspace = true
 axum.workspace = true

@@ -43,7 +43,7 @@ pub enum GameClientError {
     #[error("invalid JSON in game state: {0}")]
     StateJson(#[source] serde_json::Error),
     #[error("failed to serialize state as YAML: {0}")]
-    StateYaml(#[from] serde_yaml::Error),
+    StateYaml(#[from] serde_yaml_ng::Error),
 }
 
 use brdgme_cmd::api::{PlayerRender, PubRender, Request, Response};
@@ -296,7 +296,7 @@ pub struct GameData {
 fn json_to_yaml(json: &str) -> Result<String, GameClientError> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(GameClientError::StateJson)?;
-    serde_yaml::to_string(&value).map_err(GameClientError::from)
+    serde_yaml_ng::to_string(&value).map_err(GameClientError::from)
 }
 
 pub async fn fetch_game_data(
