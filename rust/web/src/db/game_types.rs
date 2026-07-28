@@ -35,7 +35,7 @@ pub async fn find_latest_non_deprecated_game_version(
         SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated
         FROM game_versions
         WHERE game_type_id = $1 AND is_deprecated = false
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, name DESC
         LIMIT 1
         "#,
         game_type_id

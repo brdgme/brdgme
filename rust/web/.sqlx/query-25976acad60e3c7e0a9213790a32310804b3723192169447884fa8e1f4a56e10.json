@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated\n        FROM game_versions\n        WHERE game_type_id = $1 AND is_deprecated = false\n        ORDER BY created_at DESC\n        LIMIT 1\n        ",
+  "query": "\n        SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated\n        FROM game_versions\n        WHERE game_type_id = $1 AND is_deprecated = false\n        ORDER BY created_at DESC, name DESC\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -60,5 +60,5 @@
       false
     ]
   },
-  "hash": "224c0579fb7dd1ec2d727fa325b98a92d603136002bb16fbdaf78059f9916a22"
+  "hash": "25976acad60e3c7e0a9213790a32310804b3723192169447884fa8e1f4a56e10"
 }
