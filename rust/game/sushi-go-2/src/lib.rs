@@ -892,7 +892,7 @@ impl Gamer for Game {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     const MICK: usize = 0;

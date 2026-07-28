@@ -2,25 +2,25 @@
 members = [
     "bot",
     "game/acquire-1",
-    "game/alhambra-1",
     "game/age-of-war-2",
+    "game/alhambra-1",
     "game/battleship-2",
-    "game/cathedral-2",
     "game/category-5-2",
+    "game/cathedral-2",
     "game/farkle-2",
     "game/for-sale-2",
     "game/greed-2",
     "game/jaipur-2",
     "game/liars-dice-2",
     "game/lords-of-vegas-1",
-    "game/modern-art-2",
     "game/lost-cities-1",
     "game/lost-cities-2",
     "game/love-letter-2",
+    "game/modern-art-2",
     "game/no-thanks-2",
     "game/red7-1",
-    "game/seven-wonders-1",
     "game/roll-through-the-ages-2",
+    "game/seven-wonders-1",
     "game/splendor-2",
     "game/starship-catan-1",
     "game/sushi-go-2",
@@ -37,11 +37,11 @@ members = [
     "lib/markup",
     "lib/rand_bot",
     "lib/session_store",
+    "operator",
     "tools/fuzz",
     "tools/render_plain",
     "tools/repl",
     "web",
-    "operator",
 ]
 resolver = "2"
 
@@ -79,12 +79,6 @@ all = { level = "warn", priority = -1 }
 
 [profile.dev]
 debug = "line-tables-only"
-
-[profile.android-dev]
-inherits = "dev"
-
-[profile.server-dev]
-inherits = "dev"
 
 [profile.wasm-dev]
 opt-level = 1

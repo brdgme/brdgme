@@ -782,7 +782,7 @@ pub fn score(players: usize, cards: &[Card]) -> isize {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use brdgme_game::Gamer;
 
     use super::card::{Expedition, Value};

@@ -395,7 +395,7 @@ pub fn castles() -> Vec<Castle> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

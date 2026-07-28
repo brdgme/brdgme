@@ -67,7 +67,7 @@ pub fn call_parser() -> impl Parser<T = Command> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use brdgme_game::command::Spec as CommandSpec;
 

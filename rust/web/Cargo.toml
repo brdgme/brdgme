@@ -153,14 +153,6 @@ ssr = [
     "dep:sentry-tracing",
 ]
 
-# Defines a size-optimized profile for the WASM bundle in release mode
-[profile.wasm-release]
-inherits = "release"
-opt-level = 'z'
-lto = true
-codegen-units = 1
-panic = "abort"
-
 [dev-dependencies]
 bytes = "1"
 http-body-util = "0.1"

@@ -184,7 +184,7 @@ pub fn reveal_table(player_dice: &[Vec<u8>], active: &[usize], bid_value: i32) -
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

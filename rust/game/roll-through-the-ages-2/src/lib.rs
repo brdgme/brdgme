@@ -1700,7 +1700,7 @@ pub(crate) mod test_helpers {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::test_helpers::*;
     use super::*;
 

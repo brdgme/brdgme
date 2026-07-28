@@ -103,7 +103,7 @@ fn dir_parser() -> impl Parser<T = Dir> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use brdgme_game::command::Spec;
     use brdgme_game::command::parser::Parser;
 

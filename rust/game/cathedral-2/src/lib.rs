@@ -609,7 +609,7 @@ impl Gamer for Game {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     fn players() -> Vec<String> {

@@ -383,7 +383,7 @@ impl Gamer for Game {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use brdgme_game::Gamer;
 

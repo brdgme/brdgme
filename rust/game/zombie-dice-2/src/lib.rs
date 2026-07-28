@@ -603,7 +603,7 @@ impl Gamer for Game {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     /// Find a seed whose subsequent action (as exercised by `pred`) satisfies

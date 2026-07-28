@@ -893,7 +893,7 @@ pub(crate) fn plural(n: usize, word: &str) -> String {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     const MICK: usize = 0;

@@ -17,12 +17,12 @@ terminal_size = "0.4"
 axum = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["signal", "net", "rt"], optional = true }
 sentry = { workspace = true, optional = true }
-env_logger = "0.11.11"
+env_logger = { version = "0.11.11", optional = true }
 rand.workspace = true
 
 [features]
 default = ["http-server"]
-http-server = ["axum", "tokio", "sentry"]
+http-server = ["axum", "tokio", "sentry", "env_logger"]
 test-support = []
 
 [dev-dependencies]

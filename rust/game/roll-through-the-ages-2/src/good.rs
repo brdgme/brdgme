@@ -71,7 +71,7 @@ pub fn good_value(good: Good, n: i32) -> i32 {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     // Port of TestGoodMaximum (good_test.go).

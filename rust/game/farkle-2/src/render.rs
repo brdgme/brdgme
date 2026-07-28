@@ -99,7 +99,7 @@ impl Renderer for PlayerState {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
