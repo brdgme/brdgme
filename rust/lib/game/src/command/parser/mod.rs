@@ -21,6 +21,9 @@ pub struct Output<'a, T> {
 pub trait Parser {
     type T;
 
+    /// `GameError::Parse.offset` is the byte position of the failure measured
+    /// from the start of the input slice this parser was given. Leaf parsers
+    /// report 0. Only `Chain` adds.
     fn parse<'a>(&self, input: &'a str, names: &[String])
     -> Result<Output<'a, Self::T>, GameError>;
     fn expected(&self, names: &[String]) -> Vec<String>;
@@ -404,7 +407,7 @@ where
                     parsed.len()
                 )),
                 expected: vec![],
-                offset: 0,
+                offset,
             });
         }
         Ok(Output {
@@ -415,16 +418,7 @@ where
     }
 
     fn expected(&self, names: &[String]) -> Vec<String> {
-        self.parser
-            .expected(names)
-            .iter()
-            .map(|e| match (self.min, self.max) {
-                (None, None) => format!("any number of {}", e),
-                (Some(min), None) => format!("{} or more {}", min, e),
-                (None, Some(max)) => format!("up to {} {}", max, e),
-                (Some(min), Some(max)) => format!("between {} and {} {}", min, max, e),
-            })
-            .collect()
+        many_expected(self.parser.expected(names), self.min, self.max)
     }
 
     fn to_spec(&self) -> CommandSpec {
@@ -565,6 +559,37 @@ pub fn comma_list_or<T: fmt::Display>(items: &[T]) -> String {
 
 pub fn comma_list_and<T: fmt::Display>(items: &[T]) -> String {
     comma_list(items, "and")
+}
+
+pub(crate) fn add_offset(e: GameError, by: usize) -> GameError {
+    match e {
+        GameError::Parse {
+            message,
+            expected,
+            offset,
+        } => GameError::Parse {
+            message,
+            expected,
+            offset: offset + by,
+        },
+        other => other,
+    }
+}
+
+pub(crate) fn many_expected(
+    inner: Vec<String>,
+    min: Option<usize>,
+    max: Option<usize>,
+) -> Vec<String> {
+    inner
+        .iter()
+        .map(|e| match (min, max) {
+            (None, None) => format!("any number of {}", e),
+            (Some(min), None) => format!("{} or more {}", min, e),
+            (None, Some(max)) => format!("up to {} {}", max, e),
+            (Some(min), Some(max)) => format!("between {} and {} {}", min, max, e),
+        })
+        .collect()
 }
 
 pub struct Enum<T>
@@ -944,7 +969,9 @@ impl Parser for CommandSpec {
                 let mut consumed_len = 0;
                 let mut remaining = input;
                 for s in specs {
-                    let out = s.parse(remaining, names)?;
+                    let out = s
+                        .parse(remaining, names)
+                        .map_err(|e| add_offset(e, consumed_len))?;
                     values.push(out.value);
                     consumed_len += out.consumed.len();
                     remaining = out.remaining;
@@ -1008,7 +1035,7 @@ impl Parser for CommandSpec {
                             values.len()
                         )),
                         expected: vec![],
-                        offset: 0,
+                        offset: consumed_len,
                     });
                 }
                 Ok(Output {
@@ -1065,16 +1092,21 @@ impl Parser for CommandSpec {
                 }
             }
             CommandSpec::OneOf(specs) => specs.iter().flat_map(|s| s.expected(names)).collect(),
-            CommandSpec::Chain(specs) => {
-                specs.first().map(|s| s.expected(names)).unwrap_or_default()
+            CommandSpec::Chain(specs) => specs
+                .iter()
+                .find(|s| !matches!(s, CommandSpec::Space))
+                .or_else(|| specs.first())
+                .map(|s| s.expected(names))
+                .unwrap_or_default(),
+            CommandSpec::Many { spec, min, max, .. } => {
+                many_expected(spec.expected(names), *min, *max)
             }
-            CommandSpec::Many { spec, .. } => spec.expected(names),
             CommandSpec::Opt(spec) => spec
                 .expected(names)
                 .iter()
                 .map(|e| format!("optional {}", e))
                 .collect(),
-            CommandSpec::Doc { name, .. } => vec![name.clone()],
+            CommandSpec::Doc { spec, .. } => spec.expected(names),
             CommandSpec::Player => Player {}.expected(names),
             CommandSpec::Space => Space {}.expected(names),
         }
@@ -1538,6 +1570,11 @@ mod tests {
         P: Parser,
     {
         let spec = parser.to_spec();
+        assert_eq!(
+            parser.expected(&[]),
+            spec.expected(&[]),
+            "typed and spec parsers disagree on expected()"
+        );
         for input in inputs {
             let typed_result = parser.parse(input, &[]);
             let spec_result = spec.parse(input, &[]);
@@ -1862,5 +1899,92 @@ mod tests {
                 .parse("café", &[])
                 .expect("expected full match 'café' to win over partial 'cafét'")
         );
+    }
+
+    #[test]
+    fn doc_spec_expected_delegates_to_inner() {
+        let spec = CommandSpec::Doc {
+            name: "tokens".into(),
+            desc: None,
+            spec: Box::new(CommandSpec::Enum {
+                values: vec!["Diamond".into(), "Sapphire".into()],
+                exact: false,
+            }),
+        };
+        assert_eq!(spec.expected(&[]), vec!["Diamond", "Sapphire"]);
+    }
+
+    #[test]
+    fn many_spec_expected_applies_cardinality() {
+        let spec = CommandSpec::Many {
+            spec: Box::new(CommandSpec::Token("card".into())),
+            min: Some(1),
+            max: Some(2),
+            delim: None,
+        };
+        assert_eq!(spec.expected(&[]), vec!["between 1 and 2 card"]);
+    }
+
+    #[test]
+    fn chain_offset_propagation() {
+        let spec = CommandSpec::Chain(vec![
+            CommandSpec::Token("play".into()),
+            CommandSpec::Space,
+            CommandSpec::Token("card".into()),
+        ]);
+        let err = spec
+            .parse("play x", &[])
+            .expect_err("expected 'play x' to fail");
+        match err {
+            GameError::Parse { offset, .. } => assert_eq!(offset, 5),
+            _ => panic!("expected Parse error"),
+        }
+    }
+
+    #[test]
+    fn one_of_furthest_branch_wins_expected() {
+        let spec = CommandSpec::OneOf(vec![
+            CommandSpec::Chain(vec![
+                CommandSpec::Token("play".into()),
+                CommandSpec::Space,
+                CommandSpec::Token("card".into()),
+            ]),
+            CommandSpec::Chain(vec![
+                CommandSpec::Token("play".into()),
+                CommandSpec::Space,
+                CommandSpec::Token("tile".into()),
+            ]),
+        ]);
+        let err = spec
+            .parse("play x", &[])
+            .expect_err("expected 'play x' to fail");
+        match err {
+            GameError::Parse {
+                expected, offset, ..
+            } => {
+                assert_eq!(offset, 5);
+                assert!(expected.contains(&"card".to_string()));
+                assert!(expected.contains(&"tile".to_string()));
+            }
+            _ => panic!("expected Parse error"),
+        }
+    }
+
+    #[test]
+    fn one_of_all_fail_at_zero_accumulates_all_expected() {
+        let spec = CommandSpec::OneOf(vec![
+            CommandSpec::Token("buy".into()),
+            CommandSpec::Token("sell".into()),
+        ]);
+        let err = spec.parse("x", &[]).expect_err("expected 'x' to fail");
+        match err {
+            GameError::Parse {
+                expected, offset, ..
+            } => {
+                assert_eq!(offset, 0);
+                assert_eq!(expected, vec!["buy", "sell"]);
+            }
+            _ => panic!("expected Parse error"),
+        }
     }
 }

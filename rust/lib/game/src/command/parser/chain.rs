@@ -1,5 +1,5 @@
 use crate::command::Spec as CommandSpec;
-use crate::command::parser::{Output, Parser};
+use crate::command::parser::{Output, Parser, add_offset};
 use crate::errors::*;
 
 type Chain2Output<PA, PB> = (<PA as Parser>::T, <PB as Parser>::T);
@@ -15,7 +15,9 @@ where
     PB: Parser,
 {
     let lhs = a.parse(input, names)?;
-    let rhs = b.parse(lhs.remaining, names)?;
+    let rhs = b
+        .parse(lhs.remaining, names)
+        .map_err(|e| add_offset(e, lhs.consumed.len()))?;
     let consumed = lhs.consumed.len() + rhs.consumed.len();
     Ok(Output {
         value: (lhs.value, rhs.value),
@@ -103,7 +105,8 @@ where
         names: &[String],
     ) -> Result<Output<'a, Self::T>, GameError> {
         let head = self.a.parse(input, names)?;
-        let tail = chain_2(&self.b, &self.c, head.remaining, names)?;
+        let tail = chain_2(&self.b, &self.c, head.remaining, names)
+            .map_err(|e| add_offset(e, head.consumed.len()))?;
         let consumed = head.consumed.len() + tail.consumed.len();
         Ok(Output {
             value: (head.value, tail.value.0, tail.value.1),
@@ -161,7 +164,8 @@ where
         names: &[String],
     ) -> Result<Output<'a, Self::T>, GameError> {
         let head = chain_2(&self.a, &self.b, input, names)?;
-        let tail = chain_2(&self.c, &self.d, head.remaining, names)?;
+        let tail = chain_2(&self.c, &self.d, head.remaining, names)
+            .map_err(|e| add_offset(e, head.consumed.len()))?;
         let consumed = head.consumed.len() + tail.consumed.len();
         Ok(Output {
             value: (head.value.0, head.value.1, tail.value.0, tail.value.1),

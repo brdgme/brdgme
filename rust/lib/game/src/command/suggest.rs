@@ -10,8 +10,15 @@
 //!   `AfterSpace::to_spec()` = `Chain([Space, inner])` makes the two
 //!   stop-cases indistinguishable in `Chain` (a guard there breaks 14
 //!   tests - see the parity/regression tests in `parser/mod.rs`).
+//!
+//! lg F19 (depth guard): skipped by D-38(iv). `Spec` derives `Deserialize`
+//! but crosses no trust boundary today - specs are constructed by trusted
+//! game crates. No recursion limit is needed unless a spec is ever
+//! deserialized from user input.
 
 use std::collections::HashSet;
+
+use unicase::UniCase;
 
 use crate::command::parser::Parser;
 use crate::command::{Spec, Suggestion};
@@ -32,7 +39,10 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                 // suggestions of every later chain element (lg F20).
                 return vec![];
             }
-            if token.to_lowercase().starts_with(&remaining.to_lowercase()) {
+            if UniCase::new(token.as_str())
+                .to_folded_case()
+                .starts_with(&UniCase::new(remaining).to_folded_case())
+            {
                 vec![Suggestion {
                     value: token.clone(),
                     desc: None,
@@ -42,6 +52,7 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
             }
         }
         Spec::Enum { values, .. } => {
+            // Mirrors Enum::parse / shared_prefix: char::to_lowercase per char.
             let lower = remaining.to_lowercase();
             // Deduped on the lowercased value, the same key `Enum::parse`
             // uses, so the suggestion list matches what is selectable
@@ -70,6 +81,7 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
             .collect(),
         Spec::Doc { desc, spec, .. } => {
             let suggs = suggest_spec(spec, remaining, names);
+            // Display heuristic, not an acceptance test.
             let at_current_pos = suggs.iter().any(|s| {
                 s.value
                     .to_lowercase()
@@ -120,6 +132,7 @@ fn suggest_spec(spec: &Spec, remaining: &str, names: &[String]) -> Vec<Suggestio
                 .collect()
         }
         Spec::Player => {
+            // Mirrors Enum::parse / shared_prefix: char::to_lowercase per char.
             let lower = remaining.to_lowercase();
             names
                 .iter()
@@ -1416,5 +1429,23 @@ mod tests {
         let spec = sushizock_roll_spec(2);
         assert_eq!(vals(&spec.suggest("roll ", &[])), vec!["1", "2"]);
         assert!(spec.suggest("roll 1 2 ", &[]).is_empty());
+    }
+
+    #[test]
+    fn token_unicode_case_fold_suggest() {
+        let s = Spec::Token("Straße".into()).suggest("STRASSE", &[]);
+        assert_eq!(vals(&s), vec!["Straße"]);
+        let s = Spec::Token("Straße".into()).suggest("stra", &[]);
+        assert_eq!(vals(&s), vec!["Straße"]);
+    }
+
+    #[test]
+    fn enum_does_not_unicode_fold_like_token() {
+        let spec = Spec::Enum {
+            values: vec!["Straße".into()],
+            exact: false,
+        };
+        let s = spec.suggest("STRASSE", &[]);
+        assert!(s.is_empty());
     }
 }
