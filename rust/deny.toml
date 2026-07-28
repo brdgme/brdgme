@@ -60,6 +60,13 @@ confidence-threshold = 0.8
 # only relaxes the check for us, not for third-party dependencies below.
 ignore = true
 
+# combine 4.6 (rust/lib/markup/Cargo.toml) is a knowingly dormant dependency
+# backing brdgme_markup's parser. It carries no advisory today. Migrate (winnow,
+# or fold into the in-house combinator in lib/game) only when the markup parser
+# is next rewritten - per D-24, because WP-02 already changed markup enough for
+# one release. No ignore entry, no ban - just a recorded accepted risk.
+#
+
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]
 multiple-versions = "warn"
