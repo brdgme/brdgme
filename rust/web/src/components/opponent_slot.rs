@@ -66,13 +66,43 @@ pub fn OpponentSlotEditor(
     let slot = move || get.get();
     let mode = move || slot().mode();
 
+    // wfe F58, half 1: the <select> below must be built exactly once, with an
+    // option list that never changes afterwards. When `bot_names` resolves,
+    // `collect_view()`'s Vec rebuild rewrites the existing <option> elements'
+    // `value` attributes in place while the DOM's selectedness stays on the
+    // same element - so the visible choice silently diverges from state. The
+    // `prop:value` RenderEffect does not re-run (it tracks `slot()`, not
+    // `bot_names`), and making it track `bot_names` would not help: attributes
+    // are built before children (tachys html/element/mod.rs:352 vs :357) and a
+    // reactive prop's RenderEffect runs immediately on creation
+    // (reactive_graph effect/render_effect.rs:61-62). docs/CODING.md also
+    // forbids per-<option> `selected=`. So: gate the element on the *settled*
+    // resource, and its option list is fixed for its whole lifetime.
+    //
+    // `None` while the resource is still loading; after that the list is
+    // fixed. `bot_names` is created once per page (new_game.rs:235) and never
+    // refetched, so this transitions exactly once.
+    let bot_name_options = move || -> Option<Vec<String>> {
+        let settled = bot_names.get()?;
+        Some(match settled {
+            Ok(b) if !b.is_empty() => b,
+            _ => vec!["easy".to_string(), "medium".to_string(), "hard".to_string()],
+        })
+    };
+
+    let default_bot_name = move || -> String {
+        bot_name_options()
+            .and_then(|names| names.into_iter().next())
+            .unwrap_or_else(|| "medium".to_string())
+    };
+
     let set_mode = move |m: SlotMode| {
         set.run(match m {
             SlotMode::Player => OpponentSlot::default(),
             SlotMode::Email => OpponentSlot::Email(String::new()),
             SlotMode::Bot => OpponentSlot::Bot {
                 name: bot_default_name.with_value(|n| n.clone()),
-                bot_name: "medium".to_string(),
+                bot_name: default_bot_name(),
             },
         });
         if m == SlotMode::Bot {
@@ -136,36 +166,12 @@ pub fn OpponentSlotEditor(
 
     let (search_seq, set_search_seq) = signal(0u32);
 
-    // wfe F58, half 1: the <select> below must be built exactly once, with an
-    // option list that never changes afterwards. When `bot_names` resolves,
-    // `collect_view()`'s Vec rebuild rewrites the existing <option> elements'
-    // `value` attributes in place while the DOM's selectedness stays on the
-    // same element - so the visible choice silently diverges from state. The
-    // `prop:value` RenderEffect does not re-run (it tracks `slot()`, not
-    // `bot_names`), and making it track `bot_names` would not help: attributes
-    // are built before children (tachys html/element/mod.rs:352 vs :357) and a
-    // reactive prop's RenderEffect runs immediately on creation
-    // (reactive_graph effect/render_effect.rs:61-62). docs/CODING.md also
-    // forbids per-<option> `selected=`. So: gate the element on the *settled*
-    // resource, and its option list is fixed for its whole lifetime.
-    //
-    // `None` while the resource is still loading; after that the list is
-    // fixed. `bot_names` is created once per page (new_game.rs:235) and never
-    // refetched, so this transitions exactly once.
-    let bot_name_options = move || -> Option<Vec<String>> {
-        let settled = bot_names.get()?;
-        Some(match settled {
-            Ok(b) if !b.is_empty() => b,
-            _ => vec!["easy".to_string(), "medium".to_string(), "hard".to_string()],
-        })
-    };
-
     // The single source of truth for what the difficulty select should show.
     // Used by both `prop:value` and the post-mount effect below, so the two
     // cannot drift.
     let bot_name_value = move || match slot() {
         OpponentSlot::Bot { bot_name, .. } => bot_name,
-        _ => "medium".to_string(),
+        _ => default_bot_name(),
     };
 
     // wfe F58, half 2: `prop:value` alone can never select anything on first
