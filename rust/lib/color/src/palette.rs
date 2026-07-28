@@ -82,7 +82,7 @@ impl FromStr for NamedColor {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Palette {
     pub red: Color,
     pub green: Color,
@@ -137,126 +137,38 @@ impl Palette {
     }
 }
 
+pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
+    Color { r, g, b }
+}
+
 pub static LIGHT: Palette = Palette {
-    red: Color {
-        r: 211,
-        g: 47,
-        b: 47,
-    },
-    green: Color {
-        r: 56,
-        g: 142,
-        b: 60,
-    },
-    blue: Color {
-        r: 25,
-        g: 118,
-        b: 210,
-    },
-    yellow: Color {
-        r: 251,
-        g: 192,
-        b: 45,
-    },
-    purple: Color {
-        r: 123,
-        g: 31,
-        b: 162,
-    },
-    cyan: Color {
-        r: 0,
-        g: 151,
-        b: 167,
-    },
-    pink: Color {
-        r: 194,
-        g: 24,
-        b: 91,
-    },
-    orange: Color {
-        r: 245,
-        g: 124,
-        b: 0,
-    },
-    brown: Color {
-        r: 93,
-        g: 64,
-        b: 55,
-    },
-    grey: Color {
-        r: 97,
-        g: 97,
-        b: 97,
-    },
-    foreground: Color { r: 0, g: 0, b: 0 },
-    background: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
+    red: rgb(211, 47, 47),
+    green: rgb(56, 142, 60),
+    blue: rgb(25, 118, 210),
+    yellow: rgb(251, 192, 45),
+    purple: rgb(123, 31, 162),
+    cyan: rgb(0, 151, 167),
+    pink: rgb(194, 24, 91),
+    orange: rgb(245, 124, 0),
+    brown: rgb(93, 64, 55),
+    grey: rgb(97, 97, 97),
+    foreground: rgb(0, 0, 0),
+    background: rgb(255, 255, 255),
 };
 
 pub static DARK: Palette = Palette {
-    red: Color {
-        r: 239,
-        g: 83,
-        b: 80,
-    },
-    green: Color {
-        r: 102,
-        g: 187,
-        b: 106,
-    },
-    blue: Color {
-        r: 66,
-        g: 165,
-        b: 245,
-    },
-    yellow: Color {
-        r: 255,
-        g: 238,
-        b: 88,
-    },
-    purple: Color {
-        r: 171,
-        g: 71,
-        b: 188,
-    },
-    cyan: Color {
-        r: 38,
-        g: 198,
-        b: 218,
-    },
-    pink: Color {
-        r: 236,
-        g: 64,
-        b: 122,
-    },
-    orange: Color {
-        r: 255,
-        g: 167,
-        b: 38,
-    },
-    brown: Color {
-        r: 143,
-        g: 83,
-        b: 61,
-    },
-    grey: Color {
-        r: 158,
-        g: 158,
-        b: 158,
-    },
-    foreground: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
-    background: Color {
-        r: 18,
-        g: 18,
-        b: 18,
-    },
+    red: rgb(239, 83, 80),
+    green: rgb(102, 187, 106),
+    blue: rgb(66, 165, 245),
+    yellow: rgb(255, 238, 88),
+    purple: rgb(171, 71, 188),
+    cyan: rgb(38, 198, 218),
+    pink: rgb(236, 64, 122),
+    orange: rgb(255, 167, 38),
+    brown: rgb(143, 83, 61),
+    grey: rgb(158, 158, 158),
+    foreground: rgb(255, 255, 255),
+    background: rgb(18, 18, 18),
 };
 
 /// Dracula theme. RED/GREEN/YELLOW/PURPLE/CYAN/PINK/ORANGE are the
@@ -266,66 +178,18 @@ pub static DARK: Palette = Palette {
 /// `tests::gate` and the phase-27 report for the before/after values and
 /// which check forced each change).
 pub static DRACULA: Palette = Palette {
-    red: Color {
-        r: 255,
-        g: 85,
-        b: 85,
-    },
-    green: Color {
-        r: 80,
-        g: 250,
-        b: 123,
-    },
-    blue: Color {
-        r: 112,
-        g: 140,
-        b: 245,
-    },
-    yellow: Color {
-        r: 241,
-        g: 250,
-        b: 140,
-    },
-    purple: Color {
-        r: 189,
-        g: 147,
-        b: 249,
-    },
-    cyan: Color {
-        r: 139,
-        g: 233,
-        b: 253,
-    },
-    pink: Color {
-        r: 255,
-        g: 121,
-        b: 198,
-    },
-    orange: Color {
-        r: 255,
-        g: 184,
-        b: 108,
-    },
-    brown: Color {
-        r: 188,
-        g: 137,
-        b: 103,
-    },
-    grey: Color {
-        r: 184,
-        g: 191,
-        b: 214,
-    },
-    foreground: Color {
-        r: 248,
-        g: 248,
-        b: 248,
-    },
-    background: Color {
-        r: 40,
-        g: 42,
-        b: 54,
-    },
+    red: rgb(255, 85, 85),
+    green: rgb(80, 250, 123),
+    blue: rgb(112, 140, 245),
+    yellow: rgb(241, 250, 140),
+    purple: rgb(189, 147, 249),
+    cyan: rgb(139, 233, 253),
+    pink: rgb(255, 121, 198),
+    orange: rgb(255, 184, 108),
+    brown: rgb(188, 137, 103),
+    grey: rgb(184, 191, 214),
+    foreground: rgb(248, 248, 248),
+    background: rgb(40, 42, 54),
 };
 
 /// Alucard theme (Dracula's official light variant, "Alucard Classic").
@@ -347,66 +211,18 @@ pub static DRACULA: Palette = Palette {
 /// darker-on-light hues clear the text/transform/distinctness floors as
 /// derived.
 pub static ALUCARD: Palette = Palette {
-    red: Color {
-        r: 203,
-        g: 58,
-        b: 42,
-    },
-    green: Color {
-        r: 20,
-        g: 113,
-        b: 10,
-    },
-    blue: Color {
-        r: 32,
-        g: 68,
-        b: 151,
-    },
-    yellow: Color {
-        r: 132,
-        g: 110,
-        b: 21,
-    },
-    purple: Color {
-        r: 100,
-        g: 74,
-        b: 201,
-    },
-    cyan: Color {
-        r: 3,
-        g: 106,
-        b: 150,
-    },
-    pink: Color {
-        r: 163,
-        g: 20,
-        b: 77,
-    },
-    orange: Color {
-        r: 163,
-        g: 77,
-        b: 20,
-    },
-    brown: Color {
-        r: 93,
-        g: 62,
-        b: 50,
-    },
-    grey: Color {
-        r: 108,
-        g: 102,
-        b: 75,
-    },
-    foreground: Color {
-        r: 31,
-        g: 31,
-        b: 31,
-    },
-    background: Color {
-        r: 255,
-        g: 251,
-        b: 235,
-    },
+    red: rgb(203, 58, 42),
+    green: rgb(20, 113, 10),
+    blue: rgb(32, 68, 151),
+    yellow: rgb(132, 110, 21),
+    purple: rgb(100, 74, 201),
+    cyan: rgb(3, 106, 150),
+    pink: rgb(163, 20, 77),
+    orange: rgb(163, 77, 20),
+    brown: rgb(93, 62, 50),
+    grey: rgb(108, 102, 75),
+    foreground: rgb(31, 31, 31),
+    background: rgb(255, 251, 235),
 };
 
 /// Solarized Dark (Ethan Schoonover, ethanschoonover.com/solarized;
@@ -440,62 +256,18 @@ pub static ALUCARD: Palette = Palette {
 /// the contrast and distinctness gates against BACKGROUND, GREY, and
 /// ORANGE.
 pub static SOLARIZED_DARK: Palette = Palette {
-    red: Color {
-        r: 220,
-        g: 50,
-        b: 47,
-    },
-    green: Color {
-        r: 133,
-        g: 153,
-        b: 0,
-    },
-    blue: Color {
-        r: 55,
-        g: 151,
-        b: 219,
-    },
-    yellow: Color {
-        r: 181,
-        g: 137,
-        b: 0,
-    },
-    purple: Color {
-        r: 103,
-        g: 108,
-        b: 194,
-    },
-    cyan: Color {
-        r: 42,
-        g: 161,
-        b: 152,
-    },
-    pink: Color {
-        r: 211,
-        g: 54,
-        b: 130,
-    },
-    orange: Color {
-        r: 203,
-        g: 75,
-        b: 22,
-    },
-    brown: Color {
-        r: 172,
-        g: 96,
-        b: 57,
-    },
-    grey: Color {
-        r: 154,
-        g: 171,
-        b: 177,
-    },
-    foreground: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
-    background: Color { r: 0, g: 43, b: 54 },
+    red: rgb(220, 50, 47),
+    green: rgb(133, 153, 0),
+    blue: rgb(55, 151, 219),
+    yellow: rgb(181, 137, 0),
+    purple: rgb(103, 108, 194),
+    cyan: rgb(42, 161, 152),
+    pink: rgb(211, 54, 130),
+    orange: rgb(203, 75, 22),
+    brown: rgb(172, 96, 57),
+    grey: rgb(154, 171, 177),
+    foreground: rgb(255, 255, 255),
+    background: rgb(0, 43, 54),
 };
 
 /// Solarized Light (Ethan Schoonover, ethanschoonover.com/solarized;
@@ -523,62 +295,18 @@ pub static SOLARIZED_DARK: Palette = Palette {
 /// light background (`#734623`), chosen to clear the contrast and
 /// distinctness gates.
 pub static SOLARIZED_LIGHT: Palette = Palette {
-    red: Color {
-        r: 220,
-        g: 50,
-        b: 47,
-    },
-    green: Color {
-        r: 120,
-        g: 138,
-        b: 0,
-    },
-    blue: Color {
-        r: 38,
-        g: 139,
-        b: 210,
-    },
-    yellow: Color {
-        r: 181,
-        g: 137,
-        b: 0,
-    },
-    purple: Color {
-        r: 108,
-        g: 113,
-        b: 196,
-    },
-    cyan: Color {
-        r: 39,
-        g: 149,
-        b: 141,
-    },
-    pink: Color {
-        r: 211,
-        g: 54,
-        b: 130,
-    },
-    orange: Color {
-        r: 203,
-        g: 75,
-        b: 22,
-    },
-    brown: Color {
-        r: 115,
-        g: 70,
-        b: 38,
-    },
-    grey: Color {
-        r: 76,
-        g: 95,
-        b: 103,
-    },
-    foreground: Color { r: 0, g: 0, b: 0 },
-    background: Color {
-        r: 253,
-        g: 246,
-        b: 227,
-    },
+    red: rgb(220, 50, 47),
+    green: rgb(120, 138, 0),
+    blue: rgb(38, 139, 210),
+    yellow: rgb(181, 137, 0),
+    purple: rgb(108, 113, 196),
+    cyan: rgb(39, 149, 141),
+    pink: rgb(211, 54, 130),
+    orange: rgb(203, 75, 22),
+    brown: rgb(115, 70, 38),
+    grey: rgb(76, 95, 103),
+    foreground: rgb(0, 0, 0),
+    background: rgb(253, 246, 227),
 };
 
 /// Nord Dark (Arctic Ice Studio / Sven Greb, nordtheme.com/docs/colors-and-
@@ -625,66 +353,18 @@ pub static SOLARIZED_LIGHT: Palette = Palette {
 /// and by the 15.0 deltaE floor against BLUE (which sat only 13.1 deltaE
 /// away at the first passing lightness/hue).
 pub static NORD_DARK: Palette = Palette {
-    red: Color {
-        r: 207,
-        g: 136,
-        b: 143,
-    },
-    green: Color {
-        r: 163,
-        g: 190,
-        b: 140,
-    },
-    blue: Color {
-        r: 129,
-        g: 161,
-        b: 193,
-    },
-    yellow: Color {
-        r: 235,
-        g: 203,
-        b: 139,
-    },
-    purple: Color {
-        r: 181,
-        g: 144,
-        b: 175,
-    },
-    cyan: Color {
-        r: 136,
-        g: 192,
-        b: 208,
-    },
-    pink: Color {
-        r: 212,
-        g: 127,
-        b: 191,
-    },
-    orange: Color {
-        r: 209,
-        g: 138,
-        b: 115,
-    },
-    brown: Color {
-        r: 174,
-        g: 155,
-        b: 137,
-    },
-    grey: Color {
-        r: 188,
-        g: 190,
-        b: 205,
-    },
-    foreground: Color {
-        r: 236,
-        g: 239,
-        b: 244,
-    },
-    background: Color {
-        r: 46,
-        g: 52,
-        b: 64,
-    },
+    red: rgb(207, 136, 143),
+    green: rgb(163, 190, 140),
+    blue: rgb(129, 161, 193),
+    yellow: rgb(235, 203, 139),
+    purple: rgb(181, 144, 175),
+    cyan: rgb(136, 192, 208),
+    pink: rgb(212, 127, 191),
+    orange: rgb(209, 138, 115),
+    brown: rgb(174, 155, 137),
+    grey: rgb(188, 190, 205),
+    foreground: rgb(236, 239, 244),
+    background: rgb(46, 52, 64),
 };
 
 /// Nord Light (Arctic Ice Studio / Sven Greb; same source as NORD_DARK,
@@ -724,66 +404,18 @@ pub static NORD_DARK: Palette = Palette {
 /// same text-floor/surface/distinctness gates as NORD_DARK's GREY (here
 /// BLUE and CYAN sat closest, at 18.1 deltaE at the first passing value).
 pub static NORD_LIGHT: Palette = Palette {
-    red: Color {
-        r: 181,
-        g: 73,
-        b: 84,
-    },
-    green: Color {
-        r: 89,
-        g: 116,
-        b: 66,
-    },
-    blue: Color {
-        r: 78,
-        g: 111,
-        b: 151,
-    },
-    yellow: Color {
-        r: 141,
-        g: 102,
-        b: 24,
-    },
-    purple: Color {
-        r: 141,
-        g: 93,
-        b: 132,
-    },
-    cyan: Color {
-        r: 53,
-        g: 117,
-        b: 135,
-    },
-    pink: Color {
-        r: 180,
-        g: 60,
-        b: 150,
-    },
-    orange: Color {
-        r: 170,
-        g: 83,
-        b: 56,
-    },
-    brown: Color {
-        r: 129,
-        g: 100,
-        b: 86,
-    },
-    grey: Color {
-        r: 90,
-        g: 96,
-        b: 109,
-    },
-    foreground: Color {
-        r: 46,
-        g: 52,
-        b: 64,
-    },
-    background: Color {
-        r: 236,
-        g: 239,
-        b: 244,
-    },
+    red: rgb(181, 73, 84),
+    green: rgb(89, 116, 66),
+    blue: rgb(78, 111, 151),
+    yellow: rgb(141, 102, 24),
+    purple: rgb(141, 93, 132),
+    cyan: rgb(53, 117, 135),
+    pink: rgb(180, 60, 150),
+    orange: rgb(170, 83, 56),
+    brown: rgb(129, 100, 86),
+    grey: rgb(90, 96, 109),
+    foreground: rgb(46, 52, 64),
+    background: rgb(236, 239, 244),
 };
 
 /// One Dark (Atom's `atom/one-dark-syntax`; verified 2026-07-13 against
@@ -837,66 +469,18 @@ pub static NORD_LIGHT: Palette = Palette {
 ///   surface (3.46:1), and >=15.0 deltaE from every player colour,
 ///   FOREGROUND, and CYAN.
 pub static ONE_DARK: Palette = Palette {
-    red: Color {
-        r: 226,
-        g: 120,
-        b: 129,
-    },
-    green: Color {
-        r: 152,
-        g: 195,
-        b: 121,
-    },
-    blue: Color {
-        r: 97,
-        g: 175,
-        b: 239,
-    },
-    yellow: Color {
-        r: 229,
-        g: 192,
-        b: 123,
-    },
-    purple: Color {
-        r: 198,
-        g: 120,
-        b: 221,
-    },
-    cyan: Color {
-        r: 86,
-        g: 182,
-        b: 194,
-    },
-    pink: Color {
-        r: 225,
-        g: 112,
-        b: 172,
-    },
-    orange: Color {
-        r: 209,
-        g: 154,
-        b: 102,
-    },
-    brown: Color {
-        r: 184,
-        g: 152,
-        b: 122,
-    },
-    grey: Color {
-        r: 163,
-        g: 175,
-        b: 157,
-    },
-    foreground: Color {
-        r: 191,
-        g: 197,
-        b: 206,
-    },
-    background: Color {
-        r: 40,
-        g: 44,
-        b: 52,
-    },
+    red: rgb(226, 120, 129),
+    green: rgb(152, 195, 121),
+    blue: rgb(97, 175, 239),
+    yellow: rgb(229, 192, 123),
+    purple: rgb(198, 120, 221),
+    cyan: rgb(86, 182, 194),
+    pink: rgb(225, 112, 172),
+    orange: rgb(209, 154, 102),
+    brown: rgb(184, 152, 122),
+    grey: rgb(163, 175, 157),
+    foreground: rgb(191, 197, 206),
+    background: rgb(40, 44, 52),
 };
 
 /// One Light (Atom's `atom/one-light-syntax`; verified 2026-07-13 against
@@ -941,66 +525,18 @@ pub static ONE_DARK: Palette = Palette {
 ///   (hue/saturation unchanged) to `#6c6e7a` (l 45%), clearing the floor
 ///   and 15.0 deltaE from BROWN.
 pub static ONE_LIGHT: Palette = Palette {
-    red: Color {
-        r: 204,
-        g: 45,
-        b: 30,
-    },
-    green: Color {
-        r: 62,
-        g: 123,
-        b: 61,
-    },
-    blue: Color {
-        r: 26,
-        g: 94,
-        b: 239,
-    },
-    yellow: Color {
-        r: 208,
-        g: 170,
-        b: 1,
-    },
-    purple: Color {
-        r: 166,
-        g: 38,
-        b: 164,
-    },
-    cyan: Color {
-        r: 1,
-        g: 121,
-        b: 173,
-    },
-    pink: Color {
-        r: 187,
-        g: 42,
-        b: 120,
-    },
-    orange: Color {
-        r: 152,
-        g: 104,
-        b: 1,
-    },
-    brown: Color {
-        r: 111,
-        g: 75,
-        b: 42,
-    },
-    grey: Color {
-        r: 108,
-        g: 110,
-        b: 122,
-    },
-    foreground: Color {
-        r: 56,
-        g: 58,
-        b: 66,
-    },
-    background: Color {
-        r: 250,
-        g: 250,
-        b: 250,
-    },
+    red: rgb(204, 45, 30),
+    green: rgb(62, 123, 61),
+    blue: rgb(26, 94, 239),
+    yellow: rgb(208, 170, 1),
+    purple: rgb(166, 38, 164),
+    cyan: rgb(1, 121, 173),
+    pink: rgb(187, 42, 120),
+    orange: rgb(152, 104, 1),
+    brown: rgb(111, 75, 42),
+    grey: rgb(108, 110, 122),
+    foreground: rgb(56, 58, 66),
+    background: rgb(250, 250, 250),
 };
 
 /// Gruvbox Dark (Pavel Pertsev / morhetz, github.com/morhetz/gruvbox;
@@ -1049,66 +585,18 @@ pub static ONE_LIGHT: Palette = Palette {
 /// - PINK/BROWN (see derivation above) both needed their initial guesses
 ///   pushed further from GREY's lightness to clear 4.5:1 via `contrast`.
 pub static GRUVBOX_DARK: Palette = Palette {
-    red: Color {
-        r: 255,
-        g: 85,
-        b: 60,
-    },
-    green: Color {
-        r: 184,
-        g: 187,
-        b: 38,
-    },
-    blue: Color {
-        r: 131,
-        g: 165,
-        b: 152,
-    },
-    yellow: Color {
-        r: 250,
-        g: 189,
-        b: 47,
-    },
-    purple: Color {
-        r: 211,
-        g: 134,
-        b: 155,
-    },
-    cyan: Color {
-        r: 142,
-        g: 192,
-        b: 124,
-    },
-    pink: Color {
-        r: 224,
-        g: 108,
-        b: 195,
-    },
-    orange: Color {
-        r: 254,
-        g: 128,
-        b: 25,
-    },
-    brown: Color {
-        r: 210,
-        g: 130,
-        b: 70,
-    },
-    grey: Color {
-        r: 188,
-        g: 188,
-        b: 169,
-    },
-    foreground: Color {
-        r: 236,
-        g: 232,
-        b: 223,
-    },
-    background: Color {
-        r: 40,
-        g: 40,
-        b: 40,
-    },
+    red: rgb(255, 85, 60),
+    green: rgb(184, 187, 38),
+    blue: rgb(131, 165, 152),
+    yellow: rgb(250, 189, 47),
+    purple: rgb(211, 134, 155),
+    cyan: rgb(142, 192, 124),
+    pink: rgb(224, 108, 195),
+    orange: rgb(254, 128, 25),
+    brown: rgb(210, 130, 70),
+    grey: rgb(188, 188, 169),
+    foreground: rgb(236, 232, 223),
+    background: rgb(40, 40, 40),
 };
 
 /// Gruvbox Light (same source as GRUVBOX_DARK, verified 2026-07-13).
@@ -1148,62 +636,18 @@ pub static GRUVBOX_DARK: Palette = Palette {
 ///   same warm hue family to l 35% (s 12%) -> `#64594f`, clearing both
 ///   softened surfaces and 15.0 deltaE from FOREGROUND.
 pub static GRUVBOX_LIGHT: Palette = Palette {
-    red: Color { r: 157, g: 0, b: 6 },
-    green: Color {
-        r: 110,
-        g: 105,
-        b: 12,
-    },
-    blue: Color {
-        r: 7,
-        g: 102,
-        b: 120,
-    },
-    yellow: Color {
-        r: 145,
-        g: 94,
-        b: 15,
-    },
-    purple: Color {
-        r: 143,
-        g: 63,
-        b: 113,
-    },
-    cyan: Color {
-        r: 58,
-        g: 108,
-        b: 77,
-    },
-    pink: Color {
-        r: 161,
-        g: 26,
-        b: 114,
-    },
-    orange: Color {
-        r: 175,
-        g: 58,
-        b: 3,
-    },
-    brown: Color {
-        r: 135,
-        g: 74,
-        b: 43,
-    },
-    grey: Color {
-        r: 100,
-        g: 89,
-        b: 79,
-    },
-    foreground: Color {
-        r: 60,
-        g: 56,
-        b: 54,
-    },
-    background: Color {
-        r: 251,
-        g: 241,
-        b: 199,
-    },
+    red: rgb(157, 0, 6),
+    green: rgb(110, 105, 12),
+    blue: rgb(7, 102, 120),
+    yellow: rgb(145, 94, 15),
+    purple: rgb(143, 63, 113),
+    cyan: rgb(58, 108, 77),
+    pink: rgb(161, 26, 114),
+    orange: rgb(175, 58, 3),
+    brown: rgb(135, 74, 43),
+    grey: rgb(100, 89, 79),
+    foreground: rgb(60, 56, 54),
+    background: rgb(251, 241, 199),
 };
 
 /// Catppuccin Mocha (github.com/catppuccin/catppuccin; verified 2026-07-13
@@ -1236,66 +680,18 @@ pub static GRUVBOX_LIGHT: Palette = Palette {
 /// GREY/BROWN choices above - every other official value clears the gate at
 /// its native value.
 pub static CATPPUCCIN_MOCHA: Palette = Palette {
-    red: Color {
-        r: 243,
-        g: 139,
-        b: 168,
-    },
-    green: Color {
-        r: 166,
-        g: 227,
-        b: 161,
-    },
-    blue: Color {
-        r: 137,
-        g: 180,
-        b: 250,
-    },
-    yellow: Color {
-        r: 249,
-        g: 226,
-        b: 175,
-    },
-    purple: Color {
-        r: 203,
-        g: 166,
-        b: 247,
-    },
-    cyan: Color {
-        r: 137,
-        g: 220,
-        b: 235,
-    },
-    pink: Color {
-        r: 245,
-        g: 194,
-        b: 231,
-    },
-    orange: Color {
-        r: 250,
-        g: 179,
-        b: 135,
-    },
-    brown: Color {
-        r: 171,
-        g: 128,
-        b: 96,
-    },
-    grey: Color {
-        r: 166,
-        g: 172,
-        b: 194,
-    },
-    foreground: Color {
-        r: 205,
-        g: 214,
-        b: 244,
-    },
-    background: Color {
-        r: 30,
-        g: 30,
-        b: 46,
-    },
+    red: rgb(243, 139, 168),
+    green: rgb(166, 227, 161),
+    blue: rgb(137, 180, 250),
+    yellow: rgb(249, 226, 175),
+    purple: rgb(203, 166, 247),
+    cyan: rgb(137, 220, 235),
+    pink: rgb(245, 194, 231),
+    orange: rgb(250, 179, 135),
+    brown: rgb(171, 128, 96),
+    grey: rgb(166, 172, 194),
+    foreground: rgb(205, 214, 244),
+    background: rgb(30, 30, 46),
 };
 
 /// Catppuccin Latte (github.com/catppuccin/catppuccin; same source as
@@ -1350,66 +746,18 @@ pub static CATPPUCCIN_MOCHA: Palette = Palette {
 /// and darkened to l 24% (`#3a3e40`), clearing both floors and 17.2 deltaE
 /// from FOREGROUND (vs. the 15.0 floor).
 pub static CATPPUCCIN_LATTE: Palette = Palette {
-    red: Color {
-        r: 210,
-        g: 15,
-        b: 57,
-    },
-    green: Color {
-        r: 39,
-        g: 97,
-        b: 26,
-    },
-    blue: Color {
-        r: 26,
-        g: 88,
-        b: 214,
-    },
-    yellow: Color {
-        r: 126,
-        g: 81,
-        b: 16,
-    },
-    purple: Color {
-        r: 136,
-        g: 57,
-        b: 239,
-    },
-    cyan: Color {
-        r: 2,
-        g: 101,
-        b: 141,
-    },
-    pink: Color {
-        r: 185,
-        g: 29,
-        b: 144,
-    },
-    orange: Color {
-        r: 173,
-        g: 64,
-        b: 1,
-    },
-    brown: Color {
-        r: 122,
-        g: 79,
-        b: 52,
-    },
-    grey: Color {
-        r: 58,
-        g: 62,
-        b: 64,
-    },
-    foreground: Color {
-        r: 76,
-        g: 79,
-        b: 105,
-    },
-    background: Color {
-        r: 239,
-        g: 241,
-        b: 245,
-    },
+    red: rgb(210, 15, 57),
+    green: rgb(39, 97, 26),
+    blue: rgb(26, 88, 214),
+    yellow: rgb(126, 81, 16),
+    purple: rgb(136, 57, 239),
+    cyan: rgb(2, 101, 141),
+    pink: rgb(185, 29, 144),
+    orange: rgb(173, 64, 1),
+    brown: rgb(122, 79, 52),
+    grey: rgb(58, 62, 64),
+    foreground: rgb(76, 79, 105),
+    background: rgb(239, 241, 245),
 };
 
 /// Tokyo Night (github.com/enkia/tokyo-night-vscode-theme, cross-checked
@@ -1459,66 +807,18 @@ pub static CATPPUCCIN_LATTE: Palette = Palette {
 /// the other - the same trade-off pattern as other derived accents). Moving
 /// to hue 290°/s 60% and l 65% (`#c970db`) clears both simultaneously.
 pub static TOKYO_NIGHT: Palette = Palette {
-    red: Color {
-        r: 247,
-        g: 118,
-        b: 142,
-    },
-    green: Color {
-        r: 158,
-        g: 206,
-        b: 106,
-    },
-    blue: Color {
-        r: 122,
-        g: 162,
-        b: 247,
-    },
-    yellow: Color {
-        r: 224,
-        g: 175,
-        b: 104,
-    },
-    purple: Color {
-        r: 187,
-        g: 154,
-        b: 247,
-    },
-    cyan: Color {
-        r: 125,
-        g: 207,
-        b: 255,
-    },
-    pink: Color {
-        r: 201,
-        g: 112,
-        b: 219,
-    },
-    orange: Color {
-        r: 255,
-        g: 158,
-        b: 100,
-    },
-    brown: Color {
-        r: 163,
-        g: 146,
-        b: 102,
-    },
-    grey: Color {
-        r: 172,
-        g: 194,
-        b: 205,
-    },
-    foreground: Color {
-        r: 169,
-        g: 177,
-        b: 214,
-    },
-    background: Color {
-        r: 26,
-        g: 27,
-        b: 38,
-    },
+    red: rgb(247, 118, 142),
+    green: rgb(158, 206, 106),
+    blue: rgb(122, 162, 247),
+    yellow: rgb(224, 175, 104),
+    purple: rgb(187, 154, 247),
+    cyan: rgb(125, 207, 255),
+    pink: rgb(201, 112, 219),
+    orange: rgb(255, 158, 100),
+    brown: rgb(163, 146, 102),
+    grey: rgb(172, 194, 205),
+    foreground: rgb(169, 177, 214),
+    background: rgb(26, 27, 38),
 };
 
 /// Tokyo Night Storm (same source and accents as TOKYO_NIGHT; verified
@@ -1541,11 +841,7 @@ pub static TOKYO_NIGHT: Palette = Palette {
 /// BACKGROUND pulls the softened wash closer to washed-out), forcing the
 /// hue/lightness move described on TOKYO_NIGHT.
 pub static TOKYO_NIGHT_STORM: Palette = Palette {
-    background: Color {
-        r: 36,
-        g: 40,
-        b: 59,
-    },
+    background: rgb(36, 40, 59),
     ..TOKYO_NIGHT
 };
 
@@ -1589,66 +885,18 @@ pub static TOKYO_NIGHT_STORM: Palette = Palette {
 ///   ORANGE's lightness (l 20%) -> `#4d2619`, clearing 15.0 deltaE from
 ///   ORANGE and GREY and the 4.5:1 `contrast` floor.
 pub static TOKYO_NIGHT_LIGHT: Palette = Palette {
-    red: Color {
-        r: 140,
-        g: 67,
-        b: 81,
-    },
-    green: Color {
-        r: 56,
-        g: 95,
-        b: 13,
-    },
-    blue: Color {
-        r: 41,
-        g: 89,
-        b: 170,
-    },
-    yellow: Color {
-        r: 143,
-        g: 94,
-        b: 21,
-    },
-    purple: Color {
-        r: 90,
-        g: 62,
-        b: 142,
-    },
-    cyan: Color {
-        r: 0,
-        g: 108,
-        b: 134,
-    },
-    pink: Color {
-        r: 172,
-        g: 16,
-        b: 203,
-    },
-    orange: Color {
-        r: 150,
-        g: 80,
-        b: 39,
-    },
-    brown: Color {
-        r: 77,
-        g: 38,
-        b: 25,
-    },
-    grey: Color {
-        r: 86,
-        g: 87,
-        b: 93,
-    },
-    foreground: Color {
-        r: 52,
-        g: 59,
-        b: 88,
-    },
-    background: Color {
-        r: 230,
-        g: 231,
-        b: 237,
-    },
+    red: rgb(140, 67, 81),
+    green: rgb(56, 95, 13),
+    blue: rgb(41, 89, 170),
+    yellow: rgb(143, 94, 21),
+    purple: rgb(90, 62, 142),
+    cyan: rgb(0, 108, 134),
+    pink: rgb(172, 16, 203),
+    orange: rgb(150, 80, 39),
+    brown: rgb(77, 38, 25),
+    grey: rgb(86, 87, 93),
+    foreground: rgb(52, 59, 88),
+    background: rgb(230, 231, 237),
 };
 
 /// Night Owl (Sarah Drasner, github.com/sdras/night-owl-vscode-theme;
@@ -1688,62 +936,18 @@ pub static TOKYO_NIGHT_LIGHT: Palette = Palette {
 /// (hue/saturation unchanged) to l 56% (`#829c9c`), clearing it at 3.3:1+.
 /// Every other official value clears every floor at its native lightness.
 pub static NIGHT_OWL: Palette = Palette {
-    red: Color {
-        r: 239,
-        g: 83,
-        b: 80,
-    },
-    green: Color {
-        r: 197,
-        g: 228,
-        b: 120,
-    },
-    blue: Color {
-        r: 130,
-        g: 170,
-        b: 255,
-    },
-    yellow: Color {
-        r: 255,
-        g: 203,
-        b: 139,
-    },
-    purple: Color {
-        r: 199,
-        g: 146,
-        b: 234,
-    },
-    cyan: Color {
-        r: 127,
-        g: 219,
-        b: 202,
-    },
-    pink: Color {
-        r: 255,
-        g: 44,
-        b: 131,
-    },
-    orange: Color {
-        r: 247,
-        g: 140,
-        b: 108,
-    },
-    brown: Color {
-        r: 168,
-        g: 122,
-        b: 92,
-    },
-    grey: Color {
-        r: 130,
-        g: 156,
-        b: 156,
-    },
-    foreground: Color {
-        r: 214,
-        g: 222,
-        b: 235,
-    },
-    background: Color { r: 1, g: 22, b: 39 },
+    red: rgb(239, 83, 80),
+    green: rgb(197, 228, 120),
+    blue: rgb(130, 170, 255),
+    yellow: rgb(255, 203, 139),
+    purple: rgb(199, 146, 234),
+    cyan: rgb(127, 219, 202),
+    pink: rgb(255, 44, 131),
+    orange: rgb(247, 140, 108),
+    brown: rgb(168, 122, 92),
+    grey: rgb(130, 156, 156),
+    foreground: rgb(214, 222, 235),
+    background: rgb(1, 22, 39),
 };
 
 /// Light Owl (Sarah Drasner's official light variant, distributed as "Night
@@ -1803,66 +1007,18 @@ pub static NIGHT_OWL: Palette = Palette {
 ///   clearing every softened surface and 19.1 deltaE from FOREGROUND (and
 ///   19.2 from the derived BROWN).
 pub static LIGHT_OWL: Palette = Palette {
-    red: Color {
-        r: 179,
-        g: 29,
-        b: 25,
-    },
-    green: Color {
-        r: 75,
-        g: 122,
-        b: 31,
-    },
-    blue: Color {
-        r: 39,
-        g: 83,
-        b: 175,
-    },
-    yellow: Color {
-        r: 140,
-        g: 106,
-        b: 18,
-    },
-    purple: Color {
-        r: 153,
-        g: 76,
-        b: 195,
-    },
-    cyan: Color {
-        r: 10,
-        g: 127,
-        b: 131,
-    },
-    pink: Color {
-        r: 170,
-        g: 9,
-        b: 130,
-    },
-    orange: Color {
-        r: 166,
-        g: 93,
-        b: 0,
-    },
-    brown: Color {
-        r: 122,
-        g: 82,
-        b: 64,
-    },
-    grey: Color {
-        r: 83,
-        g: 79,
-        b: 70,
-    },
-    foreground: Color {
-        r: 64,
-        g: 63,
-        b: 83,
-    },
-    background: Color {
-        r: 251,
-        g: 251,
-        b: 251,
-    },
+    red: rgb(179, 29, 25),
+    green: rgb(75, 122, 31),
+    blue: rgb(39, 83, 175),
+    yellow: rgb(140, 106, 18),
+    purple: rgb(153, 76, 195),
+    cyan: rgb(10, 127, 131),
+    pink: rgb(170, 9, 130),
+    orange: rgb(166, 93, 0),
+    brown: rgb(122, 82, 64),
+    grey: rgb(83, 79, 70),
+    foreground: rgb(64, 63, 83),
+    background: rgb(251, 251, 251),
 };
 
 /// SynthWave '84 (Robb Owen, github.com/robb0wen/synthwave-vscode; verified
@@ -1924,66 +1080,18 @@ pub static LIGHT_OWL: Palette = Palette {
 /// value (GREEN/CYAN/PINK/YELLOW/ORANGE/PURPLE) clears every floor at its
 /// native lightness.
 pub static SYNTHWAVE_84: Palette = Palette {
-    red: Color {
-        r: 254,
-        g: 77,
-        b: 89,
-    },
-    green: Color {
-        r: 114,
-        g: 241,
-        b: 184,
-    },
-    blue: Color {
-        r: 129,
-        g: 139,
-        b: 218,
-    },
-    yellow: Color {
-        r: 254,
-        g: 222,
-        b: 93,
-    },
-    purple: Color {
-        r: 184,
-        g: 147,
-        b: 206,
-    },
-    cyan: Color {
-        r: 54,
-        g: 249,
-        b: 246,
-    },
-    pink: Color {
-        r: 255,
-        g: 126,
-        b: 219,
-    },
-    orange: Color {
-        r: 255,
-        g: 139,
-        b: 57,
-    },
-    brown: Color {
-        r: 192,
-        g: 130,
-        b: 89,
-    },
-    grey: Color {
-        r: 177,
-        g: 180,
-        b: 201,
-    },
-    foreground: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
-    background: Color {
-        r: 38,
-        g: 35,
-        b: 53,
-    },
+    red: rgb(254, 77, 89),
+    green: rgb(114, 241, 184),
+    blue: rgb(129, 139, 218),
+    yellow: rgb(254, 222, 93),
+    purple: rgb(184, 147, 206),
+    cyan: rgb(54, 249, 246),
+    pink: rgb(255, 126, 219),
+    orange: rgb(255, 139, 57),
+    brown: rgb(192, 130, 89),
+    grey: rgb(177, 180, 201),
+    foreground: rgb(255, 255, 255),
+    background: rgb(38, 35, 53),
 };
 
 /// PaperColor Light (Nikyle Nguyen / NLKNguyen, github.com/NLKNguyen/
@@ -2064,58 +1172,18 @@ pub static SYNTHWAVE_84: Palette = Palette {
 ///   3:1 floor landed within 15.0 deltaE of FOREGROUND; the teal hue and
 ///   l 31% clear both simultaneously.
 pub static PAPERCOLOR_LIGHT: Palette = Palette {
-    red: Color { r: 175, g: 0, b: 0 },
-    green: Color { r: 0, g: 102, b: 0 },
-    blue: Color {
-        r: 0,
-        g: 55,
-        b: 199,
-    },
-    yellow: Color {
-        r: 112,
-        g: 84,
-        b: 0,
-    },
-    purple: Color {
-        r: 135,
-        g: 0,
-        b: 175,
-    },
-    cyan: Color {
-        r: 0,
-        g: 94,
-        b: 122,
-    },
-    pink: Color {
-        r: 153,
-        g: 0,
-        b: 96,
-    },
-    orange: Color {
-        r: 138,
-        g: 61,
-        b: 0,
-    },
-    brown: Color {
-        r: 115,
-        g: 71,
-        b: 35,
-    },
-    grey: Color {
-        r: 57,
-        g: 92,
-        b: 76,
-    },
-    foreground: Color {
-        r: 68,
-        g: 68,
-        b: 68,
-    },
-    background: Color {
-        r: 238,
-        g: 238,
-        b: 238,
-    },
+    red: rgb(175, 0, 0),
+    green: rgb(0, 102, 0),
+    blue: rgb(0, 55, 199),
+    yellow: rgb(112, 84, 0),
+    purple: rgb(135, 0, 175),
+    cyan: rgb(0, 94, 122),
+    pink: rgb(153, 0, 96),
+    orange: rgb(138, 61, 0),
+    brown: rgb(115, 71, 35),
+    grey: rgb(57, 92, 76),
+    foreground: rgb(68, 68, 68),
+    background: rgb(238, 238, 238),
 };
 
 /// PaperColor Dark (same source as PAPERCOLOR_LIGHT, verified 2026-07-13
@@ -2174,66 +1242,18 @@ pub static PAPERCOLOR_LIGHT: Palette = Palette {
 ///   (hue/saturation unchanged) to l 56% (`#b48268`), clearing it at 3.7:1+
 ///   while staying >=15.0 deltaE from ORANGE, YELLOW, and GREY.
 pub static PAPERCOLOR_DARK: Palette = Palette {
-    red: Color {
-        r: 255,
-        g: 50,
-        b: 95,
-    },
-    green: Color {
-        r: 95,
-        g: 175,
-        b: 0,
-    },
-    blue: Color {
-        r: 95,
-        g: 175,
-        b: 215,
-    },
-    yellow: Color {
-        r: 215,
-        g: 175,
-        b: 0,
-    },
-    purple: Color {
-        r: 175,
-        g: 135,
-        b: 215,
-    },
-    cyan: Color {
-        r: 0,
-        g: 175,
-        b: 175,
-    },
-    pink: Color {
-        r: 255,
-        g: 95,
-        b: 175,
-    },
-    orange: Color {
-        r: 215,
-        g: 135,
-        b: 95,
-    },
-    brown: Color {
-        r: 180,
-        g: 130,
-        b: 104,
-    },
-    grey: Color {
-        r: 166,
-        g: 166,
-        b: 166,
-    },
-    foreground: Color {
-        r: 208,
-        g: 208,
-        b: 208,
-    },
-    background: Color {
-        r: 28,
-        g: 28,
-        b: 28,
-    },
+    red: rgb(255, 50, 95),
+    green: rgb(95, 175, 0),
+    blue: rgb(95, 175, 215),
+    yellow: rgb(215, 175, 0),
+    purple: rgb(175, 135, 215),
+    cyan: rgb(0, 175, 175),
+    pink: rgb(255, 95, 175),
+    orange: rgb(215, 135, 95),
+    brown: rgb(180, 130, 104),
+    grey: rgb(166, 166, 166),
+    foreground: rgb(208, 208, 208),
+    background: rgb(28, 28, 28),
 };
 
 /// Monokai (Wimer Hazenberg, originally for TextMate, later Sublime Text's
@@ -2284,66 +1304,18 @@ pub static PAPERCOLOR_DARK: Palette = Palette {
 /// No further tuning was forced by `tests::gate_contrast_all_themes` beyond
 /// GREY's, RED's, BLUE's, PINK's, and BROWN's tunings above.
 pub static MONOKAI: Palette = Palette {
-    red: Color {
-        r: 246,
-        g: 99,
-        b: 85,
-    },
-    green: Color {
-        r: 166,
-        g: 226,
-        b: 46,
-    },
-    blue: Color {
-        r: 134,
-        g: 159,
-        b: 234,
-    },
-    yellow: Color {
-        r: 230,
-        g: 219,
-        b: 116,
-    },
-    purple: Color {
-        r: 174,
-        g: 129,
-        b: 255,
-    },
-    cyan: Color {
-        r: 102,
-        g: 217,
-        b: 239,
-    },
-    pink: Color {
-        r: 250,
-        g: 76,
-        b: 140,
-    },
-    orange: Color {
-        r: 253,
-        g: 151,
-        b: 31,
-    },
-    brown: Color {
-        r: 186,
-        g: 143,
-        b: 94,
-    },
-    grey: Color {
-        r: 196,
-        g: 207,
-        b: 212,
-    },
-    foreground: Color {
-        r: 248,
-        g: 248,
-        b: 242,
-    },
-    background: Color {
-        r: 39,
-        g: 40,
-        b: 34,
-    },
+    red: rgb(246, 99, 85),
+    green: rgb(166, 226, 46),
+    blue: rgb(134, 159, 234),
+    yellow: rgb(230, 219, 116),
+    purple: rgb(174, 129, 255),
+    cyan: rgb(102, 217, 239),
+    pink: rgb(250, 76, 140),
+    orange: rgb(253, 151, 31),
+    brown: rgb(186, 143, 94),
+    grey: rgb(196, 207, 212),
+    foreground: rgb(248, 248, 242),
+    background: rgb(39, 40, 34),
 };
 
 /// JetBrains Darcula (IntelliJ IDEA/PyCharm/WebStorm/Rider default dark
@@ -2395,66 +1367,18 @@ pub static MONOKAI: Palette = Palette {
 ///   against the 15.0 floor) -> `#a5a29c`, clearing every softened surface
 ///   at 3.15:1+ and 16.7 deltaE from FOREGROUND.
 pub static DARCULA: Palette = Palette {
-    red: Color {
-        r: 211,
-        g: 120,
-        b: 118,
-    },
-    green: Color {
-        r: 122,
-        g: 155,
-        b: 103,
-    },
-    blue: Color {
-        r: 104,
-        g: 151,
-        b: 187,
-    },
-    yellow: Color {
-        r: 255,
-        g: 198,
-        b: 109,
-    },
-    purple: Color {
-        r: 165,
-        g: 135,
-        b: 181,
-    },
-    cyan: Color {
-        r: 111,
-        g: 175,
-        b: 189,
-    },
-    pink: Color {
-        r: 209,
-        g: 121,
-        b: 168,
-    },
-    orange: Color {
-        r: 207,
-        g: 127,
-        b: 60,
-    },
-    brown: Color {
-        r: 188,
-        g: 148,
-        b: 88,
-    },
-    grey: Color {
-        r: 165,
-        g: 162,
-        b: 156,
-    },
-    foreground: Color {
-        r: 188,
-        g: 199,
-        b: 210,
-    },
-    background: Color {
-        r: 43,
-        g: 43,
-        b: 43,
-    },
+    red: rgb(211, 120, 118),
+    green: rgb(122, 155, 103),
+    blue: rgb(104, 151, 187),
+    yellow: rgb(255, 198, 109),
+    purple: rgb(165, 135, 181),
+    cyan: rgb(111, 175, 189),
+    pink: rgb(209, 121, 168),
+    orange: rgb(207, 127, 60),
+    brown: rgb(188, 148, 88),
+    grey: rgb(165, 162, 156),
+    foreground: rgb(188, 199, 210),
+    background: rgb(43, 43, 43),
 };
 
 /// VS Code Dark+ (Microsoft's classic built-in dark theme; verified
@@ -2503,66 +1427,18 @@ pub static DARCULA: Palette = Palette {
 /// YELLOW/CYAN/ORANGE/PINK) clears the 3:1 text floor and 4.5:1 `contrast`
 /// transform floor (via BACKGROUND) at its native value.
 pub static VS_CODE_DARK_PLUS: Palette = Palette {
-    red: Color {
-        r: 244,
-        g: 71,
-        b: 71,
-    },
-    green: Color {
-        r: 106,
-        g: 153,
-        b: 85,
-    },
-    blue: Color {
-        r: 86,
-        g: 156,
-        b: 214,
-    },
-    yellow: Color {
-        r: 220,
-        g: 220,
-        b: 170,
-    },
-    purple: Color {
-        r: 158,
-        g: 129,
-        b: 218,
-    },
-    cyan: Color {
-        r: 78,
-        g: 201,
-        b: 176,
-    },
-    pink: Color {
-        r: 197,
-        g: 134,
-        b: 192,
-    },
-    orange: Color {
-        r: 206,
-        g: 145,
-        b: 120,
-    },
-    brown: Color {
-        r: 168,
-        g: 148,
-        b: 138,
-    },
-    grey: Color {
-        r: 144,
-        g: 156,
-        b: 173,
-    },
-    foreground: Color {
-        r: 212,
-        g: 212,
-        b: 212,
-    },
-    background: Color {
-        r: 30,
-        g: 30,
-        b: 30,
-    },
+    red: rgb(244, 71, 71),
+    green: rgb(106, 153, 85),
+    blue: rgb(86, 156, 214),
+    yellow: rgb(220, 220, 170),
+    purple: rgb(158, 129, 218),
+    cyan: rgb(78, 201, 176),
+    pink: rgb(197, 134, 192),
+    orange: rgb(206, 145, 120),
+    brown: rgb(168, 148, 138),
+    grey: rgb(144, 156, 173),
+    foreground: rgb(212, 212, 212),
+    background: rgb(30, 30, 30),
 };
 
 /// VS Code Dark Modern (Microsoft's flatter, newer built-in dark theme;
@@ -2589,21 +1465,9 @@ pub static VS_CODE_DARK_PLUS: Palette = Palette {
 /// tuning was forced by `tests::gate_contrast_all_themes` beyond the
 /// PURPLE/BROWN/GREY derivations already documented on VS_CODE_DARK_PLUS.
 pub static VS_CODE_DARK_MODERN: Palette = Palette {
-    red: Color {
-        r: 248,
-        g: 81,
-        b: 73,
-    },
-    foreground: Color {
-        r: 204,
-        g: 204,
-        b: 204,
-    },
-    background: Color {
-        r: 31,
-        g: 31,
-        b: 31,
-    },
+    red: rgb(248, 81, 73),
+    foreground: rgb(204, 204, 204),
+    background: rgb(31, 31, 31),
     ..VS_CODE_DARK_PLUS
 };
 
@@ -2643,62 +1507,18 @@ pub static VS_CODE_DARK_MODERN: Palette = Palette {
 /// simulation and still clear with margin; no colours here needed
 /// re-tuning.
 pub static LIGHT_DEUTERANOPIA: Palette = Palette {
-    red: Color {
-        r: 189,
-        g: 28,
-        b: 7,
-    },
-    green: Color {
-        r: 22,
-        g: 55,
-        b: 46,
-    },
-    blue: Color {
-        r: 14,
-        g: 63,
-        b: 142,
-    },
-    yellow: Color {
-        r: 157,
-        g: 171,
-        b: 8,
-    },
-    purple: Color {
-        r: 117,
-        g: 69,
-        b: 190,
-    },
-    cyan: Color {
-        r: 7,
-        g: 95,
-        b: 146,
-    },
-    pink: Color {
-        r: 109,
-        g: 39,
-        b: 109,
-    },
-    orange: Color {
-        r: 199,
-        g: 152,
-        b: 52,
-    },
-    brown: Color {
-        r: 124,
-        g: 39,
-        b: 24,
-    },
-    grey: Color {
-        r: 122,
-        g: 90,
-        b: 80,
-    },
-    foreground: Color { r: 0, g: 0, b: 0 },
-    background: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
+    red: rgb(189, 28, 7),
+    green: rgb(22, 55, 46),
+    blue: rgb(14, 63, 142),
+    yellow: rgb(157, 171, 8),
+    purple: rgb(117, 69, 190),
+    cyan: rgb(7, 95, 146),
+    pink: rgb(109, 39, 109),
+    orange: rgb(199, 152, 52),
+    brown: rgb(124, 39, 24),
+    grey: rgb(122, 90, 80),
+    foreground: rgb(0, 0, 0),
+    background: rgb(255, 255, 255),
 };
 
 /// brdgme Light Protanopia. Byte-identical to `LIGHT_DEUTERANOPIA` - see that
@@ -2707,18 +1527,7 @@ pub static LIGHT_DEUTERANOPIA: Palette = Palette {
 /// `tests::gate_cvd_simulation` independently (deuteranopia 15.33 deltaE,
 /// protanopia 15.43 deltaE).
 pub static LIGHT_PROTANOPIA: Palette = Palette {
-    red: LIGHT_DEUTERANOPIA.red,
-    green: LIGHT_DEUTERANOPIA.green,
-    blue: LIGHT_DEUTERANOPIA.blue,
-    yellow: LIGHT_DEUTERANOPIA.yellow,
-    purple: LIGHT_DEUTERANOPIA.purple,
-    cyan: LIGHT_DEUTERANOPIA.cyan,
-    pink: LIGHT_DEUTERANOPIA.pink,
-    orange: LIGHT_DEUTERANOPIA.orange,
-    brown: LIGHT_DEUTERANOPIA.brown,
-    grey: LIGHT_DEUTERANOPIA.grey,
-    foreground: LIGHT_DEUTERANOPIA.foreground,
-    background: LIGHT_DEUTERANOPIA.background,
+    ..LIGHT_DEUTERANOPIA
 };
 
 /// brdgme Dark Deuteranopia/Protanopia (see `DARK_PROTANOPIA`, sharing this
@@ -2741,83 +1550,24 @@ pub static LIGHT_PROTANOPIA: Palette = Palette {
 /// 12.75 deltaE (green/grey), protanopia 13.06 deltaE (cyan/pink), both
 /// comfortably above the 9.0 floor.
 pub static DARK_DEUTERANOPIA: Palette = Palette {
-    red: Color {
-        r: 235,
-        g: 85,
-        b: 71,
-    },
-    green: Color {
-        r: 66,
-        g: 240,
-        b: 195,
-    },
-    blue: Color {
-        r: 104,
-        g: 123,
-        b: 252,
-    },
-    yellow: Color {
-        r: 246,
-        g: 237,
-        b: 141,
-    },
-    purple: Color {
-        r: 162,
-        g: 164,
-        b: 240,
-    },
-    cyan: Color {
-        r: 63,
-        g: 220,
-        b: 252,
-    },
-    pink: Color {
-        r: 222,
-        g: 168,
-        b: 226,
-    },
-    orange: Color {
-        r: 250,
-        g: 207,
-        b: 129,
-    },
-    brown: Color {
-        r: 185,
-        g: 114,
-        b: 104,
-    },
-    grey: Color {
-        r: 179,
-        g: 170,
-        b: 165,
-    },
-    foreground: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
-    background: Color {
-        r: 18,
-        g: 18,
-        b: 18,
-    },
+    red: rgb(235, 85, 71),
+    green: rgb(66, 240, 195),
+    blue: rgb(104, 123, 252),
+    yellow: rgb(246, 237, 141),
+    purple: rgb(162, 164, 240),
+    cyan: rgb(63, 220, 252),
+    pink: rgb(222, 168, 226),
+    orange: rgb(250, 207, 129),
+    brown: rgb(185, 114, 104),
+    grey: rgb(179, 170, 165),
+    foreground: rgb(255, 255, 255),
+    background: rgb(18, 18, 18),
 };
 
 /// brdgme Dark Protanopia. Byte-identical to `DARK_DEUTERANOPIA` - see that
 /// static's doc comment for full derivation and CVD calibration notes.
 pub static DARK_PROTANOPIA: Palette = Palette {
-    red: DARK_DEUTERANOPIA.red,
-    green: DARK_DEUTERANOPIA.green,
-    blue: DARK_DEUTERANOPIA.blue,
-    yellow: DARK_DEUTERANOPIA.yellow,
-    purple: DARK_DEUTERANOPIA.purple,
-    cyan: DARK_DEUTERANOPIA.cyan,
-    pink: DARK_DEUTERANOPIA.pink,
-    orange: DARK_DEUTERANOPIA.orange,
-    brown: DARK_DEUTERANOPIA.brown,
-    grey: DARK_DEUTERANOPIA.grey,
-    foreground: DARK_DEUTERANOPIA.foreground,
-    background: DARK_DEUTERANOPIA.background,
+    ..DARK_DEUTERANOPIA
 };
 
 /// brdgme Light Tritanopia. Same Okabe-Ito-derived hue mapping as
@@ -2839,58 +1589,18 @@ pub static DARK_PROTANOPIA: Palette = Palette {
 /// simulation: tritanopia 11.06 deltaE (brown/grey), comfortably above the
 /// 9.0 floor.
 pub static LIGHT_TRITANOPIA: Palette = Palette {
-    red: Color {
-        r: 197,
-        g: 17,
-        b: 0,
-    },
-    green: Color {
-        r: 26,
-        g: 75,
-        b: 60,
-    },
-    blue: Color {
-        r: 7,
-        g: 20,
-        b: 108,
-    },
-    yellow: Color {
-        r: 167,
-        g: 162,
-        b: 14,
-    },
-    purple: Color {
-        r: 95,
-        g: 53,
-        b: 139,
-    },
-    cyan: Color {
-        r: 13,
-        g: 135,
-        b: 206,
-    },
-    pink: Color { r: 83, g: 5, b: 80 },
-    orange: Color {
-        r: 215,
-        g: 175,
-        b: 42,
-    },
-    brown: Color {
-        r: 146,
-        g: 46,
-        b: 26,
-    },
-    grey: Color {
-        r: 95,
-        g: 82,
-        b: 72,
-    },
-    foreground: Color { r: 0, g: 0, b: 0 },
-    background: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
+    red: rgb(197, 17, 0),
+    green: rgb(26, 75, 60),
+    blue: rgb(7, 20, 108),
+    yellow: rgb(167, 162, 14),
+    purple: rgb(95, 53, 139),
+    cyan: rgb(13, 135, 206),
+    pink: rgb(83, 5, 80),
+    orange: rgb(215, 175, 42),
+    brown: rgb(146, 46, 26),
+    grey: rgb(95, 82, 72),
+    foreground: rgb(0, 0, 0),
+    background: rgb(255, 255, 255),
 };
 
 /// brdgme Dark Tritanopia. Same hue mapping and blue/yellow-avoidance
@@ -2908,66 +1618,18 @@ pub static LIGHT_TRITANOPIA: Palette = Palette {
 /// Achieved minimum under the corrected simulation: tritanopia 11.58 deltaE
 /// (purple/brown), comfortably above the 9.0 floor.
 pub static DARK_TRITANOPIA: Palette = Palette {
-    red: Color {
-        r: 242,
-        g: 143,
-        b: 107,
-    },
-    green: Color {
-        r: 119,
-        g: 251,
-        b: 183,
-    },
-    blue: Color {
-        r: 26,
-        g: 94,
-        b: 253,
-    },
-    yellow: Color {
-        r: 239,
-        g: 232,
-        b: 75,
-    },
-    purple: Color {
-        r: 192,
-        g: 84,
-        b: 220,
-    },
-    cyan: Color {
-        r: 41,
-        g: 159,
-        b: 215,
-    },
-    pink: Color {
-        r: 246,
-        g: 220,
-        b: 237,
-    },
-    orange: Color {
-        r: 248,
-        g: 206,
-        b: 157,
-    },
-    brown: Color {
-        r: 191,
-        g: 154,
-        b: 120,
-    },
-    grey: Color {
-        r: 193,
-        g: 180,
-        b: 180,
-    },
-    foreground: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
-    background: Color {
-        r: 18,
-        g: 18,
-        b: 18,
-    },
+    red: rgb(242, 143, 107),
+    green: rgb(119, 251, 183),
+    blue: rgb(26, 94, 253),
+    yellow: rgb(239, 232, 75),
+    purple: rgb(192, 84, 220),
+    cyan: rgb(41, 159, 215),
+    pink: rgb(246, 220, 237),
+    orange: rgb(248, 206, 157),
+    brown: rgb(191, 154, 120),
+    grey: rgb(193, 180, 180),
+    foreground: rgb(255, 255, 255),
+    background: rgb(18, 18, 18),
 };
 
 /// Modus Operandi Tritanopia (protesilaos/modus-themes, `modus-themes.el`,
@@ -3009,58 +1671,18 @@ pub static DARK_TRITANOPIA: Palette = Palette {
 /// already happened once, see that function's doc comment) needs to re-check
 /// it.
 pub static MODUS_OPERANDI_TRITANOPIA: Palette = Palette {
-    red: Color {
-        r: 112,
-        g: 32,
-        b: 0,
-    },
-    green: Color { r: 0, g: 104, b: 0 },
-    blue: Color {
-        r: 0,
-        g: 49,
-        b: 169,
-    },
-    yellow: Color {
-        r: 105,
-        g: 85,
-        b: 0,
-    },
-    purple: Color {
-        r: 83,
-        g: 26,
-        b: 182,
-    },
-    cyan: Color {
-        r: 0,
-        g: 94,
-        b: 139,
-    },
-    pink: Color {
-        r: 143,
-        g: 0,
-        b: 117,
-    },
-    orange: Color {
-        r: 178,
-        g: 17,
-        b: 0,
-    },
-    brown: Color {
-        r: 73,
-        g: 50,
-        b: 39,
-    },
-    grey: Color {
-        r: 89,
-        g: 89,
-        b: 89,
-    },
-    foreground: Color { r: 0, g: 0, b: 0 },
-    background: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
+    red: rgb(112, 32, 0),
+    green: rgb(0, 104, 0),
+    blue: rgb(0, 49, 169),
+    yellow: rgb(105, 85, 0),
+    purple: rgb(83, 26, 182),
+    cyan: rgb(0, 94, 139),
+    pink: rgb(143, 0, 117),
+    orange: rgb(178, 17, 0),
+    brown: rgb(73, 50, 39),
+    grey: rgb(89, 89, 89),
+    foreground: rgb(0, 0, 0),
+    background: rgb(255, 255, 255),
 };
 
 /// Modus Vivendi Tritanopia (protesilaos/modus-themes, `modus-themes.el`,
@@ -3109,62 +1731,18 @@ pub static MODUS_OPERANDI_TRITANOPIA: Palette = Palette {
 /// floor but, like its light sibling, is one of the tightest CVD margins in
 /// this file - flagged for the same reason.
 pub static MODUS_VIVENDI_TRITANOPIA: Palette = Palette {
-    red: Color {
-        r: 255,
-        g: 95,
-        b: 89,
-    },
-    green: Color {
-        r: 68,
-        g: 188,
-        b: 68,
-    },
-    blue: Color {
-        r: 144,
-        g: 153,
-        b: 217,
-    },
-    yellow: Color {
-        r: 202,
-        g: 191,
-        b: 0,
-    },
-    purple: Color {
-        r: 182,
-        g: 160,
-        b: 255,
-    },
-    cyan: Color {
-        r: 106,
-        g: 228,
-        b: 185,
-    },
-    pink: Color {
-        r: 207,
-        g: 127,
-        b: 167,
-    },
-    orange: Color {
-        r: 255,
-        g: 184,
-        b: 77,
-    },
-    brown: Color {
-        r: 149,
-        g: 118,
-        b: 86,
-    },
-    grey: Color {
-        r: 152,
-        g: 152,
-        b: 152,
-    },
-    foreground: Color {
-        r: 255,
-        g: 255,
-        b: 255,
-    },
-    background: Color { r: 0, g: 0, b: 0 },
+    red: rgb(255, 95, 89),
+    green: rgb(68, 188, 68),
+    blue: rgb(144, 153, 217),
+    yellow: rgb(202, 191, 0),
+    purple: rgb(182, 160, 255),
+    cyan: rgb(106, 228, 185),
+    pink: rgb(207, 127, 167),
+    orange: rgb(255, 184, 77),
+    brown: rgb(149, 118, 86),
+    grey: rgb(152, 152, 152),
+    foreground: rgb(255, 255, 255),
+    background: rgb(0, 0, 0),
 };
 
 /// Grouping used by the web theme picker to sort/section the registry. Every
@@ -3189,8 +1767,8 @@ pub enum ThemeCategory {
     Tritan,
 }
 
-/// The set of registered themes, in display order. Light/Dark is assigned by
-/// each palette's actual `background` lightness, not by theme name.
+/// The set of registered themes, in display order. categorised by background
+/// lightness, assigned manually at registration
 pub fn themes() -> &'static [(&'static str, ThemeCategory, &'static Palette)] {
     use ThemeCategory::{Dark, Default as DefaultCat, Deutan, Light, Protan, Tritan};
     static THEMES: [(&str, ThemeCategory, &Palette); 34] = [
@@ -3263,6 +1841,7 @@ pub fn soften(color: Color, pct: u8, background: Color) -> Color {
     mix(color, background, pct)
 }
 
+/// Linearise an sRGB channel using the IEC 61966-2-1 0.03928 breakpoint.
 fn srgb_channel_to_linear(c: u8) -> f64 {
     let c = c as f64 / 255.0;
     if c <= 0.03928 {
@@ -3354,7 +1933,14 @@ mod tests {
         assert_eq!(LIGHT.player_color(0), LIGHT.green);
         assert_eq!(LIGHT.player_color(1), LIGHT.red);
         assert_eq!(LIGHT.player_color(3), LIGHT.orange);
-        assert_eq!(LIGHT.player_color(3), Color::from_hex("#f57c00").unwrap());
+        assert_eq!(
+            LIGHT.player_color(3),
+            Color {
+                r: 0xf5,
+                g: 0x7c,
+                b: 0x00
+            }
+        );
         assert_eq!(LIGHT.player_color(7), LIGHT.pink);
         assert_eq!(LIGHT.player_color(8), LIGHT.player_color(0));
     }
@@ -3435,17 +2021,9 @@ mod tests {
 
     /// sRGB (D65) -> CIE Lab, for CIE76 deltaE.
     fn rgb_to_lab(c: Color) -> (f64, f64, f64) {
-        fn lin(v: u8) -> f64 {
-            let c = v as f64 / 255.0;
-            if c > 0.04045 {
-                ((c + 0.055) / 1.055).powf(2.4)
-            } else {
-                c / 12.92
-            }
-        }
-        let r = lin(c.r);
-        let g = lin(c.g);
-        let b = lin(c.b);
+        let r = super::srgb_channel_to_linear(c.r);
+        let g = super::srgb_channel_to_linear(c.g);
+        let b = super::srgb_channel_to_linear(c.b);
         let x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375;
         let y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750;
         let z = r * 0.0193339 + g * 0.1191920 + b * 0.9503041;
@@ -3652,15 +2230,6 @@ mod tests {
         ]
     }
 
-    fn srgb_to_linear(v: u8) -> f64 {
-        let c = v as f64 / 255.0;
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    }
-
     fn linear_to_srgb_u8(c: f64) -> u8 {
         let c = c.clamp(0.0, 1.0);
         let v = if c <= 0.0031308 {
@@ -3682,9 +2251,9 @@ mod tests {
     /// LMS projection documented above.
     fn simulate_cvd(c: Color, kind: Cvd) -> Color {
         let lin = [
-            srgb_to_linear(c.r),
-            srgb_to_linear(c.g),
-            srgb_to_linear(c.b),
+            super::srgb_channel_to_linear(c.r),
+            super::srgb_channel_to_linear(c.g),
+            super::srgb_channel_to_linear(c.b),
         ];
         let lms = matvec(RGB_TO_LMS, lin);
         let (l, m, s) = (lms[0], lms[1], lms[2]);

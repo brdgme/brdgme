@@ -6,8 +6,6 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
-lazy_static.workspace = true
-regex = "1.13.1"
 serde.workspace = true
 thiserror.workspace = true
 

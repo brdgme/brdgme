@@ -801,8 +801,6 @@ dependencies = [
 name = "brdgme_color"
 version = "0.1.0"
 dependencies = [
- "lazy_static",
- "regex",
  "serde",
  "thiserror 2.0.19",
 ]

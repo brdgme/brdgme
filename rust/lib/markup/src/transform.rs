@@ -456,7 +456,11 @@ mod tests {
         assert_eq!(
             result,
             vec![TN::Bg(
-                Color::from_hex("#dbdbdb").unwrap(),
+                Color {
+                    r: 0xdb,
+                    g: 0xdb,
+                    b: 0xdb
+                },
                 vec![TN::text("x")]
             )]
         );
@@ -479,7 +483,11 @@ mod tests {
         assert_eq!(
             result,
             vec![TN::Bg(
-                Color::from_hex("#765381").unwrap(),
+                Color {
+                    r: 0x76,
+                    g: 0x53,
+                    b: 0x81
+                },
                 vec![TN::text("x")]
             )]
         );
