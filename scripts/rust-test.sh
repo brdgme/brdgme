@@ -65,4 +65,4 @@ export RUST_MIN_STACK=8388608
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/../rust"
 
-exec "$SCRIPT_DIR/rust-ci-commands.sh"
+"$SCRIPT_DIR/rust-ci-commands.sh"
