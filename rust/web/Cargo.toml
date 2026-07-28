@@ -22,7 +22,7 @@ axum = { workspace = true, optional = true, features = ["macros"] }
 console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.10", optional = true }
 leptos_meta = { version = "0.8.6" }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"], optional = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "time"], optional = true }
 tokio-util = { version = "0.7", optional = true }
 wasm-bindgen = { version = "=0.2.121", optional = true }
 
@@ -80,8 +80,7 @@ aes-gcm = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 zeroize = { version = "1", optional = true }
 rand.workspace = true
-futures-util.workspace = true
-gloo-net = { version = "0.7", features = ["websocket"] }
+futures-util = { workspace = true, optional = true }
 gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3.77", features = ["Location", "Window", "Document", "HtmlDocument", "Element", "MediaQueryList", "VisibilityState", "MessageEvent"] }
 js-sys = "0.3"
@@ -144,6 +143,7 @@ ssr = [
     "dep:zeroize",
     "dep:async-nats",
     "dep:tokio-stream",
+    "dep:futures-util",
     "leptos-use/ssr",
     "dep:axum-prometheus",
 
@@ -167,6 +167,7 @@ http-body-util = "0.1"
 reqwest = { workspace = true, features = ["stream", "rustls"] }
 serial_test = "3.5.0"
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "macros", "signal"] }
+futures-util = { workspace = true }
 
 
 [package.metadata.leptos]

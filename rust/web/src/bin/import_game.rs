@@ -17,6 +17,16 @@ async fn main() -> anyhow::Result<()> {
         usage()
     };
 
+    let metadata = std::fs::metadata(&path).map_err(|e| anyhow::anyhow!("stat {path}: {e}"))?;
+    const MAX_BUNDLE_BYTES: u64 = 100 * 1024 * 1024;
+    if metadata.len() > MAX_BUNDLE_BYTES {
+        anyhow::bail!(
+            "{path}: {} bytes exceeds the {} MiB sanity limit",
+            metadata.len(),
+            MAX_BUNDLE_BYTES / 1024 / 1024
+        );
+    }
+
     let raw = std::fs::read_to_string(&path).map_err(|e| anyhow::anyhow!("reading {path}: {e}"))?;
     let bundle: web::game::export::ExportBundle =
         serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
