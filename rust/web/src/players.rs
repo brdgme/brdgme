@@ -843,7 +843,7 @@ pub fn PlayerHistoryPage() -> impl IntoView {
                                 cur_status,
                                 cur_type.as_deref(),
                                 bots,
-                                Some(d.page + 1),
+                                Some((d.page + 1).clamp(1, 1_000_000)),
                             );
                             let hide_prev = d.page <= 1;
                             let hide_next = d.page >= total_pages;
