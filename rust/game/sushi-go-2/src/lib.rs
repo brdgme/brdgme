@@ -142,7 +142,7 @@ fn draw_count(players: usize) -> usize {
         2 | 3 => 9,
         4 => 8,
         5 => 7,
-        _ => 9,
+        _ => unreachable!(),
     }
 }
 
