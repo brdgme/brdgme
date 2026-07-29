@@ -83,12 +83,17 @@ playbook - read it before touching `rust/web/src/email/` or debugging a
 
 ## Working style
 
-- Never install anything globally on this machine - it is NixOS/home-manager
+- Never install anything globally - all dev machines are NixOS/home-manager
   managed. All project tooling and dependencies must be declared in
   `devenv.nix`, not installed ad hoc. No `cargo install` / `cargo-binstall`
   to user or global locations, no host package managers. If a tool is
   missing from `devenv.nix`, add it there (or report it) rather than
   installing around it.
+- On `beefsack-laptop`, do NOT run `scripts/rust-test.sh` - the web target
+  (web-ssr compile/link) OOMs the machine even at jobs=1. Full gates there
+  are run by the user. Targeted per-crate `cargo test -p <crate>` /
+  `cargo clippy -p <crate>` runs are fine. Other machines have no
+  restriction on `scripts/rust-test.sh`.
 - Before committing any change that includes Rust code, run
   `scripts/rust-test.sh` and ensure it passes. This script spins up temporary
   Postgres and NATS containers, runs migrations, and executes the full CI

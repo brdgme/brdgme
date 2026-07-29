@@ -4,8 +4,8 @@
 
 - NixOS with `devenv` - run `devenv shell` to get all tools. All project
   tooling is declared in `devenv.nix` - never install tools globally or ad
-  hoc (this machine is NixOS/home-manager managed). If a tool is missing,
-  add it to `devenv.nix`.
+  hoc (all dev machines are NixOS/home-manager managed). If a tool is
+  missing, add it to `devenv.nix`.
 - Docker (for Kind)
 - One-time cluster setup: `bash scripts/setup-kind-cluster.sh`
 
