@@ -21,30 +21,31 @@ pub fn render_dice(dice: &[Die], delim: &str) -> N {
     N::Group(nodes)
 }
 
+fn display_name(dice: &[Die]) -> &str {
+    match dice {
+        [1] => "Single 1",
+        [5] => "Single 5",
+        [1, 1, 1] => "Three 1s",
+        [2, 2, 2] => "Three 2s",
+        [3, 3, 3] => "Three 3s",
+        [4, 4, 4] => "Three 4s",
+        [5, 5, 5] => "Three 5s",
+        [6, 6, 6] => "Three 6s",
+        _ => "Unknown",
+    }
+}
+
 fn scoring_table() -> Vec<Row> {
     let mut table: Vec<Row> = vec![vec![
         (A::Left, vec![N::Bold(vec![N::text("Combination")])]),
         (A::Right, vec![N::Bold(vec![N::text("Points")])]),
     ]];
-    let entries: &[(&[Die], &str)] = &[
-        (&[1], "Single 1"),
-        (&[5], "Single 5"),
-        (&[1, 1, 1], "Three 1s"),
-        (&[2, 2, 2], "Three 2s"),
-        (&[3, 3, 3], "Three 3s"),
-        (&[4, 4, 4], "Three 4s"),
-        (&[5, 5, 5], "Three 5s"),
-        (&[6, 6, 6], "Three 6s"),
-    ];
-    for (dice, name) in entries {
-        let pts = scores()
-            .iter()
-            .find(|s| s.dice.as_slice() == *dice)
-            .map(|s| s.value)
-            .unwrap_or(0);
+    let mut combos = scores().iter().collect::<Vec<_>>();
+    combos.sort_by_key(|s| (s.dice.len(), s.dice[0]));
+    for s in combos {
         table.push(vec![
-            (A::Left, vec![N::text(*name)]),
-            (A::Right, vec![N::text(pts.to_string())]),
+            (A::Left, vec![N::text(display_name(&s.dice))]),
+            (A::Right, vec![N::text(s.value.to_string())]),
         ]);
     }
     table
