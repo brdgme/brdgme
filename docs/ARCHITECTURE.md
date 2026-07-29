@@ -99,14 +99,8 @@ Realtime event delivery uses the SSE topology documented in
 
 ## Infrastructure
 
-See `docs/VISION.md` for infrastructure choices and rationale.
-
-- **Platform**: DigitalOcean Kubernetes (SYD1), provisioned via OpenTofu
-- **CNI**: Cilium
-- **Message bus**: NATS (in-cluster, JetStream enabled)
-- **Database**: PostgreSQL (CloudNativePG operator)
-- **Ingress**: DOKS managed Gateway API (Cilium)
-- **DNS**: external-dns (DigitalOcean provider)
+See `docs/VISION.md` (Infrastructure section) for infrastructure choices and
+rationale.
 
 ## Game Interface Contract
 
