@@ -61,6 +61,7 @@ export DATABASE_URL="postgres://postgres:postgres@localhost:15432/brdgme"
 export NATS_URL="nats://localhost:14222"
 export SQLX_OFFLINE=true
 export RUST_MIN_STACK=8388608
+export ALLOW_INSECURE_DEFAULT_KEY=true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/../rust"
