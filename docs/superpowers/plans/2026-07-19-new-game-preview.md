@@ -18,7 +18,7 @@
 - Any failure (microservice unreachable, render error, markup transform error) means the preview area simply does not render - no error surfaced to the user. Failures are never cached, so a later selection retries (spec, "Failure behavior").
 - The preview container has a fixed max-height AND max-width with `overflow: auto` in both axes, and renders at ~50% scale via a font-size reduction (spec, "Size handling") - it must never widen the panel or the page.
 - Colors only via `--mk-*` custom properties or `mk-fg-*`/`mk-bg-*` classes; must work under all themes; never hard-code a color (repo-wide constraint, inherited from the companion plan).
-- All shell commands run from `/home/beefsack/Development/brdgme/rust` unless a step says otherwise.
+- All shell commands run from `./rust` unless a step says otherwise.
 - DB-backed tests need Postgres running with `DATABASE_URL` set, migrations applied. CI uses `DATABASE_URL=postgres://postgres:postgres@localhost/brdgme`. `#[sqlx::test]` provisions an isolated database per test.
 - NEVER run `cargo test -p web` or `cargo check -p web` without `--features ssr` — the crate has no default features and fails to compile by design without them.
 - Test commands (mirroring `.github/workflows/ci.yml`):
@@ -183,7 +183,7 @@ mod tests {
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr game::preview::
+cd ./rust && cargo test -p web --features ssr game::preview::
 ```
 Expected: FAIL to compile — `cannot find function 'get_or_render_preview' in this scope`.
 
@@ -266,7 +266,7 @@ pub async fn get_or_render_preview(
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr game::preview::
+cd ./rust && cargo test -p web --features ssr game::preview::
 ```
 Expected: PASS (3 passed).
 
@@ -274,14 +274,14 @@ Expected: PASS (3 passed).
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
 ```
 Expected: clean.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/game/preview.rs rust/web/src/game/mod.rs
 git commit -m "feat(web): in-memory board preview cache and render core (#44)"
 ```
@@ -327,14 +327,14 @@ pub async fn get_game_preview(game_version_id: Uuid) -> Result<String, ServerFnE
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr game::preview::
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr game::preview::
 ```
 Expected: clippy clean; 3 tests still PASS. (No new test here: `get_game_preview` is a straight pass-through to `get_or_render_preview`, checked at compile time — same rationale as the companion plan's Task 4 for `get_available_game_types`'s field-copying body.)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/game/server_fns.rs
 git commit -m "feat(web): get_game_preview server fn (#44)"
 ```
@@ -384,14 +384,14 @@ Add to the end of `rust/web/style/main.scss`:
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
 ```
 Expected: clean (cargo-leptos compiles the SCSS at build time in dev/CI; clippy at minimum confirms nothing else broke — if a `just`/`cargo leptos` dev build is running, confirm no SCSS compile error in its output).
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/style/main.scss
 git commit -m "feat(web): styles for the board preview container (#44)"
 ```
@@ -468,7 +468,7 @@ to:
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr new_game::
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr new_game::
 ```
 Expected: clippy clean; existing `new_game::` unit tests still PASS (this task adds no new Rust unit tests — it's Leptos view wiring, verified manually next, matching the companion plan's convention for UI-only steps in its Tasks 8-9).
 
@@ -483,7 +483,7 @@ On `/games`:
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/new_game.rs
 git commit -m "feat(web): lazy board preview in the new game detail panel (#44)"
 ```
@@ -500,7 +500,7 @@ git commit -m "feat(web): lazy board preview in the new game detail panel (#44)"
 
 - [ ] **Step 1: Run the full CI-equivalent check suite**
 
-Run, from `/home/beefsack/Development/brdgme/rust` (Postgres + `DATABASE_URL` required):
+Run, from `./rust` (Postgres + `DATABASE_URL` required):
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --exclude web --all-targets -- -D warnings
@@ -526,7 +526,7 @@ If Step 2 shows the `max-height`/`font-size` values from Task 3 are wrong (too m
 - [ ] **Step 4: Commit any fixes**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add -A
 git commit -m "fix(web): verification and size tuning for board preview (#44)"
 ```

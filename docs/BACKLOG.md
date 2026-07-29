@@ -211,7 +211,7 @@ for detail.
 (Alloy log/metric/trace shipping with volume cuts, OTLP tracing at 10%
 sampling, /metrics, probes incl. operator /healthz) implemented in-tree;
 WASM source maps descoped (toolchain blocker); contact point
-(beefsack@gmail.com) + external uptime monitor done. Moved to the
+(the site admin) + external uptime monitor done. Moved to the
 archive as fully done; remaining rollout (deploy, quota window,
 alert-rule creation) removed from the backlog - the operator tracks it
 separately. #20 (external-dns, superseded 2026-07-05) also moved to the

@@ -19,7 +19,7 @@
 - Migration text exactly: `ALTER TABLE` on `game_types` adding `blurb text NOT NULL DEFAULT ''`, numbered per `rust/web/migrations/` convention (next number: `012`).
 - Bot difficulty remains a plain string end to end (easy/medium/hard); no enum, no bots-in-DB work.
 - On successful game creation, redirect to `/games/{id}` (unchanged behavior).
-- All shell commands run from `/home/beefsack/Development/brdgme/rust` unless a step says otherwise.
+- All shell commands run from `./rust` unless a step says otherwise.
 - DB-backed tests need Postgres running with `DATABASE_URL` set, migrations applied. CI uses `DATABASE_URL=postgres://postgres:postgres@localhost/brdgme`. `#[sqlx::test]` provisions an isolated database per test.
 - NEVER run `cargo test -p web` or `cargo check -p web` without `--features ssr` — the crate has no default features and fails to compile by design without them.
 - Test commands (mirroring `.github/workflows/ci.yml`):
@@ -28,7 +28,7 @@
   - `cargo clippy --workspace --exclude web --all-targets -- -D warnings`
   - `cargo clippy -p web --all-targets --features ssr -- -D warnings`
   - `cargo fmt --all -- --check`
-- Whenever a `sqlx::query!`/`query_as!`/`query_scalar!` macro call or the schema changes, regenerate the offline cache: `cd /home/beefsack/Development/brdgme/rust/web && cargo sqlx prepare -- --tests --features ssr --all-targets` (requires live DB), and commit the changed `.sqlx/` files. CI enforces this with `cargo sqlx prepare --check`.
+- Whenever a `sqlx::query!`/`query_as!`/`query_scalar!` macro call or the schema changes, regenerate the offline cache: `cd ./rust/web && cargo sqlx prepare -- --tests --features ssr --all-targets` (requires live DB), and commit the changed `.sqlx/` files. CI enforces this with `cargo sqlx prepare --check`.
 - `k8s/base/operator/crd.yaml` is hand-maintained to mirror `rust/operator/src/crd.rs` — there is no generator. "Regenerate" means edit it by hand in the same commit as the `crd.rs` change.
 - The blurbs written in Task 3 are Claude-drafted content for USER REVIEW before merge. Do not treat them as final copy.
 - Commit frequently, one commit per task minimum, conventional-commit style messages (`feat(web): ...`, `feat(operator): ...`).
@@ -63,7 +63,7 @@ ALTER TABLE public.game_types
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust/web && sqlx migrate run
+cd ./rust/web && sqlx migrate run
 ```
 Expected: `Applied 12/migrate game type blurb` (exact wording varies; it must list 012 as applied).
 
@@ -111,7 +111,7 @@ In `rust/web/src/db.rs`, inside the existing `#[cfg(all(test, feature = "ssr"))]
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr find_available_game_types_carries_weight_and_blurb
+cd ./rust && cargo test -p web --features ssr find_available_game_types_carries_weight_and_blurb
 ```
 Expected: FAIL to compile with `no field 'blurb' on type '&crate::models::game::GameType'`.
 
@@ -156,7 +156,7 @@ In `find_game_extended` (~line 366), change the game_type query string to:
 Then check for any other `query_as!` site selecting the `GameType` struct:
 
 ```bash
-grep -n "crate::models::game::GameType," /home/beefsack/Development/brdgme/rust/web/src/db.rs
+grep -n "crate::models::game::GameType," ./rust/web/src/db.rs
 ```
 Expected: only the two sites above (plus the struct-path mentions in `find_available_game_types`'s return type). If any other `query_as!(crate::models::game::GameType, ...)` call appears, add `, blurb` to its SELECT list the same way — the compile/prepare step below fails loudly on any missed site.
 
@@ -164,7 +164,7 @@ Expected: only the two sites above (plus the struct-path mentions in `find_avail
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust/web && cargo sqlx prepare -- --tests --features ssr --all-targets
+cd ./rust/web && cargo sqlx prepare -- --tests --features ssr --all-targets
 ```
 Expected: `query data written to .sqlx in the current directory` and modified/added files under `rust/web/.sqlx/`.
 
@@ -172,14 +172,14 @@ Expected: `query data written to .sqlx in the current directory` and modified/ad
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr find_available_game_types_carries_weight_and_blurb
+cd ./rust && cargo test -p web --features ssr find_available_game_types_carries_weight_and_blurb
 ```
 Expected: PASS (1 passed).
 
 - [x] **Step 9: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/migrations/012_game_type_blurb.sql rust/web/src/models/game.rs rust/web/src/db.rs rust/web/.sqlx
 git commit -m "feat(web): game_types blurb column, model and queries (#44)"
 ```
@@ -276,7 +276,7 @@ In `rust/operator/src/controller.rs`, inside the existing `#[cfg(test)] mod test
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p brdgme-operator upsert_writes_weight_and_blurb
+cd ./rust && cargo test -p brdgme-operator upsert_writes_weight_and_blurb
 ```
 Expected: FAIL to compile — `upsert_game_type_and_version` takes 8 arguments but 9 were supplied.
 
@@ -385,14 +385,14 @@ The properties block then reads `typeName`, `weight`, `blurb`, `isDeprecated`.
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p brdgme-operator
+cd ./rust && cargo test -p brdgme-operator
 ```
 Expected: PASS — `upsert_writes_weight_and_blurb` and `interceptor_uri_defaults_to_keda_proxy` both pass (2 passed; plus any tests in `main.rs`).
 
 - [x] **Step 8: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/operator/Cargo.toml rust/operator/src/crd.rs rust/operator/src/controller.rs k8s/base/operator/crd.yaml rust/Cargo.lock
 git commit -m "feat(operator): blurb field through CRD and game_types upsert (#44)"
 ```
@@ -536,14 +536,14 @@ spec:
 
 Run:
 ```bash
-grep -rl "  blurb: \"" /home/beefsack/Development/brdgme/k8s/base/game --include=game-version.yaml | wc -l
+grep -rl "  blurb: \"" ./k8s/base/game --include=game-version.yaml | wc -l
 ```
 Expected: `39`
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add k8s/base/game
 git commit -m "feat(k8s): draft blurbs for all 39 game versions (#44)"
 ```
@@ -611,14 +611,14 @@ In `get_available_game_types`, change the mapping closure to:
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr find_available_game_types_carries_weight_and_blurb
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr find_available_game_types_carries_weight_and_blurb
 ```
 Expected: clippy clean; test PASS. (The struct fields are exercised end-to-end by Task 1's DB test plus the UI unit tests in Task 8; the server fn body is a straight field copy checked at compile time.)
 
 - [x] **Step 4: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/game/server_fns.rs
 git commit -m "feat(web): expose weight and blurb in GameTypeInfo (#44)"
 ```
@@ -669,7 +669,7 @@ mod tests {
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr roster_error
+cd ./rust && cargo test -p web --features ssr roster_error
 ```
 Expected: FAIL to compile — `cannot find function 'roster_error' in this scope`.
 
@@ -701,7 +701,7 @@ fn roster_error(player_counts: &[i32], player_count: usize) -> Option<String> {
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr roster_error
+cd ./rust && cargo test -p web --features ssr roster_error
 ```
 Expected: PASS (2 passed).
 
@@ -730,7 +730,7 @@ In `rust/web/src/db.rs` tests mod, add (uses the existing `make_game_type_and_ve
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr find_game_type_player_counts_by_version
+cd ./rust && cargo test -p web --features ssr find_game_type_player_counts_by_version
 ```
 Expected: FAIL to compile — `cannot find function 'find_game_type_player_counts'`.
 
@@ -773,15 +773,15 @@ In `rust/web/src/game/server_fns.rs`, in `create_new_game`, directly after the `
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust/web && cargo sqlx prepare -- --tests --features ssr --all-targets
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr roster_error && cargo test -p web --features ssr find_game_type_player_counts_by_version
+cd ./rust/web && cargo sqlx prepare -- --tests --features ssr --all-targets
+cd ./rust && cargo test -p web --features ssr roster_error && cargo test -p web --features ssr find_game_type_player_counts_by_version
 ```
 Expected: prepare writes `.sqlx` entries; both test filters PASS.
 
 - [x] **Step 9: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/db.rs rust/web/src/game/server_fns.rs rust/web/.sqlx
 git commit -m "feat(web): server-side roster validation in create_new_game (#44)"
 ```
@@ -851,7 +851,7 @@ In `rust/web/src/db.rs` tests mod, add:
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr search_users_
+cd ./rust && cargo test -p web --features ssr search_users_
 ```
 Expected: FAIL to compile — `cannot find function 'search_users' in this scope`.
 
@@ -896,7 +896,7 @@ pub async fn search_users(
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr search_users_
+cd ./rust && cargo test -p web --features ssr search_users_
 ```
 Expected: PASS (2 passed).
 
@@ -937,14 +937,14 @@ pub async fn search_users(query: String) -> Result<Vec<UserSearchResult>, Server
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
 ```
 Expected: clean.
 
 - [x] **Step 7: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/db.rs rust/web/src/friends.rs
 git commit -m "feat(web): user search server fn for opponent typeahead (#44)"
 ```
@@ -1126,14 +1126,14 @@ Add to `rust/web/style/main.scss`, after the `.form-strip` block:
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
 ```
 Expected: clean (cargo-leptos compiles the SCSS at build time in dev/CI; clippy at minimum confirms nothing else broke — if a `just`/`cargo leptos` dev build is running, confirm no SCSS compile error in its output).
 
 - [x] **Step 3: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/style/main.scss
 git commit -m "feat(web): styles for new game page grid, panel and chips (#44)"
 ```
@@ -1266,7 +1266,7 @@ pub mod players;
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr new_game::
+cd ./rust && cargo test -p web --features ssr new_game::
 ```
 Expected: FAIL to compile — `cannot find function 'player_range' in this scope` (and the same for `weight_text`, `filter_and_sort`).
 
@@ -1951,7 +1951,7 @@ In `rust/web/src/app.rs`:
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings
 ```
 If clippy reports unused imports in `app.rs` (candidates: `Uuid`, `use_navigate`, `NavigateOptions` — only if no remaining component uses them), remove exactly the flagged ones and re-run until clean.
 Expected final result: clean.
@@ -1960,7 +1960,7 @@ Expected final result: clean.
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo test -p web --features ssr new_game::
+cd ./rust && cargo test -p web --features ssr new_game::
 ```
 Expected: PASS (5 passed).
 
@@ -1976,7 +1976,7 @@ With the dev stack running (Postgres, NATS, `cargo leptos watch` or the project'
 - [x] **Step 9: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/new_game.rs rust/web/src/lib.rs rust/web/src/app.rs rust/web/Cargo.toml rust/Cargo.lock
 git commit -m "feat(web): rebuild new game page as browsable grid with setup panel (#44)"
 ```
@@ -2145,7 +2145,7 @@ In `OpponentSlotEditor`'s view, replace the entire
 
 Run:
 ```bash
-cd /home/beefsack/Development/brdgme/rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr new_game::
+cd ./rust && cargo clippy -p web --all-targets --features ssr -- -D warnings && cargo test -p web --features ssr new_game::
 ```
 Expected: clippy clean; 5 unit tests PASS.
 
@@ -2160,7 +2160,7 @@ On `/games`, select a game with 3+ players, set a Player slot:
 - [x] **Step 6: Commit**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add rust/web/src/new_game.rs
 git commit -m "feat(web): player typeahead with inline errors in opponent slots (#44)"
 ```
@@ -2177,7 +2177,7 @@ git commit -m "feat(web): player typeahead with inline errors in opponent slots 
 
 - [x] **Step 1: Run the full CI-equivalent check suite**
 
-Run, from `/home/beefsack/Development/brdgme/rust` (Postgres + `DATABASE_URL` required):
+Run, from `./rust` (Postgres + `DATABASE_URL` required):
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --exclude web --all-targets -- -D warnings
@@ -2198,7 +2198,7 @@ Existing convention: no browser test harness; verify manually.
 - [ ] **Step 3: Commit any verification fixes**
 
 ```bash
-cd /home/beefsack/Development/brdgme
+cd .
 git add -A
 git commit -m "fix(web): verification fixes for new game page (#44)"
 ```

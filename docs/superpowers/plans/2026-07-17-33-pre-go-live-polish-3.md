@@ -15,7 +15,7 @@
 - `game_data` is keyed on `(game_id, last seq)` via `track_game_seq` (`rust/web/src/app.rs`); the spinner condition must distinguish a game_id change (show spinner) from a seq-only refetch (don't). Do not change `track_game_seq`.
 - On command-submit error: re-enable input and button, KEEP the submitted text (entry "2026-07-11: Command input stays enabled while a command is submitting").
 - Each task finishes by adding a `- **Resolved:** ...` line to its entry in `docs/pre-go-live-polish.md` (repo convention - see resolved entries in that file) and committing.
-- Verification gate for every task (run from `/home/beefsack/Development/brdgme/rust`):
+- Verification gate for every task (run from `./rust`):
   - `cargo clippy -p web --all-targets --features ssr -- -D warnings`
   - `cargo test -p web --features ssr`
   (These are the exact CI commands from `.github/workflows/ci.yml`.)
@@ -175,7 +175,7 @@ In `rust/web/style/main.scss`, after the `.spinner` keyframes block (~line 70), 
 
 - [ ] **Step 5: Verify (automated)**
 
-Run from `/home/beefsack/Development/brdgme/rust`:
+Run from `./rust`:
 
 ```bash
 cargo clippy -p web --all-targets --features ssr -- -D warnings
@@ -297,7 +297,7 @@ with:
 
 - [ ] **Step 3: Verify (automated)**
 
-Run from `/home/beefsack/Development/brdgme/rust`:
+Run from `./rust`:
 
 ```bash
 cargo clippy -p web --all-targets --features ssr -- -D warnings
@@ -372,7 +372,7 @@ to:
 
 - [ ] **Step 2: Verify (automated)**
 
-Run from `/home/beefsack/Development/brdgme/rust`:
+Run from `./rust`:
 
 ```bash
 cargo clippy -p web --all-targets --features ssr -- -D warnings

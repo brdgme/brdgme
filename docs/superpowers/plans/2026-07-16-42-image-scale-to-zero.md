@@ -25,7 +25,7 @@
 - CMD is already exec-form and probes are already `tcpSocket` (verified in the spec) - Phase 1 only needs to re-point the port, not the probe mechanism.
 - Non-root numeric USER: use `USER 65532` (the conventional distroless nonroot UID) - no shell exists in the distroless image to create a named user, so numeric UID is required regardless.
 - Run only ONE cargo build/test at a time. Docker builds via `docker buildx bake` as normal.
-- Manifests live under `k8s/base/game/<game>/` (`deployment.yaml` + `service.yaml`); brdgme-config (a separate repo/dir per prior commits, e.g. `/home/beefsack/Development/brdgme-config`) holds the per-env rollout config referenced for canarying.
+- Manifests live under `k8s/base/game/<game>/` (`deployment.yaml` + `service.yaml`); brdgme-config (a separate repo/dir per prior commits, e.g. `.-config`) holds the per-env rollout config referenced for canarying.
 - Games memory requests/limits (32Mi/10m requests, 64Mi limits) are unchanged by Phase 1/2 - image size reduction does not reduce container RSS (spec's explicit honesty note).
 
 ---
@@ -33,7 +33,7 @@
 ### Phase 1: Distroless image swap + non-root + port 8080
 
 **Files:**
-- Modify: `/home/beefsack/Development/brdgme/rust/Dockerfile` (all 22 game runtime stages)
+- Modify: `./rust/Dockerfile` (all 22 game runtime stages)
 - Modify: `k8s/base/game/<game>/deployment.yaml` and `service.yaml` for all 22 games (~44 files: containerPort, tcpSocket probe port, `ADDR` env, Service targetPort)
 - No change: `rust/docker-bake.hcl`
 
@@ -272,7 +272,7 @@ kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c
 kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme postgres-1 -c postgres -- psql -d brdgme -c "UPDATE game_versions SET uri = 'http://zombie-dice-1.brdgme.svc.cluster.local' WHERE id = '67f83a24-c753-4cd8-a8a3-8632de88e737';"
 ```
 
-**Manifests SHA and brdgme-config note:** the fleet `HTTPScaledObject`/manifest changes for these 18 versions are on brdgme master at `96a87ed45a82a1e2f2901842b41aa798aa6b2f45` (verified via `git rev-parse master`). brdgme-config's prod ref bump to this SHA is currently staged uncommitted in `/home/beefsack/Development/brdgme-config` (left untouched per this Worker's constraints) - the operator must commit and push that bump, and confirm ArgoCD sync is healthy, before running the cutover SQL above, so the `HTTPScaledObject`s exist and are Ready before traffic is repointed at the interceptor.
+**Manifests SHA and brdgme-config note:** the fleet `HTTPScaledObject`/manifest changes for these 18 versions are on brdgme master at `96a87ed45a82a1e2f2901842b41aa798aa6b2f45` (verified via `git rev-parse master`). brdgme-config's prod ref bump to this SHA is currently staged uncommitted in `.-config` (left untouched per this Worker's constraints) - the operator must commit and push that bump, and confirm ArgoCD sync is healthy, before running the cutover SQL above, so the `HTTPScaledObject`s exist and are Ready before traffic is repointed at the interceptor.
 
 **Phase 3 record: operator reconcile hazard discovered post-cutover, fixed (2026-07-17)**
 

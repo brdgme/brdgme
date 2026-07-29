@@ -533,4 +533,4 @@ Push deferred to a final cleanup unit per the orchestrate handover rules.
   touches `games`.
 - **`respond_proposal` is shared** by F4 and F5 - land F4 first, then F5 amends
   the same fn, to avoid conflicting edits.
-- **Org is `brdgme`** (not `beefsack`) for any image/URL references.
+- **Org is `brdgme`** (not the developer's personal account) for any image/URL references.

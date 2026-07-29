@@ -98,13 +98,13 @@ optimised WASM strips debug info and panics are otherwise silent.
          `PROM_URL`, `PROM_USER`, `TEMPO_URL`, `TEMPO_USER`, `GC_TOKEN`
          (Alloy config consumes these names - keep them in sync with the
          Alloy manifests task).
-      5. ~~In the Grafana UI: Alerting → Contact points → edit the default
-         email contact point to mick.alexander@gmail.com (or add one and
-         set it in the default notification policy). Send the test
-         notification and confirm it arrives.~~ **Done 2026-07-09**:
-         contact point configured to **beefsack@gmail.com** (changed
-         2026-07-09 - deliberate, not mick.alexander@gmail.com), test
-         notification confirmed delivered.
+       5. ~~In the Grafana UI: Alerting → Contact points → edit the default
+          email contact point to the operator's email (or add one and
+          set it in the default notification policy). Send the test
+          notification and confirm it arrives.~~ **Done 2026-07-09**:
+          contact point configured to **the operator's email** (changed
+          2026-07-09 - deliberate, not the operator's personal email), test
+          notification confirmed delivered.
 
 - [x] **Grafana Alloy manifests** (`k8s/prod/alloy/` - prod-only, NOT in
       `k8s/base`; dev keeps reading logs via Tilt): Deployment (single
@@ -431,7 +431,7 @@ set the threshold to 0, wait one evaluation, restore) to prove delivery.
 Initial rule set; thresholds are starting points, tune during the Phase 16
 beta/validation window:
 
-**2026-07-09:** the email contact point is done (beefsack@gmail.com, see
+**2026-07-09:** the email contact point is done (the operator's email, see
 the Grafana Cloud stack setup task above). Rule creation and rollout
 verification below are no longer tracked in this repo/backlog - the
 operator tracks that work separately from here on.
@@ -476,8 +476,8 @@ operator tracks that work separately from here on.
       1. ~~Sign up at uptimerobot.com; confirm the account email.~~
       2. ~~Add New Monitor → type HTTP(s) → URL `https://beta.brdg.me/`
          (during the Phase 16 beta) → interval 5 minutes → alert contact:
-         the account email~~ (**beefsack@gmail.com** - changed 2026-07-09,
-         not mick.alexander@gmail.com).
+         the account email~~ (**the operator's email** - changed 2026-07-09,
+          not the operator's personal email).
       3. ~~Verify it reports Up, then take the beta stack briefly down (or
          pause a Deployment) once to confirm a Down email actually
          arrives.~~

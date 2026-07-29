@@ -391,4 +391,4 @@ prefers inline formatting, both sites must stay byte-identical.)
   assertion target for the S3 render test.
 - **Migrations:** none. This plan makes no schema change; the AGENTS.md
   migration-immutability rule is not engaged.
-- **Org is `brdgme`** (not `beefsack`) for any image/URL references.
+- **Org is `brdgme`** (not the developer's personal account) for any image/URL references.

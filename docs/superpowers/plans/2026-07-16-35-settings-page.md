@@ -565,7 +565,7 @@ git add rust/web/Cargo.toml Cargo.lock rust/web/src/db.rs rust/web/src/theme.rs 
 git commit -m "feat: petname default usernames and D2 username validation"
 ```
 
-(`Cargo.lock` lives at the workspace root `/home/beefsack/Development/brdgme/Cargo.lock` if present, otherwise `rust/Cargo.lock` - `git status` after the build will show which one changed; add that path.)
+(`Cargo.lock` lives at the workspace root `./Cargo.lock` if present, otherwise `rust/Cargo.lock` - `git status` after the build will show which one changed; add that path.)
 
 ---
 
@@ -1429,7 +1429,7 @@ Expected: PASS.
 - [ ] **Step 3: Grep for leftovers**
 
 ```bash
-grep -rn "ThemeSettingsPage\|DeutanProtan\|sample_player_style\|theme-grid\|theme-category-heading\|/theme\"" /home/beefsack/Development/brdgme/rust/web/src /home/beefsack/Development/brdgme/rust/lib/color/src /home/beefsack/Development/brdgme/rust/web/style
+grep -rn "ThemeSettingsPage\|DeutanProtan\|sample_player_style\|theme-grid\|theme-category-heading\|/theme\"" ./rust/web/src ./rust/lib/color/src ./rust/web/style
 ```
 
 Expected: no matches (a `docs/` or comment match is acceptable; code/style matches are not - fix and amend the relevant commit's follow-up).

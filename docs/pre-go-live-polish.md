@@ -363,7 +363,7 @@ superpowers spec/plan and fixed as one batch when scheduled.
   rating change.
 - **Expected:** Match live brdg.me, which renders the ELO rating change
   next to the ELO rating when a game finishes. Check the legacy
-  implementation (live brdg.me, github.com/beefsack/brdg.me) for the
+  implementation (live brdg.me, github.com/brdgme/brdgme) for the
   exact presentation and make rust/web consistent with it.
 - **Resolved:** Fixed same day - `PlayerViewData.rating_change` plumbed
   from `game_players.rating_change` (already stored and queried) and

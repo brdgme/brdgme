@@ -404,4 +404,4 @@ time). Push deferred to a final cleanup unit per the orchestrate handover rules.
   `Option::unwrap` / `NodeRef::get()` unwraps - keep it that way.
 - **Pre-existing DB-test failures** in plain local runs are a known condition
   (backlog #40), not a regression from this work. These units add no DB tests.
-- **Org is `brdgme`** (not `beefsack`) for any image/URL references.
+- **Org is `brdgme`** (not the developer's personal account) for any image/URL references.

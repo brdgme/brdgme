@@ -44,10 +44,10 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   remote-bases this repo's `k8s/prod` at a pinned `?ref=`. Deploying a
   k8s manifest change = merge to master here, then bump the `?ref=` (and
   image tags when the app image changed) in
-  `/home/beefsack/Development/brdgme-config/prod/kustomization.yaml`, commit
+  `.-config/prod/kustomization.yaml`, commit
   and push there; ArgoCD auto-syncs.
 - Sealed secrets live in the sibling repo
-  `/home/beefsack/Development/brdgme-config` under `sealed-secrets/secrets/`,
+  `.-config` under `sealed-secrets/secrets/`,
   kubeseal pattern per the "Bootstrap order" section (step 3) of
   `docs/superpowers/plans/2026-07-08-15-production-cd-argocd.md`. `kubeseal`
   is in that repo's devenv, and sealing requires the prod kubectl context.
@@ -359,7 +359,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   as a create in the next step).
 - [ ] **Step 5: Init and plan.**
   ```sh
-  cd /home/beefsack/Development/brdgme/infra
+  cd ./infra
   tofu init
   tofu plan
   ```
@@ -388,7 +388,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   `No changes.`
 - [ ] **Step 8: Commit.**
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add infra/versions.tf infra/provider.tf infra/variables.tf infra/cloudflare.tf
   git commit -m "Infra #28 WP4: adopt Cloudflare zone + records into tofu (import, no create)
 
@@ -469,7 +469,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   permitted deferral.)
 - [ ] **Step 2: Plan.**
   ```sh
-  cd /home/beefsack/Development/brdgme/infra
+  cd ./infra
   tofu plan
   ```
   Expected: `Plan: 3 to add, 0 to change, 0 to destroy.` (two
@@ -498,7 +498,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   stop, set `value = "full"` temporarily, apply, and report.
 - [ ] **Step 4: Commit.**
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add infra/cloudflare.tf
   git commit -m "Infra #28 WP4: CF SSL strict + websockets + /api/ rate-limit rule via tofu
 
@@ -508,7 +508,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
 ### Task 4: TLS DNS01 switch (sealed CF token + ClusterIssuer)
 
 **Files:**
-- Create (in `/home/beefsack/Development/brdgme-config`):
+- Create (in `.-config`):
   `sealed-secrets/secrets/cloudflare-api-token.yaml`
 - Modify (brdgme-config): `sealed-secrets/secrets/kustomization.yaml`
 - Modify (this repo): `k8s/base/cert-manager/cluster-issuer.yaml`
@@ -535,7 +535,7 @@ namespace and is not overridden in the deployment args).
   `CLOUDFLARE_API_TOKEN` exported (source the brdgme repo's `.env` if
   needed):
   ```sh
-  cd /home/beefsack/Development/brdgme-config
+  cd .-config
   kubectl create secret generic cloudflare-api-token \
     -n cert-manager \
     --from-literal=api-token="$CLOUDFLARE_API_TOKEN" \
@@ -553,7 +553,7 @@ namespace and is not overridden in the deployment args).
   after `bot-config.yaml`).
 - [ ] **Step 3: Commit + push brdgme-config; poll the sync.**
   ```sh
-  cd /home/beefsack/Development/brdgme-config
+  cd .-config
   git add sealed-secrets/secrets/cloudflare-api-token.yaml sealed-secrets/secrets/kustomization.yaml
   git commit -m "Seal cloudflare-api-token for cert-manager DNS01 (brdgme #28 WP4)"
   git push
@@ -616,14 +616,14 @@ namespace and is not overridden in the deployment args).
   ```
 - [ ] **Step 5: Commit (this repo) and deploy via ArgoCD ref bump.**
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add k8s/base/cert-manager/cluster-issuer.yaml
   git commit -m "k8s #28 WP4: switch letsencrypt ClusterIssuer from HTTP01 to Cloudflare DNS01
 
   Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   git push
   NEW_SHA=$(git rev-parse master)
-  cd /home/beefsack/Development/brdgme-config
+  cd .-config
   sed -i "s|?ref=[0-9a-f]*|?ref=${NEW_SHA}|" prod/kustomization.yaml
   git add prod/kustomization.yaml
   git commit -m "deploy: brdgme ${NEW_SHA:0:7} (ClusterIssuer DNS01)"
@@ -692,7 +692,7 @@ namespace and is not overridden in the deployment args).
   the NS no longer point at DO, so these serve nothing).
 - [ ] **Step 3: Plan - DO-only destroys.**
   ```sh
-  cd /home/beefsack/Development/brdgme/infra
+  cd ./infra
   tofu plan
   ```
   Expected: `Plan: 0 to add, 0 to change, 10 to destroy.` and every
@@ -713,7 +713,7 @@ namespace and is not overridden in the deployment args).
   the DO zone was dead weight).
 - [ ] **Step 5: Commit.**
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add infra/dns.tf
   git commit -m "Infra #28 WP4: remove dead DO zone/records (NS on Cloudflare, DNS01 proven)
 
@@ -769,7 +769,7 @@ namespace and is not overridden in the deployment args).
   simply too low), then `tofu plan` (expect `1 to change`),
   `tofu apply -auto-approve`, re-run Steps 1-2, and commit:
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add infra/cloudflare.tf
   git commit -m "Infra #28 WP4: tune CF rate-limit threshold after beta verification
 
@@ -811,7 +811,7 @@ code + those tests together, then prove green again.
 
 - [ ] **Step 1: Baseline test run.**
   ```sh
-  cd /home/beefsack/Development/brdgme/rust
+  cd ./rust
   SQLX_OFFLINE=true cargo test -p web --features ssr
   ```
   Expected: all green. The limiter-only tests that will be deleted are all
@@ -903,7 +903,7 @@ code + those tests together, then prove green again.
   ```
 - [ ] **Step 9: Full verification.**
   ```sh
-  cd /home/beefsack/Development/brdgme/rust
+  cd ./rust
   SQLX_OFFLINE=true cargo test -p web --features ssr
   SQLX_OFFLINE=true cargo clippy -p web --all-features
   grep -rn "governor\|rate_limit\|extract_client_ip" web/src web/tests web/Cargo.toml
@@ -913,7 +913,7 @@ code + those tests together, then prove green again.
   the string may legitimately appear in docs elsewhere).
 - [ ] **Step 10: Commit and deploy to beta.**
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add -A rust/web
   git commit -m "web #28 WP4: delete in-app per-IP rate limiting (spec W6, CF edge rule proven)
 
@@ -930,7 +930,7 @@ code + those tests together, then prove green again.
   done
   ```
   Expected final line: `completed success`. Then deploy the new image:
-  in `/home/beefsack/Development/brdgme-config/prod/kustomization.yaml`,
+  in `.-config/prod/kustomization.yaml`,
   bump `?ref=` to the new master sha and set the `web` (and `migrate`)
   image `newTag:` to the CI-produced tag (`sha-<short7>` per the existing
   entries), commit `deploy: brdgme <short7> (delete in-app rate limiting)`,
@@ -971,7 +971,7 @@ code + those tests together, then prove green again.
   one-shot pattern as Task 2).
 - [ ] **Step 2: Plan + apply.**
   ```sh
-  cd /home/beefsack/Development/brdgme/infra
+  cd ./infra
   tofu plan
   tofu apply -auto-approve
   tofu plan
@@ -994,7 +994,7 @@ code + those tests together, then prove green again.
   checklist below and the commit message.
 - [ ] **Step 6: Commit.**
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add infra/cloudflare.tf
   git commit -m "Infra #28 WP4: Bot Fight Mode toggle (verified against WS + login on beta)
 
@@ -1135,7 +1135,7 @@ feature.
   WP4." to "See docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md."
 - [ ] **Step 3: Commit.**
   ```sh
-  cd /home/beefsack/Development/brdgme
+  cd .
   git add infra/README.md docs/superpowers/specs/2026-07-08-20-external-dns-design.md
   git commit -m "Docs #28 WP4: record Cloudflare DNS migration in infra README + external-dns spec
 

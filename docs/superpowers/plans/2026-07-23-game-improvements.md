@@ -526,7 +526,7 @@ ends with fmt + clippy green and its own commit.
 - **G6 undo interaction:** if a game supports undo (`can_undo: true`), the
   placings log is part of the undone state and will be removed with the undo.
   This is correct behaviour - no special handling needed.
-- **Org is `brdgme`** (not `beefsack`) for any image/URL references.
+- **Org is `brdgme`** (not the developer's personal account) for any image/URL references.
 - **Target single packages** for cargo work: `cargo clippy -p <crate>`.
   Never workspace-wide builds (except the `--workspace --exclude web` clippy
   gate).

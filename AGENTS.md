@@ -34,9 +34,9 @@ playbook - read it before touching `rust/web/src/email/` or debugging a
 
 ## Reference facts agents get wrong
 
-- GitHub org is `brdgme`, not `beefsack` (that's the developer's personal
-  account). Use `ghcr.io/brdgme/brdgme/<image>` and
-  `https://github.com/brdgme/brdgme.git`, never `beefsack`.
+- GitHub org is `brdgme`, not the developer's personal account. Use
+  `ghcr.io/brdgme/brdgme/<image>` and
+  `https://github.com/brdgme/brdgme.git`, never the personal account.
 - Never type or infer a git commit SHA by extending a shortened form seen
   earlier in output (e.g. completing a 7-char prefix into 40 hex chars from
   memory). Fetch the exact value with `git rev-parse` immediately before
@@ -93,7 +93,7 @@ playbook - read it before touching `rust/web/src/email/` or debugging a
   to user or global locations, no host package managers. If a tool is
   missing from `devenv.nix`, add it there (or report it) rather than
   installing around it.
-- On `beefsack-laptop`, do NOT run `scripts/rust-test.sh` - the web target
+- On the developer's laptop, do NOT run `scripts/rust-test.sh` - the web target
   (web-ssr compile/link) OOMs the machine even at jobs=1. Full gates there
   are run by the user. Targeted per-crate `cargo test -p <crate>` /
   `cargo clippy -p <crate>` runs are fine. Other machines have no

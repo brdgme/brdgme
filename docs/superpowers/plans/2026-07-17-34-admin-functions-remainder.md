@@ -14,7 +14,7 @@
 
 - All work in `rust/web` (crate `web`). No new migrations - the schema already supports everything.
 - sqlx `query!`/`query_as!` macros compile against a live `DATABASE_URL` (dev/CI convention; `.env` in `rust/` workspace). Use the macros, not runtime-checked queries, matching db.rs style (single exception documented at `db.rs:504` does not apply here).
-- CI gates (from `.github/workflows/ci.yml`): `cargo clippy -p web --all-targets --features ssr -- -D warnings` and `cargo test -p web --features ssr`. Run both (plus `cargo fmt`) before every commit. Run from `/home/beefsack/Development/brdgme/rust`.
+- CI gates (from `.github/workflows/ci.yml`): `cargo clippy -p web --all-targets --features ssr -- -D warnings` and `cargo test -p web --features ssr`. Run both (plus `cargo fmt`) before every commit. Run from `./rust`.
 - Admin enforcement is always server-side (`crate::db::is_user_admin`); UI gating on `viewer_is_admin` is cosmetic only.
 - Export bundles must never contain email addresses (spec D4).
 - No rating rewind on delete (spec D3).

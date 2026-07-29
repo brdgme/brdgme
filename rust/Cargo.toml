@@ -50,7 +50,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 publish = false
-authors = ["Michael Alexander <beefsack@gmail.com>"]
+authors = ["Michael Alexander"]
 
 [workspace.dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

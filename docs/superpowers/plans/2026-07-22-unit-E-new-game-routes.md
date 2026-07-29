@@ -689,4 +689,4 @@ cleanup unit per the orchestrate handover rules.
   E5 (land in that order; E5 reuses E4's `find_open_restart_proposal`).
   `proposals.rs` `respond_proposal` is touched only by E5. `components/game.rs`
   only by E7. Keep units serial to avoid conflicting edits.
-- **G-org** - the GitHub org is `brdgme` (not `beefsack`) for any image/URL refs.
+- **G-org** - the GitHub org is `brdgme` (not the developer's personal account) for any image/URL refs.

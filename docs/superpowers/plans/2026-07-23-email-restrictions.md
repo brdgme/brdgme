@@ -433,7 +433,7 @@ Axum state or `expect_context`). Site key from env var `TURNSTILE_SITE_KEY`
   plus-address users, the same `find_email_owner` exemption could apply to R1
   too. Flag for user decision.
 
-- **Org is `brdgme`** (not `beefsack`) for any image/URL references.
+- **Org is `brdgme`** (not the developer's personal account) for any image/URL references.
 
 - **Terraform for Turnstile:** the Turnstile site/secret keys are created in
   the CF dashboard (or via the `cloudflare_turnstile_widget` Terraform

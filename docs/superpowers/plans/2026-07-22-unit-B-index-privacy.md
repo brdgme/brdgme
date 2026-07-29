@@ -680,4 +680,4 @@ B1, B2, B3, B4, B5, B6, B7. Push deferred to a final cleanup unit.
 - **Do not delete the dashboard's backing server fns** in B7 - `get_friends_overview`,
   `get_friend_activity`, `get_pending_invites` are still used by the Friends page and/or
   the new index. Only the `DashboardPage` component + its route go away.
-- **Org is `brdgme`** (not `beefsack`) for any image/URL references.
+- **Org is `brdgme`** (not the developer's personal account) for any image/URL references.
