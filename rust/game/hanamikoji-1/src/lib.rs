@@ -1122,4 +1122,217 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, GameError::InvalidInput { .. }));
     }
+
+    fn legal_command(g: &Game) -> (usize, String) {
+        let player = g.whose_turn()[0];
+        match g.phase {
+            Phase::ChooseAction => {
+                let hand = &g.hands[player];
+                let used = g.used[player];
+                if !used[0] && !hand.is_empty() {
+                    (player, format!("secret {}", hand[0].name().to_lowercase()))
+                } else if !used[1] && hand.len() >= 2 {
+                    (
+                        player,
+                        format!(
+                            "trade {} {}",
+                            hand[0].name().to_lowercase(),
+                            hand[1].name().to_lowercase()
+                        ),
+                    )
+                } else if !used[2] && hand.len() >= 3 {
+                    (
+                        player,
+                        format!(
+                            "gift {} {} {}",
+                            hand[0].name().to_lowercase(),
+                            hand[1].name().to_lowercase(),
+                            hand[2].name().to_lowercase()
+                        ),
+                    )
+                } else if !used[3] && hand.len() >= 4 {
+                    (
+                        player,
+                        format!(
+                            "compete {} {} {} {}",
+                            hand[0].name().to_lowercase(),
+                            hand[1].name().to_lowercase(),
+                            hand[2].name().to_lowercase(),
+                            hand[3].name().to_lowercase()
+                        ),
+                    )
+                } else {
+                    panic!("no legal action available");
+                }
+            }
+            Phase::OpponentChoose => match g.pending.as_ref().expect("pending choice") {
+                Pending::Gift { cards, .. } => {
+                    (player, format!("choose {}", cards[0].name().to_lowercase()))
+                }
+                Pending::Competition { .. } => (player, "choose 1".to_string()),
+            },
+            Phase::Finished => panic!("game already finished"),
+        }
+    }
+
+    fn has_epilogue(logs: &[Log]) -> bool {
+        logs.iter()
+            .any(|l| brdgme_markup::to_string(&l.content).contains("Final scores:"))
+    }
+
+    fn drive_to_finish(g: &mut Game) -> (CommandResponse, Vec<Log>) {
+        let mut non_final: Vec<Log> = vec![];
+        let mut iterations = 0;
+        loop {
+            iterations += 1;
+            assert!(iterations < 200, "game did not terminate");
+            let (player, cmd) = legal_command(g);
+            let resp = g.command(player, &cmd, &names()).unwrap();
+            if g.is_finished() {
+                return (resp, non_final);
+            }
+            non_final.extend(resp.logs);
+        }
+    }
+
+    #[test]
+    fn test_play_full_game_to_finish() {
+        for seed in [1u64, 42, 999] {
+            let (mut g, _) = Game::start(2, seed).unwrap();
+            let mut iterations = 0;
+            while !g.is_finished() {
+                iterations += 1;
+                assert!(iterations < 200, "game did not terminate for seed {seed}");
+                let (player, cmd) = legal_command(&g);
+                g.command(player, &cmd, &names()).unwrap();
+            }
+            assert!(g.is_finished());
+            assert!(g.winner.is_some());
+            let mut placings = g.placings();
+            assert_eq!(2, placings.len());
+            placings.sort();
+            assert_eq!(vec![1, 2], placings);
+            assert!(g.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn test_finish_emits_epilogue_once() {
+        let (mut g, _) = Game::start(2, 5).unwrap();
+        let (final_resp, non_final) = drive_to_finish(&mut g);
+        assert!(has_epilogue(&final_resp.logs));
+        assert!(!has_epilogue(&non_final));
+    }
+
+    #[test]
+    fn test_command_parse_round_trips() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current;
+        g.hands[cur] = vec![Geisha::Flute, Geisha::Koto, Geisha::Fan, Geisha::Tea];
+
+        let parse = |g: &Game, player: usize, input: &str| {
+            g.command_parser(player)
+                .expect("parser available")
+                .parse(input, &names())
+                .expect("parses")
+                .value
+        };
+
+        assert_eq!(
+            Command::Secret(Geisha::Flute),
+            parse(&g, cur, "secret flute")
+        );
+        assert_eq!(
+            Command::Trade(Geisha::Flute, Geisha::Koto),
+            parse(&g, cur, "trade flute koto")
+        );
+        assert_eq!(
+            Command::Gift(Geisha::Flute, Geisha::Koto, Geisha::Fan),
+            parse(&g, cur, "gift flute koto fan")
+        );
+        assert_eq!(
+            Command::Compete(Geisha::Flute, Geisha::Koto, Geisha::Fan, Geisha::Tea),
+            parse(&g, cur, "compete flute koto fan tea")
+        );
+
+        assert_eq!(
+            Command::Secret(Geisha::Flute),
+            parse(&g, cur, "SECRET FLUTE")
+        );
+        assert_eq!(
+            Command::Secret(Geisha::Flute),
+            parse(&g, cur, "Secret Flute")
+        );
+
+        let opp = 1 - cur;
+        g.phase = Phase::OpponentChoose;
+        g.pending = Some(Pending::Gift {
+            actor: cur,
+            cards: vec![Geisha::Flute, Geisha::Koto, Geisha::Fan],
+        });
+        assert_eq!(
+            Command::ChooseCard(Geisha::Flute),
+            parse(&g, opp, "choose flute")
+        );
+
+        g.pending = Some(Pending::Competition {
+            actor: cur,
+            sets: [
+                vec![Geisha::Flute, Geisha::Koto],
+                vec![Geisha::Fan, Geisha::Tea],
+            ],
+        });
+        assert_eq!(Command::ChooseSet(0), parse(&g, opp, "choose 1"));
+        assert_eq!(Command::ChooseSet(1), parse(&g, opp, "choose 2"));
+    }
+
+    #[test]
+    fn test_command_spec_availability() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current;
+        assert!(g.command_spec(cur).is_some());
+        assert!(g.command_spec(1 - cur).is_none());
+
+        g.winner = Some(0);
+        assert!(g.command_spec(0).is_none());
+        assert!(g.command_spec(1).is_none());
+    }
+
+    #[test]
+    fn test_marker_persists_across_rounds() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.faceup = vec![[0, 0]; GEISHA];
+        g.faceup[0] = [1, 0];
+        g.secret = vec![None, None];
+        let old_round = g.round;
+        g.score_round();
+        assert!(g.winner.is_none());
+        assert_eq!(old_round + 1, g.round);
+        assert_eq!(Some(0), g.marker[0]);
+        for f in &g.faceup {
+            assert_eq!([0, 0], *f);
+        }
+    }
+
+    #[test]
+    fn test_multibyte_and_hostile_input() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let cur = g.current;
+        g.hands[cur] = vec![Geisha::Tea, Geisha::Taiko];
+        let hostile = [
+            "\u{a0}secret",
+            "secret\u{a0}flute",
+            "secret \u{3000}flute",
+            "secret caf\u{e9}",
+            "secret \u{1f004}",
+            "e\u{301}",
+        ];
+        for input in hostile {
+            let result = g.command(cur, input, &names());
+            assert!(
+                matches!(result, Err(GameError::InvalidInput { .. })),
+                "expected InvalidInput for {input:?}"
+            );
+        }
+    }
 }
