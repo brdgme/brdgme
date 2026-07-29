@@ -523,6 +523,14 @@ troubleshooting effort might be affected by dependency behavior, check the
 involved dependencies against latest and bump first, before building
 workarounds against old versions. (Policy set 2026-07-15.)
 
+**All project tooling lives in `devenv.nix`.** This machine is
+NixOS/home-manager managed - never install anything globally or ad hoc
+(`cargo install`, `cargo-binstall` to user/global locations, host package
+managers). If a tool is missing, add it to `devenv.nix`'s `packages` list.
+CI may install tools ad hoc (e.g. `taiki-e/install-action` for `cargo-deny`)
+because it runs on ephemeral GitHub runners; that is not a precedent for
+local installs. (Directive set 2026-07-29.)
+
 **`wasm-bindgen` is pinned** to `=0.2.121` in `rust/web/Cargo.toml` to match
 the `wasm-bindgen-cli` version provided by nixpkgs, which also drives the
 pins in `rust/Dockerfile` and `.github/workflows/ci.yml`. Do not update any
