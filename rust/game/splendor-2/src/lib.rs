@@ -236,7 +236,7 @@ impl Game {
             0 => self.next_phase(),
             1 => self
                 .visit(self.current_player, can_visit[0])
-                .expect("invariant: auto-visit must always succeed"),
+                .unwrap_or_else(|e| vec![Log::public(vec![N::text(e.to_string())])]),
             _ => vec![],
         }
     }
@@ -304,6 +304,9 @@ impl Game {
         if !self.can_take(player) {
             return Err(GameError::invalid_input("unable to take right now"));
         }
+        if tokens.iter().any(|t| !GEMS.contains(t)) {
+            return Err(GameError::invalid_input("can only take gem tokens"));
+        }
         let mut logs = vec![];
         match tokens.len() {
             2 => {
@@ -332,7 +335,7 @@ impl Game {
                     }
                     if self.tokens.get(&tokens[i]) == 0 {
                         return Err(GameError::invalid_input(
-                            "there aren't enough tokens remaning to take that",
+                            "there aren't enough tokens remaining to take that",
                         ));
                     }
                 }
@@ -839,6 +842,16 @@ mod tests {
     }
 
     #[test]
+    fn test_take_rejects_non_gem_tokens() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        assert!(g.take(0, &[Resource::Gold, Resource::Gold]).is_err());
+        assert!(
+            g.take(0, &[Resource::Gold, Resource::Prestige, Resource::Diamond])
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_take_command_spec_autocomplete() {
         // Regression: the trailing (still-being-typed) token must filter the
         // autocomplete suggestions, not be consumed as a completed token.
@@ -1011,10 +1024,28 @@ mod tests {
     fn test_reserve_own_reserve_slot_rejected() {
         let (mut g, _) = Game::start(2, 1).unwrap();
         g.player_boards[0].reserve = vec![card_with_cost(Resource::Ruby, &[])];
-        // Row 3 targets the reserve; `Reserve` rejects it (only board rows
-        // 0-2 valid) - the loc parser never offers row 3 as a `reserve`
-        // target either, but assert the action-level guard directly.
+        // Row 3 targets the player's own reserve. The reserve parser filters
+        // row-3 locations out (you cannot reserve a card you already hold), so
+        // this is only reachable via a direct `reserve` call; assert the
+        // action-level guard that rejects it.
         assert!(g.reserve(0, ParsedLoc { row: 3, col: 0 }).is_err());
+    }
+
+    #[test]
+    fn test_reserve_parser_excludes_own_reserve_row() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.player_boards[0].reserve = vec![card_with_cost(Resource::Ruby, &[])];
+        let spec = g.command_spec(0).expect("player 0 has a command spec");
+        let vals = |input: &str| -> Vec<String> {
+            spec.suggest(input, &[])
+                .iter()
+                .map(|s| s.value.clone())
+                .collect()
+        };
+        let reserve_vals = vals("reserve ");
+        assert!(reserve_vals.contains(&"A1".to_string()));
+        assert!(!reserve_vals.contains(&"A4".to_string()));
+        assert!(vals("buy ").contains(&"A4".to_string()));
     }
 
     #[test]

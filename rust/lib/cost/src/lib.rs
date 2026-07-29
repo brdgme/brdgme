@@ -12,12 +12,14 @@ impl<K: Hash + Eq> Default for Cost<K> {
     }
 }
 
-impl<K: Hash + Eq + Clone> Cost<K> {
+impl<K: Hash + Eq> Cost<K> {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<K: Hash + Eq + Clone> Cost<K> {
     #[must_use]
     pub fn from_keys(keys: impl IntoIterator<Item = K>) -> Self {
         let mut map = HashMap::new();

@@ -82,7 +82,7 @@ impl Game {
     /// `{'A'+col}{row+1}`, then the player's own reserve locations named
     /// `{'A'+col}4`. Computed fresh from current board/reserve state on
     /// every call - column letters are positional, not stable ids.
-    fn loc_parser(&self, player: usize) -> impl Parser<T = ParsedLoc> {
+    fn loc_parser(&self, player: usize, include_reserve: bool) -> impl Parser<T = ParsedLoc> {
         let mut values: Vec<LocChoice> = vec![];
         for (row, cards) in self.board.iter().enumerate() {
             for col in 0..cards.len() {
@@ -92,11 +92,13 @@ impl Game {
                 });
             }
         }
-        for col in 0..self.player_boards[player].reserve.len() {
-            values.push(LocChoice {
-                loc: ParsedLoc { row: 3, col },
-                name: [b'A' + col as u8, b'4'],
-            });
+        if include_reserve {
+            for col in 0..self.player_boards[player].reserve.len() {
+                values.push(LocChoice {
+                    loc: ParsedLoc { row: 3, col },
+                    name: [b'A' + col as u8, b'4'],
+                });
+            }
         }
         Map::new(Enum::exact(values), |c: LocChoice| c.loc)
     }
@@ -108,7 +110,7 @@ impl Game {
                 AfterSpace::new(Doc::name_desc(
                     "card",
                     "the card to buy",
-                    self.loc_parser(player),
+                    self.loc_parser(player, true),
                 )),
             ),
             |(_, loc)| Command::Buy(loc),
@@ -126,7 +128,7 @@ impl Game {
                 AfterSpace::new(Doc::name_desc(
                     "card",
                     "the card to reserve",
-                    self.loc_parser(player),
+                    self.loc_parser(player, false),
                 )),
             ),
             |(_, loc)| Command::Reserve(loc),
