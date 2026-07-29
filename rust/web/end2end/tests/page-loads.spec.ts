@@ -5,7 +5,7 @@ test("hard-loaded pages produce zero console errors", async ({ page }) => {
   const errors = collectConsoleErrors(page);
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Welcome to brdg.me" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "brdg.me" })).toBeVisible();
 
   await page.goto("/login");
   await expect(page.getByText("Enter your email address to start")).toBeVisible();
