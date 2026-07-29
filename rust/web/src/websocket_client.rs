@@ -54,18 +54,17 @@ pub fn use_websocket() {
 
     let on_event = move |e: &web_sys::Event| {
         let event_type = e.type_();
-        if event_type == "game" || event_type == "proposal" {
-            if let Ok(msg) = UseEventSourceMessage::<String, FromToStringCodec>::try_from(e.clone())
-            {
-                if event_type == "game" {
-                    if let Ok(signal) = serde_json::from_str::<GameUpdateSignal>(&msg.data) {
-                        trigger.set_last_update.update(|n| *n += 1);
-                        bump_game_update(game_update, signal.game_id);
-                    }
-                } else if let Ok(signal) = serde_json::from_str::<ProposalUpdateSignal>(&msg.data) {
+        if (event_type == "game" || event_type == "proposal")
+            && let Ok(msg) = UseEventSourceMessage::<String, FromToStringCodec>::try_from(e.clone())
+        {
+            if event_type == "game" {
+                if let Ok(signal) = serde_json::from_str::<GameUpdateSignal>(&msg.data) {
                     trigger.set_last_update.update(|n| *n += 1);
-                    bump_proposal_update(proposal_update, signal.proposal_id);
+                    bump_game_update(game_update, signal.game_id);
                 }
+            } else if let Ok(signal) = serde_json::from_str::<ProposalUpdateSignal>(&msg.data) {
+                trigger.set_last_update.update(|n| *n += 1);
+                bump_proposal_update(proposal_update, signal.proposal_id);
             }
         }
         UseEventSourceOnEventReturn::ProcessMessage
@@ -121,14 +120,12 @@ pub fn use_public_events() {
     let url: Signal<String> = Signal::derive(move || url_signal.get().unwrap_or_default());
 
     let on_event = move |e: &web_sys::Event| {
-        if e.type_() == "game" {
-            if let Ok(msg) = UseEventSourceMessage::<String, FromToStringCodec>::try_from(e.clone())
-            {
-                if let Ok(signal) = serde_json::from_str::<GameUpdateSignal>(&msg.data) {
-                    trigger.set_last_update.update(|n| *n += 1);
-                    bump_game_update(game_update, signal.game_id);
-                }
-            }
+        if e.type_() == "game"
+            && let Ok(msg) = UseEventSourceMessage::<String, FromToStringCodec>::try_from(e.clone())
+            && let Ok(signal) = serde_json::from_str::<GameUpdateSignal>(&msg.data)
+        {
+            trigger.set_last_update.update(|n| *n += 1);
+            bump_game_update(game_update, signal.game_id);
         }
         UseEventSourceOnEventReturn::ProcessMessage
     };
@@ -161,8 +158,6 @@ pub fn PublicEventsWatcher() -> impl IntoView {
             .map(|id| format!("/events/public?topic=game:{id}"));
         url_signal.set(game_url);
     });
-
-    view! {}
 }
 
 #[cfg(not(feature = "hydrate"))]
