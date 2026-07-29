@@ -144,8 +144,8 @@ impl Game {
     fn discard_card(&mut self, player: usize, card: Card) -> Vec<Log> {
         if let Some(pos) = self.hands[player].iter().position(|&c| c == card) {
             self.hands[player].remove(pos);
+            self.discards[player].push(card);
         }
-        self.discards[player].push(card);
         if card == Card::Princess {
             self.eliminate(player)
         } else {
@@ -974,6 +974,20 @@ mod tests {
         assert_eq!(vec![Card::Baron], g.hands[MICK]);
         assert!(!g.eliminated[MICK]);
         assert!(g.eliminated[STEVE]);
+    }
+
+    #[test]
+    fn discard_card_only_records_held_cards() {
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.hands[MICK] = vec![Card::Guard];
+        let before = g.discards[MICK].len();
+        g.discard_card(MICK, Card::King);
+        assert_eq!(before, g.discards[MICK].len());
+        assert_eq!(vec![Card::Guard], g.hands[MICK]);
+        g.discard_card(MICK, Card::Guard);
+        assert_eq!(before + 1, g.discards[MICK].len());
+        assert_eq!(Card::Guard, *g.discards[MICK].last().unwrap());
+        assert!(g.hands[MICK].is_empty());
     }
 
     #[test]
