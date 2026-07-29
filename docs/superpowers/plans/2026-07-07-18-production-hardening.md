@@ -433,8 +433,8 @@ beta/validation window:
 
 **2026-07-09:** the email contact point is done (beefsack@gmail.com, see
 the Grafana Cloud stack setup task above). Rule creation and rollout
-verification below are no longer tracked in this repo/backlog - Michael
-tracks that work separately from here on.
+verification below are no longer tracked in this repo/backlog - the
+operator tracks that work separately from here on.
 
 - [ ] Monolith 5xx: `>0.5%` of requests 5xx over 15m (from the `/metrics`
       histogram), AND an absolute guard: `>10` 5xx in 15m (catches
@@ -469,7 +469,7 @@ tracks that work separately from here on.
 
 ### External uptime monitor (added 2026-07-05)
 
-- [x] *(human - account creation)* **Done 2026-07-09** (Michael): Free
+- [x] *(human - account creation)* **Done 2026-07-09**: Free
       external HTTPS check - the only monitor that fires when the cluster,
       LB, DNS, or Grafana Cloud shipping is down wholesale. Steps
       (UptimeRobot free tier or equivalent):
@@ -537,7 +537,7 @@ bot, and the brdgme operator have none**; NATS/CNPG covered as below.
 - [x] Sum requests vs the s-2vcpu-4gb node's allocatable (~2.5GiB after
       DOKS reservations) and record the table in this file. If the sum
       exceeds ~80% of allocatable, flag it - the decision to add a second
-      node is Michael's and is deliberately deferred until the numbers
+      node is deliberately deferred until the numbers
       force it; the deliverable here is the honest number, not the node.
 
 **Capacity table (measured 2026-07-06 from manifests in this repo):**
@@ -571,4 +571,4 @@ the workloads this repo actually specs and controls.
   Barman plugin footprint is additional on top of that. This is a real gap
   worth closing before installing ArgoCD (per the existing bullet above,
   patching its kustomize defaults down), but per the task scope that
-  decision and any manifest changes are deferred to Michael.
+  decision and any manifest changes are deferred to the operator.

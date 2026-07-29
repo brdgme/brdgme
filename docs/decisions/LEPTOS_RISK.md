@@ -2,7 +2,7 @@
 
 Seed created 2026-07-03; deep dive completed same day (data via GitHub API,
 RUSTSEC advisory-db, web). **DECIDED 2026-07-03: stay on Leptos + tripwires
-+ hedges** (option b) - accepted by Michael.
++ hedges** (option b) - accepted.
 
 ## Trigger
 

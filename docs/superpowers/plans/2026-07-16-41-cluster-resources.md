@@ -202,7 +202,7 @@ Analysis / proposal:
      change needed unless that drifts).
 4. No change is prepared for (f) this session by design - analysis only.
 
-### (d) GHCR pull secret - design and operator instructions for Michael
+### (d) GHCR pull secret - design and operator instructions
 
 Evidence status: all cluster events have expired, so the historic
 `pull QPS exceeded` / ImagePullBackOff churn could not be re-confirmed
@@ -222,7 +222,7 @@ imagePullSecrets references a not-yet-existing secret still pulls
 anonymously (warning event only), so the wiring is safe to deploy before
 or after the secret - but the intended order is secret first.
 
-Operator steps (Michael) - all in brdgme-config, inside `devenv shell`,
+Operator steps - all in brdgme-config, inside `devenv shell`,
 kubectl context do-syd1-brdgme:
 
 1. Create a GitHub Personal Access Token (classic) with ONLY the
@@ -366,7 +366,7 @@ wiring, either is safe.
   commented SealedSecret shape; deliberately NOT in the secrets
   kustomization, so it can never sync as a placeholder) + a 3-line README
   pointer in bootstrap step 3.
-- Deploy: nothing to deploy directly - Michael follows the steps in the
+- Deploy: nothing to deploy directly - the operator follows the steps in the
   .example file / the (d) section above (PAT -> kubeseal -> register
   ghcr-pull.yaml -> push).
 - Revert: delete the .example + README lines (docs-only).

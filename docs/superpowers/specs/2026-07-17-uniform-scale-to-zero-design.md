@@ -1,7 +1,7 @@
 # Uniform scale-to-zero for all game versions
 
 Date: 2026-07-17
-Status: approved (Michael, 2026-07-17)
+Status: approved (2026-07-17)
 Follow-up to: #42 (docs/superpowers/plans/2026-07-16-42-image-scale-to-zero.md)
 
 ## Decision
@@ -53,7 +53,7 @@ for all versions.
 No manual SQL. Removing `scaleToZero: true` bumps the generation of the 19
 CRs that carry it; the operator reconciles those and upserts the interceptor
 URI. The other 20 CRs get no spec change, so the observedGeneration skip
-would leave their rows on direct URLs; Michael clears their status to force a
+would leave their rows on direct URLs; their status is cleared to force a
 reconcile (watch event fires immediately, no SQL needed):
 
 ```bash
@@ -74,12 +74,12 @@ cutover rows to direct service URLs.
 
 1. Land and build the operator change (rust/ change, so CI publishes an
    image).
-2. Michael bumps the operator tag in brdgme-config and syncs; new operator
+2. The operator tag in brdgme-config is bumped and synced; new operator
    live.
-3. Land the manifest changes (k8s-only commit); Michael bumps the
-   brdgme-config ref and syncs; ArgoCD applies CR + HSO changes; the operator
+3. Land the manifest changes (k8s-only commit); the
+   brdgme-config ref is bumped and synced; ArgoCD applies CR + HSO changes; the operator
    reconciles the 19 generation-bumped CRs.
-4. Michael runs the status-clear loop (Database section) so the remaining 20
+4. The operator runs the status-clear loop (Database section) so the remaining 20
    CRs reconcile onto the interceptor URI.
 
 Between steps 2 and 3 the new operator reconciles existing CRs: 19 have

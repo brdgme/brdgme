@@ -63,7 +63,7 @@ Create `rust/lib/game_client/Cargo.toml`:
 name = "brdgme_game_client"
 version = "0.1.0"
 publish = false
-authors = ["Michael Alexander <beefsack@gmail.com>"]
+authors = ["brdgme"]
 edition = "2024"
 
 [dependencies]

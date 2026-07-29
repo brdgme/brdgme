@@ -34,6 +34,10 @@ etc.) - see Dependency Management below for crates already in use.
 one. Code is read far more often than it is written - optimize for the next
 reader, not for showing off.
 
+**Keep macro surfaces small and obvious.** Custom macros carry maintenance and
+cognitive cost; pause and discuss before a macro grows complex. (The
+game-specific application is in Game Services below.)
+
 **Comment discipline.** Default to no comments. Only add one when the *why*
 is non-obvious - a hidden constraint, a workaround for a specific bug, or
 behavior that would surprise a reader. Never comment on *what* the code does
@@ -512,6 +516,23 @@ theme, colours, and the per-notification-type toggles all remain available by
 email. This is a deliberate capability boundary drawn at *credentials*, not a
 blanket ban on settings over email, and not an unfinished feature.
 
+**Canonicalize email at every input boundary.** Trim and lowercase email at all
+four input boundaries - auth, invites, new-game, and settings. A one-off
+migration lowercased the stored rows and a lowercasing unique index enforces
+uniqueness case-insensitively; the case-collision risk (two accounts differing
+only by case) was surfaced once, deliberately. (D-09; implemented WP-50,
+migration 026.)
+
+**Sessions do not expire, and there is no expiry GC.** Sessions must not expire
+and no session-expiry garbage collection is to be added; revoke-all-sessions
+("log out everywhere") IS in scope. The compensating control for a compromised
+address is that changing the account email requires re-verification - a step-up
+confirmation sent to the new address. (D-14, 2026-07.)
+
+**Fail closed in production on auth failure.** Turnstile verifier errors reject
+rather than pass. (D-12, 2026-07; the matching `DATABASE_ENCRYPTION_KEY`
+startup rule is in the Database section.)
+
 ---
 
 ## Dependency Management
@@ -538,18 +559,19 @@ one of these without updating the other two and the devenv shell in
 lockstep. A version mismatch between the CLI and the crate causes the WASM
 build to fail at link time.
 
-**Other pinned-by-ecosystem crates** (as of 2026-07-15): `js-sys`/`web-sys`
+**Other pinned-by-ecosystem crates** (as of 2026-07-29): `js-sys`/`web-sys`
 are held at `0.3.98` by the `wasm-bindgen =0.2.121` pin above (latest is
-`0.3.103`). `web`'s `sqlx` is on `0.8` (latest `0.9`) and `tower-sessions` is
-on `0.14.0` (latest `0.15`) because `tower-sessions-sqlx-store 0.15.0`
-requires `sqlx ^0.8` and `tower-sessions ^0.14`; `bot` and `operator` are
-already on `sqlx 0.9`. The `sqlx-cli` pin in `rust/Dockerfile` (`0.8.6`) is
-kept matching `web`'s `sqlx 0.8`. When `tower-sessions-sqlx-store` releases
-`sqlx-0.9` support, move `web`'s `sqlx`, `tower-sessions`, and the
-Dockerfile `sqlx-cli` pin together. Run `cargo update --verbose`
-periodically to check for patch-level updates; ignore "Unchanged" lines
-where a newer major version exists but the Cargo.toml constraint
-intentionally excludes it.
+`0.3.103`). `sqlx` is unified on `0.9` workspace-wide - a
+`[workspace.dependencies]` entry in `rust/Cargo.toml` that `web`, `bot`, and
+`operator` all inherit. The session store is vendored as the
+`brdgme_session_store` workspace member (`rust/lib/session_store`);
+`tower-sessions-sqlx-store` is no longer a dependency, which is what freed
+`web` to move off the `sqlx ^0.8` the published store imposed. `web`'s
+`tower-sessions` remains on `0.14.0` (the `0.15` bump was out of scope for the
+vendoring work). The `sqlx-cli` pin in `rust/Dockerfile` remains `0.8.6`. Run
+`cargo update --verbose` periodically to check for patch-level updates; ignore
+"Unchanged" lines where a newer major version exists but the Cargo.toml
+constraint intentionally excludes it.
 
 **`rust/web/end2end`'s `@types/node`** tracks the Node.js major provided by
 the devenv shell (currently 24), not npm latest.
@@ -676,6 +698,10 @@ statement with `CASE`/`COALESCE` (see the sanitize step of
 `009_username_rules.sql`, which was originally written the broken way and
 caught in review).
 
+**Refuse startup on a missing `DATABASE_ENCRYPTION_KEY`.** Production fails
+closed: an unset encryption key must prevent the process from starting, not
+silently fall back to a hardcoded default key. (D-12, 2026-07.)
+
 ## Game Services
 
 **The code is authoritative, not the physical rulebook.** When implementing
@@ -715,7 +741,9 @@ absolute don'ts - moves that are almost always wrong regardless of
 context. ADVANCED_STRATEGY is longer, contextual, and describes
 heuristics for strong play. Both are embedded at compile time via
 `include_str!` like RULES.md. Bots receive BASIC at all difficulty
-levels; ADVANCED only when the bot config includes it.
+levels; ADVANCED only when the bot config includes it. The two files are
+deliberately split so bot difficulty can be tiered, and must not be folded
+into RULES.md.
 
 **Game interface versioning.** The `interface_version` column in
 `game_versions` (set by the operator from the GameVersion CRD's
@@ -724,6 +752,28 @@ V2. The shared `game_client` crate abstracts this: `fetch_game_data()`
 calls Status plus the V2 endpoints and returns placeholder empty
 strings for V1 games. Callers (bot, web) never check versions
 themselves.
+
+**Do not modify deprecated game crates unless unavoidable.** A deprecated crate
+is one with `isDeprecated: true` in its manifest - the `-1` versions that have a
+`-2` successor. Leave them alone; the only reason to touch one is a forced
+change, e.g. a `Gamer` trait or API change that breaks compilation. (Policy set
+2026-07-29.)
+
+**Never make a breaking change to a stored game state shape.** For a breaking
+shape change, release a NEW game version (e.g. `-2` -> `-3`) and do it cleanly
+there, rather than adding `Option`-field or backward-compat workarounds in the
+live crate. (Policy set 2026-07-29.)
+
+**`brdgme_game_bin` stays macro-free.** Keep any macro surface small and obvious
+and pause and discuss before one grows complex (see General Principles). The
+shared game-bin crate is generic over the `Gamer` trait with thin per-game
+wrappers exposing `cli_main`/`http_main`/`fuzz_main`; it must not be
+"simplified" back into a macro. (D-20, 2026-07.)
+
+**A finished game may not be undone, and ratings do not rewind.** Undo and
+concede share the `undo_core`/`concede_core` paths across the web and email
+surfaces; the ratings-idempotency detail behind the no-rewind rule is in the
+Database section. (D-03/D-04, 2026-07.)
 
 ---
 

@@ -34,7 +34,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
 - Every `tofu apply` step is preceded by a `tofu plan` step whose expected
   summary is stated; **any planned destroy of a cloudflare resource is a
   stop-and-report condition** (Tasks 2-3, 8; Task 5 expects DO-only
-  destroys). Applies touch live DNS/edge config and run with Michael's env.
+  destroys). Applies touch live DNS/edge config and run with the operator's env.
 - web crate tests: `SQLX_OFFLINE=true cargo test -p web --features ssr`
   (run from `rust/`).
 - `gh run watch` is forbidden in background agents - poll
@@ -57,7 +57,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   otherwise proven.
 - W8 (cutover-day apex flip to proxied + Gateway apex listeners) is NOT in
   this plan - it stays in the #16 cutover runbook.
-- Steps marked **(operator-verify)** need Michael to manually confirm
+- Steps marked **(operator-verify)** need the operator to manually confirm
   (email receipt, playing a game session); everything else is
   agent-executable.
 
@@ -104,7 +104,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   Expected: `true`, `"active"`, `[]`. If it returns
   `1000 Invalid API Token` or the Step 5 dns_records listing fails with
   `10000 Authentication error` (both observed at planning time), STOP and
-  report: Michael must confirm/re-issue the token with Zone.DNS Edit +
+  report: the operator must confirm/re-issue the token with Zone.DNS Edit +
   Zone.Zone Settings Edit + Zone.Zone Read on brdg.me and update `.env`
   (then re-enter the devenv shell so dotenv re-exports it).
 - [ ] **Step 2: Confirm NS cutover and beta proxying.**
@@ -149,7 +149,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   legacy/Resend records DNS-only i.e. `proxied=false`, beta `proxied=true`)
   - CF's zone-creation copy may have guessed proxied status - plus any
   extra or missing records vs dns.tf. Extra records are a stop-and-report
-  condition (Michael decides adopt-vs-delete); proxied-flag drift is NOT a
+  condition (operator decides adopt-vs-delete); proxied-flag drift is NOT a
   stop - Task 2 reconciles it.
 - [ ] **Step 6: Verify a websocket connects through the proxy right now.**
   ```sh
@@ -164,7 +164,7 @@ ArgoCD (brdgme-config), Rust (axum/leptos web crate).
   101 is success). If it returns a non-101 HTTP status, report it -
   WebSockets may need the Task 3 zone setting before this passes; re-run
   after Task 3 in that case.
-- [ ] **Step 7 (operator-verify): Login email still delivers.** Michael:
+- [ ] **Step 7 (operator-verify): Login email still delivers.** Operator:
   request a login code on https://beta.brdg.me and confirm the email
   arrives (Resend DNS records intact through the CF zone copy). Record
   pass/fail in the task report.
@@ -759,7 +759,7 @@ namespace and is not overridden in the deployment args).
   Expected: `HTTP/2 429`, `server: cloudflare`, a `cf-ray:` line. Wait
   ~15s afterwards (mitigation_timeout 10s) and confirm a single request is
   no longer blocked.
-- [ ] **Step 2 (operator-verify): Normal use never trips it.** Michael:
+- [ ] **Step 2 (operator-verify): Normal use never trips it.** Operator:
   log in on beta, browse the game list, and play a real game session
   (moves + websocket updates) for a few minutes. No 429s / "blocked"
   interstitials may appear. Report pass/fail.
@@ -937,7 +937,7 @@ code + those tests together, then prove green again.
   push, and poll the ArgoCD app (Task 4 Step 3 loop) until
   `Synced Healthy`.
 - [ ] **Step 11 (operator-verify): Login flow on beta post-deploy.**
-  Michael: request a code, receive the email, confirm, session works.
+  Operator: request a code, receive the email, confirm, session works.
 
 ### Task 8: Bot Fight Mode toggle + verification (spec W5)
 
@@ -980,7 +980,7 @@ code + those tests together, then prove green again.
   then `No changes.`
 - [ ] **Step 3: Re-verify the websocket through the proxy.** Run Task 1
   Step 6's curl (expect the `101`). Then the >30s idle survival:
-  **(operator-verify)** Michael plays a game session on beta and leaves
+  **(operator-verify)** the operator plays a game session on beta and leaves
   the tab idle for over a minute - live updates must still arrive
   afterwards (WP2's 30s app-side pings keep it alive; BFM must not kill
   the upgraded connection).
@@ -1107,7 +1107,7 @@ feature.
   `brdg.me` moved from DO nameservers to Cloudflare for item 28 WP4 (free
   WAF/rate-limiting/proxy edge in front of beta, later the apex). Unlike
   the Route53 move, this one was done manually ahead of Tofu adoption:
-  Michael created the zone in the CF dashboard (free plan), CF copied the
+  the zone was created in the CF dashboard (free plan), CF copied the
   DO records at zone creation, and the registrar NS were cut over the same
   day - `cloudflare.tf` then ADOPTED the live zone and records via import
   blocks (no resources created), reconciling proxied flags to the design

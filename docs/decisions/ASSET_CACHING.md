@@ -2,7 +2,7 @@
 
 **IMPLEMENTED 2026-07-15: content-addressed (hashed) filenames for Leptos
 pkg assets, plus a matching Cloudflare cache rule** - pending review, not
-yet accepted by Michael. Code changes are in the working tree; the
+yet accepted. Code changes are in the working tree; the
 Cloudflare rule has not been applied via `tofu apply` yet.
 
 **Updated 2026-07-16:** two follow-up fixes, after a hashed-CSS 404 was

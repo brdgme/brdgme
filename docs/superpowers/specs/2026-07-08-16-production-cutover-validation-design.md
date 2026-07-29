@@ -40,7 +40,7 @@ are not created in `infra/dns.tf`).
 
 ## Beta period (added 2026-07-05: isolated database, pre-cutover)
 
-Michael wants a short beta on the production cluster before real traffic,
+A short beta is wanted on the production cluster before real traffic,
 against a **completely isolated database** - the fresh CNPG database the
 cluster boots with, wiped at cutover by the Phase 19 import. No legacy
 data, no shared state with old prod, which keeps serving users untouched.

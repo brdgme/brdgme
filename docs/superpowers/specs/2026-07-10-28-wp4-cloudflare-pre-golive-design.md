@@ -1,6 +1,6 @@
 # 28 WP4: Cloudflare edge, resequenced pre-go-live - Design
 
-> Decided 2026-07-10 (Michael). Supersedes the scheduling and sequencing
+> Decided 2026-07-10. Supersedes the scheduling and sequencing
 > of WP4 in `2026-07-08-28-abuse-protection-design.md` D1 (which stays as
 > a point-in-time record); the D1 decision to adopt Cloudflare free tier
 > itself is unchanged. Cross-reference the plan at
@@ -15,7 +15,7 @@
 - WP3 (peer-only rate-limit keying, commit 6e53681) proved forwarding
   headers are ignored at the app, documenting the trust model that the
   W6 limiter deletion relies on.
-- Michael's simplifying call 2026-07-10: the current brdg.me
+- Simplifying call 2026-07-10: the current brdg.me
   (Linode-hosted legacy site) is not actively used right now, so the
   migration does not need zero-downtime ceremony around the legacy
   records - keep it simple, single-stage.
@@ -99,13 +99,13 @@
 2. Agent: all Tofu changes (provider + zone + records + settings),
    ClusterIssuer DNS01 change, sealed CF token in `brdgme-config`; `tofu
    apply` populates the CF zone (inert until the NS flip).
-3. Gate: Michael's explicit sign-off.
+3. Gate: explicit sign-off.
 4. Human: registrar NS flip to Cloudflare's nameservers.
 5. Validation checklist (below), then remove DO zone resources.
 
 ## Post-approval state (2026-07-10)
 
-Approved by Michael 2026-07-10, with the following facts superseding the
+Approved 2026-07-10, with the following facts superseding the
 runbook order above:
 
 - The CF zone for brdg.me already exists; the scoped API token is
@@ -122,7 +122,7 @@ runbook order above:
   so `tofu plan` is clean. The proxied/DNS-only status of each imported
   record must be audited against W4's intent (8 records DNS-only, beta
   proxied) - CF's zone-creation import may have guessed proxied status.
-- W9 (keep WP2 hygiene middleware) confirmed by Michael, conditional on:
+- W9 (keep WP2 hygiene middleware) confirmed, conditional on:
   the code stays tiny (it is - one layer stack in `build_router`), no
   maintenance burden, and no websocket interference (already proven by
   WP2's live >30s WS survival test).

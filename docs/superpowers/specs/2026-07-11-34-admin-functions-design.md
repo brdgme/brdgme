@@ -39,7 +39,7 @@ sealed-secret + reseal workflow stands for now.
   the deleted one, then delete the `games` row, all in one transaction.
   A confirm dialog guards the button. **No rating rewind** - ELO effects
   of a deleted finished game stand; if rating adjustment is ever needed
-  it will be a separate admin feature (Michael, 2026-07-11). After
+  it will be a separate admin feature (2026-07-11). After
   delete, navigate away and broadcast the usual game-update signal so
   open clients refresh.
 - **D4 - export is a JSON bundle served from an admin-guarded Axum

@@ -2,7 +2,7 @@
 
 **DECIDED 2026-07-15: use the Sentry browser JS SDKs plus hosted Sentry SaaS,
 as two documented exceptions to CODING.md's "No non-Rust dependencies"
-principle** - accepted by Michael.
+principle** - accepted.
 
 ## Trigger
 
@@ -59,3 +59,14 @@ a component required to run or play brdgme:
 - Event-loss visibility: the ad-blocker tunnel (same-origin proxy for
   Sentry requests blocked by client ad-blockers) is skipped for now: revisit
   if event loss becomes visible.
+
+## Dependency trim must not lose functionality
+
+**DECIDED 2026-07-26:** trimming Sentry to explicit features (backtrace,
+contexts, panic, tracing/tower as used, plus the native-tls transport) is
+approved, verified with `cargo tree` - on a hard no-functionality-loss
+constraint. The trim must be verified to PRESERVE CURRENT BEHAVIOUR, not
+merely to shrink the dependency tree: enumerate the Sentry features actually
+in use before removing any, and confirm the resulting build still reports what
+it reports today. The native-tls transport choice is deliberate and is
+preserved.

@@ -53,7 +53,7 @@ etc.) - readable in the browser console/panic-hook output without any
 tooling. Cost: raw 1,374,723 -> 5,802,543 bytes (+322%), gzip -9 527,854 ->
 777,972 bytes (**+250,118 bytes, +47.4% transfer**).
 
-**Michael's decision (binding):** keep the `-g` change for now; revisit the
+**Decision (binding):** keep the `-g` change for now; revisit the
 size cost after WS3 ships, since Sentry's server-side symbolication should
 make the name section redundant for *captured* errors (raw browser consoles
 without Sentry would still benefit from it, so this is a real trade-off to
@@ -63,7 +63,7 @@ revisit, not a foregone conclusion).
 
 Design fully approved (see spec, WS3 section) after a second research pass
 specifically to avoid bespoke tooling. Two Sentry projects already created
-by Michael with real DSNs (not secret - safe to reuse, see below).
+with real DSNs (not secret - safe to reuse, see below).
 `SENTRY_AUTH_TOKEN` already created as a **GitHub org secret scoped to
 `brdgme/brdgme` only** (confirmed correct - `brdgme-config` never needs it,
 it holds no build/CI pipeline).
@@ -80,7 +80,7 @@ Phase breakdown (per `docs/superpowers/plans/2026-07-15-ws3-sentry.md`):
 | E | k8s (`web-patch.yaml`), CODING.md exception, `docs/decisions/` entry | **Not started** |
 | F | Full build/inspection verification pass | **Not started** (blocked by B) |
 
-Phase D note: a "WS3 Phase D" worker was killed by Michael mid-session, but
+Phase D note: a "WS3 Phase D" worker was killed mid-session, but
 this happened *after* it had already delivered a genuine, verified
 completion report (clean cargo check/clippy/fmt, tests, and a real boot
 check both with and without `SENTRY_DSN_SERVER`) - direct inspection of
@@ -120,10 +120,10 @@ in the current working tree, `docker buildx bake web` fails outright, not
 just `web-debug` - confirmed via direct `git diff rust/Dockerfile`
 inspection (see below), the reorder has **not** been applied yet.
 
-**Michael's decision (binding): take the reorder path**, not "pause and
+**Decision (binding): take the reorder path**, not "pause and
 reassess." Rationale recorded: each tool is still invoked exactly as its
 vendor documents - only the *sequencing* changes, and only for this one
-build stage. It does not reintroduce the bespoke-tooling risk Michael
+build stage. It does not reintroduce the bespoke-tooling risk
 flagged earlier in this project (which is why WS3 uses Sentry's official
 DWARF/wasm-split pipeline instead of a DIY DWARF-to-sourcemap tool in the
 first place).
@@ -176,7 +176,7 @@ events, never read data) - safe in source/config/manifests.
 `brdgme/brdgme` (its value is not known to any Claude session, by design -
 CI reads it directly).
 
-## Decisions Michael has made this session (binding, do not re-litigate)
+## Decisions made this session (binding, do not re-litigate)
 
 - WS3 reorder path chosen for the DWARF blocker (see above), not
   pause/reassess.
@@ -194,12 +194,12 @@ CI reads it directly).
   correct.
 - **Model constraint (current, may not still apply in the new session -
   check `/model` state first):** fable quota was exhausted mid-session;
-  Michael switched everything - main orchestration and all sub-orchestrators
+  everything was switched - main orchestration and all sub-orchestrators
   - to Sonnet. Sub-agents (the actual workers) were always required to be
     Sonnet regardless. If fable quota has recovered by the new session,
-    confirm with Michael whether to revert the top-level orchestration
+    confirm whether to revert the top-level orchestration
     model.
-- **No commits or pushes without Michael's explicit, specific request** -
+- **No commits or pushes without an explicit, specific request** -
   this handover document is the sole exception, explicitly authorized this
   turn (see the commit made alongside this file).
 
@@ -242,7 +242,7 @@ started), following the exact pattern already used for
 
 ## Orchestration model used this session (for the new session to replicate or adjust)
 
-Michael directed: main session acts as a read-only orchestrator (filesystem
+Direction: main session acts as a read-only orchestrator (filesystem
 reads + plan files only, no shell/mutating tools), delegating each
 workstream to a single-use "sub-orchestrator" agent (same read-only
 constraint, plus permission to write plan files), which in turn spawns
@@ -284,6 +284,6 @@ not the generic label it tried to use.
 6. Update `docs/superpowers/plans/2026-07-15-ws3-sentry.md` to record the
    Phase B blocker and its resolution once fixed - it currently only
    reflects the pre-implementation design.
-7. Full report to Michael; batch commit/push review remains his to
+7. Full report; batch commit/push review remains the operator's to
    organize, as throughout this whole effort - do not commit anything
-   beyond what he explicitly requests.
+   beyond what is explicitly requested.

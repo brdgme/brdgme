@@ -80,6 +80,10 @@ playbook - read it before touching `rust/web/src/email/` or debugging a
 - Target single packages for all cargo work: `cargo build/check/clippy/test
   -p <crate>` (e.g. `-p web`). Never run workspace-wide builds or test runs;
   they link ~30 binaries and spike RAM and disk.
+- On any disk-pressure condition, stop and report to the user instead of
+  attempting ad-hoc cleanup (docker builder/image prunes, deleting images or
+  containers, clearing caches). Never run cleanup commands without asking
+  first.
 
 ## Working style
 

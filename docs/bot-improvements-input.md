@@ -20,7 +20,7 @@ Relates to backlog #47 (concede with bot replacement) and #43 (bot efficacy).
 - Edge cases around placings need design: what placing do eliminated humans get
   relative to each other and relative to surviving bots?
 
-## Bot-specific feedback (to be expanded by Michael)
+## Bot-specific feedback (to be expanded)
 
 - Bots are currently included in rating adjustments after games - must be 100% excluded.
 - (Add further bot feedback here)

@@ -104,7 +104,7 @@ protection exists. Today that is thin.
   later - it owns `cilium-config` and the flag cannot be set
   persistently by the cluster operator. The matching DO-LB annotation
   deploy was reverted the same hour (`brdgme` f31be4b, `brdgme-config`
-  8333793). Decision (Michael): drop the client-IP/PROXY-protocol work
+  8333793). Decision: drop the client-IP/PROXY-protocol work
   entirely - no DO support ticket, no retry. WP1-3 (app-level hardening)
   are promoted to pre-go-live priority as the resulting effective
   protection; WP4 (Cloudflare, which sees real client IPs at the edge)

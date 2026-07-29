@@ -167,8 +167,8 @@ prerequisites (operator-verified, see below).
       `do-loadbalancer-enable-proxy-protocol` annotation had briefly
       deployed via ArgoCD in the same window and was reverted the same
       hour (`brdgme` f31be4b, `brdgme-config` 8333793); prod is back to
-      the pre-flip state and `beta.brdg.me` stayed up throughout. Decision
-      (Michael, 2026-07-08): drop the client-IP/PROXY-protocol work
+       the pre-flip state and `beta.brdg.me` stayed up throughout. Decision
+       (2026-07-08): drop the client-IP/PROXY-protocol work
       entirely rather than open a DO support ticket or retry - real client
       IPs are simply not available to the app on this platform. Per-IP
       app-level limits are therefore a collective bucket (keyed on the LB

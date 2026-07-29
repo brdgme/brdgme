@@ -54,8 +54,8 @@ implementation plan) and immediately demonstrated the classic E2E failure
 modes: multi-context WebSocket choreography races, re-render timing races on
 the command input, browser-provisioning friction (Nix read-only
 `PLAYWRIGHT_BROWSERS_PATH` vs Playwright's downloaded chromium needing
-system libs), and 60-120s timeout-style debugging. Michael's judgement: he
-does not want slow, flaky, heavy-dependency tests in this project.
+system libs), and 60-120s timeout-style debugging. Judgement: slow, flaky,
+heavy-dependency tests are not wanted in this project.
 
 **Revised strategy - two layers replacing the one big E2E suite:**
 

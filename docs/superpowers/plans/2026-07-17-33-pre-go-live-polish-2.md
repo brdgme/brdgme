@@ -9,7 +9,7 @@
 - Entry "sub menu still missing" (Task 1): the 2026-07-11 `SubMenuOpen` wiring and icon button DID ship (`layout.rs` lines 33-46, 81-86), but the CSS rule that re-shows `.header-sub-menu` inside the 60em media block never existed - the base rule's own comment ("see the 60em media block below", `main.scss` line 143-145) promises an override that was never written. Never shipped, not a regression.
 - Entry "settings page scrolls the whole page" (Task 2): `.layout .layout-body .content` has `height: 100%` but no `overflow-y`, so tall content overflows the layout and the body scrolls.
 - Entry "stale username" (Task 6): `get_settings` returns `user.name` from `get_current_user`, which reads the `SessionUser` cached in the tower-sessions session at login time (`auth/session.rs`); `set_username` updates the DB but never the session, so every later `get_settings` serves the login-time name.
-- Entry "command input sometimes clears itself" (Task 9): `game_update` is a single global `RwSignal<Option<(Uuid, u64)>>` (`websocket_client.rs`). `GamePage`'s `seq_for_this_game` memo maps it to `Some(seq)` only when the update is for the open game, `None` otherwise - so an update for a DIFFERENT game flips the memo from `Some(n)` back to `None`, which re-keys `game_data`, refetches, and re-runs the `<Transition>` closure, remounting `GameCommandInput` and resetting its local `command` signal to `""`. Michael's gut feeling (sidebar-game updates) is exactly right, and this also explains "sometimes": it only strikes after the open game has had at least one update in the session. A legitimate update for the open game (e.g. an opponent move) also remounts the input and clears typed text.
+- Entry "command input sometimes clears itself" (Task 9): `game_update` is a single global `RwSignal<Option<(Uuid, u64)>>` (`websocket_client.rs`). `GamePage`'s `seq_for_this_game` memo maps it to `Some(seq)` only when the update is for the open game, `None` otherwise - so an update for a DIFFERENT game flips the memo from `Some(n)` back to `None`, which re-keys `game_data`, refetches, and re-runs the `<Transition>` closure, remounting `GameCommandInput` and resetting its local `command` signal to `""`. The gut feeling (sidebar-game updates) is exactly right, and this also explains "sometimes": it only strikes after the open game has had at least one update in the session. A legitimate update for the open game (e.g. an opponent move) also remounts the input and clears typed text.
 - Entry "ELO rating change not shown" (Task 7): `game_players.rating_change` already exists in the schema (`001_initial_schema.sql` line 200), is already selected by `find_game_extended` (`db.rs` line 383), and is already on the `GamePlayer` model (`models/game.rs` line 67) - and the legacy presentation CSS (`.rating-change`/`-up`/`-down`/`-none`, `main.scss` lines 428-442) was already ported. Only the `PlayerViewData` plumbing and the Leptos markup are missing. Legacy presentation (recovered from git history, `web/src/components/game/show.tsx` at `ba975b5^`): `Rating: <rating> (<icon><abs(change)>)` where icon is U+2197 (up, green), U+2198 (down, red), or `-` (zero, blue), rendered only when `rating_change` is non-null.
 
 **Tech Stack:** Rust 2024 edition, Leptos 0.8 (SSR + hydrate) + leptos_router, Axum, sqlx/Postgres, SCSS compiled by cargo-leptos.
@@ -21,7 +21,7 @@
 - Light local verification per AGENTS.md: `cargo fmt --all` plus `cargo check -p web --features ssr --no-default-features` per task; push and let CI run the full test/clippy suites. Bare `cargo check -p web` (no feature flags) is known-broken - never use it.
 - DB-backed tests fail in a plain local run by design (backlog #40) - do not chase or report those failures. Only run the targeted pure-function tests named in the tasks.
 - SCSS is compiled by cargo-leptos at build time - `cargo check` does not validate it. SCSS-only changes get an eyeball review of the diff locally; real validation is the CI build + beta deploy.
-- Never start `tilt`/kind on a machine with less than 32GB RAM. Manual verification steps marked "(beta)" are for Michael on the deployed beta after CI/ArgoCD, not local blockers.
+- Never start `tilt`/kind on a machine with less than 32GB RAM. Manual verification steps marked "(beta)" are for the operator on the deployed beta after CI/ArgoCD, not local blockers.
 - Do not install host packages; all tooling comes from the devenv/nix shell.
 - Commits go directly to master, message style `web #33: <what>` (see `git log`), ending with the trailer `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 - User-facing branding is always "brdg.me", never "brdgme".
@@ -906,7 +906,7 @@ EOF
 - Produces: `fn track_game_seq(prev: Option<(Option<Uuid>, Option<u64>)>, current_id: Option<Uuid>, update: Option<(Uuid, u64)>) -> (Option<Uuid>, Option<u64>)` (private, pure, unit-tested) in `app.rs`.
 
 **Root cause (two layers, both confirmed in code - see Architecture):**
-1. `seq_for_this_game` flips `Some(n) -> None` when a WS update arrives for a *different* game, re-keying `game_data` and remounting the whole game view (this is the "sidebar game update clears my input" case Michael observed).
+1. `seq_for_this_game` flips `Some(n) -> None` when a WS update arrives for a *different* game, re-keying `game_data` and remounting the whole game view (this is the "sidebar game update clears my input" case observed).
 2. Even a legitimate update for the open game remounts `GameCommandInput` (it is created inside the `<Transition>` closure), resetting its local `command` signal.
 
 Fix both: (1) make the memo retain the last seq seen for the open game instead of collapsing to `None`, and (2) hoist the command text into `GamePage` so remounts re-read the typed value (the same hoist-above-the-closure pattern already used for the `logs` resource).
@@ -1107,5 +1107,5 @@ EOF
 
 - Spec coverage: all nine 2026-07-17 entries have a task (entry 1 -> Task 2, entry 2 -> Task 3, entry 3 -> Task 4, entry 4 -> Task 5, entry 5 -> Task 6, entry 6 -> Task 7, entry 7 -> Task 9, entry 8 -> Task 1, entry 9 -> Task 8).
 - Task 9 deliberately lands after Task 8: both edit `GameCommandInput`, and Task 9's `Ok(None)` clear-effect assumption comes from Task 8.
-- The 4xx-vs-Ok(Some) decision in Task 8 is a documented deviation from the entry's "ideally" wording, matching the repo's `set_username` pattern; flag to Michael if a literal 4xx status is required.
-- Zero rating change renders as `(-0)` - byte-for-byte legacy parity (`Math.abs(0)` after a `-` icon). Deliberate; change only if Michael objects.
+- The 4xx-vs-Ok(Some) decision in Task 8 is a documented deviation from the entry's "ideally" wording, matching the repo's `set_username` pattern; flag if a literal 4xx status is required.
+- Zero rating change renders as `(-0)` - byte-for-byte legacy parity (`Math.abs(0)` after a `-` icon). Deliberate; change only if objected.

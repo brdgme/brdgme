@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - RAM-starved dev machine: one shell at a time; always `cargo <cmd> -p operator`, never workspace-wide builds. Never start tilt or kind.
-- Agents must NOT: commit/push brdgme-config, mutate the cluster, run SQL writes, or poll CI/ArgoCD. Michael does those; give him copy-pasteable commands.
+- Agents must NOT: commit/push brdgme-config, mutate the cluster, run SQL writes, or poll CI/ArgoCD. The operator does those; give them copy-pasteable commands.
 - brdgme repo commits/pushes and read-only kubectl (`--kubeconfig ~/.kube/brdgme-kubeconfig.yaml`) are allowed.
-- ROLLOUT ORDERING: Task 2 must not be pushed until Michael confirms the Task 1 operator image is live in prod (old binary would revert the 19 interceptor rows to direct URLs on the generation bump).
+- ROLLOUT ORDERING: Task 2 must not be pushed until the operator confirms the Task 1 operator image is live in prod (old binary would revert the 19 interceptor rows to direct URLs on the generation bump).
 
 ---
 
@@ -108,9 +108,9 @@ This is a rust/ change, so CI builds and publishes `sha-<short>` images.
 
 ---
 
-### GATE after Task 1 (Michael, manual)
+### GATE after Task 1 (manual)
 
-Report the new commit sha to Michael with these commands; wait for his confirmation that the operator is live before starting Task 2.
+Report the new commit sha to the operator with these commands; wait for confirmation that the operator is live before starting Task 2.
 
 ```bash
 # after CI is green for the Task 1 commit:
@@ -204,7 +204,7 @@ k8s-only commit: CI will not build images (expected).
 
 ---
 
-### GATE after Task 2 (Michael, manual)
+### GATE after Task 2 (manual)
 
 ```bash
 cd ~/Development/brdgme-config
@@ -247,7 +247,7 @@ Expected: `Upserting game version` lines with the interceptor URI, no errors.
 - [x] **Step 4: Cold-start spot check on a previously always-on version**
 
 Run: `kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -n brdgme nats-0 -- wget -S -O /dev/null --header 'Host: acquire-1.games.internal' http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/ 2>&1 | tail -5; kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get deploy acquire-1 -n brdgme`
-Expected: HTTP 405 (GET on JSON-RPC endpoint proves wake); deployment 1/1. (Only meaningful once acquire-1 has scaled to 0 - 1800s idle; if still 1/1 from rollout, note it and let Michael confirm scale-down later.)
+Expected: HTTP 405 (GET on JSON-RPC endpoint proves wake); deployment 1/1. (Only meaningful once acquire-1 has scaled to 0 - 1800s idle; if still 1/1 from rollout, note it and let the operator confirm scale-down later.)
 
 - [x] **Step 5: Record evidence and commit**
 
@@ -337,4 +337,4 @@ NAME        READY   UP-TO-DATE   AVAILABLE   AGE
 acquire-1   1/1     1            1           10d
 ```
 
-acquire-1 is still 1/1, so the wget cold-start probe would not be meaningful (nothing to wake). Scale-down pending 1800s idle - Michael to confirm later.
+acquire-1 is still 1/1, so the wget cold-start probe would not be meaningful (nothing to wake). Scale-down pending 1800s idle - to be confirmed later.

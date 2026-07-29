@@ -169,10 +169,10 @@ superpowers spec/plan and fixed as one batch when scheduled.
   and outline is too light to see against browser tab backgrounds.
 - **Expected:** A darker grey with enough contrast to read clearly as a
   dice in the tab bar.
-- **Note:** Michael has already edited `rust/web/public/favicon.svg` in his
+- **Note:** `rust/web/public/favicon.svg` has already been edited in the
   working tree to use `#606060` for the grey. The work here is to land
   that edit and verify visibility after the next deploy.
-- **Resolved:** Confirmed fixed by Michael 2026-07-17.
+- **Resolved:** Confirmed fixed 2026-07-17.
 
 ### 2026-07-11: Game log sections still flash on command submit
 
@@ -184,7 +184,7 @@ superpowers spec/plan and fixed as one batch when scheduled.
 - **Expected:** Same fix class as the board: those log resources/
   components keep showing stale data while refetching instead of
   remounting or dropping to a loading state.
-- **Resolved:** Confirmed fixed by Michael 2026-07-17.
+- **Resolved:** Confirmed fixed 2026-07-17.
 
 ### 2026-07-11: No loading indicator on initial game page load
 
@@ -375,7 +375,7 @@ superpowers spec/plan and fixed as one batch when scheduled.
 ### 2026-07-17: Command input sometimes clears itself while typing
 
 - **Observed:** While typing into the game command input, the input
-  sometimes clears itself spontaneously. Gut feeling (Michael): it
+  sometimes clears itself spontaneously. Gut feeling: it
   happens when an update arrives for the currently open game or for one
   of the other active games in the sidebar.
 - **Expected:** Typed input is never lost to background updates.
@@ -460,7 +460,7 @@ superpowers spec/plan and fixed as one batch when scheduled.
   swaps in (per the earlier flash-on-update fixes).
 - **Note:** Consolidates/supersedes the 2026-07-11 "No loading indicator
   on initial game page load" entry (reusable spinner component,
-  login-page spinner) - confirmed the same requirement by Michael
+  login-page spinner) - confirmed the same requirement
   2026-07-17: a loading icon when routing to a game the first time, not
   on rerenders after websocket updates or commands. The
   2026-07-17 command-input fix keys `game_data` on

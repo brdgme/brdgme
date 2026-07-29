@@ -68,7 +68,7 @@ validation gate passes).
       flag cannot be set persistently by the cluster operator. The
       matching DO-LB annotation deploy was reverted the same hour
       (`brdgme` f31be4b, `brdgme-config` 8333793); prod is back to the
-      pre-flip state. Decision (Michael): drop the client-IP/PROXY-protocol
+       pre-flip state. Decision: drop the client-IP/PROXY-protocol
       work entirely - no retry, no DO support ticket. See
       docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md
       (prod-prerequisites section) for full detail, and

@@ -28,7 +28,7 @@ algorithm never ran on real data.
   exposed, so the display name is the public identifier users will
   search and friend each other by (#30). Rejected for now: Discord-style
   `nickname#1234` discriminators - a possible later pivot if uniqueness
-  contention ever hurts, not wanted yet (Michael, 2026-07-11).
+  contention ever hurts, not wanted yet (2026-07-11).
 - **D3 - default names are generated petnames, not email localparts.**
   Signup stops deriving the name from the email entirely. Use the
   `petname` crate to generate names like `big-scary-walrus`,

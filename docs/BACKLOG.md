@@ -68,7 +68,7 @@ have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 | 27 | rust/web Simplification (remainder) | WP1/2/3b/4/5 done; remaining: (a) WP3a delete WebSocketTrigger - dual-signal duplication at every update site, needs re-scoping since trigger now carries proposal/friend updates and public index keys on it; (b) harden 2 flaky NATS-timing tests still `#[ignore]`d (`game/mod.rs:1078`, `websocket.rs:191`) | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
 | 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
-| 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - downgraded 2026-07-17 (Michael: games seem okay, does not block go-live) | - | - |
+| 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - downgraded 2026-07-17 (operator: games seem okay, does not block go-live) | - | - |
 | 38 | "New version released" notification (detect when a new version has gone live and show a message to users with the site open so they know to refresh; cache busting itself handled by Cloudflare) | Pending - unscheduled; scope narrowed 2026-07-24 to detection + user-facing message only; must include viability/suitability review first to confirm implementation is not prohibitively complex | - | - |
 | 40 | DB tests run (and fail) by default (every local/agent test run hits DB test failures, repeatedly surprising agents; investigate whether DB-dependent tests should be opt-in - e.g. feature/env gated - instead of opt-out, or made to pass by default) | Pending - unscheduled; added 2026-07-15. Addendum 2026-07-16 resolved: the `cargo sqlx prepare` failure was the `User` struct lacking `theme`/`is_admin` (migration 007/008) - fixed by 212f1db, which added both fields and regenerated `.sqlx`. The related `invite_policy` concern is also resolved: `User` queries now list columns explicitly instead of `SELECT *`/`RETURNING *`, so `invite_policy` deliberately staying off the `User` struct (see `get_invite_policy` in `rust/web/src/db.rs`) is safe and won't silently break `cargo sqlx prepare` again. | - | - |
 | 46 | Turn timer to prevent dead games (idea sketch: some timer before the easy bot makes a play on the player's behalf? 3 strikes before forced concede?) | Captured 2026-07-17 - post-go-live, needs brainstorming; interacts with #47 bot replacement and #43 bot configs | - | - |
@@ -77,15 +77,18 @@ have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 | 51 | Bot dynamic sqlx queries mask schema drift (`rust/bot/src/main.rs` + `config.rs`: `row.try_get(..).unwrap_or(..)` turns query bugs into silent wrong behaviour - e.g. broken `is_turn` column makes bot silently never play; switch to checked `sqlx::query!` macros or replace `unwrap_or` defaults with `.context(..)?`) | Captured 2026-07-24 (split from Bug fixes plan); unscheduled | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
 | 50 | Dev environment reassessment - review the whole dev env with a view to making it viable to run locally again; the kind/tilt kubernetes setup is too heavy now (host crashes, 32GB RAM minimum per AGENTS.md); consider docker compose or allowing partial deployments | Captured 2026-07-19, prioritised 2026-07-24 | - | - |
 | 52 | Managed Postgres migration - move prod Postgres from in-cluster CloudNativePG to DigitalOcean Managed Database (~$15.15/mo, 1GB/1vCPU/10GB, syd1, private VPC); provision via OpenTofu, load prod data directly into managed instance, then remove CNPG resources (frees ~600Mi cluster memory); dev unaffected (keeps local Postgres) | Approved 2026-07-21, prioritised 2026-07-24; supersedes archived #19 | [spec](superpowers/specs/2026-07-21-managed-postgres-design.md) | [plan](superpowers/plans/2026-07-21-managed-postgres.md) |
-| 53 | Game rules review (parity park) | **PARKED - awaiting Michael's own review of game rules.** The 2026-07-23 Rust review found ~30 port-parity findings (code vs official rules vs RULES.md). D-35 and D-26..D-32, D-34 in [`docs/reviews/2026-07-23-rust-review/planning/DECISIONS.md`](reviews/2026-07-23-rust-review/planning/DECISIONS.md) are PARKED-PENDING-USER-RULES-REVIEW: some RULES.md content was AI-generated and may be wrong, and edition/variation choices are Michael's. **No gameplay change without per-game sign-off.** Packages WP-11, WP-12, WP-16, WP-20, WP-26, WP-30 are BLOCKED-ON-USER-RULES-REVIEW - implementing agents must not pick them up. Three cases (a F1, b F7, e F30) are flagged for immediate fix and are outside the park; b F4 was re-parked and d F37 was rejected as not-a-bug. Liveness fixes WP-15/WP-25 are NOT parked. | - | - |
-| 54 | Maximum-performance fuzzer (three independent modes) | Captured 2026-07-26 from the 2026-07-23 Rust review (D-51); scheduled 2026-07-26 into the Then tier after #31 (D-53), nothing measured. Rationale (Michael, D-43): "the value of the fuzzer is basically directly correlated by how fast it can run and how many games it can pump through." Three modes on two **independent** axes - renders and serialisation: (1) **game logic only** (default, maximum speed) - game kept live in memory, no serialisation, no rendering, drives `Gamer` directly; (2) **opt-in renders** - pub render plus all private renders after every successful command (stricter than the current loop); (3) **opt-in serialisation** - the "end to end fuzz" exercising the full `api::Request`/`api::Response` path as today. Key findings: the in-process path is **not** serialisation-free - every move already does a full state decode + encode, a pub render, every player's state JSON and N+1 markup renders, of which the loop uses only the acting player's `command_spec` and the opaque state string; `fuzz()` is **already** parallel across `num_cpus::get()` threads, so parallelism is not an available win; two free wins sit in `Fuzzer::command` - a whole-`PlayerRender` clone taken for one field, and a full state-string clone, both per move. Tradeoff: the current loop catches render-panics and serialise-panics for free, and mode 1 gives that up - which is exactly why modes 2 and 3 exist. **Nothing has been measured** (no cargo available in the planning session); the settling commands are in section 6 of the full analysis: [`docs/reviews/2026-07-23-rust-review/planning/fuzz-throughput-evaluation.md`](reviews/2026-07-23-rust-review/planning/fuzz-throughput-evaluation.md) | - | - |
+| 53 | Game rules review (parity park) | **PARKED - awaiting a product decision (per-game rules review).** The 2026-07-23 Rust review found ~30 port-parity findings (code vs official rules vs RULES.md). The global port-parity policy (D-35: official rules authoritative, no gameplay change without per-game sign-off, parked) now lives in [`docs/decisions/PORT_PARITY.md`](decisions/PORT_PARITY.md). The detailed per-rule parity list (D-26..D-32, D-34) was NOT migrated and is retained only in git history under the review's commit range (`f0589894c1937c2c1134cf99523f1fd4e9a8f944..868094a6c8177858dededdd5321ce0c03882ada5`, file `docs/reviews/2026-07-23-rust-review/planning/DECISIONS.md`). All of these are PARKED-PENDING-USER-RULES-REVIEW: some RULES.md content was AI-generated and may be wrong, and edition/variation choices are a product decision. **No gameplay change without per-game sign-off.** Packages WP-11, WP-12, WP-16, WP-20, WP-26, WP-30 are BLOCKED-ON-USER-RULES-REVIEW - implementing agents must not pick them up. Rules-content work WP-74 (red7-1 empty-hand elimination sentence) and WP-75 (RULES_AUTHORING strategy-docs rewrite) is also queued behind this park. Three cases (a F1, b F7, e F30) are flagged for immediate fix and are outside the park; b F4 was re-parked and d F37 was rejected as not-a-bug. Liveness fixes WP-15/WP-25 are NOT parked. | - | - |
+| 54 | Maximum-performance fuzzer (three independent modes) | Captured 2026-07-26 from the 2026-07-23 Rust review (D-51); scheduled 2026-07-26 into the Then tier after #31 (D-53), nothing measured. Rationale (D-43): "the value of the fuzzer is basically directly correlated by how fast it can run and how many games it can pump through." Three modes on two **independent** axes - renders and serialisation: (1) **game logic only** (default, maximum speed) - game kept live in memory, no serialisation, no rendering, drives `Gamer` directly; (2) **opt-in renders** - pub render plus all private renders after every successful command (stricter than the current loop); (3) **opt-in serialisation** - the "end to end fuzz" exercising the full `api::Request`/`api::Response` path as today. Key findings: the in-process path is **not** serialisation-free - every move already does a full state decode + encode, a pub render, every player's state JSON and N+1 markup renders, of which the loop uses only the acting player's `command_spec` and the opaque state string; `fuzz()` is **already** parallel across `num_cpus::get()` threads, so parallelism is not an available win; two free wins sit in `Fuzzer::command` - a whole-`PlayerRender` clone taken for one field, and a full state-string clone, both per move. Tradeoff: the current loop catches render-panics and serialise-panics for free, and mode 1 gives that up - which is exactly why modes 2 and 3 exist. **Nothing has been measured** (no cargo available in the planning session); the settling commands are in section 6 of the full analysis: [`docs/fuzz-throughput-evaluation.md`](fuzz-throughput-evaluation.md) | - | - |
 | 55 | Comprehensive dependency and toolchain currency pass (first run of the recurring process) | Captured 2026-07-29; unscheduled. First execution of the process defined in [`docs/DEPENDENCY-CURRENCY.md`](DEPENDENCY-CURRENCY.md): audit rustc pin (`rust/rust-toolchain.toml`) and tooling vs latest stable, `cargo outdated -R --depth 2` for direct+transitive deps, throwaway-branch breakage assessment (bump everything including majors), then prioritised upgrade commits (rustc pin first, advisories, framework majors, compatible sweep, tail majors) with a duplicate-cluster re-audit at the end. Resolves the parked tower-http/gloo-timers duplication question (2026-07-23 review dp F9) by holding latest and letting the old-version consumers catch up. | - | - |
+| 56 | Email escape-hatch verb set (WP-85) | **DEFERRED - awaiting a product decision.** Carved out of the 2026-07-23 Rust review's WP-59 (D-54) and deferred (D-55): D-15 settled the inbound-email dispatch design (game command parser runs first, platform commands are the fallback) but carved out a small hard-reserved set of escape-hatch verbs (`help` and equivalents) that always wins even on the game path; which verbs belong to that set is deliberately undecided. This is a different block from the rules-review park (#53) and must not be folded into it. Accepted cost of the deferral: the acquire-1 / starship-catan-1 top-level `end` move stays unplayable by email until this lands. Surfaced during the 2026-07-23 Rust review. | - | - |
+| 57 | unsafe-libyaml still in Cargo.lock (dp-F14 backend half) | Open tech debt from the 2026-07-23 Rust review. The front half of dp-F14 landed (WP-70 migrated bot + game_client from the archived `serde_yaml` to `serde_yaml_ng`, output byte-identical), but the backend half is unresolved: `unsafe-libyaml` 0.2.11 (the C libyaml binding) remains in `Cargo.lock` via `serde_yaml_ng`. Removing it means severing the libyaml-backed parser (e.g. a pure-Rust YAML path). Surfaced during the 2026-07-23 Rust review. | - | - |
+| 58 | Non-default build targets are not CI-gated | Open tech debt surfaced during the 2026-07-23 Rust review remediation. Two pre-existing gaps: (a) `cargo test -p web` without the `ssr` feature has never compiled (~323 errors; the integration tests require `ssr`), so the non-ssr web target is untested and ungated; (b) wasm-target clippy with `-D warnings` fails on four pre-existing lints (`unused_unit`, `collapsible_if`) and is never CI-gated (wasm builds via cargo-leptos while clippy runs ssr-only). Either gate these targets in CI or fix-and-gate them. Surfaced during the 2026-07-23 Rust review. | - | - |
 
 ---
 
 ## Human tasks (operator-only, in rough execution order)
 
-Everything below needs Michael (accounts, credentials, production access);
+Everything below needs the operator (accounts, credentials, production access);
 tasks are also marked *(human)* inline in their phase files. Added
 2026-07-05.
 
@@ -190,7 +193,7 @@ cannot be set persistently by the cluster operator. The matching DO-LB
 annotation commit briefly deployed via ArgoCD and was reverted the same
 hour (`brdgme` f31be4b, `brdgme-config` 8333793); prod is back to the
 pre-flip state and `beta.brdg.me` stayed up throughout. Decision
-(Michael): drop the client-IP/PROXY-protocol work entirely - no DO
+(operator decision): drop the client-IP/PROXY-protocol work entirely - no DO
 support ticket, no retry planned; real client IPs are simply not
 available to the app on this platform, so per-IP app-level limits stay
 one collective bucket (keyed on the LB SNAT address) and XFF-spoofable
@@ -210,7 +213,7 @@ sampling, /metrics, probes incl. operator /healthz) implemented in-tree;
 WASM source maps descoped (toolchain blocker); contact point
 (beefsack@gmail.com) + external uptime monitor done. Moved to the
 archive as fully done; remaining rollout (deploy, quota window,
-alert-rule creation) removed from the backlog - Michael tracks it
+alert-rule creation) removed from the backlog - the operator tracks it
 separately. #20 (external-dns, superseded 2026-07-05) also moved to the
 archive - no remaining work was ever tracked against it. Dropped the
 now-stale '#18' line from Human tasks, same as the '#21' line was
@@ -237,7 +240,7 @@ the shared SNAT bucket (login burst 30/+1 per 2s, confirm burst 60/+1 per
 accepted and documented (SQL comment plus a #16 beta-checklist line); a
 reviewer-recommended accepted-race comment was also added in
 `confirm_login_inner`. Fix commit 5a7bb85; re-review approved. Separately,
-Michael initially considered and rejected pulling WP4 (Cloudflare) ahead
+The operator initially considered and rejected pulling WP4 (Cloudflare) ahead
 of go-live: it would stay post-cutover + 1-week gate per D1, since
 bringing it forward would entangle nameserver migration with the cutover
 itself, and the app-level DB caps are mandatory regardless (Cloudflare
@@ -258,7 +261,7 @@ cutover.
 2026-07-10 (later still): #28 WP4 redesigned for pre-go-live and specced
 (`docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md`,
 plan `docs/superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md`).
-Single-stage migration: Michael created the CF zone (free plan, existing
+Single-stage migration: the operator created the CF zone (free plan, existing
 account), CF copied the DO records at zone creation, and the registrar
 nameservers were cut over to Cloudflare the same day - so the Tofu work is
 adoption/import of the live zone, not creation, and beta.brdg.me is
@@ -268,7 +271,7 @@ rule is proven on beta, the in-app per-IP rate limiting is DELETED
 re-tightened via a `CF-Connecting-IP` carve-out - WP1's DB-backed caps
 remain the backstop for direct-to-LB traffic, and WP2's hygiene middleware
 stays (W9). The old plan's WP4 section is superseded in place. Separately,
-#32 (Alloy OTLP export) demoted to post-go-live (Michael: the Grafana
+#32 (Alloy OTLP export) demoted to post-go-live (operator: the Grafana
 Cloud quota must reset anyway - not a go-live blocker); remaining
 pre-go-live order is now #28 WP4 -> #16 beta -> cutover.
 
@@ -308,7 +311,7 @@ commit 8120ee3) already removed the cost of Rust builds for non-Rust
 changes, so this caching investigation only affects CI runs that
 genuinely touch Rust.
 
-2026-07-11 (beta testing): #37 added - Michael reports some of the games
+2026-07-11 (beta testing): #37 added - the operator reports some of the games
 ported to Rust appear to have problems, from a beta testing pass on the
 deployed #33 batch (deploy sha-48686c8). Item is a checklist to do a full
 operator gameplay pass over every already-converted Rust game. Authoritative
@@ -323,7 +326,7 @@ editions (no Go predecessor), not Go-replacement `-2` conversions - both
 still count as Rust games in scope for this testing pass. Same testing
 pass also produced four new jank entries appended to
 docs/pre-go-live-polish.md: favicon grey too light (`#606060` fix already
-in Michael's working tree), game log sections (recent-logs panel + sidebar)
+in the operator's working tree), game log sections (recent-logs panel + sidebar)
 still flashing on command submit, a reusable centered loading spinner
 needed for initial game page load, and disabling the command input/send
 button while a command is submitting. These are recorded for a future #33
@@ -337,7 +340,7 @@ renderer with per-theme CSS custom properties, brdgme light/dark +
 Dracula themes with a contrast gate test, system-theme default with
 instant client-side switching, migrations 006 (player colour palette)
 and 007 (user theme) written but not yet run. Decisions D1-D15 in the
-plan need Michael's review. **Web chrome theming is the immediate next
+plan need operator review. **Web chrome theming is the immediate next
 work item** (operator decision 2026-07-13: critical for wrapping up
 #26) - `main.scss` still hardcodes ~20 chrome colours. Also found:
 lords-of-vegas-1 `shuffled_deck` iterates HashMap keys pre-shuffle, so
@@ -346,7 +349,7 @@ unscheduled).
 
 2026-07-13 (later): web chrome theming shipped (f185ae5, plan
 `2026-07-13-26-web-chrome-theming.md`), closing D11. Follow-up noted
-(Michael, not for this session): `THEME_BOOT_SCRIPT` - the inline
+(operator, not for this session): `THEME_BOOT_SCRIPT` - the inline
 minified pre-paint cookie-reading script in `rust/web/src/app.rs` -
 reads like a malicious injection at first glance even though review
 shows it is fine. Find a cleaner approach (e.g. readable source
@@ -368,7 +371,7 @@ version released, please reload" message to the user; the underlying
 cache-busting story (hashed asset filenames / cache headers) should be
 investigated as part of the same item.
 
-2026-07-17: post-go-live one-liner captures from Michael, recorded for
+2026-07-17: post-go-live one-liner captures from the operator, recorded for
 later brainstorming (not designed or scheduled): #44 "New game" screen
 usability, #45 rich index page for new visitors, #46 turn timer against
 dead games, #47 concede in >2-player games with bot replacement, #48
@@ -380,7 +383,7 @@ settings, not just plays), game history and stats = #29, add-friend =
 
 2026-07-17: #43 bot efficacy added (post-go-live, slotted after #25 rules
 rendering since the per-game doc split must coordinate with #25's
-single-source RULES.md design). Motivation (Michael): bots have trouble
+single-source RULES.md design). Motivation (operator): bots have trouble
 parsing the full game render, and it is a large noisy prompt payload -
 lean on player and public data instead for more signal and less noise;
 reduced AI API spend is a welcome side benefit but bot quality is the
@@ -400,7 +403,7 @@ balancing, enable/disable). This unparks the bot model configuration
 topic parked 2026-07-11.
 
 2026-07-17: second #33 polish batch recorded as the immediate next tasks -
-9 entries appended to docs/pre-go-live-polish.md from Michael's beta pass
+9 entries appended to docs/pre-go-live-polish.md from the operator's beta pass
 over the new settings page and gameplay: settings page should scroll only
 the main content (sidebar static, app-shell pattern); non-game content
 pages widened to ~1220px (Wikipedia-style, fits 3 theme columns); selected
@@ -451,7 +454,7 @@ background game updates (root cause was a global `game_update` signal
 re-keying the `<Transition>` and remounting `GameCommandInput` on
 unrelated-game updates - fixed by hoisting command text above the
 remounting closure). Only Task 9 Step 6 (manual reproduction/verification
-on the deployed beta) is left, deliberately, for Michael.
+on the deployed beta) is left, deliberately, for the operator.
 
 2026-07-17 (later still): third #33 polish batch implemented end-to-end,
 all 3 tasks in
@@ -467,7 +470,7 @@ autocomplete suggestion click handler now refocuses the command input
 after inserting the word. Manual browser verification of all three,
 including the initial-load/navigation spinner behaviour, the
 disabled-while-submitting state, and the refocus-on-click behaviour, is
-left for Michael.
+left for the operator.
 
 2026-07-20: #43 bot efficacy implemented end-to-end. Migration 013 adds
 bots/llm_providers/bot_providers tables (three-layer enable gate,

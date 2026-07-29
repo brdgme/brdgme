@@ -94,6 +94,9 @@ sequenceDiagram
     Monolith-->>Browser: push via WebSocket
 ```
 
+Realtime event delivery uses the SSE topology documented in
+`docs/decisions/SSE_TOPOLOGY.md`.
+
 ## Infrastructure
 
 See `docs/VISION.md` for infrastructure choices and rationale.
@@ -142,7 +145,17 @@ a request without the Host header gets a 404 from the interceptor.
 }
 ```
 
+**State redaction policy:** `pub_state` carries only public counts and
+aggregates (e.g. cup contents as counts, bids only after reveal). Per-player
+secrets live in `player_state`, visible only to the entitled viewer. Secret
+data must never appear in `pub_state`.
+
 ### Methods
+
+**Deserialized-state trust:** stored or forwarded game state is never trusted
+blindly. The player index is bounds-checked at the requester boundary before
+dispatch, and each game exposes a `validate()` hook (`Gamer::validate`) run on
+loaded state. Per-crate unchecked-index fixes are defence in depth.
 
 #### New Game
 
@@ -264,7 +277,9 @@ Key tables in PostgreSQL:
 - **`game_logs`**: Immutable history of all actions and messages within a game.
 - **`bots`**: Bot configurations (name, model, provider, thinking budget,
   temperature, docs flags). Three-layer enable gate (bot + provider +
-  binding). Seeded with easy/medium/hard.
+  binding). Seeded with easy/medium/hard. Bots are referenced by name with
+  validate-on-write / tolerate-on-read semantics; see
+  `docs/decisions/BOT_REFERENCES_BY_NAME.md`.
 - **`llm_providers`**: LLM provider credentials (name, base_url,
   api_key_encrypted via AES-256-GCM, model). Enable flag.
 - **`bot_providers`**: Join table binding bots to providers with priority

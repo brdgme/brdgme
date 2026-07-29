@@ -137,7 +137,7 @@ the key); WP1 gate.
 
 > **Superseded 2026-07-10** - WP4 was resequenced from post-cutover to
 > pre-go-live and redesigned the same day (single-stage migration; the CF
-> zone is already live and the registrar NS already cut over by Michael,
+> zone is already live and the registrar NS already cut over,
 > so the Tofu work is adoption/import, not creation). The current design
 > is
 > `docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md`

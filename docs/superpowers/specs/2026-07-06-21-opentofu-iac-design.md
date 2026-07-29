@@ -21,7 +21,7 @@ load balancer is NOT managed here - DOKS owns it.
 
 **Sequencing (revised 2026-07-04):** entirely human-operated (account
 credentials), and now scheduled **first** among the pre-go-live infra
-phases - Michael wants the account infrastructure described in tofu from
+phases - the account infrastructure should be described in tofu from
 the start. It encodes the Phase 14 prod prerequisite ("cluster >= 1.33,
 VPC-native"), owns the DNS zone the 22a Resend records (SPF/DKIM/DMARC)
 land in, and creates the Spaces buckets Phase 19 needs.

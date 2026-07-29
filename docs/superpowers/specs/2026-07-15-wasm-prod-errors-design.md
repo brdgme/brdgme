@@ -95,12 +95,12 @@ Verification (must-pass before done):
 - Confirm shipped `pkg/web.wasm` contains a name section and browser traces
   show Rust function names (build web image locally, run, force a panic or
   inspect DevTools).
-- Measure and report the wasm size delta (name section cost) so Michael can
-  accept or reject the trade-off with numbers.
+- Measure and report the wasm size delta (name section cost) so the
+  trade-off can be accepted or rejected with numbers.
 
 ### WS3: Sentry error tracking (design approved 2026-07-15)
 
-Decisions made by Michael 2026-07-15:
+Decisions made 2026-07-15:
 - Policy: documented exception in CODING.md permitting the Sentry browser
   SDKs as the sole non-Rust runtime dependency (no Rust alternative exists
   for browser wasm-address capture); documented exception for hosted Sentry
@@ -142,7 +142,7 @@ Design (research-verified 2026-07-15):
   only, protects 5k/month quota; 0 is not equivalent to omitting);
   beforeSend scrub of cookies/auth headers. Ad-blocker tunnel SKIPPED
   (needs same-origin proxy route; revisit if event loss is visible).
-- Account (Michael, in progress): org + two projects (browser JS
+- Account (in progress): org + two projects (browser JS
   `web-frontend`-style, Rust `web-server`-style), two DSNs, org auth token
   with project write/release scopes as a GitHub Actions secret. Exact
   minimal token scopes to be confirmed during implementation.

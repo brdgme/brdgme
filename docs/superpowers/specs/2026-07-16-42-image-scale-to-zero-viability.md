@@ -1,6 +1,6 @@
 # Backlog #42: Image Size Reduction and Scale-to-Zero Viability
 
-One-line summary: from-scratch/distroless game images are viable now (-64% size, zero build changes); scale-to-zero for non-latest game versions will use the KEDA HTTP add-on (chosen 2026-07-16 by Michael - see verdict), with core-KEDA metrics-api as second choice and a bespoke operator shim as third; a NATS-event-driven design does not fit brdgme's actual RPC pattern.
+One-line summary: from-scratch/distroless game images are viable now (-64% size, zero build changes); scale-to-zero for non-latest game versions will use the KEDA HTTP add-on (chosen 2026-07-16 - see verdict), with core-KEDA metrics-api as second choice and a bespoke operator shim as third; a NATS-event-driven design does not fit brdgme's actual RPC pattern.
 
 Date: 2026-07-16
 Status: research/viability only, no changes made.
@@ -93,7 +93,7 @@ On connection-refused/timeout, patch Deployment 0->1, retry HTTP with backoff un
 Keep the *latest* version per game warm (minReplicas 1, or exclude it from scaling) - it's the one live players hit continuously. The ~17 non-latest deployments are the real scale-to-zero candidates: ~544Mi requests freed (estimate), ~1.1Gi limits freed. Tiny images from Q1 make cache-hit cold starts sub-2s regardless of which mechanism is chosen.
 
 **Verdict, in order (owner decision 2026-07-16):**
-1. **KEDA HTTP add-on, pinned v0.15.x** - chosen by Michael. Rationale (recorded verbatim-ish): he prefers an officially-documented, actively-maintained upstream component over hand-rolled activation semantics; the metrics-api path requires bespoke demand-tracking/endpoint code in web, which is exactly what he wants to avoid. Plan: PoC one non-latest game version behind the interceptor first, generous `scaledownPeriod` (300s+) to start, mitigations from the risk assessment below retained (pin release, confined blast radius, rollback plan). The interceptor only proxies non-latest-version hosts - latest games keep the direct Service path, never routed through the interceptor, so the beta component's blast radius is confined to already-idle old versions. Honest beta caveat unchanged: the add-on's own README states "We can't yet recommend it for production usage" (kedacore/http-add-on, 2026-07) - this is a deliberate, informed tradeoff, not a gap in the research.
+1. **KEDA HTTP add-on, pinned v0.15.x** - chosen. Rationale (recorded verbatim-ish): an officially-documented, actively-maintained upstream component is preferred over hand-rolled activation semantics; the metrics-api path requires bespoke demand-tracking/endpoint code in web, which is exactly what is to be avoided. Plan: PoC one non-latest game version behind the interceptor first, generous `scaledownPeriod` (300s+) to start, mitigations from the risk assessment below retained (pin release, confined blast radius, rollback plan). The interceptor only proxies non-latest-version hosts - latest games keep the direct Service path, never routed through the interceptor, so the beta component's blast radius is confined to already-idle old versions. Honest beta caveat unchanged: the add-on's own README states "We can't yet recommend it for production usage" (kedacore/http-add-on, 2026-07) - this is a deliberate, informed tradeoff, not a gap in the research.
 2. **KEDA core + metrics-api/external scaler** - viable, battle-hardened KEDA core with no beta component, but requires bespoke demand-tracking code in web (the per-version demand endpoint) - exactly the owned-code surface the owner wants to avoid by picking the add-on instead.
 3. **Bespoke operator shim** - same web-side work as (2), fewer moving parts (no KEDA install/CRDs), but fully owned scale logic end-to-end.
 
@@ -120,11 +120,11 @@ Note: a separate Alloy assessment (trim the traces pipeline, backlog #41b/#32) d
 
 ### Risk assessment (bottom line)
 - **Low-risk/mainstream:** the `distroless/cc-debian12` swap - proceed with normal confidence (pin by digest).
-- **The one risky bet is the beta add-on, again:** the HTTP add-on's own README still says "we can't yet recommend it for production usage." This is unchanged from the earlier analysis - what changed is that Michael weighed this explicitly against the cost of owning demand-tracking/activation code in web, and chose the upstream component anyway (recorded decision, 2026-07-16), not an oversight.
+- **The one risky bet is the beta add-on, again:** the HTTP add-on's own README still says "we can't yet recommend it for production usage." This is unchanged from the earlier analysis - what changed is that this was weighed explicitly against the cost of owning demand-tracking/activation code in web, and the upstream component was chosen anyway (recorded decision, 2026-07-16), not an oversight.
 - **Mitigations (retained):** pin the release (v0.15.x, digest where possible); PoC on one non-latest game version before fleet rollout; generous `scaledownPeriod` (300s+ to start) so recently-played versions stay warm; blast radius confined to non-latest versions only - latest games always use the direct Service path, never the interceptor; keep core-KEDA metrics-api and the bespoke operator shim (Options 4/6) as documented fallbacks if the add-on proves unstable.
 - **Bottom line:** `distroless/cc` swap is within mainstream practice - proceed with normal confidence. The HTTP add-on carries genuine beta risk, confined by design to non-latest versions, with a PoC gate and rollback plan before fleet rollout; this is a deliberate, recorded owner tradeoff (official upstream component vs. owned activation code), not an unmitigated risk. Platform overhead ~100-150Mi (interceptor + scaler + operator).
 
-## 5. Open Questions for Michael
+## 5. Open Questions
 
 - Acceptable worst-case latency for a move against an old (non-latest) version? Cold start is ~0.5-2s on a cache-hit node (estimate), but up to ~5-10s on an image pull miss (estimate).
 - PoC acceptance gate (see plan): what cold-start latency threshold and stability window (N days, no interceptor errors/OOMs) must the one-version PoC clear before fleet rollout of the HTTP add-on?

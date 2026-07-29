@@ -84,7 +84,7 @@
       `bootstrap.initdb.import`)**. The original spec assumed the old
       StatefulSet lived in the same cluster; current prod is on Linode, and
       a live cross-provider connection for CNPG's `externalCluster` import
-      is more plumbing than the data warrants. Michael decided:
+       is more plumbing than the data warrants. Decision:
       dump/restore through the workstation. Also note the beta-period
       interaction (Phase 16): the CNPG cluster is created **before** the
       import with a fresh, isolated database for beta testing; the import
