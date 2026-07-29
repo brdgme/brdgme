@@ -28,6 +28,7 @@
     awscli2
     binaryen
     cargo-binstall
+    cargo-deny
     cargo-leptos
     cilium-cli
     ctlptl
