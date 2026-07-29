@@ -1,0 +1,20 @@
+[package]
+name = "hanamikoji-1"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+brdgme_game_bin = { path = "../../lib/game_bin" }
+brdgme_color = { path = "../../lib/color" }
+brdgme_game = { path = "../../lib/game" }
+brdgme_markup = { path = "../../lib/markup" }
+rand.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+brdgme_cmd = { path = "../../lib/cmd", features = ["test-support"] }
+
+[lints]
+workspace = true

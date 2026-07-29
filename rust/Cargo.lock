@@ -2240,6 +2240,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hanamikoji-1"
+version = "0.1.0"
+dependencies = [
+ "brdgme_cmd",
+ "brdgme_color",
+ "brdgme_game",
+ "brdgme_game_bin",
+ "brdgme_markup",
+ "rand 0.10.2",
+ "serde",
+]
+
+[[package]]
 name = "hashbag"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
