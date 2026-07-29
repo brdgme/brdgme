@@ -42,6 +42,7 @@ pub fn use_websocket() {
     use crate::websocket::{GameUpdateSignal, ProposalUpdateSignal};
     use codee::string::FromToStringCodec;
     use leptos::ev::visibilitychange;
+    use leptos_use::core::ConnectionReadyState;
     use leptos_use::{
         ReconnectLimit, UseEventSourceMessage, UseEventSourceOnEventReturn, UseEventSourceOptions,
         UseEventSourceReturn, use_document, use_event_listener, use_event_source_with_options,
@@ -70,29 +71,34 @@ pub fn use_websocket() {
         UseEventSourceOnEventReturn::ProcessMessage
     };
 
-    let UseEventSourceReturn { open, .. } =
-        use_event_source_with_options::<String, FromToStringCodec>(
-            "/events",
-            UseEventSourceOptions::default()
-                .reconnect_limit(ReconnectLimit::Infinite)
-                .named_events(vec!["game".to_string(), "proposal".to_string()])
-                .on_event(on_event),
-        );
+    let UseEventSourceReturn {
+        open, ready_state, ..
+    } = use_event_source_with_options::<String, FromToStringCodec>(
+        "/events",
+        UseEventSourceOptions::default()
+            .reconnect_limit(ReconnectLimit::Infinite)
+            .named_events(vec!["game".to_string(), "proposal".to_string()])
+            .on_event(on_event),
+    );
 
     let open_vis = open.clone();
     let _ = use_event_listener(use_document(), visibilitychange, move |_| {
         let doc = web_sys::window()
             .and_then(|w| w.document())
             .expect("no document");
-        if doc.visibility_state() == web_sys::VisibilityState::Visible {
+        if doc.visibility_state() == web_sys::VisibilityState::Visible
+            && ready_state.get_untracked() == ConnectionReadyState::Closed
+        {
             open_vis();
             trigger.set_last_update.update(|n| *n += 1);
         }
     });
 
     window_event_listener(leptos::ev::online, move |_| {
-        open();
-        trigger.set_last_update.update(|n| *n += 1);
+        if ready_state.get_untracked() == ConnectionReadyState::Closed {
+            open();
+            trigger.set_last_update.update(|n| *n += 1);
+        }
     });
 }
 
