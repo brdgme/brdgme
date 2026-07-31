@@ -300,3 +300,8 @@ FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c261840
 COPY --from=builder /app/target/release/seven_wonders_1_http .
 USER 65532
 CMD ["./seven_wonders_1_http"]
+
+FROM gcr.io/distroless/cc-debian12@sha256:7ee09f36862efbdbf70422db263e411c2618409ca46faa555bd5b636155307df AS hanamikoji-1
+COPY --from=builder /app/target/release/hanamikoji_1_http .
+USER 65532
+CMD ["./hanamikoji_1_http"]

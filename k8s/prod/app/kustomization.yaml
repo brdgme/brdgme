@@ -77,6 +77,9 @@ images:
 - name: brdgme/greed-2
   newName: ghcr.io/brdgme/brdgme/greed-2
   newTag: latest
+- name: brdgme/hanamikoji-1
+  newName: ghcr.io/brdgme/brdgme/hanamikoji-1
+  newTag: latest
 - name: brdgme/jaipur-2
   newName: ghcr.io/brdgme/brdgme/jaipur-2
   newTag: latest

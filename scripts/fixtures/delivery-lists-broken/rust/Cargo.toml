@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "game/foo-1",
+    "game/bar-1",
+]

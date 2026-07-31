@@ -1,0 +1,10 @@
+apiVersion: brdgme.com/v1
+kind: GameVersion
+metadata:
+  name: hanamikoji-1
+  namespace: brdgme
+spec:
+  typeName: Hanamikoji
+  weight: 1.0
+  blurb: "A two-player game of favour and majority. Seven geisha line the table; you and your rival court them by placing item cards on your side of each. Win a geisha by holding the majority of cards on it, then claim the game by controlling four geisha or eleven charm. Every card you commit is a card your opponent can see - except the ones you hide."
+  interfaceVersion: 2

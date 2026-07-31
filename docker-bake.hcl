@@ -44,6 +44,7 @@ target "image" {
       "farkle-2",
       "for-sale-2",
       "greed-2",
+      "hanamikoji-1",
       "jaipur-2",
       "liars-dice-2",
       "lost-cities-1",

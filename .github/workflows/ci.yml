@@ -70,6 +70,13 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v7
+      # Pure-text consistency guard (no toolchain needed), so it runs first.
+      # working-directory overrides the job's `rust` default: the guard reads
+      # rust/Cargo.toml, rust/Dockerfile, docker-bake.hcl and k8s/base/game/
+      # relative to the repo root.
+      - name: Check delivery-list consistency
+        working-directory: .
+        run: bash scripts/check-delivery-lists.sh
       # GitHub Actions `services:` containers can't take extra CLI args (no
       # way to append `-js` to the image's default command), so NATS is
       # started as a plain step instead - JetStream needs that flag.
