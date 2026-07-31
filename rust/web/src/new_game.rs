@@ -452,7 +452,7 @@ fn GameSetupPanel(gt: GameTypeInfo, restart: Option<Uuid>) -> impl IntoView {
                         ));
                         return;
                     }
-                    emails.push(email);
+                    emails.push(email.as_str().to_owned());
                 }
                 OpponentSlot::Bot { name, bot_name } => bots.push(BotSlot { name, bot_name }),
             }

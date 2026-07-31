@@ -19,7 +19,7 @@ pub struct CreateGameOpts<'a> {
     pub points: &'a [f32],
     pub creator_id: Uuid,
     pub opponent_ids: &'a [Uuid],
-    pub opponent_emails: &'a [String],
+    pub opponent_emails: &'a [crate::auth::email_addr::CanonicalEmail],
     pub bot_slots: &'a [BotSlot],
     pub chat_id: Option<Uuid>,
     pub game_state: &'a str,
@@ -83,7 +83,7 @@ pub async fn create_game_with_users_tx(
             crate::models::user::User,
             r#"SELECT u.id, u.created_at, u.updated_at, u.name, u.pref_colors, u.theme, u.is_admin
                FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1"#,
-            email
+            email.as_str()
         )
         .fetch_optional(&mut *tx)
         .await?
@@ -109,7 +109,7 @@ pub async fn create_game_with_users_tx(
                  VALUES ($1, $2, true, NOW())",
             )
             .bind(new_user_id)
-            .bind(email)
+            .bind(email.as_str())
             .execute(&mut *tx)
             .await?;
 

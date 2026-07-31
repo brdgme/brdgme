@@ -601,7 +601,7 @@ pub async fn get_available_game_types() -> Result<Vec<GameTypeInfo>, ServerFnErr
 pub(crate) struct CreateGameSeed<'a> {
     pub(crate) creator_id: Uuid,
     pub(crate) opponent_ids: &'a [Uuid],
-    pub(crate) opponent_emails: &'a [String],
+    pub(crate) opponent_emails: &'a [crate::auth::email_addr::CanonicalEmail],
     pub(crate) bot_slots: &'a [BotSlot],
     pub(crate) all_accepted: bool,
 }
@@ -1083,7 +1083,7 @@ pub(crate) async fn restart_core(
     old_game_id: Uuid,
     version: &crate::models::game::GameVersion,
     opponent_ids: &[Uuid],
-    opponent_emails: &[String],
+    opponent_emails: &[crate::auth::email_addr::CanonicalEmail],
     bot_slots: &[BotSlot],
 ) -> Result<RestartOutcome, ServerFnError> {
     let player_count = 1 + opponent_ids.len() + opponent_emails.len() + bot_slots.len();
@@ -1295,7 +1295,7 @@ pub async fn restart_game_with_roster(
 
     let opponent_ids = opponent_ids.unwrap_or_default();
     let opponent_emails = opponent_emails.unwrap_or_default();
-    let opponent_emails: Vec<String> = opponent_emails
+    let opponent_emails: Vec<crate::auth::email_addr::CanonicalEmail> = opponent_emails
         .into_iter()
         .map(|e| crate::auth::email_addr::canonicalize_email(&e))
         .collect();

@@ -537,11 +537,12 @@ async fn from_matches_verified_email(
     user_id: uuid::Uuid,
     from: &str,
 ) -> anyhow::Result<bool> {
+    let canonical = crate::auth::email_addr::canonicalize_email(from);
     let (exists,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM user_emails WHERE user_id = $1 AND verified_at IS NOT NULL AND LOWER(email) = LOWER($2))",
+        "SELECT EXISTS(SELECT 1 FROM user_emails WHERE user_id = $1 AND verified_at IS NOT NULL AND email = $2)",
     )
     .bind(user_id)
-    .bind(from)
+    .bind(canonical.as_str())
     .fetch_one(pool)
     .await?;
     Ok(exists)

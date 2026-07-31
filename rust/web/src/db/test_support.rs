@@ -171,8 +171,12 @@ pub(crate) async fn check_roster(
     ids: &[Uuid],
     emails: &[String],
 ) -> Vec<String> {
+    let emails: Vec<crate::auth::email_addr::CanonicalEmail> = emails
+        .iter()
+        .map(|e| crate::auth::email_addr::canonicalize_email(e))
+        .collect();
     let mut tx = pool.begin().await.unwrap();
-    let v = check_invite_policy_tx(&mut tx, creator, ids, emails)
+    let v = check_invite_policy_tx(&mut tx, creator, ids, &emails)
         .await
         .unwrap();
     tx.commit().await.unwrap();

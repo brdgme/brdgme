@@ -415,7 +415,7 @@ fn EmailSection(
         if let Some(el) = add_input.get() {
             let val = crate::auth::email_addr::canonicalize_email(&el.value());
             if !val.is_empty() {
-                add_action.dispatch(val);
+                add_action.dispatch(val.as_str().to_owned());
             }
         }
     };

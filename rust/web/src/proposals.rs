@@ -1163,12 +1163,12 @@ pub async fn count_pending_human_invitees_tx(
 #[cfg(feature = "ssr")]
 pub(crate) async fn find_or_create_user_by_email_tx(
     tx: &mut sqlx::PgConnection,
-    email: &str,
+    email: &crate::auth::email_addr::CanonicalEmail,
 ) -> Result<Uuid, ServerFnError> {
     let existing: Option<Uuid> = sqlx::query_scalar(
         "SELECT u.id FROM users u JOIN user_emails ue ON u.id = ue.user_id WHERE ue.email = $1",
     )
-    .bind(email)
+    .bind(email.as_str())
     .fetch_optional(&mut *tx)
     .await
     .map_err(internal("resolve invite email: lookup"))?;
@@ -1191,7 +1191,7 @@ pub(crate) async fn find_or_create_user_by_email_tx(
         "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1,$2,true,NOW())",
     )
     .bind(new_user_id)
-    .bind(email)
+    .bind(email.as_str())
     .execute(&mut *tx)
     .await
     .map_err(internal("resolve invite email: insert email"))?;
@@ -1382,7 +1382,7 @@ pub async fn create_proposal(
 
     let opponent_ids = opponent_ids.unwrap_or_default();
     let opponent_emails = opponent_emails.unwrap_or_default();
-    let opponent_emails: Vec<String> = opponent_emails
+    let opponent_emails: Vec<crate::auth::email_addr::CanonicalEmail> = opponent_emails
         .into_iter()
         .map(|e| crate::auth::email_addr::canonicalize_email(&e))
         .collect();
@@ -1768,17 +1768,29 @@ pub async fn add_proposal_player(
         .await
         .map_err(internal("add_proposal_player: players"))?;
 
+    let canonical_email: Option<crate::auth::email_addr::CanonicalEmail> = match &email {
+        Some(raw) => {
+            let c = crate::auth::email_addr::canonicalize_email(raw);
+            if c.is_empty() || !c.contains('@') {
+                return Err(ServerFnError::new("Invalid email address"));
+            }
+            Some(c)
+        }
+        None => None,
+    };
+
     let human_id = if let Some(uid) = user_id {
         Some(uid)
-    } else if let Some(email) = &email {
-        Some(find_or_create_user_by_email_tx(&mut tx, email).await?)
+    } else if let Some(canonical) = &canonical_email {
+        Some(find_or_create_user_by_email_tx(&mut tx, canonical).await?)
     } else {
         None
     };
 
     if let Some(hid) = human_id {
         let policy_ids: Vec<Uuid> = user_id.into_iter().collect();
-        let policy_emails: Vec<String> = email.clone().into_iter().collect();
+        let policy_emails: Vec<crate::auth::email_addr::CanonicalEmail> =
+            canonical_email.clone().into_iter().collect();
         let violations =
             crate::db::check_invite_policy_tx(&mut tx, user.id, &policy_ids, &policy_emails)
                 .await

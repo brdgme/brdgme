@@ -168,19 +168,18 @@ pub async fn visible_user_ids(
 /// creation with default 'open' and can have no blocks). Block-by-target
 /// uses wording identical to policy 'none' so a blocked creator cannot
 /// distinguish the two (D7 detectability).
-/// Callers must pass canonicalized addresses (see auth::email_addr::canonicalize_email).
 #[cfg(feature = "ssr")]
 pub async fn check_invite_policy_tx(
     tx: &mut sqlx::PgConnection,
     creator_id: Uuid,
     opponent_ids: &[Uuid],
-    opponent_emails: &[String],
+    opponent_emails: &[crate::auth::email_addr::CanonicalEmail],
 ) -> Result<Vec<String>> {
     let mut targets: Vec<Uuid> = opponent_ids.to_vec();
     for email in opponent_emails {
         let existing: Option<Uuid> =
             sqlx::query_scalar("SELECT user_id FROM user_emails WHERE email = $1")
-                .bind(email)
+                .bind(email.as_str())
                 .fetch_optional(&mut *tx)
                 .await?;
         if let Some(id) = existing {

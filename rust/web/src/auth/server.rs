@@ -319,7 +319,7 @@ pub async fn login(email: String, turnstile_token: String) -> Result<LoginRespon
         let is_existing_verified: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM user_emails WHERE email = $1 AND verified_at IS NOT NULL)",
         )
-        .bind(&email)
+        .bind(email.as_str())
         .fetch_one(&pool)
         .await
         .map_err(internal("login: check verified"))?;
@@ -334,7 +334,7 @@ pub async fn login(email: String, turnstile_token: String) -> Result<LoginRespon
     }
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
-    request_confirmation_code(&pool, resend.as_ref(), &email).await
+    request_confirmation_code(&pool, resend.as_ref(), email.as_str()).await
 }
 
 #[server(ConfirmLogin, "/api")]
@@ -355,7 +355,7 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
     }
 
     let pool = expect_context::<PgPool>();
-    let confirmed = confirm_login_inner(&pool, &email, &token).await?;
+    let confirmed = confirm_login_inner(&pool, email.as_str(), &token).await?;
 
     session
         .cycle_id()
@@ -892,7 +892,7 @@ pub async fn add_email_address(email: String) -> Result<(), ServerFnError> {
     }
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
-    let resp = request_confirmation_code(&pool, resend.as_ref(), &email).await?;
+    let resp = request_confirmation_code(&pool, resend.as_ref(), email.as_str()).await?;
     if !resp.success {
         return Err(ServerFnError::new(resp.message));
     }
@@ -909,7 +909,7 @@ pub async fn confirm_email_address(email: String, token: String) -> Result<(), S
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    validate_confirmation_code(&pool, &email, &token).await?;
+    validate_confirmation_code(&pool, email.as_str(), &token).await?;
 
     if !crate::db::mark_email_verified(&pool, user.id, &email)
         .await
@@ -917,7 +917,7 @@ pub async fn confirm_email_address(email: String, token: String) -> Result<(), S
     {
         return Err(ServerFnError::new("No pending address for that code"));
     }
-    crate::db::delete_login_confirmation(&pool, &email)
+    crate::db::delete_login_confirmation(&pool, email.as_str())
         .await
         .map_err(internal("confirm_email_address: delete confirmation"))?;
     Ok(())
@@ -934,7 +934,7 @@ pub async fn make_email_address_active(email: String) -> Result<(), ServerFnErro
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    match crate::db::set_primary_email(&pool, user.id, &email)
+    match crate::db::set_primary_email(&pool, user.id, email.as_str())
         .await
         .map_err(internal("make_email_address_active: set primary"))?
     {
@@ -984,7 +984,7 @@ pub async fn remove_email_address(email: String) -> Result<(), ServerFnError> {
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    match crate::db::remove_user_email(&pool, user.id, &email)
+    match crate::db::remove_user_email(&pool, user.id, email.as_str())
         .await
         .map_err(internal("remove_email_address: remove"))?
     {

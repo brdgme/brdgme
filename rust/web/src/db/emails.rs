@@ -68,12 +68,14 @@ pub async fn list_user_emails(pool: &PgPool, user_id: Uuid) -> Result<Vec<UserEm
 /// Which account (if any) already owns this address. Used to reject re-adding
 /// an address already on the caller's account and to reject addresses owned by
 /// another account (global UNIQUE(email)).
-/// Callers must pass a canonicalized address (see auth::email_addr::canonicalize_email).
 #[cfg(feature = "ssr")]
-pub async fn find_email_owner(pool: &PgPool, email: &str) -> Result<Option<Uuid>> {
+pub async fn find_email_owner(
+    pool: &PgPool,
+    email: &crate::auth::email_addr::CanonicalEmail,
+) -> Result<Option<Uuid>> {
     Ok(
         sqlx::query_scalar("SELECT user_id FROM user_emails WHERE email = $1")
-            .bind(email)
+            .bind(email.as_str())
             .fetch_optional(pool)
             .await?,
     )
@@ -86,14 +88,14 @@ pub async fn find_email_owner(pool: &PgPool, email: &str) -> Result<Option<Uuid>
 pub async fn insert_unverified_email(
     pool: &PgPool,
     user_id: Uuid,
-    email: &str,
+    email: &crate::auth::email_addr::CanonicalEmail,
 ) -> Result<Option<Uuid>> {
     let res = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO user_emails (user_id, email, is_primary)
          VALUES ($1, $2, false) RETURNING id",
     )
     .bind(user_id)
-    .bind(email)
+    .bind(email.as_str())
     .fetch_one(pool)
     .await;
     match res {
@@ -106,13 +108,17 @@ pub async fn insert_unverified_email(
 /// Marks an address verified (the 22d "confirm address" step). Returns whether
 /// a row was updated (false = no matching unverified address on this account).
 #[cfg(feature = "ssr")]
-pub async fn mark_email_verified(pool: &PgPool, user_id: Uuid, email: &str) -> Result<bool> {
+pub async fn mark_email_verified(
+    pool: &PgPool,
+    user_id: Uuid,
+    email: &crate::auth::email_addr::CanonicalEmail,
+) -> Result<bool> {
     let res = sqlx::query(
         "UPDATE user_emails SET verified_at = NOW()
          WHERE user_id = $1 AND email = $2 AND verified_at IS NULL",
     )
     .bind(user_id)
-    .bind(email)
+    .bind(email.as_str())
     .execute(pool)
     .await?;
     Ok(res.rows_affected() > 0)
@@ -324,7 +330,8 @@ mod tests {
         .unwrap();
 
         let email = format!("add-{}@example.com", Uuid::new_v4());
-        insert_unverified_email(&pool, user_id, &email)
+        let canonical = crate::auth::email_addr::canonicalize_email(&email);
+        insert_unverified_email(&pool, user_id, &canonical)
             .await
             .unwrap()
             .unwrap();
@@ -333,7 +340,11 @@ mod tests {
         assert!(!row.is_primary);
         assert!(row.verified_at.is_none());
 
-        assert!(mark_email_verified(&pool, user_id, &email).await.unwrap());
+        assert!(
+            mark_email_verified(&pool, user_id, &canonical)
+                .await
+                .unwrap()
+        );
         let rows = list_user_emails(&pool, user_id).await.unwrap();
         assert!(
             rows.iter()
@@ -343,7 +354,9 @@ mod tests {
                 .is_some()
         );
         assert!(
-            !mark_email_verified(&pool, user_id, &email).await.unwrap(),
+            !mark_email_verified(&pool, user_id, &canonical)
+                .await
+                .unwrap(),
             "second mark is a no-op"
         );
     }
@@ -480,18 +493,19 @@ mod tests {
         .await
         .unwrap();
         let email = format!("shared-{}@example.com", Uuid::new_v4());
-        insert_unverified_email(&pool, u1, &email)
+        let canonical = crate::auth::email_addr::canonicalize_email(&email);
+        insert_unverified_email(&pool, u1, &canonical)
             .await
             .unwrap()
             .unwrap();
         assert!(
-            insert_unverified_email(&pool, u2, &email)
+            insert_unverified_email(&pool, u2, &canonical)
                 .await
                 .unwrap()
                 .is_none(),
             "global UNIQUE(email)"
         );
-        assert_eq!(find_email_owner(&pool, &email).await.unwrap(), Some(u1));
+        assert_eq!(find_email_owner(&pool, &canonical).await.unwrap(), Some(u1));
     }
 
     #[sqlx::test]
