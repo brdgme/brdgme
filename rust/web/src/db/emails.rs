@@ -645,9 +645,20 @@ mod tests {
     async fn canonical_emails_migration_aborts_on_case_duplicates(pool: PgPool) {
         const MIGRATION: &str = include_str!("../../migrations/026_canonical_emails.sql");
 
-        // The test DB already has 026 applied, so the lower() unique index
-        // exists and would reject the dirty fixture. Drop it to reconstruct the
-        // pre-migration state.
+        // The test DB already has 026 and 029 applied, so the canonical CHECK,
+        // the lower(btrim()) unique index, and the legacy lower() index all
+        // exist and would reject the dirty fixture. Drop them to reconstruct the
+        // pre-migration state so 026 can be exercised in isolation.
+        sqlx::query(
+            "ALTER TABLE user_emails DROP CONSTRAINT IF EXISTS user_emails_email_canonical_chk",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("DROP INDEX IF EXISTS user_emails_email_canonical_key")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("DROP INDEX IF EXISTS user_emails_email_lower_key")
             .execute(&pool)
             .await
@@ -687,6 +698,24 @@ mod tests {
     #[sqlx::test]
     async fn canonical_emails_migration_lowercases_and_enforces(pool: PgPool) {
         const MIGRATION: &str = include_str!("../../migrations/026_canonical_emails.sql");
+
+        // The test DB already has 026 and 029 applied; drop the canonical CHECK
+        // and both unique indexes to reconstruct the pre-migration state so 026
+        // can be exercised in isolation (026 recreates the lower() index).
+        sqlx::query(
+            "ALTER TABLE user_emails DROP CONSTRAINT IF EXISTS user_emails_email_canonical_chk",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("DROP INDEX IF EXISTS user_emails_email_canonical_key")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP INDEX IF EXISTS user_emails_email_lower_key")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         let user = make_user(&pool, "dirty").await;
         sqlx::query(
