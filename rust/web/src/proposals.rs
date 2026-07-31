@@ -1725,6 +1725,19 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
     Ok(game_id)
 }
 
+/// Canonicalize and validate a proposal invite email before any account is
+/// touched. Rejects empty / `@`-less input so a junk address can never mint a
+/// verified ghost account (R-07 / F-124 / F-126).
+fn validate_proposal_email(
+    raw: &str,
+) -> Result<crate::auth::email_addr::CanonicalEmail, ServerFnError> {
+    let canonical = crate::auth::email_addr::canonicalize_email(raw);
+    if canonical.is_empty() || !canonical.contains('@') {
+        return Err(ServerFnError::new("Invalid email address"));
+    }
+    Ok(canonical)
+}
+
 /// Owner-only: add a single human (by id or email) or bot to an open proposal.
 /// Re-normalizes positions and resets accepted humans to pending.
 #[server(AddProposalPlayer, "/api")]
@@ -1768,16 +1781,8 @@ pub async fn add_proposal_player(
         .await
         .map_err(internal("add_proposal_player: players"))?;
 
-    let canonical_email: Option<crate::auth::email_addr::CanonicalEmail> = match &email {
-        Some(raw) => {
-            let c = crate::auth::email_addr::canonicalize_email(raw);
-            if c.is_empty() || !c.contains('@') {
-                return Err(ServerFnError::new("Invalid email address"));
-            }
-            Some(c)
-        }
-        None => None,
-    };
+    let canonical_email: Option<crate::auth::email_addr::CanonicalEmail> =
+        email.as_deref().map(validate_proposal_email).transpose()?;
 
     let human_id = if let Some(uid) = user_id {
         Some(uid)
@@ -3795,5 +3800,99 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(users_after, users_before, "no second user created");
+    }
+
+    #[test]
+    fn validate_proposal_email_rejects_empty_and_atless() {
+        assert!(validate_proposal_email("").is_err());
+        assert!(validate_proposal_email("   ").is_err());
+        assert!(validate_proposal_email("no-at-sign").is_err());
+        assert_eq!(
+            validate_proposal_email(" Foo@x.com ").unwrap().as_str(),
+            "foo@x.com"
+        );
+        assert_eq!(
+            validate_proposal_email("BAR@x.com").unwrap().as_str(),
+            "bar@x.com"
+        );
+    }
+
+    #[sqlx::test]
+    async fn add_proposal_player_email_creates_no_ghost_account(pool: PgPool) {
+        let foo_owner_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("foo_owner")
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(foo_owner_id)
+        .bind("foo@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let bar_owner_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("bar_owner")
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(bar_owner_id)
+        .bind("bar@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let users_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let noncanon_before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_emails WHERE email <> lower(btrim(email))",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let c = validate_proposal_email(" Foo@x.com ").unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let resolved = find_or_create_user_by_email_tx(&mut tx, &c).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(resolved, foo_owner_id, "raw variant resolves to the owner");
+
+        let c = validate_proposal_email("BAR@x.com").unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let resolved = find_or_create_user_by_email_tx(&mut tx, &c).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            resolved, bar_owner_id,
+            "non-canonical variant resolves to the owner"
+        );
+
+        assert!(validate_proposal_email("").is_err());
+
+        let noncanon_after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_emails WHERE email <> lower(btrim(email))",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(noncanon_after, noncanon_before);
+        let users_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(users_after, users_before);
     }
 }

@@ -2362,6 +2362,44 @@ body\r\n";
         );
     }
 
+    #[sqlx::test]
+    async fn from_matches_verified_email_unicode_canonical_agreement(pool: sqlx::PgPool) {
+        let user_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("u-{}", uuid::Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let canonical = crate::auth::email_addr::canonicalize_email("İ@example.com");
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind(canonical.as_str())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            from_matches_verified_email(&pool, user_id, "İ@example.com")
+                .await
+                .unwrap()
+        );
+        let stored: String = sqlx::query_scalar("SELECT email FROM user_emails WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, canonical.as_str());
+        assert!(
+            !from_matches_verified_email(&pool, user_id, "i@example.com")
+                .await
+                .unwrap()
+        );
+    }
+
     #[test]
     fn settings_response_header_error_wins() {
         assert_eq!(
