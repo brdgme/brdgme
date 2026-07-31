@@ -134,7 +134,15 @@ async fn send_reminder(
     let recipient = match crate::email::outbound::fetch_email_recipient(pool, game_player_id).await
     {
         Ok(Some(r)) => r,
-        _ => return ReminderOutcome::PermanentSkip,
+        Ok(None) => return ReminderOutcome::PermanentSkip,
+        Err(e) => {
+            tracing::error!(
+                "turn_reminder: recipient lookup failed for {}: {}",
+                game_player_id,
+                e
+            );
+            return ReminderOutcome::Retry;
+        }
     };
 
     if !(recipient.email.is_some() && !recipient.is_bot && recipient.reminder_emails_enabled) {
@@ -1518,5 +1526,176 @@ mod tests {
 
         assert_eq!(mine.iter().filter(|c| !c.is_dangling).count(), 1);
         assert_eq!(mine.iter().filter(|c| c.is_dangling).count(), 2);
+    }
+
+    // R-08 / F-136: a transient DB error in `fetch_email_recipient` must be
+    // classified Retry (row left unmarked), not PermanentSkip (row marked sent
+    // with nothing sent). Renaming `user_emails` makes the recipient lookup fail
+    // while `fetch_candidates` and the claim query still succeed, driving the
+    // full `sweep_once` path through the classifier at sweep.rs:134-138.
+    #[sqlx::test]
+    async fn turn_reminder_transient_recipient_lookup_error_leaves_row_unmarked(pool: PgPool) {
+        let (_game_id, _user_id, gp_id) = seed_reminder_game(&pool).await;
+        let http = reqwest::Client::new();
+
+        let candidates = fetch_candidates(&pool, std::time::Duration::from_secs(86400)).await;
+        assert!(
+            candidates.iter().any(|c| c.game_player_id == gp_id),
+            "the seeded player must be a candidate before the fault is injected"
+        );
+
+        sqlx::query("ALTER TABLE user_emails RENAME TO user_emails_r08_hidden")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sweep_once(None, &pool, &http).await;
+
+        sqlx::query("ALTER TABLE user_emails_r08_hidden RENAME TO user_emails")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let sent_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            sent_at.is_none(),
+            "a transient DB error must classify as Retry: row must remain unmarked"
+        );
+    }
+
+    // R-08 / F-145: a transient DB error in `mailer_recipient` (the invitee
+    // lookup inside `send_invite_core`) must cause `send_invite_now` to return
+    // `false` so `sweep_invite_nudge_once` does NOT call `mark_proposal_nudged`.
+    // Renaming `user_emails` makes `fetch_invite_recipient` fail while
+    // `fetch_nudge_candidates` (which only touches `game_proposals` and
+    // `game_proposal_players`) still returns the candidate.
+    #[sqlx::test]
+    async fn invite_nudge_transient_lookup_error_leaves_proposal_unmarked(pool: PgPool) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Nudge {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://127.0.0.1:1', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let owner: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, invite_emails_enabled)
+             VALUES ($1, $2, true) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(owner)
+        .bind(format!("owner-{}@example.com", Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let invitee: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, invite_emails_enabled)
+             VALUES ($1, $2, true) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(invitee)
+        .bind(format!("invitee-{}@example.com", Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let pid: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status, created_at)
+             VALUES ($1, $2, 'open', NOW() - interval '48 hours') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        crate::proposals::insert_proposal_player(
+            &mut tx,
+            pid,
+            0,
+            Some(owner),
+            None,
+            None,
+            "accepted",
+            None,
+        )
+        .await
+        .unwrap();
+        crate::proposals::insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(invitee),
+            None,
+            None,
+            "pending",
+            Some(format!("tok-{}", Uuid::new_v4())),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let candidates =
+            crate::proposals::fetch_nudge_candidates(&pool, 86400).await;
+        assert!(
+            candidates.iter().any(|c| c.proposal_id == pid),
+            "the seeded proposal must be a nudge candidate before the fault is injected"
+        );
+
+        sqlx::query("ALTER TABLE user_emails RENAME TO user_emails_r08_nudge_hidden")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sweep_invite_nudge_once(None, &pool).await;
+
+        sqlx::query("ALTER TABLE user_emails_r08_nudge_hidden RENAME TO user_emails")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let nudged_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT nudged_at FROM game_proposals WHERE id = $1")
+                .bind(pid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            nudged_at.is_none(),
+            "a transient DB error must prevent marking the proposal as nudged"
+        );
     }
 }

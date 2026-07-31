@@ -265,8 +265,17 @@ impl RealInviteMailer {
         let Some(token) = email_token else {
             return true;
         };
-        let Some(recip) = mailer_recipient(pool, invitee_user_id, "send_invite").await else {
-            return true;
+        let recip = match fetch_invite_recipient(pool, invitee_user_id).await {
+            Ok(Some(r)) => r,
+            Ok(None) => return true,
+            Err(e) => {
+                tracing::error!(
+                    "invite mailer (send_invite): user {} lookup failed: {}",
+                    invitee_user_id,
+                    e
+                );
+                return false;
+            }
         };
         let suppressed =
             crate::email::outbound::suppress_for_web_presence(pool, Some(invitee_user_id)).await;
@@ -279,14 +288,31 @@ impl RealInviteMailer {
         let Some(email) = recip.email else {
             return true;
         };
-        let Some(proposal) = mailer_proposal(pool, proposal_id, "send_invite").await else {
-            return true;
+        let proposal = match find_proposal(pool, proposal_id).await {
+            Ok(Some(p)) => p,
+            Ok(None) => return true,
+            Err(e) => {
+                tracing::error!(
+                    "invite mailer (send_invite): proposal {} lookup failed: {}",
+                    proposal_id,
+                    e
+                );
+                return false;
+            }
         };
         if proposal.status != "open" {
             return true;
         }
-        let Ok(Some(pp)) = find_proposal_player_by_email_token(pool, &token).await else {
-            return true;
+        let pp = match find_proposal_player_by_email_token(pool, &token).await {
+            Ok(Some(pp)) => pp,
+            Ok(None) => return true,
+            Err(e) => {
+                tracing::error!(
+                    "invite mailer (send_invite): email token lookup failed: {}",
+                    e
+                );
+                return false;
+            }
         };
         if pp.proposal_id != proposal_id
             || pp.user_id != Some(invitee_user_id)
@@ -4095,4 +4121,5 @@ mod tests {
         .unwrap();
         assert_eq!(bar_verified, 1, "bar@x.com stays a single verified row");
     }
+
 }
