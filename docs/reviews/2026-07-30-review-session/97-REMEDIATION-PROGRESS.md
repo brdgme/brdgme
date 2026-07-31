@@ -29,7 +29,7 @@ restored per owner instruction.)
 | R-04 | done(c338d13) | c338d133027b57d5a7638a652bac6d3c0cbc811f | 5/5 game-creation entry points call validate_bot_slots |
 | R-05 | done(f3a87b7) | f3a87b7d282f432867ab9db2e366cbd7363a459b | AC5: sweep GATES on is_turn, so R-05 is the only F-119 control |
 | R-06 | done(3cd727e) | 3cd727eba4173f44276c3fae07c400e463c57ad3 | 4 lifecycle writers enumerated; CODING.md rule rewritten as property |
-| R-07 | blocked(D-09 owner cross-owner decision) | 1e19d05f0506aa6e92cc16764d4f8c2f148eb022 (impl HEAD pre-tracker) | static impl/compile check exists but AC4 prod reconciliation unresolved; prod aggregates: 3 noncanonical rows, 2 duplicate groups/4 rows/2 excess, both cross-owner, all 4 dup rows verified+primary, 2 noncanonical rows overlap groups, PG lower U+0130 != Rust, 1 non-ASCII row, no stored raw or Rust U+0130 forms; D-09 forbids auto cross-owner merge - owner must privately inspect+decide both groups before R-07 completes; SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr passed; tests authored, exec deferred to CI (cargo test -p web banned); no push |
+| R-07 | blocked(prod Kubernetes API unreachable) | 1e19d05f0506aa6e92cc16764d4f8c2f148eb022 (impl HEAD pre-tracker) | production Kubernetes API connectivity failure (TLS handshake EOF) before backup and mutation; Backup postgres-pre-repair-r07-20260801-01 not applied; no database action |
 | R-08 | pending | | |
 | R-09 | pending | | |
 | R-10 | pending | | |
