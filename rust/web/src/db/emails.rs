@@ -140,14 +140,14 @@ pub enum SetPrimaryOutcome {
 pub async fn set_primary_email(
     pool: &PgPool,
     user_id: Uuid,
-    email: &str,
+    email: &crate::auth::email_addr::CanonicalEmail,
 ) -> Result<SetPrimaryOutcome> {
     let mut tx = pool.begin().await?;
     let row: Option<(bool,)> = sqlx::query_as(
         "SELECT (verified_at IS NOT NULL) FROM user_emails WHERE user_id = $1 AND email = $2",
     )
     .bind(user_id)
-    .bind(email)
+    .bind(email.as_str())
     .fetch_optional(&mut *tx)
     .await?;
     let Some((verified,)) = row else {
@@ -168,7 +168,7 @@ pub async fn set_primary_email(
          WHERE user_id = $1 AND email = $2",
     )
     .bind(user_id)
-    .bind(email)
+    .bind(email.as_str())
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -189,12 +189,12 @@ pub enum RemoveEmailOutcome {
 pub async fn remove_user_email(
     pool: &PgPool,
     user_id: Uuid,
-    email: &str,
+    email: &crate::auth::email_addr::CanonicalEmail,
 ) -> Result<RemoveEmailOutcome> {
     let row: Option<(bool,)> =
         sqlx::query_as("SELECT is_primary FROM user_emails WHERE user_id = $1 AND email = $2")
             .bind(user_id)
-            .bind(email)
+            .bind(email.as_str())
             .fetch_optional(pool)
             .await?;
     let Some((is_primary,)) = row else {
@@ -205,7 +205,7 @@ pub async fn remove_user_email(
     }
     sqlx::query("DELETE FROM user_emails WHERE user_id = $1 AND email = $2 AND is_primary = false")
         .bind(user_id)
-        .bind(email)
+        .bind(email.as_str())
         .execute(pool)
         .await?;
     Ok(RemoveEmailOutcome::Removed)
@@ -390,8 +390,11 @@ mod tests {
         .await
         .unwrap();
 
+        let secondary_canon = crate::auth::email_addr::canonicalize_email(&secondary);
         assert_eq!(
-            set_primary_email(&pool, user_id, &secondary).await.unwrap(),
+            set_primary_email(&pool, user_id, &secondary_canon)
+                .await
+                .unwrap(),
             SetPrimaryOutcome::Switched
         );
         let rows = list_user_emails(&pool, user_id).await.unwrap();
@@ -417,16 +420,21 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        let unverified_canon = crate::auth::email_addr::canonicalize_email(&unverified);
         assert_eq!(
-            set_primary_email(&pool, user_id, &unverified)
+            set_primary_email(&pool, user_id, &unverified_canon)
                 .await
                 .unwrap(),
             SetPrimaryOutcome::Unverified
         );
         assert_eq!(
-            set_primary_email(&pool, user_id, "missing@example.com")
-                .await
-                .unwrap(),
+            set_primary_email(
+                &pool,
+                user_id,
+                &crate::auth::email_addr::canonicalize_email("missing@example.com")
+            )
+            .await
+            .unwrap(),
             SetPrimaryOutcome::NotFound
         );
     }
@@ -460,16 +468,24 @@ mod tests {
         .await
         .unwrap();
 
+        let primary_canon = crate::auth::email_addr::canonicalize_email(&primary);
+        let secondary_canon = crate::auth::email_addr::canonicalize_email(&secondary);
         assert_eq!(
-            remove_user_email(&pool, user_id, &primary).await.unwrap(),
+            remove_user_email(&pool, user_id, &primary_canon)
+                .await
+                .unwrap(),
             RemoveEmailOutcome::IsPrimary
         );
         assert_eq!(
-            remove_user_email(&pool, user_id, &secondary).await.unwrap(),
+            remove_user_email(&pool, user_id, &secondary_canon)
+                .await
+                .unwrap(),
             RemoveEmailOutcome::Removed
         );
         assert_eq!(
-            remove_user_email(&pool, user_id, &secondary).await.unwrap(),
+            remove_user_email(&pool, user_id, &secondary_canon)
+                .await
+                .unwrap(),
             RemoveEmailOutcome::NotFound
         );
     }

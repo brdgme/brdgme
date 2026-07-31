@@ -934,7 +934,7 @@ pub async fn make_email_address_active(email: String) -> Result<(), ServerFnErro
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    match crate::db::set_primary_email(&pool, user.id, email.as_str())
+    match crate::db::set_primary_email(&pool, user.id, &email)
         .await
         .map_err(internal("make_email_address_active: set primary"))?
     {
@@ -984,7 +984,7 @@ pub async fn remove_email_address(email: String) -> Result<(), ServerFnError> {
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    match crate::db::remove_user_email(&pool, user.id, email.as_str())
+    match crate::db::remove_user_email(&pool, user.id, &email)
         .await
         .map_err(internal("remove_email_address: remove"))?
     {
@@ -1796,9 +1796,13 @@ mod tests {
             .await
             .unwrap();
 
-        let outcome = crate::db::set_primary_email(&pool, user_id, "unverified@example.com")
-            .await
-            .unwrap();
+        let outcome = crate::db::set_primary_email(
+            &pool,
+            user_id,
+            &crate::auth::email_addr::canonicalize_email("unverified@example.com"),
+        )
+        .await
+        .unwrap();
         assert!(
             matches!(outcome, crate::db::SetPrimaryOutcome::Unverified),
             "unverified address must not become active"
