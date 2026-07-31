@@ -1036,7 +1036,7 @@ mod tests {
 
     #[test]
     fn ack_heartbeat_interval_below_ack_wait() {
-        assert!(ACK_HEARTBEAT_INTERVAL < std::time::Duration::from_secs(5 * 60));
+        assert!(ACK_HEARTBEAT_INTERVAL < nats::ACK_WAIT);
     }
 
     #[sqlx::test(migrations = "../web/migrations")]

@@ -4,46 +4,11 @@
 
 use anyhow::{Context, Result};
 use async_nats::jetstream::{consumer::pull, stream};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
-pub const STREAM_NAME: &str = "BOT";
-pub const SUBJECT_TURN: &str = "bot.turn";
-pub const SUBJECT_COMMAND: &str = "bot.command";
-pub const CONSUMER_TURN: &str = "bot-turn";
-pub const CONSUMER_COMMAND: &str = "bot-command";
-
-/// Overall cap on turn-level re-publishes after a stale-state conflict
-/// (`BotTurnEvent::attempt`), on top of the original publish.
-pub const MAX_TURN_ATTEMPTS: i32 = 3;
-
-/// JetStream `max_deliver` for the BOT stream's pull consumers: the maximum
-/// times a single message is redelivered before JetStream gives up. Shared
-/// by the consumer config and the (future) term ceiling so the two cannot
-/// drift (WP-38).
-pub const MAX_DELIVER: i64 = 3;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BotTurnEvent {
-    pub game_id: Uuid,
-    pub player_position: i32,
-    pub bot_name: String,
-    pub attempt: i32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BotCommandEvent {
-    pub game_id: Uuid,
-    pub player_position: i32,
-    pub command: String,
-    /// Echoes `BotTurnEvent::attempt` from the `bot.turn` event this command
-    /// resulted from, so the `bot.command` consumer knows how many
-    /// turn-level retries have already happened before deciding whether a
-    /// stale-state conflict should give up or re-publish `bot.turn` again.
-    pub attempt: i32,
-}
+pub use brdgme_nats::*;
 
 /// Connects to NATS and wraps the client in a JetStream context.
 pub async fn connect(nats_url: &str) -> Result<async_nats::jetstream::Context> {
@@ -140,16 +105,14 @@ pub async fn ensure_stream_and_consumers(js: &async_nats::jetstream::Context) ->
         );
     }
 
-    // `ack_wait` must comfortably exceed the worst-case `bot.command`
-    // handler duration, or JetStream redelivers mid-processing and the
-    // command runs twice (review ws F58). Today's worst case is bounded
-    // well under 5 min: the consumer processes-then-acks with a 10s
-    // overall HTTP client timeout (web::main http_client) and bounded
-    // retries. Do NOT lower this, and revisit alongside any ack-cadence
-    // change (WP-38 / decision D-5, which also owns the bot-turn
-    // consumer's long-turn story).
-    let ack_wait = Duration::from_secs(5 * 60);
-
+    // `ACK_WAIT` (shared `brdgme_nats` const) must comfortably exceed the
+    // worst-case `bot.command` handler duration, or JetStream redelivers
+    // mid-processing and the command runs twice (review ws F58). Today's worst
+    // case is bounded well under 5 min: the consumer processes-then-acks with a
+    // 10s overall HTTP client timeout (web::main http_client) and bounded
+    // retries. Do NOT lower it, and revisit alongside any ack-cadence change
+    // (WP-38 / decision D-5, which also owns the bot-turn consumer's long-turn
+    // story).
     for (name, subject) in [
         (CONSUMER_TURN, SUBJECT_TURN),
         (CONSUMER_COMMAND, SUBJECT_COMMAND),
@@ -158,7 +121,7 @@ pub async fn ensure_stream_and_consumers(js: &async_nats::jetstream::Context) ->
             durable_name: Some(name.to_string()),
             filter_subject: subject.to_string(),
             ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
-            ack_wait,
+            ack_wait: ACK_WAIT,
             max_deliver: MAX_DELIVER,
             ..Default::default()
         };

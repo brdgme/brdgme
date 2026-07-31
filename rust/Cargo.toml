@@ -37,6 +37,7 @@ members = [
     "lib/game_bin",
     "lib/game_client",
     "lib/markup",
+    "lib/nats_protocol",
     "lib/rand_bot",
     "lib/session_store",
     "operator",

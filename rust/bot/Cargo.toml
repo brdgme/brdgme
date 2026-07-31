@@ -25,6 +25,7 @@ brdgme_cmd = { path = "../lib/cmd", default-features = false }
 brdgme_color = { path = "../lib/color" }
 brdgme_crypto = { path = "../lib/crypto" }
 brdgme_game = { path = "../lib/game" }
+brdgme_nats = { path = "../lib/nats_protocol" }
 brdgme_game_client = { path = "../lib/game_client", features = ["sentry"] }
 brdgme_markup = { path = "../lib/markup" }
 minijinja = "2"

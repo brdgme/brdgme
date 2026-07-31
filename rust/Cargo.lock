@@ -734,6 +734,7 @@ dependencies = [
  "brdgme_game",
  "brdgme_game_client",
  "brdgme_markup",
+ "brdgme_nats",
  "futures-util",
  "minijinja",
  "reqwest",
@@ -883,6 +884,15 @@ dependencies = [
  "combine",
  "serde",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "brdgme_nats"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -6951,6 +6961,7 @@ dependencies = [
  "brdgme_game",
  "brdgme_game_client",
  "brdgme_markup",
+ "brdgme_nats",
  "brdgme_session_store",
  "bytes",
  "codee",

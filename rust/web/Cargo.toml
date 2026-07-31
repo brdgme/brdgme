@@ -76,6 +76,7 @@ reqwest = { workspace = true, features = ["json", "form", "rustls"], optional = 
 # process-default provider. Direct dep exists solely for the
 # install_default() call in main.rs; see CODING.md's rustls section.
 brdgme_crypto = { path = "../lib/crypto", optional = true }
+brdgme_nats = { path = "../lib/nats_protocol", optional = true }
 rustls = { workspace = true, optional = true }
 rand.workspace = true
 futures-util = { workspace = true, optional = true }
@@ -137,6 +138,7 @@ ssr = [
     "dep:reqwest",
     "dep:rustls",
     "dep:brdgme_crypto",
+    "dep:brdgme_nats",
     "dep:async-nats",
     "dep:tokio-stream",
     "dep:futures-util",
