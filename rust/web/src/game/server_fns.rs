@@ -905,6 +905,7 @@ pub(crate) async fn undo_core(
         &undo_state,
         player.game_player.position as usize,
         &status,
+        &game_response.points,
         player.game_player.id,
         ge.game.updated_at,
     )
@@ -1049,7 +1050,7 @@ pub async fn end_game(game_id: Uuid) -> Result<(), ServerFnError> {
         ));
     }
 
-    crate::db::end_game(&pool, game_id)
+    crate::db::end_game(&pool, game_id, ge.game.updated_at)
         .await
         .map_err(internal("end_game: end"))?;
 

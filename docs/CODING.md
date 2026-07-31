@@ -651,17 +651,20 @@ now()` on every `UPDATE`, regardless of the `SET` clause. Consequences:
   `#[sqlx::test]` per-test database).
 
 **Read-then-write on a game row needs an `updated_at` guard, not a snapshot
-check.** `update_game_command_success` is the reference shape: the caller
+check.** Any writer that rates a game (calls `apply_rating_changes` or
+`write_ranked_placings`) or finalises/un-finalises a game (writes
+`games.is_finished`) must take `expected_updated_at` and guard its transaction
+with it. `update_game_command_success` is the reference shape: the caller
 passes `ge.game.updated_at`, the write carries `AND updated_at = $n`, and 0
 rows affected becomes `db::StaleStateConflict` - a distinguishable type, so
-callers can say "someone moved first" instead of "internal error". Every
-mutating game-lifecycle function (`concede_game`, `concede_game_replace`,
-`undo_game`) takes `expected_updated_at` and opens its transaction with
-`claim_unfinished_game_tx`, which locks the row `FOR UPDATE` and rejects both a
-finished game (`db::GameAlreadyFinished`) and a stale snapshot. Checking
-`ge.game.is_finished` in a server fn is a courtesy for the error message only;
-it is never the guard, because the game service round-trip sits between the
-read and the write.
+callers can say "someone moved first" instead of "internal error". The other
+lifecycle writers open their transaction with `claim_unfinished_game_tx`,
+which locks the row `FOR UPDATE` and rejects both a finished game
+(`db::GameAlreadyFinished`) and a stale snapshot. To find all such writers:
+`rg -n 'apply_rating_changes|write_ranked_placings|is_finished' rust/web/src/db/game_write.rs`
+(excluding the `mod tests` section). Checking `ge.game.is_finished` in a
+server fn is a courtesy for the error message only; it is never the guard,
+because the game service round-trip sits between the read and the write.
 
 **A finished game cannot be undone.** `undo_game` refuses once
 `games.is_finished` is true. Finishing a game runs `apply_rating_changes`,
