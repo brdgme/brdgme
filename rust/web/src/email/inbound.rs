@@ -158,13 +158,12 @@ pub fn extract_addr_spec(value: &str) -> Option<String> {
 pub enum AuthVerdict {
     Pass,
     Fail,
-    Unknown,
 }
 
 pub fn classify_inbound_auth(raw: &str) -> AuthVerdict {
     let msg = match mail_parser::MessageParser::default().parse(raw) {
         Some(msg) => msg,
-        None => return AuthVerdict::Unknown,
+        None => return AuthVerdict::Fail,
     };
 
     // Trust only the topmost Authentication-Results header; lower ones may be forged.
@@ -174,18 +173,18 @@ pub fn classify_inbound_auth(raw: &str) -> AuthVerdict {
         .find(|h| h.name().eq_ignore_ascii_case("Authentication-Results"))
     {
         Some(h) => h,
-        None => return AuthVerdict::Unknown,
+        None => return AuthVerdict::Fail,
     };
 
     let value = match header.value().as_text() {
         Some(v) => v,
-        None => return AuthVerdict::Unknown,
+        None => return AuthVerdict::Fail,
     };
 
     let mut parts = value.split(';');
     let authserv_id = parts.next().unwrap_or("").trim();
     if !authserv_id.eq_ignore_ascii_case("amazonses.com") {
-        return AuthVerdict::Unknown;
+        return AuthVerdict::Fail;
     }
 
     let mut spf: Option<String> = None;
@@ -210,11 +209,14 @@ pub fn classify_inbound_auth(raw: &str) -> AuthVerdict {
         }
     }
 
-    let failed = |r: &Option<String>| r.as_deref() == Some("fail");
-    if failed(&dmarc) || (failed(&spf) && failed(&dkim)) {
-        AuthVerdict::Fail
-    } else {
+    let is = |r: &Option<String>, want: &str| r.as_deref() == Some(want);
+    if is(&dmarc, "fail") {
+        return AuthVerdict::Fail;
+    }
+    if is(&spf, "pass") || is(&dkim, "pass") {
         AuthVerdict::Pass
+    } else {
+        AuthVerdict::Fail
     }
 }
 
@@ -715,11 +717,6 @@ async fn fetch_inbound_text(state: &AppState, from: &str, email_id: &str) -> Inb
                 "resend webhook: inbound auth failed; permanently rejecting from={from} email_id={email_id}"
             );
             return InboundText::AuthFailed;
-        }
-        AuthVerdict::Unknown => {
-            tracing::warn!(
-                "resend webhook: inbound auth unknown; proceeding from={from} email_id={email_id}"
-            );
         }
         AuthVerdict::Pass => {}
     }
@@ -1771,7 +1768,7 @@ body\r\n";
         let raw = "From: a@x.com\r\n\
 \r\n\
 body\r\n";
-        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Unknown);
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
     }
 
     #[test]
@@ -1779,7 +1776,7 @@ body\r\n";
         let raw = "Authentication-Results: mx.google.com; spf=fail smtp.mailfrom=x.com; dkim=fail header.i=@x.com; dmarc=fail header.from=x.com\r\n\
 \r\n\
 body\r\n";
-        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Unknown);
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
     }
 
     #[test]
@@ -1793,18 +1790,42 @@ body\r\n";
 
     #[test]
     fn classify_inbound_auth_softfail_is_not_fail() {
-        let raw = "Authentication-Results: amazonses.com; spf=softfail smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=none header.from=x.com\r\n\
+        let raw = "Authentication-Results: amazonses.com; spf=softfail smtp.mailfrom=x.com; dkim=none header.i=@x.com\r\n\
 \r\n\
 body\r\n";
-        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Pass);
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
     }
 
     #[test]
     fn classify_inbound_auth_single_fail_is_not_fail() {
-        let raw = "Authentication-Results: amazonses.com; spf=fail smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=pass header.from=x.com\r\n\
+        let raw = "Authentication-Results: amazonses.com; spf=fail smtp.mailfrom=x.com; dkim=none header.i=@x.com\r\n\
 \r\n\
 body\r\n";
-        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Pass);
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
+    }
+
+    #[test]
+    fn classify_inbound_auth_dmarc_rule_spf_fail_dkim_none_is_not_pass() {
+        let raw = "Authentication-Results: amazonses.com; spf=fail smtp.mailfrom=x.com; dkim=none header.i=@x.com\r\n\
+\r\n\
+body\r\n";
+        assert_ne!(classify_inbound_auth(raw), AuthVerdict::Pass);
+    }
+
+    #[test]
+    fn classify_inbound_auth_unknown_verdict_is_rejected() {
+        let raw = "Authentication-Results: mx.google.com; spf=fail smtp.mailfrom=x.com; dkim=fail header.i=@x.com; dmarc=fail header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
+    }
+
+    #[test]
+    fn classify_inbound_auth_attacker_supplied_sole_header_is_not_honoured() {
+        let raw = "Authentication-Results: mail.attacker.example; spf=pass smtp.mailfrom=x.com; dkim=pass header.i=@x.com; dmarc=pass header.from=x.com\r\n\
+\r\n\
+body\r\n";
+        assert_eq!(classify_inbound_auth(raw), AuthVerdict::Fail);
     }
 
     #[test]
