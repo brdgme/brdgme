@@ -2468,6 +2468,37 @@ mod tests {
         crate::crypto::load_key().unwrap()
     }
 
+    /// 5.4 seed: the request-parts harness drives a real `#[server]` fn
+    /// directly (no HTTP, no NATS) across the three auth states. `admin_list_bots`
+    /// is the template for all 16 admin fns (5.3).
+    #[sqlx::test]
+    async fn admin_list_bots_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        // migration 013 seeds easy/medium/hard; clear so admin yields an empty list.
+        sqlx::query("DELETE FROM bots").execute(&pool).await.unwrap();
+
+        let anonymous =
+            crate::test_support::anonymous(&pool, || async { admin_list_bots().await }).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || async { admin_list_bots().await }).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || async { admin_list_bots().await }).await;
+        assert!(
+            admin.expect("admin caller must succeed").is_empty(),
+            "admin caller must see an empty bot list"
+        );
+    }
+
     #[sqlx::test]
     async fn test_admin_list_bots_rejects_non_admin(pool: sqlx::PgPool) {
         sqlx::query(

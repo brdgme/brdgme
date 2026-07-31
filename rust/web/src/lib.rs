@@ -22,6 +22,9 @@ pub mod state;
 #[cfg(feature = "ssr")]
 pub mod router;
 
+#[cfg(all(test, feature = "ssr"))]
+pub(crate) mod test_support;
+
 #[cfg(feature = "ssr")]
 pub mod crypto;
 
