@@ -1096,6 +1096,15 @@ pub(crate) async fn restart_core(
         return Err(ServerFnError::new(msg));
     }
 
+    let mut bot_slots: Vec<BotSlot> = bot_slots.to_vec();
+    let canonical_names = crate::db::validate_bot_slots(pool, &bot_slots)
+        .await
+        .map_err(internal("restart_core: validate bot slots"))?
+        .map_err(ServerFnError::new)?;
+    for (slot, canonical) in bot_slots.iter_mut().zip(canonical_names) {
+        slot.bot_name = canonical;
+    }
+
     let fetched = if opponent_ids.is_empty() && opponent_emails.is_empty() {
         Some(fetch_game_from_service(http_client, version, player_count).await?)
     } else {
@@ -1175,7 +1184,7 @@ pub(crate) async fn restart_core(
                 creator_id: user_id,
                 opponent_ids: &[],
                 opponent_emails: &[],
-                bot_slots,
+                bot_slots: &bot_slots,
                 all_accepted: false,
             },
             fetched.expect("fetched when no human invitees"),
@@ -1236,7 +1245,7 @@ pub(crate) async fn restart_core(
         position += 1;
     }
 
-    for bot in bot_slots {
+    for bot in &bot_slots {
         crate::proposals::insert_proposal_player(
             &mut tx,
             proposal_id,
@@ -2196,6 +2205,40 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not a player"), "unexpected error: {err}");
+    }
+
+    #[sqlx::test]
+    async fn restart_core_rejects_garbage_bot_name(pool: PgPool) {
+        let uri = spawn_ok_new_game_service().await;
+        let (game_id, creator_id) = make_finished_two_player_game(&pool, &uri).await;
+        let http_client = reqwest::Client::new();
+
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let version = ge.game_version.clone();
+
+        let result = restart_core(
+            &pool,
+            &http_client,
+            creator_id,
+            game_id,
+            &version,
+            &[],
+            &[],
+            &[BotSlot {
+                name: "Botty".to_string(),
+                bot_name: "garbage".to_string(),
+            }],
+        )
+        .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not a valid bot type"),
+            "unexpected error: {err}"
+        );
     }
 
     #[sqlx::test]
