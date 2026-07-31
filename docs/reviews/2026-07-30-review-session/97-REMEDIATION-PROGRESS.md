@@ -34,12 +34,12 @@ restored per owner instruction.)
 | R-09 | done(61f9f4e) | 61f9f4eee5af657b108a11e5722155f82d4260c8 | AC1 single named contract `transient_failure` called by both routes; literal-Done grep 26 constructions commented (two non-constructions: match arm, doc prose); AC2 invite lock-timeout DB-error test asserts Retry; AC3 settings closed-pool DB-error test asserts Retry; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with two non-blocking Minor notes |
 | R-10 | done(a9ea19d) | a9ea19d5e9f4640b8d6cafe64068fbcbbbe6cf3c | AC1 30s periodic session re-validation arm + revocation test; AC2 per-connection CancellationToken on SseStream::Drop + idle gauge-drop test; AC3 public handler per-id subscribe (no game.>) + VisibilityCache + subsz test; AC4 F-163 #[ignore] removed, #[serial] added; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned; needs Postgres/NATS); comprehensive review ACCEPT, no Critical/Important findings |
 | R-11 | done(13ab0ffd) | 13ab0ffd3896f3b0804997a36b2b24a02c2c8147 | implement ws F55 second half (owner ruling 6.3b). AC1 tooth-4 historical amendment: WP-36's ws F55 fix and its regression test `rust/web/tests/websocket_hygiene.rs` were deleted by `efad81f92b0a1f585410e6f30fdd8de8a3dac518`; the WP-84 §3g successor proof test is `rust/web/tests/sse_events.rs:601-657` (`graceful_shutdown_ends_sse_stream_and_server_completes`) - I1 citation corrected from the keepalive test `:551-595` (`sse_stream_survives_past_request_timeout_with_keepalive`). AC2 shutdown signal threaded into bot consumer (`game/mod.rs:263,311`), advisory listener (`nats.rs:214`), supervisor (`nats.rs:280`), and all six sweeps (`sweep.rs:324,635`); shutdown-path tests call the real production paths: `bot_command_consume_loop_exits_on_shutdown` (`game/mod.rs:1284`), `sweep_stops_on_shutdown` (`sweep.rs:1736`), `supervisor_stops_on_shutdown_and_waits_for_run_to_wind_down` (`nats.rs:467`), `supervisor_backoff_sleep_is_interrupted_by_shutdown` (`nats.rs:517`). AC3 detached SSE spawns bounded for the normal case by R-10's per-connection token + axum graceful shutdown (no `TaskTracker` reintroduced), proven by `graceful_shutdown_ends_sse_stream_and_server_completes` (`sse_events.rs:601-657`); documented residual: a task blocked in `client.subscribe()` under broken NATS is not bounded in-code (I2, owner confirmation recommended). Gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned). Comprehensive review ACCEPT, no Critical findings; targeted doc-only re-review (`review/R-11-TARGETED-REREVIEW.md`) PASS, resolving I1 (AC1 successor citation corrected from `:551-595` to `:601-657`); I2 residual owner confirmation recommended. |
-| R-12 | done(c4c408c) | c4c408c9f9190e8140ba7ed07491f35b10a28a6f | AC1 real `logout_everywhere` + fail-first injected SessionStore error asserts Err and 2 tokens remain; AC2 healthy MemoryStore real call asserts Ok(true) and zero rows; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); F-86/R-37 same root cause but read-path behavior remains deferred - R-12 only adds a nonblocking/soft sequencing dependency and R-37 is still blocked by 5.4; comprehensive review APPROVE with no Blocking/Important and three Minor notes |
+| R-12 | done(c4c408c) | c4c408c9f9190e8140ba7ed07491f35b10a28a6f | AC1 real `logout_everywhere` + fail-first injected SessionStore error asserts Err and 2 tokens remain; AC2 healthy MemoryStore real call asserts Ok(true) and zero rows; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); F-86/R-37 same root cause but read-path behavior remains deferred - R-12 only adds a nonblocking/soft sequencing dependency and R-37 was blocked by 5.4 (now done, 973ea62); comprehensive review APPROVE with no Blocking/Important and three Minor notes |
 | R-13 | done(afe85b2) | afe85b24290aca483a777088d57eb53291bdf87a | AC1 new workspace crate `brdgme_crypto` (`rust/lib/crypto`) holds the single hardened `encrypt`/`decrypt`/`load_key`; both consumers are thin re-export facades (`bot/src/crypto.rs:1` and `web/src/crypto.rs:1` = `pub use brdgme_crypto::*;`), so divergence cannot recur. AC2 bot-level panic-without-opt-in test `load_key_missing_env_panics_without_opt_in` (`bot/src/crypto.rs:11-22`, removes both envs, `catch_unwind` on `load_key().expect(..)` asserts `is_err()`, testing the real `main.rs:809` `.expect()`) plus opt-in test `load_key_missing_env_with_opt_in_loads_default` (`bot/src/crypto.rs:24-33`, sets `ALLOW_INSECURE_DEFAULT_KEY=true`, asserts key == `default_key()`); shared crate adds the unit-level MissingKey result test `load_key_missing_env_returns_missing_key` (`lib/crypto/src/lib.rs:130-135`, asserts `Err(CryptoError::MissingKey)`). AC3 old bot assertions/dispositions per review section 1: old missing-env `matches!(.., LoadedKey::Default(k) if k == default_key())` INVERTED (deleted from bot; replaced by bot panic test + crate `Err(MissingKey)` test; `LoadedKey` type eliminated); old valid-hex `matches!(.., LoadedKey::FromEnv(k) if k == [0xAB;32])` MOVED+inverted to crate `:121-127` `assert!(*load_key().unwrap() == [0xAB;32])` (`LoadedKey` ref removed); roundtrip MOVED to crate `:92-97` `encrypt_decrypt_roundtrip`; tamper MOVED to crate `:100-109` `decrypt_rejects_tampered_ciphertext`; invalid-hex MOVED to crate `:149-154`; wrong-length MOVED to crate `:157-162`; `wrong_key_fails` (decrypt with `[0xCD;32]`) DROPPED - review finding F-1 LOW, non-blocking (AEAD auth path already exercised by tamper test). AC4 F-187 four axes all resolved: (1) missing-key behaviour `Err(MissingKey)` unless `ALLOW_INSECURE_DEFAULT_KEY=true` (`lib.rs:57-65`), bot panics at boot via `.expect()`; (2) key material in memory `Zeroizing<[u8;32]>` + hex scratch buffer `bytes.zeroize()` after copy (`lib.rs:46-50,67-75`); (3) nonce source `getrandom::fill` with `?` propagation (`lib.rs:78-82`); (4) length check explicit `bytes.len() != 32` then `bytes.zeroize()` before `Err(InvalidKeyLength)` (`lib.rs:68-70`). Gates: shared `cargo test -p brdgme_crypto` 8/8 pass; bot R-13 facade tests both pass while full `cargo test -p bot` is 34 pass / 4 known DB `PoolTimedOut` failures (sqlx-core testing/mod.rs:227, pre-existing env condition, none touch crypto); `cargo clippy -p brdgme_crypto`/`-p bot --all-targets -- -D warnings` and per-package `cargo fmt -p brdgme_crypto`/`-p bot -- --check` all exit 0; allowed `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (only pre-existing `proc-macro-error2` future-incompat warning). Web tests/clippy/fmt NOT run (web build/test/run banned). Review verdict APPROVE with one non-blocking LOW (F-1 dropped `wrong_key_fails`) and F-190 incidentally closed (fail-fast `load_key().expect(..)` replaces the old warn-and-continue `None` degradation path; non-optional `encryption_key` field). |
 | R-14 | done(f9173fe) | f9173fe51e46c4e3f53db7b0dafeb32a649be5d8 | AC1 focused `brdgme_nats` shared crate owns `BotTurnEvent`/`BotCommandEvent` and all protocol constants; bot and web consume it through thin re-export facades (bot unconditional dependency, web optional behind the `ssr` feature), so the protocol types and constants have a single definition site and cannot diverge. AC2 eight-test exact-JSON golden fixture covers serialization, deserialization, and round-trip for the protocol events. AC3 definition-focused grep found exactly one `pub const` definition each for `STREAM_NAME`, `SUBJECT_TURN`, `SUBJECT_COMMAND`, `CONSUMER_TURN`, `CONSUMER_COMMAND`, `MAX_TURN_ATTEMPTS`, `MAX_DELIVER`, `ACK_WAIT`; bot heartbeat uses `ACK_WAIT`. Gates: shared crate test/fmt/clippy pass; bot fmt/clippy pass; allowed `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` pass; bot test 34 pass plus the known four local sqlx `PoolTimedOut` failures (pre-existing local condition, not a regression). Review verdict APPROVE, no Critical/Important findings. |
 | R-15 | done(4d6244c) | 4d6244c165f00db4ec3676b79385131f6eeaf979 | Closes F-101/F-102/F-105/F-107 (NATS delivery semantics). AC1 dedup: stream config sets `duplicate_window: 120s` (`nats.rs`) and `publish_bot_turns` sets a `Nats-Msg-Id` via `bot_turn_message_id(game_id, position, updated_at, attempt)` (`game/mod.rs:202-211`, call `:264`) published with `jetstream.send_publish(SUBJECT_TURN, message)`; key is `{game_id}:{position}:{updated_at}:{attempt}`; both AC1 duplicate sources publish attempt 0 (`trigger_bot_turns` and the sweep at `email/sweep.rs:437`), so identical turn state still collides to one delivery; test `duplicate_bot_turn_publish_collapses_to_one_delivery`. AC2 redelivery inside 5-min ack_wait: `process_bot_command_message` `Ok(info)` arm Naks with exponential backoff `2u64.saturating_pow(info.delivered.max(1))` -> 2s then 4s (`game/mod.rs:439-457`), delivery 3 still hits the existing `info.delivered >= MAX_DELIVER` Term branch, all well inside the 5-minute `ACK_WAIT`; test `transient_failure_redelivers_command_well_inside_ack_wait`. AC3 reconcile-not-create-if-absent: `ensure_stream_and_consumers` switched `get_or_create_stream`->`create_stream` and `get_or_create_consumer`->`create_consumer` (durable name in the desired config, `nats.rs:106,148-151`) with drift warnings reworded to "still drifted after reconciliation"; drift policy decision = automatic `create_stream`/`create_consumer` reconciliation selected over startup failure because on the pinned `nats:2.11-alpine` server `create_*` updates existing objects in place (probe-verified), so it is safe/idempotent and will not crash on pre-existing objects; test `ensure_stream_and_consumers_reconciles_drifted_config` deliberately drifts `duplicate_window` to 1s and the `bot-turn` consumer to `ack_wait: 30s`/`max_deliver: 1`, sanity-asserts the drift, then asserts exact restoration to `120s`/`ACK_WAIT`/`MAX_DELIVER` (a `get_or_create_*` impl would leave the drift and fail). AC4 remove `(future)` markers: `nats_protocol/src/lib.rs` `MAX_DELIVER` doc and the two `nats.rs` "future recovery" comments reworded; `rg '\(future\)' rust/web/src/nats.rs` exit 1 (zero hits). Design decisions: the 120s `duplicate_window` collapses only rapid re-publishes of the same turn state (broadcast races, conflict/user-error re-publish within 120s) while the 15-minute reconciliation sweep is a deliberate retry intentionally outside the window, and the message-id includes `attempt` so a real retry bumps the key and is not suppressed (this is the F-2 fix - the old attempt-less key silently deduped the deliberate retry after an invalid bot command); the 2s/4s Nak backoff is exponential (`pow(delivered.max(1))`) and stays well inside the 5-minute `ACK_WAIT`, with delivery 3 falling through to the existing Term ceiling. Gates (locally run, exact exit statuses): `cargo fmt -p brdgme_nats -- --check` exit 0; `cargo clippy -p brdgme_nats -- -D warnings` exit 0; `cargo test -p brdgme_nats` exit 0 (8 passed, 0 failed); `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); `git diff --check` exit 0. CI-deferred (WEB HARD BAN, not claimed passing locally): runtime red/green of the three live-NATS integration tests and the F-2 unit test `bot_turn_message_id_differs_by_attempt` (all compile-verified by the permitted `cargo check --all-targets --features ssr`), and the authoritative F-1 E0080 full-codegen confirmation - `cargo check` structurally defers the const-eval, so CI's `cargo test -p web --features ssr` is authoritative; the F-1 fix (`assume_utc()` lifting `PrimitiveDateTime`->`OffsetDateTime`) is byte-for-byte the reviewer's probe-verified recommendation. Review: comprehensive review verdict CHANGES REQUIRED with four findings - F-1 CRITICAL (`PrimitiveDateTime::format(&Iso8601::DEFAULT)` E0080 build break, invisible to `cargo check` but fatal under CI's full codegen), F-2 HIGH (dedup key omitted `attempt`, suppressing the deliberate retry), F-3 MEDIUM (test 3 non-discriminating), F-4 LOW (comment accuracy); all four resolved and the targeted re-review verdict APPROVED with no new blocker; final verification VERIFIED. No push. |
 | R-16 | done(85fff2e) | 85fff2e784e49f0191a417a1dab2325d80b5df45 | hanamikoji-1 Dockerfile stage + bake target + k8s bundle shipped; delivery-list CI guard added; F-211 smoke assertion restored; comprehensive review PASS, no blocking findings |
-| R-17 | pending | | needs 5.4 for server-fn tests |
+| R-17 | pending | | 5.4 done (973ea62); server-fn test harness available |
 | R-18 | pending | | |
 | R-19 | pending | | |
 | R-20 | pending | | |
@@ -59,8 +59,8 @@ restored per owner instruction.)
 | R-34 | pending | | after R-30 (same file) |
 | R-35 | pending | | sequence with 5.8 |
 | R-36 | pending | | |
-| R-37 | blocked(5.4) | | |
-| R-38 | blocked(5.4, 5.3) | | |
+| R-37 | pending | | 5.4 done (973ea62); unblocked |
+| R-38 | blocked(5.3) | | 5.4 done (973ea62) |
 | R-39 | pending | | |
 | R-40 | pending | | |
 | R-41 | pending | | |
@@ -85,8 +85,8 @@ restored per owner instruction.)
 |------|--------|-----------|-------|
 | 5.1 roll-through-the-ages-2 crate pass | pending | | |
 | 5.2 session_store test module | pending | | blocks R-44 |
-| 5.3 require_admin true-path tests | pending | | after 5.4 |
-| 5.4 request-parts test harness | pending | | blocks 5.3, R-37, R-38 |
+| 5.3 require_admin true-path tests | pending | | 5.4 done (973ea62); unblocked |
+| 5.4 request-parts test harness | done(973ea62) | 973ea62a3cb407127e527acbb64063305c65414d | in-crate request-parts harness (`crate::test_support::{anonymous, non_admin, admin}`); unblocks 5.3, R-37, R-38 |
 | 5.5 13 crates validate+redaction tests | pending | | L; per-crate checklist |
 | 5.8 bot test coverage (U11, U12) | pending | | sequence with R-35 |
 
@@ -370,3 +370,53 @@ guard).
   bake/build not run; kustomize/kubeconform deferred to CI; Tiltfile Starlark
   unvalidated; `scripts/rust-test.sh` skipped per laptop OOM ban, no Rust source
   changed; tracker update deferred to this row) - none blocking.
+
+## 5.4 evidence
+
+Code commit `973ea62a3cb407127e527acbb64063305c65414d` (verified via
+`git rev-parse`; tracked changes: `rust/web/src/test_support.rs` new 96 lines,
+`rust/web/src/lib.rs` +3, `rust/web/src/admin.rs` +31; 130 insertions,
+0 deletions).
+
+- **Delivers:** reusable in-crate request-parts test harness
+  (`rust/web/src/test_support.rs`), gated
+  `#[cfg(all(test, feature = "ssr"))] pub(crate) mod test_support;`
+  (`lib.rs:25-26`).
+- **Helper API:** `crate::test_support::{anonymous, non_admin, admin}`, each
+  `(&PgPool, async closure) -> T`. Private internals: `run_with_session`
+  (the sanctioned `Request::new(()).into_parts()` +
+  `parts.extensions.insert(session)` + `Owner::new()` + `provide_context` +
+  `ScopedFuture` mechanism), `seed_user` (inserts real `users` + matching real
+  `user_auth_tokens` rows), `authenticated` (MemoryStore-backed
+  `tower_sessions::Session` with seeded `SessionUser`).
+- **Representative consumer:**
+  `admin_list_bots_distinguishes_anonymous_non_admin_admin` (`admin.rs:2471-2500`)
+  calls the real `#[server]` fn `admin_list_bots` (`admin.rs:991-999`) directly
+  in-process under three identities:
+  - anonymous (empty MemoryStore session) -> `Err` containing "Not authenticated"
+  - non-admin (real user + real `user_auth_tokens` row, `is_admin=false`) ->
+    `Err(ServerError(msg))` with `msg == ADMIN_REQUIRED`
+  - admin (real user + real `user_auth_tokens` row, `is_admin=true`) ->
+    `Ok` and empty list (`DELETE FROM bots` first)
+- **Three-identity evidence:** real `tower_sessions::Session` backed by
+  `MemoryStore`, placed in real axum request `Parts` extensions; `Parts` +
+  cloned `PgPool` provided into a Leptos `Owner`; closure run through the real
+  `ScopedFuture` reactive mechanism. Real `users` and `user_auth_tokens` rows
+  inserted; `get_current_user`, authorization, request parts, session
+  extensions, and DB token validation all run for real. Real `admin_list_bots`
+  results asserted. NATS-free.
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0 (one pre-existing `proc-macro-error2`
+  future-incompat warning, unrelated).
+- **Runtime:** the seed test is compile-verified only; runtime web tests
+  deferred to CI by explicit ban (web build/test/run forbidden). Same disclosed
+  limitation as R-08..R-12.
+- **Review:** comprehensive independent review verdict APPROVE; no
+  Critical/High/Medium findings; two informational Low deferrals (L1: ad-hoc
+  harness de-duplication of `auth/server.rs::with_session_context` and
+  `proposals.rs::with_logged_in_context` deliberately deferred as a follow-up;
+  L2: runtime test deferred to CI per hard constraint).
+- **Unblocks:** 5.3 (require_admin true-path tests), R-37 (web auth
+  hardening), R-38 (admin surface + db module). 5.4 is done; those items'
+  "blocked by 5.4" condition is removed. 5.3/R-17/R-37/R-38 themselves remain
+  pending or blocked on other dependencies - not marked done here.
