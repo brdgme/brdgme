@@ -1,0 +1,16 @@
+[package]
+name = "brdgme_crypto"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+aes-gcm.workspace = true
+getrandom = "0.4"
+hex.workspace = true
+thiserror.workspace = true
+zeroize = "1"
+
+[lints]
+workspace = true

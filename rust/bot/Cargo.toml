@@ -23,6 +23,7 @@ sentry.workspace = true
 sentry-tracing.workspace = true
 brdgme_cmd = { path = "../lib/cmd", default-features = false }
 brdgme_color = { path = "../lib/color" }
+brdgme_crypto = { path = "../lib/crypto" }
 brdgme_game = { path = "../lib/game" }
 brdgme_game_client = { path = "../lib/game_client", features = ["sentry"] }
 brdgme_markup = { path = "../lib/markup" }
@@ -31,9 +32,7 @@ serde_yaml_ng.workspace = true
 async-nats.workspace = true
 futures-util.workspace = true
 axum.workspace = true
-aes-gcm.workspace = true
-thiserror.workspace = true
-hex.workspace = true
+zeroize = "1"
 
 [dev-dependencies]
 sqlx = { workspace = true, features = ["macros", "migrate"] }

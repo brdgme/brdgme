@@ -2464,7 +2464,7 @@ fn BotProviderEditForm(
 mod tests {
     use super::*;
 
-    fn test_encryption_key() -> zeroize::Zeroizing<[u8; 32]> {
+    fn test_encryption_key() -> crate::crypto::Zeroizing<[u8; 32]> {
         crate::crypto::load_key().unwrap()
     }
 

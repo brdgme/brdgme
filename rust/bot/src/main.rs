@@ -39,7 +39,7 @@ struct AppState {
     /// Client for game service calls: shorter timeout than the LLM client,
     /// but generous enough for KEDA scale-from-zero cold starts.
     game_http: reqwest::Client,
-    encryption_key: Option<[u8; 32]>,
+    encryption_key: zeroize::Zeroizing<[u8; 32]>,
     jetstream: async_nats::jetstream::Context,
 }
 
@@ -204,12 +204,9 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         }
     };
 
-    let mut providers = match &state.encryption_key {
-        Some(key) => config::load_providers(&state.pool, &req.bot_name, key)
-            .await
-            .context("Failed to load providers")?,
-        None => Vec::new(),
-    };
+    let mut providers = config::load_providers(&state.pool, &req.bot_name, &state.encryption_key)
+        .await
+        .context("Failed to load providers")?;
     let table_empty = config::bots_table_empty(&state.pool)
         .await
         .context("Failed to check bots table")?;
@@ -809,23 +806,12 @@ async fn main() -> Result<()> {
         .with(sentry_tracing::layer())
         .init();
 
-    let loaded_key = match crypto::load_key() {
-        Ok(key) => {
-            if key.is_default() {
-                tracing::warn!(
-                    "DATABASE_ENCRYPTION_KEY not set - using insecure default key, DO NOT USE IN PRODUCTION"
-                );
-            }
-            Some(key)
-        }
-        Err(e) => {
-            tracing::warn!(
-                "DATABASE_ENCRYPTION_KEY invalid ({}); DB-stored provider API keys will be unavailable, env-var fallback only",
-                e
-            );
-            None
-        }
-    };
+    let encryption_key = crypto::load_key().expect("DATABASE_ENCRYPTION_KEY missing or malformed");
+    if crypto::using_default_key() {
+        tracing::warn!(
+            "DATABASE_ENCRYPTION_KEY not set - using insecure default key (ALLOW_INSECURE_DEFAULT_KEY=true), DO NOT USE IN PRODUCTION"
+        );
+    }
     tracing::info!("Bot service starting");
 
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
@@ -854,7 +840,7 @@ async fn main() -> Result<()> {
         pool,
         http,
         game_http,
-        encryption_key: loaded_key.as_ref().map(|k| *k.bytes()),
+        encryption_key,
         jetstream: jetstream.clone(),
     };
 

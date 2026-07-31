@@ -1,79 +1,4 @@
-use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
-use aes_gcm::{Aes256Gcm, Nonce};
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum CryptoError {
-    #[error("invalid key length: expected 32 bytes")]
-    InvalidKeyLength,
-    #[error("encryption failed")]
-    EncryptionFailed,
-    #[error("decryption failed")]
-    DecryptionFailed,
-    #[error("invalid hex encoding")]
-    InvalidHex,
-}
-
-pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    let cipher = Aes256Gcm::new(key.into());
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-    let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
-        .map_err(|_| CryptoError::EncryptionFailed)?;
-    let mut out = Vec::with_capacity(12 + ciphertext.len());
-    out.extend_from_slice(&nonce);
-    out.extend_from_slice(&ciphertext);
-    Ok(out)
-}
-
-pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    if data.len() < 12 {
-        return Err(CryptoError::DecryptionFailed);
-    }
-    let (nonce_bytes, ciphertext) = data.split_at(12);
-    let cipher = Aes256Gcm::new(key.into());
-    let nonce = Nonce::from_slice(nonce_bytes);
-    cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|_| CryptoError::DecryptionFailed)
-}
-
-#[derive(Debug)]
-pub enum LoadedKey {
-    Default([u8; 32]),
-    FromEnv([u8; 32]),
-}
-
-impl LoadedKey {
-    pub fn bytes(&self) -> &[u8; 32] {
-        match self {
-            LoadedKey::Default(k) | LoadedKey::FromEnv(k) => k,
-        }
-    }
-
-    pub fn is_default(&self) -> bool {
-        matches!(self, LoadedKey::Default(_))
-    }
-}
-
-pub fn default_key() -> [u8; 32] {
-    let mut key = [0u8; 32];
-    let seed = b"brdgme-dev-key-not-for-prod!!!";
-    key[..seed.len()].copy_from_slice(seed);
-    key
-}
-
-pub fn load_key() -> Result<LoadedKey, CryptoError> {
-    let hex_str = match std::env::var("DATABASE_ENCRYPTION_KEY") {
-        Ok(v) => v,
-        Err(_) => return Ok(LoadedKey::Default(default_key())),
-    };
-    let bytes = hex::decode(&hex_str).map_err(|_| CryptoError::InvalidHex)?;
-    let key: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| CryptoError::InvalidKeyLength)?;
-    Ok(LoadedKey::FromEnv(key))
-}
+pub use brdgme_crypto::*;
 
 #[cfg(test)]
 mod tests {
@@ -82,65 +7,28 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    fn test_key() -> [u8; 32] {
-        [0xAB; 32]
-    }
-
     #[test]
-    fn round_trip() {
-        let key = test_key();
-        let plaintext = b"hello world";
-        let encrypted = encrypt(&key, plaintext).unwrap();
-        let decrypted = decrypt(&key, &encrypted).unwrap();
-        assert_eq!(decrypted, plaintext);
-    }
-
-    #[test]
-    fn wrong_key_fails() {
-        let key = test_key();
-        let wrong_key = [0xCD; 32];
-        let encrypted = encrypt(&key, b"secret").unwrap();
-        assert!(decrypt(&wrong_key, &encrypted).is_err());
-    }
-
-    #[test]
-    fn tampered_ciphertext_fails() {
-        let key = test_key();
-        let mut encrypted = encrypt(&key, b"secret").unwrap();
-        let last = encrypted.len() - 1;
-        encrypted[last] ^= 0xFF;
-        assert!(decrypt(&key, &encrypted).is_err());
-    }
-
-    #[test]
-    fn load_key_valid_hex() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let hex_key = "ab".repeat(32);
-        unsafe { std::env::set_var("DATABASE_ENCRYPTION_KEY", &hex_key) };
-        assert!(matches!(load_key().unwrap(), LoadedKey::FromEnv(k) if k == [0xAB; 32]));
-        unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
-    }
-
-    #[test]
-    fn load_key_missing_env() {
+    fn load_key_missing_env_panics_without_opt_in() {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
-        assert!(matches!(load_key().unwrap(), LoadedKey::Default(k) if k == default_key()));
+        unsafe { std::env::remove_var("ALLOW_INSECURE_DEFAULT_KEY") };
+        let result = std::panic::catch_unwind(|| {
+            let _ = load_key().expect("DATABASE_ENCRYPTION_KEY must be set");
+        });
+        assert!(
+            result.is_err(),
+            "loader must refuse startup (panic) when DATABASE_ENCRYPTION_KEY and ALLOW_INSECURE_DEFAULT_KEY are both unset"
+        );
     }
 
     #[test]
-    fn load_key_invalid_hex() {
+    fn load_key_missing_env_with_opt_in_loads_default() {
         let _guard = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("DATABASE_ENCRYPTION_KEY", "not-valid-hex!!") };
-        assert!(matches!(load_key(), Err(CryptoError::InvalidHex)));
         unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
-    }
-
-    #[test]
-    fn load_key_wrong_length() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("DATABASE_ENCRYPTION_KEY", "abcd") };
-        assert!(matches!(load_key(), Err(CryptoError::InvalidKeyLength)));
-        unsafe { std::env::remove_var("DATABASE_ENCRYPTION_KEY") };
+        unsafe { std::env::set_var("ALLOW_INSECURE_DEFAULT_KEY", "true") };
+        let loaded =
+            load_key().expect("default key must load when ALLOW_INSECURE_DEFAULT_KEY is enabled");
+        assert!(*loaded == *default_key());
+        unsafe { std::env::remove_var("ALLOW_INSECURE_DEFAULT_KEY") };
     }
 }

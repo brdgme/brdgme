@@ -75,10 +75,8 @@ reqwest = { workspace = true, features = ["json", "form", "rustls"], optional = 
 # sqlx/async-nats defaults -> ring), so rustls can't auto-select a
 # process-default provider. Direct dep exists solely for the
 # install_default() call in main.rs; see CODING.md's rustls section.
+brdgme_crypto = { path = "../lib/crypto", optional = true }
 rustls = { workspace = true, optional = true }
-aes-gcm = { workspace = true, optional = true }
-hex = { workspace = true, optional = true }
-zeroize = { version = "1", optional = true }
 rand.workspace = true
 futures-util = { workspace = true, optional = true }
 gloo-timers = { version = "0.4", features = ["futures"] }
@@ -138,9 +136,7 @@ ssr = [
     "dep:tower-http",
     "dep:reqwest",
     "dep:rustls",
-    "dep:aes-gcm",
-    "dep:hex",
-    "dep:zeroize",
+    "dep:brdgme_crypto",
     "dep:async-nats",
     "dep:tokio-stream",
     "dep:futures-util",

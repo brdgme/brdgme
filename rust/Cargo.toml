@@ -31,6 +31,7 @@ members = [
     "game/zombie-dice-2",
     "lib/cmd",
     "lib/color",
+    "lib/crypto",
     "lib/cost",
     "lib/game",
     "lib/game_bin",

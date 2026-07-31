@@ -725,17 +725,16 @@ dependencies = [
 name = "bot"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "anyhow",
  "async-nats",
  "axum",
  "brdgme_cmd",
  "brdgme_color",
+ "brdgme_crypto",
  "brdgme_game",
  "brdgme_game_client",
  "brdgme_markup",
  "futures-util",
- "hex",
  "minijinja",
  "reqwest",
  "sentry",
@@ -744,11 +743,11 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sqlx",
- "thiserror 2.0.19",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -807,6 +806,17 @@ name = "brdgme_cost"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "brdgme_crypto"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "getrandom 0.4.3",
+ "hex",
+ "thiserror 2.0.19",
+ "zeroize",
 ]
 
 [[package]]
@@ -6930,7 +6940,6 @@ dependencies = [
 name = "web"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "anyhow",
  "async-nats",
  "async-trait",
@@ -6938,6 +6947,7 @@ dependencies = [
  "axum-prometheus",
  "brdgme_cmd",
  "brdgme_color",
+ "brdgme_crypto",
  "brdgme_game",
  "brdgme_game_client",
  "brdgme_markup",
@@ -6949,7 +6959,6 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "gloo-timers 0.4.0",
- "hex",
  "http-body-util",
  "js-sys",
  "leptos",
@@ -6987,7 +6996,6 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "web-sys",
- "zeroize",
 ]
 
 [[package]]
