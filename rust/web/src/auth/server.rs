@@ -136,7 +136,7 @@ pub struct AuthUser {
 pub(crate) async fn request_confirmation_code(
     pool: &PgPool,
     resend: Option<&resend_rs::Resend>,
-    email: &str,
+    email: &crate::auth::email_addr::CanonicalEmail,
 ) -> Result<LoginResponse, ServerFnError> {
     let mut tx = pool
         .begin()
@@ -167,7 +167,7 @@ pub(crate) async fn request_confirmation_code(
     let existing = sqlx::query_as!(
         LoginConfirmation,
         "SELECT * FROM login_confirmations WHERE email = $1",
-        email
+        email.as_str()
     )
     .fetch_optional(&mut *tx)
     .await
@@ -227,23 +227,29 @@ pub(crate) async fn request_confirmation_code(
                sent_count = login_confirmations.sent_count + 1,
                last_sent_at = NOW()
            RETURNING code"#,
-        email,
+        email.as_str(),
         fresh_code
     )
     .fetch_one(&mut *tx)
     .await
     .map_err(internal("login: upsert confirmation"))?;
 
-    sqlx::query!("INSERT INTO login_email_sends (email) VALUES ($1)", email)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal("login: record send"))?;
+    sqlx::query!(
+        "INSERT INTO login_email_sends (email) VALUES ($1)",
+        email.as_str()
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(internal("login: record send"))?;
 
     tx.commit()
         .await
         .map_err(internal("login: commit transaction"))?;
 
-    if send_login_email(resend, email, &code).await.is_err() {
+    if send_login_email(resend, email.as_str(), &code)
+        .await
+        .is_err()
+    {
         return Ok(LoginResponse {
             success: false,
             message: "Could not send the login email, please try again.".to_string(),
@@ -334,7 +340,7 @@ pub async fn login(email: String, turnstile_token: String) -> Result<LoginRespon
     }
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
-    request_confirmation_code(&pool, resend.as_ref(), email.as_str()).await
+    request_confirmation_code(&pool, resend.as_ref(), &email).await
 }
 
 #[server(ConfirmLogin, "/api")]
@@ -355,7 +361,7 @@ pub async fn confirm_login(email: String, token: String) -> Result<AuthUser, Ser
     }
 
     let pool = expect_context::<PgPool>();
-    let confirmed = confirm_login_inner(&pool, email.as_str(), &token).await?;
+    let confirmed = confirm_login_inner(&pool, &email, &token).await?;
 
     session
         .cycle_id()
@@ -393,7 +399,7 @@ struct ConfirmedLogin {
 #[tracing::instrument(skip_all)]
 pub(crate) async fn validate_confirmation_code(
     pool: &PgPool,
-    email: &str,
+    email: &crate::auth::email_addr::CanonicalEmail,
     token: &str,
 ) -> Result<LoginConfirmation, ServerFnError> {
     let invalid = || ServerFnError::new("Invalid or expired token".to_string());
@@ -401,7 +407,7 @@ pub(crate) async fn validate_confirmation_code(
     let confirmation = sqlx::query_as!(
         LoginConfirmation,
         "UPDATE login_confirmations SET attempts = attempts + 1 WHERE email = $1 RETURNING *",
-        email
+        email.as_str()
     )
     .fetch_optional(pool)
     .await
@@ -430,7 +436,7 @@ pub(crate) async fn validate_confirmation_code(
 #[tracing::instrument(skip_all)]
 async fn confirm_login_inner(
     pool: &PgPool,
-    email: &str,
+    email: &crate::auth::email_addr::CanonicalEmail,
     token: &str,
 ) -> Result<ConfirmedLogin, ServerFnError> {
     let _confirmation = validate_confirmation_code(pool, email, token).await?;
@@ -448,7 +454,7 @@ async fn confirm_login_inner(
         "SELECT id, created_at, updated_at, user_id, email, is_primary
          FROM user_emails WHERE email = $1 AND verified_at IS NOT NULL",
     )
-    .bind(email)
+    .bind(email.as_str())
     .fetch_optional(&mut *tx)
     .await
     .map_err(internal("confirm_login: look up user email"))?;
@@ -459,13 +465,13 @@ async fn confirm_login_inner(
         let pending: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM user_emails WHERE email = $1 AND verified_at IS NULL)",
         )
-        .bind(email)
+        .bind(email.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(internal("confirm_login: check pending email"))?;
         if pending {
             sqlx::query("DELETE FROM user_emails WHERE email = $1 AND verified_at IS NULL")
-                .bind(email)
+                .bind(email.as_str())
                 .execute(&mut *tx)
                 .await
                 .map_err(internal("confirm_login: delete squatted email"))?;
@@ -492,7 +498,7 @@ async fn confirm_login_inner(
              VALUES ($1, $2, true, NOW())",
         )
         .bind(new_user_id)
-        .bind(email)
+        .bind(email.as_str())
         .execute(&mut *tx)
         .await
         .map_err(internal("confirm_login: create user email"))?;
@@ -892,7 +898,7 @@ pub async fn add_email_address(email: String) -> Result<(), ServerFnError> {
     }
 
     let resend = expect_context::<Option<resend_rs::Resend>>();
-    let resp = request_confirmation_code(&pool, resend.as_ref(), email.as_str()).await?;
+    let resp = request_confirmation_code(&pool, resend.as_ref(), &email).await?;
     if !resp.success {
         return Err(ServerFnError::new(resp.message));
     }
@@ -909,7 +915,7 @@ pub async fn confirm_email_address(email: String, token: String) -> Result<(), S
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    validate_confirmation_code(&pool, email.as_str(), &token).await?;
+    validate_confirmation_code(&pool, &email, &token).await?;
 
     if !crate::db::mark_email_verified(&pool, user.id, &email)
         .await
@@ -917,7 +923,7 @@ pub async fn confirm_email_address(email: String, token: String) -> Result<(), S
     {
         return Err(ServerFnError::new("No pending address for that code"));
     }
-    crate::db::delete_login_confirmation(&pool, email.as_str())
+    crate::db::delete_login_confirmation(&pool, &email)
         .await
         .map_err(internal("confirm_email_address: delete confirmation"))?;
     Ok(())
@@ -1001,6 +1007,7 @@ pub async fn remove_email_address(email: String) -> Result<(), ServerFnError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::email_addr::canonicalize_email;
     use leptos::reactive::owner::Owner;
 
     async fn with_pool_context<F, Fut, T>(pool: &PgPool, f: F) -> T
@@ -1322,7 +1329,8 @@ mod tests {
 
     #[sqlx::test]
     async fn confirm_login_rejects_unknown_email(pool: PgPool) {
-        let result = confirm_login_inner(&pool, "nobody@example.com", "000000").await;
+        let result =
+            confirm_login_inner(&pool, &canonicalize_email("nobody@example.com"), "000000").await;
         assert!(result.is_err());
         assert_eq!(user_count(&pool).await, 0);
     }
@@ -1341,7 +1349,7 @@ mod tests {
         )
         .await;
 
-        let result = confirm_login_inner(&pool, email, "654321").await;
+        let result = confirm_login_inner(&pool, &canonicalize_email(email), "654321").await;
         assert!(result.is_err());
         let row = get_confirmation(&pool, email).await.unwrap();
         assert_eq!(row.attempts, 1);
@@ -1362,7 +1370,7 @@ mod tests {
         )
         .await;
 
-        let result = confirm_login_inner(&pool, email, "123456").await;
+        let result = confirm_login_inner(&pool, &canonicalize_email(email), "123456").await;
         assert!(result.is_err());
         assert_eq!(user_count(&pool).await, 0);
     }
@@ -1382,7 +1390,12 @@ mod tests {
 
         // Right code, but for a different email than the one the code was
         // issued to: must not succeed.
-        let result = confirm_login_inner(&pool, "someone-else@example.com", "654321").await;
+        let result = confirm_login_inner(
+            &pool,
+            &canonicalize_email("someone-else@example.com"),
+            "654321",
+        )
+        .await;
         assert!(result.is_err());
         assert_eq!(user_count(&pool).await, 0);
     }
@@ -1402,13 +1415,17 @@ mod tests {
         .await;
 
         for _ in 0..10 {
-            assert!(confirm_login_inner(&pool, email, "000000").await.is_err());
+            assert!(
+                confirm_login_inner(&pool, &canonicalize_email(email), "000000")
+                    .await
+                    .is_err()
+            );
         }
         let row = get_confirmation(&pool, email).await.unwrap();
         assert_eq!(row.attempts, 10);
 
         // Even the correct code is dead once the attempt cap is reached.
-        let result = confirm_login_inner(&pool, email, "123456").await;
+        let result = confirm_login_inner(&pool, &canonicalize_email(email), "123456").await;
         assert!(result.is_err());
         assert_eq!(user_count(&pool).await, 0);
     }
@@ -1422,7 +1439,10 @@ mod tests {
         assert_eq!(user_count(&pool).await, 0);
         let code = get_confirmation(&pool, email).await.unwrap().code;
 
-        let confirmed = confirm_login_inner(&pool, email, &code).await.unwrap();
+        let confirmed =
+            confirm_login_inner(&pool, &canonicalize_email(email), &code)
+                .await
+                .unwrap();
         assert!(
             crate::db::validate_username(&confirmed.user.name),
             "default username satisfies D2: {}",
@@ -1450,7 +1470,7 @@ mod tests {
 
         // Repeat confirm with the same (now consumed) code must fail and must
         // not create a second user.
-        let repeat = confirm_login_inner(&pool, email, &code).await;
+        let repeat = confirm_login_inner(&pool, &canonicalize_email(email), &code).await;
         assert!(repeat.is_err());
         assert_eq!(user_count(&pool).await, 1);
     }
@@ -1487,9 +1507,10 @@ mod tests {
         )
         .await;
 
-        let confirmed = confirm_login_inner(&pool, "existing@example.com", "123456")
-            .await
-            .unwrap();
+        let confirmed =
+            confirm_login_inner(&pool, &canonicalize_email("existing@example.com"), "123456")
+                .await
+                .unwrap();
         assert_eq!(confirmed.user.id, user_id, "logs in the existing user");
         assert_eq!(user_count(&pool).await, 1, "no duplicate user created");
     }
@@ -1549,9 +1570,10 @@ mod tests {
         )
         .await;
 
-        let confirmed = confirm_login_inner(&pool, "work@example.com", "123456")
-            .await
-            .unwrap();
+        let confirmed =
+            confirm_login_inner(&pool, &canonicalize_email("work@example.com"), "123456")
+                .await
+                .unwrap();
         assert_eq!(
             confirmed.user.id, user_id,
             "verified non-primary resolves to owner"
@@ -1587,9 +1609,10 @@ mod tests {
         )
         .await;
 
-        let confirmed = confirm_login_inner(&pool, "victim@example.com", "123456")
-            .await
-            .unwrap();
+        let confirmed =
+            confirm_login_inner(&pool, &canonicalize_email("victim@example.com"), "123456")
+                .await
+                .unwrap();
         assert_ne!(
             confirmed.user.id, squatter_id,
             "new user created, not the squatter"
@@ -1632,7 +1655,8 @@ mod tests {
         )
         .await;
 
-        let calls = (0..15).map(|_| confirm_login_inner(&pool, email, "000000"));
+        let canonical = canonicalize_email(email);
+        let calls = (0..15).map(|_| confirm_login_inner(&pool, &canonical, "000000"));
         let results = futures_util::future::join_all(calls).await;
         for r in &results {
             assert!(r.is_err());
@@ -1644,7 +1668,7 @@ mod tests {
             "cap must have been reached: got {}",
             row.attempts
         );
-        let correct = confirm_login_inner(&pool, email, "123456").await;
+        let correct = confirm_login_inner(&pool, &canonical, "123456").await;
         assert!(
             correct.is_err(),
             "correct code must be rejected once cap is reached"
@@ -1665,7 +1689,7 @@ mod tests {
         )
         .await;
 
-        let result = confirm_login_inner(&pool, email, "123456").await;
+        let result = confirm_login_inner(&pool, &canonicalize_email(email), "123456").await;
         assert!(
             result.is_ok(),
             "10th attempt (attempts=9 -> 10) must succeed with correct code"
@@ -1686,7 +1710,7 @@ mod tests {
         )
         .await;
 
-        let result = confirm_login_inner(&pool, email, "123456").await;
+        let result = confirm_login_inner(&pool, &canonicalize_email(email), "123456").await;
         assert!(
             result.is_err(),
             "11th attempt (attempts=10 -> 11) must be rejected"
@@ -1764,9 +1788,10 @@ mod tests {
                 .unwrap();
         }
 
-        let resp = request_confirmation_code(&pool, None, "victim@example.com")
-            .await
-            .unwrap();
+        let resp =
+            request_confirmation_code(&pool, None, &canonicalize_email("victim@example.com"))
+                .await
+                .unwrap();
         assert!(!resp.success);
         assert!(resp.message.contains("temporarily limited"));
     }

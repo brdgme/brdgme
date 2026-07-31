@@ -253,9 +253,12 @@ pub async fn delete_old_processed_webhook_events(
 }
 
 #[cfg(feature = "ssr")]
-pub async fn delete_login_confirmation(pool: &PgPool, email: &str) -> Result<()> {
+pub async fn delete_login_confirmation(
+    pool: &PgPool,
+    email: &crate::auth::email_addr::CanonicalEmail,
+) -> Result<()> {
     sqlx::query("DELETE FROM login_confirmations WHERE email = $1")
-        .bind(email)
+        .bind(email.as_str())
         .execute(pool)
         .await
         .map_err(Into::into)
@@ -263,9 +266,12 @@ pub async fn delete_login_confirmation(pool: &PgPool, email: &str) -> Result<()>
 }
 
 #[cfg(feature = "ssr")]
-pub async fn delete_login_confirmation_tx(tx: &mut sqlx::PgConnection, email: &str) -> Result<()> {
+pub async fn delete_login_confirmation_tx(
+    tx: &mut sqlx::PgConnection,
+    email: &crate::auth::email_addr::CanonicalEmail,
+) -> Result<()> {
     sqlx::query("DELETE FROM login_confirmations WHERE email = $1")
-        .bind(email)
+        .bind(email.as_str())
         .execute(&mut *tx)
         .await
         .map_err(Into::into)

@@ -3895,4 +3895,204 @@ mod tests {
             .unwrap();
         assert_eq!(users_after, users_before);
     }
+
+    /// Runs `f` with the full context the `#[server] add_proposal_player` fn
+    /// pulls via `expect_context` / `require_user`: the `PgPool`, a NATS-backed
+    /// `GameBroadcaster`, the `Option<Resend>` mailer context, and a
+    /// tower-sessions `Session` (placed in the `axum` request `Parts` that
+    /// `leptos_axum::extract` reads) logged in as `session_user`. This lets a
+    /// `#[sqlx::test]` call the literal server fn rather than a helper.
+    async fn with_logged_in_context<F, Fut, T>(
+        pool: &PgPool,
+        session_user: crate::auth::session::SessionUser,
+        f: F,
+    ) -> T
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        use crate::auth::session::SESSION_USER_KEY;
+        use crate::websocket::GameBroadcaster;
+        use leptos::reactive::owner::Owner;
+        use std::sync::Arc;
+        use tower_sessions::{MemoryStore, Session};
+
+        let session = Session::new(None, Arc::new(MemoryStore::default()), None);
+        session.insert(SESSION_USER_KEY, session_user).await.unwrap();
+        let (mut parts, _) = axum::http::Request::new(()).into_parts();
+        parts.extensions.insert(session);
+
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let client = async_nats::connect(&nats_url).await.unwrap();
+        let broadcaster = GameBroadcaster::new(client);
+
+        let owner = Owner::new();
+        owner.with(|| {
+            provide_context(pool.clone());
+            provide_context(broadcaster);
+            provide_context(None::<resend_rs::Resend>);
+            provide_context(parts);
+        });
+        owner
+            .with(|| leptos::reactive::computed::ScopedFuture::new(f()))
+            .await
+    }
+
+    /// AC3 (literal): drive the actual `#[server] add_proposal_player` with raw,
+    /// non-canonical, and empty email inputs and prove no verified ghost account
+    /// is minted for any of them.
+    #[sqlx::test]
+    async fn add_proposal_player_server_fn_creates_no_ghost_account(pool: PgPool) {
+        // The logged-in proposal owner (the session user).
+        let owner_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("proposal_owner")
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(owner_id)
+        .bind("owner@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let auth_token_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(auth_token_id)
+            .bind(owner_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Pre-existing canonical accounts the invites must resolve to.
+        let foo_owner_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("foo_owner")
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(foo_owner_id)
+        .bind("foo@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let bar_owner_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("bar_owner")
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(bar_owner_id)
+        .bind("bar@x.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let gv = seed_game_version(&pool).await;
+        let proposal_id = seed_proposal(&pool, gv, owner_id).await;
+
+        let users_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let noncanon_before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_emails WHERE email <> lower(btrim(email))",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let session_user = crate::auth::session::SessionUser {
+            id: owner_id,
+            name: "proposal_owner".to_string(),
+            email: "owner@x.com".to_string(),
+            auth_token_id,
+        };
+
+        // Raw input (surrounding spaces + mixed case) resolves to the existing
+        // owner instead of minting a ghost account.
+        with_logged_in_context(&pool, session_user.clone(), || {
+            add_proposal_player(proposal_id, None, Some(" Foo@x.com ".to_string()), None)
+        })
+        .await
+        .unwrap();
+
+        // A non-canonical case variant resolves to the existing owner too.
+        with_logged_in_context(&pool, session_user.clone(), || {
+            add_proposal_player(proposal_id, None, Some("BAR@x.com".to_string()), None)
+        })
+        .await
+        .unwrap();
+
+        // Empty and whitespace-only inputs are rejected before any account is
+        // touched.
+        assert!(
+            with_logged_in_context(&pool, session_user.clone(), || {
+                add_proposal_player(proposal_id, None, Some(String::new()), None)
+            })
+            .await
+            .is_err(),
+            "empty email must be rejected"
+        );
+        assert!(
+            with_logged_in_context(&pool, session_user.clone(), || {
+                add_proposal_player(proposal_id, None, Some("   ".to_string()), None)
+            })
+            .await
+            .is_err(),
+            "whitespace-only email must be rejected"
+        );
+
+        let users_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(users_after, users_before, "no ghost account may be minted");
+
+        let noncanon_after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_emails WHERE email <> lower(btrim(email))",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            noncanon_after, noncanon_before,
+            "no non-canonical email row may be stored"
+        );
+
+        // The invites resolved to the pre-existing owners (exactly one verified
+        // row each), not to newly created verified accounts.
+        let foo_verified: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_emails WHERE email = 'foo@x.com' AND verified_at IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(foo_verified, 1, "foo@x.com stays a single verified row");
+        let bar_verified: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_emails WHERE email = 'bar@x.com' AND verified_at IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(bar_verified, 1, "bar@x.com stays a single verified row");
+    }
 }
