@@ -226,7 +226,9 @@ pub trait InboundEmailSource: Send + Sync {
 }
 
 pub struct ResendInbound {
-    pub api_key: String,
+    /// `None` (or empty) when `RESEND_API_KEY` is unset; the fetch then fails at
+    /// call time (see `fetch_raw_email`), preserving lookup-first behavior.
+    pub api_key: Option<String>,
     pub http: reqwest::Client,
 }
 
@@ -243,11 +245,16 @@ struct ResendRaw {
 #[async_trait::async_trait]
 impl InboundEmailSource for ResendInbound {
     async fn fetch_raw_email(&self, email_id: &str) -> anyhow::Result<String> {
+        let api_key = self
+            .api_key
+            .as_deref()
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("RESEND_API_KEY not configured"))?;
         let url = format!("https://api.resend.com/emails/receiving/{email_id}");
         let resp: ResendEmailResponse = self
             .http
             .get(&url)
-            .bearer_auth(&self.api_key)
+            .bearer_auth(api_key)
             .send()
             .await?
             .error_for_status()?
@@ -643,18 +650,26 @@ pub async fn resend_webhook(
     };
 
     let start = std::time::Instant::now();
+    // The inbound fetch seam is a local route dependency: production builds
+    // `ResendInbound` here (tests pass `StaticInbound` to the handlers directly).
+    // A missing/empty `RESEND_API_KEY` stays a fetch-time error (lookup-first).
+    let source = ResendInbound {
+        api_key: std::env::var("RESEND_API_KEY").ok(),
+        http: state.http_client.clone(),
+    };
     let outcome = match select_route(&event.data.to, &event.data.received_for) {
         Some(InboundRoute::Game(token)) => {
-            handle_game_reply(&state, &token, &from, &event.data.email_id).await
+            handle_game_reply(&state, &source, &token, &from, &event.data.email_id).await
         }
         Some(InboundRoute::Invite(token)) => {
-            handle_invite_reply(&state, &token, &from, &event.data.email_id).await
+            handle_invite_reply(&state, &source, &token, &from, &event.data.email_id).await
         }
         Some(InboundRoute::Settings(token)) => {
-            handle_settings_reply_route(&state, &token, &from, &event.data.email_id).await
+            handle_settings_reply_route(&state, &source, &token, &from, &event.data.email_id).await
         }
         None => {
             tracing::info!("resend webhook: no route for recipient; ignoring");
+            // Non-transient: the recipient routes to no handler; nothing to retry.
             RouteOutcome::Done
         }
     };
@@ -663,6 +678,7 @@ pub async fn resend_webhook(
         tracing::warn!("resend webhook: dispatch took {elapsed:?} (>10s); consider option C");
     }
     match outcome {
+        // Done: finished (success or permanent failure); mark processed, return 200.
         RouteOutcome::Done => {
             if let Err(e) = mark_event_processed(&state.pool, &msg_id).await {
                 tracing::error!("resend webhook: failed to mark event processed: {e}");
@@ -685,18 +701,15 @@ enum InboundText {
     AuthFailed,
 }
 
-/// Fetches an inbound email's raw MIME source from Resend. The single place the
-/// inbound direction reads `RESEND_API_KEY` and performs the fetch; this block
-/// used to be duplicated verbatim in all three routes (wfe F9).
-async fn fetch_inbound_raw(state: &AppState, email_id: &str) -> anyhow::Result<String> {
-    let api_key = std::env::var("RESEND_API_KEY")
-        .ok()
-        .filter(|k| !k.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("RESEND_API_KEY not configured"))?;
-    let source = ResendInbound {
-        api_key,
-        http: state.http_client.clone(),
-    };
+/// Fetches an inbound email's raw MIME source via the injected
+/// [`InboundEmailSource`]. The single place the inbound direction performs the
+/// fetch; this block used to be duplicated verbatim in all three routes (wfe F9).
+/// The source is built once at the `resend_webhook` dispatch boundary
+/// (`ResendInbound` in production; tests pass `StaticInbound` to the handlers).
+async fn fetch_inbound_raw(
+    source: &dyn InboundEmailSource,
+    email_id: &str,
+) -> anyhow::Result<String> {
     source.fetch_raw_email(email_id).await
 }
 
@@ -705,8 +718,12 @@ async fn fetch_inbound_raw(state: &AppState, email_id: &str) -> anyhow::Result<S
 /// raw MIME once (wfe F9 single fetch), runs SPF/DKIM auth classification, and
 /// extracts the plain-text body. `FetchFailed` is transient (handler retries);
 /// `AuthFailed` is a permanent drop (handler returns Done, no reply).
-async fn fetch_inbound_text(state: &AppState, from: &str, email_id: &str) -> InboundText {
-    let raw = match fetch_inbound_raw(state, email_id).await {
+async fn fetch_inbound_text(
+    source: &dyn InboundEmailSource,
+    from: &str,
+    email_id: &str,
+) -> InboundText {
+    let raw = match fetch_inbound_raw(source, email_id).await {
         Ok(raw) => raw,
         Err(e) => {
             tracing::error!("resend webhook: failed to fetch raw email {email_id}: {e}");
@@ -748,8 +765,20 @@ enum RouteOutcome {
     Retry,
 }
 
+/// Maps a transient (retryable) failure to `RouteOutcome::Retry`, logging it.
+/// The single named contract shared by the invite (F-162) and settings (F-169)
+/// routes for every error that occurs BEFORE any state mutation is committed:
+/// the webhook then returns 5xx so svix retries (at-least-once, D-2). Errors
+/// that are not transient (missing data, auth, commit) stay `RouteOutcome::Done`
+/// and carry their own justifying comment at the site.
+fn transient_failure(e: impl std::fmt::Display, ctx: &str) -> RouteOutcome {
+    tracing::error!("resend webhook: {ctx}: {e}");
+    RouteOutcome::Retry
+}
+
 async fn handle_game_reply(
     state: &AppState,
+    source: &dyn InboundEmailSource,
     token: &str,
     from: &str,
     email_id: &str,
@@ -760,6 +789,7 @@ async fn handle_game_reply(
         Ok(Some(p)) => p,
         Ok(None) => {
             tracing::info!("resend webhook: unknown game token; no response");
+            // Non-transient: unknown game token; retrying cannot resolve it.
             return RouteOutcome::Done;
         }
         Err(e) => {
@@ -772,6 +802,7 @@ async fn handle_game_reply(
         Ok(true) => {}
         Ok(false) => {
             tracing::info!("resend webhook: From does not match a verified address; no response");
+            // Non-transient: From is not a verified address for this player.
             return RouteOutcome::Done;
         }
         Err(e) => {
@@ -780,11 +811,13 @@ async fn handle_game_reply(
         }
     }
 
-    let text = match fetch_inbound_text(state, from, email_id).await {
+    let text = match fetch_inbound_text(source, from, email_id).await {
         InboundText::FetchFailed => return RouteOutcome::Retry,
+        // Non-transient: inbound SPF/DKIM auth failed; permanent drop, no reply.
         InboundText::AuthFailed => return RouteOutcome::Done,
         InboundText::NoBody => {
             send_game_reply_response(state, &player, token, from, no_command_header_text()).await;
+            // Non-transient: no text body; no-command reply already sent.
             return RouteOutcome::Done;
         }
         InboundText::Text(text) => text,
@@ -793,6 +826,7 @@ async fn handle_game_reply(
 
     if commands.is_empty() {
         send_game_reply_response(state, &player, token, from, no_command_header_text()).await;
+        // Non-transient: no commands parsed; no-command reply already sent.
         return RouteOutcome::Done;
     }
 
@@ -841,11 +875,13 @@ async fn handle_game_reply(
             send_game_reply_response(state, &player, token, from, header).await;
         }
     }
+    // Non-transient: commands processed and the response email was sent.
     RouteOutcome::Done
 }
 
 async fn handle_invite_reply(
     state: &AppState,
+    source: &dyn InboundEmailSource,
     token: &str,
     from: &str,
     email_id: &str,
@@ -856,6 +892,7 @@ async fn handle_invite_reply(
         Ok(Some(p)) => p,
         Ok(None) => {
             tracing::info!("resend webhook: unknown invite token; no response");
+            // Non-transient: unknown invite token; retrying cannot resolve it.
             return RouteOutcome::Done;
         }
         Err(e) => {
@@ -866,6 +903,7 @@ async fn handle_invite_reply(
 
     let Some(user_id) = player.user_id else {
         tracing::info!("resend webhook: invite token belongs to a bot slot; no response");
+        // Non-transient: token belongs to a bot slot; no human response possible.
         return RouteOutcome::Done;
     };
 
@@ -875,6 +913,7 @@ async fn handle_invite_reply(
             tracing::info!(
                 "resend webhook: invite From does not match a verified address; no response"
             );
+            // Non-transient: From is not a verified address for this user.
             return RouteOutcome::Done;
         }
         Err(e) => {
@@ -883,8 +922,9 @@ async fn handle_invite_reply(
         }
     }
 
-    let text = match fetch_inbound_text(state, from, email_id).await {
+    let text = match fetch_inbound_text(source, from, email_id).await {
         InboundText::FetchFailed => return RouteOutcome::Retry,
+        // Non-transient: inbound SPF/DKIM auth failed; permanent drop, no reply.
         InboundText::AuthFailed => return RouteOutcome::Done,
         InboundText::NoBody => {
             send_invite_reply_response(
@@ -896,6 +936,7 @@ async fn handle_invite_reply(
                 None,
             )
             .await;
+            // Non-transient: no text body; no-command reply already sent.
             return RouteOutcome::Done;
         }
         InboundText::Text(text) => text,
@@ -914,6 +955,7 @@ async fn handle_invite_reply(
             None,
         )
         .await;
+        // Non-transient: no accept/decline intent; no-command reply already sent.
         return RouteOutcome::Done;
     };
     let accept = intent == InviteIntent::Accept;
@@ -931,6 +973,7 @@ async fn handle_invite_reply(
         Ok(Some(p)) => p,
         Ok(None) => {
             tracing::warn!("resend webhook: proposal {proposal_id} not found");
+            // Non-transient: the proposal no longer exists; nothing to retry.
             return RouteOutcome::Done;
         }
         Err(e) => {
@@ -950,6 +993,7 @@ async fn handle_invite_reply(
             None,
         )
         .await;
+        // Non-transient: the proposal is no longer open; reply already sent.
         return RouteOutcome::Done;
     }
 
@@ -969,6 +1013,7 @@ async fn handle_invite_reply(
                 player.id
             );
             rollback_invite_tx(tx, "invite player not in roster").await;
+            // Non-transient: the token's player is not in the roster; no response.
             return RouteOutcome::Done;
         }
     };
@@ -984,6 +1029,7 @@ async fn handle_invite_reply(
             None,
         )
         .await;
+        // Non-transient: the invite was already responded to; reply already sent.
         return RouteOutcome::Done;
     }
 
@@ -991,8 +1037,7 @@ async fn handle_invite_reply(
     if let Err(e) =
         crate::proposals::update_proposal_player_response(&mut tx, player.id, response).await
     {
-        tracing::error!("resend webhook: invite update response failed: {e}");
-        return RouteOutcome::Done;
+        return transient_failure(e, "invite update response failed");
     }
 
     let mut started_game_id: Option<uuid::Uuid> = None;
@@ -1002,10 +1047,7 @@ async fn handle_invite_reply(
         let pending =
             match crate::proposals::count_pending_human_invitees_tx(&mut tx, proposal_id).await {
                 Ok(n) => n,
-                Err(e) => {
-                    tracing::error!("resend webhook: invite count pending failed: {e}");
-                    return RouteOutcome::Done;
-                }
+                Err(e) => return transient_failure(e, "invite count pending failed"),
             };
         if pending == 0 {
             let game_version =
@@ -1013,19 +1055,15 @@ async fn handle_invite_reply(
                     Ok(Some(gv)) => gv,
                     Ok(None) => {
                         tracing::error!("resend webhook: game version not found for proposal");
+                        // Non-transient: the game version is genuinely missing; retrying
+                        // cannot create it, so finish without starting a game.
                         return RouteOutcome::Done;
                     }
-                    Err(e) => {
-                        tracing::error!("resend webhook: invite game version lookup failed: {e}");
-                        return RouteOutcome::Done;
-                    }
+                    Err(e) => return transient_failure(e, "invite game version lookup failed"),
                 };
             roster = match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
                 Ok(p) => p,
-                Err(e) => {
-                    tracing::error!("resend webhook: invite roster lookup failed: {e}");
-                    return RouteOutcome::Done;
-                }
+                Err(e) => return transient_failure(e, "invite roster lookup failed"),
             };
             let accepted_count = roster.iter().filter(|p| p.response == "accepted").count();
             let fetched = match crate::game::server_fns::fetch_game_from_service(
@@ -1036,10 +1074,7 @@ async fn handle_invite_reply(
             .await
             {
                 Ok(f) => f,
-                Err(e) => {
-                    tracing::error!("resend webhook: invite fetch game failed: {e}");
-                    return RouteOutcome::Done;
-                }
+                Err(e) => return transient_failure(e, "invite fetch game failed"),
             };
             match crate::proposals::start_proposal_tx(
                 &mut tx,
@@ -1051,16 +1086,15 @@ async fn handle_invite_reply(
             .await
             {
                 Ok(gid) => started_game_id = Some(gid),
-                Err(e) => {
-                    tracing::error!("resend webhook: invite start proposal failed: {e}");
-                    return RouteOutcome::Done;
-                }
+                Err(e) => return transient_failure(e, "invite start proposal failed"),
             }
         }
     }
 
     if let Err(e) = tx.commit().await {
         tracing::error!("resend webhook: invite commit failed: {e}");
+        // Non-transient for retry: the commit may have persisted the mutation, so
+        // an at-least-once retry could double-apply it; finish Done.
         return RouteOutcome::Done;
     }
 
@@ -1107,6 +1141,7 @@ async fn handle_invite_reply(
     };
 
     send_invite_reply_response(state, &player, user_id, from, header, started_game_id).await;
+    // Non-transient: response recorded (and game started if applicable); reply sent.
     RouteOutcome::Done
 }
 
@@ -1390,33 +1425,38 @@ async fn send_rules_reply_response(
 
 async fn handle_settings_reply_route(
     state: &AppState,
+    source: &dyn InboundEmailSource,
     token: &str,
     from: &str,
     email_id: &str,
 ) -> RouteOutcome {
-    let text = match fetch_inbound_text(state, from, email_id).await {
+    let text = match fetch_inbound_text(source, from, email_id).await {
         InboundText::FetchFailed => return RouteOutcome::Retry,
+        // Non-transient: inbound SPF/DKIM auth failed; permanent drop, no reply.
         InboundText::AuthFailed => return RouteOutcome::Done,
+        // Non-transient: no text body to act on.
         InboundText::NoBody => return RouteOutcome::Done,
         InboundText::Text(text) => text,
     };
-    handle_settings_reply(state, token, from, &text).await;
-    RouteOutcome::Done
+    handle_settings_reply(state, token, from, &text).await
 }
 
 /// Rate limiting on this path depends on R-37 (no rate-limiting middleware
 /// exists in rust/web yet - F-94).
-async fn handle_settings_reply(state: &AppState, token: &str, from: &str, text: &str) {
+async fn handle_settings_reply(
+    state: &AppState,
+    token: &str,
+    from: &str,
+    text: &str,
+) -> RouteOutcome {
     let user_id = match find_user_by_settings_token(&state.pool, token).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             tracing::info!("resend webhook: settings reply with unknown token; no response");
-            return;
+            // Non-transient: unknown, expired, or already-used settings token.
+            return RouteOutcome::Done;
         }
-        Err(e) => {
-            tracing::error!("resend webhook: settings token lookup failed: {e}");
-            return;
-        }
+        Err(e) => return transient_failure(e, "settings token lookup failed"),
     };
 
     match from_matches_verified_email(&state.pool, user_id, from).await {
@@ -1425,12 +1465,10 @@ async fn handle_settings_reply(state: &AppState, token: &str, from: &str, text: 
             tracing::info!(
                 "resend webhook: settings From does not match a verified address; no response"
             );
-            return;
+            // Non-transient: From is not a verified address for this user.
+            return RouteOutcome::Done;
         }
-        Err(e) => {
-            tracing::error!("resend webhook: settings From verification failed: {e}");
-            return;
-        }
+        Err(e) => return transient_failure(e, "settings From verification failed"),
     }
 
     let commands = parse_reply_commands(text);
@@ -1444,7 +1482,8 @@ async fn handle_settings_reply(state: &AppState, token: &str, from: &str, text: 
             no_command_header_text(),
         )
         .await;
-        return;
+        // Non-transient: no commands; no-command response already sent.
+        return RouteOutcome::Done;
     }
 
     let sctx = crate::email::commands::StandaloneCommandCtx {
@@ -1480,6 +1519,8 @@ async fn handle_settings_reply(state: &AppState, token: &str, from: &str, text: 
 
     let header = settings_response_header(error_header, last_status);
     send_settings_response(&state.pool, state.resend.as_ref(), user_id, from, header).await;
+    // Non-transient: settings commands processed; response already sent.
+    RouteOutcome::Done
 }
 
 async fn send_settings_response(
@@ -2600,6 +2641,184 @@ body\r\n";
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    // ---- R-09 (F-162, F-169): the at-least-once `RouteOutcome::Retry` contract.
+    //
+    // These call the route handlers directly and inject a transient DB error,
+    // asserting `Retry`. The inbound fetch is satisfied without a live Resend
+    // API by passing a `StaticInbound` as the handlers' `&dyn InboundEmailSource`
+    // argument (the production seam is `ResendInbound`, built at the
+    // `resend_webhook` dispatch boundary; no `AppState` field is involved).
+    //   * F-169: `handle_settings_reply` returns `RouteOutcome` (both `Err`
+    //     lookup arms map to `Retry` via `transient_failure`), and
+    //     `handle_settings_reply_route` propagates it instead of returning
+    //     `Done` unconditionally.
+    //   * F-162: the in-tx transient errors before `tx.commit()` in
+    //     `handle_invite_reply` map to `Retry` via `transient_failure`.
+    //
+    // Like `tests/inbound_webhook.rs`, these build a full `AppState`, so they
+    // need a running NATS (provided by scripts/rust-test.sh / CI) in addition
+    // to Postgres.
+
+    async fn make_inbound_test_state(pool: sqlx::PgPool) -> crate::state::AppState {
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats_client = async_nats::connect(&nats_url).await.expect("nats connect");
+        let jetstream = async_nats::jetstream::new(nats_client.clone());
+        let broadcaster = crate::websocket::GameBroadcaster::new(nats_client);
+        crate::state::AppState {
+            leptos_options: leptos::config::LeptosOptions::builder()
+                .output_name("web")
+                .build(),
+            pool,
+            broadcaster,
+            http_client: reqwest::Client::new(),
+            resend: None,
+            jetstream,
+        }
+    }
+
+    // A pool to the same (sqlx::test temp) database with a short lock_timeout,
+    // so one contended statement fails fast with a transient lock-timeout error
+    // while every uncontended statement still succeeds.
+    async fn pool_with_lock_timeout(base: &sqlx::PgPool) -> sqlx::PgPool {
+        sqlx::postgres::PgPoolOptions::new()
+            .after_connect(|conn, _| {
+                Box::pin(async move {
+                    sqlx::query("SET lock_timeout = '100ms'")
+                        .execute(&mut *conn)
+                        .await
+                        .map(|_| ())
+                })
+            })
+            .connect_with((*base.connect_options()).clone())
+            .await
+            .expect("connect lock-timeout pool")
+    }
+
+    #[sqlx::test]
+    async fn settings_route_transient_db_error_is_retry(pool: sqlx::PgPool) {
+        // F-169: a transient DB error on the settings route's token lookup must
+        // be Retry, not Done. The StaticInbound seam satisfies the inbound
+        // fetch; closing the pool then makes the first DB call
+        // (find_user_by_settings_token) error, simulating transient DB
+        // unavailability before any state mutation. The route entry
+        // (handle_settings_reply_route) must propagate that as Retry instead of
+        // returning Done unconditionally.
+        let email_id = "em_settings_retry";
+        let raw = "Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=brdg.me\r\n\
+                   MIME-Version: 1.0\r\n\
+                   Content-Type: text/plain; charset=utf-8\r\n\
+                   \r\n\
+                   theme dracula\r\n";
+        let mut emails = std::collections::HashMap::new();
+        emails.insert(email_id.to_string(), raw.to_string());
+        let source = StaticInbound(emails);
+        let state = make_inbound_test_state(pool.clone()).await;
+        state.pool.close().await;
+
+        let outcome = handle_settings_reply_route(
+            &state,
+            &source,
+            "settings-token",
+            "user@brdg.me",
+            email_id,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, RouteOutcome::Retry),
+            "transient DB error on the settings token lookup must be Retry, not Done (F-169)"
+        );
+    }
+
+    #[sqlx::test]
+    async fn invite_route_transient_db_error_is_retry(pool: sqlx::PgPool) {
+        // F-162: a transient DB error inside the invite transaction (before
+        // commit) must be Retry, not Done. Drive handle_invite_reply to its
+        // first in-tx write (update_proposal_player_response) and fail only
+        // that statement with a lock timeout, so every earlier step succeeds.
+        let user_id = seed_user(&pool, "invite-reply-user").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("invitee@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Invite Game {}", uuid::Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let game_version_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) \
+             VALUES ($1, '1.0.0', 'http://localhost:0/mock', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let owner_id = seed_user(&pool, "invite-owner").await;
+        let proposal_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status) \
+             VALUES ($1, $2, 'open') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(owner_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let token = "invite-tok-retry";
+        let player_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposal_players \
+              (proposal_id, \"position\", user_id, response, email_token) \
+             VALUES ($1, 1, $2, 'pending', $3) RETURNING id",
+        )
+        .bind(proposal_id)
+        .bind(user_id)
+        .bind(token)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        // Inbound fetch satisfied by the StaticInbound seam: a raw MIME that
+        // classifies SPF pass and extracts the body "decline".
+        let email_id = "em_invite_retry";
+        let raw = "Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=brdg.me\r\n\
+                   MIME-Version: 1.0\r\n\
+                   Content-Type: text/plain; charset=utf-8\r\n\
+                   \r\n\
+                   decline\r\n";
+        let mut emails = std::collections::HashMap::new();
+        emails.insert(email_id.to_string(), raw.to_string());
+        let source = StaticInbound(emails);
+        let handler_pool = pool_with_lock_timeout(&pool).await;
+        let state = make_inbound_test_state(handler_pool).await;
+
+        // Hold a FOR UPDATE lock on the player row from a second connection so
+        // the handler's in-tx UPDATE times out (a transient DB error) while the
+        // preceding uncontended lookups succeed.
+        let mut blocker = pool.begin().await.unwrap();
+        sqlx::query("SELECT id FROM game_proposal_players WHERE id = $1 FOR UPDATE")
+            .bind(player_id)
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+
+        let outcome =
+            handle_invite_reply(&state, &source, token, "invitee@brdg.me", email_id).await;
+
+        drop(blocker);
+        assert!(
+            matches!(outcome, RouteOutcome::Retry),
+            "transient DB error inside the invite transaction must be Retry, not Done (F-162)"
         );
     }
 }
