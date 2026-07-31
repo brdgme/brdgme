@@ -32,7 +32,7 @@ restored per owner instruction.)
 | R-07 | blocked(prod Kubernetes API unreachable) | 1e19d05f0506aa6e92cc16764d4f8c2f148eb022 (impl HEAD pre-tracker) | production Kubernetes API connectivity failure (TLS handshake EOF) before backup and mutation; Backup postgres-pre-repair-r07-20260801-01 not applied; no database action |
 | R-08 | done(899814f) | 899814f7528d719b2b46131e74129520b52f30ed | AC1 explicit exhaustive named matches (no wildcard); AC2 and AC3 persistence-mark tests; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with only two non-blocking Minor notes |
 | R-09 | done(61f9f4e) | 61f9f4eee5af657b108a11e5722155f82d4260c8 | AC1 single named contract `transient_failure` called by both routes; literal-Done grep 26 constructions commented (two non-constructions: match arm, doc prose); AC2 invite lock-timeout DB-error test asserts Retry; AC3 settings closed-pool DB-error test asserts Retry; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with two non-blocking Minor notes |
-| R-10 | pending | | |
+| R-10 | done(a9ea19d) | a9ea19d5e9f4640b8d6cafe64068fbcbbbe6cf3c | AC1 30s periodic session re-validation arm + revocation test; AC2 per-connection CancellationToken on SseStream::Drop + idle gauge-drop test; AC3 public handler per-id subscribe (no game.>) + VisibilityCache + subsz test; AC4 F-163 #[ignore] removed, #[serial] added; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned; needs Postgres/NATS); comprehensive review ACCEPT, no Critical/Important findings |
 | R-11 | pending | | implement ws F55 second half (owner ruling) |
 | R-12 | pending | | |
 | R-13 | pending | | |
@@ -172,3 +172,64 @@ Code commit `61f9f4eee5af657b108a11e5722155f82d4260c8` (only tracked change:
   non-blocking notes (settings command-dispatch `Internal` error stays `Done`,
   pre-existing/out-of-scope; runtime behavior of the two tests unverified, a
   disclosed limitation for CI to confirm).
+
+## R-10 evidence
+
+Code commit `a9ea19d5e9f4640b8d6cafe64068fbcbbbe6cf3c` (verified via
+`git rev-parse`; tracked changes only: `rust/web/src/events.rs` production,
+`rust/web/tests/sse_events.rs` tests).
+
+- **Closes:** F-158 (session re-validation), F-159 (task/subscription leak),
+  F-160 (public firehose + uncached query, in-scope halves), F-131 (concretised
+  as F-158), F-163 (`#[ignore]`d regression test).
+- **AC1 (F-158):** production adds a guarded 30s `interval` re-validation arm
+  (`events.rs:102-103,145-152`) that re-runs `validate_session_token` and breaks
+  the loop unless `Ok(true)`; period matches the `VisibilityCache` TTL and is
+  under the 45s AC bound; anonymous connections skip it (guard
+  `auth_token_id.is_some()`). Test `auth_stream_terminates_after_token_revocation`
+  (`sse_events.rs:668-739`) drives the real handler, asserts a frame arrives,
+  revokes via `invalidate_auth_token`, asserts termination within 45s.
+- **AC2 (F-159):** production wraps the response in `SseStream` whose `Drop`
+  fires a per-connection `CancellationToken` (`events.rs:42-59`); both loops add
+  a `task_disconnected.cancelled()` select arm (`events.rs:153-155,240-242`), so
+  an idle/no-event stream wakes and breaks on disconnect, dropping the task, the
+  NATS subscription(s), and decrementing the gauge. Test
+  `idle_anonymous_connection_releases_task_on_disconnect`
+  (`sse_events.rs:750-792`) drops the client and asserts the `sse_connections`
+  gauge falls within 10s.
+- **AC3 (F-160):** public handler now subscribes per-id `game.{id}` via
+  `select_all` and never `game.>` (`events.rs:204-214`), and routes the
+  visibility check through a per-task `VisibilityCache` (`events.rs:216,234`),
+  mirroring the auth handler. Test
+  `public_handler_subscribes_per_game_not_firehose` (`sse_events.rs:803-834`)
+  reads NATS `subsz?subs=1` and asserts `game.{A}` present, `game.>` absent.
+- **AC4 (F-163):** `#[ignore]` removed (grep for `ignore` in `sse_events.rs`
+  returns nothing); `sse_stream_survives_past_request_timeout_with_keepalive`
+  now `#[sqlx::test] #[serial]` with unchanged 32s body
+  (`sse_events.rs:551-595`), reachable in CI (tooth 2 restored).
+- **Auth-vs-public handler difference justification (AC3):** the full exhaustive
+  per-row difference table with justifications is in
+  `docs/reviews/r-10-comprehensive-review.md` §4. Categories covered: session
+  extraction, viewer/token resolution, game subscription, proposal subscription,
+  visibility cache, game visibility predicate, topic filtering, topic cap,
+  session re-validation, disconnect detection, shutdown observation, gauge guard,
+  return type, KeepAlive, and rate limiting. The two previously unjustified rows
+  (public `game.>` firehose, public missing cache) are now resolved; all
+  surviving differences are by-design auth-vs-public semantics or correct
+  predicate/return-type distinctions.
+- **Runtime:** the new tests are compile-verified only; runtime web tests
+  deferred to CI by explicit ban (web build/test/run forbidden) and because they
+  need Postgres and NATS (with `-m 8222` monitoring), unavailable in a plain
+  local run (AGENTS.md; BACKLOG #40).
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0 (one pre-existing `proc-macro-error2`
+  future-incompat warning, unrelated; nothing from `events.rs`/`sse_events.rs`).
+- **Review:** comprehensive independent review
+  (`docs/reviews/r-10-comprehensive-review.md`) verdict ACCEPT; no Critical or
+  Important findings; four Minor observations and two test-reliability residual
+  risks, all non-blocking (intended behaviour or disclosed/deferred to CI).
+- **Out of scope / unchanged:** F-94 rate limiting deferred (R-37/edge), not
+  added; F-123 (`VisibilityCache` cross-user leak) remains refuted (each cache is
+  a per-task local: `events.rs:101` auth, `events.rs:216` public); no
+  `TaskTracker` added - the spawns are unchanged in shape so R-11 can still
+  register them (R-11 intentionally untouched).
