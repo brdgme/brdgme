@@ -89,19 +89,34 @@ pub async fn ensure_stream_and_consumers(js: &async_nats::jetstream::Context) ->
         name: STREAM_NAME.to_string(),
         subjects: vec!["bot.>".to_string()],
         retention: stream::RetentionPolicy::WorkQueue,
+        // JetStream dedup window for `Nats-Msg-Id` (set on `bot.turn`
+        // publishes): collapses rapid re-publishes of the same turn state -
+        // broadcast races, and the conflict/user-error re-publish that lands
+        // within 120s (R-15 / F-105). The 15-minute reconciliation sweep is a
+        // deliberate retry and is intentionally outside this window; a real
+        // turn change bumps `updated_at` (and a retry bumps `attempt`), so
+        // neither is suppressed by the window.
+        duplicate_window: Duration::from_secs(120),
         ..Default::default()
     };
+    // `create_stream` (not `get_or_create_stream`): on the deployed NATS 2.11
+    // server it reconciles an existing stream's config in place, so code
+    // changes (e.g. the duplicate window above) are applied at startup rather
+    // than silently ignored on a pre-existing stream (R-15 / F-102).
     let stream = js
-        .get_or_create_stream(desired_stream.clone())
+        .create_stream(desired_stream.clone())
         .await
-        .context("Failed to create/get BOT stream")?;
+        .context("Failed to create/reconcile BOT stream")?;
     let drift = stream_config_drift(&desired_stream, &stream.cached_info().config);
     if !drift.is_empty() {
+        // Reconciliation is automatic now, so residual drift means the server
+        // rejected part of the config - a genuine anomaly, not the old
+        // "changes are ignored" steady state.
         tracing::warn!(
             stream = STREAM_NAME,
             ?drift,
-            "NATS stream config drift: code changes to stream config are NOT applied to an \
-             existing stream; update it manually (e.g. nats CLI) or delete/recreate to apply"
+            "NATS stream config still drifted after reconciliation; the server may be \
+             rejecting part of the desired config"
         );
     }
 
@@ -125,17 +140,22 @@ pub async fn ensure_stream_and_consumers(js: &async_nats::jetstream::Context) ->
             max_deliver: MAX_DELIVER,
             ..Default::default()
         };
+        // `create_consumer` (not `get_or_create_consumer`): on NATS 2.11 it
+        // updates an existing durable's config in place, so `ack_wait` /
+        // `max_deliver` changes are reconciled at startup instead of being
+        // stranded on a pre-existing consumer (R-15 / F-102). The durable name
+        // comes from `desired.durable_name`.
         let consumer = stream
-            .get_or_create_consumer(name, desired.clone())
+            .create_consumer(desired.clone())
             .await
-            .with_context(|| format!("Failed to create/get {} consumer", name))?;
+            .with_context(|| format!("Failed to create/reconcile {} consumer", name))?;
         let drift = consumer_config_drift(&desired, &consumer.cached_info().config);
         if !drift.is_empty() {
             tracing::warn!(
                 consumer = name,
                 ?drift,
-                "NATS consumer config drift: code changes to consumer config are NOT applied \
-                 to an existing durable consumer; delete/recreate it manually to apply"
+                "NATS consumer config still drifted after reconciliation; the server may be \
+                 rejecting part of the desired config"
             );
         }
     }
@@ -145,8 +165,9 @@ pub async fn ensure_stream_and_consumers(js: &async_nats::jetstream::Context) ->
 /// JetStream server advisory subject for messages that exhausted
 /// `max_deliver` on any consumer of the BOT stream. These messages will
 /// never be redelivered and (WorkQueue retention) never deleted — they are
-/// stranded until an operator or a future recovery mechanism (WP-38/D-5)
-/// intervenes.
+/// stranded until an operator intervenes. The advisory listener below makes
+/// that stranding visible (error log + metric); automated recovery
+/// (re-publish/DLQ) is not yet implemented (WP-38/D-5).
 pub const MAX_DELIVERIES_ADVISORY_SUBJECT: &str =
     "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.BOT.*";
 
@@ -169,7 +190,9 @@ pub fn parse_max_deliveries_advisory(payload: &[u8]) -> Option<MaxDeliveriesAdvi
 /// Subscribes to MAX_DELIVERIES advisories for the BOT stream and turns
 /// each one into an error log + `bot_stream_max_deliveries_total` metric,
 /// so stranded messages are alertable instead of silent (review ws F56).
-/// Visibility only: recovery (term/DLQ/re-publish) is WP-38/D-5.
+/// Visibility only: the `bot.command` consumer already Terms messages that
+/// exhaust `max_deliver`, but DLQ/re-publish recovery for stranded messages
+/// is WP-38/D-5.
 /// Returns when the subscription stream ends or `shutdown` is cancelled; run
 /// under `supervise_consumer` so it is re-established. The shutdown arm lets
 /// the supervisor's bounded drain (R-11 / F-109) wind this listener down

@@ -387,6 +387,7 @@ struct BotTurnCandidate {
     position: i32,
     bot_name: String,
     is_dangling: bool,
+    updated_at: time::PrimitiveDateTime,
 }
 
 async fn fetch_bot_turn_candidates(
@@ -398,7 +399,8 @@ async fn fetch_bot_turn_candidates(
         "SELECT gp.game_id AS game_id,
                 gp.position AS position,
                 gb.bot_name AS bot_name,
-                (b.id IS NULL OR b.enabled = false) AS is_dangling
+                (b.id IS NULL OR b.enabled = false) AS is_dangling,
+                g.updated_at AS updated_at
          FROM game_players gp
          JOIN games g ON gp.game_id = g.id
          JOIN game_bots gb ON gp.game_bot_id = gb.id
@@ -432,6 +434,7 @@ async fn sweep_bot_turns_once(pool: &PgPool, jetstream: &async_nats::jetstream::
         let turns = vec![crate::db::BotTurn {
             position: c.position,
             bot_name: c.bot_name.clone(),
+            updated_at: c.updated_at,
         }];
         crate::game::publish_bot_turns(jetstream, c.game_id, &turns, 0).await;
         axum_prometheus::metrics::counter!("bot_turn_sweep_republished_total").increment(1);

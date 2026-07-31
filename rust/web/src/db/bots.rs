@@ -6,28 +6,39 @@ use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct BotTurn {
     pub position: i32,
     pub bot_name: String,
+    /// The game's persisted `updated_at` at read time, carried so the
+    /// `bot.turn` publisher can build a stable `Nats-Msg-Id`
+    /// (`{game_id}:{position}:{updated_at}`) for JetStream dedup (R-15 /
+    /// F-105): identical re-publishes of the same turn state collapse, while
+    /// a real turn change bumps `updated_at` and gets a fresh id.
+    pub updated_at: time::PrimitiveDateTime,
 }
 
-/// Returns the position/bot_name of every bot player whose turn it
-/// currently is. Empty for games with no bots or no bot on turn (including
-/// nonexistent games) - that's a normal outcome, not an error.
+/// Returns the position/bot_name (and the game's `updated_at`) of every bot
+/// player whose turn it currently is. Empty for games with no bots or no bot
+/// on turn (including nonexistent games) - that's a normal outcome, not an
+/// error.
+///
+/// Runtime `query_as` (not the `query_as!` macro) so the added `updated_at`
+/// column does not require regenerating the committed `.sqlx` offline cache;
+/// this mirrors `email::sweep::fetch_bot_turn_candidates`.
 #[cfg(feature = "ssr")]
 #[tracing::instrument(skip(pool), fields(game_id = %game_id))]
 pub async fn find_bot_turns(pool: &PgPool, game_id: Uuid) -> Result<Vec<BotTurn>> {
-    sqlx::query_as!(
-        BotTurn,
+    sqlx::query_as::<_, BotTurn>(
         r#"
-        SELECT gp.position, gb.bot_name
+        SELECT gp.position AS position, gb.bot_name AS bot_name, g.updated_at AS updated_at
         FROM game_players gp
         JOIN game_bots gb ON gp.game_bot_id = gb.id
+        JOIN games g ON gp.game_id = g.id
         WHERE gp.game_id = $1 AND gp.is_turn = true
         "#,
-        game_id
     )
+    .bind(game_id)
     .fetch_all(pool)
     .await
     .map_err(Into::into)

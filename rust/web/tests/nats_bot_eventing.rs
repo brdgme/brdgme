@@ -21,12 +21,15 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use web::db::{self, CreateGameOpts};
-use web::game::{handle_bot_command_event, trigger_bot_turns};
+use web::game::{handle_bot_command_event, run_bot_command_consumer, trigger_bot_turns};
 use web::models::user::User;
 use web::nats::{self, BotCommandEvent, BotTurnEvent};
 use web::websocket::GameBroadcaster;
@@ -935,4 +938,287 @@ async fn conflict_republish_targets_only_the_conflicting_bot(pool: PgPool) {
     );
     assert_eq!(events[0].player_position, conflicting_pos);
     assert_eq!(events[0].attempt, 1);
+}
+
+// ---------------------------------------------------------------------------
+// R-15 (F-101 / F-102 / F-105): test-first coverage for the NATS delivery
+// semantics remediation. These are written BEFORE the production fix and are
+// EXPECTED TO FAIL against current behavior:
+//
+//   * `duplicate_bot_turn_publish_collapses_to_one_delivery` - today the same
+//     turn published twice yields two stream messages (no `Nats-Msg-Id`, no
+//     `duplicate_window`), so it observes two deliveries and fails the
+//     "exactly one" assertion. Passes once publish sets a message id and the
+//     stream sets a duplicate window.
+//   * `transient_failure_redelivers_command_well_inside_ack_wait` - today a
+//     transient (`Other`) failure leaves the message unacked, so redelivery
+//     waits the full 5-minute `ack_wait`; the bounded wait sees a single
+//     delivery and fails. Passes once the handler Naks with a short backoff.
+//   * `ensure_stream_and_consumers_reconciles_drifted_config` - deliberately
+//     drifts the live stream/consumer config away from the desired values, then
+//     asserts `ensure_stream_and_consumers` restores them (including the
+//     explicit 120s duplicate window). A `get_or_create_*` implementation would
+//     leave the drifted values in place and fail; only real reconciliation
+//     passes. This is a regression guard for the reconcile path, not a
+//     red/green against the pre-fix default (the server already defaults the
+//     window to 120s).
+//
+// Runtime verification is deferred to CI (a live NATS server is required); see
+// docs/reviews/2026-07-30-review-session/98-REMEDIATION-PLAN.md (R-15).
+// ---------------------------------------------------------------------------
+
+/// Best-effort drain of the shared `bot-command` consumer: fetches a bounded
+/// batch and acks every message (matching or not) so leftovers from a prior
+/// run don't accumulate. Mirrors `drain_bot_turn_events` for the command side.
+async fn ack_all_bot_command(jetstream: &async_nats::jetstream::Context) {
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    let consumer = stream
+        .get_or_create_consumer(
+            nats::CONSUMER_COMMAND,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(nats::CONSUMER_COMMAND.to_string()),
+                filter_subject: nats::SUBJECT_COMMAND.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut messages = consumer
+        .batch()
+        .max_messages(100)
+        .expires(Duration::from_millis(500))
+        .messages()
+        .await
+        .unwrap();
+    while let Some(Ok(message)) = messages.next().await {
+        let _ = message.ack().await;
+    }
+}
+
+/// F-105: the same bot turn can be published more than once for the identical
+/// (game, position) - the `broadcast_and_trigger` path after a command and the
+/// 15-minute reconciliation sweep both fire `trigger_bot_turns` before the bot
+/// has moved. Without dedup each publish becomes a separate stream message and
+/// a separate (expensive) LLM completion. Publishing the exact same turn twice
+/// must collapse to exactly one delivery.
+#[sqlx::test]
+#[serial]
+async fn duplicate_bot_turn_publish_collapses_to_one_delivery(pool: PgPool) {
+    let jetstream = make_jetstream().await;
+    let uri = spawn_mock_game_service(|_req| play_response("s", vec![0], true)).await;
+    let game_id = make_game_with_human_and_bot(&pool, &uri).await;
+    let bot_pos = bot_position(&pool, game_id).await;
+    sqlx::query!(
+        "UPDATE game_players SET is_turn = (position = $2) WHERE game_id = $1",
+        game_id,
+        bot_pos
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The identical turn is published twice: no command runs between the two
+    // calls, so the game row (and thus any dedup key derived from it) is
+    // unchanged - this is exactly the sweep-overlap duplicate.
+    trigger_bot_turns(&pool, &jetstream, game_id).await;
+    trigger_bot_turns(&pool, &jetstream, game_id).await;
+
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    let consumer = stream
+        .get_or_create_consumer(
+            nats::CONSUMER_TURN,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(nats::CONSUMER_TURN.to_string()),
+                filter_subject: nats::SUBJECT_TURN.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let events = drain_bot_turn_events(&consumer, game_id, 20, Duration::from_secs(5)).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "the same bot turn published twice must collapse to exactly one delivery, got {:?}",
+        events
+    );
+    assert_eq!(events[0].game_id, game_id);
+    assert_eq!(events[0].player_position, bot_pos);
+}
+
+/// F-101: a `bot.command` that fails transiently (`ExecuteCommandError::Other`,
+/// e.g. a game-service 5xx) must be retried on a cadence appropriate for prompt
+/// processing - seconds, not the full 5-minute `ack_wait`. Drives the real
+/// `run_bot_command_consumer` against a game service that always returns a
+/// system error and asserts the single message is redelivered (processed more
+/// than once) well inside the ack window.
+#[sqlx::test]
+#[serial]
+async fn transient_failure_redelivers_command_well_inside_ack_wait(pool: PgPool) {
+    let jetstream = make_jetstream().await;
+    let http_client = reqwest::Client::new();
+    let broadcaster = make_broadcaster().await;
+
+    // Count every game-service call: one per delivery of the command, since a
+    // system error performs no DB write and leaves position 0 on turn.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_mock = calls.clone();
+    let uri = spawn_mock_game_service(move |_req| {
+        calls_for_mock.fetch_add(1, Ordering::SeqCst);
+        Response::SystemError {
+            message: "boom".to_string(),
+        }
+    })
+    .await;
+    let (game_id, _p0, _p1) = make_two_player_game(&pool, &uri).await;
+
+    let shutdown = CancellationToken::new();
+    let consumer_task = tokio::spawn(run_bot_command_consumer(
+        pool.clone(),
+        http_client,
+        broadcaster,
+        jetstream.clone(),
+        None,
+        shutdown.clone(),
+    ));
+
+    let event = BotCommandEvent {
+        game_id,
+        player_position: 0,
+        command: "abc".to_string(),
+        attempt: 0,
+    };
+    let ack = jetstream
+        .publish(
+            nats::SUBJECT_COMMAND,
+            serde_json::to_vec(&event).unwrap().into(),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    let our_seq = ack.sequence;
+
+    // Bound the wait well under the 5-minute ack_wait: a Nak-driven retry
+    // redelivers in single-digit seconds, whereas an unacked message would not
+    // reappear inside this window at all.
+    const REDELIVERY_BOUND: Duration = Duration::from_secs(15);
+    let deadline = tokio::time::Instant::now() + REDELIVERY_BOUND;
+    let mut delivered = 0;
+    while tokio::time::Instant::now() < deadline {
+        delivered = calls.load(Ordering::SeqCst);
+        if delivered >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // Cleanup before asserting so it runs even on failure: stop the consumer,
+    // delete our message by stream sequence (works whether it is pending-ack or
+    // already termed), and best-effort drain any other leftovers.
+    shutdown.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), consumer_task).await;
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    let _ = stream.delete_message(our_seq).await;
+    ack_all_bot_command(&jetstream).await;
+
+    assert!(
+        delivered >= 2,
+        "a transiently failing bot.command must be redelivered well inside the \
+         5-minute ack_wait (processed {} time(s) in {:?}); an unacked message \
+         waiting out the full ack_wait is the F-101 failure mode",
+        delivered,
+        REDELIVERY_BOUND
+    );
+}
+
+/// F-102 / F-105: `ensure_stream_and_consumers` must actively reconcile a
+/// drifted server config back to the desired values, not merely create-if-absent
+/// (a `get_or_create_*` would leave the drift in place). Deliberately skews the
+/// live stream's `duplicate_window` and the `bot-turn` consumer's retry config,
+/// re-runs `ensure_stream_and_consumers`, and asserts the explicit desired
+/// values are restored - including the 120s duplicate window the dedup relies
+/// on. Asserting the exact 120s (not just `> 0`) after forcing it to 1s is what
+/// proves reconciliation rather than NATS 2.11's 2-minute server default.
+#[sqlx::test]
+#[serial]
+async fn ensure_stream_and_consumers_reconciles_drifted_config(pool: PgPool) {
+    let _pool = pool; // only JetStream is exercised here.
+    let jetstream = make_jetstream().await; // establishes a known-good baseline
+
+    // Deliberately drift the stream's duplicate window and one consumer's retry
+    // config away from the desired values, simulating a stale config left by an
+    // older deploy. Subjects/retention/filter match the desired config so only
+    // the mutable fields under test change.
+    jetstream
+        .create_stream(async_nats::jetstream::stream::Config {
+            name: nats::STREAM_NAME.to_string(),
+            subjects: vec!["bot.>".to_string()],
+            retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+            duplicate_window: Duration::from_secs(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    stream
+        .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            durable_name: Some(nats::CONSUMER_TURN.to_string()),
+            filter_subject: nats::SUBJECT_TURN.to_string(),
+            ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+            ack_wait: Duration::from_secs(30),
+            max_deliver: 1,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Sanity: the drift actually took effect, so the restore below is meaningful.
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    assert_eq!(
+        stream.cached_info().config.duplicate_window,
+        Duration::from_secs(1),
+        "test setup failed to drift the stream duplicate_window"
+    );
+    let drifted_turn: async_nats::jetstream::consumer::PullConsumer =
+        stream.get_consumer(nats::CONSUMER_TURN).await.unwrap();
+    assert_eq!(
+        drifted_turn.cached_info().config.max_deliver, 1,
+        "test setup failed to drift the bot-turn consumer max_deliver"
+    );
+
+    // Reconcile, then assert the desired config is restored.
+    nats::ensure_stream_and_consumers(&jetstream).await.unwrap();
+
+    let stream = jetstream.get_stream(nats::STREAM_NAME).await.unwrap();
+    assert_eq!(
+        stream.cached_info().config.duplicate_window,
+        Duration::from_secs(120),
+        "ensure_stream_and_consumers must reconcile the stream duplicate_window \
+         back to the explicit 120s desired value (F-105)"
+    );
+
+    for (name, subject) in [
+        (nats::CONSUMER_TURN, nats::SUBJECT_TURN),
+        (nats::CONSUMER_COMMAND, nats::SUBJECT_COMMAND),
+    ] {
+        let consumer: async_nats::jetstream::consumer::PullConsumer =
+            stream.get_consumer(name).await.unwrap();
+        let cfg = &consumer.cached_info().config;
+        assert_eq!(
+            cfg.filter_subject, subject,
+            "{name} consumer filter_subject drifted from server"
+        );
+        assert_eq!(
+            cfg.ack_wait,
+            nats::ACK_WAIT,
+            "{name} consumer ack_wait must be reconciled to the shared ACK_WAIT const"
+        );
+        assert_eq!(
+            cfg.max_deliver,
+            nats::MAX_DELIVER,
+            "{name} consumer max_deliver must be reconciled to the shared MAX_DELIVER const"
+        );
+    }
 }

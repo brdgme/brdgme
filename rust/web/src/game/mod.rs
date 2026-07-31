@@ -193,6 +193,23 @@ pub async fn trigger_bot_turns(
     }
 }
 
+/// Stable `Nats-Msg-Id` for a `bot.turn` publish. Derived from the turn state
+/// plus the retry `attempt` so identical re-publishes of the same
+/// (game, position, updated_at, attempt) collapse inside the stream's duplicate
+/// window, while a real turn change bumps `updated_at` and a deliberate retry
+/// (the invalid-command re-publish, which writes nothing and so leaves
+/// `updated_at` unchanged) bumps `attempt` - each getting a fresh id so the
+/// retry is delivered rather than deduped away (R-15 / F-105, F-2).
+#[cfg(feature = "ssr")]
+fn bot_turn_message_id(
+    game_id: uuid::Uuid,
+    position: i32,
+    updated_at: &str,
+    attempt: i32,
+) -> String {
+    format!("{}:{}:{}:{}", game_id, position, updated_at, attempt)
+}
+
 /// Shared by `trigger_bot_turns` (attempt 0, fresh turns) and the
 /// `bot.command` consumer (attempt N, re-publish after a stale-state
 /// conflict).
@@ -232,8 +249,21 @@ pub(crate) async fn publish_bot_turns(
                 }
             }
         });
+        // `games.updated_at` is stored without an offset (`PrimitiveDateTime`)
+        // and treated as UTC throughout, so attach UTC to satisfy `Iso8601`'s
+        // offset component - a bare `PrimitiveDateTime` is a compile-time error
+        // here, not a runtime `Result`.
+        let updated_at = turn
+            .updated_at
+            .assume_utc()
+            .format(&time::format_description::well_known::Iso8601::DEFAULT)
+            .unwrap_or_default();
+        let message = async_nats::jetstream::message::PublishMessage::build()
+            .payload(payload.into())
+            .headers(headers)
+            .message_id(bot_turn_message_id(game_id, turn.position, &updated_at, attempt));
         match jetstream
-            .publish_with_headers(crate::nats::SUBJECT_TURN, headers, payload.into())
+            .send_publish(crate::nats::SUBJECT_TURN, message)
             .await
         {
             // The outer `.await` only confirms the message was sent; the
@@ -406,11 +436,26 @@ async fn process_bot_command_message(
                 axum_prometheus::metrics::counter!("bot_command_terminated_total").increment(1);
             }
             Ok(info) => {
+                // Transient failure: Nak with a short exponential backoff so
+                // the server redelivers in seconds instead of waiting out the
+                // full 5-minute ack_wait. `delivered` is 1-based, so
+                // 2^delivered yields 2s then 4s for deliveries 1 and 2;
+                // delivery 3 hits the term branch above (R-15 / F-101).
+                let backoff = std::time::Duration::from_secs(
+                    2u64.saturating_pow(info.delivered.max(1) as u32),
+                );
                 tracing::warn!(
                     game_id = %event.game_id,
                     delivered = info.delivered,
-                    "Leaving bot.command message unacked for redelivery after transient failure"
+                    backoff_secs = backoff.as_secs(),
+                    "Naking bot.command message for delayed redelivery after transient failure"
                 );
+                if let Err(e) = message
+                    .ack_with(async_nats::jetstream::AckKind::Nak(Some(backoff)))
+                    .await
+                {
+                    tracing::warn!(game_id = %event.game_id, "Failed to nak bot.command message: {}", e);
+                }
             }
             Err(e) => {
                 tracing::warn!(
@@ -561,6 +606,29 @@ mod tests {
     fn now() -> time::PrimitiveDateTime {
         let t = time::OffsetDateTime::now_utc();
         time::PrimitiveDateTime::new(t.date(), t.time())
+    }
+
+    /// F-2: the `bot.turn` dedup key must include the retry `attempt`. A
+    /// deliberate retry after an invalid bot command re-publishes the identical
+    /// (game, position, updated_at) at `attempt + 1` with no DB write in
+    /// between, so an attempt-less key would dedup the retry away and wedge the
+    /// game. Two publishes of the identical event (same attempt) must collide,
+    /// while a higher attempt of the same turn state must get a fresh key.
+    #[test]
+    fn bot_turn_message_id_differs_by_attempt() {
+        let game_id = Uuid::new_v4();
+        let updated_at = "2026-08-01T12:34:56.789000000Z";
+        let attempt0_a = bot_turn_message_id(game_id, 1, updated_at, 0);
+        let attempt0_b = bot_turn_message_id(game_id, 1, updated_at, 0);
+        let attempt1 = bot_turn_message_id(game_id, 1, updated_at, 1);
+        assert_eq!(
+            attempt0_a, attempt0_b,
+            "identical events (same attempt) must share a key so duplicates dedup"
+        );
+        assert_ne!(
+            attempt0_a, attempt1,
+            "a retry at a higher attempt must get a fresh key so it is delivered"
+        );
     }
 
     /// Starts an in-process mock game service that answers every request with

@@ -22,7 +22,8 @@ pub const MAX_TURN_ATTEMPTS: i32 = 3;
 
 /// JetStream `max_deliver` for the BOT stream's pull consumers: the maximum
 /// times a single message is redelivered before JetStream gives up. Shared
-/// by the consumer config and the (future) term ceiling so the two cannot
+/// by the consumer config and the term ceiling (the `bot.command` consumer
+/// Terms a message once `info.delivered >= MAX_DELIVER`) so the two cannot
 /// drift (WP-38).
 pub const MAX_DELIVER: i64 = 3;
 
