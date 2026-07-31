@@ -946,7 +946,6 @@ pub(crate) async fn concede_core(
         return Err(ServerFnError::new("You have already left this game"));
     }
 
-    let active_humans = count_active_humans(&ge);
     let replacement_available = crate::db::replacement_bot_available(pool)
         .await
         .map_err(internal("concede_core: replacement available"))?;
@@ -961,7 +960,7 @@ pub(crate) async fn concede_core(
         )
         .await
         .map_err(|e| conflict_or_internal("concede_core: replace", e))?;
-    } else if active_humans == 2 {
+    } else if ge.game_players.len() == 2 {
         crate::db::concede_game(
             pool,
             game_id,

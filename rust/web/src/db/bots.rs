@@ -84,13 +84,13 @@ pub async fn validate_bot_slots(
 
 #[cfg(feature = "ssr")]
 pub async fn pick_replacement_bot(
-    pool: &PgPool,
+    tx: &mut sqlx::PgConnection,
     game_id: Uuid,
 ) -> Result<Option<crate::models::game::GameBot>> {
     let name: Option<String> = sqlx::query_scalar(
         "SELECT name FROM bots WHERE can_replace_humans = true AND enabled = true ORDER BY random() LIMIT 1",
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some(name) = name else {
         return Ok(None);
@@ -102,7 +102,7 @@ pub async fn pick_replacement_bot(
         name,
         name
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await?;
     Ok(Some(bot))
 }
@@ -172,18 +172,22 @@ mod tests {
         let (_, game_version_id) = make_game_type_and_version(&pool).await;
         let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 0, &[0]).await;
 
+        let mut tx = pool.begin().await.unwrap();
         assert!(
-            pick_replacement_bot(&pool, game.id)
+            pick_replacement_bot(&mut tx, game.id)
                 .await
                 .unwrap()
                 .is_none()
         );
+        tx.rollback().await.unwrap();
 
         sqlx::query("INSERT INTO bots (name, can_replace_humans) VALUES ('Hard', true)")
             .execute(&pool)
             .await
             .unwrap();
-        let picked = pick_replacement_bot(&pool, game.id).await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let picked = pick_replacement_bot(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
         assert!(picked.is_some());
         assert_eq!(picked.unwrap().bot_name, "Hard");
     }

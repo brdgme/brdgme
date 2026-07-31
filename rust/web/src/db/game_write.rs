@@ -391,16 +391,16 @@ pub async fn concede_game_replace(
     conceding_name: &str,
     expected_updated_at: time::PrimitiveDateTime,
 ) -> Result<()> {
-    let bot = pick_replacement_bot(pool, game_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("no replacement bot configured"))?;
-
     let mut tx = pool.begin().await?;
     claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
 
+    let bot = pick_replacement_bot(&mut tx, game_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no replacement bot configured"))?;
+
     sqlx::query(
         r#"UPDATE game_players
-           SET is_turn = false, game_bot_id = $1, left_at = NOW(),
+           SET game_bot_id = $1, left_at = NOW(),
                undo_game_state = NULL, turn_reminder_sent_at = NULL
            WHERE id = $2"#,
     )
@@ -420,6 +420,11 @@ pub async fn concede_game_replace(
     )
     .execute(&mut *tx)
     .await?;
+
+    sqlx::query("UPDATE games SET updated_at = updated_at WHERE id = $1")
+        .bind(game_id)
+        .execute(&mut *tx)
+        .await?;
 
     tx.commit().await?;
     Ok(())
@@ -1878,7 +1883,10 @@ mod tests {
         assert!(ge_after.game.is_finished);
         assert!(ge_after.game.finished_at.is_some());
         for p in &ge_after.game_players {
-            assert!(p.game_player.rating_change.is_some() || p.game_player.user_id.is_none());
+            if p.game_player.user_id.is_some() {
+                assert!(p.game_player.place.is_some());
+                assert!(p.game_player.rating_change.is_some());
+            }
         }
 
         let logs = get_all_game_logs(&pool, game.id).await.unwrap();
@@ -1965,6 +1973,13 @@ mod tests {
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         assert_eq!(ge_after.game.game_state, "state_2");
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.undo_game_state.as_deref(),
+                Some("state_1"),
+                "undo_game_state must be unchanged after rejected undo"
+            );
+        }
     }
 
     #[sqlx::test]
@@ -2239,6 +2254,17 @@ mod tests {
                 .await
                 .unwrap();
         assert!(left_at.is_none());
+
+        let bot_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM game_bots WHERE game_id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            bot_count, 0,
+            "no game_bots row should exist after rejected concede"
+        );
     }
 
     #[sqlx::test]
@@ -2278,5 +2304,165 @@ mod tests {
         for p in &ge_after.game_players {
             assert_eq!(p.game_player.place, None);
         }
+        assert!(!ge_after.game.is_finished);
+    }
+
+    #[sqlx::test]
+    async fn concede_game_replace_idempotent(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+
+        sqlx::query("INSERT INTO bots (name, can_replace_humans) VALUES ('Hard', true)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceder = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let conceder_id = conceder.game_player.id;
+        let updated_at = ge.game.updated_at;
+
+        concede_game_replace(&pool, game.id, conceder_id, "creator", updated_at)
+            .await
+            .unwrap();
+
+        let result = concede_game_replace(&pool, game.id, conceder_id, "creator", updated_at).await;
+        assert!(result.is_err());
+
+        let bot_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM game_bots WHERE game_id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(bot_count, 1);
+
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        let public_concede_logs: Vec<_> = logs
+            .iter()
+            .filter(|l| l.is_public && l.body.contains("conceded"))
+            .collect();
+        assert_eq!(public_concede_logs.len(), 1);
+    }
+
+    #[sqlx::test]
+    async fn concede_game_replace_rolls_back_on_failure(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+
+        sqlx::query("INSERT INTO bots (name, can_replace_humans) VALUES ('Hard', true)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceder = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let conceder_id = conceder.game_player.id;
+
+        sqlx::query("INSERT INTO game_bots (game_id, name, bot_name) VALUES ($1, 'Hard', 'Hard')")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result =
+            concede_game_replace(&pool, game.id, conceder_id, "creator", ge.game.updated_at).await;
+        assert!(result.is_err());
+
+        let bot_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM game_bots WHERE game_id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            bot_count, 1,
+            "only the pre-existing row, no orphan from the failed tx"
+        );
+
+        let left_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT left_at FROM game_players WHERE id = $1")
+                .bind(conceder_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(left_at.is_none(), "game_players UPDATE must be rolled back");
+    }
+
+    #[sqlx::test]
+    async fn concede_game_replace_assigns_turn_to_bot(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+
+        sqlx::query("INSERT INTO bots (name, can_replace_humans) VALUES ('Hard', true)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let conceder = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == 0)
+            .unwrap();
+        let conceder_id = conceder.game_player.id;
+
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE id = $1")
+            .bind(conceder_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE game_players SET is_turn = false WHERE game_id = $1 AND id != $2")
+            .bind(game.id)
+            .bind(conceder_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ge_before = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        concede_game_replace(
+            &pool,
+            game.id,
+            conceder_id,
+            "creator",
+            ge_before.game.updated_at,
+        )
+        .await
+        .unwrap();
+
+        let is_turn: bool = sqlx::query_scalar("SELECT is_turn FROM game_players WHERE id = $1")
+            .bind(conceder_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(is_turn, "replacement bot must inherit the turn");
+
+        let bot_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT game_bot_id FROM game_players WHERE id = $1")
+                .bind(conceder_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(bot_id.is_some(), "game_bot_id must be set");
     }
 }
