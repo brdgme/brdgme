@@ -313,7 +313,7 @@ pub async fn dispatch_settings_standalone(
     }
 
     Err(CommandError::User(
-        "That command is not available by email without a game. Available commands: new, bump, list, name, colors, theme, emails on/off, subscribe, unsubscribe, settings, help.".to_string(),
+        "That command is not available by email without a game. Available commands: list, name, colors, theme, emails on/off, settings, help.".to_string(),
     ))
 }
 
@@ -330,19 +330,7 @@ pub async fn dispatch_standalone_server_command(
     ctx: &StandaloneCommandCtx<'_>,
     line: &str,
 ) -> Result<CommandReply, CommandError> {
-    let trimmed = line.trim();
-    let verb = trimmed.split_once(' ').map(|(v, _)| v).unwrap_or(trimmed);
-    if verb.eq_ignore_ascii_case("new") {
-        let args = trimmed.split_once(' ').map(|(_, a)| a.trim()).unwrap_or("");
-        return run_new_command(ctx, args).await;
-    }
-    if verb.eq_ignore_ascii_case("bump") {
-        return run_bump_command(ctx).await;
-    }
-    if let Some(enabled) = subscribe_toggle(verb) {
-        return apply_subscribe_toggle(ctx.pool, ctx.user_id, enabled).await;
-    }
-    dispatch_settings_standalone(ctx.pool, ctx.resend, ctx.user_id, trimmed).await
+    dispatch_settings_standalone(ctx.pool, ctx.resend, ctx.user_id, line.trim()).await
 }
 
 async fn run_list_command(pool: &sqlx::PgPool) -> Result<CommandReply, CommandError> {
@@ -1178,7 +1166,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn standalone_unsubscribe_and_subscribe_toggle_turn_emails(pool: sqlx::PgPool) {
+    async fn standalone_refuses_subscribe_and_unsubscribe(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "sub-toggle-user").await;
         let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
         let http_client = reqwest::Client::new();
@@ -1191,31 +1179,20 @@ mod tests {
             user_id,
         };
 
-        match dispatch_standalone_server_command(&ctx, "unsubscribe").await {
-            Ok(CommandReply::Status(_)) => {}
-            Ok(_) => panic!("expected Status reply for unsubscribe"),
-            Err(e) => panic!("expected Ok for unsubscribe, got {e}"),
+        for verb in ["unsubscribe", "subscribe"] {
+            match dispatch_standalone_server_command(&ctx, verb).await {
+                Err(CommandError::User(msg)) => {
+                    assert!(
+                        msg.contains("not available"),
+                        "rejection should say not available: {msg}"
+                    );
+                }
+                Err(CommandError::Internal(e)) => {
+                    panic!("expected User error for {verb}, got Internal: {e}")
+                }
+                Ok(_) => panic!("expected User error for {verb}, got Ok"),
+            }
         }
-        let enabled: bool =
-            sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
-                .bind(user_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert!(!enabled);
-
-        match dispatch_standalone_server_command(&ctx, "subscribe").await {
-            Ok(CommandReply::Status(_)) => {}
-            Ok(_) => panic!("expected Status reply for subscribe"),
-            Err(e) => panic!("expected Ok for subscribe, got {e}"),
-        }
-        let enabled: bool =
-            sqlx::query_scalar("SELECT turn_emails_enabled FROM users WHERE id = $1")
-                .bind(user_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert!(enabled);
     }
 
     #[sqlx::test]
@@ -1233,10 +1210,13 @@ mod tests {
         };
         match dispatch_standalone_server_command(&ctx, "frobnicate").await {
             Err(CommandError::User(msg)) => {
-                assert!(msg.contains("bump"), "rejection should mention bump: {msg}");
                 assert!(
-                    msg.contains("unsubscribe"),
-                    "rejection should mention unsubscribe: {msg}"
+                    msg.contains("not available"),
+                    "rejection should say not available: {msg}"
+                );
+                assert!(
+                    msg.contains("settings"),
+                    "rejection should mention settings: {msg}"
                 );
             }
             Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
@@ -1823,7 +1803,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn bump_verb_is_case_insensitive(pool: sqlx::PgPool) {
+    async fn standalone_refuses_bump(pool: sqlx::PgPool) {
         let user_id = seed_user(&pool, "bump-user").await;
         let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
         let http_client = reqwest::Client::new();
@@ -1837,16 +1817,16 @@ mod tests {
         };
         for line in ["bump", "Bump", "BUMP"] {
             match dispatch_standalone_server_command(&ctx, line).await {
-                Ok(CommandReply::Status(msg)) => {
-                    assert_eq!(msg, "No games are waiting on your turn.");
-                }
-                Ok(_) => panic!("expected Status reply for {line}"),
-                Err(CommandError::User(m)) => {
-                    panic!("expected Status reply for {line}, got user error: {m}")
+                Err(CommandError::User(msg)) => {
+                    assert!(
+                        msg.contains("not available"),
+                        "rejection should say not available: {msg}"
+                    );
                 }
                 Err(CommandError::Internal(e)) => {
-                    panic!("expected Status reply for {line}, got internal error: {e}")
+                    panic!("expected User error for {line}, got Internal: {e}")
                 }
+                Ok(_) => panic!("expected User error for {line}, got Ok"),
             }
         }
     }
@@ -2111,6 +2091,35 @@ mod tests {
             }
             Err(CommandError::Internal(_)) => {}
             Ok(_) => {}
+        }
+    }
+
+    #[sqlx::test]
+    async fn standalone_refuses_new_bump_and_subscribe_verbs(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "scope-refusal").await;
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = StandaloneCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            user_id,
+        };
+        for line in ["new sometype opponent1", "bump", "subscribe", "unsubscribe"] {
+            match dispatch_standalone_server_command(&ctx, line).await {
+                Err(CommandError::User(msg)) => {
+                    assert!(
+                        msg.contains("not available"),
+                        "rejection for {line:?} should say not available: {msg}"
+                    );
+                }
+                Err(CommandError::Internal(e)) => {
+                    panic!("expected User error for {line:?}, got Internal: {e}")
+                }
+                Ok(_) => panic!("expected User error for {line:?}, got Ok"),
+            }
         }
     }
 }

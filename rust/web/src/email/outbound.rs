@@ -121,16 +121,24 @@ pub async fn ensure_email_token_tx(
 /// first use (lazy population, per the WP-56 migration). Plain query, matching
 /// `ensure_email_token`.
 pub async fn ensure_settings_email_token(pool: &PgPool, user_id: Uuid) -> anyhow::Result<String> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT settings_email_token FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await?;
-    if let Some((Some(tok),)) = row {
+    let row: Option<(
+        Option<String>,
+        Option<time::OffsetDateTime>,
+        Option<time::OffsetDateTime>,
+    )> = sqlx::query_as(
+        "SELECT settings_email_token, settings_token_expires_at, settings_token_used_at FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    if let Some((Some(tok), Some(expires), used)) = row
+        && expires > time::OffsetDateTime::now_utc()
+        && used.is_none()
+    {
         return Ok(tok);
     }
     let token = generate_email_token();
-    sqlx::query("UPDATE users SET settings_email_token = $1, updated_at = NOW() WHERE id = $2")
+    sqlx::query("UPDATE users SET settings_email_token = $1, settings_token_expires_at = NOW() + interval '24 hours', settings_token_used_at = NULL, updated_at = NOW() WHERE id = $2")
         .bind(&token)
         .bind(user_id)
         .execute(pool)

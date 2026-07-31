@@ -523,11 +523,12 @@ async fn find_user_by_settings_token(
     pool: &sqlx::PgPool,
     token: &str,
 ) -> anyhow::Result<Option<uuid::Uuid>> {
-    let row =
-        sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM users WHERE settings_email_token = $1")
-            .bind(token)
-            .fetch_optional(pool)
-            .await?;
+    let row = sqlx::query_scalar::<_, uuid::Uuid>(
+        "UPDATE users SET settings_token_used_at = NOW() WHERE id = (SELECT id FROM users WHERE settings_email_token = $1 AND settings_token_expires_at > NOW() AND settings_token_used_at IS NULL) RETURNING id",
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await?;
     Ok(row)
 }
 
@@ -1402,6 +1403,8 @@ async fn handle_settings_reply_route(
     RouteOutcome::Done
 }
 
+/// Rate limiting on this path depends on R-37 (no rate-limiting middleware
+/// exists in rust/web yet - F-94).
 async fn handle_settings_reply(state: &AppState, token: &str, from: &str, text: &str) {
     let user_id = match find_user_by_settings_token(&state.pool, token).await {
         Ok(Some(u)) => u,
@@ -2519,6 +2522,45 @@ body\r\n";
         assert_eq!(
             select_route(&["unsubscribe@brdg.me".to_string()], &[]),
             None
+        );
+    }
+
+    #[sqlx::test]
+    async fn settings_token_expired_is_rejected(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "expired-token").await;
+        let token = crate::email::outbound::ensure_settings_email_token(&pool, user_id)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE users SET settings_token_expires_at = NOW() - interval '1 hour' WHERE id = $1",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            find_user_by_settings_token(&pool, &token)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test]
+    async fn settings_token_is_single_use(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "single-use-token").await;
+        let token = crate::email::outbound::ensure_settings_email_token(&pool, user_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            find_user_by_settings_token(&pool, &token).await.unwrap(),
+            Some(user_id)
+        );
+        assert!(
+            find_user_by_settings_token(&pool, &token)
+                .await
+                .unwrap()
+                .is_none()
         );
     }
 }
