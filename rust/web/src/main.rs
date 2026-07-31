@@ -69,38 +69,60 @@ async fn main() {
         log!("RESEND_API_KEY not set; login emails will be logged instead of sent");
     }
 
-    tokio::spawn({
+    // Process-level shutdown token (R-11 / F-109): cancelled alongside
+    // `broadcaster.begin_shutdown()` in the graceful-shutdown future below, and
+    // observed by the bot-command consumer, the max-deliveries-advisory
+    // listener, and every email/bot sweep so they wind down instead of being
+    // killed mid-work at process exit. `main` holds the spawned `JoinHandle`s
+    // and boundedly drains them after axum finishes serving.
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let mut background_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+
+    background_tasks.push(tokio::spawn({
         let pool = pool.clone();
         let http_client = http_client.clone();
         let broadcaster = broadcaster.clone();
         let jetstream = jetstream.clone();
         let resend = resend.clone();
+        let shutdown = shutdown.clone();
         async move {
-            web::nats::supervise_consumer("bot-command", move || {
+            web::nats::supervise_consumer("bot-command", shutdown.clone(), move || {
                 web::game::run_bot_command_consumer(
                     pool.clone(),
                     http_client.clone(),
                     broadcaster.clone(),
                     jetstream.clone(),
                     resend.clone(),
+                    shutdown.clone(),
                 )
             })
             .await;
         }
-    });
-    tokio::spawn(async move {
-        web::nats::supervise_consumer("max-deliveries-advisory", move || {
-            web::nats::run_max_deliveries_advisory_listener(advisory_client.clone())
-        })
-        .await;
-    });
-    web::email::sweep::spawn_periodic_sweeps(
+    }));
+    background_tasks.push(tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            web::nats::supervise_consumer(
+                "max-deliveries-advisory",
+                shutdown.clone(),
+                move || {
+                    web::nats::run_max_deliveries_advisory_listener(
+                        advisory_client.clone(),
+                        shutdown.clone(),
+                    )
+                },
+            )
+            .await;
+        }
+    }));
+    background_tasks.extend(web::email::sweep::spawn_periodic_sweeps(
         pool.clone(),
         resend.clone(),
         http_client.clone(),
         broadcaster.clone(),
         jetstream.clone(),
-    );
+        shutdown.clone(),
+    ));
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
@@ -130,13 +152,36 @@ async fn main() {
     )
     .with_graceful_shutdown({
         let broadcaster = broadcaster.clone();
+        let shutdown = shutdown.clone();
         async move {
             shutdown_signal().await;
             broadcaster.begin_shutdown();
+            shutdown.cancel();
         }
     })
     .await
     .unwrap();
+
+    // Boundedly drain the background consumers/sweeps now that axum has stopped
+    // (R-11 / F-109). Each task observed `shutdown` and is winding down; the
+    // 5s bound (matching WP-36's original drain) caps the wait before the
+    // process exits. SSE streams are NOT tracked here: they are already bounded
+    // by axum's graceful shutdown plus the per-connection and shutdown
+    // `CancellationToken`s added in R-10 (see events.rs), which is the accepted
+    // AC3 resolution - the deleted WP-36 `TaskTracker` is deliberately not
+    // reintroduced.
+    let drain_bound = std::time::Duration::from_secs(5);
+    if tokio::time::timeout(
+        drain_bound,
+        futures_util::future::join_all(background_tasks),
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!(
+            "background tasks did not drain within {drain_bound:?}; abandoning them"
+        );
+    }
 }
 
 #[cfg(feature = "ssr")]

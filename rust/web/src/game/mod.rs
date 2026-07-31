@@ -255,9 +255,10 @@ pub(crate) async fn publish_bot_turns(
 }
 
 /// Pulls `bot.command` events one at a time from the durable `bot-command`
-/// consumer and applies them via `execute_command`. Runs for the lifetime of
-/// the process; multiple monolith replicas can run this concurrently since
-/// JetStream hands each message to exactly one fetcher.
+/// consumer and applies them via `execute_command`. Runs until `shutdown` is
+/// cancelled (R-11 / F-109) or the message stream ends; multiple monolith
+/// replicas can run this concurrently since JetStream hands each message to
+/// exactly one fetcher.
 #[cfg(feature = "ssr")]
 pub async fn run_bot_command_consumer(
     pool: sqlx::PgPool,
@@ -265,15 +266,72 @@ pub async fn run_bot_command_consumer(
     broadcaster: crate::websocket::GameBroadcaster,
     jetstream: async_nats::jetstream::Context,
     resend: Option<resend_rs::Resend>,
+    shutdown: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
-    use futures_util::StreamExt;
-
     let consumer: async_nats::jetstream::consumer::PullConsumer = jetstream
         .get_consumer_from_stream(crate::nats::CONSUMER_COMMAND, crate::nats::STREAM_NAME)
         .await?;
-    let mut messages = consumer.messages().await?;
+    let messages = consumer.messages().await?;
 
-    while let Some(message) = messages.next().await {
+    let handler = {
+        let pool = pool.clone();
+        let http_client = http_client.clone();
+        let broadcaster = broadcaster.clone();
+        let jetstream = jetstream.clone();
+        let resend = resend.clone();
+        move |message: async_nats::jetstream::Message| {
+            let pool = pool.clone();
+            let http_client = http_client.clone();
+            let broadcaster = broadcaster.clone();
+            let jetstream = jetstream.clone();
+            let resend = resend.clone();
+            async move {
+                process_bot_command_message(
+                    message,
+                    &pool,
+                    &http_client,
+                    &broadcaster,
+                    &jetstream,
+                    &resend,
+                )
+                .await
+            }
+        }
+    };
+
+    run_bot_command_consume_loop(shutdown, messages, handler).await
+}
+
+/// The bot-command consume loop, generic over the message stream so the
+/// shutdown path can be exercised without a live NATS connection (R-11). Each
+/// pulled message is handed to `handle`; the loop returns promptly when
+/// `shutdown` is cancelled - including while parked waiting for the next
+/// message - or when the stream ends.
+#[cfg(feature = "ssr")]
+async fn run_bot_command_consume_loop<S, E, H, HFut>(
+    shutdown: tokio_util::sync::CancellationToken,
+    mut messages: S,
+    mut handle: H,
+) -> anyhow::Result<()>
+where
+    S: futures_util::Stream<Item = Result<async_nats::jetstream::Message, E>> + Unpin + Send,
+    E: std::fmt::Display + Send,
+    H: FnMut(async_nats::jetstream::Message) -> HFut + Send,
+    HFut: std::future::Future<Output = ()> + Send + 'static,
+{
+    use futures_util::StreamExt;
+
+    loop {
+        let next = tokio::select! {
+            _ = shutdown.cancelled() => {
+                tracing::info!("bot-command consumer shutdown signalled; stopping consume loop");
+                return Ok(());
+            }
+            next = messages.next() => next,
+        };
+        let Some(message) = next else {
+            return Ok(());
+        };
         let message = match message {
             Ok(m) => m,
             Err(e) => {
@@ -281,82 +339,88 @@ pub async fn run_bot_command_consumer(
                 continue;
             }
         };
-        let event: crate::nats::BotCommandEvent = match serde_json::from_slice(&message.payload) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::error!("Failed to parse bot.command payload: {}", e);
-                if let Err(e) = message.ack().await {
-                    tracing::warn!("Failed to ack unparseable bot.command message: {}", e);
-                }
-                continue;
-            }
-        };
+        handle(message).await;
+    }
+}
 
-        let outcome = handle_bot_command_event(
-            &pool,
-            &http_client,
-            &broadcaster,
-            &jetstream,
-            &resend,
-            &event,
-        )
-        .await;
-
-        match outcome {
-            // `handle_bot_command_event` never actually returns
-            // `Conflict` (it resolves conflicts internally by re-publishing
-            // `bot.turn` or, on exhaustion, giving up), but ack it too if it
-            // ever did - nothing more is going to happen with this message.
-            Ok(()) | Err(ExecuteCommandError::Conflict) => {
-                if let Err(e) = message.ack().await {
-                    tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
-                }
+/// Parses, applies, and acks/terms a single pulled `bot.command` message
+/// (the per-message body of `run_bot_command_consumer`, split out so the
+/// consume loop can stay generic over the stream - R-11).
+#[cfg(feature = "ssr")]
+async fn process_bot_command_message(
+    message: async_nats::jetstream::Message,
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    broadcaster: &crate::websocket::GameBroadcaster,
+    jetstream: &async_nats::jetstream::Context,
+    resend: &Option<resend_rs::Resend>,
+) {
+    let event: crate::nats::BotCommandEvent = match serde_json::from_slice(&message.payload) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("Failed to parse bot.command payload: {}", e);
+            if let Err(e) = message.ack().await {
+                tracing::warn!("Failed to ack unparseable bot.command message: {}", e);
             }
-            Err(ExecuteCommandError::UserError(_)) => {
-                // Unreachable for the `handle_bot_command_event` path: it now
-                // resolves `UserError` internally (re-publishing `bot.turn` or,
-                // on exhaustion, giving up) and returns `Ok(())`. Kept so any
-                // future caller that does surface a `UserError` still acks it -
-                // a game-rejected command never succeeds on redelivery.
+            return;
+        }
+    };
+
+    let outcome =
+        handle_bot_command_event(pool, http_client, broadcaster, jetstream, resend, &event).await;
+
+    match outcome {
+        // `handle_bot_command_event` never actually returns
+        // `Conflict` (it resolves conflicts internally by re-publishing
+        // `bot.turn` or, on exhaustion, giving up), but ack it too if it
+        // ever did - nothing more is going to happen with this message.
+        Ok(()) | Err(ExecuteCommandError::Conflict) => {
+            if let Err(e) = message.ack().await {
+                tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
+            }
+        }
+        Err(ExecuteCommandError::UserError(_)) => {
+            // Unreachable for the `handle_bot_command_event` path: it now
+            // resolves `UserError` internally (re-publishing `bot.turn` or,
+            // on exhaustion, giving up) and returns `Ok(())`. Kept so any
+            // future caller that does surface a `UserError` still acks it -
+            // a game-rejected command never succeeds on redelivery.
+            tracing::warn!(
+                game_id = %event.game_id,
+                "Acking bot.command message rejected by the game (not transient)"
+            );
+            if let Err(e) = message.ack().await {
+                tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
+            }
+        }
+        Err(ExecuteCommandError::Other(_)) => match message.info() {
+            Ok(info) if info.delivered >= crate::nats::MAX_DELIVER => {
+                if let Err(e) = message.ack_with(async_nats::jetstream::AckKind::Term).await {
+                    tracing::warn!(game_id = %event.game_id, "Failed to term bot.command message: {}", e);
+                }
+                tracing::error!(
+                    game_id = %event.game_id,
+                    delivered = info.delivered,
+                    "Terminating bot.command message after exhausting max_deliver"
+                );
+                axum_prometheus::metrics::counter!("bot_command_terminated_total").increment(1);
+            }
+            Ok(info) => {
                 tracing::warn!(
                     game_id = %event.game_id,
-                    "Acking bot.command message rejected by the game (not transient)"
+                    delivered = info.delivered,
+                    "Leaving bot.command message unacked for redelivery after transient failure"
                 );
-                if let Err(e) = message.ack().await {
-                    tracing::warn!(game_id = %event.game_id, "Failed to ack bot.command message: {}", e);
-                }
             }
-            Err(ExecuteCommandError::Other(_)) => match message.info() {
-                Ok(info) if info.delivered >= crate::nats::MAX_DELIVER => {
-                    if let Err(e) = message.ack_with(async_nats::jetstream::AckKind::Term).await {
-                        tracing::warn!(game_id = %event.game_id, "Failed to term bot.command message: {}", e);
-                    }
-                    tracing::error!(
-                        game_id = %event.game_id,
-                        delivered = info.delivered,
-                        "Terminating bot.command message after exhausting max_deliver"
-                    );
-                    axum_prometheus::metrics::counter!("bot_command_terminated_total").increment(1);
-                }
-                Ok(info) => {
-                    tracing::warn!(
-                        game_id = %event.game_id,
-                        delivered = info.delivered,
-                        "Leaving bot.command message unacked for redelivery after transient failure"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        game_id = %event.game_id,
-                        "Leaving bot.command message unacked for redelivery (failed to read delivery info: {})",
-                        e
-                    );
-                }
-            },
-        }
+            Err(e) => {
+                tracing::warn!(
+                    game_id = %event.game_id,
+                    "Leaving bot.command message unacked for redelivery (failed to read delivery info: {})",
+                    e
+                );
+            }
+        },
     }
-
-    Ok(())
 }
 
 /// Applies a single `bot.command` event: run `execute_command`, and on a
@@ -1214,5 +1278,45 @@ mod tests {
             .expect("timed out waiting for game.{id} message")
             .expect("game.{id} subscription ended unexpectedly");
         assert_eq!(msg.subject.as_str(), format!("game.{}", game_id));
+    }
+
+    #[tokio::test]
+    async fn bot_command_consume_loop_exits_on_shutdown() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio_util::sync::CancellationToken;
+
+        let shutdown = CancellationToken::new();
+        // A stream that never yields: the loop parks in `messages.next()`, so
+        // the shutdown arm is the only way out - this exercises the active
+        // consume loop's shutdown path, not just the supervisor restart gap.
+        let messages = futures_util::stream::pending::<
+            Result<async_nats::jetstream::Message, async_nats::Error>,
+        >();
+        let handled = Arc::new(AtomicUsize::new(0));
+        let handled_clone = handled.clone();
+        let handler = move |_message: async_nats::jetstream::Message| {
+            let handled = handled_clone.clone();
+            async move {
+                handled.fetch_add(1, Ordering::SeqCst);
+            }
+        };
+        let task = tokio::spawn(run_bot_command_consume_loop(
+            shutdown.clone(),
+            messages,
+            handler,
+        ));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+        shutdown.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("consume loop did not exit after shutdown")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            handled.load(Ordering::SeqCst),
+            0,
+            "no message should be handled once shutdown is signalled"
+        );
     }
 }

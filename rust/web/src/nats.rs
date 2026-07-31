@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use async_nats::jetstream::{consumer::pull, stream};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub const STREAM_NAME: &str = "BOT";
@@ -206,9 +207,14 @@ pub fn parse_max_deliveries_advisory(payload: &[u8]) -> Option<MaxDeliveriesAdvi
 /// each one into an error log + `bot_stream_max_deliveries_total` metric,
 /// so stranded messages are alertable instead of silent (review ws F56).
 /// Visibility only: recovery (term/DLQ/re-publish) is WP-38/D-5.
-/// Returns when the subscription stream ends; run under
-/// `supervise_consumer` so it is re-established.
-pub async fn run_max_deliveries_advisory_listener(client: async_nats::Client) -> Result<()> {
+/// Returns when the subscription stream ends or `shutdown` is cancelled; run
+/// under `supervise_consumer` so it is re-established. The shutdown arm lets
+/// the supervisor's bounded drain (R-11 / F-109) wind this listener down
+/// instead of abandoning it at process exit.
+pub async fn run_max_deliveries_advisory_listener(
+    client: async_nats::Client,
+    shutdown: CancellationToken,
+) -> Result<()> {
     use futures_util::StreamExt;
 
     let mut sub = client
@@ -219,7 +225,17 @@ pub async fn run_max_deliveries_advisory_listener(client: async_nats::Client) ->
         subject = MAX_DELIVERIES_ADVISORY_SUBJECT,
         "Listening for JetStream max-deliveries advisories"
     );
-    while let Some(msg) = sub.next().await {
+    loop {
+        let msg = tokio::select! {
+            _ = shutdown.cancelled() => {
+                tracing::info!("max-deliveries advisory listener shutdown signalled; stopping");
+                return Ok(());
+            }
+            msg = sub.next() => msg,
+        };
+        let Some(msg) = msg else {
+            return Ok(());
+        };
         match parse_max_deliveries_advisory(&msg.payload) {
             Some(adv) => {
                 axum_prometheus::metrics::counter!("bot_stream_max_deliveries_total").increment(1);
@@ -240,7 +256,6 @@ pub async fn run_max_deliveries_advisory_listener(client: async_nats::Client) ->
             }
         }
     }
-    Ok(())
 }
 
 /// Runs `make_run()` forever, restarting it whenever it exits — cleanly
@@ -255,8 +270,18 @@ pub async fn run_max_deliveries_advisory_listener(client: async_nats::Client) ->
 /// This supervises task LIVENESS only; message-level recovery semantics
 /// (what gets acked/termed/re-published) are owned by the consumer body
 /// and are out of scope here (WP-38 / D-5).
-pub async fn supervise_consumer<F, Fut>(name: &'static str, mut make_run: F)
-where
+///
+/// `shutdown` bounds the supervisor's lifetime (R-11 / F-109): once it is
+/// cancelled the supervisor stops restarting and returns. If a run is in
+/// flight at that moment, the supervisor waits for it to wind down (the
+/// consumer bodies observe the same token and exit cleanly) so `main`'s
+/// bounded drain can await this task to completion instead of killing a
+/// consumer mid-`execute_command`.
+pub async fn supervise_consumer<F, Fut>(
+    name: &'static str,
+    shutdown: CancellationToken,
+    mut make_run: F,
+) where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
 {
@@ -267,18 +292,31 @@ where
     let mut backoff = INITIAL_BACKOFF;
     loop {
         let started = tokio::time::Instant::now();
-        match tokio::spawn(make_run()).await {
-            Ok(Ok(())) => {
+        let mut run = tokio::spawn(make_run());
+        let result = tokio::select! {
+            res = &mut run => Some(res),
+            _ = shutdown.cancelled() => None,
+        };
+        match result {
+            None => {
+                tracing::info!(
+                    consumer = name,
+                    "shutdown signalled; waiting for consumer to wind down"
+                );
+                let _ = run.await;
+                return;
+            }
+            Some(Ok(Ok(()))) => {
                 tracing::error!(consumer = name, "consumer stream ended; restarting");
             }
-            Ok(Err(e)) => {
+            Some(Ok(Err(e))) => {
                 tracing::error!(
                     consumer = name,
                     "consumer exited with error: {:#}; restarting",
                     e
                 );
             }
-            Err(join_err) => {
+            Some(Err(join_err)) => {
                 tracing::error!(
                     consumer = name,
                     "consumer task panicked: {}; restarting",
@@ -291,7 +329,13 @@ where
         if started.elapsed() >= STABLE_RESET {
             backoff = INITIAL_BACKOFF;
         }
-        tokio::time::sleep(backoff).await;
+        tokio::select! {
+            _ = shutdown.cancelled() => {
+                tracing::info!(consumer = name, "shutdown signalled during backoff; stopping");
+                return;
+            }
+            _ = tokio::time::sleep(backoff) => {}
+        }
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
@@ -369,17 +413,21 @@ mod tests {
     async fn supervisor_restarts_on_err_ok_and_panic() {
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_clone = calls.clone();
-        let sup = tokio::spawn(supervise_consumer("test-consumer", move || {
-            let calls = calls_clone.clone();
-            async move {
-                match calls.fetch_add(1, Ordering::SeqCst) {
-                    0 => Err(anyhow::anyhow!("boom")),
-                    1 => Ok(()),
-                    2 => panic!("consumer task panic"),
-                    _ => std::future::pending().await,
+        let sup = tokio::spawn(supervise_consumer(
+            "test-consumer",
+            tokio_util::sync::CancellationToken::new(),
+            move || {
+                let calls = calls_clone.clone();
+                async move {
+                    match calls.fetch_add(1, Ordering::SeqCst) {
+                        0 => Err(anyhow::anyhow!("boom")),
+                        1 => Ok(()),
+                        2 => panic!("consumer task panic"),
+                        _ => std::future::pending().await,
+                    }
                 }
-            }
-        }));
+            },
+        ));
         tokio::time::timeout(Duration::from_secs(600), async {
             while calls.load(Ordering::SeqCst) < 4 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -394,13 +442,17 @@ mod tests {
     async fn supervisor_keeps_retrying_under_persistent_failure() {
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_clone = calls.clone();
-        let sup = tokio::spawn(supervise_consumer("always-fails", move || {
-            let calls = calls_clone.clone();
-            async move {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Err(anyhow::anyhow!("still down"))
-            }
-        }));
+        let sup = tokio::spawn(supervise_consumer(
+            "always-fails",
+            tokio_util::sync::CancellationToken::new(),
+            move || {
+                let calls = calls_clone.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Err(anyhow::anyhow!("still down"))
+                }
+            },
+        ));
         tokio::time::timeout(Duration::from_secs(700), async {
             while calls.load(Ordering::SeqCst) < 20 {
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -409,5 +461,88 @@ mod tests {
         .await
         .expect("supervisor stopped retrying under persistent failure");
         sup.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn supervisor_stops_on_shutdown_and_waits_for_run_to_wind_down() {
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let started = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
+        let started_clone = started.clone();
+        let finished_clone = finished.clone();
+        let run_token = shutdown.clone();
+        let sup = tokio::spawn(supervise_consumer(
+            "shutdown-test",
+            shutdown.clone(),
+            move || {
+                let started = started_clone.clone();
+                let finished = finished_clone.clone();
+                let run_token = run_token.clone();
+                async move {
+                    started.fetch_add(1, Ordering::SeqCst);
+                    // Mirrors a shutdown-aware consumer body (bot-command /
+                    // max-deliveries-advisory): run until shutdown, then wind
+                    // down cleanly.
+                    run_token.cancelled().await;
+                    finished.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+        ));
+        tokio::time::timeout(Duration::from_secs(600), async {
+            while started.load(Ordering::SeqCst) < 1 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("supervised run did not start");
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(600), sup)
+            .await
+            .expect("supervisor did not exit after shutdown")
+            .unwrap();
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            1,
+            "supervisor must not restart the consumer after shutdown"
+        );
+        assert_eq!(
+            finished.load(Ordering::SeqCst),
+            1,
+            "supervisor must wait for the running consumer to wind down before exiting"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn supervisor_backoff_sleep_is_interrupted_by_shutdown() {
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let sup = tokio::spawn(supervise_consumer(
+            "backoff-shutdown",
+            shutdown.clone(),
+            move || {
+                let calls = calls_clone.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Err(anyhow::anyhow!("down"))
+                }
+            },
+        ));
+        tokio::time::timeout(Duration::from_secs(600), async {
+            while calls.load(Ordering::SeqCst) < 1 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("first run did not happen");
+        // The supervisor is now in its (paused) backoff sleep; cancelling must
+        // interrupt it rather than waiting out the full backoff.
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(600), sup)
+            .await
+            .expect("supervisor did not exit promptly when shutdown interrupted backoff")
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no restart after shutdown");
     }
 }

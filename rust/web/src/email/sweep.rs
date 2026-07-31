@@ -4,6 +4,7 @@
 //! nudge/expiry) via `spawn_periodic_sweeps`.
 
 use sqlx::PgPool;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub const DEFAULT_REMINDER_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(86400);
@@ -317,9 +318,15 @@ async fn sweep_once(
 }
 
 /// Spawns one periodic sweep: a `MissedTickBehavior::Skip` interval that runs
-/// `run()` every tick, forever. Six sweeps used to repeat this loop verbatim
-/// (wfe F38).
-fn spawn_sweep<F, Fut>(name: &'static str, interval: std::time::Duration, mut run: F)
+/// `run()` every tick until `shutdown` is cancelled (R-11 / F-109). Six sweeps
+/// used to repeat this loop verbatim (wfe F38). Returns the `JoinHandle` so
+/// `main` can boundedly drain the sweep on shutdown.
+fn spawn_sweep<F, Fut>(
+    name: &'static str,
+    interval: std::time::Duration,
+    shutdown: CancellationToken,
+    mut run: F,
+) -> tokio::task::JoinHandle<()>
 where
     F: FnMut() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -329,23 +336,30 @@ where
         let mut tick = tokio::time::interval(interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            tick.tick().await;
+            tokio::select! {
+                _ = shutdown.cancelled() => {
+                    tracing::info!("{name}: shutdown signalled; stopping sweep");
+                    return;
+                }
+                _ = tick.tick() => {}
+            }
             run().await;
         }
-    });
+    })
 }
 
 pub fn spawn_turn_reminder_sweep(
     pool: PgPool,
     resend: Option<resend_rs::Resend>,
     http_client: reqwest::Client,
-) {
-    spawn_sweep("turn_reminder", sweep_interval(), move || {
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    spawn_sweep("turn_reminder", sweep_interval(), shutdown, move || {
         let pool = pool.clone();
         let resend = resend.clone();
         let http_client = http_client.clone();
         async move { sweep_once(resend.as_ref(), &pool, &http_client).await }
-    });
+    })
 }
 
 pub const DEFAULT_BOT_TURN_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(900);
@@ -426,12 +440,16 @@ async fn sweep_bot_turns_once(pool: &PgPool, jetstream: &async_nats::jetstream::
         .set(dangling_names.len() as f64);
 }
 
-pub fn spawn_bot_turn_sweep(pool: PgPool, jetstream: async_nats::jetstream::Context) {
-    spawn_sweep("bot_turn_sweep", bot_turn_sweep_interval(), move || {
+pub fn spawn_bot_turn_sweep(
+    pool: PgPool,
+    jetstream: async_nats::jetstream::Context,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    spawn_sweep("bot_turn_sweep", bot_turn_sweep_interval(), shutdown, move || {
         let pool = pool.clone();
         let jetstream = jetstream.clone();
         async move { sweep_bot_turns_once(&pool, &jetstream).await }
-    });
+    })
 }
 
 /// The 22d unverified-address expiry window: unverified `user_emails` older
@@ -463,14 +481,14 @@ async fn sweep_processed_webhook_events_once(pool: &PgPool) {
 
 /// Periodic job deleting unverified addresses that were never confirmed
 /// (the 22d expiry cleanup). Reuses the shared `sweep_interval()` cadence.
-pub fn spawn_unverified_email_sweep(pool: PgPool) {
-    spawn_sweep("unverified_email_expiry", sweep_interval(), move || {
+pub fn spawn_unverified_email_sweep(pool: PgPool, shutdown: CancellationToken) -> tokio::task::JoinHandle<()> {
+    spawn_sweep("unverified_email_expiry", sweep_interval(), shutdown, move || {
         let pool = pool.clone();
         async move {
             sweep_unverified_emails_once(&pool).await;
             sweep_processed_webhook_events_once(&pool).await;
         }
-    });
+    })
 }
 
 pub const DEFAULT_INVITE_REMINDER_THRESHOLD: std::time::Duration =
@@ -527,12 +545,16 @@ async fn sweep_invite_nudge_once(resend: Option<&resend_rs::Resend>, pool: &PgPo
     }
 }
 
-pub fn spawn_invite_nudge_sweep(pool: PgPool, resend: Option<resend_rs::Resend>) {
-    spawn_sweep("invite_nudge", sweep_interval(), move || {
+pub fn spawn_invite_nudge_sweep(
+    pool: PgPool,
+    resend: Option<resend_rs::Resend>,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    spawn_sweep("invite_nudge", sweep_interval(), shutdown, move || {
         let pool = pool.clone();
         let resend = resend.clone();
         async move { sweep_invite_nudge_once(resend.as_ref(), &pool).await }
-    });
+    })
 }
 
 async fn sweep_invite_expiry_once(resend: Option<&resend_rs::Resend>, pool: &PgPool) {
@@ -554,12 +576,16 @@ async fn sweep_invite_expiry_once(resend: Option<&resend_rs::Resend>, pool: &PgP
     }
 }
 
-pub fn spawn_invite_expiry_sweep(pool: PgPool, resend: Option<resend_rs::Resend>) {
-    spawn_sweep("invite_expiry", sweep_interval(), move || {
+pub fn spawn_invite_expiry_sweep(
+    pool: PgPool,
+    resend: Option<resend_rs::Resend>,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    spawn_sweep("invite_expiry", sweep_interval(), shutdown, move || {
         let pool = pool.clone();
         let resend = resend.clone();
         async move { sweep_invite_expiry_once(resend.as_ref(), &pool).await }
-    });
+    })
 }
 
 async fn sweep_invite_auto_decline_once(
@@ -593,28 +619,35 @@ pub fn spawn_invite_auto_decline_sweep(
     pool: PgPool,
     resend: Option<resend_rs::Resend>,
     broadcaster: crate::websocket::GameBroadcaster,
-) {
-    spawn_sweep("invite_auto_decline", sweep_interval(), move || {
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    spawn_sweep("invite_auto_decline", sweep_interval(), shutdown, move || {
         let pool = pool.clone();
         let resend = resend.clone();
         let broadcaster = broadcaster.clone();
         async move { sweep_invite_auto_decline_once(resend.as_ref(), &pool, &broadcaster).await }
-    });
+    })
 }
 
+/// Spawns all periodic email/bot sweeps, each observing `shutdown` (R-11 /
+/// F-109). Returns their `JoinHandle`s so `main` can boundedly drain them on
+/// shutdown.
 pub fn spawn_periodic_sweeps(
     pool: PgPool,
     resend: Option<resend_rs::Resend>,
     http_client: reqwest::Client,
     broadcaster: crate::websocket::GameBroadcaster,
     jetstream: async_nats::jetstream::Context,
-) {
-    spawn_turn_reminder_sweep(pool.clone(), resend.clone(), http_client.clone());
-    spawn_unverified_email_sweep(pool.clone());
-    spawn_invite_nudge_sweep(pool.clone(), resend.clone());
-    spawn_invite_expiry_sweep(pool.clone(), resend.clone());
-    spawn_invite_auto_decline_sweep(pool.clone(), resend.clone(), broadcaster);
-    spawn_bot_turn_sweep(pool.clone(), jetstream);
+    shutdown: CancellationToken,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    vec![
+        spawn_turn_reminder_sweep(pool.clone(), resend.clone(), http_client.clone(), shutdown.clone()),
+        spawn_unverified_email_sweep(pool.clone(), shutdown.clone()),
+        spawn_invite_nudge_sweep(pool.clone(), resend.clone(), shutdown.clone()),
+        spawn_invite_expiry_sweep(pool.clone(), resend.clone(), shutdown.clone()),
+        spawn_invite_auto_decline_sweep(pool.clone(), resend.clone(), broadcaster, shutdown.clone()),
+        spawn_bot_turn_sweep(pool.clone(), jetstream, shutdown.clone()),
+    ]
 }
 
 #[cfg(all(test, feature = "ssr"))]
@@ -1697,5 +1730,40 @@ mod tests {
             nudged_at.is_none(),
             "a transient DB error must prevent marking the proposal as nudged"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sweep_stops_on_shutdown() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        use tokio_util::sync::CancellationToken;
+
+        let shutdown = CancellationToken::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let runs_clone = runs.clone();
+        let handle = spawn_sweep(
+            "shutdown_sweep",
+            Duration::from_millis(10),
+            shutdown.clone(),
+            move || {
+                let runs = runs_clone.clone();
+                async move {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                }
+            },
+        );
+        tokio::time::timeout(Duration::from_secs(600), async {
+            while runs.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("sweep did not run on its interval");
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(600), handle)
+            .await
+            .expect("sweep task did not exit after shutdown")
+            .unwrap();
     }
 }
