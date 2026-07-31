@@ -725,4 +725,80 @@ mod tests {
             "the lower() unique index must reject a case variant"
         );
     }
+
+    #[sqlx::test]
+    async fn canonical_email_index_matches_backfill_expression(pool: PgPool) {
+        let canonical_indexes: Vec<String> = sqlx::query_scalar(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'user_emails' AND indexdef LIKE '%lower(btrim(email))%'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            canonical_indexes.len(),
+            1,
+            "exactly one unique index must use the backfill expression lower(btrim(email))"
+        );
+        assert!(
+            canonical_indexes[0].contains("UNIQUE"),
+            "the lower(btrim(email)) index must be unique"
+        );
+        let stale_lower_only: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'user_emails' AND indexname = 'user_emails_email_lower_key'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stale_lower_only, 0,
+            "the mismatched lower(email) index must be dropped"
+        );
+
+        let chk: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pg_constraint WHERE conname = 'user_emails_email_canonical_chk' AND contype = 'c'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(chk, 1, "the canonical CHECK constraint must exist");
+
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("dup@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+        let variant = sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind("  DUP@example.com  ")
+        .execute(&pool)
+        .await;
+        assert!(
+            variant.is_err(),
+            "a trim/case variant must be rejected by the CHECK/index"
+        );
+
+        let trim_dups: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM (SELECT lower(btrim(email)) FROM user_emails GROUP BY 1 HAVING COUNT(*) > 1) d",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            trim_dups, 0,
+            "no trim-duplicate rows may survive under the new index"
+        );
+    }
 }
