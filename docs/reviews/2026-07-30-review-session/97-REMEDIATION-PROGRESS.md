@@ -39,7 +39,7 @@ restored per owner instruction.)
 | R-14 | done(f9173fe) | f9173fe51e46c4e3f53db7b0dafeb32a649be5d8 | AC1 focused `brdgme_nats` shared crate owns `BotTurnEvent`/`BotCommandEvent` and all protocol constants; bot and web consume it through thin re-export facades (bot unconditional dependency, web optional behind the `ssr` feature), so the protocol types and constants have a single definition site and cannot diverge. AC2 eight-test exact-JSON golden fixture covers serialization, deserialization, and round-trip for the protocol events. AC3 definition-focused grep found exactly one `pub const` definition each for `STREAM_NAME`, `SUBJECT_TURN`, `SUBJECT_COMMAND`, `CONSUMER_TURN`, `CONSUMER_COMMAND`, `MAX_TURN_ATTEMPTS`, `MAX_DELIVER`, `ACK_WAIT`; bot heartbeat uses `ACK_WAIT`. Gates: shared crate test/fmt/clippy pass; bot fmt/clippy pass; allowed `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` pass; bot test 34 pass plus the known four local sqlx `PoolTimedOut` failures (pre-existing local condition, not a regression). Review verdict APPROVE, no Critical/Important findings. |
 | R-15 | done(4d6244c) | 4d6244c165f00db4ec3676b79385131f6eeaf979 | Closes F-101/F-102/F-105/F-107 (NATS delivery semantics). AC1 dedup: stream config sets `duplicate_window: 120s` (`nats.rs`) and `publish_bot_turns` sets a `Nats-Msg-Id` via `bot_turn_message_id(game_id, position, updated_at, attempt)` (`game/mod.rs:202-211`, call `:264`) published with `jetstream.send_publish(SUBJECT_TURN, message)`; key is `{game_id}:{position}:{updated_at}:{attempt}`; both AC1 duplicate sources publish attempt 0 (`trigger_bot_turns` and the sweep at `email/sweep.rs:437`), so identical turn state still collides to one delivery; test `duplicate_bot_turn_publish_collapses_to_one_delivery`. AC2 redelivery inside 5-min ack_wait: `process_bot_command_message` `Ok(info)` arm Naks with exponential backoff `2u64.saturating_pow(info.delivered.max(1))` -> 2s then 4s (`game/mod.rs:439-457`), delivery 3 still hits the existing `info.delivered >= MAX_DELIVER` Term branch, all well inside the 5-minute `ACK_WAIT`; test `transient_failure_redelivers_command_well_inside_ack_wait`. AC3 reconcile-not-create-if-absent: `ensure_stream_and_consumers` switched `get_or_create_stream`->`create_stream` and `get_or_create_consumer`->`create_consumer` (durable name in the desired config, `nats.rs:106,148-151`) with drift warnings reworded to "still drifted after reconciliation"; drift policy decision = automatic `create_stream`/`create_consumer` reconciliation selected over startup failure because on the pinned `nats:2.11-alpine` server `create_*` updates existing objects in place (probe-verified), so it is safe/idempotent and will not crash on pre-existing objects; test `ensure_stream_and_consumers_reconciles_drifted_config` deliberately drifts `duplicate_window` to 1s and the `bot-turn` consumer to `ack_wait: 30s`/`max_deliver: 1`, sanity-asserts the drift, then asserts exact restoration to `120s`/`ACK_WAIT`/`MAX_DELIVER` (a `get_or_create_*` impl would leave the drift and fail). AC4 remove `(future)` markers: `nats_protocol/src/lib.rs` `MAX_DELIVER` doc and the two `nats.rs` "future recovery" comments reworded; `rg '\(future\)' rust/web/src/nats.rs` exit 1 (zero hits). Design decisions: the 120s `duplicate_window` collapses only rapid re-publishes of the same turn state (broadcast races, conflict/user-error re-publish within 120s) while the 15-minute reconciliation sweep is a deliberate retry intentionally outside the window, and the message-id includes `attempt` so a real retry bumps the key and is not suppressed (this is the F-2 fix - the old attempt-less key silently deduped the deliberate retry after an invalid bot command); the 2s/4s Nak backoff is exponential (`pow(delivered.max(1))`) and stays well inside the 5-minute `ACK_WAIT`, with delivery 3 falling through to the existing Term ceiling. Gates (locally run, exact exit statuses): `cargo fmt -p brdgme_nats -- --check` exit 0; `cargo clippy -p brdgme_nats -- -D warnings` exit 0; `cargo test -p brdgme_nats` exit 0 (8 passed, 0 failed); `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); `git diff --check` exit 0. CI-deferred (WEB HARD BAN, not claimed passing locally): runtime red/green of the three live-NATS integration tests and the F-2 unit test `bot_turn_message_id_differs_by_attempt` (all compile-verified by the permitted `cargo check --all-targets --features ssr`), and the authoritative F-1 E0080 full-codegen confirmation - `cargo check` structurally defers the const-eval, so CI's `cargo test -p web --features ssr` is authoritative; the F-1 fix (`assume_utc()` lifting `PrimitiveDateTime`->`OffsetDateTime`) is byte-for-byte the reviewer's probe-verified recommendation. Review: comprehensive review verdict CHANGES REQUIRED with four findings - F-1 CRITICAL (`PrimitiveDateTime::format(&Iso8601::DEFAULT)` E0080 build break, invisible to `cargo check` but fatal under CI's full codegen), F-2 HIGH (dedup key omitted `attempt`, suppressing the deliberate retry), F-3 MEDIUM (test 3 non-discriminating), F-4 LOW (comment accuracy); all four resolved and the targeted re-review verdict APPROVED with no new blocker; final verification VERIFIED. No push. |
 | R-16 | done(85fff2e) | 85fff2e784e49f0191a417a1dab2325d80b5df45 | hanamikoji-1 Dockerfile stage + bake target + k8s bundle shipped; delivery-list CI guard added; F-211 smoke assertion restored; comprehensive review PASS, no blocking findings |
-| R-17 | pending | | 5.4 done (973ea62); server-fn test harness available |
+| R-17 | done(2fa5b35) | 2fa5b356646d00bf120d2782a73aa15797c300d0 | closes F-150..F-156 (WP-52 stats/query-perf "Test? y" rows); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime DB/web tests deferred to CI, not claimed passing; comprehensive review resolved two stale SQLX cache entries + F48/F21 entry-point coverage, targeted re-review no blockers |
 | R-18 | pending | | |
 | R-19 | pending | | |
 | R-20 | pending | | |
@@ -370,6 +370,150 @@ guard).
   bake/build not run; kustomize/kubeconform deferred to CI; Tiltfile Starlark
   unvalidated; `scripts/rust-test.sh` skipped per laptop OOM ban, no Rust source
   changed; tracker update deferred to this row) - none blocking.
+
+## R-17 evidence
+
+Code commit `2fa5b356646d00bf120d2782a73aa15797c300d0` (verified via
+`git rev-parse`; message `fix(web): correct stats queries and coverage (R-17,
+F-150, F-151, F-152, F-153, F-154, F-155, F-156)`). Closes F-150 through F-156
+(the seven WP-52 stats/query-perf "Test? y" rows and their follow-up findings).
+Tracked changes: `rust/web/src/stats/queries.rs`, `rust/web/src/stats/mod.rs`,
+`rust/web/src/db/social.rs`, `rust/web/src/game/server_fns.rs`,
+`rust/web/src/index.rs`, `rust/web/src/test_support.rs`, plus two deleted
+`.sqlx` cache JSON entries.
+
+- **Checklist provenance:** the original WP-52/WP-53 checklist
+  `docs/reviews/2026-07-23-rust-review/planning/checklists/T3-B5-web-domain-stats-misc.md`
+  was compacted (deleted) in `d89fa34` ("docs(review): compact 2026-07-23 rust
+  review to summary", 206 lines removed). It is NOT reconstructed here. The
+  replacement citation is `docs/reviews/2026-07-23-rust-review/SUMMARY.md:114`
+  ("WP-52 - stats + query performance pass."). The seven WP-52 "Test? y" rows
+  remediated here, as recorded from the pre-compaction checklist, are: `wd F50`,
+  `wd F51`, `wd F55`, `wd F48`, `wd F52`, `wd F46`, `wd F21`.
+
+- **Findings closed (F-150..F-156):**
+  - **F-150** (all seven "Test? y" rows shipped with no test): each row now has
+    a direct test - see the per-row citations below.
+  - **F-151** (High, `wd F48` game-type filter on only one side of a FULL OUTER
+    JOIN): the `gtu` rating side of `game_type_stats` now joins `game_types` and
+    applies `($3::text IS NULL OR gt_f.name = $3)` (`queries.rs:91-150`), so a
+    filtered request can no longer leak another type's rating/record.
+  - **F-152** (Medium, `wd F55` `NULLS LAST` skipped the third byte-identical
+    ordering): `recent_form_for_game_type`'s window ordering now carries
+    `NULLS LAST` (`queries.rs:716`), matching `finished_games` (`:309`) and
+    `recent_form` (`:630`).
+  - **F-153** (Medium, `wd F50` dead `#[allow(dead_code)]` const used by zero
+    sites): the `ELIGIBILITY_PREDICATE` const and its `#[allow(dead_code)]` are
+    deleted; grep for `ELIGIBILITY_PREDICATE` and for `allow(dead_code)` in
+    `stats/queries.rs` both return zero.
+  - **F-154** (Medium, `wd F52` canonicalization turns an unknown `game_type`
+    into no filter): `get_player_history` now returns `Ok(None)` when
+    `find_game_type_name` resolves to `None` (`mod.rs:343-350`), matching
+    `get_player_game_type_stats`' 404-on-unknown behaviour.
+  - **F-155** (Low, `wd F53` justifying comment copy-pasted and wrong at one
+    site): the stale `ELIGIBILITY_PREDICATE`/runtime-check comment block is
+    removed; the surviving runtime-`query_as` comments are per-site and accurate.
+  - **F-156** (Medium, `wd F74` bound truncates the friends feed
+    alphabetically): the `.take(20)` alphabetical truncation is removed;
+    `get_logged_in_index` now streams ALL friends through a bounded
+    `.buffered(10)` (`index.rs:47-68`), preserving `list_friends`' stable
+    alphabetical (`ORDER BY lower(u.name)`) output order while no longer dropping
+    friends past position 20. Semantics: no alphabetical truncation, bounded
+    concurrency `buffered(10)`, stable alphabetical output.
+
+- **Test-first / pre-fix RED evidence (compile-verified; runtime deferred to
+  CI, NOT claimed passing):**
+  - **F-151:** `game_type_stats_explicit_filter_returns_only_requested_type_and_rating`
+    (`queries.rs:1140`) fails pre-fix - the unfiltered FULL OUTER JOIN rating
+    side yields BOTH types and the alphabetically-first ("Acquire") row orders
+    first with the wrong rating; post-fix it asserts a single "Zebra Game" row
+    with rating 1400.
+  - **F-152:** `recent_form_for_game_type_null_finished_at_does_not_displace_recent`
+    (`queries.rs:1925`) fails pre-fix - PostgreSQL defaults `DESC` to
+    `NULLS FIRST`, so the NULL-`finished_at` legacy row sorts to `rn = 1` and
+    displaces a dated game from the 3-game window.
+  - **F-154:** `get_player_history_unknown_game_type_returns_none` (`mod.rs:408`)
+    fails pre-fix - `find_game_type_name`'s `None` bound straight into
+    `($3 IS NULL OR gt.name = $3)` as "no filter", returning the full history
+    wrapped in `Ok(Some(_))`.
+  - **F-156:** `get_logged_in_index_includes_late_alphabetical_friend_with_recent_game`
+    (`index.rs:131`) fails pre-fix - `.take(20)` on the name-ordered list
+    permanently drops `friend_21` (alphabetically last, holder of the most recent
+    visible game); the >20 late-alphabetical regression asserts that friend is
+    present with its game.
+  - **NOT a RED test (truthful note):** `rating_before_aggregates_exclude_nulls`
+    (`queries.rs:1344`, wd F51) was REWRITTEN to call `game_history` directly
+    (the old body queried raw SQL and would have kept passing even if the LATERAL
+    were deleted). It is a PASSING regression guarding the already-correct
+    `LEFT JOIN LATERAL` NULL-exclusion semantics, not a pre-fix failure, and is
+    not described as a RED test.
+
+- **All seven WP-52 "Test? y" rows - function/test citations (compile-verified;
+  runtime DB tests deferred to CI, NOT claimed passing):**
+  - **wd F50** - all eight named stats query functions, current direct-test
+    calls: `overall_totals` (`queries.rs:43`; tests `:977,:982,:1002,:1006`),
+    `game_type_stats` (`:91`; tests `:1029,:1158`), `finished_games` (`:281`;
+    tests `:1288,:1316,:1328`), `game_history` (`:416`; tests `:1398,:2026`),
+    `game_history_count` (`:498`; tests `:2152,:2157`), `head_to_head` (`:528`;
+    tests `:1487,:1512`), `recent_form` (`:613`; test `:1561`),
+    `recent_form_for_game_type` (`:696`; tests `:1864,:1966`).
+  - **wd F51** - `game_history` (`queries.rs:416`) via the rewritten
+    `rating_before_aggregates_exclude_nulls` (`:1344`), which now calls
+    `game_history` directly and asserts the LATERAL `match_elo` ignores the NULL
+    seat (1200/1200/1200) while `player_count` still counts it, and the
+    game-type filter excludes the "Duel" game.
+  - **wd F55** - `finished_games` (`:309` `NULLS LAST`, existing direct calls
+    `:1288,:1316,:1328`) and `recent_form` (`:630` `NULLS LAST`, existing direct
+    call `:1561`), PLUS the new F-152 sibling
+    `recent_form_for_game_type_null_finished_at_does_not_displace_recent`
+    (`:1925`) covering the third ordering at `:716`.
+  - **wd F48** - `game_type_stats` (`:91`) via
+    `game_type_stats_explicit_filter_returns_only_requested_type_and_rating`
+    (`:1158` call) PLUS the new entry-point test
+    `get_player_game_type_stats_returns_requested_type_and_rating` (`mod.rs:496`)
+    driving the real `get_player_game_type_stats` (`mod.rs:239`) and its
+    defence-in-depth `.find(|s| s.game_type_name == canonical)` (`mod.rs:270`).
+  - **wd F52** - `get_player_history` unknown-type test
+    `get_player_history_unknown_game_type_returns_none` (`mod.rs:408`).
+  - **wd F46** - `get_player_history` clamp test
+    `get_player_history_clamps_page_bounds` (`mod.rs:452`): page 0 and negative
+    clamp up to 1, page 1_000_001 clamps down to 1_000_000 (clamp already in
+    place; this guards it).
+  - **wd F21** - `should_hide_add_friend_many` (`db/social.rs:182`)
+    batch-vs-singular equivalence test
+    `should_hide_add_friend_many_matches_singular_per_row_state` (`social.rs:956`)
+    PLUS the `get_game_details` ENTRY-POINT test
+    `get_game_details_batch_add_friend_reflects_per_player_state`
+    (`server_fns.rs:2799`), which drives the real server fn through the harness
+    against an in-process local mock game service (canned PubRender; no real
+    service) and asserts the batched affordance (`server_fns.rs:316,:385-388`)
+    hides an accepted friend and shows a pending-INCOMING requester.
+
+- **SQLX cache:** two obsolete `query!` cache entries deleted
+  (`.sqlx/query-11b46fcc7ad564627ecea8b6bacf68a615e6e1388f.json` and
+  `.sqlx/query-350faff674aef8d03893fe73be38809711dea11492.json`) because
+  `game_type_stats` and `recent_form_for_game_type` were converted from the
+  compile-time `sqlx::query!` macro to runtime `sqlx::query_as` (named `FromRow`
+  structs `GameTypeStatsRow` / `RecentFormForGameTypeRow`); the macro cache
+  entries no longer correspond to any `query!` invocation.
+
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0. Runtime DB/web tests are deferred to CI and are NOT
+  claimed passing here (web build/test/run banned; the new `#[sqlx::test]` cases
+  need Postgres).
+
+- **Review:** the comprehensive review identified, and the implementation then
+  resolved, two stale SQLX cache entries (the two deleted JSON files above) plus
+  the F48 (`get_player_game_type_stats`) and F21 (`get_game_details`) ENTRY-POINT
+  coverage gaps (the two new entry-point tests). A targeted re-review found no
+  blockers.
+
+- **Transparency (command-constraint deviation):** during the targeted re-review
+  a reviewer ran `cargo clean -p web` to force a full recompile. This violated
+  the "only `cargo check -p web` variants" command constraint, but it only
+  removed ignored web build artifacts (no source, no tracked files). It is
+  recorded here rather than concealed. All actual verification checks were the
+  permitted gate above.
 
 ## 5.4 evidence
 
