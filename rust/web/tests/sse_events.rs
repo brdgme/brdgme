@@ -4,6 +4,7 @@ use axum::http::{Request, StatusCode};
 use brdgme_session_store::PostgresStore;
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
+use serial_test::serial;
 use sqlx::PgPool;
 use std::time::Duration;
 use tower::ServiceExt;
@@ -55,6 +56,11 @@ async fn make_user(pool: &PgPool, name: &str) -> User {
 }
 
 async fn login_cookie(pool: &PgPool, user: &User, email: &str) -> String {
+    let (cookie, _) = login_cookie_with_token(pool, user, email).await;
+    cookie
+}
+
+async fn login_cookie_with_token(pool: &PgPool, user: &User, email: &str) -> (String, Uuid) {
     let store = PostgresStore::new(pool.clone());
     store.migrate().await.unwrap();
 
@@ -80,7 +86,7 @@ async fn login_cookie(pool: &PgPool, user: &User, email: &str) -> String {
         .unwrap();
     session.save().await.unwrap();
     let id = session.id().expect("session id assigned after save");
-    format!("id={}", id)
+    (format!("id={}", id), auth_token_id)
 }
 
 async fn make_game_version(pool: &PgPool) -> Uuid {
@@ -195,9 +201,89 @@ async fn sse_request(app: Router, path: &str, cookie: Option<&str>) -> axum::res
     app.oneshot(req).await.unwrap()
 }
 
+async fn serve_router(app: Router) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    addr
+}
+
+// The `sse_connections` gauge is recorded through the global `metrics` facade,
+// which is a no-op until a recorder is installed. `PrometheusMetricLayer::pair()`
+// installs the recorder (and panics if called twice), so it is guarded by a
+// process-wide `OnceLock`; the returned handle renders the current gauge value.
+fn metrics_handle() -> &'static axum_prometheus::metrics_exporter_prometheus::PrometheusHandle {
+    static HANDLE: std::sync::OnceLock<
+        axum_prometheus::metrics_exporter_prometheus::PrometheusHandle,
+    > = std::sync::OnceLock::new();
+    HANDLE.get_or_init(|| {
+        let (_layer, handle) = axum_prometheus::PrometheusMetricLayer::pair();
+        handle
+    })
+}
+
+fn gauge_value(
+    handle: &axum_prometheus::metrics_exporter_prometheus::PrometheusHandle,
+    name: &str,
+) -> f64 {
+    for line in handle.render().lines() {
+        let mut parts = line.split_whitespace();
+        if parts.next() == Some(name)
+            && let Some(val) = parts.next()
+        {
+            return val.parse().unwrap_or(f64::NAN);
+        }
+    }
+    0.0
+}
+
+// NATS publishes its monitoring endpoint on the client port + 4000 (CI maps
+// 4222->8222, the local test script 14222->18222; both run `nats-server -m 8222`).
+fn nats_monitor_base() -> String {
+    let url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let stripped = url.strip_prefix("nats://").unwrap_or(&url);
+    let (host, port) = match stripped.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(4222)),
+        None => (stripped.to_string(), 4222),
+    };
+    format!("http://{}:{}", host, port + 4000)
+}
+
+async fn nats_game_subjects() -> Vec<String> {
+    let url = format!("{}/subsz?subs=1", nats_monitor_base());
+    let body = reqwest::get(&url)
+        .await
+        .unwrap_or_else(|e| panic!("NATS monitoring endpoint {url} unreachable: {e}"))
+        .text()
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .unwrap_or_else(|e| panic!("could not parse NATS subsz JSON from {url}: {e}\nbody: {body}"));
+    let mut subjects = Vec::new();
+    if let Some(subs) = json.get("subscriptions").and_then(|s| s.as_array()) {
+        for sub in subs {
+            if let Some(subject) = sub.get("subject").and_then(|s| s.as_str())
+                && subject.starts_with("game.")
+            {
+                subjects.push(subject.to_string());
+            }
+        }
+    }
+    subjects
+}
+
 // --- Group 1: Rejection cases ---
 
 #[sqlx::test]
+#[serial]
 async fn public_events_zero_topics_returns_400(pool: PgPool) {
     let (state, _) = make_state(pool).await;
     let app = build_router(state).await;
@@ -206,6 +292,7 @@ async fn public_events_zero_topics_returns_400(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn public_events_unknown_topic_kind_returns_400(pool: PgPool) {
     let (state, _) = make_state(pool).await;
     let app = build_router(state).await;
@@ -219,6 +306,7 @@ async fn public_events_unknown_topic_kind_returns_400(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn public_events_malformed_uuid_returns_400(pool: PgPool) {
     let (state, _) = make_state(pool).await;
     let app = build_router(state).await;
@@ -227,6 +315,7 @@ async fn public_events_malformed_uuid_returns_400(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn public_events_no_colon_returns_400(pool: PgPool) {
     let (state, _) = make_state(pool).await;
     let app = build_router(state).await;
@@ -235,6 +324,7 @@ async fn public_events_no_colon_returns_400(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn public_events_over_cap_returns_400(pool: PgPool) {
     let (state, _) = make_state(pool).await;
     let app = build_router(state).await;
@@ -248,6 +338,7 @@ async fn public_events_over_cap_returns_400(pool: PgPool) {
 // --- Group 2: Anonymous /events returns 200 ---
 
 #[sqlx::test]
+#[serial]
 async fn anonymous_events_returns_200_event_stream(pool: PgPool) {
     let (state, _) = make_state(pool).await;
     let app = build_router(state).await;
@@ -264,6 +355,7 @@ async fn anonymous_events_returns_200_event_stream(pool: PgPool) {
 // --- Group 3: Frame delivery ---
 
 #[sqlx::test]
+#[serial]
 async fn public_game_frame_reaches_anonymous_events(pool: PgPool) {
     let gv = make_game_version(&pool).await;
     let creator = make_user(&pool, "pub-creator").await;
@@ -287,6 +379,7 @@ async fn public_game_frame_reaches_anonymous_events(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn private_game_frame_does_not_reach_non_participant(pool: PgPool) {
     let gv = make_game_version(&pool).await;
     let player_a = make_user(&pool, "priv-a").await;
@@ -327,6 +420,7 @@ async fn private_game_frame_does_not_reach_non_participant(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn proposal_frame_reaches_participant_but_not_anonymous(pool: PgPool) {
     let gv = make_game_version(&pool).await;
     let owner = make_user(&pool, "prop-owner").await;
@@ -364,6 +458,7 @@ async fn proposal_frame_reaches_participant_but_not_anonymous(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn public_events_receives_matching_game_only(pool: PgPool) {
     let gv = make_game_version(&pool).await;
     let u1 = make_user(&pool, "pe-u1").await;
@@ -413,6 +508,7 @@ async fn public_events_receives_matching_game_only(pool: PgPool) {
 }
 
 #[sqlx::test]
+#[serial]
 async fn public_events_multiple_topics_all_deliver(pool: PgPool) {
     let gv = make_game_version(&pool).await;
     let u1 = make_user(&pool, "mt-u1").await;
@@ -453,7 +549,7 @@ async fn public_events_multiple_topics_all_deliver(pool: PgPool) {
 // --- Group 4: Keepalive ---
 
 #[sqlx::test]
-#[ignore = "takes 32+ seconds"]
+#[serial]
 async fn sse_stream_survives_past_request_timeout_with_keepalive(pool: PgPool) {
     use std::net::SocketAddr;
 
@@ -501,6 +597,7 @@ async fn sse_stream_survives_past_request_timeout_with_keepalive(pool: PgPool) {
 // --- Group 5: Graceful shutdown ---
 
 #[sqlx::test]
+#[serial]
 async fn graceful_shutdown_ends_sse_stream_and_server_completes(pool: PgPool) {
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
@@ -556,5 +653,182 @@ async fn graceful_shutdown_ends_sse_stream_and_server_completes(pool: PgPool) {
     assert!(
         server_result.is_ok(),
         "server task did not complete within 5s of shutdown"
+    );
+}
+
+// --- Group 6: Authorization lifetime and task hygiene (R-10) ---
+
+// F-158: the auth handler validates the session token once at connect and never
+// re-validates, so a revoked token keeps delivering events on the open stream.
+// Drives the real handler over a real listener and asserts the stream TERMINATES
+// after the token is revoked mid-stream. Pre-fix the viewer is captured once and
+// nothing re-runs `validate_session_token`, so the stream never ends and the
+// bounded deadline below is exhausted (test fails). Post-fix a periodic
+// re-validation arm breaks the loop and the stream ends promptly.
+#[sqlx::test]
+#[serial]
+async fn auth_stream_terminates_after_token_revocation(pool: PgPool) {
+    let gv = make_game_version(&pool).await;
+    let creator = make_user(&pool, "rev-creator").await;
+    let opponent = make_user(&pool, "rev-opponent").await;
+    let game_id = seed_game(&pool, gv, creator.id, &[opponent.id]).await;
+
+    let (cookie, auth_token_id) =
+        login_cookie_with_token(&pool, &creator, "rev-creator@example.com").await;
+
+    let (state, broadcaster) = make_state(pool.clone()).await;
+    let app = build_router(state).await;
+    let addr = serve_router(app).await;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("http://{addr}/events"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let mut stream = response.bytes_stream();
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    broadcaster.broadcast_game_update(game_id).await;
+    let mut saw_frame = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(chunk))) => {
+                if String::from_utf8_lossy(&chunk).contains(&game_id.to_string()) {
+                    saw_frame = true;
+                    break;
+                }
+            }
+            Ok(Some(Err(e))) => panic!("stream error: {e}"),
+            Ok(None) => panic!("stream ended before delivering any frame"),
+            Err(_) => continue,
+        }
+    }
+    assert!(
+        saw_frame,
+        "authenticated stream did not deliver a visible game frame"
+    );
+
+    web::auth::session::invalidate_auth_token(&pool, auth_token_id)
+        .await
+        .unwrap();
+
+    // Keep broadcasting visible events so a handler that re-checks per visible
+    // event also terminates; a time-based re-validation arm terminates regardless.
+    // The bound must exceed the implementation's re-validation period.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    let mut stream_ended = false;
+    while tokio::time::Instant::now() < deadline {
+        broadcaster.broadcast_game_update(game_id).await;
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(_))) | Ok(None) => {
+                stream_ended = true;
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
+    assert!(
+        stream_ended,
+        "SSE stream stayed open after auth token revocation; handler never re-validated the session"
+    );
+}
+
+// F-159: an idle anonymous connection (no visible games, so `tx.send` is never
+// reached) leaks its spawned task and NATS subscription past client disconnect -
+// the task only exits on a visible-event send failure or global shutdown. Opens a
+// real connection, drops the client, and asserts the `sse_connections` gauge (the
+// metric the finding names as hiding the leak, decremented on the task guard's
+// Drop) falls back within a bounded deadline. Pre-fix the anonymous task lives
+// until process shutdown, so the gauge never falls and the deadline is exhausted
+// (test fails). Post-fix a per-connection cancellation token fires on stream drop
+// and the task (with its subscription) goes away promptly.
+#[sqlx::test]
+#[serial]
+async fn idle_anonymous_connection_releases_task_on_disconnect(pool: PgPool) {
+    let handle = metrics_handle();
+    let (state, _broadcaster) = make_state(pool).await;
+    let app = build_router(state).await;
+    let addr = serve_router(app).await;
+
+    let before = gauge_value(handle, "sse_connections");
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("http://{addr}/events"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let stream = response.bytes_stream();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let peak = gauge_value(handle, "sse_connections");
+    assert!(
+        peak >= before + 1.0,
+        "expected sse_connections to rise by 1 for the open connection (before={before}, peak={peak})"
+    );
+
+    drop(stream);
+    drop(client);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut released = false;
+    while tokio::time::Instant::now() < deadline {
+        if gauge_value(handle, "sse_connections") <= peak - 1.0 {
+            released = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        released,
+        "sse_connections did not fall back after client disconnect; the anonymous SSE task leaked (before={before}, peak={peak}, now={})",
+        gauge_value(handle, "sse_connections")
+    );
+}
+
+// F-160: the public handler subscribes to the `game.>` firehose and filters
+// in-process instead of subscribing to the specific `game.{id}` subjects it
+// parsed. Opens a real `/events/public?topic=game:{A}` connection and asserts,
+// via the NATS monitoring `subsz` endpoint, that the server holds a subscription
+// on the specific `game.{A}` subject and NONE on the `game.>` wildcard. Pre-fix
+// the handler subscribes to `game.>`, so the wildcard assertion fails. The
+// frame-level filtering itself is already covered by
+// `public_events_receives_matching_game_only`; the cached visibility predicate is
+// covered by the `VisibilityCache` unit tests.
+#[sqlx::test]
+#[serial]
+async fn public_handler_subscribes_per_game_not_firehose(pool: PgPool) {
+    let gv = make_game_version(&pool).await;
+    let u1 = make_user(&pool, "sub-u1").await;
+    let u2 = make_user(&pool, "sub-u2").await;
+    let game_a = seed_game(&pool, gv, u1.id, &[u2.id]).await;
+
+    let (state, _broadcaster) = make_state(pool).await;
+    let app = build_router(state).await;
+    let addr = serve_router(app).await;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("http://{addr}/events/public?topic=game:{game_a}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let _stream = response.bytes_stream();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let subjects = nats_game_subjects().await;
+    assert!(
+        !subjects.iter().any(|s| s == "game.>"),
+        "public handler must not subscribe to the game.> firehose; active game.* subscriptions: {subjects:?}"
+    );
+    assert!(
+        subjects.iter().any(|s| s == &format!("game.{game_a}")),
+        "public handler should subscribe to the specific game.{game_a} subject; active game.* subscriptions: {subjects:?}"
     );
 }
