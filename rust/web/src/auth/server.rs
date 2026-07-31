@@ -545,7 +545,13 @@ pub async fn get_current_user() -> Result<Option<AuthUser>, ServerFnError> {
     let session: Session = extract()
         .await
         .map_err(internal("get_current_user: extract session"))?;
-    let session_user = get_user_from_session(&session).await;
+    let session_user = match get_user_from_session(&session).await {
+        Ok(user) => user,
+        Err(e) => {
+            tracing::warn!("get_current_user: failed to read session: {e}");
+            None
+        }
+    };
 
     if let Some(user) = session_user {
         let pool = expect_context::<PgPool>();
@@ -575,7 +581,10 @@ pub async fn logout() -> Result<bool, ServerFnError> {
         .await
         .map_err(internal("logout: extract session"))?;
 
-    if let Some(user) = get_user_from_session(&session).await {
+    if let Some(user) = get_user_from_session(&session)
+        .await
+        .map_err(internal("logout: read session"))?
+    {
         let pool = expect_context::<PgPool>();
         if let Err(e) = invalidate_auth_token(&pool, user.auth_token_id).await {
             tracing::error!("logout: failed to invalidate auth token: {e}");
@@ -599,7 +608,10 @@ pub async fn logout_everywhere() -> Result<bool, ServerFnError> {
         .await
         .map_err(internal("logout_everywhere: extract session"))?;
 
-    if let Some(user) = get_user_from_session(&session).await {
+    if let Some(user) = get_user_from_session(&session)
+        .await
+        .map_err(internal("logout_everywhere: read session"))?
+    {
         let pool = expect_context::<PgPool>();
         crate::db::invalidate_all_auth_tokens(&pool, user.id)
             .await
@@ -744,7 +756,7 @@ pub async fn set_username(name: String) -> Result<Option<String>, ServerFnError>
             let session: Session = extract()
                 .await
                 .map_err(internal("set_username: extract session"))?;
-            if let Some(mut session_user) = get_user_from_session(&session).await {
+            if let Ok(Some(mut session_user)) = get_user_from_session(&session).await {
                 session_user.name = name;
                 let _ = session.insert(SESSION_USER_KEY, session_user).await;
             }
@@ -2021,5 +2033,150 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(owner, Some(user_id));
+    }
+
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use tower_sessions::SessionStore;
+
+    #[derive(Debug)]
+    struct FailFirstLoadStore {
+        failed: AtomicBool,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionStore for FailFirstLoadStore {
+        async fn save(
+            &self,
+            _record: &tower_sessions::session::Record,
+        ) -> tower_sessions::session_store::Result<()> {
+            Ok(())
+        }
+
+        async fn load(
+            &self,
+            _id: &tower_sessions::session::Id,
+        ) -> tower_sessions::session_store::Result<Option<tower_sessions::session::Record>> {
+            use std::sync::atomic::Ordering;
+            if self.failed.swap(true, Ordering::SeqCst) {
+                Ok(None)
+            } else {
+                Err(tower_sessions::session_store::Error::Backend(
+                    "injected store failure".to_string(),
+                ))
+            }
+        }
+
+        async fn delete(
+            &self,
+            _id: &tower_sessions::session::Id,
+        ) -> tower_sessions::session_store::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn with_session_context<F, Fut, T>(pool: &PgPool, session: Session, f: F) -> T
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        let (mut parts, _) = axum::http::Request::new(()).into_parts();
+        parts.extensions.insert(session);
+
+        let owner = Owner::new();
+        owner.with(|| {
+            provide_context(pool.clone());
+            provide_context(parts);
+        });
+        owner
+            .with(|| leptos::reactive::computed::ScopedFuture::new(f()))
+            .await
+    }
+
+    async fn seed_user_with_two_tokens(pool: &PgPool) -> Uuid {
+        let user_id: Uuid =
+            sqlx::query_scalar("INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id")
+                .bind("victim")
+                .bind(Vec::<String>::new())
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        for _ in 0..2 {
+            sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+                .bind(Uuid::new_v4())
+                .bind(user_id)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+        user_id
+    }
+
+    async fn token_count(pool: &PgPool, user_id: Uuid) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_auth_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn logout_everywhere_errors_when_session_store_fails(pool: PgPool) {
+        let user_id = seed_user_with_two_tokens(&pool).await;
+
+        let session = Session::new(
+            Some(tower_sessions::session::Id::default()),
+            Arc::new(FailFirstLoadStore {
+                failed: AtomicBool::new(false),
+            }),
+            None,
+        );
+
+        let result = with_session_context(&pool, session, || logout_everywhere()).await;
+
+        assert!(
+            result.is_err(),
+            "logout_everywhere must fail when the session store fails, got: {result:?}"
+        );
+        assert_eq!(
+            token_count(&pool, user_id).await,
+            2,
+            "no tokens may be revoked on a failed session read"
+        );
+    }
+
+    #[sqlx::test]
+    async fn logout_everywhere_revokes_all_tokens_on_healthy_session(pool: PgPool) {
+        let user_id = seed_user_with_two_tokens(&pool).await;
+
+        let session = Session::new(
+            None,
+            Arc::new(tower_sessions::MemoryStore::default()),
+            None,
+        );
+        session
+            .insert(
+                SESSION_USER_KEY,
+                crate::auth::session::SessionUser {
+                    id: user_id,
+                    name: "victim".to_string(),
+                    email: "victim@example.com".to_string(),
+                    auth_token_id: Uuid::new_v4(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let result = with_session_context(&pool, session, || logout_everywhere()).await;
+
+        assert!(
+            matches!(result, Ok(true)),
+            "healthy session logs out everywhere, got: {result:?}"
+        );
+        assert_eq!(
+            token_count(&pool, user_id).await,
+            0,
+            "every auth token is revoked on a healthy logout"
+        );
     }
 }

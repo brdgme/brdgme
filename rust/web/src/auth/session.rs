@@ -65,12 +65,10 @@ pub async fn set_user_session(
 }
 
 #[cfg(feature = "ssr")]
-pub async fn get_user_from_session(session: &Session) -> Option<SessionUser> {
-    session
-        .get::<SessionUser>(SESSION_USER_KEY)
-        .await
-        .ok()
-        .flatten()
+pub async fn get_user_from_session(
+    session: &Session,
+) -> Result<Option<SessionUser>, tower_sessions::session::Error> {
+    session.get::<SessionUser>(SESSION_USER_KEY).await
 }
 
 #[cfg(feature = "ssr")]

@@ -183,7 +183,7 @@ pub async fn admin_export_game(
     session: Session,
     Path(game_id): Path<Uuid>,
 ) -> Response {
-    let Some(session_user) = crate::auth::session::get_user_from_session(&session).await else {
+    let Ok(Some(session_user)) = crate::auth::session::get_user_from_session(&session).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     match crate::auth::session::validate_session_token(&state.pool, session_user.auth_token_id)

@@ -65,13 +65,13 @@ pub async fn events_handler(
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
     let (viewer, auth_token_id): (Option<Uuid>, Option<Uuid>) =
         match crate::auth::session::get_user_from_session(&session).await {
-            Some(su) => {
+            Ok(Some(su)) => {
                 match crate::auth::session::validate_session_token(&pool, su.auth_token_id).await {
                     Ok(true) => (Some(su.id), Some(su.auth_token_id)),
                     _ => (None, None),
                 }
             }
-            None => (None, None),
+            _ => (None, None),
         };
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
