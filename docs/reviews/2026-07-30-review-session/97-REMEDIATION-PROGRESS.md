@@ -31,7 +31,7 @@ restored per owner instruction.)
 | R-06 | done(3cd727e) | 3cd727eba4173f44276c3fae07c400e463c57ad3 | 4 lifecycle writers enumerated; CODING.md rule rewritten as property |
 | R-07 | blocked(prod Kubernetes API unreachable) | 1e19d05f0506aa6e92cc16764d4f8c2f148eb022 (impl HEAD pre-tracker) | production Kubernetes API connectivity failure (TLS handshake EOF) before backup and mutation; Backup postgres-pre-repair-r07-20260801-01 not applied; no database action |
 | R-08 | done(899814f) | 899814f7528d719b2b46131e74129520b52f30ed | AC1 explicit exhaustive named matches (no wildcard); AC2 and AC3 persistence-mark tests; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with only two non-blocking Minor notes |
-| R-09 | pending | | |
+| R-09 | done(61f9f4e) | 61f9f4eee5af657b108a11e5722155f82d4260c8 | AC1 single named contract `transient_failure` called by both routes; literal-Done grep 26 constructions commented (two non-constructions: match arm, doc prose); AC2 invite lock-timeout DB-error test asserts Retry; AC3 settings closed-pool DB-error test asserts Retry; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with two non-blocking Minor notes |
 | R-10 | pending | | |
 | R-11 | pending | | implement ws F55 second half (owner ruling) |
 | R-12 | pending | | |
@@ -138,3 +138,37 @@ restored per owner instruction.)
   never remove or revert changes outside the agent's own work.
 - 2026-07-31: R-07 production-query Worker performed one unapproved
   schema-metadata check; exposed no sensitive output and made no modifications.
+
+## R-09 evidence
+
+Code commit `61f9f4eee5af657b108a11e5722155f82d4260c8` (only tracked change:
+`rust/web/src/email/inbound.rs`, 277+/58-).
+
+- **Root cause:** F-162 (invite) and F-169 (settings) were the same defect
+  class - a transient (retryable) DB failure collapsed into `RouteOutcome::Done`,
+  so svix saw 200 and never redelivered, violating D-2 at-least-once. Invite's
+  six pre-`tx.commit()` errors and settings' two lookup errors now map to
+  `Retry`; an uncommitted transaction rolls back on drop, so retry is safe.
+- **AC1:** single named contract `transient_failure` (logs error, returns
+  `Retry`) is called by both routes - invite at six sites, settings at two.
+  Literal-`Done` grep: 26 constructions, each with an immediately preceding
+  non-transient justification comment; the only two non-constructions are the
+  `:682` dispatch match arm and the `:772` doc-comment prose.
+- **AC2:** `invite_route_transient_db_error_is_retry` calls the direct invite
+  route; a `lock_timeout='100ms'` pool plus a blocker holding `FOR UPDATE` on
+  the player row makes `update_proposal_player_response` time out (transient),
+  asserting `RouteOutcome::Retry`.
+- **AC3:** `settings_route_transient_db_error_is_retry` calls the direct
+  settings route; `state.pool.close()` makes `find_user_by_settings_token`
+  error (closed pool), and the route now propagates the inner outcome,
+  asserting `RouteOutcome::Retry`.
+- **Runtime:** the two new tests are compile-verified only; runtime web tests
+  deferred to CI by explicit ban (web build/test/run forbidden; DB tests need
+  Postgres/NATS).
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0 (one pre-existing `proc-macro-error2`
+  future-incompat warning, unrelated).
+- **Review:** comprehensive independent review verdict APPROVE, with two Minor
+  non-blocking notes (settings command-dispatch `Internal` error stays `Done`,
+  pre-existing/out-of-scope; runtime behavior of the two tests unverified, a
+  disclosed limitation for CI to confirm).
