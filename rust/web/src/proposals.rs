@@ -1252,7 +1252,7 @@ pub(crate) async fn start_proposal_tx(
         .filter_map(|p| p.user_id)
         .filter(|id| *id != creator_id)
         .collect();
-    let bot_slots: Vec<BotSlot> = accepted
+    let mut bot_slots: Vec<BotSlot> = accepted
         .iter()
         .filter(|p| p.user_id.is_none())
         .map(|p| BotSlot {
@@ -1261,11 +1261,12 @@ pub(crate) async fn start_proposal_tx(
         })
         .collect();
 
-    if let Some(msg) = crate::db::validate_bot_slots(&mut *tx, &bot_slots)
+    let canonical_names = crate::db::validate_bot_slots(&mut *tx, &bot_slots)
         .await
         .map_err(internal("start_proposal_tx: validate bot slots"))?
-    {
-        return Err(ServerFnError::new(msg));
+        .map_err(ServerFnError::new)?;
+    for (slot, canonical) in bot_slots.iter_mut().zip(canonical_names) {
+        slot.bot_name = canonical;
     }
 
     let game = crate::game::server_fns::insert_game_from_service(
@@ -1391,7 +1392,7 @@ pub async fn create_proposal(
     {
         return Err(ServerFnError::new("Invalid email address"));
     }
-    let bot_slots = bot_slots.unwrap_or_default();
+    let mut bot_slots = bot_slots.unwrap_or_default();
 
     let player_count = 1 + opponent_ids.len() + opponent_emails.len() + bot_slots.len();
 
@@ -1408,11 +1409,12 @@ pub async fn create_proposal(
         return Err(ServerFnError::new(msg));
     }
 
-    if let Some(msg) = crate::db::validate_bot_slots(&pool, &bot_slots)
+    let canonical_names = crate::db::validate_bot_slots(&pool, &bot_slots)
         .await
         .map_err(internal("create_proposal: validate bot slots"))?
-    {
-        return Err(ServerFnError::new(msg));
+        .map_err(ServerFnError::new)?;
+    for (slot, canonical) in bot_slots.iter_mut().zip(canonical_names) {
+        slot.bot_name = canonical;
     }
 
     let fetched = if opponent_ids.is_empty() && opponent_emails.is_empty() {
@@ -1808,13 +1810,12 @@ pub async fn add_proposal_player(
         .await
         .map_err(internal("add_proposal_player: insert human"))?;
         invite = Some((hid, token));
-    } else if let Some(bot) = bot {
-        if let Some(msg) = crate::db::validate_bot_slots(&mut *tx, std::slice::from_ref(&bot))
+    } else if let Some(mut bot) = bot {
+        let canonical_names = crate::db::validate_bot_slots(&mut *tx, std::slice::from_ref(&bot))
             .await
             .map_err(internal("add_proposal_player: validate bot slots"))?
-        {
-            return Err(ServerFnError::new(msg));
-        }
+            .map_err(ServerFnError::new)?;
+        bot.bot_name = canonical_names.into_iter().next().unwrap();
         insert_proposal_player(
             &mut tx,
             proposal_id,

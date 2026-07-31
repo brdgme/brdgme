@@ -45,9 +45,9 @@ pub async fn find_enabled_bots(pool: &PgPool) -> Result<Vec<String>> {
 pub async fn validate_bot_slots(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     bot_slots: &[crate::game::server_fns::BotSlot],
-) -> Result<Option<String>> {
+) -> Result<std::result::Result<Vec<String>, String>> {
     if bot_slots.is_empty() {
-        return Ok(None);
+        return Ok(Ok(vec![]));
     }
     let valid_names: Vec<String> =
         sqlx::query_scalar("SELECT name FROM bots WHERE enabled = true ORDER BY display_order")
@@ -56,20 +56,30 @@ pub async fn validate_bot_slots(
             .map_err(|e| anyhow::anyhow!("validate_bot_slots: {e}"))?;
     for slot in bot_slots {
         if slot.name.trim().is_empty() {
-            return Ok(Some("Bot display name cannot be empty".to_string()));
+            return Ok(Err("Bot display name cannot be empty".to_string()));
         }
         if !valid_names
             .iter()
             .any(|n| n.eq_ignore_ascii_case(&slot.bot_name))
         {
-            return Ok(Some(format!(
+            return Ok(Err(format!(
                 "'{}' is not a valid bot type. Valid bot types: {}",
                 slot.bot_name,
                 valid_names.join(", ")
             )));
         }
     }
-    Ok(None)
+    let canonical_names = bot_slots
+        .iter()
+        .map(|slot| {
+            valid_names
+                .iter()
+                .find(|n| n.eq_ignore_ascii_case(&slot.bot_name))
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    Ok(Ok(canonical_names))
 }
 
 #[cfg(feature = "ssr")]
@@ -245,16 +255,30 @@ mod tests {
             name: "My Bot".to_string(),
             bot_name: "easy".to_string(),
         }];
-        assert_eq!(validate_bot_slots(&pool, &slots).await.unwrap(), None);
+        assert_eq!(
+            validate_bot_slots(&pool, &slots).await.unwrap(),
+            Ok(vec!["easy".to_string()])
+        );
     }
 
     #[sqlx::test]
-    async fn validate_bot_slots_accepts_case_mismatch(pool: PgPool) {
+    async fn validate_bot_slots_canonicalizes_case_mismatch(pool: PgPool) {
         let slots = vec![crate::game::server_fns::BotSlot {
             name: "My Bot".to_string(),
             bot_name: "EASY".to_string(),
         }];
-        assert_eq!(validate_bot_slots(&pool, &slots).await.unwrap(), None);
+        let result = validate_bot_slots(&pool, &slots).await.unwrap();
+        let canonical = result.expect("EASY should be accepted as a valid bot");
+        assert_eq!(
+            canonical,
+            vec!["easy".to_string()],
+            "returned name must be the DB-canonical form, not the input casing"
+        );
+        assert_ne!(
+            canonical,
+            vec!["EASY".to_string()],
+            "must not echo back the caller's casing"
+        );
     }
 
     #[sqlx::test]
@@ -264,8 +288,8 @@ mod tests {
             bot_name: "garbage".to_string(),
         }];
         let result = validate_bot_slots(&pool, &slots).await.unwrap();
-        assert!(result.is_some());
-        let msg = result.unwrap();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
         assert!(
             msg.contains("garbage"),
             "message should name the offending bot: {msg}"
@@ -287,8 +311,8 @@ mod tests {
             bot_name: "hard".to_string(),
         }];
         let result = validate_bot_slots(&pool, &slots).await.unwrap();
-        assert!(result.is_some());
-        assert!(result.unwrap().contains("hard"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("hard"));
     }
 
     #[sqlx::test]
@@ -298,12 +322,12 @@ mod tests {
             bot_name: "easy".to_string(),
         }];
         let result = validate_bot_slots(&pool, &slots).await.unwrap();
-        assert!(result.is_some());
-        assert!(result.unwrap().contains("empty"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
     }
 
     #[sqlx::test]
     async fn validate_bot_slots_accepts_empty_slice(pool: PgPool) {
-        assert_eq!(validate_bot_slots(&pool, &[]).await.unwrap(), None);
+        assert_eq!(validate_bot_slots(&pool, &[]).await.unwrap(), Ok(vec![]));
     }
 }

@@ -25,7 +25,7 @@ pub struct ProviderConfig {
 pub async fn load_bot_config(pool: &PgPool, bot_name: &str) -> Result<Option<BotConfig>> {
     let row = sqlx::query(
         "SELECT name, include_basic_strategy, include_advanced_strategy, temperature \
-         FROM bots WHERE name = $1 AND enabled = true",
+         FROM bots WHERE LOWER(name) = LOWER($1) AND enabled = true",
     )
     .bind(bot_name)
     .fetch_optional(pool)
@@ -64,7 +64,7 @@ pub async fn load_providers(
          FROM bot_providers bp \
          JOIN bots b ON b.id = bp.bot_id \
          JOIN llm_providers lp ON lp.id = bp.provider_id \
-         WHERE b.name = $1 AND b.enabled = true AND bp.enabled = true AND lp.enabled = true \
+         WHERE LOWER(b.name) = LOWER($1) AND b.enabled = true AND bp.enabled = true AND lp.enabled = true \
          ORDER BY bp.priority ASC, bp.created_at ASC",
     )
     .bind(bot_name)
@@ -205,5 +205,40 @@ mod tests {
         assert!(provider.extra_body.is_none());
 
         clear_env();
+    }
+
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn load_bot_config_matches_case_insensitively(pool: PgPool) {
+        let config = load_bot_config(&pool, "EASY").await.unwrap();
+        assert!(config.is_some());
+        assert_eq!(config.unwrap().name, "easy");
+    }
+
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn load_providers_matches_case_insensitively(pool: PgPool) {
+        let bot_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM bots WHERE name = 'easy'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let provider_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO llm_providers (name, url) VALUES ('test-provider', 'http://localhost:11434') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO bot_providers (bot_id, provider_id, model, priority) VALUES ($1, $2, 'test-model', 0)",
+        )
+        .bind(bot_id)
+        .bind(provider_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let key = [0u8; 32];
+        let providers = load_providers(&pool, "EASY", &key).await.unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].model, "test-model");
+        assert_eq!(providers[0].url, "http://localhost:11434");
     }
 }

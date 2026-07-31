@@ -74,6 +74,30 @@ struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
+async fn resolve_bot_config(pool: &PgPool, bot_name: &str) -> Result<config::BotConfig> {
+    let table_empty = config::bots_table_empty(pool)
+        .await
+        .context("Failed to check bots table")?;
+    match config::load_bot_config(pool, bot_name)
+        .await
+        .context("Failed to load bot config")?
+    {
+        Some(c) => Ok(c),
+        None => {
+            if table_empty {
+                Ok(config::BotConfig {
+                    name: bot_name.to_string(),
+                    include_basic_strategy: true,
+                    include_advanced_strategy: false,
+                    temperature: 0.2,
+                })
+            } else {
+                Err(anyhow!("Bot '{}' not found or disabled", bot_name))
+            }
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "bot_turn",
     skip(state, req),
@@ -167,31 +191,16 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
         "bot_turn_start"
     );
 
-    let table_empty = config::bots_table_empty(&state.pool)
-        .await
-        .context("Failed to check bots table")?;
-    let bot_cfg = match config::load_bot_config(&state.pool, &req.bot_name)
-        .await
-        .context("Failed to load bot config")?
-    {
-        Some(c) => c,
-        None => {
-            if table_empty {
-                config::BotConfig {
-                    name: req.bot_name.clone(),
-                    include_basic_strategy: true,
-                    include_advanced_strategy: false,
-                    temperature: 0.2,
-                }
-            } else {
-                tracing::warn!(
-                    elapsed_ms = turn_start.elapsed().as_millis() as u64,
-                    outcome = "skipped",
-                    reason = "bot not found or disabled",
-                    "bot_turn_end"
-                );
-                return Ok(());
-            }
+    let bot_cfg = match resolve_bot_config(&state.pool, &req.bot_name).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                elapsed_ms = turn_start.elapsed().as_millis() as u64,
+                outcome = "skipped",
+                reason = "bot not found or disabled",
+                "bot_turn_end"
+            );
+            return Err(e);
         }
     };
 
@@ -201,6 +210,9 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             .context("Failed to load providers")?,
         None => Vec::new(),
     };
+    let table_empty = config::bots_table_empty(&state.pool)
+        .await
+        .context("Failed to check bots table")?;
     if providers.is_empty()
         && table_empty
         && let Some(p) = config::env_fallback_provider()
@@ -1039,5 +1051,22 @@ mod tests {
     #[test]
     fn ack_heartbeat_interval_below_ack_wait() {
         assert!(ACK_HEARTBEAT_INTERVAL < std::time::Duration::from_secs(5 * 60));
+    }
+
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn resolve_bot_config_returns_err_on_miss(pool: PgPool) {
+        let result = resolve_bot_config(&pool, "nonexistent_bot").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not found or disabled"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[sqlx::test(migrations = "../web/migrations")]
+    async fn resolve_bot_config_matches_case_insensitively(pool: PgPool) {
+        let config = resolve_bot_config(&pool, "EASY").await.unwrap();
+        assert_eq!(config.name, "easy");
     }
 }

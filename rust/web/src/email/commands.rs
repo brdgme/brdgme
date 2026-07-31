@@ -405,11 +405,12 @@ async fn run_new_command(
         }
     }
 
-    if let Some(msg) = crate::db::validate_bot_slots(ctx.pool, &bot_slots)
+    let canonical_names = crate::db::validate_bot_slots(ctx.pool, &bot_slots)
         .await
         .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: validate bot slots: {e}")))?
-    {
-        return Err(CommandError::User(msg));
+        .map_err(CommandError::User)?;
+    for (slot, canonical) in bot_slots.iter_mut().zip(canonical_names) {
+        slot.bot_name = canonical;
     }
 
     check_duplicate_players(&human_ids).map_err(CommandError::User)?;
@@ -1413,7 +1414,7 @@ mod tests {
 
     #[test]
     fn classify_opponent_detects_bots() {
-        let bn = vec!["easy".to_string(), "medium".to_string(), "hard".to_string()];
+        let bn = vec!["Easy".to_string(), "Medium".to_string(), "Hard".to_string()];
         assert_eq!(
             classify_opponent("easy", &bn),
             OpponentToken::Bot("easy".to_string())
@@ -1423,7 +1424,7 @@ mod tests {
             OpponentToken::Bot("hard".to_string())
         );
         assert_eq!(
-            classify_opponent("bot:medium", &bn),
+            classify_opponent("bot:Medium", &bn),
             OpponentToken::Bot("medium".to_string())
         );
         assert_eq!(
@@ -2088,6 +2089,48 @@ mod tests {
         match run_new_command(&sctx, &format!("{type_name} bot:easy")).await {
             Err(CommandError::User(msg)) => {
                 panic!("validation should pass for enabled bot, got User error: {msg}")
+            }
+            Err(CommandError::Internal(_)) => {}
+            Ok(_) => {}
+        }
+    }
+
+    #[sqlx::test]
+    async fn new_command_canonicalizes_mixed_case_bot_name(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "bot-canon-user").await;
+        let type_name = format!("botcanon{}", uuid::Uuid::new_v4().simple());
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(&type_name)
+        .bind(vec![2, 3, 4])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) VALUES ($1, $2, $3, true, false)",
+        )
+        .bind(game_type_id)
+        .bind("test-v1")
+        .bind("http://127.0.0.1:1")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let sctx = StandaloneCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            user_id,
+        };
+
+        match run_new_command(&sctx, &format!("{type_name} bot:EASY")).await {
+            Err(CommandError::User(msg)) => {
+                panic!("mixed-case bot name should be accepted, got User error: {msg}")
             }
             Err(CommandError::Internal(_)) => {}
             Ok(_) => {}
