@@ -38,7 +38,7 @@ restored per owner instruction.)
 | R-13 | done(afe85b2) | afe85b24290aca483a777088d57eb53291bdf87a | AC1 new workspace crate `brdgme_crypto` (`rust/lib/crypto`) holds the single hardened `encrypt`/`decrypt`/`load_key`; both consumers are thin re-export facades (`bot/src/crypto.rs:1` and `web/src/crypto.rs:1` = `pub use brdgme_crypto::*;`), so divergence cannot recur. AC2 bot-level panic-without-opt-in test `load_key_missing_env_panics_without_opt_in` (`bot/src/crypto.rs:11-22`, removes both envs, `catch_unwind` on `load_key().expect(..)` asserts `is_err()`, testing the real `main.rs:809` `.expect()`) plus opt-in test `load_key_missing_env_with_opt_in_loads_default` (`bot/src/crypto.rs:24-33`, sets `ALLOW_INSECURE_DEFAULT_KEY=true`, asserts key == `default_key()`); shared crate adds the unit-level MissingKey result test `load_key_missing_env_returns_missing_key` (`lib/crypto/src/lib.rs:130-135`, asserts `Err(CryptoError::MissingKey)`). AC3 old bot assertions/dispositions per review section 1: old missing-env `matches!(.., LoadedKey::Default(k) if k == default_key())` INVERTED (deleted from bot; replaced by bot panic test + crate `Err(MissingKey)` test; `LoadedKey` type eliminated); old valid-hex `matches!(.., LoadedKey::FromEnv(k) if k == [0xAB;32])` MOVED+inverted to crate `:121-127` `assert!(*load_key().unwrap() == [0xAB;32])` (`LoadedKey` ref removed); roundtrip MOVED to crate `:92-97` `encrypt_decrypt_roundtrip`; tamper MOVED to crate `:100-109` `decrypt_rejects_tampered_ciphertext`; invalid-hex MOVED to crate `:149-154`; wrong-length MOVED to crate `:157-162`; `wrong_key_fails` (decrypt with `[0xCD;32]`) DROPPED - review finding F-1 LOW, non-blocking (AEAD auth path already exercised by tamper test). AC4 F-187 four axes all resolved: (1) missing-key behaviour `Err(MissingKey)` unless `ALLOW_INSECURE_DEFAULT_KEY=true` (`lib.rs:57-65`), bot panics at boot via `.expect()`; (2) key material in memory `Zeroizing<[u8;32]>` + hex scratch buffer `bytes.zeroize()` after copy (`lib.rs:46-50,67-75`); (3) nonce source `getrandom::fill` with `?` propagation (`lib.rs:78-82`); (4) length check explicit `bytes.len() != 32` then `bytes.zeroize()` before `Err(InvalidKeyLength)` (`lib.rs:68-70`). Gates: shared `cargo test -p brdgme_crypto` 8/8 pass; bot R-13 facade tests both pass while full `cargo test -p bot` is 34 pass / 4 known DB `PoolTimedOut` failures (sqlx-core testing/mod.rs:227, pre-existing env condition, none touch crypto); `cargo clippy -p brdgme_crypto`/`-p bot --all-targets -- -D warnings` and per-package `cargo fmt -p brdgme_crypto`/`-p bot -- --check` all exit 0; allowed `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (only pre-existing `proc-macro-error2` future-incompat warning). Web tests/clippy/fmt NOT run (web build/test/run banned). Review verdict APPROVE with one non-blocking LOW (F-1 dropped `wrong_key_fails`) and F-190 incidentally closed (fail-fast `load_key().expect(..)` replaces the old warn-and-continue `None` degradation path; non-optional `encryption_key` field). |
 | R-14 | done(f9173fe) | f9173fe51e46c4e3f53db7b0dafeb32a649be5d8 | AC1 focused `brdgme_nats` shared crate owns `BotTurnEvent`/`BotCommandEvent` and all protocol constants; bot and web consume it through thin re-export facades (bot unconditional dependency, web optional behind the `ssr` feature), so the protocol types and constants have a single definition site and cannot diverge. AC2 eight-test exact-JSON golden fixture covers serialization, deserialization, and round-trip for the protocol events. AC3 definition-focused grep found exactly one `pub const` definition each for `STREAM_NAME`, `SUBJECT_TURN`, `SUBJECT_COMMAND`, `CONSUMER_TURN`, `CONSUMER_COMMAND`, `MAX_TURN_ATTEMPTS`, `MAX_DELIVER`, `ACK_WAIT`; bot heartbeat uses `ACK_WAIT`. Gates: shared crate test/fmt/clippy pass; bot fmt/clippy pass; allowed `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` pass; bot test 34 pass plus the known four local sqlx `PoolTimedOut` failures (pre-existing local condition, not a regression). Review verdict APPROVE, no Critical/Important findings. |
 | R-15 | done(4d6244c) | 4d6244c165f00db4ec3676b79385131f6eeaf979 | Closes F-101/F-102/F-105/F-107 (NATS delivery semantics). AC1 dedup: stream config sets `duplicate_window: 120s` (`nats.rs`) and `publish_bot_turns` sets a `Nats-Msg-Id` via `bot_turn_message_id(game_id, position, updated_at, attempt)` (`game/mod.rs:202-211`, call `:264`) published with `jetstream.send_publish(SUBJECT_TURN, message)`; key is `{game_id}:{position}:{updated_at}:{attempt}`; both AC1 duplicate sources publish attempt 0 (`trigger_bot_turns` and the sweep at `email/sweep.rs:437`), so identical turn state still collides to one delivery; test `duplicate_bot_turn_publish_collapses_to_one_delivery`. AC2 redelivery inside 5-min ack_wait: `process_bot_command_message` `Ok(info)` arm Naks with exponential backoff `2u64.saturating_pow(info.delivered.max(1))` -> 2s then 4s (`game/mod.rs:439-457`), delivery 3 still hits the existing `info.delivered >= MAX_DELIVER` Term branch, all well inside the 5-minute `ACK_WAIT`; test `transient_failure_redelivers_command_well_inside_ack_wait`. AC3 reconcile-not-create-if-absent: `ensure_stream_and_consumers` switched `get_or_create_stream`->`create_stream` and `get_or_create_consumer`->`create_consumer` (durable name in the desired config, `nats.rs:106,148-151`) with drift warnings reworded to "still drifted after reconciliation"; drift policy decision = automatic `create_stream`/`create_consumer` reconciliation selected over startup failure because on the pinned `nats:2.11-alpine` server `create_*` updates existing objects in place (probe-verified), so it is safe/idempotent and will not crash on pre-existing objects; test `ensure_stream_and_consumers_reconciles_drifted_config` deliberately drifts `duplicate_window` to 1s and the `bot-turn` consumer to `ack_wait: 30s`/`max_deliver: 1`, sanity-asserts the drift, then asserts exact restoration to `120s`/`ACK_WAIT`/`MAX_DELIVER` (a `get_or_create_*` impl would leave the drift and fail). AC4 remove `(future)` markers: `nats_protocol/src/lib.rs` `MAX_DELIVER` doc and the two `nats.rs` "future recovery" comments reworded; `rg '\(future\)' rust/web/src/nats.rs` exit 1 (zero hits). Design decisions: the 120s `duplicate_window` collapses only rapid re-publishes of the same turn state (broadcast races, conflict/user-error re-publish within 120s) while the 15-minute reconciliation sweep is a deliberate retry intentionally outside the window, and the message-id includes `attempt` so a real retry bumps the key and is not suppressed (this is the F-2 fix - the old attempt-less key silently deduped the deliberate retry after an invalid bot command); the 2s/4s Nak backoff is exponential (`pow(delivered.max(1))`) and stays well inside the 5-minute `ACK_WAIT`, with delivery 3 falling through to the existing Term ceiling. Gates (locally run, exact exit statuses): `cargo fmt -p brdgme_nats -- --check` exit 0; `cargo clippy -p brdgme_nats -- -D warnings` exit 0; `cargo test -p brdgme_nats` exit 0 (8 passed, 0 failed); `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); `git diff --check` exit 0. CI-deferred (WEB HARD BAN, not claimed passing locally): runtime red/green of the three live-NATS integration tests and the F-2 unit test `bot_turn_message_id_differs_by_attempt` (all compile-verified by the permitted `cargo check --all-targets --features ssr`), and the authoritative F-1 E0080 full-codegen confirmation - `cargo check` structurally defers the const-eval, so CI's `cargo test -p web --features ssr` is authoritative; the F-1 fix (`assume_utc()` lifting `PrimitiveDateTime`->`OffsetDateTime`) is byte-for-byte the reviewer's probe-verified recommendation. Review: comprehensive review verdict CHANGES REQUIRED with four findings - F-1 CRITICAL (`PrimitiveDateTime::format(&Iso8601::DEFAULT)` E0080 build break, invisible to `cargo check` but fatal under CI's full codegen), F-2 HIGH (dedup key omitted `attempt`, suppressing the deliberate retry), F-3 MEDIUM (test 3 non-discriminating), F-4 LOW (comment accuracy); all four resolved and the targeted re-review verdict APPROVED with no new blocker; final verification VERIFIED. No push. |
-| R-16 | pending | | |
+| R-16 | done(85fff2e) | 85fff2e784e49f0191a417a1dab2325d80b5df45 | hanamikoji-1 Dockerfile stage + bake target + k8s bundle shipped; delivery-list CI guard added; F-211 smoke assertion restored; comprehensive review PASS, no blocking findings |
 | R-17 | pending | | needs 5.4 for server-fn tests |
 | R-18 | pending | | |
 | R-19 | pending | | |
@@ -98,7 +98,7 @@ restored per owner instruction.)
 | TURNSTILE_SITE_KEY startup check | pending | lands with F-96 |
 | config::public_base_url() prod HTTPS | pending | |
 | F-207 sqlx migrator reconcile | pending | |
-| F-211 hanamikoji-1 delivery gap | pending | code half in R-16 |
+| F-211 hanamikoji-1 delivery gap | done(85fff2e) | code half in R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | Pre-rollout checklist file in brdgme-config | pending | |
 
 ## Process fixes (section 4)
@@ -111,7 +111,7 @@ restored per owner instruction.)
 | 4.4 deferral-state mechanism | pending | |
 | 4.5 4b second-reviewer rule | pending | docs/CODING.md |
 | 4.6 STOP-AND-REPORT escalation rule | pending | docs/CODING.md |
-| 4.7 delivery-list CI guard | pending | same as R-16 |
+| 4.7 delivery-list CI guard | done(85fff2e) | same as R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | 4.8 vendoring "known defects" spec section | pending | needs owner 6.1 |
 | 4.9 named-pattern sign-off sweeps | pending | |
 
@@ -304,3 +304,69 @@ reintroduced; no migration, no CI config, no `Cargo.toml` change.
   the AC1 successor citation correction from `:551-595` to `:601-657` against the
   actual source and verifies no unrelated tracker content was damaged; no code
   re-review was needed.
+
+## R-16 evidence
+
+Code commit `85fff2e784e49f0191a417a1dab2325d80b5df45` (verified via
+`git rev-parse`; message `ci: enforce game delivery list parity (R-16, F-208,
+F-211)`). Closes F-208 (built-but-unshipped game class) and the code half of
+F-211 (hanamikoji-1 delivery gap); delivers process fix 4.7 (delivery-list CI
+guard).
+
+- **AC1 (hanamikoji-1 shipped):** `rust/Dockerfile:304` distroless stage
+  `hanamikoji_1_http` (same SHA pin as the 26 prior game stages);
+  `docker-bake.hcl:47` `"hanamikoji-1"` in the `tgt` matrix (alphabetical);
+  `k8s/base/game/hanamikoji-1/` 5-file bundle (deployment, service,
+  game-version, http-scaled-object, kustomization) copied field-by-field from
+  the `jaipur-2` neighbor; registered in `k8s/base/game/kustomization.yaml:18`,
+  `k8s/prod/app/kustomization.yaml:80-82`, and `Tiltfile:21`.
+- **AC2/4.7 (CI guard):** `scripts/check-delivery-lists.sh` derives all four
+  lists by pure text parsing, computes `expected = cargo_members - ALLOWLIST`,
+  and runs three bidirectional set-equality checks (`comm -23`/`comm -13`),
+  printing named offenders and `exit 1` on any mismatch. Wired as the first
+  step after checkout in `.github/workflows/ci.yml:77-79` (step-level
+  `working-directory: .` = repo root).
+- **Post-allowlist comparable set counts (independently re-derived):**
+  - Cargo game members (raw total): **28**
+  - expected (members minus the one-entry allowlist): **27**
+  - Dockerfile distroless game stages: **27**
+  - docker-bake.hcl game targets (31 total minus web/migrate/bot/operator): **27**
+  - k8s/base/game dirs Cargo-intersected (Rust): **27** (of **44** total dirs;
+    the other **17** are Go v1 games with no Cargo entry, intersected out via
+    `comm -12`, no Rust/Go name collision)
+  - `comm` both ways for expected vs {docker, bake, k8s_rust}: all empty (equal).
+- **Allowlist (exactly one entry):** `ALLOWLIST="lords-of-vegas-1"`
+  (`check-delivery-lists.sh:22-24`), commented `WIP, owner-excluded (BACKLOG Out
+  of Scope). Review: 2026-09-01.` It is a real Cargo member, so it genuinely
+  subtracts one (28 -> 27).
+- **Positive proof:** `bash scripts/check-delivery-lists.sh` on the real repo ->
+  `OK`, exit 0. `bash scripts/check-delivery-lists.test.sh` -> `PASS`, exit 0.
+- **Negative proof (fixture):** running the guard with
+  `scripts/fixtures/delivery-lists-broken/` as CWD -> `MISMATCH: rust/Dockerfile
+  stage / cargo game members with no rust/Dockerfile stage: bar-1`, exit 1.
+  Diagnosis: `bar-1` is a Cargo member with a bake target and a k8s dir but no
+  Dockerfile stage - exactly the F-208 built-but-unshipped class; the bake and
+  k8s checks pass on the fixture, isolating the single clean mismatch.
+- **Raw-count mismatch is NOT a finding:** per the remediation plan scope note
+  (98-REMEDIATION-PLAN.md:574-576, F-208a refuted), the script header
+  (`check-delivery-lists.sh:10-12`) states raw count differences are never
+  reported on their own; only named set differences are. The `compare` function
+  emits only named missing/stale entries, never counts. The 44-vs-28 raw k8s/Cargo
+  difference is the expected Go-game asymmetry, not a defect.
+- **F-211 e2e assertion:** `rust/web/end2end/tests/page-loads.spec.ts:8` restored
+  to `getByRole("link", { name: "Start a game" })` (replacing the weakened
+  sidebar-satisfied `getByRole("heading", { name: "brdg.me" })`). Committed but
+  NOT executed: running it requires the full e2e stack (release web binary + game
+  service + Postgres via run.sh/tilt/docker), all prohibited, and
+  `end2end/node_modules` is absent. Advisory regardless - the e2e CI job is
+  `continue-on-error: true` (ci.yml:155).
+- **Review:** comprehensive independent review verdict **PASS, no blocking
+  findings**. All four acceptance criteria met; the guard is correct, fails
+  closed, and the three delivery lists are set-equal at 27 against the 27
+  expected Cargo members. Four LOW/informational observations (F-211 red-handover
+  rationale imprecision; k8s intersection assumes disjoint Rust/Go names; guard
+  cannot detect a fully-orphaned k8s dir; guard runs only under the `rust` path
+  filter) and six residual verification deferrals (e2e not executed; docker
+  bake/build not run; kustomize/kubeconform deferred to CI; Tiltfile Starlark
+  unvalidated; `scripts/rust-test.sh` skipped per laptop OOM ban, no Rust source
+  changed; tracker update deferred to this row) - none blocking.
