@@ -33,7 +33,7 @@ restored per owner instruction.)
 | R-08 | done(899814f) | 899814f7528d719b2b46131e74129520b52f30ed | AC1 explicit exhaustive named matches (no wildcard); AC2 and AC3 persistence-mark tests; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with only two non-blocking Minor notes |
 | R-09 | done(61f9f4e) | 61f9f4eee5af657b108a11e5722155f82d4260c8 | AC1 single named contract `transient_failure` called by both routes; literal-Done grep 26 constructions commented (two non-constructions: match arm, doc prose); AC2 invite lock-timeout DB-error test asserts Retry; AC3 settings closed-pool DB-error test asserts Retry; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with two non-blocking Minor notes |
 | R-10 | done(a9ea19d) | a9ea19d5e9f4640b8d6cafe64068fbcbbbe6cf3c | AC1 30s periodic session re-validation arm + revocation test; AC2 per-connection CancellationToken on SseStream::Drop + idle gauge-drop test; AC3 public handler per-id subscribe (no game.>) + VisibilityCache + subsz test; AC4 F-163 #[ignore] removed, #[serial] added; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned; needs Postgres/NATS); comprehensive review ACCEPT, no Critical/Important findings |
-| R-11 | pending | | implement ws F55 second half (owner ruling). Tooth-4 historical amendment (AC1): WP-36's ws F55 fix and its regression test `rust/web/tests/websocket_hygiene.rs` were deleted by `efad81f92b0a1f585410e6f30fdd8de8a3dac518`; the WP-84 §3g successor proof test is `rust/web/tests/sse_events.rs:551-595` (`sse_stream_survives_past_request_timeout_with_keepalive`). |
+| R-11 | done(13ab0ffd) | 13ab0ffd3896f3b0804997a36b2b24a02c2c8147 | implement ws F55 second half (owner ruling 6.3b). AC1 tooth-4 historical amendment: WP-36's ws F55 fix and its regression test `rust/web/tests/websocket_hygiene.rs` were deleted by `efad81f92b0a1f585410e6f30fdd8de8a3dac518`; the WP-84 §3g successor proof test is `rust/web/tests/sse_events.rs:601-657` (`graceful_shutdown_ends_sse_stream_and_server_completes`) - I1 citation corrected from the keepalive test `:551-595` (`sse_stream_survives_past_request_timeout_with_keepalive`). AC2 shutdown signal threaded into bot consumer (`game/mod.rs:263,311`), advisory listener (`nats.rs:214`), supervisor (`nats.rs:280`), and all six sweeps (`sweep.rs:324,635`); shutdown-path tests call the real production paths: `bot_command_consume_loop_exits_on_shutdown` (`game/mod.rs:1284`), `sweep_stops_on_shutdown` (`sweep.rs:1736`), `supervisor_stops_on_shutdown_and_waits_for_run_to_wind_down` (`nats.rs:467`), `supervisor_backoff_sleep_is_interrupted_by_shutdown` (`nats.rs:517`). AC3 detached SSE spawns bounded for the normal case by R-10's per-connection token + axum graceful shutdown (no `TaskTracker` reintroduced), proven by `graceful_shutdown_ends_sse_stream_and_server_completes` (`sse_events.rs:601-657`); documented residual: a task blocked in `client.subscribe()` under broken NATS is not bounded in-code (I2, owner confirmation recommended). Gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned). Comprehensive review ACCEPT, no Critical findings; targeted doc-only re-review (`review/R-11-TARGETED-REREVIEW.md`) PASS, resolving I1 (AC1 successor citation corrected from `:551-595` to `:601-657`); I2 residual owner confirmation recommended. |
 | R-12 | pending | | |
 | R-13 | pending | | |
 | R-14 | pending | | blocks R-15 |
@@ -233,3 +233,74 @@ Code commit `a9ea19d5e9f4640b8d6cafe64068fbcbbbe6cf3c` (verified via
   a per-task local: `events.rs:101` auth, `events.rs:216` public); no
   `TaskTracker` added - the spawns are unchanged in shape so R-11 can still
   register them (R-11 intentionally untouched).
+
+## R-11 evidence
+
+Code commit `13ab0ffd3896f3b0804997a36b2b24a02c2c8147` (verified via
+`git rev-parse HEAD`; tracked changes: `rust/web/src/nats.rs`,
+`rust/web/src/email/sweep.rs`, `rust/web/src/game/mod.rs`,
+`rust/web/src/main.rs`, plus the single R-11 tracker row). `websocket.rs` and
+`events.rs` are NOT in the diff; no `TaskTracker`/`tokio-util` `rt` feature
+reintroduced; no migration, no CI config, no `Cargo.toml` change.
+
+- **Closes:** F-109 (detached background tasks not drained on shutdown - the bot
+  consumer, the max-deliveries-advisory listener, and the six email sweeps).
+- **AC1 (tooth-4 historical amendment):** WP-36's ws F55 fix and its regression
+  test `rust/web/tests/websocket_hygiene.rs` were deleted by
+  `efad81f92b0a1f585410e6f30fdd8de8a3dac518` (deletion independently confirmed:
+  `websocket_hygiene.rs` absent; `efad81f9 --stat` deletes it, 153 lines). The
+  WP-84 §3g successor proof test is
+  `graceful_shutdown_ends_sse_stream_and_server_completes` at
+  `rust/web/tests/sse_events.rs:601-657` (Group 5: Graceful shutdown;
+  `begin_shutdown` at `:619`, "SSE stream did not end after graceful shutdown" at
+  `:649`, "server task did not complete within 5s of shutdown" at `:655`).
+  **I1 corrected here:** the prior citation named the Group-4 keepalive test
+  `sse_events.rs:551-595` (`sse_stream_survives_past_request_timeout_with_keepalive`),
+  which never triggers a graceful shutdown; the error originated in the survey
+  (`R-11-SURVEY.md:58-59,334`).
+- **AC2 (owner ruling 6.3b):** process `CancellationToken` threaded into
+  `supervise_consumer` (`nats.rs:280`), `run_bot_command_consumer` /
+  `run_bot_command_consume_loop` (`game/mod.rs:263,311`),
+  `run_max_deliveries_advisory_listener` (`nats.rs:214`), and all six sweeps
+  (`sweep.rs:324,635`); the eight handles are retained by `main`
+  (`main.rs:118-125`) and joined under a 5s bounded drain (`main.rs:173-184`).
+  Shutdown-path tests call the real production functions:
+  `bot_command_consume_loop_exits_on_shutdown` (`game/mod.rs:1284`),
+  `sweep_stops_on_shutdown` (`sweep.rs:1736`),
+  `supervisor_stops_on_shutdown_and_waits_for_run_to_wind_down` (`nats.rs:467`),
+  `supervisor_backoff_sleep_is_interrupted_by_shutdown` (`nats.rs:517`). The
+  advisory listener (a third F-109 §1c family AC2 does not name) is also wired
+  up (bonus completeness).
+- **AC3 (concrete harm F-109 cites):** detached SSE spawns are bounded for the
+  normal case by R-10's committed mechanism - per-connection token
+  (`events.rs:42-59`) + global `shutdown.cancelled()` arms
+  (`events.rs:156-158,243-245`) + axum `with_graceful_shutdown` - proven by
+  `graceful_shutdown_ends_sse_stream_and_server_completes`
+  (`sse_events.rs:601-657`). No `TaskTracker` reintroduced (correct per task
+  constraint; `websocket.rs`/`events.rs` absent from the diff). **Documented
+  residual (I2):** a task blocked in `client.subscribe()` (`events.rs:86,93,206`)
+  at shutdown under a broken NATS connection holds `tx`, so the response body
+  never ends and axum's timeout-less graceful shutdown hangs until k8s SIGKILL;
+  narrow, externally bounded, acknowledged by the survey
+  (`R-11-SURVEY.md:73-76`), and not closable by the prescribed `TaskTracker` at
+  its placed location. Owner confirmation recommended.
+- **Runtime:** the four new tests are compile-verified only; runtime web tests
+  deferred to CI by explicit ban (web build/test/run forbidden). They are
+  pure-tokio (no DB/NATS) and should pass in CI as written (same disclosed
+  limitation as R-08/R-09/R-10).
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0 (one pre-existing `proc-macro-error2`
+  future-incompat warning, unrelated; nothing from the R-11 files; no new
+  `unused`/`unreachable`/`dead_code` warning).
+- **Review:** comprehensive independent review
+  (`review/R-11-COMPREHENSIVE-REVIEW.md`) verdict ACCEPT; no Critical
+  findings; two Important findings, neither a functional defect in the committed
+  code - I1 (AC1 successor citation, the doc correction applied in this row) and
+  I2 (AC3 subscribe-blocked residual, owner confirmation recommended); three
+  Minor notes (M1 advisory-listener unit-test gap, beyond AC2 scope; M2 backoff
+  test timing nuance; M3 runtime unverified, disclosed). The committed code is
+  accepted as-is. **The required targeted doc-only re-review
+  (`review/R-11-TARGETED-REREVIEW.md`) returned PASS**, resolving I1: it confirms
+  the AC1 successor citation correction from `:551-595` to `:601-657` against the
+  actual source and verifies no unrelated tracker content was damaged; no code
+  re-review was needed.
