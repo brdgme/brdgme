@@ -23,6 +23,11 @@ where
     owner.with(|| {
         provide_context(pool.clone());
         provide_context(parts);
+        // Server fns that call out to the game service (e.g. get_game_details)
+        // `expect_context::<reqwest::Client>()`; provide a default so those fns
+        // are drivable through the harness. Tests point it at an in-process mock
+        // via the game version URI, never a real service.
+        provide_context(reqwest::Client::new());
     });
     owner
         .with(|| leptos::reactive::computed::ScopedFuture::new(f()))

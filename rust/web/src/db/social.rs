@@ -945,6 +945,72 @@ mod tests {
         );
     }
 
+    /// wd F21: `should_hide_add_friend_many` (the batched predicate behind
+    /// `get_game_details`' add-friend affordance) must agree with the singular
+    /// `should_hide_add_friend` for every friend-row state, in one batched
+    /// call. Mirrors the singular test above by batch-equivalence: stranger
+    /// (no row), pending outgoing, declined outgoing and accepted all hide;
+    /// a pending INCOMING request does not. Also covers the empty-targets
+    /// early return.
+    #[sqlx::test]
+    async fn should_hide_add_friend_many_matches_singular_per_row_state(pool: PgPool) {
+        let viewer = make_user(&pool, "viewer").await;
+        let stranger = make_user(&pool, "stranger").await;
+        let pending_out = make_user(&pool, "pendingout").await;
+        let pending_in = make_user(&pool, "pendingin").await;
+        let declined_out = make_user(&pool, "declinedout").await;
+        let accepted = make_user(&pool, "accepted").await;
+
+        send_friend_request(&pool, viewer.id, pending_out.id)
+            .await
+            .unwrap();
+        send_friend_request(&pool, pending_in.id, viewer.id)
+            .await
+            .unwrap();
+        send_friend_request(&pool, viewer.id, declined_out.id)
+            .await
+            .unwrap();
+        let (req_id, _, _) = list_incoming_friend_requests(&pool, declined_out.id)
+            .await
+            .unwrap()[0];
+        respond_to_friend_request(&pool, req_id, declined_out.id, false)
+            .await
+            .unwrap();
+        accept_friends(&pool, viewer.id, accepted.id).await;
+
+        let targets = [
+            stranger.id,
+            pending_out.id,
+            pending_in.id,
+            declined_out.id,
+            accepted.id,
+        ];
+        let hidden = should_hide_add_friend_many(&pool, viewer.id, &targets)
+            .await
+            .unwrap();
+
+        for t in targets {
+            assert_eq!(
+                hidden.contains(&t),
+                should_hide_add_friend(&pool, viewer.id, t).await.unwrap(),
+                "batch and singular predicates disagree for target {t}"
+            );
+        }
+        assert!(!hidden.contains(&stranger.id));
+        assert!(hidden.contains(&pending_out.id));
+        assert!(hidden.contains(&declined_out.id));
+        assert!(hidden.contains(&accepted.id));
+        assert!(
+            !hidden.contains(&pending_in.id),
+            "a pending INCOMING request must not hide the button"
+        );
+
+        let empty = should_hide_add_friend_many(&pool, viewer.id, &[])
+            .await
+            .unwrap();
+        assert!(empty.is_empty(), "empty targets must short-circuit to empty");
+    }
+
     /// ws F35: three untested friend/block helpers, batched.
     #[sqlx::test]
     async fn friend_request_helpers(pool: PgPool) {

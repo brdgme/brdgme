@@ -4,21 +4,6 @@ use std::collections::HashMap;
 use time::PrimitiveDateTime;
 use uuid::Uuid;
 
-/// Canonical eligibility predicate shared by the stats queries below
-/// (`overall_totals`, `game_type_stats`, `finished_games`, `game_history`,
-/// `game_history_count`, `head_to_head`, `recent_form`): a game qualifies only
-/// if it has enough non-null `user_id` seats - at least 2 (human-vs-human), or
-/// at least 1 when `$include_single_human` is set (human-vs-bot counts).
-///
-/// This is documentation, not a substitute: the queries use the compile-time
-/// `sqlx::query!` macro against the offline `.sqlx` cache, which requires a
-/// string literal and so cannot interpolate this fragment. The SQL is therefore
-/// inlined at each call site (aliased `gp_elig`/`gp2`/`gp3` to avoid collisions)
-/// and MUST be kept in sync with this constant by hand. Each inlined occurrence
-/// is tagged with an `ELIGIBILITY_PREDICATE` comment.
-#[allow(dead_code)]
-const ELIGIBILITY_PREDICATE: &str = "(SELECT count(*) FROM game_players gp_elig WHERE gp_elig.game_id = g.id AND gp_elig.user_id IS NOT NULL) >= CASE WHEN $include_single_human THEN 1 ELSE 2 END";
-
 pub async fn get_profile_user(pool: &PgPool, name: &str) -> Result<Option<super::ProfileUser>> {
     let row = sqlx::query!(
         r#"SELECT id, name, pref_colors, created_at FROM users WHERE lower(name) = lower($1)"#,
@@ -60,7 +45,6 @@ pub async fn overall_totals(
     user_id: Uuid,
     include_single_human: bool,
 ) -> Result<super::OverallTotals> {
-    // ELIGIBILITY_PREDICATE (see const at top of file)
     let row = sqlx::query!(
         r#"
         SELECT
@@ -94,14 +78,24 @@ pub async fn overall_totals(
     })
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct GameTypeStatsRow {
+    game_type_name: String,
+    games: i64,
+    wins: i64,
+    avg_place_percentile: Option<f64>,
+    rating: Option<i32>,
+    peak_rating: Option<i32>,
+}
+
 pub async fn game_type_stats(
     pool: &PgPool,
     user_id: Uuid,
     include_single_human: bool,
     game_type_name: Option<&str>,
 ) -> Result<Vec<super::GameTypeStats>> {
-    // ELIGIBILITY_PREDICATE (see const at top of file)
-    let rows = sqlx::query!(
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    let rows: Vec<GameTypeStatsRow> = sqlx::query_as(
         r#"
         WITH qualifying AS (
             SELECT
@@ -133,23 +127,27 @@ pub async fn game_type_stats(
             GROUP BY game_type_id, game_type_name
         )
         SELECT
-            COALESCE(agg.game_type_name, gt.name) AS "game_type_name!",
-            COALESCE(agg.games, 0) AS "games!",
-            COALESCE(agg.wins, 0) AS "wins!",
+            COALESCE(agg.game_type_name, gt.name) AS game_type_name,
+            COALESCE(agg.games, 0) AS games,
+            COALESCE(agg.wins, 0) AS wins,
             agg.avg_place_percentile AS avg_place_percentile,
-            gtu.rating AS "rating?",
-            gtu.peak_rating AS "peak_rating?"
+            gtu.rating AS rating,
+            gtu.peak_rating AS peak_rating
         FROM agg
         FULL OUTER JOIN (
-            SELECT game_type_id, rating, peak_rating FROM game_type_users WHERE user_id = $1
+            SELECT gtu_f.game_type_id, gtu_f.rating, gtu_f.peak_rating
+            FROM game_type_users gtu_f
+            JOIN game_types gt_f ON gt_f.id = gtu_f.game_type_id
+            WHERE gtu_f.user_id = $1
+              AND ($3::text IS NULL OR gt_f.name = $3)
         ) gtu ON gtu.game_type_id = agg.game_type_id
         LEFT JOIN game_types gt ON gt.id = gtu.game_type_id
-        ORDER BY "game_type_name!"
+        ORDER BY game_type_name
         "#,
-        user_id,
-        include_single_human,
-        game_type_name
     )
+    .bind(user_id)
+    .bind(include_single_human)
+    .bind(game_type_name)
     .fetch_all(pool)
     .await?;
 
@@ -288,7 +286,6 @@ pub async fn finished_games(
     limit: Option<i64>,
     viewer: Option<Uuid>,
 ) -> Result<Vec<super::FinishedGameRow>> {
-    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows = sqlx::query!(
         r#"
         SELECT
@@ -427,7 +424,6 @@ pub async fn game_history(
     viewer: Option<Uuid>,
 ) -> Result<Vec<super::HistoryRow>> {
     // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
-    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows: Vec<GameHistoryRow> = sqlx::query_as(
         r#"
         SELECT g.id AS game_id, gt.name AS game_type_name, g.is_finished AS is_finished,
@@ -506,8 +502,6 @@ pub async fn game_history_count(
     game_type: Option<&str>,
     include_single_human: bool,
 ) -> Result<i64> {
-    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
-    // ELIGIBILITY_PREDICATE (see const at top of file)
     let (count,): (i64,) = sqlx::query_as(
         r#"
         SELECT count(*)
@@ -538,7 +532,6 @@ pub async fn head_to_head(
     include_single_human: bool,
     viewer: Option<Uuid>,
 ) -> Result<Vec<super::HeadToHead>> {
-    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows = sqlx::query!(
         r#"
         WITH qualifying AS (
@@ -623,7 +616,6 @@ pub async fn recent_form(
     per_type: i64,
     include_single_human: bool,
 ) -> Result<Vec<super::GameTypeForm>> {
-    // ELIGIBILITY_PREDICATE (see const at top of file)
     let rows = sqlx::query!(
         r#"
         WITH qualifying AS (
@@ -691,6 +683,16 @@ pub async fn recent_form(
 
 /// Recent form for multiple users within a single game type - last
 /// `per_user` finished games each, oldest-to-newest, keyed by user id.
+#[derive(Debug, sqlx::FromRow)]
+struct RecentFormForGameTypeRow {
+    user_id: Uuid,
+    game_id: Uuid,
+    finished_at: Option<PrimitiveDateTime>,
+    place: Option<i32>,
+    rating_change: Option<i32>,
+    player_count: i64,
+}
+
 pub async fn recent_form_for_game_type(
     pool: &PgPool,
     user_ids: &[Uuid],
@@ -699,7 +701,8 @@ pub async fn recent_form_for_game_type(
 ) -> Result<HashMap<Uuid, Vec<super::FormResult>>> {
     // Single-human games deliberately excluded (>= 2 hardcoded): this fn serves
     // the game-type page's multi-user form, which only shows human-vs-human games.
-    let rows = sqlx::query!(
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    let rows: Vec<RecentFormForGameTypeRow> = sqlx::query_as(
         r#"
         WITH qualifying AS (
             SELECT
@@ -710,7 +713,7 @@ pub async fn recent_form_for_game_type(
                 gp.rating_change,
                 (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
                 row_number() OVER (
-                    PARTITION BY gp.user_id ORDER BY g.finished_at DESC, g.id
+                    PARTITION BY gp.user_id ORDER BY g.finished_at DESC NULLS LAST, g.id
                 ) AS rn
             FROM game_players gp
             JOIN games g ON g.id = gp.game_id
@@ -725,20 +728,20 @@ pub async fn recent_form_for_game_type(
               ) >= 2
         )
         SELECT
-            user_id AS "user_id!",
-            game_id AS "game_id!",
+            user_id,
+            game_id,
             finished_at,
             place,
             rating_change,
-            player_count AS "player_count!"
+            player_count
         FROM qualifying
         WHERE rn <= $3
-        ORDER BY user_id, finished_at ASC, "game_id!"
+        ORDER BY user_id, finished_at ASC, game_id
         "#,
-        user_ids,
-        game_type_id,
-        per_user
     )
+    .bind(user_ids)
+    .bind(game_type_id)
+    .bind(per_user)
     .fetch_all(pool)
     .await?;
 
@@ -1126,6 +1129,52 @@ mod tests {
         assert_eq!(stats[0].game_type_name, "Camel Up");
     }
 
+    /// F-151 / wd F48: with an explicit game-type filter, `game_type_stats`
+    /// must return ONLY that type and that type's own rating. The user holds
+    /// rating rows for two alphabetically-ordered distinct types ("Acquire"
+    /// sorts before "Zebra Game"); requesting the later one must not surface
+    /// the earlier one's rating via the unfiltered side of the FULL OUTER JOIN.
+    /// Pre-fix this fails: the `gtu` side is filtered by user only, so the
+    /// alphabetically-first "Acquire" row leaks in and orders first.
+    #[sqlx::test]
+    async fn game_type_stats_explicit_filter_returns_only_requested_type_and_rating(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+
+        let (gt_acquire, _gv_acquire) = make_game_type(&pool, "Acquire").await;
+        let (gt_zebra, gv_zebra) = make_game_type(&pool, "Zebra Game").await;
+
+        insert_finished_game(
+            &pool,
+            gv_zebra,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        set_game_type_rating(&pool, gt_acquire, user, 1300, 1350).await;
+        set_game_type_rating(&pool, gt_zebra, user, 1400, 1450).await;
+
+        let stats = game_type_stats(&pool, user, false, Some("Zebra Game"))
+            .await
+            .expect("query ok");
+
+        assert_eq!(
+            stats.len(),
+            1,
+            "only the requested game type may be returned: {stats:?}"
+        );
+        assert_eq!(stats[0].game_type_name, "Zebra Game");
+        assert_eq!(stats[0].games, 1);
+        assert_eq!(stats[0].wins, 1);
+        assert_eq!(
+            stats[0].rating,
+            Some(1400),
+            "rating must be the requested type's, not Acquire's 1300"
+        );
+        assert_eq!(stats[0].peak_rating, Some(1450));
+    }
+
     #[sqlx::test]
     async fn rating_series_reconstruction_matches_game_type_users_rating(pool: PgPool) {
         let user = make_user(&pool, "alice").await;
@@ -1283,15 +1332,24 @@ mod tests {
         assert!(camel_only.iter().all(|r| r.game_type_name == "Camel Up"));
     }
 
+    /// wd F51: the per-game rating aggregate (the `LEFT JOIN LATERAL` that
+    /// produces `match_elo`) must ignore NULL `rating_before` seats, and the
+    /// game-type filter must keep another game type's ratings out entirely.
+    /// Calls `game_history` directly (the old body queried raw SQL and would
+    /// have kept passing even if the lateral were deleted). The Camel Up game
+    /// has one rated seat (1200) and one NULL seat, so the aggregate collapses
+    /// to 1200/1200/1200 while `player_count` still counts the NULL seat; the
+    /// Duel game carries a distinctive 2000 rating that must not appear.
     #[sqlx::test]
     async fn rating_before_aggregates_exclude_nulls(pool: PgPool) {
         let alice = make_user(&pool, "alice").await;
         let bob = make_user(&pool, "bob").await;
-        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+        let (_gt_camel, gv_camel) = make_game_type(&pool, "Camel Up").await;
+        let (_gt_duel, gv_duel) = make_game_type(&pool, "Duel").await;
 
-        let game1 = insert_finished_game(
+        let camel = insert_finished_game(
             &pool,
-            gv,
+            gv_camel,
             datetime!(2026-01-01 00:00:00),
             &[
                 (Some(alice), Some(1), Some(16)),
@@ -1300,49 +1358,63 @@ mod tests {
         )
         .await;
 
+        // alice rated, bob left NULL: the aggregate must ignore bob's NULL.
         sqlx::query(
             "UPDATE game_players SET rating_before = 1200 WHERE game_id = $1 AND user_id = $2",
         )
-        .bind(game1)
+        .bind(camel)
         .bind(alice)
         .execute(&pool)
         .await
         .expect("set alice rating_before");
 
-        sqlx::query(
-            "UPDATE game_players SET rating_before = 1300 WHERE game_id = $1 AND user_id = $2",
+        let duel = insert_finished_game(
+            &pool,
+            gv_duel,
+            datetime!(2026-01-02 00:00:00),
+            &[
+                (Some(alice), Some(1), Some(16)),
+                (Some(bob), Some(2), Some(-16)),
+            ],
         )
-        .bind(game1)
+        .await;
+        sqlx::query(
+            "UPDATE game_players SET rating_before = 2000 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(duel)
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .expect("set duel alice rating_before");
+        sqlx::query(
+            "UPDATE game_players SET rating_before = 2000 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(duel)
         .bind(bob)
         .execute(&pool)
         .await
-        .expect("set bob rating_before");
+        .expect("set duel bob rating_before");
 
-        insert_finished_game(
-            &pool,
-            gv,
-            datetime!(2026-01-02 00:00:00),
-            &[(Some(alice), Some(1), None), (None, Some(2), None)],
-        )
-        .await;
+        let rows = game_history(&pool, alice, None, Some("Camel Up"), true, 50, 0, None)
+            .await
+            .expect("query ok");
 
-        let (min_rb, max_rb, avg_rb): (Option<i32>, Option<i32>, Option<i32>) = sqlx::query_as(
-            "SELECT min(rating_before), max(rating_before), avg(rating_before)::integer FROM game_players WHERE rating_before IS NOT NULL",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("query ok");
+        assert_eq!(
+            rows.len(),
+            1,
+            "game-type filter must exclude the Duel game: {rows:?}"
+        );
+        assert_eq!(rows[0].game_id, camel);
+        assert_eq!(rows[0].game_type_name, "Camel Up");
+        assert_eq!(rows[0].player_count, 2, "count(*) still counts the NULL seat");
 
-        assert_eq!(min_rb, Some(1200));
-        assert_eq!(max_rb, Some(1300));
-        assert_eq!(avg_rb, Some(1250));
-
-        let null_count: (i64,) =
-            sqlx::query_as("SELECT count(*) FROM game_players WHERE rating_before IS NULL")
-                .fetch_one(&pool)
-                .await
-                .expect("query ok");
-        assert!(null_count.0 > 0);
+        let elo = rows[0]
+            .match_elo
+            .as_ref()
+            .expect("match_elo present for a game with a rated seat");
+        assert_eq!(elo.min, 1200, "NULL seat must not lower the min");
+        assert_eq!(elo.max, 1200, "NULL seat must not raise the max");
+        assert_eq!(elo.avg, 1200, "NULL seat must be excluded from the avg");
     }
 
     #[sqlx::test]
@@ -1842,6 +1914,66 @@ mod tests {
         let alice_results = form.get(&alice).expect("alice present");
         assert_eq!(alice_results.len(), 1);
         assert_eq!(alice_results[0].game_id, g2);
+    }
+
+    /// F-152 / wd F55: a finished legacy game with a NULL `finished_at` must
+    /// not displace a genuinely recent game from the per-user form window.
+    /// PostgreSQL defaults `DESC` to `NULLS FIRST`, so without `NULLS LAST` the
+    /// legacy row sorts to `rn = 1` and pushes the oldest dated game out of a
+    /// 3-game window. Pre-fix this fails: the legacy row is in the window.
+    #[sqlx::test]
+    async fn recent_form_for_game_type_null_finished_at_does_not_displace_recent(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let g1 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+        let g2 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(alice), Some(2), None), (Some(bob), Some(1), None)],
+        )
+        .await;
+        let g3 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-03 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+
+        // Legacy finished game: is_finished = true but finished_at IS NULL.
+        let legacy = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-04 00:00:00),
+            &[(Some(alice), Some(2), None), (Some(bob), Some(1), None)],
+        )
+        .await;
+        sqlx::query("UPDATE games SET finished_at = NULL WHERE id = $1")
+            .bind(legacy)
+            .execute(&pool)
+            .await
+            .expect("null the legacy finished_at");
+
+        let form = recent_form_for_game_type(&pool, &[alice], gt, 3)
+            .await
+            .expect("query ok");
+        let results = form.get(&alice).expect("alice present");
+
+        let ids: Vec<Uuid> = results.iter().map(|r| r.game_id).collect();
+        assert!(
+            !ids.contains(&legacy),
+            "NULL-finished_at legacy game displaced a recent game: {ids:?}"
+        );
+        assert_eq!(ids, vec![g1, g2, g3], "window holds the dated games, oldest first");
     }
 
     #[sqlx::test]

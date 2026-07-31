@@ -267,7 +267,7 @@ pub async fn get_player_game_type_stats(
         .await
         .map_err(internal("get_player_game_type_stats: stats"))?
         .into_iter()
-        .next()
+        .find(|s| s.game_type_name == canonical)
         .unwrap_or_else(|| GameTypeStats {
             game_type_name: canonical.clone(),
             games: 0,
@@ -341,9 +341,13 @@ pub async fn get_player_history(
     };
 
     let game_type = match game_type {
-        Some(ref gt) if !gt.is_empty() => find_game_type_name(&pool, gt)
+        Some(ref gt) if !gt.is_empty() => match find_game_type_name(&pool, gt)
             .await
-            .map_err(internal("get_player_history: find game type"))?,
+            .map_err(internal("get_player_history: find game type"))?
+        {
+            Some(name) => Some(name),
+            None => return Ok(None),
+        },
         _ => None,
     };
 
@@ -385,4 +389,148 @@ pub async fn get_player_history(
             include_single_human,
         },
     }))
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::queries::fixtures;
+    use super::*;
+    use sqlx::PgPool;
+    use time::macros::datetime;
+
+    /// F-154 / wd F52: an unknown, nonempty `game_type` must resolve to
+    /// nothing - `Ok(None)`, matching the sibling `get_player_game_type_stats`
+    /// (which 404s on an unresolvable type) - not the player's entire history.
+    /// Pre-fix this fails: `find_game_type_name`'s `None` binds straight into
+    /// the `($3 IS NULL OR gt.name = $3)` predicate as "no filter", so the full
+    /// history comes back wrapped in `Ok(Some(_))`.
+    #[sqlx::test]
+    async fn get_player_history_unknown_game_type_returns_none(pool: PgPool) {
+        let user = fixtures::make_user(&pool, "targetplayer").await;
+        let opponent = fixtures::make_user(&pool, "opponent").await;
+        let (_gt, gv) = fixtures::make_game_type(&pool, "Camel Up").await;
+        fixtures::insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        // Sanity: the seeded history is genuinely non-empty, so the bug would
+        // surface as a full-history `Ok(Some(_))` rather than an accidental
+        // pass on empty data.
+        let unfiltered = crate::test_support::anonymous(&pool, || async {
+            get_player_history("targetplayer".to_string(), 1, None, None, false).await
+        })
+        .await;
+        let unfiltered = unfiltered.expect("unfiltered ok").expect("user exists");
+        assert_eq!(unfiltered.total, 1);
+        assert!(!unfiltered.rows.is_empty());
+
+        let result = crate::test_support::anonymous(&pool, || async {
+            get_player_history(
+                "targetplayer".to_string(),
+                1,
+                None,
+                Some("NoSuchGameType".to_string()),
+                false,
+            )
+            .await
+        })
+        .await;
+        assert!(
+            result.expect("query ok").is_none(),
+            "unknown game type must return Ok(None), matching get_player_game_type_stats"
+        );
+    }
+
+    /// wd F46: the server clamps `page` to `1..=1_000_000`. Regression coverage
+    /// for underflow (0 and negative) and overflow page values; the clamp is
+    /// already in place, so this passes today and guards it.
+    #[sqlx::test]
+    async fn get_player_history_clamps_page_bounds(pool: PgPool) {
+        fixtures::make_user(&pool, "targetplayer").await;
+
+        let underflow = crate::test_support::anonymous(&pool, || async {
+            get_player_history("targetplayer".to_string(), 0, None, None, false).await
+        })
+        .await;
+        assert_eq!(
+            underflow.expect("ok").expect("user").page,
+            1,
+            "page 0 clamps up to 1"
+        );
+
+        let negative = crate::test_support::anonymous(&pool, || async {
+            get_player_history("targetplayer".to_string(), -5, None, None, false).await
+        })
+        .await;
+        assert_eq!(
+            negative.expect("ok").expect("user").page,
+            1,
+            "negative page clamps up to 1"
+        );
+
+        let overflow = crate::test_support::anonymous(&pool, || async {
+            get_player_history("targetplayer".to_string(), 1_000_001, None, None, false).await
+        })
+        .await;
+        assert_eq!(
+            overflow.expect("ok").expect("user").page,
+            1_000_000,
+            "page above the ceiling clamps down to 1_000_000"
+        );
+    }
+
+    /// wd F48: exercise the `get_player_game_type_stats` ENTRY POINT, not just
+    /// the `game_type_stats` query the F-151 regression test already covers. The
+    /// user holds rating rows for two alphabetically-ordered types ("Acquire" <
+    /// "Zebra Game"); requesting the later one must return that type's own
+    /// aggregate and rating. Driving the real server fn keeps the caller's
+    /// defence-in-depth `.find(|s| s.game_type_name == canonical)` (mod.rs:270)
+    /// covered: with the F-151 SQL fix the query yields a single row and the
+    /// `.find` selects it by canonical name rather than blindly taking the first
+    /// row, so the returned `stats` carry the requested type's rating.
+    #[sqlx::test]
+    async fn get_player_game_type_stats_returns_requested_type_and_rating(pool: PgPool) {
+        let user = fixtures::make_user(&pool, "targetplayer").await;
+        let opponent = fixtures::make_user(&pool, "opponent").await;
+
+        let (gt_acquire, _gv_acquire) = fixtures::make_game_type(&pool, "Acquire").await;
+        let (gt_zebra, gv_zebra) = fixtures::make_game_type(&pool, "Zebra Game").await;
+
+        fixtures::insert_finished_game(
+            &pool,
+            gv_zebra,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        fixtures::set_game_type_rating(&pool, gt_acquire, user, 1300, 1350).await;
+        fixtures::set_game_type_rating(&pool, gt_zebra, user, 1400, 1450).await;
+
+        let data = crate::test_support::anonymous(&pool, || async {
+            get_player_game_type_stats("targetplayer".to_string(), "Zebra Game".to_string(), false)
+                .await
+        })
+        .await
+        .expect("query ok")
+        .expect("user and game type resolve");
+
+        assert_eq!(data.game_type_name, "Zebra Game");
+        assert_eq!(
+            data.stats.game_type_name, "Zebra Game",
+            "the entry point must select the requested type, not the alphabetical first"
+        );
+        assert_eq!(
+            data.stats.rating,
+            Some(1400),
+            "rating must be Zebra Game's, not Acquire's 1300"
+        );
+        assert_eq!(data.stats.peak_rating, Some(1450));
+        assert_eq!(data.stats.games, 1);
+        assert_eq!(data.stats.wins, 1);
+    }
 }

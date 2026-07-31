@@ -2785,4 +2785,78 @@ mod tests {
         assert!(!joined.contains("public one"));
         assert!(!joined.contains("public two"));
     }
+
+    /// wd F21: drive the real `get_game_details` entry point through the
+    /// server-fn harness and prove the BATCHED `should_hide_add_friend_many`
+    /// add-friend affordance (server_fns.rs:316, :385) for two co-players in one
+    /// call: an ACCEPTED friend (affordance hidden) and a PENDING INCOMING
+    /// requester (affordance shown - accepting by sending back is the documented
+    /// mutual-intent path). The viewer spectates a public game, so the predicate
+    /// runs over both human players via the batch query rather than per-row. The
+    /// game service is the in-process mock answering PubRender with a canned
+    /// render; no real service is contacted.
+    #[sqlx::test]
+    async fn get_game_details_batch_add_friend_reflects_per_player_state(pool: PgPool) {
+        let uri = spawn_pub_render_service().await;
+
+        // Two human co-players; both default to game_visibility = 'public' so the
+        // spectating viewer passes the visibility gate.
+        let accepted_friend = make_user(&pool, "acceptedfriend").await;
+        let pending_in = make_user(&pool, "pendingin").await;
+        let game_version_id = make_game_version_at(&pool, &uri).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: accepted_friend,
+                opponent_ids: &[pending_in],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        let game_id = game.id;
+
+        let data = crate::test_support::non_admin(&pool, || async {
+            let viewer = crate::auth::server::get_current_user()
+                .await
+                .expect("session query ok")
+                .expect("authenticated viewer");
+
+            // viewer <-> accepted_friend: mutual (accepted). pending_in -> viewer:
+            // a pending INCOMING request the viewer has not responded to.
+            crate::db::test_support::accept_friends(&pool, viewer.id, accepted_friend).await;
+            crate::db::send_friend_request(&pool, pending_in, viewer.id)
+                .await
+                .expect("pending incoming request");
+
+            get_game_details(game_id).await.expect("game details")
+        })
+        .await;
+
+        let can_add = |uid: Uuid| -> bool {
+            data.players
+                .iter()
+                .find(|p| p.user_id == Some(uid))
+                .unwrap_or_else(|| panic!("player {uid} must be in the game view"))
+                .can_add_friend
+        };
+
+        assert!(
+            !can_add(accepted_friend),
+            "an accepted friend must have the add-friend affordance hidden"
+        );
+        assert!(
+            can_add(pending_in),
+            "a pending INCOMING requester must still show the add-friend affordance"
+        );
+    }
 }
