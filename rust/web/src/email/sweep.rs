@@ -89,7 +89,8 @@ async fn mark_reminder_sent_tx(
     game_player_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE game_players SET turn_reminder_sent_at = NOW(), updated_at = NOW() WHERE id = $1",
+        "UPDATE game_players SET turn_reminder_sent_at = NOW(), updated_at = NOW()
+         WHERE id = $1 AND turn_reminder_sent_at IS NULL AND is_turn = true",
     )
     .bind(game_player_id)
     .execute(&mut *tx)
@@ -107,9 +108,9 @@ async fn send_reminder(
     resend: Option<&resend_rs::Resend>,
     pool: &PgPool,
     http_client: &reqwest::Client,
-    tx: &mut sqlx::PgConnection,
     game_id: Uuid,
     game_player_id: Uuid,
+    token: String,
 ) -> ReminderOutcome {
     let ge = match crate::db::find_game_extended(pool, game_id).await {
         Ok(Some(g)) => g,
@@ -152,19 +153,6 @@ async fn send_reminder(
     if crate::email::outbound::suppress_for_web_presence(pool, recipient.user_id).await {
         return ReminderOutcome::Retry;
     }
-
-    let token = match crate::email::outbound::ensure_email_token_tx(&mut *tx, game_player_id).await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(
-                "turn_reminder: failed to ensure email token for {}: {}",
-                game_player_id,
-                e
-            );
-            return ReminderOutcome::Retry;
-        }
-    };
 
     let palette = crate::email::render::palette_for_slug(recipient.theme_slug.as_deref());
     let players: Vec<brdgme_markup::Player> = ge
@@ -252,11 +240,11 @@ async fn sweep_once(
     }
     tracing::info!("turn_reminder: {} candidate(s)", candidates.len());
     for c in candidates {
-        let mut tx = match pool.begin().await {
+        let mut claim_tx = match pool.begin().await {
             Ok(tx) => tx,
             Err(e) => {
                 tracing::error!(
-                    "turn_reminder: failed to begin tx for {}: {}",
+                    "turn_reminder: failed to begin claim tx for {}: {}",
                     c.game_player_id,
                     e
                 );
@@ -269,7 +257,7 @@ async fn sweep_once(
              FOR UPDATE SKIP LOCKED",
         )
         .bind(c.game_player_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *claim_tx)
         .await
         {
             Ok(opt) => opt,
@@ -285,18 +273,53 @@ async fn sweep_once(
         if claimed.is_none() {
             continue;
         }
+        let token = match crate::email::outbound::ensure_email_token_tx(
+            &mut *claim_tx,
+            c.game_player_id,
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(
+                    "turn_reminder: failed to ensure email token for {}: {}",
+                    c.game_player_id,
+                    e
+                );
+                continue;
+            }
+        };
+        if let Err(e) = claim_tx.commit().await {
+            tracing::error!(
+                "turn_reminder: failed to commit claim tx for {}: {}",
+                c.game_player_id,
+                e
+            );
+            continue;
+        }
         let outcome = send_reminder(
             resend,
             pool,
             http_client,
-            &mut tx,
             c.game_id,
             c.game_player_id,
+            token,
         )
         .await;
         match outcome {
             ReminderOutcome::Sent | ReminderOutcome::PermanentSkip => {
-                if let Err(e) = mark_reminder_sent_tx(&mut tx, c.game_player_id).await {
+                let mut mark_tx = match pool.begin().await {
+                    Ok(tx) => tx,
+                    Err(e) => {
+                        tracing::error!(
+                            "turn_reminder: failed to begin mark tx for {}: {}",
+                            c.game_player_id,
+                            e
+                        );
+                        continue;
+                    }
+                };
+                if let Err(e) = mark_reminder_sent_tx(&mut mark_tx, c.game_player_id).await {
                     tracing::error!(
                         "turn_reminder: failed to mark sent for {}: {}",
                         c.game_player_id,
@@ -304,9 +327,9 @@ async fn sweep_once(
                     );
                     continue;
                 }
-                if let Err(e) = tx.commit().await {
+                if let Err(e) = mark_tx.commit().await {
                     tracing::error!(
-                        "turn_reminder: failed to commit for {}: {}",
+                        "turn_reminder: failed to commit mark tx for {}: {}",
                         c.game_player_id,
                         e
                     );
@@ -1174,30 +1197,27 @@ mod tests {
         (game_id, user_id, gp_id)
     }
 
-    // The turn reminder is skipped while the recipient is active on the web (no
-    // reply token minted => the send returned before rendering) and sent once
-    // they are no longer active.
+    // The turn reminder is skipped while the recipient is active on the web
+    // (Retry) and sent once they are no longer active (Sent).
     #[sqlx::test]
     async fn turn_reminder_suppressed_by_recipient_presence(pool: PgPool) {
         let (game_id, user_id, gp_id) = seed_reminder_game(&pool).await;
         let http = reqwest::Client::new();
+
+        let mut tx = pool.begin().await.unwrap();
+        let token = crate::email::outbound::ensure_email_token_tx(&mut *tx, gp_id)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
 
         sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
             .bind(user_id)
             .execute(&pool)
             .await
             .unwrap();
-        let mut tx = pool.begin().await.unwrap();
-        send_reminder(None, &pool, &http, &mut tx, game_id, gp_id).await;
-        tx.commit().await.unwrap();
-        let token: Option<String> =
-            sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
-                .bind(gp_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let outcome = send_reminder(None, &pool, &http, game_id, gp_id, token.clone()).await;
         assert!(
-            token.is_none(),
+            matches!(outcome, ReminderOutcome::Retry),
             "turn reminder should be suppressed while recipient is active on the web"
         );
 
@@ -1208,17 +1228,9 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let mut tx = pool.begin().await.unwrap();
-        send_reminder(None, &pool, &http, &mut tx, game_id, gp_id).await;
-        tx.commit().await.unwrap();
-        let token: Option<String> =
-            sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
-                .bind(gp_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let outcome = send_reminder(None, &pool, &http, game_id, gp_id, token).await;
         assert!(
-            token.is_some(),
+            matches!(outcome, ReminderOutcome::Sent),
             "turn reminder should send once the recipient is no longer active"
         );
     }
@@ -1768,5 +1780,314 @@ mod tests {
             .await
             .expect("sweep task did not exit after shutdown")
             .unwrap();
+    }
+
+    fn mock_player_render_response() -> brdgme_cmd::api::Response {
+        use brdgme_cmd::api::{PlayerRender, Response};
+        Response::PlayerRender {
+            render: PlayerRender {
+                player_state: "p0".to_string(),
+                render: "board".to_string(),
+                command_spec: None,
+            },
+        }
+    }
+
+    /// In-process game-service mock whose `PlayerRender` handler parks until the
+    /// test releases it: `arrived` fires when the render request lands (the sweep
+    /// is now inside the send window) and `release` lets it complete. Gives a
+    /// deterministic rendezvous inside the (hoisted) render/send for R-18.
+    async fn spawn_blocking_render_service(
+        arrived: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Notify>,
+    ) -> String {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{Request, Response};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(move |Json(payload): Json<Request>| {
+                let arrived = arrived.clone();
+                let release = release.clone();
+                async move {
+                    match payload {
+                        Request::PlayerRender { .. } => {
+                            arrived.notify_one();
+                            release.notified().await;
+                            Json(mock_player_render_response())
+                        }
+                        _ => Json(Response::SystemError {
+                            message: "unsupported in sweep test mock".to_string(),
+                        }),
+                    }
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    /// In-process game-service mock that counts `PlayerRender` requests, adds one
+    /// `entered` permit per render (a render runs only after its sweep's claim TX
+    /// has committed, so a permit proves that sweep holds no row lock and the row
+    /// is still unmarked), then parks each on a shared barrier so concurrent
+    /// sweeps can be held inside the (hoisted) send window simultaneously and
+    /// released together.
+    async fn spawn_barrier_render_service(
+        renders: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        entered: std::sync::Arc<tokio::sync::Semaphore>,
+        barrier: std::sync::Arc<tokio::sync::Barrier>,
+    ) -> String {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{Request, Response};
+        use std::sync::atomic::Ordering;
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(move |Json(payload): Json<Request>| {
+                let renders = renders.clone();
+                let entered = entered.clone();
+                let barrier = barrier.clone();
+                async move {
+                    match payload {
+                        Request::PlayerRender { .. } => {
+                            renders.fetch_add(1, Ordering::SeqCst);
+                            entered.add_permits(1);
+                            barrier.wait().await;
+                            Json(mock_player_render_response())
+                        }
+                        _ => Json(Response::SystemError {
+                            message: "unsupported in sweep test mock".to_string(),
+                        }),
+                    }
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    /// Like `seed_reminder_game`, but points the game version at `uri` under a
+    /// DNS-label version name (the game client rejects dotted names like `1.0.0`)
+    /// and marks the recipient emailable and off the web, so the reminder send
+    /// proceeds all the way to the game-service render.
+    async fn seed_reminder_game_at(pool: &PgPool, uri: &str) -> (Uuid, Uuid, Uuid) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Reminder {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, $2, $3, true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .bind(format!("reminder-mock-{}", Uuid::new_v4().simple()))
+        .bind(uri)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let game_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO games (game_version_id, is_finished, game_state)
+             VALUES ($1, false, 'state') RETURNING id",
+        )
+        .bind(game_version_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users
+                 (name, pref_colors, reminder_emails_enabled, turn_emails_enabled, last_active_at)
+             VALUES ($1, $2, true, true, NOW() - interval '11 minutes') RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind(format!("u-{}@example.com", Uuid::new_v4()))
+        .execute(pool)
+        .await
+        .unwrap();
+        let gp_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_players
+                 (game_id, user_id, position, color, has_accepted, is_turn,
+                  is_turn_at, last_turn_at, is_eliminated, is_read)
+             VALUES ($1, $2, 0, 'Green', true, true,
+                     NOW() - interval '48 hours', NOW(), false, false)
+             RETURNING id",
+        )
+        .bind(game_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        (game_id, user_id, gp_id)
+    }
+
+    /// Best-effort concurrent flip of the recipient's turn, scoped to a short
+    /// `lock_timeout` so it can never deadlock against a sweep still holding the
+    /// `FOR UPDATE` claim lock across the send (the R-18 defect). Pre-hoist this
+    /// times out on the held lock and the flip does not apply; post-hoist the lock
+    /// is released during the send and the flip lands.
+    async fn try_flip_turn(pool: &PgPool, gp_id: Uuid) -> Result<(), sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        sqlx::query("SET LOCAL lock_timeout = '250ms'").execute(&mut *tx).await?;
+        sqlx::query("UPDATE game_players SET is_turn = false WHERE id = $1")
+            .bind(gp_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    // R-18 / F-143 (WP-46 vs WP-79 reconciliation): once the game-service render
+    // and Resend send are hoisted OUT of the claim transaction, the sweep must
+    // re-check eligibility before marking. A concurrent player loses the turn
+    // during the (hoisted) send window; the post-call re-check
+    // (`turn_reminder_sent_at IS NULL AND is_turn = true`) must refuse the mark.
+    // RED against the current code, which holds `FOR UPDATE` across the send and
+    // marks unconditionally: the flip times out on the held lock and the row ends
+    // marked.
+    #[sqlx::test]
+    async fn turn_reminder_recheck_rejects_concurrent_loss_of_turn(pool: PgPool) {
+        use std::sync::Arc;
+        use tokio::sync::Notify;
+
+        let arrived = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let uri = spawn_blocking_render_service(arrived.clone(), release.clone()).await;
+        let (_game_id, _user_id, gp_id) = seed_reminder_game_at(&pool, &uri).await;
+        let http = reqwest::Client::new();
+
+        let sweep_pool = pool.clone();
+        let sweep = tokio::spawn(async move { sweep_once(None, &sweep_pool, &http).await });
+
+        // Deterministic hook: park until the sweep is inside the render/send.
+        arrived.notified().await;
+
+        // Concurrent modification while the send is in flight. Pre-hoist this
+        // times out on the claim lock (ignored); post-hoist it lands.
+        let _ = try_flip_turn(&pool, gp_id).await;
+
+        release.notify_one();
+        sweep.await.unwrap();
+
+        let sent_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            sent_at.is_none(),
+            "post-call re-check must not mark a recipient who lost the turn during the send"
+        );
+    }
+
+    // R-18 / F-143: the hoist trades claim-lock serialization for an at-most-once
+    // DB mark plus an ACCEPTED rare duplicate send (CODING.md: "Mark work done
+    // only after it succeeded ... a rare duplicate is the cheaper failure mode").
+    //
+    // Determinism: the second sweep is NOT spawned until the first is observed
+    // inside the render (an `entered` semaphore permit). A render runs only after
+    // its claim TX commits, so by then the first sweep holds no row lock and the
+    // row is still unmarked; the second sweep's `FOR UPDATE SKIP LOCKED` claim is
+    // therefore guaranteed to succeed rather than racing the first claim's
+    // commit. A barrier then parks BOTH sweeps inside the (hoisted) send window,
+    // proving they can both render (the tolerated duplicate) yet the conditional
+    // mark (`WHERE turn_reminder_sent_at IS NULL`) lands at most once and stays
+    // marked. RED against the current code: the claim lock is held across the
+    // send, so the second sweep's SKIP LOCKED claim finds a locked row, never
+    // renders, and its `entered` acquire times out.
+    #[sqlx::test]
+    async fn turn_reminder_concurrent_sweeps_mark_at_most_once(pool: PgPool) {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        use tokio::sync::{Barrier, Semaphore};
+
+        let renders = Arc::new(AtomicUsize::new(0));
+        let entered = Arc::new(Semaphore::new(0));
+        let barrier = Arc::new(Barrier::new(3));
+        let uri =
+            spawn_barrier_render_service(renders.clone(), entered.clone(), barrier.clone()).await;
+        let (_game_id, _user_id, gp_id) = seed_reminder_game_at(&pool, &uri).await;
+        let http = reqwest::Client::new();
+
+        // Start the first sweep and wait until it is parked inside the (hoisted)
+        // send window. A render runs only after `claim_tx.commit()`, so the permit
+        // proves sweep 1 has released the claim row lock while the row is still
+        // unmarked.
+        let p1 = pool.clone();
+        let h1 = http.clone();
+        let s1 = tokio::spawn(async move { sweep_once(None, &p1, &h1).await });
+        let first = tokio::time::timeout(Duration::from_secs(5), entered.acquire()).await;
+        assert!(
+            first.is_ok(),
+            "the first sweep must reach the hoisted send window; pre-hoist it never renders outside the claim lock (the R-18 gap)"
+        );
+        first.unwrap().unwrap().forget();
+
+        // Only now start the second sweep. Its `FOR UPDATE SKIP LOCKED` claim is
+        // therefore guaranteed to see an unlocked, unmarked row and succeed: the
+        // rendezvous no longer depends on the second claim racing the first
+        // claim's commit. Both sweeps are now inside the send window at once.
+        let p2 = pool.clone();
+        let h2 = http.clone();
+        let s2 = tokio::spawn(async move { sweep_once(None, &p2, &h2).await });
+        let second = tokio::time::timeout(Duration::from_secs(5), entered.acquire()).await;
+        assert!(
+            second.is_ok(),
+            "the second sweep must also reach the hoisted send window; pre-hoist SKIP LOCKED serializes the claim so only one arrives"
+        );
+        second.unwrap().unwrap().forget();
+
+        // Both renders are in flight; release them together so each proceeds to its
+        // conditional mark.
+        barrier.wait().await;
+        assert_eq!(
+            renders.load(Ordering::SeqCst),
+            2,
+            "both sweeps rendered before either marked: the accepted rare duplicate send"
+        );
+
+        s1.await.unwrap();
+        s2.await.unwrap();
+
+        let sent_at: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT turn_reminder_sent_at FROM game_players WHERE id = $1")
+                .bind(gp_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(sent_at.is_some(), "the due candidate must be marked");
+
+        // At-most-once is durable: a later sweep sees the mark, never renders again.
+        let before = renders.load(Ordering::SeqCst);
+        sweep_once(None, &pool, &http).await;
+        assert_eq!(
+            renders.load(Ordering::SeqCst),
+            before,
+            "a marked recipient must never be re-rendered or re-marked"
+        );
     }
 }

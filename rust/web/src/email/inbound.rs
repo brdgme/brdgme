@@ -879,6 +879,26 @@ async fn handle_game_reply(
     RouteOutcome::Done
 }
 
+/// True when every roster member's identity and response are identical between
+/// the pre-game-service-call snapshot and the post-call re-read. Used after the
+/// hoisted external call to detect a concurrent roster mutation before starting
+/// the game, so a game is never created on stale membership (R-18 / F-135).
+fn invite_roster_unchanged(
+    snapshot: &[crate::proposals::ProposalPlayer],
+    current: &[crate::proposals::ProposalPlayer],
+) -> bool {
+    if snapshot.len() != current.len() {
+        return false;
+    }
+    snapshot.iter().zip(current.iter()).all(|(a, b)| {
+        a.id == b.id
+            && a.user_id == b.user_id
+            && a.bot_name == b.bot_name
+            && a.bot_difficulty == b.bot_difficulty
+            && a.response == b.response
+    })
+}
+
 async fn handle_invite_reply(
     state: &AppState,
     source: &dyn InboundEmailSource,
@@ -1040,8 +1060,21 @@ async fn handle_invite_reply(
         return transient_failure(e, "invite update response failed");
     }
 
-    let mut started_game_id: Option<uuid::Uuid> = None;
-    let mut roster: Vec<crate::proposals::ProposalPlayer> = Vec::new();
+    // R-18 / F-135: snapshot every input to the game-service call inside this
+    // short transaction, then commit and release the `FOR UPDATE` lock BEFORE
+    // the external HTTP round-trip. A second transaction re-locks, re-reads and
+    // re-validates the exact roster/status after the call, so a concurrent
+    // mutation that lands while the game service is in-flight can never start a
+    // game on stale membership. No network I/O runs while a transaction or row
+    // lock is held.
+    //
+    // `start_inputs` is Some only when this acceptance settles the proposal (no
+    // pending humans remain) and a game must be started.
+    let mut start_inputs: Option<(
+        crate::models::game::GameVersion,
+        Vec<crate::proposals::ProposalPlayer>,
+        usize,
+    )> = None;
 
     if accept {
         let pending =
@@ -1056,46 +1089,159 @@ async fn handle_invite_reply(
                     Ok(None) => {
                         tracing::error!("resend webhook: game version not found for proposal");
                         // Non-transient: the game version is genuinely missing; retrying
-                        // cannot create it, so finish without starting a game.
+                        // cannot create it, so finish without starting a game. The
+                        // transaction is dropped, rolling back the response write above
+                        // (unchanged from the pre-R-18 behavior).
                         return RouteOutcome::Done;
                     }
                     Err(e) => return transient_failure(e, "invite game version lookup failed"),
                 };
-            roster = match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
-                Ok(p) => p,
-                Err(e) => return transient_failure(e, "invite roster lookup failed"),
-            };
+            let roster =
+                match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
+                    Ok(p) => p,
+                    Err(e) => return transient_failure(e, "invite roster lookup failed"),
+                };
             let accepted_count = roster.iter().filter(|p| p.response == "accepted").count();
-            let fetched = match crate::game::server_fns::fetch_game_from_service(
-                &state.http_client,
-                &game_version,
-                accepted_count,
-            )
-            .await
-            {
-                Ok(f) => f,
-                Err(e) => return transient_failure(e, "invite fetch game failed"),
-            };
-            match crate::proposals::start_proposal_tx(
-                &mut tx,
-                &proposal,
-                &roster,
-                &game_version,
-                fetched,
-            )
-            .await
-            {
-                Ok(gid) => started_game_id = Some(gid),
-                Err(e) => return transient_failure(e, "invite start proposal failed"),
-            }
+            start_inputs = Some((game_version, roster, accepted_count));
         }
     }
 
     if let Err(e) = tx.commit().await {
         tracing::error!("resend webhook: invite commit failed: {e}");
-        // Non-transient for retry: the commit may have persisted the mutation, so
-        // an at-least-once retry could double-apply it; finish Done.
+        // Non-transient for retry: the commit may have persisted the response
+        // mutation, so an at-least-once retry could double-apply it; finish Done.
         return RouteOutcome::Done;
+    }
+
+    // The response mutation is now durable. From here every failure is Done
+    // (never Retry): a retry would see `me.response != "pending"` and bail out
+    // as "already responded", so it could not re-attempt the start.
+    let mut started_game_id: Option<uuid::Uuid> = None;
+    let mut roster: Vec<crate::proposals::ProposalPlayer> = Vec::new();
+
+    if let Some((game_version, roster_snapshot, accepted_count)) = start_inputs {
+        // External game-service call: NO transaction open, NO row lock held.
+        let fetched = match crate::game::server_fns::fetch_game_from_service(
+            &state.http_client,
+            &game_version,
+            accepted_count,
+        )
+        .await
+        {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::error!("resend webhook: invite fetch game failed: {e}");
+                // Response already committed; the game simply did not start. The
+                // proposal stays open and the owner can start it manually.
+                send_invite_reply_response(
+                    state,
+                    &player,
+                    user_id,
+                    from,
+                    "Invite accepted.".to_string(),
+                    None,
+                )
+                .await;
+                return RouteOutcome::Done;
+            }
+        };
+
+        // Re-open a transaction, re-lock the proposal, re-read the roster, and
+        // re-validate the exact snapshot taken before the external call.
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!("resend webhook: invite re-start begin tx failed: {e}");
+                return RouteOutcome::Done;
+            }
+        };
+        let proposal =
+            match crate::proposals::lock_proposal_for_update(&mut tx, proposal_id).await {
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    tracing::warn!("resend webhook: proposal {proposal_id} not found on re-start");
+                    return RouteOutcome::Done;
+                }
+                Err(e) => {
+                    tracing::error!("resend webhook: invite re-start lock failed: {e}");
+                    return RouteOutcome::Done;
+                }
+            };
+        if proposal.status != "open" {
+            rollback_invite_tx(tx, "invite no longer open on re-start").await;
+            send_invite_reply_response(
+                state,
+                &player,
+                user_id,
+                from,
+                "Invite accepted.".to_string(),
+                None,
+            )
+            .await;
+            return RouteOutcome::Done;
+        }
+        let roster_now =
+            match crate::proposals::find_proposal_players_tx(&mut tx, proposal_id).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("resend webhook: invite re-start roster lookup failed: {e}");
+                    return RouteOutcome::Done;
+                }
+            };
+        let accepted_now = roster_now.iter().filter(|p| p.response == "accepted").count();
+        if !invite_roster_unchanged(&roster_snapshot, &roster_now) || accepted_now != accepted_count
+        {
+            // A concurrent mutation changed the roster while the game service was
+            // in-flight. Do not start on stale membership; the response is already
+            // recorded and the proposal stays open.
+            rollback_invite_tx(tx, "invite roster changed during game fetch").await;
+            send_invite_reply_response(
+                state,
+                &player,
+                user_id,
+                from,
+                "Invite accepted.".to_string(),
+                None,
+            )
+            .await;
+            return RouteOutcome::Done;
+        }
+        match crate::proposals::start_proposal_tx(
+            &mut tx,
+            &proposal,
+            &roster_now,
+            &game_version,
+            fetched,
+        )
+        .await
+        {
+            Ok(gid) => {
+                started_game_id = Some(gid);
+                roster = roster_now;
+            }
+            Err(e) => {
+                tracing::error!("resend webhook: invite start proposal failed: {e}");
+                // Roll back so no partial game write persists; the response remains
+                // committed and the proposal stays open. Finish Done.
+                rollback_invite_tx(tx, "invite start proposal failed").await;
+                send_invite_reply_response(
+                    state,
+                    &player,
+                    user_id,
+                    from,
+                    "Invite accepted.".to_string(),
+                    None,
+                )
+                .await;
+                return RouteOutcome::Done;
+            }
+        }
+        if let Err(e) = tx.commit().await {
+            tracing::error!("resend webhook: invite re-start commit failed: {e}");
+            // The commit may have persisted the game row; an at-least-once retry
+            // could double-apply it; finish Done.
+            return RouteOutcome::Done;
+        }
     }
 
     state
@@ -2819,6 +2965,244 @@ body\r\n";
         assert!(
             matches!(outcome, RouteOutcome::Retry),
             "transient DB error inside the invite transaction must be Retry, not Done (F-162)"
+        );
+    }
+
+    // ---- R-18 (F-135): concurrency regression for the external-call-to-
+    // revalidation gap in handle_invite_reply.
+    //
+    // The game-service HTTP call (fetch_game_from_service) currently executes
+    // inside the FOR UPDATE transaction. A concurrent roster mutation that
+    // lands while the game service is in-flight is invisible to the in-memory
+    // roster snapshot, so start_proposal_tx creates a game on stale membership.
+    //
+    // This test gates the mock game service with a tokio::sync::Notify pair so
+    // the concurrent mutation is placed deterministically in the gap between the
+    // external call and the transaction's use of the roster. It asserts the
+    // state machine does NOT start a game on stale proposal membership/status.
+    //
+    // Expected RED on current code: the game IS started (stale roster used).
+    // Expected GREEN after R-18 fix: the re-validation detects the stale roster
+    // and aborts without starting a game.
+
+    fn new_game_response(player_count: usize) -> brdgme_cmd::api::Response {
+        use brdgme_cmd::api::{GameResponse, PlayerRender, PubRender, Response};
+        Response::New {
+            game: GameResponse {
+                state: "test_game_state".to_string(),
+                points: vec![0.0; player_count],
+                status: brdgme_game::Status::Active {
+                    whose_turn: vec![0],
+                    eliminated: vec![],
+                },
+            },
+            logs: vec![],
+            public_render: PubRender {
+                pub_state: "pub".to_string(),
+                render: "render".to_string(),
+            },
+            player_renders: (0..player_count)
+                .map(|i| PlayerRender {
+                    player_state: format!("p{i}"),
+                    render: format!("p{i}render"),
+                    command_spec: None,
+                })
+                .collect(),
+            seed: 42,
+        }
+    }
+
+    #[sqlx::test]
+    async fn invite_reply_does_not_start_game_on_stale_roster_after_game_fetch(
+        pool: sqlx::PgPool,
+    ) {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::Request;
+        use std::sync::Arc;
+        use tokio::net::TcpListener;
+
+        let owner_id = seed_user(&pool, "r18-owner").await;
+        let invitee_id = seed_user(&pool, "r18-invitee").await;
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) VALUES ($1, $2, true, NOW())",
+        )
+        .bind(invitee_id)
+        .bind("r18-invitee@brdg.me")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let called = Arc::new(tokio::sync::Notify::new());
+        let proceed = Arc::new(tokio::sync::Notify::new());
+        let called_mock = called.clone();
+        let proceed_mock = proceed.clone();
+
+        let app = Router::new().route(
+            "/",
+            post(move |Json(payload): Json<Request>| {
+                let called = called_mock.clone();
+                let proceed = proceed_mock.clone();
+                async move {
+                    match payload {
+                        Request::New { players, .. } => {
+                            called.notify_one();
+                            proceed.notified().await;
+                            Json(new_game_response(players))
+                        }
+                        _ => Json(new_game_response(2)),
+                    }
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mock_uri = format!("http://{addr}");
+
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("R18 Game {}", uuid::Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let game_version_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) \
+             VALUES ($1, $2, $3, true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .bind(format!("invite-mock-{}", uuid::Uuid::new_v4().simple()))
+        .bind(&mock_uri)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let proposal_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status) \
+             VALUES ($1, $2, 'open') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(owner_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_proposal_players \
+               (proposal_id, \"position\", user_id, response, email_token) \
+             VALUES ($1, 0, $2, 'accepted', NULL)",
+        )
+        .bind(proposal_id)
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let token = "r18-invite-tok";
+        sqlx::query(
+            "INSERT INTO game_proposal_players \
+               (proposal_id, \"position\", user_id, response, email_token) \
+             VALUES ($1, 1, $2, 'pending', $3)",
+        )
+        .bind(proposal_id)
+        .bind(invitee_id)
+        .bind(token)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let email_id = "em_r18_stale_roster";
+        let raw = "Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=brdg.me\r\n\
+                   MIME-Version: 1.0\r\n\
+                   Content-Type: text/plain; charset=utf-8\r\n\
+                   \r\n\
+                   accept\r\n";
+        let mut emails = std::collections::HashMap::new();
+        emails.insert(email_id.to_string(), raw.to_string());
+        let state = std::sync::Arc::new(make_inbound_test_state(pool.clone()).await);
+        let state_task = state.clone();
+        let handle = tokio::spawn(async move {
+            let source = StaticInbound(emails);
+            handle_invite_reply(&state_task, &source, token, "r18-invitee@brdg.me", email_id)
+                .await
+        });
+
+        called.notified().await;
+
+        sqlx::query(
+            "UPDATE game_proposal_players SET response = 'declined', \
+               responded_at = (now() AT TIME ZONE 'utc'), \
+               updated_at = (now() AT TIME ZONE 'utc') \
+             WHERE proposal_id = $1 AND \"position\" = 0",
+        )
+        .bind(proposal_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        proceed.notify_one();
+        let outcome = handle.await.unwrap();
+
+        let (status, started_game_id): (String, Option<uuid::Uuid>) = sqlx::query_as(
+            "SELECT status, started_game_id FROM game_proposals WHERE id = $1",
+        )
+        .bind(proposal_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let game_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM games g \
+             JOIN game_versions gv ON gv.id = g.game_version_id \
+             WHERE gv.id = $1",
+        )
+        .bind(game_version_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            game_count, 0,
+            "no game must be started on a stale roster: the owner declined \
+             while the game-service call was in-flight (F-135)"
+        );
+        assert_ne!(
+            status, "started",
+            "proposal must not be flipped to 'started' when the roster changed \
+             during the external call (F-135)"
+        );
+        assert!(
+            started_game_id.is_none(),
+            "started_game_id must remain NULL when the roster is stale (F-135)"
+        );
+
+        let owner_response: String = sqlx::query_scalar(
+            "SELECT response FROM game_proposal_players WHERE proposal_id = $1 AND \"position\" = 0",
+        )
+        .bind(proposal_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            owner_response, "declined",
+            "the concurrent owner decline must have persisted"
+        );
+
+        let invitee_response: String = sqlx::query_scalar(
+            "SELECT response FROM game_proposal_players WHERE proposal_id = $1 AND \"position\" = 1",
+        )
+        .bind(proposal_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            invitee_response, "accepted",
+            "the invitee's acceptance must have been recorded"
+        );
+
+        assert!(
+            matches!(outcome, RouteOutcome::Done | RouteOutcome::Retry),
+            "outcome must preserve RouteOutcome semantics (F-135)"
         );
     }
 }

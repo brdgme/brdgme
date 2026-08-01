@@ -1338,6 +1338,20 @@ fn proposal_ready_to_start(players: &[ProposalPlayer], player_counts: &[i32]) ->
     crate::game::server_fns::roster_error(player_counts, count).is_none()
 }
 
+#[cfg(feature = "ssr")]
+fn roster_unchanged(snapshot: &[ProposalPlayer], current: &[ProposalPlayer]) -> bool {
+    if snapshot.len() != current.len() {
+        return false;
+    }
+    snapshot.iter().zip(current.iter()).all(|(a, b)| {
+        a.id == b.id
+            && a.user_id == b.user_id
+            && a.bot_name == b.bot_name
+            && a.bot_difficulty == b.bot_difficulty
+            && a.response == b.response
+    })
+}
+
 /// Why a respond_proposal call must be rejected, or None if allowed.
 /// The owner can never respond: declining would wedge the proposal
 /// (declined is terminal and the owner slot cannot be removed).
@@ -1672,6 +1686,72 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
     let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = crate::friends::require_user().await?;
 
+    let proposal = find_proposal(&pool, proposal_id)
+        .await
+        .map_err(internal("start_proposal: find proposal"))?
+        .ok_or_else(|| ServerFnError::new("Invite not found"))?;
+
+    if proposal.owner_user_id != user.id {
+        return Err(ServerFnError::new(
+            "Only the owner can start this proposal.",
+        ));
+    }
+    if proposal.status != "open" {
+        return Err(ServerFnError::new("This proposal is no longer open."));
+    }
+
+    let snapshot_players = find_proposal_players(&pool, proposal_id)
+        .await
+        .map_err(internal("start_proposal: players"))?;
+
+    let pending_humans = snapshot_players
+        .iter()
+        .filter(|p| p.user_id.is_some() && p.response == "pending")
+        .count();
+    if pending_humans > 0 {
+        return Err(ServerFnError::new(format!(
+            "Cannot start: {pending_humans} players have not responded"
+        )));
+    }
+
+    let declined = snapshot_players
+        .iter()
+        .filter(|p| p.response == "declined")
+        .count();
+    if declined > 0 {
+        return Err(ServerFnError::new(format!(
+            "Cannot start: {declined} players have declined"
+        )));
+    }
+
+    let player_counts = crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
+        .await
+        .map_err(internal("start_proposal: player counts"))?
+        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
+    let count = snapshot_players
+        .iter()
+        .filter(|p| p.response != "declined")
+        .count();
+    if let Some(msg) = crate::game::server_fns::roster_error(&player_counts, count) {
+        return Err(ServerFnError::new(msg));
+    }
+
+    let game_version = crate::db::find_game_version(&pool, proposal.game_version_id)
+        .await
+        .map_err(internal("start_proposal: game version"))?
+        .ok_or_else(|| ServerFnError::new("Game version not found"))?;
+
+    let accepted_count = snapshot_players
+        .iter()
+        .filter(|p| p.response == "accepted")
+        .count();
+    let fetched = crate::game::server_fns::fetch_game_from_service(
+        &http_client,
+        &game_version,
+        accepted_count,
+    )
+    .await?;
+
     let mut tx = pool
         .begin()
         .await
@@ -1712,27 +1792,16 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
         )));
     }
 
-    let player_counts = crate::db::find_game_type_player_counts(&pool, proposal.game_version_id)
-        .await
-        .map_err(internal("start_proposal: player counts"))?
-        .ok_or_else(|| ServerFnError::new("Game type not found"))?;
     let count = players.iter().filter(|p| p.response != "declined").count();
     if let Some(msg) = crate::game::server_fns::roster_error(&player_counts, count) {
         return Err(ServerFnError::new(msg));
     }
 
-    let game_version = crate::db::find_game_version(&pool, proposal.game_version_id)
-        .await
-        .map_err(internal("start_proposal: game version"))?
-        .ok_or_else(|| ServerFnError::new("Game version not found"))?;
-
-    let accepted_count = players.iter().filter(|p| p.response == "accepted").count();
-    let fetched = crate::game::server_fns::fetch_game_from_service(
-        &http_client,
-        &game_version,
-        accepted_count,
-    )
-    .await?;
+    if !roster_unchanged(&snapshot_players, &players) {
+        return Err(ServerFnError::new(
+            "This invite changed while it was starting. Please try again.",
+        ));
+    }
 
     let game_id = start_proposal_tx(&mut tx, &proposal, &players, &game_version, fetched).await?;
 
@@ -4120,6 +4189,280 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(bar_verified, 1, "bar@x.com stays a single verified row");
+    }
+
+    /// Seeds a game version pointed at `uri` (the in-process mock), unlike
+    /// `seed_game_version` which hardcodes a dead address.
+    async fn seed_game_version_at(pool: &PgPool, uri: &str) -> Uuid {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Test Game {}", Uuid::new_v4()))
+        .bind(vec![2i32, 3, 4])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, $2, $3, true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .bind(format!("start-mock-{}", Uuid::new_v4().simple()))
+        .bind(uri)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// In-process Axum mock game service answering `Request::New` (same shape as
+    /// `game::tests::spawn_mock_game_service`, which is private to that module
+    /// and not nameable here). On receiving `Request::New` it signals `entered`
+    /// then blocks on the `done` condvar, so a concurrent writer can mutate the
+    /// roster while the game-service call is in flight - the snapshot-to-tx gap
+    /// the R-18 hoist creates. `#[sqlx::test]` runs a current-thread runtime, so
+    /// the writer must live on its own OS thread (a spawned tokio task could not
+    /// run while this handler blocks the single worker); the blocking wait here
+    /// is bounded and releases as soon as that thread signals `done`.
+    async fn spawn_gated_new_game_service(
+        entered: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+        done: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    ) -> String {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{GameResponse, PubRender, Request, Response};
+        use std::time::Duration;
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(move |Json(payload): Json<Request>| {
+                let entered = entered.clone();
+                let done = done.clone();
+                async move {
+                    let players = match payload {
+                        Request::New { players, .. } => players,
+                        _ => 0,
+                    };
+                    {
+                        let (lock, cvar) = &*entered;
+                        let mut guard = lock.lock().unwrap();
+                        *guard = true;
+                        cvar.notify_all();
+                    }
+                    {
+                        let (lock, cvar) = &*done;
+                        let mut guard = lock.lock().unwrap();
+                        while !*guard {
+                            let (g, timeout) =
+                                cvar.wait_timeout(guard, Duration::from_secs(15)).unwrap();
+                            guard = g;
+                            if timeout.timed_out() {
+                                break;
+                            }
+                        }
+                    }
+                    Json(Response::New {
+                        game: GameResponse {
+                            state: "mock_state".to_string(),
+                            points: vec![0.0; players],
+                            status: brdgme_game::Status::Active {
+                                whose_turn: vec![0],
+                                eliminated: vec![],
+                            },
+                        },
+                        logs: vec![],
+                        public_render: PubRender {
+                            pub_state: "pub".to_string(),
+                            render: "mock render".to_string(),
+                        },
+                        player_renders: vec![],
+                        seed: 0,
+                    })
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{}", addr)
+    }
+
+    /// Runs `f` with every context the `#[server] start_proposal` fn pulls via
+    /// `expect_context` / `require_user`: the `PgPool`, a NATS-backed
+    /// `GameBroadcaster`, the game-service `reqwest::Client`, a real NATS
+    /// jetstream `Context`, the `Option<Resend>` mailer context (None), and a
+    /// tower-sessions `Session` logged in as `session_user`. Mirrors
+    /// `with_logged_in_context` plus the two contexts `start_proposal` needs.
+    async fn with_start_proposal_context<F, Fut, T>(
+        pool: &PgPool,
+        session_user: crate::auth::session::SessionUser,
+        f: F,
+    ) -> T
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        use crate::auth::session::SESSION_USER_KEY;
+        use crate::websocket::GameBroadcaster;
+        use leptos::reactive::owner::Owner;
+        use std::sync::Arc;
+        use tower_sessions::{MemoryStore, Session};
+
+        let session = Session::new(None, Arc::new(MemoryStore::default()), None);
+        session.insert(SESSION_USER_KEY, session_user).await.unwrap();
+        let (mut parts, _) = axum::http::Request::new(()).into_parts();
+        parts.extensions.insert(session);
+
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let client = async_nats::connect(&nats_url).await.unwrap();
+        let broadcaster = GameBroadcaster::new(client);
+        let jetstream = crate::nats::connect(&nats_url).await.unwrap();
+        crate::nats::ensure_stream_and_consumers(&jetstream)
+            .await
+            .unwrap();
+
+        let owner = Owner::new();
+        owner.with(|| {
+            provide_context(pool.clone());
+            provide_context(broadcaster);
+            provide_context(reqwest::Client::new());
+            provide_context(jetstream);
+            provide_context(None::<resend_rs::Resend>);
+            provide_context(parts);
+        });
+        owner
+            .with(|| leptos::reactive::computed::ScopedFuture::new(f()))
+            .await
+    }
+
+    /// R-18 / F-134 (test-first, RED against the current code): a stale
+    /// pre-call roster snapshot must not start a game.
+    ///
+    /// The fix hoists the game-service `Request::New` call out of the
+    /// `FOR UPDATE` transaction and re-reads + re-validates the roster inside a
+    /// fresh tx. This test parks the mock game-service call exactly in that
+    /// snapshot-to-tx gap and, while it is in flight, flips an accepted invitee
+    /// to `declined` on a second connection (`game_proposal_players` is not
+    /// row-locked by the start path, so the write lands in the gap rather than
+    /// blocking on it). With the hoist + in-tx re-validation applied, the
+    /// re-read roster no longer matches the snapshot, so the start aborts:
+    /// `Err`, proposal stays `open`, no game. Against today's code the
+    /// in-memory snapshot is used verbatim under the open tx, so a game IS
+    /// created from the stale roster and the proposal flips to `started`,
+    /// failing the assertions below.
+    #[sqlx::test]
+    async fn start_proposal_rejects_a_stale_snapshot_under_concurrent_roster_change(pool: PgPool) {
+        use std::sync::{Arc, Condvar, Mutex};
+
+        let entered: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+        let done: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+        let uri = spawn_gated_new_game_service(entered.clone(), done.clone()).await;
+
+        let owner = seed_invite_user(&pool, true).await;
+        let invitee = seed_invite_user(&pool, true).await;
+        let gv = seed_game_version_at(&pool, &uri).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        let invitee_player = insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(invitee),
+            None,
+            None,
+            "accepted",
+            None,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let auth_token_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(auth_token_id)
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let session_user = crate::auth::session::SessionUser {
+            id: owner,
+            name: "proposal_owner".to_string(),
+            email: format!("owner-{}@example.com", Uuid::new_v4()),
+            auth_token_id,
+        };
+
+        // Concurrent writer on its own OS thread (the test runs a
+        // current-thread runtime, so a spawned task could not run while the
+        // mock handler blocks the single worker). Once the game-service call is
+        // in flight (`entered`), it declines the accepted invitee on a separate
+        // connection and commits before signalling `done`, so any re-read inside
+        // the start path sees the change. `game_proposal_players` is not
+        // row-locked by the start path, so this lands in the gap rather than
+        // blocking on the proposal's `FOR UPDATE`.
+        let writer_pool = pool.clone();
+        let writer_entered = entered.clone();
+        let writer_done = done.clone();
+        let writer = std::thread::spawn(move || {
+            {
+                let (lock, cvar) = &*writer_entered;
+                let mut guard = lock.lock().unwrap();
+                while !*guard {
+                    guard = cvar.wait(guard).unwrap();
+                }
+            }
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                sqlx::query(
+                    "UPDATE game_proposal_players SET response = 'declined', \
+                     responded_at = (now() AT TIME ZONE 'utc'), \
+                     updated_at = (now() AT TIME ZONE 'utc') WHERE id = $1",
+                )
+                .bind(invitee_player)
+                .execute(&writer_pool)
+                .await
+                .unwrap();
+            });
+            let (lock, cvar) = &*writer_done;
+            let mut guard = lock.lock().unwrap();
+            *guard = true;
+            cvar.notify_all();
+        });
+
+        let result = with_start_proposal_context(&pool, session_user, || start_proposal(pid)).await;
+        writer.join().unwrap();
+
+        let invitee_response: String =
+            sqlx::query_scalar("SELECT response FROM game_proposal_players WHERE id = $1")
+                .bind(invitee_player)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            invitee_response, "declined",
+            "the concurrent roster change must have committed in the gap"
+        );
+
+        assert!(
+            result.is_err(),
+            "starting from a stale pre-call roster snapshot must be rejected, got {result:?}"
+        );
+        let proposal = find_proposal(&pool, pid).await.unwrap().unwrap();
+        assert_eq!(
+            proposal.status, "open",
+            "a rejected start must leave the proposal open"
+        );
+        assert!(
+            proposal.started_game_id.is_none(),
+            "no game may be created from a stale roster snapshot"
+        );
     }
 
 }
