@@ -303,7 +303,7 @@ jobs:
       - name: Upload debug files to Sentry
         if: github.ref == 'refs/heads/master' && env.SENTRY_AUTH_TOKEN != ''
         env:
-          # Slugs confirmed per docs/superpowers/plans/2026-07-15-ws3-sentry.md
+          # Slugs confirmed per docs/changes/archive/2026-07-15-ws3-sentry-plan/plan.md
           # (org `brdgme`; browser project `web-javascript` receives debug-file uploads).
           SENTRY_ORG: brdgme
           SENTRY_PROJECT: web-javascript

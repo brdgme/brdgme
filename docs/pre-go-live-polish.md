@@ -142,7 +142,7 @@ superpowers spec/plan and fixed as one batch when scheduled.
   arrives; the update swaps in without any blank frame.
 - **Note:** `GamePage`'s game `Resource` is wrapped in `<Suspense>` with
   an empty-`<div>` fallback (`rust/web/src/app.rs` ~line 563), which
-  blanks on every refetch. `docs/superpowers/plans/2026-07-05-bugs.md`
+  blanks on every refetch. `docs/changes/51-bot-sqlx-queries/plan.md`
   (line ~92) records this exact bug as already fixed by switching the
   outer `Suspense` to `Transition` - but no `Transition` exists anywhere
   in `rust/web/src` today, so the fix regressed or was reverted. Check

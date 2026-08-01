@@ -6,7 +6,7 @@ resolves each name to a concrete value at the final render boundary.
 
 Decided 2026-07-11 from a full colour audit of `rust/`, `brdgme-go/`, and
 the legacy `brdg.me` repo (see Appendix B). Supersedes the palette details
-in `docs/superpowers/specs/2026-07-05-26-theming-design.md` (which assumed
+in `docs/changes/archive/2026-07-05-26-theming/spec.md` (which assumed
 all 21 Material colours survive); the architectural direction there
 (semantic colours end-to-end, `Palette` as data, CSS custom properties on
 the web) is unchanged.

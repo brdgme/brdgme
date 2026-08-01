@@ -542,7 +542,7 @@ const CHROME_SOFTENS: &[(NamedColor, u8)] = &[
 ```
 
 `--mk-soften-red-86` has **zero consumers anywhere in the repo** outside a
-historical planning doc (`docs/superpowers/plans/2026-07-13-26-web-chrome-theming.md:34`).
+historical planning doc (`docs/changes/archive/2026-07-13-26-web-chrome-theming-plan/plan.md:34`).
 Its only user was deleted by `0d5da49` (2026-07-22, "feat(sidebar): show pending
 and finished games alongside active"), which removed
 

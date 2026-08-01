@@ -713,8 +713,8 @@ Call-site semantics, checked individually against `rust/lib/game_bin/src/lib.rs`
    actix-web/ureq into every build). See F-205. The unified report should amend the corpus entry,
    not just record the WP as closed.
 7. **Stale docs contradicting the code at HEAD** (not findings, but sign-off noise):
-   `docs/superpowers/specs/2026-07-16-42-image-scale-to-zero-viability.md:14` and
-   `docs/superpowers/plans/2026-07-16-42-image-scale-to-zero.md:41` both still assert the game
+   `docs/changes/archive/2026-07-16-42-image-scale-to-zero-viability-spec/spec.md:14` and
+   `docs/changes/archive/2026-07-16-42-image-scale-to-zero-plan/plan.md:41` both still assert the game
    HTTP default is `0.0.0.0:80` and cite `no_thanks_2_http.rs`, a path WP-73 deleted.
 
 ## Carry-forwards from Unit 10c (for the unified report and Unit 11)

@@ -2,7 +2,7 @@
 //! from the shared `brdgme_nats` wire-protocol crate (R-14). The bot only ever
 //! consumes `bot.turn` and publishes `bot.command`; the monolith owns creating
 //! the stream and both durable consumers on its own startup (see
-//! docs/superpowers/plans/2026-07-05-13-nats-bot-eventing.md).
+//! docs/changes/archive/2026-07-05-13-nats-bot-eventing/plan.md).
 
 use anyhow::{Context, Result};
 

@@ -1,6 +1,6 @@
 //! The /settings page: username, preferred colours, theme picker, email
 //! management. Logged-in only - anonymous visitors are sent to /login.
-//! See docs/superpowers/specs/2026-07-16-35-settings-page-design.md.
+//! See docs/changes/archive/2026-07-16-35-settings-page/spec.md.
 
 use leptos::prelude::*;
 

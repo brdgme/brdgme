@@ -21,7 +21,7 @@ Evidence, not inference:
   `https://challenges.cloudflare.com/turnstile/v0/api.js`
 - Widget markup uses the `cf-turnstile` class with `data-sitekey`
   (`rust/web/src/app.rs:663`)
-- `docs/superpowers/plans/2026-07-23-email-restrictions.md:11` - "R3 Cloudflare
+- `docs/changes/archive/2026-07-23-email-restrictions-plan/plan.md:11` - "R3 Cloudflare
   Turnstile CAPTCHA widget on the login form"
 
 Turnstile is Cloudflare's CAPTCHA alternative; here it is used as a bot gate on
@@ -40,9 +40,9 @@ Code:
 | `/home/beefsack/Development/brdgme/rust/web/src/components/game.rs` | 359 (comment only) |
 
 Docs: `docs/CODING.md:532`;
-`docs/superpowers/plans/2026-07-23-email-restrictions.md` (~50 hits);
-`docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md:93,95,123`;
-`docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md:151`;
+`docs/changes/archive/2026-07-23-email-restrictions-plan/plan.md` (~50 hits);
+`docs/changes/archive/2026-07-08-28-abuse-protection/spec.md:93,95,123`;
+`docs/changes/archive/2026-07-10-28-wp4-cloudflare-pre-golive/spec.md:151`;
 `docs/reviews/2026-07-23-rust-review/SUMMARY.md:28,93,120,156`.
 
 **Zero hits in `k8s/`, in CI, in the Tiltfile, or in any `.env`.** Neither

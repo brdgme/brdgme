@@ -15,7 +15,7 @@ pub struct User {
 }
 
 /// A pending login code, keyed by email. See D2 in
-/// `docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md`: no
+/// `docs/changes/archive/2026-07-08-28-abuse-protection/spec.md`: no
 /// `users` row exists until the code here is confirmed.
 #[derive(Debug, Clone, FromRow)]
 pub struct LoginConfirmation {

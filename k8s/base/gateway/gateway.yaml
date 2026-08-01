@@ -17,7 +17,7 @@
 # client IPs are therefore not available in-cluster, permanently, not just
 # until some future flip lands. Abuse protection is IP-independent instead
 # (DB-backed send/attempt caps + post-cutover Cloudflare edge limiting) - see
-# docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md.
+# docs/changes/archive/2026-07-08-28-abuse-protection/spec.md.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:

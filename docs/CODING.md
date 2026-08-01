@@ -796,7 +796,7 @@ canned `Response` JSON - see the pattern in `rust/web/src/game/client.rs`.
 This keeps tests fast and deterministic and avoids depending on a running
 game binary. The LLM is never called in any test; bot-loop behaviour that
 would require a live LLM call is out of scope for the test suite (see
-`docs/superpowers/specs/2026-07-04-11-testing-foundation-design.md` for the
+`docs/changes/archive/2026-07-04-11-testing-foundation/spec.md` for the
 current deferral).
 
 **Use `#[sqlx::test]` for anything touching the database.** It gives each
@@ -806,7 +806,7 @@ each `#[sqlx::test]` function should set up exactly the rows it needs.
 
 **Two-layer frontend/page testing: prefer the in-process layer.** Page-level
 coverage is split into two layers (see
-`docs/superpowers/specs/2026-07-04-11-testing-foundation-design.md` 11.6):
+`docs/changes/archive/2026-07-04-11-testing-foundation/spec.md` 11.6):
 
 - **In-process SSR page tests (primary)** - `#[sqlx::test]` +
   `tower::ServiceExt::oneshot` against the real Axum/Leptos router (see

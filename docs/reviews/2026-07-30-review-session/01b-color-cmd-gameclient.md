@@ -309,7 +309,7 @@ HEAD (`rust/**` plus non-Rust sources, excluding `docs/reviews/`):
 
 | deleted symbol | verdict |
 |---|---|
-| `Color::from_hex` | no live reference (one prose mention in `docs/superpowers/plans/2026-07-14-mix-transform.md:210`, a historical plan doc) |
+| `Color::from_hex` | no live reference (one prose mention in `docs/changes/archive/2026-07-14-mix-transform/plan.md:210`, a historical plan doc) |
 | `impl FromStr for Color` / `Color::from_str` | no live reference; no `parse::<Color>()` anywhere |
 | `named` (free colour-name lookup fn) | no live reference; its only caller was the deleted `FromStr` impl |
 | test fns `color_from_hex_works`, `color_from_str_named_works` | deleted with the API they covered, not weakened to pass |

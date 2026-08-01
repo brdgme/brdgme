@@ -5,7 +5,7 @@ self-describe: the DOKS cluster, the VPC, the `brdg.me` DNS zone (on
 Cloudflare since 2026-07-10, plus legacy records until cutover), the
 Spaces bucket for CloudNativePG (Phase 19) backups, and the Spaces bucket
 for this configuration's own state. See
-`docs/superpowers/specs/2026-07-06-21-opentofu-iac-design.md` for the
+`docs/changes/archive/2026-07-06-21-opentofu-iac/spec.md` for the
 decision record and cost posture.
 
 The DO account was confirmed empty on 2026-07-05 (current prod runs on
@@ -96,5 +96,5 @@ blocks (no resources created), reconciling proxied flags to the design
 verified. TLS moved from HTTP01 to DNS01 at the same time
 (`k8s/base/cert-manager/cluster-issuer.yaml`), with the token sealed for
 cert-manager in `brdgme-config`. See
-`docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md`
+`docs/changes/archive/2026-07-10-28-wp4-cloudflare-pre-golive/spec.md`
 and the matching plan for the full decision record.

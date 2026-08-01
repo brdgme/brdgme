@@ -1,5 +1,5 @@
 //! #30 friends: server fns and the /friends page.
-//! Spec: docs/superpowers/specs/2026-07-08-30-friends-design.md
+//! Spec: docs/changes/archive/2026-07-08-30-friends/spec.md
 
 use leptos::prelude::*;
 use leptos_router::components::A;

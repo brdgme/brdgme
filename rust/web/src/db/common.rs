@@ -174,7 +174,7 @@ pub(crate) fn build_game_player_from_row(
     }
 }
 
-/// D2 username rules (docs/superpowers/specs/2026-07-11-35-user-settings-design.md):
+/// D2 username rules (docs/changes/archive/2026-07-11-35-user-settings-spec/spec.md):
 /// `^[a-zA-Z0-9_-]{1,16}$`. Uniqueness is enforced separately by the
 /// `users_name_lower_key` index (migration 009). Pure and ungated so the
 /// client-side form and server fns share one definition.

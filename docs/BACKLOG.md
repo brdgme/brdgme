@@ -1,9 +1,9 @@
 # brdgme Product Backlog
 
 This file is the backlog index. Each work item's design/decisions live in
-`docs/superpowers/specs/YYYY-MM-DD-NN-*-design.md` and its tasks/runbook live
-in `docs/superpowers/plans/YYYY-MM-DD-NN-*.md` (either may be absent if the
-item has no content of that kind); `NN` is a **permanent ID in assignment
+`docs/changes/<active-change>/spec.md` and its tasks/runbook live in
+`docs/changes/<active-change>/plan.md` (either may be absent if the item has
+no content of that kind); `NN` is a **permanent ID in assignment
 order** - it never changes and never implies execution order. Priority lives
 in the ordered list below (historically these items were called "phases";
 prose saying "Phase NN" means item `NN`).
@@ -64,9 +64,9 @@ have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 
 | # | Title | Status | Spec | Plan |
 |---|---|---|---|---|
-| 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation | [spec](superpowers/specs/2026-07-08-15-production-cd-argocd-design.md) | [plan](superpowers/plans/2026-07-08-15-production-cd-argocd.md) |
-| 27 | rust/web Simplification (remainder) | WP1/2/3b/4/5 done; remaining: (a) WP3a delete WebSocketTrigger - dual-signal duplication at every update site, needs re-scoping since trigger now carries proposal/friend updates and public index keys on it; (b) harden 2 flaky NATS-timing tests still `#[ignore]`d (`game/mod.rs:1078`, `websocket.rs:191`) | [spec](superpowers/specs/2026-07-07-27-web-simplification-design.md) | [plan](superpowers/plans/2026-07-07-27-web-simplification.md) |
-| 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](superpowers/specs/2026-07-08-31-rust-only-repo-design.md) | [plan](superpowers/plans/2026-07-08-31-rust-only-repo.md) |
+| 15 | Production CD (ArgoCD) | Live 2026-07-08 - ArgoCD + sealed-secrets running in prod, first fully-green sync at brdgme@851e23c; remaining: CI deploy job, delete stale k8s/argocd/, admin-password rotation | [spec](changes/15-production-cd-argocd/spec.md) | [plan](changes/15-production-cd-argocd/plan.md) |
+| 27 | rust/web Simplification (remainder) | WP1/2/3b/4/5 done; remaining: (a) WP3a delete WebSocketTrigger - dual-signal duplication at every update site, needs re-scoping since trigger now carries proposal/friend updates and public index keys on it; (b) harden 2 flaky NATS-timing tests still `#[ignore]`d (`game/mod.rs:1078`, `websocket.rs:191`) | [spec](changes/27-web-simplification/spec.md) | [plan](changes/27-web-simplification/plan.md) |
+| 31 | Rust-Only Repository (delete legacy trio + brdgme-go, game shelving lifecycle, lift `rust/` to root) | Ready 2026-07-08 - no-rollback decision made, WP1 runnable pre-cutover; WP3-5 gated on #23 Track B | [spec](changes/31-rust-only-repo/spec.md) | [plan](changes/31-rust-only-repo/plan.md) |
 | 36 | Web Push turn notifications (service worker, VAPID keys, push subscriptions in Postgres, server-side push on turn change, settings toggle, graceful permission-denied handling) | Pending - post-go-live, bottom of backlog (scoped 2026-07-11; sits alongside #22c turn-reminder emails; no spec yet) | - | - |
 | 37 | Rust game port verification testing (operator gameplay pass over all converted Rust games; some observed misbehaving 2026-07-11 - see History for the full game list) | Pending - downgraded 2026-07-17 (operator: games seem okay, does not block go-live) | - | - |
 | 38 | "New version released" notification (detect when a new version has gone live and show a message to users with the site open so they know to refresh; cache busting itself handled by Cloudflare) | Pending - unscheduled; scope narrowed 2026-07-24 to detection + user-facing message only; must include viability/suitability review first to confirm implementation is not prohibitively complex | - | - |
@@ -74,9 +74,9 @@ have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 | 46 | Turn timer to prevent dead games (idea sketch: some timer before the easy bot makes a play on the player's behalf? 3 strikes before forced concede?) | Captured 2026-07-17 - post-go-live, needs brainstorming; interacts with #47 bot replacement and #43 bot configs | - | - |
 | 48 | Basic moderation - initially just usernames, may extend to more later | Captured 2026-07-17 - post-go-live, needs brainstorming | - | - |
 | 49 | Convert #30 friends plain sqlx queries to compile-time-checked macros now that the .sqlx prepare workflow is healthy (the friends-related queries in `rust/web/src/db.rs` currently use plain (runtime-checked) `sqlx::query`/`sqlx::query_as` calls by old convention; convert them to `query!`/`query_as!` macros and add cache entries via `cargo sqlx prepare` per docs/DEV.md) | Captured 2026-07-18 - unscheduled; **note 2026-07-24: review first to ensure direction is correct and appropriate before executing** | - | - |
-| 51 | Bot dynamic sqlx queries mask schema drift (`rust/bot/src/main.rs` + `config.rs`: `row.try_get(..).unwrap_or(..)` turns query bugs into silent wrong behaviour - e.g. broken `is_turn` column makes bot silently never play; switch to checked `sqlx::query!` macros or replace `unwrap_or` defaults with `.context(..)?`) | Captured 2026-07-24 (split from Bug fixes plan); unscheduled | - | [plan](superpowers/plans/2026-07-05-bugs.md) |
+| 51 | Bot dynamic sqlx queries mask schema drift (`rust/bot/src/main.rs` + `config.rs`: `row.try_get(..).unwrap_or(..)` turns query bugs into silent wrong behaviour - e.g. broken `is_turn` column makes bot silently never play; switch to checked `sqlx::query!` macros or replace `unwrap_or` defaults with `.context(..)?`) | Captured 2026-07-24 (split from Bug fixes plan); unscheduled | - | [plan](changes/51-bot-sqlx-queries/plan.md) |
 | 50 | Dev environment reassessment - review the whole dev env with a view to making it viable to run locally again; the kind/tilt kubernetes setup is too heavy now (host crashes, 32GB RAM minimum per AGENTS.md); consider docker compose or allowing partial deployments | Captured 2026-07-19, prioritised 2026-07-24 | - | - |
-| 52 | Managed Postgres migration - move prod Postgres from in-cluster CloudNativePG to DigitalOcean Managed Database (~$15.15/mo, 1GB/1vCPU/10GB, syd1, private VPC); provision via OpenTofu, load prod data directly into managed instance, then remove CNPG resources (frees ~600Mi cluster memory); dev unaffected (keeps local Postgres) | Approved 2026-07-21, prioritised 2026-07-24; supersedes archived #19 | [spec](superpowers/specs/2026-07-21-managed-postgres-design.md) | [plan](superpowers/plans/2026-07-21-managed-postgres.md) |
+| 52 | Managed Postgres migration - move prod Postgres from in-cluster CloudNativePG to DigitalOcean Managed Database (~$15.15/mo, 1GB/1vCPU/10GB, syd1, private VPC); provision via OpenTofu, load prod data directly into managed instance, then remove CNPG resources (frees ~600Mi cluster memory); dev unaffected (keeps local Postgres) | Approved 2026-07-21, prioritised 2026-07-24; supersedes archived #19 | [spec](changes/52-managed-postgres/spec.md) | [plan](changes/52-managed-postgres/plan.md) |
 | 53 | Game rules review (parity park) | **PARKED - awaiting a product decision (per-game rules review).** The 2026-07-23 Rust review found ~30 port-parity findings (code vs official rules vs RULES.md). The global port-parity policy (D-35: official rules authoritative, no gameplay change without per-game sign-off, parked) now lives in [`docs/decisions/PORT_PARITY.md`](decisions/PORT_PARITY.md). The detailed per-rule parity list (D-26..D-32, D-34) was NOT migrated and is retained only in git history under the review's commit range (`f0589894c1937c2c1134cf99523f1fd4e9a8f944..868094a6c8177858dededdd5321ce0c03882ada5`, file `docs/reviews/2026-07-23-rust-review/planning/DECISIONS.md`). The review's surviving summary is [`docs/reviews/2026-07-23-rust-review/SUMMARY.md`](reviews/2026-07-23-rust-review/SUMMARY.md). All of these are PARKED-PENDING-USER-RULES-REVIEW: some RULES.md content was AI-generated and may be wrong, and edition/variation choices are a product decision. **No gameplay change without per-game sign-off.** Packages WP-11, WP-12, WP-16, WP-20, WP-26, WP-30 are BLOCKED-ON-USER-RULES-REVIEW - implementing agents must not pick them up. Rules-content work WP-74 (red7-1 empty-hand elimination sentence) and WP-75 (RULES_AUTHORING strategy-docs rewrite) is also queued behind this park. Three cases (a F1, b F7, e F30) are flagged for immediate fix and are outside the park; b F4 was re-parked and d F37 was rejected as not-a-bug. Liveness fixes WP-15/WP-25 are NOT parked. | - | - |
 | 54 | Maximum-performance fuzzer (three independent modes) | Captured 2026-07-26 from the 2026-07-23 Rust review (D-51); scheduled 2026-07-26 into the Then tier after #31 (D-53), nothing measured. Rationale (D-43): "the value of the fuzzer is basically directly correlated by how fast it can run and how many games it can pump through." Three modes on two **independent** axes - renders and serialisation: (1) **game logic only** (default, maximum speed) - game kept live in memory, no serialisation, no rendering, drives `Gamer` directly; (2) **opt-in renders** - pub render plus all private renders after every successful command (stricter than the current loop); (3) **opt-in serialisation** - the "end to end fuzz" exercising the full `api::Request`/`api::Response` path as today. Key findings: the in-process path is **not** serialisation-free - every move already does a full state decode + encode, a pub render, every player's state JSON and N+1 markup renders, of which the loop uses only the acting player's `command_spec` and the opaque state string; `fuzz()` is **already** parallel across `num_cpus::get()` threads, so parallelism is not an available win; two free wins sit in `Fuzzer::command` - a whole-`PlayerRender` clone taken for one field, and a full state-string clone, both per move. Tradeoff: the current loop catches render-panics and serialise-panics for free, and mode 1 gives that up - which is exactly why modes 2 and 3 exist. **Nothing has been measured** (no cargo available in the planning session); the settling commands are in section 6 of the full analysis: [`docs/fuzz-throughput-evaluation.md`](fuzz-throughput-evaluation.md) | - | - |
 | 55 | Comprehensive dependency and toolchain currency pass (first run of the recurring process) | Captured 2026-07-29; unscheduled. First execution of the process defined in [`docs/DEPENDENCY-CURRENCY.md`](DEPENDENCY-CURRENCY.md): audit rustc pin (`rust/rust-toolchain.toml`) and tooling vs latest stable, `cargo outdated -R --depth 2` for direct+transitive deps, throwaway-branch breakage assessment (bump everything including majors), then prioritised upgrade commits (rustc pin first, advisories, framework majors, compatible sweep, tail majors) with a duplicate-cluster re-audit at the end. Resolves the parked tower-http/gloo-timers duplication question (2026-07-23 review dp F9) by holding latest and letting the old-version consumers catch up. | - | - |
@@ -171,10 +171,10 @@ TTL-lowering cutover runbook, and a corrected two-path rollback story;
 tofu state bucket gets versioning; bot-restart bug specced (bot_slots
 pass-through).
 
-2026-07-08: `docs/plan/` retired in favor of the superpowers convention -
-each item's design/decisions moved to `docs/superpowers/specs/`, its
-tasks/runbook to `docs/superpowers/plans/` (point-in-time records, not
-living documents).
+2026-07-08: `docs/plan/` retired in favor of per-change spec/plan documents -
+each item's design/decisions moved to `docs/changes/<active-change>/spec.md`,
+its tasks/runbook to `docs/changes/<active-change>/plan.md` (point-in-time
+records, not living documents).
 
 2026-07-08: moved fully done/resolved/superseded items (1-13, 17, 21,
 Quick wins, Review findings 2026-07-04, Development Workflow) out of the
@@ -202,9 +202,9 @@ the archive as fully done. #28 WP1-3 (app-level hardening: DB-backed
 send caps + per-code attempt caps, IP-independent) is promoted to
 pre-go-live priority as the effective protection in place of the flip;
 WP4 (Cloudflare edge, which sees real client IPs) stays post-cutover.
-See `docs/superpowers/plans/2026-07-05-14-drop-knative-gateway-api.md`,
-`docs/superpowers/plans/2026-07-08-16-production-cutover-validation.md`,
-and `docs/superpowers/specs/2026-07-08-28-abuse-protection-design.md`
+See `docs/changes/archive/2026-07-05-14-drop-knative-gateway-api/plan.md`,
+`docs/changes/archive/2026-07-08-16-production-cutover-validation/plan.md`,
+and `docs/changes/archive/2026-07-08-28-abuse-protection/spec.md`
 for detail.
 
 2026-07-09: #18 hardening closed - full Grafana Cloud observability
@@ -259,8 +259,8 @@ is now #32 investigation → #28 WP4 (Cloudflare edge) → #16 beta →
 cutover.
 
 2026-07-10 (later still): #28 WP4 redesigned for pre-go-live and specced
-(`docs/superpowers/specs/2026-07-10-28-wp4-cloudflare-pre-golive-design.md`,
-plan `docs/superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md`).
+(`docs/changes/archive/2026-07-10-28-wp4-cloudflare-pre-golive/spec.md`,
+plan `docs/changes/archive/2026-07-10-28-wp4-cloudflare-pre-golive/plan.md`).
 Single-stage migration: the operator created the CF zone (free plan, existing
 account), CF copied the DO records at zone creation, and the registrar
 nameservers were cut over to Cloudflare the same day - so the Tofu work is
@@ -438,7 +438,7 @@ BODY-only. Also discovered `cargo sqlx prepare` fails on the missing
 `User.theme` field (recorded under #40).
 
 2026-07-17 (later): second #33 polish batch implemented end-to-end, all
-9 tasks in `docs/superpowers/plans/2026-07-17-33-pre-go-live-polish-2.md`
+9 tasks in `docs/changes/archive/2026-07-17-33-pre-go-live-polish-2-plan/plan.md`
 committed to master: header sub menu button now shows below 60em (missing
 CSS override added); settings/content pages scroll only the main content
 pane (app-shell pattern) and widened to a shared ~1220px centered layout;
@@ -458,7 +458,7 @@ on the deployed beta) is left, deliberately, for the operator.
 
 2026-07-17 (later still): third #33 polish batch implemented end-to-end,
 all 3 tasks in
-`docs/superpowers/plans/2026-07-17-33-pre-go-live-polish-3.md` committed
+`docs/changes/archive/2026-07-17-33-pre-go-live-polish-3-plan/plan.md` committed
 to master: a reusable `Spinner` component extracted from the login form
 and used by `GamePage`, whose `<Transition>` is now remounted via a
 deduped game-id memo so a centered spinner shows on initial load and on

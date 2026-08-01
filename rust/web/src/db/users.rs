@@ -178,7 +178,7 @@ pub async fn is_user_recently_active(pool: &PgPool, user_id: Uuid) -> bool {
     )
 }
 
-// --- #30 friends (spec docs/superpowers/specs/2026-07-08-30-friends-design.md) ---
+// --- #30 friends (spec docs/changes/archive/2026-07-08-30-friends/spec.md) ---
 // Plain (non-macro) queries throughout, matching get_user_theme above.
 
 /// Exact-name lookup, case-insensitive (users_name_lower_key, migration 009).

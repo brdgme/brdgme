@@ -2,7 +2,7 @@
 # in the CF dashboard 2026-07-10 (free plan) and the registrar NS were cut
 # over the same day; tofu ADOPTED it via import blocks rather than
 # creating it - see the plan
-# docs/superpowers/plans/2026-07-10-28-wp4-cloudflare-pre-golive.md.
+# docs/changes/archive/2026-07-10-28-wp4-cloudflare-pre-golive/plan.md.
 # Post-cutover (#16): the apex A record points at the DOKS Gateway LB and
 # is proxied (orange-cloud) through the CF edge; the Resend mail records
 # stay DNS-only. The legacy Linode mail/SPF records and the beta validation

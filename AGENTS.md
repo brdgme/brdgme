@@ -23,7 +23,7 @@ At the start of every session, read the following files in full:
 Everything else under `docs/` is out of scope for this bootstrap step - read
 on demand when the task at hand references it. That includes the
 subdirectories (`docs/decisions/`, `docs/porting/`, `docs/authoring/`,
-`docs/superpowers/`) and the on-demand references directly under `docs/`,
+`docs/changes/`) and the on-demand references directly under `docs/`,
 notably `docs/hydration.md` (Leptos SSR hydration mechanics, hazards, and
 troubleshooting - read it before touching Suspense/Transition/resource
 structure in `rust/web` or when debugging a hydration panic) and

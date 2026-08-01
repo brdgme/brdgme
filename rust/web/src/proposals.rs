@@ -1,5 +1,5 @@
 //! #24 game invites: pre-game proposals.
-//! Spec: docs/superpowers/specs/2026-07-04-24-game-invites-design.md
+//! Spec: docs/changes/archive/2026-07-04-24-game-invites/spec.md
 //!
 //! Bot column mapping (critical for the create_game step):
 //! `game_proposal_players.bot_name` = `BotSlot.name` (the bot's display name),
