@@ -118,12 +118,47 @@ pub trait InviteMailer: Send + Sync {
     fn notify_cancelled(&self, proposal_id: Uuid, accepted_user_ids: Vec<Uuid>);
     fn notify_started(&self, proposal_id: Uuid, game_id: Uuid, invitee_user_ids: Vec<Uuid>);
     fn notify_owner_ready(&self, proposal_id: Uuid);
+    async fn notify_game_started(&self, game_id: Uuid);
+}
+
+#[cfg(feature = "ssr")]
+pub enum InviteNotifyKind {
+    Reinvite,
+    Decline,
+    Cancelled,
+    Started,
+    Ready,
+}
+
+#[cfg(feature = "ssr")]
+pub fn invite_notify_subject(game_type: &str, kind: &InviteNotifyKind) -> String {
+    let suffix = match kind {
+        InviteNotifyKind::Reinvite => "invite updated",
+        InviteNotifyKind::Decline => "invite declined",
+        InviteNotifyKind::Cancelled => "invite cancelled",
+        InviteNotifyKind::Started => "game started",
+        InviteNotifyKind::Ready => "invite ready",
+    };
+    format!("{game_type} {suffix}")
+}
+
+#[cfg(feature = "ssr")]
+pub fn invite_notify_thread_id(proposal_id: Uuid, kind: &InviteNotifyKind) -> String {
+    let suffix = match kind {
+        InviteNotifyKind::Reinvite => "reinvite",
+        InviteNotifyKind::Decline => "decline",
+        InviteNotifyKind::Cancelled => "cancelled",
+        InviteNotifyKind::Started => "started",
+        InviteNotifyKind::Ready => "ready",
+    };
+    format!("proposal-{proposal_id}-{suffix}")
 }
 
 #[cfg(feature = "ssr")]
 pub struct RealInviteMailer {
     pool: PgPool,
     resend: Option<resend_rs::Resend>,
+    http_client: reqwest::Client,
 }
 
 #[cfg(feature = "ssr")]
@@ -377,8 +412,9 @@ impl InviteMailer for RealInviteMailer {
     fn send_invite(&self, proposal_id: Uuid, invitee_user_id: Uuid, email_token: Option<String>) {
         let pool = self.pool.clone();
         let resend = self.resend.clone();
+        let http_client = self.http_client.clone();
         tokio::spawn(async move {
-            let mailer = RealInviteMailer { pool, resend };
+            let mailer = RealInviteMailer { pool, resend, http_client };
             mailer
                 .send_invite_core(proposal_id, invitee_user_id, email_token)
                 .await;
@@ -424,7 +460,7 @@ impl InviteMailer for RealInviteMailer {
             };
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
             let content = crate::email::render::EmailContent {
-                subject: format!("{game_type_name} invite"),
+                subject: invite_notify_subject(&game_type_name, &InviteNotifyKind::Reinvite),
                 header: Some(
                     "The owner has made changes to the game. Accept again for the game to start."
                         .into(),
@@ -462,7 +498,7 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                Some(&format!("proposal-{proposal_id}")),
+                Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Reinvite)),
                 false,
                 &format!("i-{token}@brdg.me"),
                 unsubscribe,
@@ -501,7 +537,7 @@ impl InviteMailer for RealInviteMailer {
                 .unwrap_or_else(|| UNKNOWN_PLAYER_NAME.to_string());
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
             let content = crate::email::render::EmailContent {
-                subject: format!("{game_type_name} invite"),
+                subject: invite_notify_subject(&game_type_name, &InviteNotifyKind::Decline),
                 header: Some(format!("{invitee_name} declined your invite.")),
                 digest: None,
                 board: None,
@@ -541,7 +577,7 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                Some(&format!("proposal-{proposal_id}")),
+                Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Decline)),
                 false,
                 &crate::email::notify::invite_reply_address("noreply"),
                 unsubscribe,
@@ -570,7 +606,7 @@ impl InviteMailer for RealInviteMailer {
                 }
                 let Some(email) = recip.email else { continue };
                 let content = crate::email::render::EmailContent {
-                    subject: format!("{game_type_name} invite"),
+                    subject: invite_notify_subject(&game_type_name, &InviteNotifyKind::Cancelled),
                     header: Some("The game invite was cancelled.".into()),
                     digest: None,
                     board: None,
@@ -606,7 +642,7 @@ impl InviteMailer for RealInviteMailer {
                     &content,
                     palette,
                     &[],
-                    Some(&format!("proposal-{proposal_id}")),
+                    Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Cancelled)),
                     false,
                     &crate::email::notify::invite_reply_address("noreply"),
                     unsubscribe,
@@ -638,7 +674,7 @@ impl InviteMailer for RealInviteMailer {
                 }
                 let Some(email) = recip.email else { continue };
                 let content = crate::email::render::EmailContent {
-                    subject: format!("{game_type_name} invite"),
+                    subject: invite_notify_subject(&game_type_name, &InviteNotifyKind::Started),
                     header: Some("The game has started!".into()),
                     digest: None,
                     board: None,
@@ -674,7 +710,7 @@ impl InviteMailer for RealInviteMailer {
                     &content,
                     palette,
                     &[],
-                    Some(&format!("proposal-{proposal_id}")),
+                    Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Started)),
                     false,
                     &crate::email::notify::invite_reply_address("noreply"),
                     unsubscribe,
@@ -711,7 +747,7 @@ impl InviteMailer for RealInviteMailer {
             };
             let game_type_name = proposal_game_type_name(&pool, &proposal).await;
             let content = crate::email::render::EmailContent {
-                subject: format!("{game_type_name} invite"),
+                subject: invite_notify_subject(&game_type_name, &InviteNotifyKind::Ready),
                 header: Some(format!(
                     "Everyone has accepted - your {game_type_name} game is ready to start."
                 )),
@@ -753,13 +789,23 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                Some(&format!("proposal-{proposal_id}")),
+                Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Ready)),
                 false,
                 &crate::email::notify::invite_reply_address("noreply"),
                 unsubscribe,
             );
             crate::email::outbound::send_rendered_email(resend.as_ref(), rendered, &email).await;
         });
+    }
+
+    async fn notify_game_started(&self, game_id: Uuid) {
+        crate::email::notify::notify_game_started(
+            self.resend.as_ref(),
+            &self.pool,
+            &self.http_client,
+            game_id,
+        )
+        .await;
     }
 }
 
@@ -768,12 +814,13 @@ pub(crate) fn mailer() -> RealInviteMailer {
     RealInviteMailer {
         pool: expect_context::<PgPool>(),
         resend: expect_context::<Option<resend_rs::Resend>>(),
+        http_client: expect_context::<reqwest::Client>(),
     }
 }
 
 #[cfg(feature = "ssr")]
 pub(crate) fn mailer_from(pool: PgPool, resend: Option<resend_rs::Resend>) -> RealInviteMailer {
-    RealInviteMailer { pool, resend }
+    RealInviteMailer { pool, resend, http_client: reqwest::Client::new() }
 }
 
 #[cfg(feature = "ssr")]
@@ -1424,7 +1471,6 @@ pub async fn create_proposal(
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
-    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = crate::friends::require_user().await?;
 
     let opponent_ids = opponent_ids.unwrap_or_default();
@@ -1516,15 +1562,8 @@ pub async fn create_proposal(
         tx.commit()
             .await
             .map_err(internal("create_proposal: commit transaction"))?;
+        mailer().notify_game_started(game.id).await;
         crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game.id).await;
-        crate::email::notify::notify_game_emails(
-            resend.as_ref(),
-            &pool,
-            &http_client,
-            game.id,
-            None,
-        )
-        .await;
         return Ok(ProposalOutcome {
             proposal_id: None,
             game_id: Some(game.id),
@@ -1690,7 +1729,6 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
     let broadcaster = expect_context::<GameBroadcaster>();
     let http_client = expect_context::<reqwest::Client>();
     let jetstream = expect_context::<async_nats::jetstream::Context>();
-    let resend = expect_context::<Option<resend_rs::Resend>>();
     let user = crate::friends::require_user().await?;
 
     let proposal = find_proposal(&pool, proposal_id)
@@ -1817,12 +1855,8 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
         .map_err(internal("start_proposal: commit transaction"))?;
 
     broadcaster.broadcast_proposal_update(proposal_id).await;
+    mailer().notify_game_started(game_id).await;
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
-    crate::email::notify::notify_game_emails(resend.as_ref(), &pool, &http_client, game_id, None)
-        .await;
-
-    let invitee_ids = accepted_invitee_ids(&players, proposal.owner_user_id);
-    mailer().notify_started(proposal_id, game_id, invitee_ids);
 
     Ok(game_id)
 }
@@ -4470,6 +4504,372 @@ mod tests {
             proposal.started_game_id.is_none(),
             "no game may be created from a stale roster snapshot"
         );
+    }
+
+    // R-20 / F-182: the InviteMailer seam is spyable. A test calls the
+    // proposal notification path and asserts on recorded mails.
+    struct SpyMailer {
+        calls: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl InviteMailer for SpyMailer {
+        fn send_invite(&self, _: Uuid, _: Uuid, _: Option<String>) {
+            self.calls.lock().unwrap().push("send_invite".into());
+        }
+        async fn send_invite_now(&self, _: Uuid, _: Uuid, _: Option<String>) -> bool {
+            self.calls.lock().unwrap().push("send_invite_now".into());
+            true
+        }
+        fn notify_changed_reinvite(&self, _: Uuid, _: Uuid, _: Option<String>) {
+            self.calls.lock().unwrap().push("notify_changed_reinvite".into());
+        }
+        fn notify_owner_decline(&self, _: Uuid, _: Uuid) {
+            self.calls.lock().unwrap().push("notify_owner_decline".into());
+        }
+        fn notify_cancelled(&self, _: Uuid, _: Vec<Uuid>) {
+            self.calls.lock().unwrap().push("notify_cancelled".into());
+        }
+        fn notify_started(&self, _: Uuid, _: Uuid, _: Vec<Uuid>) {
+            self.calls.lock().unwrap().push("notify_started".into());
+        }
+        fn notify_owner_ready(&self, _: Uuid) {
+            self.calls.lock().unwrap().push("notify_owner_ready".into());
+        }
+        async fn notify_game_started(&self, _: Uuid) {
+            self.calls.lock().unwrap().push("notify_game_started".into());
+        }
+    }
+
+    #[test]
+    fn invite_mailer_seam_is_spyable() {
+        let spy = SpyMailer { calls: std::sync::Mutex::new(Vec::new()) };
+        let pid = Uuid::new_v4();
+        let uid = Uuid::new_v4();
+        let gid = Uuid::new_v4();
+
+        spy.notify_changed_reinvite(pid, uid, Some("tok".into()));
+        spy.notify_owner_decline(pid, uid);
+        spy.notify_cancelled(pid, vec![uid]);
+        spy.notify_started(pid, gid, vec![uid]);
+        spy.notify_owner_ready(pid);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            spy.notify_game_started(gid).await;
+        });
+
+        let calls = spy.calls.lock().unwrap();
+        assert_eq!(calls.len(), 6);
+        assert!(calls.contains(&"notify_changed_reinvite".to_string()));
+        assert!(calls.contains(&"notify_owner_decline".to_string()));
+        assert!(calls.contains(&"notify_cancelled".to_string()));
+        assert!(calls.contains(&"notify_started".to_string()));
+        assert!(calls.contains(&"notify_owner_ready".to_string()));
+        assert!(calls.contains(&"notify_game_started".to_string()));
+    }
+
+    async fn spawn_ungated_new_game_service() -> String {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{GameResponse, PlayerRender, PubRender, Request, Response};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(|Json(payload): Json<Request>| async move {
+                let players = match payload {
+                    Request::New { players, .. } => players,
+                    _ => 0,
+                };
+                Json(Response::New {
+                    game: GameResponse {
+                        state: "mock_state".to_string(),
+                        points: vec![0.0; players],
+                        status: brdgme_game::Status::Active {
+                            whose_turn: vec![0],
+                            eliminated: vec![],
+                        },
+                    },
+                    logs: vec![],
+                    public_render: PubRender {
+                        pub_state: "pub".to_string(),
+                        render: "mock render".to_string(),
+                    },
+                    player_renders: (0..players)
+                        .map(|i| PlayerRender {
+                            player_state: format!("p{i}"),
+                            render: format!("p{i}render"),
+                            command_spec: None,
+                        })
+                        .collect(),
+                    seed: 0,
+                })
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{}", addr)
+    }
+
+    async fn seed_game_version_with_counts(pool: &PgPool, uri: &str, counts: Vec<i32>) -> Uuid {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Test Game {}", Uuid::new_v4()))
+        .bind(counts)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, $2, $3, true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .bind(format!("mock-{}", Uuid::new_v4().simple()))
+        .bind(uri)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn seed_emailable_user(pool: &PgPool) -> Uuid {
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, turn_emails_enabled, invite_emails_enabled)
+             VALUES ($1, $2, true, true) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind(format!("u-{}@example.com", Uuid::new_v4()))
+        .execute(pool)
+        .await
+        .unwrap();
+        user_id
+    }
+
+    async fn game_player_email_token(
+        pool: &PgPool,
+        game_id: Uuid,
+        position: i32,
+    ) -> Option<String> {
+        sqlx::query_scalar(
+            "SELECT email_token FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game_id)
+        .bind(position)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    // R-20 / C1 (F-182): a test calls the real proposal path via
+    // with_start_proposal_context and asserts recorded mails, proving deletion
+    // of the production mailer().notify_game_started(...) wiring at start sites
+    // would fail.
+    #[sqlx::test]
+    async fn start_proposal_notifies_game_started_via_proposal_path(pool: PgPool) {
+        let uri = spawn_ungated_new_game_service().await;
+
+        let owner = seed_emailable_user(&pool).await;
+        let invitee = seed_emailable_user(&pool).await;
+        let gv = seed_game_version_with_counts(&pool, &uri, vec![2, 3, 4]).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(invitee), None, None, "accepted", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let auth_token_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(auth_token_id)
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let session_user = crate::auth::session::SessionUser {
+            id: owner,
+            name: "owner".to_string(),
+            email: format!("owner-{}@example.com", Uuid::new_v4()),
+            auth_token_id,
+        };
+
+        let result =
+            with_start_proposal_context(&pool, session_user, || start_proposal(pid)).await;
+        let game_id = result.expect("start_proposal must succeed");
+
+        assert!(
+            game_player_email_token(&pool, game_id, 0).await.is_some(),
+            "on-turn player (position 0) must have an email token proving \
+             notify_game_started ran at the start site (C1/F-182)"
+        );
+    }
+
+    // R-20 / M2 (F-180): the solo-start path in create_proposal itself (not just
+    // the notify_game_started helper) produces a notification.
+    #[sqlx::test]
+    async fn solo_start_notifies_game_started(pool: PgPool) {
+        let uri = spawn_ungated_new_game_service().await;
+
+        let owner = seed_emailable_user(&pool).await;
+        let gv = seed_game_version_with_counts(&pool, &uri, vec![1, 2]).await;
+
+        let auth_token_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(auth_token_id)
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let session_user = crate::auth::session::SessionUser {
+            id: owner,
+            name: "solo".to_string(),
+            email: format!("solo-{}@example.com", Uuid::new_v4()),
+            auth_token_id,
+        };
+
+        let outcome = with_start_proposal_context(&pool, session_user, || {
+            create_proposal(gv, None, None, None)
+        })
+        .await
+        .expect("create_proposal solo must succeed");
+
+        let game_id = outcome.game_id.expect("solo start must create a game");
+        assert!(
+            game_player_email_token(&pool, game_id, 0).await.is_some(),
+            "solo-start path must notify via notify_game_started (M2/F-180)"
+        );
+    }
+
+    // R-20 / I2 (F-181): notify-before-broadcast_and_trigger ordering at the
+    // start_proposal site, proven without any timing assumption. Token/state
+    // assertions are identical whether notify runs before or after the
+    // broadcast (with no bot, the broadcast advances nothing), so instead this
+    // taps the two choke points - the mail send and `broadcast_and_trigger` -
+    // via `email::outbound::test_events` and asserts the game-start mail to the
+    // on-turn owner carries a LOWER global sequence number than the broadcast
+    // for that game. That ordering is the guard against F-181: if notify were
+    // reordered after the broadcast, a fast bot move published by that
+    // broadcast could mail the same transition twice (start-path notify plus
+    // bot-command notify); the broadcast seq would then precede the mail seq
+    // and this assertion would fail.
+    #[sqlx::test]
+    async fn start_proposal_notifies_before_broadcast(pool: PgPool) {
+        let uri = spawn_ungated_new_game_service().await;
+
+        let owner = seed_emailable_user(&pool).await;
+        let invitee = seed_emailable_user(&pool).await;
+        let gv = seed_game_version_with_counts(&pool, &uri, vec![2, 3, 4]).await;
+        let pid = seed_proposal(&pool, gv, owner).await;
+        let mut tx = pool.begin().await.unwrap();
+        insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+            .await
+            .unwrap();
+        insert_proposal_player(&mut tx, pid, 1, Some(invitee), None, None, "accepted", None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let auth_token_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
+            .bind(auth_token_id)
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let session_user = crate::auth::session::SessionUser {
+            id: owner,
+            name: "owner".to_string(),
+            email: format!("owner-{}@example.com", Uuid::new_v4()),
+            auth_token_id,
+        };
+
+        let result =
+            with_start_proposal_context(&pool, session_user, || start_proposal(pid)).await;
+        let game_id = result.expect("start_proposal must succeed");
+
+        let owner_email: String = sqlx::query_scalar(
+            "SELECT email FROM user_emails WHERE user_id = $1 AND is_primary = true",
+        )
+        .bind(owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mail_seq = crate::email::outbound::test_events::mails_to(&owner_email)
+            .iter()
+            .map(|m| m.seq)
+            .min()
+            .expect(
+                "notify_game_started must record a game-start mail to the on-turn owner \
+                 at the start_proposal site (I2/F-181)",
+            );
+        let broadcast_seq = crate::email::outbound::test_events::broadcasts_for(game_id)
+            .iter()
+            .map(|b| b.seq)
+            .min()
+            .expect("start_proposal must call broadcast_and_trigger for the new game (I2/F-181)");
+        assert!(
+            mail_seq < broadcast_seq,
+            "the game-start mail (seq {mail_seq}) must be recorded before \
+             broadcast_and_trigger (seq {broadcast_seq}): notify-after-broadcast \
+             lets a fast bot move double-mail the same transition (I2/F-181)"
+        );
+    }
+
+    // R-20 / F-146 (M1): each notification kind renders a distinct subject and
+    // thread id so email clients do not collapse them into one conversation.
+    // Asserts on the real production-emitted values via invite_notify_subject /
+    // invite_notify_thread_id, not re-derived hardcoded strings.
+    #[test]
+    fn notification_kinds_have_distinct_subjects_and_thread_ids() {
+        let pid = Uuid::new_v4();
+        let game_type = "Acquire";
+
+        let kinds = [
+            InviteNotifyKind::Reinvite,
+            InviteNotifyKind::Decline,
+            InviteNotifyKind::Cancelled,
+            InviteNotifyKind::Started,
+            InviteNotifyKind::Ready,
+        ];
+        let subjects: Vec<String> = kinds
+            .iter()
+            .map(|k| invite_notify_subject(game_type, k))
+            .collect();
+        let thread_ids: Vec<String> = kinds
+            .iter()
+            .map(|k| invite_notify_thread_id(pid, k))
+            .collect();
+
+        for i in 0..subjects.len() {
+            for j in (i + 1)..subjects.len() {
+                assert_ne!(
+                    subjects[i], subjects[j],
+                    "subjects at {i} and {j} must differ"
+                );
+                assert_ne!(
+                    thread_ids[i], thread_ids[j],
+                    "thread ids at {i} and {j} must differ"
+                );
+            }
+        }
     }
 
 }

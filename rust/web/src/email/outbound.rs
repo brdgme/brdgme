@@ -26,6 +26,12 @@ pub async fn try_send_rendered_email(
     email: crate::email::render::RenderedEmail,
     to: &str,
 ) -> bool {
+    // R-20 / I2,C2: test-only tap on the single send choke point. Every mail
+    // any production path produces flows through here, so recording `(to,
+    // subject)` with a global sequence number gives tests a direct, non-timing
+    // observable of actual mails and their order relative to broadcasts.
+    #[cfg(test)]
+    test_events::record_mail(to, &email.subject);
     let Some(resend) = resend else {
         println!(
             "\n==> GAME EMAIL for {}\nSubject: {}\nReply-To: {}\n\n{}\n",
@@ -215,6 +221,81 @@ pub async fn fetch_email_recipient(
 /// at the automated send sites, never here and never for direct responses.
 pub fn should_email_recipient(recipient: &EmailRecipient) -> bool {
     recipient.email.is_some() && !recipient.is_bot && recipient.turn_emails_enabled
+}
+
+/// R-20 / I2,C2: process-global, test-only event log tapped at the two choke
+/// points that matter for the notification-ordering and duplicate-mail
+/// properties - the mail send (`try_send_rendered_email`, above) and the
+/// post-commit broadcast (`game::broadcast_and_trigger`). A single monotonic
+/// sequence orders events across both, so a test can assert a mail was recorded
+/// before a broadcast (I2: notify-before-broadcast, the guard against a fast bot
+/// move double-mailing) or count actual mails to one recipient (C2: exactly one
+/// mail per invitee). Tests filter by per-test-unique recipients/game ids, so
+/// parallel `#[sqlx::test]` runs do not contaminate each other. Compiles to
+/// nothing outside `cfg(test)`.
+#[cfg(test)]
+pub mod test_events {
+    use std::sync::{LazyLock, Mutex};
+    use uuid::Uuid;
+
+    #[derive(Debug, Clone)]
+    pub struct MailEvent {
+        pub seq: u64,
+        pub to: String,
+        pub subject: String,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct BroadcastEvent {
+        pub seq: u64,
+        pub game_id: Uuid,
+    }
+
+    static SEQ: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(0));
+    static MAILS: LazyLock<Mutex<Vec<MailEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+    static BROADCASTS: LazyLock<Mutex<Vec<BroadcastEvent>>> =
+        LazyLock::new(|| Mutex::new(Vec::new()));
+
+    fn next_seq() -> u64 {
+        let mut seq = SEQ.lock().unwrap();
+        *seq += 1;
+        *seq
+    }
+
+    pub fn record_mail(to: &str, subject: &str) {
+        MAILS.lock().unwrap().push(MailEvent {
+            seq: next_seq(),
+            to: to.to_string(),
+            subject: subject.to_string(),
+        });
+    }
+
+    pub fn record_broadcast(game_id: Uuid) {
+        BROADCASTS.lock().unwrap().push(BroadcastEvent {
+            seq: next_seq(),
+            game_id,
+        });
+    }
+
+    pub fn mails_to(to: &str) -> Vec<MailEvent> {
+        MAILS
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.to == to)
+            .cloned()
+            .collect()
+    }
+
+    pub fn broadcasts_for(game_id: Uuid) -> Vec<BroadcastEvent> {
+        BROADCASTS
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|b| b.game_id == game_id)
+            .cloned()
+            .collect()
+    }
 }
 
 #[cfg(test)]

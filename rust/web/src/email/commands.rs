@@ -455,9 +455,11 @@ async fn run_new_command(
         .await
         .map_err(|e| CommandError::Internal(anyhow::anyhow!("new: commit: {e}")))?;
 
-    crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, game.id).await;
-    crate::email::notify::notify_game_emails(ctx.resend, ctx.pool, ctx.http_client, game.id, None)
+    use crate::proposals::InviteMailer;
+    crate::proposals::mailer_from(ctx.pool.clone(), ctx.resend.cloned())
+        .notify_game_started(game.id)
         .await;
+    crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, game.id).await;
 
     let roster_parts: Vec<String> = human_names
         .iter()
@@ -2135,6 +2137,148 @@ mod tests {
             Err(CommandError::Internal(_)) => {}
             Ok(_) => {}
         }
+    }
+
+    // R-20 / I2 (F-181): the email new-game path notifies before
+    // broadcast_and_trigger, proven without any timing assumption. The token on
+    // the on-turn player is identical whether notify runs before or after the
+    // broadcast, so instead this taps the mail-send and broadcast choke points
+    // via `email::outbound::test_events` and asserts the game-start mail to the
+    // on-turn player carries a LOWER global sequence number than the broadcast
+    // for that game. Reordering notify after the broadcast would invert that
+    // order (a fast bot move could then double-mail the transition) and fail.
+    #[sqlx::test]
+    async fn email_new_game_notifies_before_broadcast(pool: sqlx::PgPool) {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{GameResponse, PlayerRender, PubRender, Request, Response};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(|Json(payload): Json<Request>| async move {
+                let players = match payload {
+                    Request::New { players, .. } => players,
+                    _ => 1,
+                };
+                Json(Response::New {
+                    game: GameResponse {
+                        state: "mock_state".to_string(),
+                        points: vec![0.0; players],
+                        status: brdgme_game::Status::Active {
+                            whose_turn: vec![0],
+                            eliminated: vec![],
+                        },
+                    },
+                    logs: vec![],
+                    public_render: PubRender {
+                        pub_state: "pub".to_string(),
+                        render: "render".to_string(),
+                    },
+                    player_renders: (0..players)
+                        .map(|i| PlayerRender {
+                            player_state: format!("p{i}"),
+                            render: format!("p{i}render"),
+                            command_spec: None,
+                        })
+                        .collect(),
+                    seed: 0,
+                })
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mock_uri = format!("http://{addr}");
+
+        let user_id = seed_user(&pool, "i2-email-new").await;
+        let user_email = format!("i2-{}@brdg.me", uuid::Uuid::new_v4().simple());
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at) \
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(user_id)
+        .bind(&user_email)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE users SET turn_emails_enabled = true WHERE id = $1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let type_name = format!("i2new{}", uuid::Uuid::new_v4().simple());
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(&type_name)
+        .bind(vec![1i32, 2])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) \
+             VALUES ($1, $2, $3, true, false)",
+        )
+        .bind(game_type_id)
+        .bind(format!("i2-mock-{}", uuid::Uuid::new_v4().simple()))
+        .bind(&mock_uri)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let sctx = StandaloneCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            user_id,
+        };
+
+        let reply = run_new_command(&sctx, &type_name)
+            .await
+            .expect("email new-game command must succeed");
+        let msg = status_msg(reply);
+        assert!(msg.contains("Game created"), "unexpected reply: {msg}");
+
+        let game_id: uuid::Uuid = sqlx::query_scalar(
+            "SELECT g.id FROM games g \
+             JOIN game_versions gv ON gv.id = g.game_version_id \
+             JOIN game_types gt ON gt.id = gv.game_type_id \
+             WHERE gt.name = $1 ORDER BY g.created_at DESC LIMIT 1",
+        )
+        .bind(&type_name)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mail_seq = crate::email::outbound::test_events::mails_to(&user_email)
+            .iter()
+            .map(|m| m.seq)
+            .min()
+            .expect(
+                "email new-game path must record a game-start mail to the on-turn player \
+                 (I2/F-181)",
+            );
+        let broadcast_seq = crate::email::outbound::test_events::broadcasts_for(game_id)
+            .iter()
+            .map(|b| b.seq)
+            .min()
+            .expect(
+                "email new-game path must call broadcast_and_trigger for the new game \
+                 (I2/F-181)",
+            );
+        assert!(
+            mail_seq < broadcast_seq,
+            "the game-start mail (seq {mail_seq}) must be recorded before \
+             broadcast_and_trigger (seq {broadcast_seq}): notify-after-broadcast \
+             lets a fast bot move double-mail the same transition (I2/F-181)"
+        );
     }
 
     #[sqlx::test]

@@ -1117,7 +1117,6 @@ async fn handle_invite_reply(
     // (never Retry): a retry would see `me.response != "pending"` and bail out
     // as "already responded", so it could not re-attempt the start.
     let mut started_game_id: Option<uuid::Uuid> = None;
-    let mut roster: Vec<crate::proposals::ProposalPlayer> = Vec::new();
 
     if let Some((game_version, roster_snapshot, accepted_count)) = start_inputs {
         // External game-service call: NO transaction open, NO row lock held.
@@ -1217,7 +1216,6 @@ async fn handle_invite_reply(
         {
             Ok(gid) => {
                 started_game_id = Some(gid);
-                roster = roster_now;
             }
             Err(e) => {
                 tracing::error!("resend webhook: invite start proposal failed: {e}");
@@ -1250,27 +1248,11 @@ async fn handle_invite_reply(
         .await;
 
     if let Some(gid) = started_game_id {
+        crate::proposals::mailer_from(state.pool.clone(), state.resend.clone())
+            .notify_game_started(gid)
+            .await;
         crate::game::broadcast_and_trigger(&state.pool, &state.broadcaster, &state.jetstream, gid)
             .await;
-        crate::email::notify::notify_game_emails(
-            state.resend.as_ref(),
-            &state.pool,
-            &state.http_client,
-            gid,
-            None,
-        )
-        .await;
-        let invitee_ids: Vec<uuid::Uuid> = roster
-            .iter()
-            .filter(|p| p.response == "accepted")
-            .filter_map(|p| p.user_id)
-            .filter(|id| *id != proposal.owner_user_id)
-            .collect();
-        crate::proposals::mailer_from(state.pool.clone(), state.resend.clone()).notify_started(
-            proposal_id,
-            gid,
-            invitee_ids,
-        );
     } else if !accept {
         crate::proposals::mailer_from(state.pool.clone(), state.resend.clone())
             .notify_owner_decline(proposal_id, user_id);
@@ -3203,6 +3185,175 @@ body\r\n";
         assert!(
             matches!(outcome, RouteOutcome::Done | RouteOutcome::Retry),
             "outcome must preserve RouteOutcome semantics (F-135)"
+        );
+    }
+
+    // R-20 / C2 (F-179): handle_invite_reply auto-start produces exactly one
+    // mail per on-turn invitee - no duplicate from a restored notify_game_emails
+    // or notify_started. Token state cannot prove this (notify_started mints no
+    // game-player token and ensure_email_token is idempotent), so this taps the
+    // real send choke point via `email::outbound::test_events` and counts the
+    // actual mails recorded to the on-turn player's address through the real
+    // handle_invite_reply auto-start path. Restoring either removed duplicate
+    // adds a second mail to that same address (both prefs are enabled above),
+    // so the count assertion fails.
+    #[sqlx::test]
+    async fn invite_accept_auto_start_one_mail_per_on_turn_invitee(pool: sqlx::PgPool) {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::Request;
+        use tokio::net::TcpListener;
+
+        let owner_id = seed_user(&pool, "c2-owner").await;
+        let invitee_id = seed_user(&pool, "c2-invitee").await;
+        for uid in [owner_id, invitee_id] {
+            sqlx::query(
+                "INSERT INTO user_emails (user_id, email, is_primary, verified_at) \
+                 VALUES ($1, $2, true, NOW())",
+            )
+            .bind(uid)
+            .bind(format!("c2-{}@brdg.me", uuid::Uuid::new_v4().simple()))
+            .execute(&pool)
+            .await
+            .unwrap();
+            // Enable BOTH preference gates: the live game-start mail is gated by
+            // `turn_emails_enabled`, while a restored `notify_started` duplicate
+            // would be gated by `invite_emails_enabled`. Turning both on ensures
+            // restoring either duplicate actually produces a mail the seam can
+            // count (C2/F-179), rather than being silently suppressed by pref.
+            sqlx::query(
+                "UPDATE users SET turn_emails_enabled = true, invite_emails_enabled = true \
+                 WHERE id = $1",
+            )
+            .bind(uid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let app = Router::new().route(
+            "/",
+            post(|Json(payload): Json<Request>| async move {
+                let players = match payload {
+                    Request::New { players, .. } => players,
+                    _ => 2,
+                };
+                Json(new_game_response(players))
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mock_uri = format!("http://{addr}");
+
+        let game_type_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("C2 Game {}", uuid::Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let game_version_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated) \
+             VALUES ($1, $2, $3, true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .bind(format!("c2-mock-{}", uuid::Uuid::new_v4().simple()))
+        .bind(&mock_uri)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let proposal_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status) \
+             VALUES ($1, $2, 'open') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(owner_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO game_proposal_players \
+               (proposal_id, \"position\", user_id, response, email_token) \
+             VALUES ($1, 0, $2, 'accepted', NULL)",
+        )
+        .bind(proposal_id)
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let token = "c2-invite-tok";
+        sqlx::query(
+            "INSERT INTO game_proposal_players \
+               (proposal_id, \"position\", user_id, response, email_token) \
+             VALUES ($1, 1, $2, 'pending', $3)",
+        )
+        .bind(proposal_id)
+        .bind(invitee_id)
+        .bind(token)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let invitee_email: String = sqlx::query_scalar(
+            "SELECT email FROM user_emails WHERE user_id = $1 AND is_primary = true",
+        )
+        .bind(invitee_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let email_id = "em_c2_auto_start";
+        let raw = "Authentication-Results: amazonses.com; spf=pass smtp.mailfrom=brdg.me\r\n\
+                   MIME-Version: 1.0\r\n\
+                   Content-Type: text/plain; charset=utf-8\r\n\
+                   \r\n\
+                   accept\r\n";
+        let mut emails = std::collections::HashMap::new();
+        emails.insert(email_id.to_string(), raw.to_string());
+        let source = StaticInbound(emails);
+        let state = make_inbound_test_state(pool.clone()).await;
+
+        let outcome =
+            handle_invite_reply(&state, &source, token, &invitee_email, email_id).await;
+        assert!(
+            matches!(outcome, RouteOutcome::Done),
+            "invite accept auto-start must complete as Done"
+        );
+
+        let started: Option<uuid::Uuid> = sqlx::query_scalar(
+            "SELECT started_game_id FROM game_proposals WHERE id = $1",
+        )
+        .bind(proposal_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let _game_id = started.expect("proposal must have started a game");
+
+        // The on-turn player is the owner (position 0); the accept reply mail
+        // goes to the invitee who replied, so the owner receives ONLY the
+        // game-start notification. Counting the actual mails recorded to the
+        // owner's address through the send seam is the direct observable: it is
+        // exactly one today, and a restored notify_game_emails or notify_started
+        // duplicate would make it two.
+        let owner_email: String = sqlx::query_scalar(
+            "SELECT email FROM user_emails WHERE user_id = $1 AND is_primary = true",
+        )
+        .bind(owner_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let owner_mails = crate::email::outbound::test_events::mails_to(&owner_email);
+        assert_eq!(
+            owner_mails.len(),
+            1,
+            "the on-turn invitee must receive exactly one game-start mail; got {} \
+             (subjects: {:?}) - a second indicates a restored notify_game_emails \
+             or notify_started duplicate (C2/F-179)",
+            owner_mails.len(),
+            owner_mails.iter().map(|m| &m.subject).collect::<Vec<_>>()
         );
     }
 }

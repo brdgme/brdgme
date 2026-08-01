@@ -54,6 +54,13 @@ pub async fn broadcast_and_trigger(
     jetstream: &async_nats::jetstream::Context,
     game_id: uuid::Uuid,
 ) {
+    // R-20 / I2: test-only tap recording that the broadcast (and thus the
+    // `bot.turn` publish that can trigger a fast bot move) happened. Ordered
+    // against the mail-send tap in `email::outbound::test_events`, this lets a
+    // test prove notify-before-broadcast directly - the guard that stops the
+    // start-path notify and the bot-command notify from double-mailing.
+    #[cfg(all(test, feature = "ssr"))]
+    crate::email::outbound::test_events::record_broadcast(game_id);
     broadcaster.broadcast_game_update(game_id).await;
     trigger_bot_turns(pool, jetstream, game_id).await;
 }

@@ -519,6 +519,48 @@ pub async fn send_turn_digest_forced(
     .await;
 }
 
+/// Notifies every human player currently on turn that a brand-new game has
+/// started. Unlike `notify_game_emails` (which uses `SendMode::Normal`), this
+/// bypasses web-presence suppression: the user explicitly created or started
+/// the game, so the confirmation must not be swallowed by the hydrated-page
+/// presence window (R-20 / F-180). Still respects `turn_emails_enabled` and
+/// the bot/address checks via `SendMode::BypassSuppression`.
+pub async fn notify_game_started(
+    resend: Option<&resend_rs::Resend>,
+    pool: &sqlx::PgPool,
+    http_client: &reqwest::Client,
+    game_id: uuid::Uuid,
+) {
+    let after = match crate::db::find_game_extended(pool, game_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::error!("notify: failed to load game {}: {}", game_id, e);
+            return;
+        }
+    };
+    let log_count = game_log_count(pool, game_id).await;
+    for p in after
+        .game_players
+        .iter()
+        .filter(|p| p.user.is_some() && p.game_bot.is_none())
+    {
+        if p.game_player.is_turn {
+            send_one_loaded(
+                resend,
+                pool,
+                http_client,
+                &after,
+                log_count,
+                p.game_player.id,
+                NotifyKind::Turn,
+                SendMode::BypassSuppression,
+            )
+            .await;
+        }
+    }
+}
+
 /// Diffs `before`/`after` game state and fires the appropriate notification for
 /// each human player. Mail failures are isolated: every send logs and returns;
 /// this never fails the game operation.
@@ -887,5 +929,80 @@ mod tests {
 
         assert!(email_token(&pool, gp1).await.is_some());
         assert!(email_token(&pool, gp0).await.is_none());
+    }
+
+    // R-20 / F-180: `notify_game_started` bypasses web-presence suppression so
+    // the solo-start confirmation is never swallowed by the hydrated-page
+    // presence window, while `notify_game_emails` (Normal mode) still suppresses.
+    #[sqlx::test]
+    async fn notify_game_started_bypasses_web_presence_suppression(pool: sqlx::PgPool) {
+        let (game_id, players) = seed_game_with_emailable_players(&pool, 2).await;
+        let (active_user, active_gp) = players[0];
+        let (_u1, gp1) = players[1];
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE id = $1")
+            .bind(active_gp)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(active_user)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let http = reqwest::Client::new();
+
+        // notify_game_emails (Normal mode) suppresses the active player.
+        notify_game_emails(None, &pool, &http, game_id, None).await;
+        assert!(
+            email_token(&pool, active_gp).await.is_none(),
+            "notify_game_emails must suppress a recently-active player"
+        );
+
+        // notify_game_started (BypassSuppression) does NOT suppress.
+        notify_game_started(None, &pool, &http, game_id).await;
+        assert!(
+            email_token(&pool, active_gp).await.is_some(),
+            "notify_game_started must bypass web-presence suppression"
+        );
+        assert!(
+            email_token(&pool, gp1).await.is_none(),
+            "a player not on turn must not be mailed"
+        );
+    }
+
+    // R-20 / F-179: `notify_game_started` produces exactly one mail per
+    // on-turn invitee - no duplicate "game started" burst.
+    #[sqlx::test]
+    async fn notify_game_started_one_mail_per_on_turn_player(pool: sqlx::PgPool) {
+        let (game_id, players) = seed_game_with_emailable_players(&pool, 3).await;
+        let (_u0, gp0) = players[0];
+        let (_u1, gp1) = players[1];
+        let (_u2, gp2) = players[2];
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE id = $1")
+            .bind(gp0)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE game_players SET is_turn = true WHERE id = $1")
+            .bind(gp2)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        notify_game_started(None, &pool, &reqwest::Client::new(), game_id).await;
+
+        assert!(
+            email_token(&pool, gp0).await.is_some(),
+            "on-turn player 0 must be mailed exactly once"
+        );
+        assert!(
+            email_token(&pool, gp1).await.is_none(),
+            "off-turn player 1 must not be mailed"
+        );
+        assert!(
+            email_token(&pool, gp2).await.is_some(),
+            "on-turn player 2 must be mailed exactly once"
+        );
     }
 }
