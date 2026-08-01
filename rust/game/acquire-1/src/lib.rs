@@ -1559,4 +1559,77 @@ mod tests {
             first
         );
     }
+
+    // --- F-21: pin the WP-08 finish/placings epilogue regression ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let players = vec!["mick".to_string(), "steve".to_string()];
+        let mut g: Game = "AA01".into();
+        g.players[0].shares.insert(Corp::American, 3);
+        g.phase = Phase::Buy {
+            player: 0,
+            remaining: 3,
+        };
+        g.last_turn = true;
+
+        // A non-finishing action: buying keeps the game active, emits no
+        // placings epilogue, and the Buy arm's can_undo is unchanged.
+        let resp = g
+            .command(0, "buy 1 am", &players)
+            .expect("expected buy to work");
+        assert!(resp.can_undo, "buy arm can_undo must be unchanged");
+        assert!(!g.is_finished());
+        assert!(
+            resp.logs.iter().all(|l| !is_placings_log(l)),
+            "a non-finishing buy emits no placings log"
+        );
+
+        // done finishes the game: exactly one placings epilogue, last, and
+        // the Done arm's can_undo is unchanged.
+        let resp = g
+            .command(0, "done", &players)
+            .expect("expected done to finish the game");
+        assert!(g.is_finished());
+        assert!(
+            !resp.can_undo,
+            "finishing Done arm can_undo must be unchanged"
+        );
+        let scores: Vec<(usize, i32)> = (0..g.players.len())
+            .map(|p| (p, g.player_score(p) as i32))
+            .collect();
+        let expected = placings_log(&g.placings(), Some(&scores)).content;
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| l.content == expected).count(),
+            "exactly one placings epilogue"
+        );
+        assert_eq!(
+            expected,
+            resp.logs.last().unwrap().content,
+            "placings log is last"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(placings, g.placings(), "status() placings agree");
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // The finished game's parser rejects further commands...
+        assert!(g.command(0, "done", &players).is_err());
+        assert!(g.command(0, "buy 1 am", &players).is_err());
+        // ...and directly re-running the finish path emits no second epilogue.
+        let again = g
+            .end()
+            .expect("expected re-running end on a finished game not to error");
+        assert!(
+            again.iter().all(|l| l.content != expected),
+            "directly re-running the finish path emits no second placings log"
+        );
+    }
 }
