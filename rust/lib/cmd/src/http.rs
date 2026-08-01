@@ -143,6 +143,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn malformed_envelope_returns_400_text_plain() {
+        // `{ not json` is a genuine JSON syntax error (unquoted key), so axum
+        // rejects with 400 JsonSyntaxError. Other malformed inputs do not:
+        // serde's enum buffering turns `{"garbage":}` into "unknown variant"
+        // (Data -> 422) and EOF-truncation maps to 422 as well - this test pins
+        // the 400 text/plain contract for genuine syntax errors.
+        let req = HttpRequest::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-type", "application/json")
+            .body(Body::from("{ not json"))
+            .unwrap();
+        let res = route::<TestGame>().oneshot(req).await.unwrap();
+        assert_eq!(400, res.status());
+        assert!(
+            res.headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("text/plain"),
+            "expected text/plain body, got {:?}",
+            res.headers().get(axum::http::header::CONTENT_TYPE)
+        );
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            text.contains("Failed to parse the request body as JSON"),
+            "got: {}",
+            text
+        );
+        assert!(
+            serde_json::from_slice::<Response>(&body).is_err(),
+            "a malformed envelope must not produce a JSON Response::SystemError"
+        );
+    }
+
+    #[tokio::test]
     async fn oversized_content_length_is_rejected() {
         let big = vec![0u8; (MAX_CONTENT_LENGTH + 1) as usize];
         let req = HttpRequest::builder()

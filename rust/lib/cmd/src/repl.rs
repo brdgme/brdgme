@@ -15,6 +15,12 @@ pub fn repl<T>(client: &mut T)
 where
     T: Requester,
 {
+    if let Err(message) = run(client) {
+        output_error(message);
+    }
+}
+
+fn run<T: Requester>(client: &mut T) -> Result<(), String> {
     print!("{}", Style::default().ansi());
     let mut player_names: Vec<String> = vec![];
     loop {
@@ -22,7 +28,7 @@ where
             "Enter player {} (or blank to finish)",
             player_names.len() + 1
         )) else {
-            return;
+            return Ok(());
         };
         if player.is_empty() {
             break;
@@ -37,25 +43,25 @@ where
             color: LIGHT.player_color(i),
         })
         .collect::<Vec<Player>>();
-    let (mut game, logs, mut public_render, mut player_renders) = match client
-        .request(&Request::New {
+    let (mut game, logs, mut public_render, mut player_renders) =
+        match client.request(&Request::New {
             players: players.len(),
             seed: None,
-        })
-        .unwrap()
-    {
-        Response::New {
-            game,
-            logs,
-            public_render,
-            player_renders,
-            ..
-        } => (game, logs, public_render, player_renders),
-        Response::UserError { message } | Response::SystemError { message } => {
-            panic!("{}", message)
-        }
-        r => panic!("unexpected response to new game request: {:?}", r),
-    };
+        }) {
+            Ok(Response::New {
+                game,
+                logs,
+                public_render,
+                player_renders,
+                ..
+            }) => (game, logs, public_render, player_renders),
+            Ok(resp) => {
+                output_nl();
+                output_error(response_error_message(&resp, "new game request"));
+                return Ok(());
+            }
+            Err(e) => return Err(e.to_string()),
+        };
     output_nl();
     output_logs(logs, &players);
     let mut undo_stack: Vec<GameResponse> = vec![];
@@ -81,13 +87,13 @@ where
                 }
                 output_nl();
                 output_markup(&public_render.render, &players);
-                return;
+                return Ok(());
             }
             Status::Active { ref whose_turn, .. } => {
                 output_nl();
                 if whose_turn.is_empty() {
                     output_nodes(&[Node::text("no player's turn, exiting")], &players);
-                    return;
+                    return Ok(());
                 }
                 let current_player = whose_turn[0];
                 output_markup(&player_renders[current_player].render, &players);
@@ -100,30 +106,67 @@ where
                 let Some(input) =
                     prompt(ansi(&transform(&[Node::Player(current_player)], &players)))
                 else {
-                    return;
+                    return Ok(());
                 };
                 match input.as_ref() {
                     ":dump" | ":d" => println!("{:#?}", game),
-                    ":json" => println!("{}", serde_json::ser::to_string_pretty(&game).unwrap()),
+                    ":json" => match serde_json::ser::to_string_pretty(&game) {
+                        Ok(json) => println!("{}", json),
+                        Err(e) => output_error(format!("could not serialize game: {}", e)),
+                    },
                     ":save" => {
-                        let mut file = File::create("game.json").expect("could not create file");
-                        write!(
-                            file,
-                            "{}",
-                            serde_json::ser::to_string_pretty(&game)
-                                .expect("could not get game JSON")
-                        )
-                        .expect("could not write to file");
+                        let json = match serde_json::ser::to_string_pretty(&game) {
+                            Ok(json) => json,
+                            Err(e) => {
+                                output_error(format!("could not get game JSON: {}", e));
+                                continue;
+                            }
+                        };
+                        let mut file = match File::create("game.json") {
+                            Ok(file) => file,
+                            Err(e) => {
+                                output_error(format!("could not create file: {}", e));
+                                continue;
+                            }
+                        };
+                        if let Err(e) = write!(file, "{}", json) {
+                            output_error(format!("could not write to file: {}", e));
+                        }
                     }
                     ":load" => {
-                        let file = File::open("game.json").expect("could not open file");
-                        game = serde_json::from_reader(file).expect("could not read file JSON");
-                        refresh_renders(client, &game, &mut public_render, &mut player_renders);
+                        let file = match File::open("game.json") {
+                            Ok(file) => file,
+                            Err(e) => {
+                                output_error(format!("could not open file: {}", e));
+                                continue;
+                            }
+                        };
+                        match serde_json::from_reader(file) {
+                            Ok(new_game) => {
+                                game = new_game;
+                                if let Err(message) = refresh_renders(
+                                    client,
+                                    &game,
+                                    &mut public_render,
+                                    &mut player_renders,
+                                ) {
+                                    output_error(message);
+                                }
+                            }
+                            Err(e) => output_error(format!("could not read file JSON: {}", e)),
+                        }
                     }
                     ":undo" | ":u" => {
                         if let Some(u) = undo_stack.pop() {
                             game = u;
-                            refresh_renders(client, &game, &mut public_render, &mut player_renders);
+                            if let Err(message) = refresh_renders(
+                                client,
+                                &game,
+                                &mut public_render,
+                                &mut player_renders,
+                            ) {
+                                output_error(message);
+                            }
                         } else {
                             output_nodes(
                                 &[Node::Bold(vec![Node::Fg(
@@ -134,24 +177,21 @@ where
                             );
                         }
                     }
-                    ":quit" | ":q" => return,
-                    _ => match client
-                        .request(&Request::Play {
-                            player: current_player,
-                            command: input,
-                            names: player_names.clone(),
-                            game: game.state.clone(),
-                        })
-                        .unwrap()
-                    {
-                        Response::Play {
+                    ":quit" | ":q" => return Ok(()),
+                    _ => match client.request(&Request::Play {
+                        player: current_player,
+                        command: input,
+                        names: player_names.clone(),
+                        game: game.state.clone(),
+                    }) {
+                        Ok(Response::Play {
                             game: new_game,
                             logs,
                             remaining_input,
                             public_render: new_public_render,
                             player_renders: new_player_renders,
                             ..
-                        } => {
+                        }) => {
                             if !remaining_input.trim().is_empty() {
                                 output_nl();
                                 output_error(format!("Unexpected: '{}'", remaining_input));
@@ -164,15 +204,11 @@ where
                             output_nl();
                             output_logs(logs, &players);
                         }
-                        Response::SystemError { message } => {
+                        Ok(resp) => {
                             output_nl();
-                            panic!("{}", message);
+                            output_error(response_error_message(&resp, "play request"));
                         }
-                        Response::UserError { message } => {
-                            output_nl();
-                            output_error(message);
-                        }
-                        r => panic!("unexpected response to play request: {:?}", r),
+                        Err(e) => return Err(e.to_string()),
                     },
                 }
             }
@@ -185,13 +221,13 @@ fn refresh_renders<T: Requester>(
     game: &GameResponse,
     public_render: &mut PubRender,
     player_renders: &mut Vec<PlayerRender>,
-) {
-    match client
+) -> Result<(), String> {
+    let response = client
         .request(&Request::Status {
             game: game.state.clone(),
         })
-        .unwrap()
-    {
+        .map_err(|e| e.to_string())?;
+    match response {
         Response::Status {
             public_render: new_public_render,
             player_renders: new_player_renders,
@@ -199,15 +235,29 @@ fn refresh_renders<T: Requester>(
         } => {
             *public_render = new_public_render;
             *player_renders = new_player_renders;
+            Ok(())
         }
-        Response::SystemError { message } => panic!("{}", message),
-        r => panic!("unexpected response to status request: {:?}", r),
+        resp => Err(response_error_message(&resp, "status request")),
+    }
+}
+
+/// Renders the user-facing message for a non-success REPL response. `context`
+/// names the request that produced it for the unexpected-response case. Used by
+/// the new-game, play and status handlers so a normal `Response::UserError` (or
+/// any other non-success variant) prints a message instead of panicking.
+fn response_error_message(response: &Response, context: &str) -> String {
+    match response {
+        Response::UserError { message } | Response::SystemError { message } => message.clone(),
+        r => format!("unexpected response to {}: {:?}", context, r),
     }
 }
 
 fn output_logs(logs: Vec<CliLog>, players: &[Player]) {
     for l in logs {
-        let (content, _) = brdgme_markup::from_string(&l.content).unwrap();
+        let content = match brdgme_markup::from_string(&l.content) {
+            Ok((nodes, _)) => nodes,
+            Err(_) => vec![Node::text(&l.content)],
+        };
         let mut l_line = vec![Node::Bold(vec![Node::text(format!("{}", l.at))])];
         l_line.push(Node::text(" - "));
         l_line.extend(content);
@@ -249,7 +299,11 @@ fn output_error<I: Into<String>>(s: I) {
 }
 
 fn output_markup(markup: &str, players: &[Player]) {
-    output_nodes(&brdgme_markup::from_string(markup).unwrap().0, players)
+    let nodes = match brdgme_markup::from_string(markup) {
+        Ok((nodes, _)) => nodes,
+        Err(_) => vec![Node::text(markup.to_string())],
+    };
+    output_nodes(&nodes, players)
 }
 
 fn output_nl() {
@@ -261,10 +315,28 @@ where
     T: Into<Cow<'a, str>>,
 {
     print!("{}: \x1b[K", s.into());
-    stdout().flush().expect("failed to flush stdout");
+    if stdout().flush().is_err() {
+        return None;
+    }
     let mut input = String::new();
     match stdin().read_line(&mut input) {
         Ok(0) | Err(_) => None,
         Ok(_) => Some(input.trim().to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_error_response_produces_message_without_panicking() {
+        let message = response_error_message(
+            &Response::UserError {
+                message: "no more moves".to_string(),
+            },
+            "new game request",
+        );
+        assert!(message.contains("no more moves"), "got: {}", message);
     }
 }

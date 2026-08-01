@@ -88,9 +88,39 @@ impl<G: Gamer + Debug + Clone + Serialize + DeserializeOwned> Requester for Game
                 Ok(handle_player_render::<G>(player, &game))
             }
             Request::Rules => Ok(handle_rules::<G>()),
-            Request::DataDocs { .. } => Ok(handle_data_docs::<G>()),
-            Request::BasicStrategy { .. } => Ok(handle_basic_strategy::<G>()),
-            Request::AdvancedStrategy { .. } => Ok(handle_advanced_strategy::<G>()),
+            Request::DataDocs { ref game } => {
+                let game: G = serde_json::from_str(game)?;
+                if let Err(e) = game.validate() {
+                    return Ok(Response::SystemError {
+                        message: e.to_string(),
+                    });
+                }
+                Ok(handle_data_docs::<G>())
+            }
+            Request::BasicStrategy { player, ref game } => {
+                let game: G = serde_json::from_str(game)?;
+                if let Err(e) = game.validate() {
+                    return Ok(Response::SystemError {
+                        message: e.to_string(),
+                    });
+                }
+                if let Some(resp) = check_player(player, &game) {
+                    return Ok(resp);
+                }
+                Ok(handle_basic_strategy::<G>())
+            }
+            Request::AdvancedStrategy { player, ref game } => {
+                let game: G = serde_json::from_str(game)?;
+                if let Err(e) = game.validate() {
+                    return Ok(Response::SystemError {
+                        message: e.to_string(),
+                    });
+                }
+                if let Some(resp) = check_player(player, &game) {
+                    return Ok(resp);
+                }
+                Ok(handle_advanced_strategy::<G>())
+            }
         }
     }
 }
@@ -544,6 +574,167 @@ mod tests {
                 assert!(message.contains("bad state"), "got: {}", message)
             }
             resp => panic!("expected SystemError for PubRender, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn data_docs_malformed_state_is_rejected() {
+        let mut r = new::<PanicGame>();
+        match r.request(&Request::DataDocs {
+            game: "not valid json".to_string(),
+        }) {
+            Err(RequestError::Parse { .. }) => {}
+            resp => panic!("expected Err(Parse), got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn basic_strategy_malformed_state_is_rejected() {
+        let mut r = new::<PanicGame>();
+        match r.request(&Request::BasicStrategy {
+            game: "not valid json".to_string(),
+            player: 0,
+        }) {
+            Err(RequestError::Parse { .. }) => {}
+            resp => panic!("expected Err(Parse), got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn advanced_strategy_malformed_state_is_rejected() {
+        let mut r = new::<PanicGame>();
+        match r.request(&Request::AdvancedStrategy {
+            game: "not valid json".to_string(),
+            player: 0,
+        }) {
+            Err(RequestError::Parse { .. }) => {}
+            resp => panic!("expected Err(Parse), got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn data_docs_validate_error_returns_system_error() {
+        let state = serde_json::to_string(&InvalidGame).unwrap();
+        let mut r = new::<InvalidGame>();
+        match r.request(&Request::DataDocs { game: state }).unwrap() {
+            Response::SystemError { message } => {
+                assert!(message.contains("bad state"), "got: {}", message)
+            }
+            resp => panic!("expected SystemError for DataDocs, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn basic_strategy_validate_error_returns_system_error() {
+        let state = serde_json::to_string(&InvalidGame).unwrap();
+        let mut r = new::<InvalidGame>();
+        match r
+            .request(&Request::BasicStrategy {
+                game: state,
+                player: 0,
+            })
+            .unwrap()
+        {
+            Response::SystemError { message } => {
+                assert!(message.contains("bad state"), "got: {}", message)
+            }
+            resp => panic!("expected SystemError for BasicStrategy, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn advanced_strategy_validate_error_returns_system_error() {
+        let state = serde_json::to_string(&InvalidGame).unwrap();
+        let mut r = new::<InvalidGame>();
+        match r
+            .request(&Request::AdvancedStrategy {
+                game: state,
+                player: 0,
+            })
+            .unwrap()
+        {
+            Response::SystemError { message } => {
+                assert!(message.contains("bad state"), "got: {}", message)
+            }
+            resp => panic!("expected SystemError for AdvancedStrategy, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn basic_strategy_out_of_range_player_returns_user_error() {
+        let state = serde_json::to_string(&PanicGame { players: 2 }).unwrap();
+        let mut r = new::<PanicGame>();
+        match r
+            .request(&Request::BasicStrategy {
+                game: state,
+                player: 2,
+            })
+            .unwrap()
+        {
+            Response::UserError { message } => {
+                assert!(message.contains("invalid player 2"), "got: {}", message);
+            }
+            resp => panic!("expected UserError, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn advanced_strategy_out_of_range_player_returns_user_error() {
+        let state = serde_json::to_string(&PanicGame { players: 2 }).unwrap();
+        let mut r = new::<PanicGame>();
+        match r
+            .request(&Request::AdvancedStrategy {
+                game: state,
+                player: 2,
+            })
+            .unwrap()
+        {
+            Response::UserError { message } => {
+                assert!(message.contains("invalid player 2"), "got: {}", message);
+            }
+            resp => panic!("expected UserError, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn data_docs_valid_state_unchanged() {
+        let state = serde_json::to_string(&TestGame::start(2, 1).unwrap().0).unwrap();
+        let mut r = new::<TestGame>();
+        match r.request(&Request::DataDocs { game: state }).unwrap() {
+            Response::DataDocs { .. } => {}
+            resp => panic!("expected DataDocs, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn basic_strategy_valid_state_unchanged() {
+        let state = serde_json::to_string(&TestGame::start(2, 1).unwrap().0).unwrap();
+        let mut r = new::<TestGame>();
+        match r
+            .request(&Request::BasicStrategy {
+                game: state,
+                player: 0,
+            })
+            .unwrap()
+        {
+            Response::BasicStrategy { .. } => {}
+            resp => panic!("expected BasicStrategy, got {:?}", resp),
+        }
+    }
+
+    #[test]
+    fn advanced_strategy_valid_state_unchanged() {
+        let state = serde_json::to_string(&TestGame::start(2, 1).unwrap().0).unwrap();
+        let mut r = new::<TestGame>();
+        match r
+            .request(&Request::AdvancedStrategy {
+                game: state,
+                player: 0,
+            })
+            .unwrap()
+        {
+            Response::AdvancedStrategy { .. } => {}
+            resp => panic!("expected AdvancedStrategy, got {:?}", resp),
         }
     }
 }
