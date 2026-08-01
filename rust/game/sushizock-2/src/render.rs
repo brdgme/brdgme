@@ -53,17 +53,6 @@ pub fn dice_row_bold_then_normal(rolled: &[DieFace], kept: &[DieFace]) -> N {
     N::Group(nodes)
 }
 
-pub fn bold_tile_list(tiles: &[Tile]) -> N {
-    let mut nodes: Vec<N> = vec![];
-    for (i, t) in tiles.iter().enumerate() {
-        if i > 0 {
-            nodes.push(N::text(" "));
-        }
-        nodes.push(N::Bold(vec![tile(t)]));
-    }
-    N::Group(nodes)
-}
-
 fn tile_cells(tiles: &[Tile], highlight_idx: Option<usize>) -> Row {
     tiles
         .iter()

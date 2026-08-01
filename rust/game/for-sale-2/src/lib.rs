@@ -363,6 +363,13 @@ impl Game {
         gen_placings(&metrics)
     }
 
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_points(p)))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
+
     fn points_int(&self) -> Vec<i32> {
         let finished = self.is_finished();
         (0..self.players)
@@ -498,63 +505,33 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Bid(amount),
                 ..
-            }) => {
-                let mut logs = self.bid(player, amount)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: true,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.bid(player, amount)?, true, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Pass,
                 ..
-            }) => {
-                let mut logs = self.pass(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.pass(player)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Play(building),
                 ..
-            }) => {
-                let mut logs = self.play(player, building)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_points(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.play(player, building)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1106,5 +1083,62 @@ mod tests {
             matches!(result, Err(GameError::Internal { .. })),
             "the distribution must surface a checked error, not panic"
         );
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let p = players(3);
+        // Selling phase with the cheque deck already exhausted and three
+        // cheques left on the table: the round resolved by the last play
+        // starts an empty round and finishes the game.
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.building_deck = vec![];
+        g.cheque_deck = vec![];
+        g.open_cards = vec![1, 2, 3];
+        g.hands = vec![vec![17], vec![18], vec![16]];
+        g.phase = Some(Phase::Selling);
+
+        // Non-finishing plays: no placings log, and the Play arm's can_undo
+        // is unchanged.
+        let resp = g.command(MICK, "play 17", &p).unwrap();
+        assert!(!resp.can_undo, "Play arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing play emits no placings log"
+        );
+        let resp = g.command(STEVE, "play 18", &p).unwrap();
+        assert!(!resp.logs.iter().any(is_placings_log));
+
+        // The last play resolves the round, finds both decks empty, and
+        // finishes the game.
+        let resp = g.command(BJ, "play 16", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(
+            !resp.can_undo,
+            "finishing Play arm can_undo must be unchanged"
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        // BJ (16 points) third, MICK (17) second, STEVE (18) first, indexed
+        // by player.
+        assert_eq!(vec![2, 1, 3], g.placings());
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // epilogue total stays at exactly one.
+        assert!(g.command(BJ, "play 16", &p).is_err());
     }
 }

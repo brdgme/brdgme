@@ -375,36 +375,13 @@ impl Game {
 
     pub fn next_player(&mut self) -> Vec<Log> {
         if self.is_finished() {
-            return self.log_game_end();
+            // The finish epilogue is emitted once, by command(), via
+            // finish_epilogue; the old log_game_end score-table duplicate is
+            // gone (F-52).
+            return vec![];
         }
         self.current_player = (self.current_player + 1) % self.players;
         self.start_turn()
-    }
-
-    pub fn log_game_end(&self) -> Vec<Log> {
-        use brdgme_markup::{Align as A, Row, table_with_gap};
-        let mut rows: Vec<Row> = vec![];
-        for p in 0..self.players {
-            let mut all_tiles: Vec<Tile> = self.player_blue_tiles[p].clone();
-            all_tiles.extend(self.player_red_tiles[p].clone());
-            rows.push(vec![
-                (A::Left, vec![N::Player(p)]),
-                (A::Left, vec![render::bold_tile_list(&all_tiles)]),
-                (
-                    A::Left,
-                    vec![N::Bold(vec![N::text(format!(
-                        "{} points",
-                        self.player_score(p)
-                    ))])],
-                ),
-            ]);
-        }
-        vec![Log::public(vec![
-            N::Bold(vec![N::text(
-                "The game is now finished, scores are as follows:\n",
-            )]),
-            table_with_gap(&rows, 2),
-        ])]
     }
 
     fn take(&mut self, player: usize, kind: TileType) -> Result<Vec<Log>, GameError> {
@@ -645,6 +622,13 @@ impl Game {
             .collect();
         gen_placings(&metrics)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_score(p)))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -731,72 +715,45 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Roll(dice),
                 ..
-            }) => {
-                let mut logs = self.roll_dice_cmd(player, &dice)?;
-                // The game can finish here via the forced `take_worst`
-                // inside `roll_dice_cmd`; emit the same placings log as the
-                // take and steal arms (c F30).
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_score(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.roll_dice_cmd(player, &dice)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Take(kind),
                 ..
             }) => {
-                let mut logs = match kind {
+                let logs = match kind {
                     TileType::Blue => self.take_blue(player)?,
                     TileType::Red => self.take_red(player)?,
                 };
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_score(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
+                (logs, false, remaining)
             }
             Ok(ParseOutput {
                 remaining,
                 value: Command::Steal { target, kind, num },
                 ..
             }) => {
-                let mut logs = match kind {
+                let logs = match kind {
                     TileType::Blue => self.steal_blue(player, target, num)?,
                     TileType::Red => self.steal_red(player, target, num)?,
                 };
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_score(p)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
+                (logs, false, remaining)
             }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -2059,5 +2016,93 @@ mod tests {
         let (mut g, _) = Game::start(3, 1).unwrap();
         g.current_player = g.players;
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    // --- R-32 (F-18, F-52): !was_finished gate and a single end log ---
+
+    fn log_plain(log: &Log) -> String {
+        brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
+    }
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    fn is_end_log(l: &Log) -> bool {
+        let s = log_plain(l);
+        s.contains("The game is now finished, scores are as follows:")
+            || s.contains("Final scores:")
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue_and_one_end_log() {
+        let n = names();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        // Two blue tiles left, no red: taking one is a non-finishing move.
+        g.blue_tiles = vec![
+            Tile {
+                kind: TileType::Blue,
+                value: 1,
+            },
+            Tile {
+                kind: TileType::Blue,
+                value: 2,
+            },
+        ];
+        g.red_tiles = vec![];
+        g.rolled_dice = vec![
+            DieFace::Sushi,
+            DieFace::Bones,
+            DieFace::Bones,
+            DieFace::Bones,
+            DieFace::Bones,
+        ];
+        let resp = g.command(MICK, "take b", &n).unwrap();
+        assert!(!resp.can_undo, "Take arm can_undo must be unchanged");
+        assert_eq!(
+            0,
+            resp.logs.iter().filter(|l| is_end_log(l)).count(),
+            "a non-finishing take emits no end log"
+        );
+        assert_eq!(STEVE, g.current_player);
+
+        // One blue tile left: the next take empties the last pile and
+        // finishes the game. End-of-game must be reported exactly once (the
+        // placings epilogue), never the old log_game_end score table plus
+        // placings log double emission.
+        g.rolled_dice = vec![
+            DieFace::Sushi,
+            DieFace::Bones,
+            DieFace::Bones,
+            DieFace::Bones,
+            DieFace::Bones,
+        ];
+        let resp = g.command(STEVE, "take b", &n).unwrap();
+        assert!(g.is_finished());
+        let end_logs = resp.logs.iter().filter(|l| is_end_log(l)).count();
+        assert_eq!(
+            1,
+            end_logs,
+            "exactly one end log on finish, got: {}",
+            resp.logs
+                .iter()
+                .map(log_plain)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // totals stay at exactly one epilogue and one end log.
+        assert!(g.command(STEVE, "take b", &n).is_err());
     }
 }

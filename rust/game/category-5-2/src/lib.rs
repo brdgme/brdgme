@@ -348,6 +348,13 @@ impl Game {
             .collect();
         gen_placings(&metrics)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, -self.player_points[p]))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -511,45 +518,28 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Play(card),
                 ..
-            }) => {
-                let mut logs = self.play(player, card)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, -self.player_points[p]))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.play(player, card)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Choose(row),
                 ..
-            }) => {
-                let mut logs = self.choose(player, row)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, -self.player_points[p]))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.choose(player, row)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -965,5 +955,63 @@ mod tests {
         // Previously panicked at `self.hands[1][0]` (empty hand) in the
         // auto-play loop.
         let _ = g.resolve_plays();
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let p = players(2);
+        // Mick's play takes a full row (5 bullheads), pushing him over the
+        // END_SCORE threshold; when both hands empty at round end the game
+        // finishes.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.board = [
+            vec![Card(1), Card(2), Card(3), Card(4), Card(5)],
+            vec![Card(10)],
+            vec![Card(20)],
+            vec![Card(30)],
+        ];
+        g.hands[MICK] = vec![Card(6)];
+        g.hands[STEVE] = vec![Card(7)];
+        g.player_points = vec![61, 30];
+
+        // Non-finishing play: no placings log, and the Play arm's can_undo is
+        // unchanged.
+        let resp = g.command(MICK, "play 6", &p).unwrap();
+        assert!(!resp.can_undo, "Play arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing play emits no placings log"
+        );
+
+        // The last play resolves the round and finishes the game.
+        let resp = g.command(STEVE, "play 7", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(
+            !resp.can_undo,
+            "finishing Play arm can_undo must be unchanged"
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        // Mick crossed the END_SCORE threshold with the most bullheads (66)
+        // and Steve the fewest (30), so Steve places first, indexed by player.
+        assert_eq!(vec![2, 1], g.placings());
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // epilogue total stays at exactly one.
+        assert!(g.command(STEVE, "play 7", &p).is_err());
     }
 }

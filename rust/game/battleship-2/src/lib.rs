@@ -398,6 +398,13 @@ impl Game {
             .collect();
         gen_placings(&metrics)
     }
+
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.players)
+            .map(|p| (p, self.player_hits_remaining(p) as i32))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
 }
 
 impl Gamer for Game {
@@ -516,39 +523,28 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 remaining,
                 value: Command::Place { ship, loc, dir },
                 ..
-            }) => {
-                let logs = self.place_ship(player, ship, loc, dir)?;
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
+            }) => (self.place_ship(player, ship, loc, dir)?, false, remaining),
             Ok(ParseOutput {
                 remaining,
                 value: Command::Shoot { loc },
                 ..
-            }) => {
-                let mut logs = self.shoot(player, loc)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, self.player_hits_remaining(p) as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: false,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.shoot(player, loc)?, false, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            self.finish_epilogue(&mut logs);
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1098,5 +1094,57 @@ mod tests {
         let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
         let player_nodes = g.player_state(0).render();
         let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let mut g = mock_game();
+        let p = players();
+        place_all(&mut g, MICK);
+        place_all(&mut g, STEVE);
+
+        // A non-finishing miss: no placings log, and the Shoot arm's can_undo
+        // is unchanged.
+        let resp = g.command(MICK, "shoot a1", &p).unwrap();
+        assert!(!resp.can_undo, "Shoot arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing shoot emits no placings log"
+        );
+        assert_eq!(STEVE, g.current_player);
+
+        // Steve's shot at MICK's last surviving ship cell sinks the final
+        // ship and finishes the game.
+        g.boards[MICK] = [[Cell::Miss; BOARD_SIZE]; BOARD_SIZE];
+        g.boards[MICK][0][0] = Cell::Carrier;
+        let resp = g.command(STEVE, "shoot a1", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(
+            !resp.can_undo,
+            "finishing Shoot arm can_undo must be unchanged"
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        // STEVE still has a full fleet, MICK has none left: STEVE first,
+        // indexed by player.
+        assert_eq!(vec![2, 1], g.placings());
+        assert!(matches!(g.status(), Status::Finished { .. }));
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // epilogue total stays at exactly one.
+        assert!(g.command(STEVE, "shoot a1", &p).is_err());
     }
 }
