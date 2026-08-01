@@ -803,16 +803,20 @@ impl Game {
         Ok(self.next_phase())
     }
 
+    fn placings(&self) -> Vec<usize> {
+        // F-19: single placings source for status() and the finish epilogue;
+        // boards are read defensively (status()'s form).
+        let metrics: Vec<Vec<i32>> = (0..self.human_players)
+            .map(|p| vec![self.boards.get(p).map(|b| b.points).unwrap_or(0)])
+            .collect();
+        gen_placings(&metrics)
+    }
+
     fn finish_epilogue(&self, logs: &mut Vec<Log>) {
         let scores: Vec<(usize, i32)> = (0..self.human_players)
             .map(|p| (p, self.boards[p].points))
             .collect();
-        let placings = gen_placings(
-            &(0..self.human_players)
-                .map(|p| vec![self.boards[p].points])
-                .collect::<Vec<Vec<i32>>>(),
-        );
-        logs.push(placings_log(&placings, Some(&scores)));
+        logs.push(placings_log(&self.placings(), Some(&scores)));
     }
 }
 
@@ -921,12 +925,8 @@ impl Gamer for Game {
 
     fn status(&self) -> Status {
         if self.phase == Phase::End {
-            let metrics: Vec<Vec<i32>> = (0..self.human_players)
-                .map(|p| vec![self.boards.get(p).map(|b| b.points).unwrap_or(0)])
-                .collect();
-            let placings = gen_placings(&metrics);
             Status::Finished {
-                placings,
+                placings: self.placings(),
                 stats: vec![],
             }
         } else {
@@ -1920,6 +1920,58 @@ mod tests {
             resp.logs.iter().all(|l| !is_placings_log(l)),
             "non-finishing command must not emit a placings log"
         );
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        // A non-finishing take emits no placings log; the take arm's
+        // can_undo is unchanged.
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.current_player = 0;
+        g.phase = Phase::Action;
+        let card = g.cards[0];
+        let resp = g.command(0, &format!("take {}", card), &[]).unwrap();
+        assert!(!resp.can_undo, "take arm can_undo must be unchanged");
+        assert!(resp.logs.iter().all(|l| !is_placings_log(l)));
+        assert!(!matches!(g.status(), Status::Finished { .. }));
+
+        // Finishing via `done` appends exactly one placings log, last, from
+        // the same single source as status()'s (F-19).
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        setup_near_end(&mut g);
+        let resp = g.command(0, "done", &[]).unwrap();
+        assert!(matches!(g.status(), Status::Finished { .. }));
+        assert!(
+            !resp.can_undo,
+            "finishing done arm can_undo must be unchanged"
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log last"
+        );
+        let expected_scores: Vec<(usize, i32)> = (0..g.human_players)
+            .map(|p| (p, g.boards[p].points))
+            .collect();
+        assert_eq!(
+            placings_log(&g.placings(), Some(&expected_scores)).content,
+            resp.logs.last().unwrap().content,
+            "the finish epilogue must use the same placings as status()"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(placings, g.placings(), "status() placings agree")
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // epilogue total stays at exactly one.
+        assert!(g.command(0, "done", &[]).is_err());
     }
 
     #[test]

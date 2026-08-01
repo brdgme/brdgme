@@ -1482,6 +1482,11 @@ impl Game {
         self.boards.iter().map(|b| b.score()).collect()
     }
 
+    fn placings(&self) -> Vec<usize> {
+        let metrics: Vec<Vec<i32>> = self.scores().into_iter().map(|s| vec![s]).collect();
+        gen_placings(&metrics)
+    }
+
     fn finish_epilogue(&self, logs: &mut Vec<Log>) {
         let scores: Vec<(usize, i32)> = self
             .scores()
@@ -1489,8 +1494,7 @@ impl Game {
             .enumerate()
             .map(|(i, &s)| (i, s))
             .collect();
-        let metrics: Vec<Vec<i32>> = self.scores().into_iter().map(|s| vec![s]).collect();
-        logs.push(placings_log(&gen_placings(&metrics), Some(&scores)));
+        logs.push(placings_log(&self.placings(), Some(&scores)));
     }
 }
 
@@ -1627,9 +1631,8 @@ impl Gamer for Game {
     /// actually uses.
     fn status(&self) -> Status {
         if self.finished {
-            let metrics: Vec<Vec<i32>> = self.scores().into_iter().map(|s| vec![s]).collect();
             Status::Finished {
-                placings: gen_placings(&metrics),
+                placings: self.placings(),
                 stats: vec![],
             }
         } else {
@@ -3208,5 +3211,67 @@ mod tests {
         let resp = g.command(MICK, "next", &p).unwrap();
         let placings_content = expected_placings_content(&g);
         assert!(!resp.logs.iter().any(|l| l.content == placings_content));
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let p = vec!["Mick".to_string(), "Steve".to_string()];
+        let expected_placings_content = |g: &Game| -> Vec<N> {
+            let scores: Vec<(usize, i32)> = g
+                .scores()
+                .iter()
+                .enumerate()
+                .map(|(i, &s)| (i, s))
+                .collect();
+            placings_log(&g.placings(), Some(&scores)).content
+        };
+
+        // A non-finishing `next` emits no placings log; the next arm's
+        // can_undo (current_player == player) is unchanged.
+        let mut g = new_blank(2);
+        g.kept_dice = vec![Die::Workers];
+        let resp = g.command(MICK, "next", &p).unwrap();
+        assert!(resp.can_undo, "next arm can_undo must be unchanged");
+        assert!(!g.finished);
+        assert!(
+            !resp
+                .logs
+                .iter()
+                .any(|l| l.content == expected_placings_content(&g))
+        );
+
+        // Finishing via `next` from Buy appends exactly one placings log,
+        // last, and its placings come from the same single source as
+        // status()'s (F-19).
+        let mut g = new_blank(2);
+        g.current_player = STEVE;
+        g.final_round = true;
+        g.phase = Phase::Buy;
+        let resp = g.command(STEVE, "next", &p).unwrap();
+        assert!(g.finished);
+        assert!(
+            !resp.can_undo,
+            "finishing next arm can_undo must be unchanged"
+        );
+        let expected_content = expected_placings_content(&g);
+        assert_eq!(
+            1,
+            resp.logs
+                .iter()
+                .filter(|l| l.content == expected_content)
+                .count(),
+            "exactly one placings epilogue"
+        );
+        assert_eq!(&expected_content, &resp.logs.last().unwrap().content);
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(placings, g.placings(), "status() placings agree")
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // epilogue total stays at exactly one.
+        assert!(g.command(STEVE, "next", &p).is_err());
     }
 }

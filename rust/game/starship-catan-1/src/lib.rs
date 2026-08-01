@@ -1739,16 +1739,18 @@ impl Game {
         Ok(logs)
     }
 
+    fn placings(&self) -> Vec<usize> {
+        let metrics: Vec<Vec<i32>> = (0..2)
+            .map(|p| vec![self.player_boards[p].victory_points()])
+            .collect();
+        gen_placings(&metrics)
+    }
+
     fn finish_epilogue(&self, logs: &mut Vec<Log>) {
         let scores: Vec<(usize, i32)> = (0..self.players)
             .map(|p| (p, self.player_boards[p].victory_points()))
             .collect();
-        let placings = gen_placings(
-            &(0..2)
-                .map(|p| vec![self.player_boards[p].victory_points()])
-                .collect::<Vec<Vec<i32>>>(),
-        );
-        logs.push(placings_log(&placings, Some(&scores)));
+        logs.push(placings_log(&self.placings(), Some(&scores)));
     }
 }
 
@@ -1991,11 +1993,8 @@ impl Gamer for Game {
 
     fn status(&self) -> Status {
         if self.is_finished() {
-            let metrics: Vec<Vec<i32>> = (0..2)
-                .map(|p| vec![self.player_boards[p].victory_points()])
-                .collect();
             Status::Finished {
-                placings: gen_placings(&metrics),
+                placings: self.placings(),
                 stats: vec![],
             }
         } else {
@@ -2685,6 +2684,67 @@ mod tests {
             placings_count, 0,
             "no placings log on non-finishing command"
         );
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let players = players();
+
+        // A non-finishing build emits no placings log; the Pay arm's
+        // can_undo is unchanged.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::TradeAndBuild;
+        g.current_player = 0;
+        g.player_boards[0].resources.insert(Resource::Fuel, 2);
+        let resp = g.command(0, "build booster", &players).unwrap();
+        assert!(resp.can_undo, "Pay arm can_undo must be unchanged");
+        assert!(!g.is_finished());
+        assert!(!resp.logs.iter().any(is_placings_log));
+
+        // Finishing via `upgrade se` appends exactly one placings log, last,
+        // and its placings come from the same single source as status()'s
+        // (F-19).
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::TradeAndBuild;
+        g.current_player = 0;
+        g.player_boards[0].colonies = vec![colony_card(); 9];
+        g.player_boards[0].modules.insert(Module::Sensor, 1);
+        g.player_boards[0].resources.insert(Resource::Ore, 1);
+        g.player_boards[0].resources.insert(Resource::Carbon, 1);
+        g.player_boards[0].resources.insert(Resource::Food, 2);
+        let resp = g.command(0, "upgrade se", &players).unwrap();
+        assert!(g.is_finished());
+        assert!(
+            resp.can_undo,
+            "finishing Pay arm can_undo must be unchanged"
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log last"
+        );
+        let expected_scores: Vec<(usize, i32)> = (0..g.players)
+            .map(|p| (p, g.player_boards[p].victory_points()))
+            .collect();
+        assert_eq!(
+            placings_log(&g.placings(), Some(&expected_scores)).content,
+            resp.logs.last().unwrap().content,
+            "the finish epilogue must use the same placings as status()"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(placings, g.placings(), "status() placings agree")
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // epilogue total stays at exactly one.
+        assert!(g.command(0, "upgrade se", &players).is_err());
     }
 
     // --- R-25 (F-31): render path must not panic on a bad current_player ---

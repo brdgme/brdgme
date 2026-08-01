@@ -663,16 +663,18 @@ impl Game {
         }
     }
 
+    fn placings(&self) -> Vec<usize> {
+        let metrics: Vec<Vec<i32>> = (0..NUM_PLAYERS)
+            .map(|p| vec![i32::from(self.winners().contains(&p))])
+            .collect();
+        gen_placings(&metrics)
+    }
+
     fn finish_epilogue(&self, logs: &mut Vec<Log>) {
         let scores: Vec<(usize, i32)> = (0..2)
             .map(|p| (p, self.tokens[p].iter().sum::<u32>() as i32))
             .collect();
-        let placings = gen_placings(
-            &(0..NUM_PLAYERS)
-                .map(|p| vec![i32::from(self.winners().contains(&p))])
-                .collect::<Vec<Vec<i32>>>(),
-        );
-        logs.push(placings_log(&placings, Some(&scores)));
+        logs.push(placings_log(&self.placings(), Some(&scores)));
     }
 }
 
@@ -698,12 +700,8 @@ impl Gamer for Game {
 
     fn status(&self) -> Status {
         if self.is_finished() {
-            let winner = self.winners();
-            let metrics: Vec<Vec<i32>> = (0..NUM_PLAYERS)
-                .map(|p| vec![i32::from(winner.contains(&p))])
-                .collect();
             Status::Finished {
-                placings: gen_placings(&metrics),
+                placings: self.placings(),
                 stats: vec![],
             }
         } else {
@@ -1744,6 +1742,76 @@ mod tests {
             Status::Finished { placings, .. } => assert_eq!(placings[player], 1),
             _ => panic!("expected finished"),
         }
+    }
+
+    // --- R-32 (F-19): placings computed once, shared by status() and the
+    // finish epilogue ---
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        fn is_placings_log(log: &Log) -> bool {
+            brdgme_markup::to_string(&log.content).contains("Final scores:")
+        }
+
+        // A non-finishing Sell emits no placings log and keeps can_undo.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        g.hands[player] = vec![Good::Gold, Good::Gold];
+        let resp = g.command(player, "sell 2 gold", &[]).unwrap();
+        assert!(!resp.can_undo, "Sell arm can_undo must be unchanged");
+        assert!(!resp.logs.iter().any(is_placings_log));
+        assert!(!g.is_finished());
+
+        // A Sell that finishes the match appends exactly one placings log,
+        // last, and its placings come from the same single source as
+        // status()'s (F-19).
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        let player = g.current_player;
+        let opp = opponent(player);
+        g.round_wins[player] = 1;
+        g.tokens[player] = vec![10, 10];
+        g.tokens[opp] = vec![];
+        g.camels = [0, 0];
+        g.bonus_tokens = [0, 0];
+        g.good_tokens = [0, 0];
+        g.goods.insert(Good::Diamond, vec![]);
+        g.goods.insert(Good::Gold, vec![]);
+        g.goods.insert(Good::Silver, vec![5]);
+        g.goods.insert(Good::Cloth, vec![1]);
+        g.hands[player] = vec![Good::Cloth];
+        let resp = g.command(player, "sell 1 cloth", &[]).unwrap();
+        assert!(g.is_finished());
+        assert!(
+            !resp.can_undo,
+            "finishing Sell arm can_undo must be unchanged"
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log last"
+        );
+        let expected_scores: Vec<(usize, i32)> = (0..NUM_PLAYERS)
+            .map(|p| (p, g.tokens[p].iter().sum::<u32>() as i32))
+            .collect();
+        assert_eq!(
+            placings_log(&g.placings(), Some(&expected_scores)).content,
+            resp.logs.last().unwrap().content,
+            "the finish epilogue must use the same placings as status()"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(placings, g.placings(), "status() placings agree")
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // Re-invoking the finish path is rejected and appends nothing, so the
+        // epilogue total stays at exactly one.
+        assert!(g.command(player, "sell 1 cloth", &[]).is_err());
     }
 
     // --- R-25 (F-54): render path must not panic on a bad current_player ---

@@ -768,14 +768,19 @@ impl Game {
         Ok(logs)
     }
 
+    fn placings(&self) -> Vec<usize> {
+        // F-19: single placings source for status() and the finish epilogue.
+        // Coins are read defensively (status()'s form), resolving the old
+        // epilogue's direct coins[p] index.
+        let metrics: Vec<Vec<i32>> = (0..self.players)
+            .map(|p| vec![self.player_vp(p), self.coins.get(p).copied().unwrap_or(0)])
+            .collect();
+        gen_placings(&metrics)
+    }
+
     fn finish_epilogue(&self, logs: &mut Vec<Log>) {
         let scores: Vec<(usize, i32)> = (0..self.players).map(|p| (p, self.player_vp(p))).collect();
-        let placings = gen_placings(
-            &(0..self.players)
-                .map(|p| vec![self.player_vp(p), self.coins[p]])
-                .collect::<Vec<Vec<i32>>>(),
-        );
-        logs.push(placings_log(&placings, Some(&scores)));
+        logs.push(placings_log(&self.placings(), Some(&scores)));
     }
 }
 
@@ -899,12 +904,8 @@ impl Gamer for Game {
 
     fn status(&self) -> Status {
         if self.finished {
-            let metrics: Vec<Vec<i32>> = (0..self.players)
-                .map(|p| vec![self.player_vp(p), self.coins.get(p).copied().unwrap_or(0)])
-                .collect();
-            let placings = gen_placings(&metrics);
             Status::Finished {
-                placings,
+                placings: self.placings(),
                 stats: vec![],
             }
         } else if let Some(Resolver::DrawDiscard { player }) = self.to_resolve.first() {
@@ -1765,6 +1766,76 @@ mod tests {
             Status::Finished { placings, .. } => assert_eq!(placings.len(), 3),
             s => panic!("expected finished status, got {:?}", s),
         }
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let is_placings =
+            |log: &Log| brdgme_markup::to_string(&log.content).contains("Final scores:");
+
+        let mut g = new_game();
+        g.round = 3;
+        g.hands = vec![
+            vec![db_card("Lumber Yard")],
+            vec![db_card("Clay Pool")],
+            vec![db_card("Ore Vein")],
+        ];
+        g.cards = vec![vec![], vec![], vec![]];
+        g.actions = vec![None; 3];
+        g.to_resolve = vec![];
+
+        // Non-finishing builds emit no placings log; the build arm's
+        // can_undo is unchanged.
+        let r0 = cmd(&mut g, MICK, "build 1").unwrap();
+        assert!(!r0.can_undo, "build arm can_undo must be unchanged");
+        assert!(!r0.logs.iter().any(&is_placings));
+        let r1 = cmd(&mut g, STEVE, "build 1").unwrap();
+        assert!(!r1.can_undo, "build arm can_undo must be unchanged");
+        assert!(!r1.logs.iter().any(&is_placings));
+
+        // The final build finishes the game: exactly one placings log, last,
+        // from the same single source as status()'s (F-19).
+        let r2 = cmd(&mut g, GREG, "build 1").unwrap();
+        assert!(g.is_finished());
+        assert!(
+            !r2.can_undo,
+            "finishing build arm can_undo must be unchanged"
+        );
+        assert_eq!(
+            1,
+            r2.logs.iter().filter(|l| is_placings(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(is_placings(r2.logs.last().unwrap()), "placings log last");
+        let expected_scores: Vec<(usize, i32)> =
+            (0..g.players).map(|p| (p, g.player_vp(p))).collect();
+        assert_eq!(
+            placings_log(&g.placings(), Some(&expected_scores)).content,
+            r2.logs.last().unwrap().content,
+            "the finish epilogue must use the same placings as status()"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => {
+                assert_eq!(placings, g.placings(), "status() placings agree")
+            }
+            _ => panic!("expected Finished status"),
+        }
+
+        // Re-invoking the finish path is rejected (assert_not_finished) and
+        // appends nothing, so the epilogue total stays at exactly one.
+        assert!(cmd(&mut g, GREG, "build 1").is_err());
+    }
+
+    #[test]
+    fn finish_epilogue_does_not_panic_on_short_coins() {
+        // F-19: status() reads coins defensively (coins.get(p).unwrap_or(0))
+        // while the finish epilogue indexed coins[p] directly; the shared
+        // placings() resolves the distinction in favour of status()'s read.
+        let mut g = new_game();
+        g.finished = true;
+        shorten_all(&mut g);
+        let mut logs = vec![];
+        g.finish_epilogue(&mut logs);
     }
 
     #[test]
