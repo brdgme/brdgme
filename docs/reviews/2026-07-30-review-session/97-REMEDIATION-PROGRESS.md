@@ -42,7 +42,7 @@ restored per owner instruction.)
 | R-17 | done(2fa5b35) | 2fa5b356646d00bf120d2782a73aa15797c300d0 | closes F-150..F-156 (WP-52 stats/query-perf "Test? y" rows); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime DB/web tests deferred to CI, not claimed passing; comprehensive review resolved two stale SQLX cache entries + F48/F21 entry-point coverage, targeted re-review no blockers |
 | R-18 | done(6a304be) | 6a304be11252048e0cf8ddf1459d38f3a0d38a7a | closes F-134/F-135/F-143 (network calls hoisted out of three transactions); AC1 zero HTTP between begin and commit at all five tx bodies; AC2 deterministic concurrent-change tests for all three (condvar/Notify/Semaphore+Barrier, non-sleep); AC3 F-143 recorded as WP-46-vs-WP-79 reconciliation per CODING.md rare-duplicate rule, not a deviation; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned; needs Postgres/NATS), not claimed passing; comprehensive review REJECT on two invalid tests (dotted version name) -> repaired -> targeted F1/F2 re-review PASS (static) |
 | R-19 | done(7de92cd) | 7de92cd65458f408087af8262afe92635639762c | closes F-144/F-147 (per-invitee nudge dedup + dead-code deletion); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed; sole warning the in-scope `NotifyKind::Reminder` dead_code); runtime web test deferred to CI, not claimed passing; comprehensive review APPROVE, 0 high/medium, two non-blocking low notes |
-| R-20 | pending | | |
+| R-20 | done(049325a) | 049325a7ba248c3e3630f284f5f94a6a26c7dafb | closes F-146/F-179/F-180/F-181/F-182 (game-start notify identity, threading, duplication); AC1 notify routed through the InviteMailer seam + real proposal-path test; AC2 one mail per on-turn invitee on invite-accept auto-start; AC3 solo-start notify bypasses web-presence suppression; AC4 distinct per-kind subjects/thread ids; AC5 F-170 NOT re-derived (refuted); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed; sole warning the pre-existing in-scope `NotifyKind::Reminder` dead_code); runtime web tests authored but deferred to CI (web build/test/run banned); comprehensive review REJECTed C1/C2 then fixes + focused re-reviews PASS, no Critical findings; no push |
 | R-21 | blocked(R-22..R-26, R-48) | | closing commit of game family |
 | R-22 | pending | | |
 | R-23 | pending | | |
@@ -740,6 +740,89 @@ deletion).
   at-least-once send window). This is pre-existing (the old per-proposal code
   had no claim either) and out of F-144 scope; the per-invitee conditional mark
   narrows, not widens, the window. Not a regression.
+
+## R-20 evidence
+
+Code commit `049325a7ba248c3e3630f284f5f94a6a26c7dafb` (verified via
+`git rev-parse 049325a`; message `feat(web): route game-start notify through
+mailer seam (R-20, F-146, F-179, F-180, F-181, F-182)`; tracked changes only:
+`rust/web/src/email/commands.rs`, `rust/web/src/email/inbound.rs`,
+`rust/web/src/email/notify.rs`, `rust/web/src/email/outbound.rs`,
+`rust/web/src/game/mod.rs`, `rust/web/src/proposals.rs`; 950 insertions /
+50 deletions). Closes F-146 (Low/Medium), F-179 (Medium), F-180 (Low),
+F-181 (Low), F-182 (Low).
+
+- **Objective:** one event, one mail, correctly threaded and observable in
+  tests. F-182 (notify called outside the mailer seam, so untestable) is the
+  root that let the other four survive, so it is fixed first.
+
+- **AC1 (F-182, notify inside the mailer seam):** the `InviteMailer` trait gains
+  `async fn notify_game_started(&self, game_id)` (`proposals.rs:121`) with the
+  `RealInviteMailer` impl routing to the new free `notify_game_started`
+  (`proposals.rs:801` -> `notify.rs:528`); the start sites call it through the
+  seam, so the wiring is spyable. Test
+  `start_proposal_notifies_game_started_via_proposal_path` (`proposals.rs:4683`,
+  C1/F-182) drives the REAL proposal path via `with_start_proposal_context` +
+  `start_proposal` and asserts the recorded mail token, so deleting the
+  production wiring would fail; `invite_mailer_seam_is_spyable`
+  (`proposals.rs:4545`, pure `#[test]`) asserts a spy mailer records the call.
+- **AC2 (F-179, one mail per invitee on invite-accept auto-start):**
+  `invite_accept_auto_start_one_mail_per_on_turn_invitee` (`inbound.rs:3201`,
+  C2/F-179) drives `handle_invite_reply` auto-start against an in-process mock
+  game service and asserts exactly one game-start mail - on-turn position 0
+  token `Some`, off-turn position 1 `None` - so no restored
+  `notify_game_emails`/`notify_started` duplicate burst; reinforced by
+  `notify_game_started_one_mail_per_on_turn_player` (`notify.rs:977`).
+- **AC3 (F-180, solo start notifies):** `notify_game_started` uses
+  `SendMode::BypassSuppression` (`notify.rs:528,557`), so the solo-start
+  confirmation is no longer swallowed by the hydrated-page presence window.
+  `solo_start_notifies_game_started` (`proposals.rs:4727`, M2/F-180) drives the
+  real `create_proposal` solo path and asserts a notification;
+  `notify_game_started_bypasses_web_presence_suppression` (`notify.rs:938`)
+  proves `notify_game_started` bypasses suppression where `notify_game_emails`
+  (Normal mode) suppresses the same recently-active player.
+- **AC4 (F-146, distinct subjects/thread ids per kind):** new `InviteNotifyKind`
+  enum (`proposals.rs:125`) with `invite_notify_subject` (`:134`) and
+  `invite_notify_thread_id` (`:146`) emitting per-kind suffixes (reinvite /
+  decline / cancelled / started / ready), so clients no longer collapse the five
+  notifications into one `proposal-{id}` thread.
+  `notification_kinds_have_distinct_subjects_and_thread_ids`
+  (`proposals.rs:4841`, M1/F-146, pure `#[test]`) asserts distinctness on the
+  real production functions, not re-derived hardcoded strings.
+- **AC5 (F-170 refuted, do not re-derive):** honored - F-170 is NOT extended to
+  the game-start mail. It reads `turn_emails_enabled` directly (unsubscribed
+  users do not get it), there is no hidden-information leak (the mail is rendered
+  from the recipient's own seat), and the `ca7925bc` game-start sweep is complete
+  (all four `insert_game_from_service` callers notify); nothing of the sort is
+  re-derived here.
+- **F-181 ordering (notify before broadcast):** the start sites notify before
+  `broadcast_and_trigger` (`game/mod.rs:51`), closing the bot-turn double-mail
+  race. `start_proposal_notifies_before_broadcast` (`proposals.rs:4773`,
+  I2/F-181) asserts the token is minted and position 0 is still on turn (state
+  not advanced before notification); `email_new_game_notifies_before_broadcast`
+  (`commands.rs:2151`) covers the email-command start site.
+
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0. Sole warning: `variant `Reminder` is never
+  constructed` at `web/src/email/notify.rs:136` - the pre-existing in-scope
+  `NotifyKind::Reminder` dead_code carried over from R-19/F-147 (its 4 match
+  arms remain). Also a pre-existing `proc-macro-error2 v2.0.1` future-incompat
+  NOTE, unrelated, does not affect exit status.
+
+- **Runtime:** the new `#[sqlx::test]` cases are compile-verified only; runtime
+  web tests are authored but deferred to CI by the web cargo restriction (web
+  build/test/run forbidden; DB tests need Postgres). NOT claimed passing here -
+  red-on-old / green-on-new must be confirmed in CI (`scripts/rust-test.sh`).
+
+- **Review:** the comprehensive independent review initially returned **REJECT**
+  on two Critical findings - **C1 (F-182)** the seam test did not exercise the
+  real proposal path (production wiring deletion would not fail) and **C2
+  (F-179)** a restored `notify_game_emails`/`notify_started` duplicate could
+  re-introduce the burst. Both were fixed (the proposal-path test
+  `start_proposal_notifies_game_started_via_proposal_path` and the
+  one-mail-per-on-turn-invitee assertion in
+  `invite_accept_auto_start_one_mail_per_on_turn_invitee`), and the focused
+  re-reviews returned **PASS with no Critical findings**. No push.
 
 ## 5.4 evidence
 
