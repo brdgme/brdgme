@@ -45,7 +45,7 @@ restored per owner instruction.)
 | R-20 | done(049325a) | 049325a7ba248c3e3630f284f5f94a6a26c7dafb | closes F-146/F-179/F-180/F-181/F-182 (game-start notify identity, threading, duplication); AC1 notify routed through the InviteMailer seam + real proposal-path test; AC2 one mail per on-turn invitee on invite-accept auto-start; AC3 solo-start notify bypasses web-presence suppression; AC4 distinct per-kind subjects/thread ids; AC5 F-170 NOT re-derived (refuted); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed; sole warning the pre-existing in-scope `NotifyKind::Reminder` dead_code); runtime web tests authored but deferred to CI (web build/test/run banned); comprehensive review REJECTed C1/C2 then fixes + focused re-reviews PASS, no Critical findings; no push |
 | R-21 | blocked(R-22..R-26, R-48) | | closing commit of game family |
 | R-22 | blocked(AC1 test quantity unsatisfiable; needs owner amendment) | | AC1 requires seven per-player-vector short-state tests, but current `texas-holdem-2::Game` has exactly four such vectors (`player_hands`, `player_money`, `bets`, `folded_players`); its specific test quantity cannot be satisfied without owner amendment. Evidence report `/tmp/opencode/r22-root-cause.md` is ephemeral and is not an authoritative repository artifact. |
-| R-23 | pending | | |
+| R-23 | done(3db5c06) | 3db5c06e95fe78a6b521e87a4cd2e27aab77093b | closes F-60/F-62/F-63/F-64; strictly two crates (lost-cities-1, lost-cities-2); -1 validate() + direct player_state defense + named no-panic test; -2 three unreachable!() player-count helpers -> Result errors propagated through score/end_round/draw_hand_full + direct/command-path four-player Err tests; AC4 score_3p_works coverage-only (passed pre-fix, no rules change); per-crate test/clippy/fmt all pass; comprehensive review APPROVE/PASS, no Critical/Important/Minor findings |
 | R-24 | pending | | |
 | R-25 | pending | | L; re-size per crate |
 | R-26 | pending | | |
@@ -823,6 +823,67 @@ F-181 (Low), F-182 (Low).
   one-mail-per-on-turn-invitee assertion in
   `invite_accept_auto_start_one_mail_per_on_turn_invitee`), and the focused
   re-reviews returned **PASS with no Critical findings**. No push.
+
+## R-23 evidence
+
+Code commit `3db5c06e95fe78a6b521e87a4cd2e27aab77093b` (verified via
+`git rev-parse HEAD`; message `R-23: lost-cities-1/-2 parity (F-60, F-62,
+F-63, F-64)`; tracked changes only: `rust/game/lost-cities-1/src/lib.rs` and
+`rust/game/lost-cities-2/src/lib.rs`; 170 insertions / 25 deletions). No
+migration, doc, Cargo, or tracker changes in the code commit.
+
+- **Objective / findings:** R-23 closes F-60 (High, -1 raw-index panic on the
+  render path), F-62 (Medium, only -2 had a `validate()`), F-63 (Low, -2
+  `unreachable!()` in three player-count lookups on the command path), and F-64
+  (Low, -2 3-player scoring constants untested). Scope is strictly two crates:
+  `lost-cities-1` and `lost-cities-2`.
+
+- **AC1 (F-60 / F-62, -1 validate + direct defense):** -1 gains a `validate()`
+  that checks the hands/scores/expeditions/stats vectors and `current_player`,
+  and its direct `player_state` access is defended with
+  `.get(...).cloned().unwrap_or_default()`. A named no-panic short-hands test
+  exercises the short-state path.
+
+- **AC2 (-1 vs -2 parity deltas justified):** all final `validate()` differences
+  between -1 and -2 are only the fixed `PLAYERS` constant versus runtime
+  `self.players`, the no-players-field range check, and crate-specific error
+  text; each is justified by -1's compile-time two-player model.
+
+- **AC3 (F-63, -2 unreachable!() -> Result):** -2 replaces the three
+  `unreachable!()` player-count helpers with `Result` errors, propagated through
+  `score`, `end_round`, and `draw_hand_full`. Direct and command-path
+  four-player tests assert `Err`.
+
+- **AC4 (F-64, 3-player scoring coverage):** `score_3p_works` covers cost 15,
+  threshold 7, and bonus 15. It passed against the old scoring implementation
+  (coverage-only), so no rules change was made.
+
+- **TDD RED/GREEN:** -1 both new tests failed pre-fix for the actual raw-index
+  panic / default `validate()` behavior, then passed after the fix. -2 F-63
+  tests failed to compile against the old signature, then passed after the
+  `Result` API. F-64 coverage was green before implementation, as above.
+
+- **Verification (per-crate, serial, one crate per cargo command):**
+  `cargo test -p lost-cities-1`, `cargo test -p lost-cities-2`,
+  `cargo clippy -p lost-cities-1 --all-targets -- -D warnings`,
+  `cargo clippy -p lost-cities-2 --all-targets -- -D warnings`,
+  `cargo fmt -p lost-cities-1 -- --check`,
+  `cargo fmt -p lost-cities-2 -- --check`, and `git diff --check` - each passed.
+  No workspace-wide cargo, no `scripts/rust-test.sh`, no Tilt/kind, no global
+  installs, no production operation was run.
+
+- **Review:** comprehensive independent review
+  (`/tmp/opencode/r23-comprehensive-review.md`) verdict **APPROVE / PASS**, no
+  Critical/Important/Minor findings. Two informational residuals (out of R-23
+  scope): (1) pre-existing -2 `end_round` increments `self.round` before the
+  scoring loop, so a scoring `Err` leaves `round` mutated without scores pushed
+  (strictly better than the old panic; gated by `validate()`); (2) -2
+  `player_state` still uses raw `self.hands[player]` indexing protected by
+  `validate()` at deserialization. The reviewer did not rerun clippy/fmt, but the
+  implementation did (above).
+
+- **Scope / R-07 / R-22:** `R-07-HANDOVER.md` untouched; R-22 unchanged / parked;
+  R-21 remains gated by R-22 through R-26 and R-48.
 
 ## 5.4 evidence
 
