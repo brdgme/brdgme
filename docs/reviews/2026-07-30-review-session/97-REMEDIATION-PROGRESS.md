@@ -52,7 +52,7 @@ restored per owner instruction.)
 | R-27 | done(1a2d82a) | 1a2d82ae658c9e37f4bcca1c136fa5567e77c56c + 9ec9949a86c04e9c937e7f48f40a1e62f6f663df | closes F-05/F-69 (for-sale-2 deadlock and short-deck stall) plus the section-7 escalation (pass()/take_first_open_card panic); short building/cheque-deck round-start transitions produce Finished and logs (`start_buying_round` lib.rs:143-144 and `start_selling_round` :157-158 return `finish()`; tests `start_buying_round_short_deck_finishes_game`, `start_selling_round_short_deck_finishes_game` assert `is_finished`, `Status::Finished`, empty whose_turn, non-empty logs); all-passed direct `next_bidder()` returns `Err(GameError::Internal)` within the 2s bounded timeout (:316-317; `next_bidder_all_passed_terminates_with_internal_error` - second commit 9ec9949 corrected the literal AC2 note by calling `next_bidder()` directly instead of through `bid()`); empty `take_first_open_card` returns `Err(Internal)` not panic (:302-305) and selling distribution surfaces `Err(Internal)` not panic (:281-284); AC4 `pass()` half-bid rounding deliberately unchanged - confirmed parked as WP-11 `f F14` under D-30 + D-35 (BLOCKED-ON-USER-RULES-REVIEW, do not pick up) per `04c-games-cleanup-parity-wp33.md:455-474`, not a remediation gap; fresh commands all exit 0: `cargo test -p for-sale-2` (28 lib + 1 contract pass), `cargo clippy -p for-sale-2 --all-targets -- -D warnings`, `cargo fmt -p for-sale-2 -- --check`, `git diff --check`; independent review APPROVE WITH NON-BLOCKING NOTES; residual risk: pre-existing `start_selling_round` autoplay `if let Ok` (lib.rs:170) still swallows corrupted-state `play` errors (no normal-play effect, same class as R-26's auto-play note); no standalone R-27 docs/changes document existed and nothing was archived; no push |
 | R-28 | done(34a1222) | 34a1222f4213916094e2e24e8a3a56617a49ea73 | closes F-09 (High) + F-10 (Medium); only file `rust/lib/rand_bot/src/lib.rs` (+113/-11); Int inverted bounds -> empty tokens (was `panic!`); Many None-max/inverted -> `max.unwrap_or(3).max(min)` honors min (was `assert!` trip); Many out-of-i32-range bounds rejected empty, no `as i32` narrowing (was i32 wrap); `bounded_i32` total; six new tests genuine RED by construction, incl. the AC1 reviewer-confirmation re-fixture of the out-of-i32-range-min test (naive `i32::MAX+1` passes pre-fix; re-fixtured to `(1<<32)+5`); fresh commands all exit 0: `cargo test -p brdgme_rand_bot` (10 lib), `cargo clippy -p brdgme_rand_bot --all-targets -- -D warnings`, `cargo fmt -p brdgme_rand_bot -- --check`, `git diff --check`; residual: in-range Many count up to `i32::MAX` emitted in full (no cap); no standalone R-28 change doc existed, nothing archived; no push |
 | R-29 | done(fcda3e6) | fcda3e6d096f3db929fca9c5a33353c7b11bac23 + a48c783a9b00212fb5dfff98ad0570a9ee6fc4bd | closes F-17 (High) + F-16 (Low) + F-191 (Low); files `rust/lib/cmd/src/repl.rs`, `requester/gamer.rs`, `http.rs`, `rust/web/src/rules.rs`; AC1 repl.rs unwrap/expect/panic survivor grep count exactly 0, so no survivor justification applies (scope excludes test_support/startup expects); AC2 `response_error_message` seam renders a `Response::UserError` message without panicking, test `user_error_response_produces_message_without_panicking`; AC3 all three payload variants (DataDocs/BasicStrategy/AdvancedStrategy) deserialize + `validate()` + player bounds-check, tests: 3 malformed -> `Err(Parse)`, 3 validate-error -> SystemError, 2 out-of-range player -> UserError, 3 valid unchanged; AC4 settled contract (per 98-REMEDIATION-PLAN.md:979-983 + 00-STATE.md:541-543): true malformed envelope syntax (`{ not json`) -> Axum 400 text/plain via `route::<G>()` with non-JSON body (test `malformed_envelope_returns_400_text_plain`), while malformed inner game state remains 200 SystemError; fresh commands: `cargo test -p brdgme_cmd` 31 pass / 0 fail, `cargo clippy -p brdgme_cmd --all-targets -- -D warnings` exit 0, `cargo fmt -p brdgme_cmd -- --check` exit 0, `cargo check -p tic-tac-toe-2` exit 0, allowed gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0, `git diff --check` exit 0; web clippy NOT passed - five pre-existing unrelated warnings (notify.rs `Reminder` dead-code, sweep.rs x2 auto-deref, auth/server.rs x2 redundant closure, none in rules.rs), web fmt NOT passed - pre-existing drift, none in rules.rs; web runtime test `fetch_strategy_sends_validated_payloads_and_receives_strategy` passes: from `rust/` `SQLX_OFFLINE=true cargo test -p web --features ssr fetch_strategy_sends_validated_payloads_and_receives_strategy` exit 0, target result `1 passed; 0 failed; 0 ignored; 0 measured; 651 filtered out`, duration 0.02s, in-process (no DB/NATS); no R-29 defect found; independent initial review REJECTed web empty-state caller regression (fcda3e6 sent `game: ""`), bounded correction a48c783 added PlayerCounts->New->strategy valid scratch-state flow, targeted re-review APPROVE with no findings; residuals: four sequential strategy HTTP calls, pre-existing web lint/fmt debt; no standalone R-29 change doc existed and nothing was archived; protected R-07-HANDOVER.md untouched; no push |
-| R-30 | pending | | |
+| R-30 | done(fc90116) | fc90116ce063261c3c643c64a85a6771e092c0fe + 8814bb0e00b3dcd9937f2ff49a1c94964025ca66 | closes F-22/F-23/F-28/F-29/F-30/F-34/F-38/F-39; four crates despite plan Size prose "three crates" (four named Files governed; discrepancy recorded, see R-30 evidence); per-crate test/clippy/fmt all pass; independent review PASS after bounded legacy-bids correction (see R-30 evidence) |
 | R-31 | pending | | |
 | R-32 | pending | | |
 | R-33 | pending | | |
@@ -1234,4 +1234,167 @@ other-tracker changes in the code commit.
 
 - **Scope / R-07:** `R-07-HANDOVER.md` untouched (last modified by `5c1995d`,
   pre-dating R-28; absent from the R-28 commit diff); R-07 (PARKED), R-21
+  (gated), R-22 (PARKED) statuses and files untouched; no push.
+
+## R-30 evidence
+
+Implementation commits `fc90116ce063261c3c643c64a85a6771e092c0fe` (initial
+four-crate implementation; message `R-30: redact private values from
+Log::public in four game crates (F-22, F-23, F-28, F-29, F-30, F-34, F-38,
+F-39)`) and `8814bb0e00b3dcd9937f2ff49a1c94964025ca66` (persisted-state
+compatibility correction; message `fix(modern-art-2): allow legacy stale
+PlayCard bids to load while enforcing the invariant (R-30-04)`), both verified
+via `git rev-parse`. HEAD at completion is `8814bb0`. Tracked changes only:
+`rust/game/alhambra-1/src/lib.rs`, `rust/game/modern-art-2/src/lib.rs`,
+`rust/game/modern-art-2/src/render.rs`, `rust/game/seven-wonders-1/src/lib.rs`,
+`rust/game/splendor-2/src/lib.rs`, `rust/game/splendor-2/src/render.rs`. No
+migration, doc, Cargo, CI, or other-tracker changes in either commit.
+
+- **Status:** done.
+
+- **Scope / plan crate-count discrepancy:** the work spans **four** crates
+  (alhambra-1, modern-art-2, seven-wonders-1, splendor-2) despite the plan's
+  Size prose saying "three crates" (`98-REMEDIATION-PLAN.md:998`). The plan's
+  own Files list governs - it names all four crates (alhambra-1 `:160-181`
+  `:452-479`, modern-art-2 `:442-450`(+3 sites) `:53-75` `:304-309`(+1 site),
+  seven-wonders-1 `:722-725`, splendor-2 `:237-239` `:79-97`), and all four
+  were implemented. The "three crates" prose is recorded as a discrepancy, not
+  resolved (plan not modified).
+
+- **Per-crate / Finding / AC map:**
+  - **alhambra-1 F-22 (High) + AC1/AC2:** `start_game` no longer logs each
+    player's exact opening money-card draw publicly; the public log now carries
+    only the count (`drew {n} cards`, lib.rs:174-178), and the exact card
+    identities move to a `Log::private` addressed to the drawing player only
+    (lib.rs:179-185). Test
+    `start_game_logs_do_not_expose_dealt_card_codes` (lib.rs:1504) calls the
+    real `Game::start` log-producing path, renders each public log via
+    `log_plain`, and asserts no dealt card code appears in any public log while
+    a private per-player draw log still lists that player's cards.
+  - **alhambra-1 F-23 (Medium) + AC3:** `final_place_phase` no longer publishes
+    `best_value`, the aggregate over the winner's private hand; the public log
+    keeps the player, currency, and tile but drops the amount (lib.rs:478-484).
+    Test
+    `final_place_public_log_hides_private_hand_value` (lib.rs:1547) drives
+    `final_place_phase`, asserts the winner/tile stay public and "with 9" (the
+    private value) does not appear in the rendered public log.
+  - **modern-art-2 F-28 (Medium) + AC2:** all three public money trails are
+    made private while a neutral public event remains: (1) the round-end
+    payout (`Paying {p} {money} for selling all their cards`) becomes
+    `Log::private` to that player, public log reads "sold all their cards"
+    (lib.rs:352-365); (2) the final money table becomes `Log::private` to all
+    players (lib.rs:379-386); (3) the auction settlement `paying {price} to`
+    clause becomes `Log::private` to the buyer and seller only, while the
+    purchase itself stays public (lib.rs:466-484). Tests
+    `auction_settlement_amount_is_private_to_the_parties`,
+    `round_end_payout_amount_is_private_to_the_player`, and
+    `final_round_money_stays_out_of_public_logs` drive real `command()` play
+    paths and assert no public rendered log contains "paying $"/"paid
+    $"/"Paying "/"final player money", and that each private log reaches
+    exactly the entitled parties. Public artist values and legitimate public
+    events (a purchase, a sale, "bought") were deliberately left public - they
+    are not treated as leaks.
+  - **modern-art-2 F-29 (Low) + AC3 (over-redaction restore):** `PubState`
+    gains `hand_counts: Vec<usize>` (lib.rs:81, populated :679), and the public
+    render adds a "Cards" column (render.rs:92-112). Test
+    `pub_state_exposes_hand_counts` (lib.rs:1461) asserts
+    `hand_counts == vec![9,9,9,9]` post-start, that the rendered players table
+    contains a "Cards" column, and that counts track actual hands after a play.
+  - **modern-art-2 F-30 (Low, state invariant):** `end_round` and
+    `settle_auction` both clear `self.bids` (lib.rs:318, :454), and `validate()`
+    rejects a `PlayCard` state with non-empty bids (lib.rs:815-822). Tests
+    `bids_cleared_when_settle_ends_the_round` (lib.rs:1370) and
+    `validate_rejects_bids_outside_an_auction` (lib.rs:1412). The legacy
+    stored-state marker shim is in commit `8814bb0` (below).
+  - **seven-wonders-1 F-34 (Low) + AC2:** the discard-pile prune log "has no
+    cards they can take from the discard pile" - a public assertion about a
+    pile whose contents `PubState` hides - becomes `Log::private` to the
+    affected player only (lib.rs:725-730). Test
+    `no_takeable_discard_log_is_private_to_the_player` (lib.rs:1375) drives
+    real build commands, asserts the prune is logged exactly once, is not
+    public, and targets the affected player.
+  - **splendor-2 F-38 (Low) + AC4:** the swallowed `GameError` at the old
+    `:237-239` no longer becomes a public log. `discard_phase`, `visit_phase`,
+    and `next_phase` now return `Result<Vec<Log>, GameError>` (lib.rs:219,
+    :228, :254); the `unwrap_or_else(|e| vec![Log::public(e.to_string())])` is
+    replaced by propagating the error via `?` at the five command call sites
+    (lib.rs:354, :414, :458, :492, :521). Test
+    `auto_visit_failure_propagates_without_public_log` (lib.rs:1166) forces a
+    failing auto-visit and asserts `Err` surfaces with its message and no noble
+    is awarded.
+  - **splendor-2 F-39 (Low) + AC3 (over-redaction restore):** `PubState` gains
+    `deck_counts: Vec<usize>` (lib.rs:85, populated :594), and the public
+    render shows "Level N (N left)" per level (render.rs:164-171). Test
+    `pub_state_exposes_deck_counts` (lib.rs:1294) asserts
+    `deck_counts == vec![36, 26, 16]` post-start and that the rendered board
+    contains "36 left"/"26 left"/"16 left".
+
+- **F-81 classifications (AC2, applied per finding):** **direct fixes** (the
+  value appeared directly in `Log::public`): F-22 (card identities), F-23
+  (`best_value`), F-28 (money amounts), F-34 (discard-pile property), F-38
+  (raw error text). **Inference-only / public-derived information** is
+  acceptable by the owner ruling and was not re-raised. F-29 and F-39 are
+  **approved over-redaction restores** (public info a player is entitled to,
+  restored, not a leak). F-30 is a **state invariant**, not an inference
+  classification.
+
+- **TDD red-to-green:** all per-crate tests call the actual log-producing
+  paths (`Game::start`, `command()`, `final_place_phase`, `visit_phase`) and
+  assert on the rendered `Log::public` content via `log_plain`/`transform` -
+  not merely on `pub_state` fields (exactly the AC1 shape the old tests
+  missed). Durable RED proof: `start_game_logs_do_not_expose_dealt_card_codes`
+  fails pre-fix because the opening draw logs are public and list card codes;
+  the F-28 tests fail pre-fix because the payout/payment/final-money strings
+  are public; `final_place_public_log_hides_private_hand_value` fails pre-fix
+  because `best_value` is in the public log; the F-34 test fails pre-fix
+  because the prune log is public; `auto_visit_failure_propagates_without_public_log`
+  fails to compile pre-fix (`visit_phase` returns `Vec<Log>`, not `Result`);
+  F-29/F-39 tests fail pre-fix on the absent `hand_counts`/`deck_counts`
+  fields. All pass post-fix (GREEN).
+
+- **Legacy stored-state marker shim (commit `8814bb0`, the R-30-04
+  correction):** the initial `validate()` bids check would have rejected
+  persisted pre-R-30 games carrying concluded-auction stale bids (the F-30
+  invariant fix, applied retroactively). The correction adds
+  `bids_cleared_outside_auction: bool` (`#[serde(default)]`, lib.rs:47-53),
+  set `true` at `start_round`, `add_card_to_auction`, `settle_auction`, and
+  `Game::new`; `validate()` rejects PlayCard bids only when the flag is set
+  (lib.rs:815-822). Legacy persisted states (flag absent -> default `false`)
+  load and validate; the next normal play clears the stale bids and sets the
+  flag, transitioning the state to conformant. Test
+  `legacy_playcard_with_stale_bids_loads_and_plays` (lib.rs:1427) strips the
+  flag from a stale-bids PlayCard JSON, asserts it loads and validates, plays
+  through an auction, and asserts bids cleared + flag set + re-validates. The
+  marker is intentionally retained until pre-R-30 persisted games have
+  drained (removal note in the field comment).
+
+- **Verification (per-package, serial, one crate per cargo command; run from
+  `rust/`):** initial run - `cargo test -p alhambra-1` EXIT=0, 47 passed;
+  `cargo test -p modern-art-2` EXIT=0, 25 passed; `cargo test -p
+  seven-wonders-1` EXIT=0, 50 passed; `cargo test -p splendor-2` EXIT=0, 69
+  passed. Each changed crate also passed `cargo clippy -p <crate>
+  --all-targets -- -D warnings` and `cargo fmt -p <crate> -- --check` in the
+  initial run, and `git diff --check` EXIT=0. The corrected modern-art (commit
+  `8814bb0`) re-ran `cargo test -p modern-art-2` (26 lib + 1 contract passed),
+  clippy, fmt, and `git diff --check` - all EXIT=0. No workspace-wide cargo,
+  no `scripts/rust-test.sh`, no Tilt/kind, no global installs, no production
+  operation, no push.
+
+- **Review:** the independent security/privacy review originally REJECTed the
+  implementation on one Important finding only - the legacy Modern Art
+  stale-bids persisted-state compatibility regression (pre-R-30 PlayCard games
+  would no longer load). The bounded correction `8814bb0` addresses exactly
+  that, and the fresh targeted re-review PASSed. No remaining Critical or
+  Important findings. Factual residual: the `bids_cleared_outside_auction`
+  marker remains in the serialized state until pre-R-30 persisted games have
+  drained; it is a deliberate migration shim, not a finding.
+
+- **No change doc:** no standalone R-30 `docs/changes/` document existed and
+  nothing was archived. Coverage item 5.5 (13-crates validate+redaction
+  checklist) is NOT marked done or expanded by this row - R-30 folded its
+  per-crate `Log::public` test shape into the R-30 evidence only; the 5.5
+  inventory/checklist row is left as-is per the brief.
+
+- **Scope / R-07:** `R-07-HANDOVER.md` untouched (last modified by `5c1995d`,
+  pre-dating R-30; absent from both R-30 commit diffs); R-07 (PARKED), R-21
   (gated), R-22 (PARKED) statuses and files untouched; no push.
