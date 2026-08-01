@@ -990,6 +990,7 @@ pub async fn find_proposal_player_by_email_token(
 #[cfg(feature = "ssr")]
 #[derive(Debug, sqlx::FromRow)]
 pub struct NudgeCandidate {
+    pub game_proposal_player_id: Uuid,
     pub proposal_id: Uuid,
     pub user_id: Uuid,
     pub email_token: Option<String>,
@@ -998,10 +999,10 @@ pub struct NudgeCandidate {
 #[cfg(feature = "ssr")]
 pub async fn fetch_nudge_candidates(pool: &PgPool, threshold_secs: i64) -> Vec<NudgeCandidate> {
     let rows = sqlx::query_as::<_, NudgeCandidate>(
-        "SELECT gp.id AS proposal_id, pp.user_id, pp.email_token \
+        "SELECT pp.id AS game_proposal_player_id, gp.id AS proposal_id, pp.user_id, pp.email_token \
          FROM game_proposals gp \
          JOIN game_proposal_players pp ON pp.proposal_id = gp.id \
-         WHERE gp.status = 'open' AND gp.nudged_at IS NULL \
+         WHERE gp.status = 'open' AND pp.nudged_at IS NULL \
            AND gp.created_at < NOW() - ($1 * interval '1 second') \
            AND pp.response = 'pending' AND pp.user_id IS NOT NULL",
     )
@@ -1018,14 +1019,20 @@ pub async fn fetch_nudge_candidates(pool: &PgPool, threshold_secs: i64) -> Vec<N
 }
 
 #[cfg(feature = "ssr")]
-pub async fn mark_proposal_nudged(pool: &PgPool, proposal_id: Uuid) {
-    if let Err(e) =
-        sqlx::query("UPDATE game_proposals SET nudged_at = NOW(), updated_at = NOW() WHERE id = $1")
-            .bind(proposal_id)
-            .execute(pool)
-            .await
+pub async fn mark_proposal_player_nudged(pool: &PgPool, game_proposal_player_id: Uuid) {
+    if let Err(e) = sqlx::query(
+        "UPDATE game_proposal_players SET nudged_at = NOW(), updated_at = NOW() \
+         WHERE id = $1 AND nudged_at IS NULL",
+    )
+    .bind(game_proposal_player_id)
+    .execute(pool)
+    .await
     {
-        tracing::error!("invite_nudge: mark failed for {}: {}", proposal_id, e);
+        tracing::error!(
+            "invite_nudge: mark failed for proposal player {}: {}",
+            game_proposal_player_id,
+            e
+        );
     }
 }
 

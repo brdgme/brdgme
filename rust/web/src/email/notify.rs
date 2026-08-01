@@ -291,8 +291,7 @@ pub fn turn_subject_or_fallback(
 
 /// What one notification attempt did. `Suppressed` covers every deliberate
 /// non-send: opted out, bot slot, no verified address, or active on the web.
-/// Only the turn-reminder sweep currently reads this (wfe F36); every other
-/// caller is best-effort and drops it.
+/// Every caller is best-effort and drops it.
 pub enum SendResult {
     Sent,
     Suppressed,
@@ -518,28 +517,6 @@ pub async fn send_turn_digest_forced(
         SendMode::Forced,
     )
     .await;
-}
-
-/// Sends the turn REMINDER for one player, reporting what happened so the sweep
-/// can decide whether to mark the reminder as sent. Replaces the ~90-line copy
-/// of this pipeline that used to live in `email::sweep` (wfe F36).
-pub async fn send_turn_reminder(
-    resend: Option<&resend_rs::Resend>,
-    pool: &sqlx::PgPool,
-    http_client: &reqwest::Client,
-    game_id: uuid::Uuid,
-    game_player_id: uuid::Uuid,
-) -> SendResult {
-    send_one(
-        resend,
-        pool,
-        http_client,
-        game_id,
-        game_player_id,
-        NotifyKind::Reminder,
-        SendMode::Normal,
-    )
-    .await
 }
 
 /// Diffs `before`/`after` game state and fires the appropriate notification for

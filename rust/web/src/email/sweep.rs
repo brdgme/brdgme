@@ -556,17 +556,13 @@ async fn sweep_invite_nudge_once(resend: Option<&resend_rs::Resend>, pool: &PgPo
     }
     tracing::info!("invite_nudge: {} candidate(s)", candidates.len());
     let mailer = crate::proposals::mailer_from(pool.clone(), resend.cloned());
-    let mut all_sent: std::collections::HashMap<Uuid, bool> = std::collections::HashMap::new();
     for c in &candidates {
         use crate::proposals::InviteMailer;
         let ok = mailer
             .send_invite_now(c.proposal_id, c.user_id, c.email_token.clone())
             .await;
-        *all_sent.entry(c.proposal_id).or_insert(true) &= ok;
-    }
-    for (pid, sent) in &all_sent {
-        if *sent {
-            crate::proposals::mark_proposal_nudged(pool, *pid).await;
+        if ok {
+            crate::proposals::mark_proposal_player_nudged(pool, c.game_proposal_player_id).await;
         }
     }
 }
@@ -1744,6 +1740,208 @@ mod tests {
         assert!(
             nudged_at.is_none(),
             "a transient DB error must prevent marking the proposal as nudged"
+        );
+    }
+
+    // R-19 / F-144: the nudge dedup must be keyed PER-INVITEE, not per-proposal.
+    // Seed one open proposal with TWO pending, emailable invitees and make one
+    // web-present so its `send_invite_now` returns `false` (a transient no-send,
+    // the web-presence suppression at proposals.rs:280-284). Run the nudge sweep
+    // twice. The sendable invitee must be recorded as nudged exactly once - its
+    // own per-invitee marker set - while the retrying (web-present) invitee stays
+    // unmarked so it is retried next tick. Asserts the per-invitee marker state
+    // directly (`game_proposal_players.nudged_at`), not logs.
+    //
+    // RED against the current code: the dedup gate and the mark are per-proposal
+    // (`game_proposals.nudged_at`), there is NO per-invitee marker, so the whole
+    // roster is re-selected and re-nudged every tick for as long as one invitee
+    // stays web-present. This test cannot compile against the current schema
+    // because the per-invitee `game_proposal_players.nudged_at` column does not
+    // exist yet - it is the marker the fix introduces.
+    #[sqlx::test]
+    async fn invite_nudge_dedup_is_per_invitee(pool: PgPool) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(format!("Nudge {}", Uuid::new_v4()))
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let game_version_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated)
+             VALUES ($1, '1.0.0', 'http://127.0.0.1:1', true, false) RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let owner: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, invite_emails_enabled)
+             VALUES ($1, $2, true) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(owner)
+        .bind(format!("owner-{}@example.com", Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The sendable invitee: emailable and never active on the web, so its
+        // send proceeds (returns true).
+        let sendable: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, invite_emails_enabled)
+             VALUES ($1, $2, true) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(sendable)
+        .bind(format!("sendable-{}@example.com", Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The retrying invitee: emailable but web-present, so its send is
+        // transiently suppressed (returns false).
+        let retrying: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors, invite_emails_enabled)
+             VALUES ($1, $2, true) RETURNING id",
+        )
+        .bind(format!("u-{}", Uuid::new_v4()))
+        .bind(Vec::<String>::new())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_emails (user_id, email, is_primary, verified_at)
+             VALUES ($1, $2, true, NOW())",
+        )
+        .bind(retrying)
+        .bind(format!("retrying-{}@example.com", Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let pid: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_proposals (game_version_id, owner_user_id, status, created_at)
+             VALUES ($1, $2, 'open', NOW() - interval '48 hours') RETURNING id",
+        )
+        .bind(game_version_id)
+        .bind(owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        crate::proposals::insert_proposal_player(
+            &mut tx,
+            pid,
+            0,
+            Some(owner),
+            None,
+            None,
+            "accepted",
+            None,
+        )
+        .await
+        .unwrap();
+        let sendable_pp: Uuid = crate::proposals::insert_proposal_player(
+            &mut tx,
+            pid,
+            1,
+            Some(sendable),
+            None,
+            None,
+            "pending",
+            Some(format!("tok-{}", Uuid::new_v4())),
+        )
+        .await
+        .unwrap();
+        let retrying_pp: Uuid = crate::proposals::insert_proposal_player(
+            &mut tx,
+            pid,
+            2,
+            Some(retrying),
+            None,
+            None,
+            "pending",
+            Some(format!("tok-{}", Uuid::new_v4())),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // Make the retrying invitee web-present so its send is a transient no-send.
+        sqlx::query("UPDATE users SET last_active_at = NOW() WHERE id = $1")
+            .bind(retrying)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let candidates = crate::proposals::fetch_nudge_candidates(&pool, 86400).await;
+        assert!(
+            candidates.iter().any(|c| c.user_id == sendable)
+                && candidates.iter().any(|c| c.user_id == retrying),
+            "both pending invitees must be nudge candidates before the sweep runs"
+        );
+
+        sweep_invite_nudge_once(None, &pool).await;
+
+        // Candidate-state evidence: after one sweep the sendable invitee is
+        // marked and therefore no longer selectable, while the retrying
+        // (web-present) invitee is still selectable for a later tick.
+        let candidates_after_first = crate::proposals::fetch_nudge_candidates(&pool, 86400).await;
+        assert!(
+            !candidates_after_first.iter().any(|c| c.user_id == sendable),
+            "the sendable invitee must not be selectable again once nudged"
+        );
+        assert!(
+            candidates_after_first.iter().any(|c| c.user_id == retrying),
+            "the retrying invitee must remain selectable until its send succeeds"
+        );
+
+        sweep_invite_nudge_once(None, &pool).await;
+
+        // Per-invitee marker state: the sendable invitee is nudged exactly once
+        // (its own marker set), the retrying invitee stays unmarked for retry.
+        let sendable_nudged: Option<time::PrimitiveDateTime> = sqlx::query_scalar(
+            "SELECT nudged_at FROM game_proposal_players WHERE id = $1",
+        )
+        .bind(sendable_pp)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            sendable_nudged.is_some(),
+            "the sendable invitee must be recorded as nudged via its own per-invitee marker"
+        );
+
+        let retrying_nudged: Option<time::PrimitiveDateTime> = sqlx::query_scalar(
+            "SELECT nudged_at FROM game_proposal_players WHERE id = $1",
+        )
+        .bind(retrying_pp)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            retrying_nudged.is_none(),
+            "the retrying (web-present) invitee must remain unmarked"
         );
     }
 
