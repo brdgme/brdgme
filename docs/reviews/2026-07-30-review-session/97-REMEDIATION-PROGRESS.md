@@ -41,7 +41,7 @@ restored per owner instruction.)
 | R-16 | done(85fff2e) | 85fff2e784e49f0191a417a1dab2325d80b5df45 | hanamikoji-1 Dockerfile stage + bake target + k8s bundle shipped; delivery-list CI guard added; F-211 smoke assertion restored; comprehensive review PASS, no blocking findings |
 | R-17 | done(2fa5b35) | 2fa5b356646d00bf120d2782a73aa15797c300d0 | closes F-150..F-156 (WP-52 stats/query-perf "Test? y" rows); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime DB/web tests deferred to CI, not claimed passing; comprehensive review resolved two stale SQLX cache entries + F48/F21 entry-point coverage, targeted re-review no blockers |
 | R-18 | done(6a304be) | 6a304be11252048e0cf8ddf1459d38f3a0d38a7a | closes F-134/F-135/F-143 (network calls hoisted out of three transactions); AC1 zero HTTP between begin and commit at all five tx bodies; AC2 deterministic concurrent-change tests for all three (condvar/Notify/Semaphore+Barrier, non-sleep); AC3 F-143 recorded as WP-46-vs-WP-79 reconciliation per CODING.md rare-duplicate rule, not a deviation; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned; needs Postgres/NATS), not claimed passing; comprehensive review REJECT on two invalid tests (dotted version name) -> repaired -> targeted F1/F2 re-review PASS (static) |
-| R-19 | pending | | |
+| R-19 | done(7de92cd) | 7de92cd65458f408087af8262afe92635639762c | closes F-144/F-147 (per-invitee nudge dedup + dead-code deletion); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed; sole warning the in-scope `NotifyKind::Reminder` dead_code); runtime web test deferred to CI, not claimed passing; comprehensive review APPROVE, 0 high/medium, two non-blocking low notes |
 | R-20 | pending | | |
 | R-21 | blocked(R-22..R-26, R-48) | | closing commit of game family |
 | R-22 | pending | | |
@@ -663,6 +663,83 @@ F-134 (High), F-135 (High), F-143 (Low, note).
   F3 is resolved by this tracker entry; F4 remains an accepted residual. The
   only residual common to both reviews is the unchanged one: runtime red/green
   has NOT been executed (web absolute rule) and requires a Postgres+NATS host.
+
+## R-19 evidence
+
+Code commit `7de92cd65458f408087af8262afe92635639762c` (verified via
+`git rev-parse HEAD`; message `fix(web): deduplicate invite nudges per
+recipient (R-19, F-144, F-147)`; tracked changes: `rust/web/src/email/notify.rs`,
+`rust/web/src/email/sweep.rs`, `rust/web/src/proposals.rs`, plus new migration
+`rust/web/migrations/030_proposal_player_nudge.sql`; 227 insertions / 39
+deletions). Closes F-144 (per-invitee nudge dedup) and F-147 (dead-code
+deletion).
+
+- **Root cause:** F-144 was a granularity mismatch - the dedup gate and the
+  mark keyed per-proposal (`game_proposals.nudged_at`) while the send is
+  per-invitee, so one unsendable invitee could block or one sendable invitee
+  could be double-nudged. Fixed at both the selection gate and the mark: the
+  gate re-keys `gp.nudged_at IS NULL` -> `pp.nudged_at IS NULL`
+  (`proposals.rs:1005`), `NudgeCandidate` gains `game_proposal_player_id`
+  (`proposals.rs:993`, SELECT `:1002`), and the per-proposal `all_sent`
+  aggregation + `mark_proposal_nudged` is replaced by the per-invitee
+  conditional mark `mark_proposal_player_nudged` (`proposals.rs:1022-1037`,
+  `UPDATE ... WHERE id=$1 AND nudged_at IS NULL`), called per invitee whose own
+  `send_invite_now` returns `true` (`sweep.rs:559-567`). The mark keys directly
+  on `send_invite_core`'s per-invitee `bool` (`proposals.rs:250-256`):
+  sent-OR-permanent-skip -> `true` -> marked (durable dedup); transient
+  (web-presence suppression `proposals.rs:280-284`, lookup/send failures) ->
+  `false` -> unmarked/retryable. Mirrors the turn-reminder at-most-once
+  conditional mark (`sweep.rs:87-99`). F-147: the dead-at-birth
+  `send_turn_reminder` helper is removed; the sweep keeps its own hardened
+  `send_reminder`/`ReminderOutcome`, and no reminder behavior is refactored.
+
+- **AC1 (dedup test):** `invite_nudge_dedup_is_per_invitee`
+  (`sweep.rs:1758-1946`) calls `sweep_invite_nudge_once` twice
+  (`sweep.rs:1904,1919`) over a sendable (never-active) invitee and a
+  web-present retrying invitee. Between the two sweeps it asserts the sendable
+  invitee is no longer selectable as a candidate while the web-present retrying
+  invitee still is (`sweep.rs:1909-1917`); after sweep 2 it asserts the sendable
+  invitee's marker is set and the retrying invitee's marker is still NULL
+  (`sweep.rs:1923-1945`). Dedup is proven via marker + candidate state (no send
+  counter exists without the F-182/R-20 mailer seam) - permitted by the task.
+
+- **AC2 (`send_turn_reminder` deletion):** deleted with its doc comment. Source
+  (`rust/`) symbol/caller count is **0**; repo-wide there are **14** references,
+  ALL in `docs/reviews/2026-07-30-review-session/` prose (documentation only,
+  expected). The false `SendResult` doc is corrected (`notify.rs:291-294` ->
+  "Every caller is best-effort and drops it").
+
+- **AC3 (no pattern-4e re-derivation):** honored - no pattern-4e revert in
+  `dcd8844c` was re-derived; nothing of the sort is attempted here.
+
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0. Sole warning: `variant `Reminder` is never
+  constructed` at `web/src/email/notify.rs:136` - the documented in-scope F-147
+  side effect (`NotifyKind::Reminder` is now never-constructed; its 4 match arms
+  remain). No errors. (Also a pre-existing `proc-macro-error2 v2.0.1`
+  future-incompat NOTE, unrelated, does not affect exit status.)
+
+- **Runtime:** the new test is compile-verified only; the runtime web test is
+  deferred to CI by explicit ban (web build/test/run forbidden; DB tests need
+  Postgres). NOT claimed passing here - "nudged exactly once" is inferred from
+  marker + candidate state and must be confirmed red-on-old / green-on-new in CI
+  (`scripts/rust-test.sh`).
+
+- **Review:** comprehensive independent review (`/tmp/opencode/r19-review.md`)
+  verdict **APPROVE**; **0 high and 0 medium** findings; two non-blocking low
+  notes - L-1 (the pre-existing R-08 test
+  `invite_nudge_transient_lookup_error_leaves_proposal_unmarked` still asserts
+  `game_proposals.nudged_at IS NONE`, now vacuously true since the sweep writes
+  `game_proposal_players.nudged_at`; behavior covered by the new R-19 test) and
+  L-2 (stale comment at `sweep.rs:1617` still names the removed
+  `mark_proposal_nudged`; behavioral claim still correct).
+
+- **Residual (pre-existing, out of scope):** the invite-nudge sweep has no
+  `FOR UPDATE SKIP LOCKED` claim, so two concurrent replicas can both select an
+  unmarked invitee and both send before either marks (at-most-once mark,
+  at-least-once send window). This is pre-existing (the old per-proposal code
+  had no claim either) and out of F-144 scope; the per-invitee conditional mark
+  narrows, not widens, the window. Not a regression.
 
 ## 5.4 evidence
 
