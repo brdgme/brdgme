@@ -40,7 +40,7 @@ restored per owner instruction.)
 | R-15 | done(4d6244c) | 4d6244c165f00db4ec3676b79385131f6eeaf979 | Closes F-101/F-102/F-105/F-107 (NATS delivery semantics). AC1 dedup: stream config sets `duplicate_window: 120s` (`nats.rs`) and `publish_bot_turns` sets a `Nats-Msg-Id` via `bot_turn_message_id(game_id, position, updated_at, attempt)` (`game/mod.rs:202-211`, call `:264`) published with `jetstream.send_publish(SUBJECT_TURN, message)`; key is `{game_id}:{position}:{updated_at}:{attempt}`; both AC1 duplicate sources publish attempt 0 (`trigger_bot_turns` and the sweep at `email/sweep.rs:437`), so identical turn state still collides to one delivery; test `duplicate_bot_turn_publish_collapses_to_one_delivery`. AC2 redelivery inside 5-min ack_wait: `process_bot_command_message` `Ok(info)` arm Naks with exponential backoff `2u64.saturating_pow(info.delivered.max(1))` -> 2s then 4s (`game/mod.rs:439-457`), delivery 3 still hits the existing `info.delivered >= MAX_DELIVER` Term branch, all well inside the 5-minute `ACK_WAIT`; test `transient_failure_redelivers_command_well_inside_ack_wait`. AC3 reconcile-not-create-if-absent: `ensure_stream_and_consumers` switched `get_or_create_stream`->`create_stream` and `get_or_create_consumer`->`create_consumer` (durable name in the desired config, `nats.rs:106,148-151`) with drift warnings reworded to "still drifted after reconciliation"; drift policy decision = automatic `create_stream`/`create_consumer` reconciliation selected over startup failure because on the pinned `nats:2.11-alpine` server `create_*` updates existing objects in place (probe-verified), so it is safe/idempotent and will not crash on pre-existing objects; test `ensure_stream_and_consumers_reconciles_drifted_config` deliberately drifts `duplicate_window` to 1s and the `bot-turn` consumer to `ack_wait: 30s`/`max_deliver: 1`, sanity-asserts the drift, then asserts exact restoration to `120s`/`ACK_WAIT`/`MAX_DELIVER` (a `get_or_create_*` impl would leave the drift and fail). AC4 remove `(future)` markers: `nats_protocol/src/lib.rs` `MAX_DELIVER` doc and the two `nats.rs` "future recovery" comments reworded; `rg '\(future\)' rust/web/src/nats.rs` exit 1 (zero hits). Design decisions: the 120s `duplicate_window` collapses only rapid re-publishes of the same turn state (broadcast races, conflict/user-error re-publish within 120s) while the 15-minute reconciliation sweep is a deliberate retry intentionally outside the window, and the message-id includes `attempt` so a real retry bumps the key and is not suppressed (this is the F-2 fix - the old attempt-less key silently deduped the deliberate retry after an invalid bot command); the 2s/4s Nak backoff is exponential (`pow(delivered.max(1))`) and stays well inside the 5-minute `ACK_WAIT`, with delivery 3 falling through to the existing Term ceiling. Gates (locally run, exact exit statuses): `cargo fmt -p brdgme_nats -- --check` exit 0; `cargo clippy -p brdgme_nats -- -D warnings` exit 0; `cargo test -p brdgme_nats` exit 0 (8 passed, 0 failed); `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); `git diff --check` exit 0. CI-deferred (WEB HARD BAN, not claimed passing locally): runtime red/green of the three live-NATS integration tests and the F-2 unit test `bot_turn_message_id_differs_by_attempt` (all compile-verified by the permitted `cargo check --all-targets --features ssr`), and the authoritative F-1 E0080 full-codegen confirmation - `cargo check` structurally defers the const-eval, so CI's `cargo test -p web --features ssr` is authoritative; the F-1 fix (`assume_utc()` lifting `PrimitiveDateTime`->`OffsetDateTime`) is byte-for-byte the reviewer's probe-verified recommendation. Review: comprehensive review verdict CHANGES REQUIRED with four findings - F-1 CRITICAL (`PrimitiveDateTime::format(&Iso8601::DEFAULT)` E0080 build break, invisible to `cargo check` but fatal under CI's full codegen), F-2 HIGH (dedup key omitted `attempt`, suppressing the deliberate retry), F-3 MEDIUM (test 3 non-discriminating), F-4 LOW (comment accuracy); all four resolved and the targeted re-review verdict APPROVED with no new blocker; final verification VERIFIED. No push. |
 | R-16 | done(85fff2e) | 85fff2e784e49f0191a417a1dab2325d80b5df45 | hanamikoji-1 Dockerfile stage + bake target + k8s bundle shipped; delivery-list CI guard added; F-211 smoke assertion restored; comprehensive review PASS, no blocking findings |
 | R-17 | done(2fa5b35) | 2fa5b356646d00bf120d2782a73aa15797c300d0 | closes F-150..F-156 (WP-52 stats/query-perf "Test? y" rows); gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime DB/web tests deferred to CI, not claimed passing; comprehensive review resolved two stale SQLX cache entries + F48/F21 entry-point coverage, targeted re-review no blockers |
-| R-18 | pending | | |
+| R-18 | done(6a304be) | 6a304be11252048e0cf8ddf1459d38f3a0d38a7a | closes F-134/F-135/F-143 (network calls hoisted out of three transactions); AC1 zero HTTP between begin and commit at all five tx bodies; AC2 deterministic concurrent-change tests for all three (condvar/Notify/Semaphore+Barrier, non-sleep); AC3 F-143 recorded as WP-46-vs-WP-79 reconciliation per CODING.md rare-duplicate rule, not a deviation; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned; needs Postgres/NATS), not claimed passing; comprehensive review REJECT on two invalid tests (dotted version name) -> repaired -> targeted F1/F2 re-review PASS (static) |
 | R-19 | pending | | |
 | R-20 | pending | | |
 | R-21 | blocked(R-22..R-26, R-48) | | closing commit of game family |
@@ -514,6 +514,155 @@ Tracked changes: `rust/web/src/stats/queries.rs`, `rust/web/src/stats/mod.rs`,
   removed ignored web build artifacts (no source, no tracked files). It is
   recorded here rather than concealed. All actual verification checks were the
   permitted gate above.
+
+## R-18 evidence
+
+Code commit `6a304be11252048e0cf8ddf1459d38f3a0d38a7a` (verified via
+`git rev-parse HEAD`; message `fix(web): move network calls outside
+transactions (R-18, F-134, F-135, F-143)`; tracked changes only:
+`rust/web/src/proposals.rs`, `rust/web/src/email/inbound.rs`,
+`rust/web/src/email/sweep.rs`; 1136 insertions / 88 deletions). Closes
+F-134 (High), F-135 (High), F-143 (Low, note).
+
+- **Objective:** remove the three sites that hold a row lock across an HTTP
+  call. Acceptance criteria: (1) zero HTTP-client calls in each transaction
+  body; (2) each hoisted call followed by an in-tx re-read + re-validation
+  with a test calling the enclosing function under concurrent modification;
+  (3) F-143 recorded as reconciling the WP-46 vs WP-79 policy, not a
+  deviation.
+
+- **AC1 / per-site before-after transaction contract (all five tx bodies
+  confirmed free of HTTP/network I/O between begin and commit):**
+  - **F-134 `start_proposal` (proposals.rs:1748-1810):** BEFORE,
+    `fetch_game_from_service` (reqwest -> game service `Request::New`) ran
+    between `pool.begin()`/`lock_proposal_for_update` and `commit`, holding the
+    `game_proposals` `FOR UPDATE` lock and a pool connection for the full
+    reqwest timeout. AFTER, Phase 1 (no tx) snapshots the proposal + roster,
+    `find_game_type_player_counts`, `find_game_version`, derives
+    `accepted_count`, and calls `fetch_game_from_service` (1748) - all BEFORE
+    `pool.begin()` (1755). Phase 2 (tx 1755..1810): `lock_proposal_for_update`
+    (1760), re-read roster (1774), re-validate owner/status/pending/declined/
+    count, `roster_unchanged` TOCTOU guard (1800, helper 1342),
+    `start_proposal_tx` (1806), single commit (1808). Post-commit: broadcast +
+    `broadcast_and_trigger` + mailer (1812+). `accepted_count` does not depend
+    on an in-tx write here, so an unchanged roster guarantees the fetched game
+    matches the roster written.
+  - **F-135 `handle_invite_reply` (inbound.rs:984-1239):** BEFORE, WP-79's own
+    commit `91c723d` landed `fetch_game_from_service` after `begin()` instead of
+    before, behind the `FOR UPDATE` lock. AFTER, split into two short txs with
+    the fetch in the gap. TX#1 (984..1109): lock, `status == "open"`, roster,
+    `me.response == "pending"`, `update_proposal_player_response`,
+    `count_pending_human_invitees_tx`, `find_game_version` (pool DB read),
+    roster snapshot + `accepted_count` captured into `start_inputs`; no network;
+    commits, releasing the lock. Gap: `fetch_game_from_service` (1124) AFTER
+    TX#1 commit, BEFORE TX#2 begin. TX#2 (1151..1239): re-lock, status re-check,
+    fresh roster re-read, `invite_roster_unchanged` (helper 886) AND
+    `accepted_now != accepted_count` re-derivation (1192), `start_proposal_tx`
+    fed the FRESH roster; no network. RouteOutcome semantics preserved: `Retry`
+    only pre-mutation; once TX#1 commits every path is `Done` (at-least-once
+    webhook safety). The in-tx-write dependency of `accepted_count` (why F-135
+    is harder than F-134) is handled by snapshotting after the response UPDATE
+    inside TX#1.
+  - **F-143 `sweep_once` / `send_reminder` (sweep.rs:87-330):** BEFORE, the
+    claim tx held the `game_players` `FOR UPDATE SKIP LOCKED` lock across a
+    game-service render (`render_board_and_you_can`) AND a Resend API send
+    (`try_send_rendered_email`), serialised over up to 200 candidates per tick.
+    AFTER, `send_reminder` takes `token: String` and holds NO transaction. Claim
+    TX (243..292): `SELECT ... FOR UPDATE SKIP LOCKED` re-checking
+    `turn_reminder_sent_at IS NULL AND is_turn = true` (256-257) +
+    `ensure_email_token_tx` (276, idempotent `COALESCE` upsert), then commit
+    (lock released before network). Send in the gap (300). Mark TX (311..330):
+    conditional `mark_reminder_sent_tx` (87-99) `UPDATE ... WHERE id=$1 AND
+    turn_reminder_sent_at IS NULL AND is_turn = true` - the at-most-once hard
+    guarantee; 0 rows silently accepted. `fetch_candidates` filters on
+    `turn_reminder_sent_at IS NULL` (68), so a marked player is never
+    re-selected. No network in either tx.
+
+- **AC2 / deterministic concurrent-change test evidence (all three; coordination
+  is deterministic and non-sleep - condvar / Notify / Semaphore+Barrier - not
+  timing-based; compile-verified only, runtime deferred to CI):**
+  - **F-134** `start_proposal_rejects_a_stale_snapshot_under_concurrent_roster_change`
+    (proposals.rs:4356): gated in-process mock `spawn_gated_new_game_service`
+    (4226); on `Request::New` the handler sets `entered=true` + `notify_all`
+    then blocks on a `done` condvar; a writer OS thread waits on `entered`,
+    declines the invitee, then sets `done`. The seeded version name
+    `format!("start-mock-{}", Uuid::new_v4().simple())` (4210) is a DNS label
+    that passes `brdgme_game_client::validate_version_name`, so the mock IS
+    reached and the gate fires (a dotted `'1.0.0'` is rejected before any HTTP
+    and would hang). Asserts a stale snapshot under concurrent roster change is
+    rejected, never a game started from a stale roster. The 15s `wait_timeout`
+    is a safety net, not the synchronization.
+  - **F-135** `invite_reply_does_not_start_game_on_stale_roster_after_game_fetch`
+    (inbound.rs:3016): seed (3072-3081) uses the valid DNS-label name
+    `format!("invite-mock-{}", uuid::Uuid::new_v4().simple())` (3077) + mock
+    uri; the mock on `Request::New` does `called.notify_one()` then
+    `proceed.notified().await`; the test awaits `called.notified()`, declines
+    the owner, then `proceed.notify_one()`. `tokio::sync::Notify` stores a
+    permit on `notify_one` even if the waiter is unregistered, so neither
+    handoff is lost to ordering - fully deterministic and non-blocking. Asserts
+    the game is NOT started on a stale roster after the gap fetch.
+  - **F-143** `turn_reminder_concurrent_sweeps_mark_at_most_once`
+    (sweep.rs:2022) plus a single-sweep `Notify` rendezvous test: barrier mock
+    `spawn_barrier_render_service` (1841) emits a `Semaphore` permit from inside
+    the render (hence after that sweep's claim commit) then `barrier.wait()`.
+    With `entered = Semaphore::new(0)`, `barrier = Barrier::new(3)`: spawn s1;
+    acquire permit 1 (exists only after render R(1), hence after claim commit
+    C(1)); ONLY THEN spawn s2, whose `FOR UPDATE SKIP LOCKED` claim finds the
+    row unlocked (C(1) committed) and unmarked (no mark tx yet)
+    deterministically; acquire permit 2; `barrier.wait()` as party 3 releases
+    both renders together; assert `renders == 2` (duplicate external work in the
+    hoisted window) and final `sent_at IS NOT NULL` with a subsequent
+    `sweep_once` rendering nothing (exactly one durable mark wins). The former
+    race (both sweeps spawned at once, s2 starved by SKIP LOCKED) is gone
+    because s2's spawn is gated on an event that implies s1's lock is already
+    released. The two 5s `timeout`s are safety nets, not the determinism
+    mechanism.
+
+- **AC3 / F-143 is a reconciliation of contradictory WP-46 vs WP-79 policy, NOT
+  a deviation:** WP-46 spec 3a mandated holding the lock across the sweep send;
+  WP-79 removes it on the proposal path; the two specs contradict (the reason
+  F-143 is graded "Low, note"). Resolution: hoist everywhere; the hard guarantee
+  is the at-most-once DB MARK (the conditional `turn_reminder_sent_at IS NULL`
+  re-check), and the accepted cost is a rare duplicate reminder SEND. This
+  follows CODING.md:140-142 ("Mark work done only after it succeeded ... a rare
+  duplicate is the cheaper failure mode"), so the sweep hoist needs no new
+  product call and is recorded here as the reconciled policy rather than a
+  deviation from WP-46.
+
+- **Gate (allowed):** `SQLX_OFFLINE=true cargo check -p web --all-targets
+  --features ssr` - exit 0, 0 errors; one pre-existing `proc-macro-error2
+  v2.0.1` future-incompat warning (unrelated, not a code error).
+
+- **Runtime:** the three new tests (and the modified
+  `turn_reminder_suppressed_by_recipient_presence`) are compile-verified only;
+  runtime web tests are deferred to CI by explicit ban (web build/test/run
+  forbidden) and because they need a real Postgres+NATS host
+  (`scripts/rust-test.sh` / CI, not the dev laptop). NO runtime red/green has
+  been executed; all green claims are by reasoning only and MUST be confirmed
+  red-on-old / green-on-new in CI before R-18 is relied upon. Residuals: F-134
+  and F-135 connect to real NATS; F-134's cloned-`PgPool`-from-a-separate-OS-
+  thread pattern has no in-repo precedent and is unproven until run; F-135's
+  outcome assertion is still loose (`Done | Retry`, inbound.rs:3203-3206) and
+  should tighten to `Done` once green is confirmed.
+
+- **Review:** the single comprehensive independent review
+  (`/tmp/opencode/r18-review.md`) returned **REJECT (blocking)**: the three
+  production hoists are correct and the static zero-network-in-transaction
+  property holds, but F1 (HIGH) - the F-134 and F-135 regression tests seeded
+  the dotted version name `'1.0.0'`, which `validate_version_name` rejects
+  before any HTTP, so the mock was never reached and both tests hung; F2
+  (MEDIUM) - the F-143 two-sweep test had a likely SKIP-LOCKED race; F3
+  (MEDIUM/LOW) - the WP-46/WP-79 reconciliation was not yet recorded in the
+  repo; F4 (LOW, accepted) - player rows are not `FOR UPDATE`-locked in the
+  Phase-2 re-read (same residual as the original code and every reference
+  pattern). After the test repair (DNS-label version names + sequencing the
+  second sweep's claim after the first's commit), the **targeted F1/F2
+  re-review** (`/tmp/opencode/r18-targeted-rereview.md`) returned **PASS
+  (static)** for both: F1 F-134 PASS (proposals.rs:4210), F1 F-135 PASS
+  (inbound.rs:3077), F2 F-143 TEST 2 PASS deterministic (sweep.rs:2021-2092).
+  F3 is resolved by this tracker entry; F4 remains an accepted residual. The
+  only residual common to both reviews is the unchanged one: runtime red/green
+  has NOT been executed (web absolute rule) and requires a Postgres+NATS host.
 
 ## 5.4 evidence
 
