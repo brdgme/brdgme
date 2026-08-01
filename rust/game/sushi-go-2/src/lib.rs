@@ -137,12 +137,14 @@ impl Card {
     }
 }
 
-fn draw_count(players: usize) -> usize {
+fn draw_count(players: usize) -> Result<usize, GameError> {
     match players {
-        2 | 3 => 9,
-        4 => 8,
-        5 => 7,
-        _ => unreachable!(),
+        2 | 3 => Ok(9),
+        4 => Ok(8),
+        5 => Ok(7),
+        n => Err(GameError::internal(format!(
+            "sushi-go-2: no draw count for {n} players"
+        ))),
     }
 }
 
@@ -225,7 +227,7 @@ impl Game {
         self.round == TOTAL_ROUNDS
             && !self.hands.is_empty()
             && self.hands[0].is_empty()
-            && self.playing[0].is_none()
+            && self.playing.first().is_some_and(|p| p.is_none())
     }
 
     pub fn whose_turn_inner(&self) -> Vec<usize> {
@@ -242,7 +244,9 @@ impl Game {
     }
 
     pub fn can_dummy(&self, player: usize) -> bool {
-        self.players == 2 && self.controller == player && self.playing[DUMMY].is_none()
+        self.players == 2
+            && self.controller == player
+            && self.playing.get(DUMMY).is_some_and(|p| p.is_none())
     }
 
     pub fn render_name(&self, player: usize) -> N {
@@ -254,15 +258,20 @@ impl Game {
     }
 
     pub fn pudding_cards(&self, player: usize) -> i32 {
-        self.played[player]
-            .iter()
-            .filter(|&&c| c == Card::Pudding)
-            .count() as i32
+        self.played
+            .get(player)
+            .map(|cards| cards.iter().filter(|&&c| c == Card::Pudding).count() as i32)
+            .unwrap_or(0)
     }
 
     pub fn placings(&self) -> Vec<usize> {
         let metrics: Vec<Vec<i32>> = (0..self.players)
-            .map(|p| vec![self.player_points[p], self.pudding_cards(p)])
+            .map(|p| {
+                vec![
+                    self.player_points.get(p).copied().unwrap_or(0),
+                    self.pudding_cards(p),
+                ]
+            })
             .collect();
         gen_placings(&metrics)
     }
@@ -274,7 +283,7 @@ impl Game {
         logs.push(placings_log(&self.placings(), Some(&scores)));
     }
 
-    pub fn start_round(&mut self) -> Vec<Log> {
+    pub fn start_round(&mut self) -> Result<Vec<Log>, GameError> {
         let mut logs = vec![];
         self.round += 1;
         for p in 0..self.all_players {
@@ -286,7 +295,7 @@ impl Game {
             self.played[p] = new_played;
         }
         self.hands = vec![vec![]; self.all_players];
-        let dc = draw_count(self.all_players);
+        let dc = draw_count(self.all_players)?;
         let pass_dir = if self.round == 2 { "right" } else { "left" };
         logs.push(Log::public(vec![
             N::text("Starting round "),
@@ -302,7 +311,7 @@ impl Game {
             self.hands[p] = sort_cards(hand);
         }
         logs.extend(self.start_hand());
-        logs
+        Ok(logs)
     }
 
     pub fn start_hand(&mut self) -> Vec<Log> {
@@ -326,7 +335,7 @@ impl Game {
         logs
     }
 
-    pub fn end_hand(&mut self) -> Vec<Log> {
+    pub fn end_hand(&mut self) -> Result<Vec<Log>, GameError> {
         let mut logs = vec![];
         for p in 0..self.all_players {
             self.hands[p] = trim_played(&self.hands[p]);
@@ -349,8 +358,8 @@ impl Game {
             self.controller = (self.controller + 1) % self.players;
         }
         if self.hands[0].is_empty() {
-            logs.extend(self.end_round());
-            return logs;
+            logs.extend(self.end_round()?);
+            return Ok(logs);
         }
         if self.players == 2 {
             logs.push(Log::public(vec![N::text("Players are swapping hands")]));
@@ -369,7 +378,7 @@ impl Game {
             self.hands.rotate_right(1);
         }
         logs.extend(self.start_hand());
-        logs
+        Ok(logs)
     }
 
     pub fn score(&self) -> (Vec<i32>, Vec<Vec<N>>) {
@@ -622,7 +631,7 @@ impl Game {
         (scores, output)
     }
 
-    pub fn end_round(&mut self) -> Vec<Log> {
+    pub fn end_round(&mut self) -> Result<Vec<Log>, GameError> {
         let (scores, mut output) = self.score();
         output.push(vec![N::Bold(vec![N::text(
             "The scores after this round are:",
@@ -648,9 +657,9 @@ impl Game {
         }
         let mut logs = vec![Log::public(content)];
         if self.round < TOTAL_ROUNDS {
-            logs.extend(self.start_round());
+            logs.extend(self.start_round()?);
         }
-        logs
+        Ok(logs)
     }
 
     pub fn play(&mut self, player: usize, cards: Vec<usize>) -> Result<Vec<Log>, GameError> {
@@ -720,7 +729,7 @@ impl Game {
                 return Ok(vec![]);
             }
         }
-        Ok(self.end_hand())
+        self.end_hand()
     }
 }
 
@@ -759,8 +768,48 @@ impl Gamer for Game {
                 g.render_name(DUMMY),
             ]));
         }
-        logs.extend(g.start_round());
+        logs.extend(g.start_round()?);
         Ok((g, logs))
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "sushi-go-2: players {} out of range",
+                self.players
+            )));
+        }
+        let expected_all = if self.players == 2 { 3 } else { self.players };
+        if self.all_players != expected_all {
+            return Err(GameError::internal(format!(
+                "sushi-go-2: all_players {} does not match players {}",
+                self.all_players, self.players
+            )));
+        }
+        if self.hands.len() != self.all_players {
+            return Err(GameError::internal("sushi-go-2: hands length mismatch"));
+        }
+        if self.playing.len() != self.all_players {
+            return Err(GameError::internal("sushi-go-2: playing length mismatch"));
+        }
+        if self.played.len() != self.all_players {
+            return Err(GameError::internal("sushi-go-2: played length mismatch"));
+        }
+        if self.player_points.len() != self.all_players {
+            return Err(GameError::internal(
+                "sushi-go-2: player_points length mismatch",
+            ));
+        }
+        if self.controller >= self.players {
+            return Err(GameError::internal("sushi-go-2: controller out of range"));
+        }
+        if !(1..=TOTAL_ROUNDS).contains(&self.round) {
+            return Err(GameError::internal(format!(
+                "sushi-go-2: round {} out of range",
+                self.round
+            )));
+        }
+        Ok(())
     }
 
     fn status(&self) -> Status {
@@ -788,7 +837,9 @@ impl Gamer for Game {
             player_points: self.player_points.clone(),
             finished,
             final_scores: if finished {
-                (0..self.players).map(|p| self.player_points[p]).collect()
+                (0..self.players)
+                    .map(|p| self.player_points.get(p).copied().unwrap_or(0))
+                    .collect()
             } else {
                 vec![]
             },
@@ -810,7 +861,7 @@ impl Gamer for Game {
                 None
             },
             dummy_playing: if self.players == 2 && player == self.controller {
-                self.playing[DUMMY].clone()
+                self.playing.get(DUMMY).cloned().flatten()
             } else {
                 None
             },
@@ -1278,10 +1329,29 @@ mod tests {
 
     #[test]
     fn test_draw_counts() {
-        assert_eq!(9, draw_count(2));
-        assert_eq!(9, draw_count(3));
-        assert_eq!(8, draw_count(4));
-        assert_eq!(7, draw_count(5));
+        assert_eq!(9, draw_count(2).unwrap());
+        assert_eq!(9, draw_count(3).unwrap());
+        assert_eq!(8, draw_count(4).unwrap());
+        assert_eq!(7, draw_count(5).unwrap());
+    }
+
+    // --- R-24 (F-210): draw_count must be total, not panic out of range ---
+
+    #[test]
+    fn test_draw_count_out_of_range_is_defined_not_panic() {
+        assert!(draw_count(0).is_err());
+        assert!(draw_count(1).is_err());
+        assert!(draw_count(6).is_err());
+        assert!(draw_count(999).is_err());
+    }
+
+    // --- R-24 (F-65): the removed silent `_ => 9` fallback must not return ---
+
+    #[test]
+    fn test_draw_count_out_of_range_is_not_silent_nine() {
+        for n in [0usize, 1, 6, 999] {
+            assert!(!matches!(draw_count(n), Ok(9)));
+        }
     }
 
     #[test]
@@ -1389,7 +1459,7 @@ mod tests {
             Some(vec![Card::Dumpling]),
             Some(vec![Card::SalmonNigiri]),
         ];
-        g.end_hand();
+        g.end_hand().unwrap();
         // After trim: [Sashimi], [MakiRoll1], [SquidNigiri]
         // Pass left (rotate_left): [0]<-[1], [1]<-[2], [2]<-[0]
         assert_eq!(vec![Card::MakiRoll1], g.hands[MICK]);
@@ -1622,5 +1692,121 @@ mod tests {
         let resp = g2b.command(MICK, "play 1", &n2).unwrap();
         assert!(g2b.is_finished());
         assert_finish_response(&g2b, &resp);
+    }
+
+    // --- R-24 (F-61): render path must not panic on a short/short state ---
+
+    #[test]
+    fn test_is_finished_short_playing_no_panic() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.round = TOTAL_ROUNDS;
+        g.hands = vec![vec![]];
+        g.playing = vec![];
+        assert!(!g.is_finished());
+    }
+
+    #[test]
+    fn test_can_dummy_short_playing_no_panic() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.controller = 0;
+        g.playing = vec![None];
+        assert!(!g.can_dummy(0));
+    }
+
+    #[test]
+    fn test_pudding_cards_short_played_no_panic() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.played = vec![];
+        assert_eq!(0, g.pudding_cards(0));
+    }
+
+    #[test]
+    fn test_placings_short_player_points_no_panic() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.played = vec![vec![], vec![], vec![]];
+        g.player_points = vec![];
+        assert_eq!(vec![1, 1, 1], g.placings());
+    }
+
+    #[test]
+    fn test_pub_state_short_player_points_no_panic() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.round = TOTAL_ROUNDS;
+        g.hands = vec![vec![], vec![], vec![]];
+        g.playing = vec![None, None, None];
+        g.player_points = vec![];
+        let ps = g.pub_state();
+        assert_eq!(vec![0, 0, 0], ps.final_scores);
+    }
+
+    #[test]
+    fn test_player_state_short_playing_dummy_no_panic() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.controller = 0;
+        g.playing = vec![None, None];
+        let pls = g.player_state(0);
+        assert_eq!(None, pls.dummy_playing);
+    }
+
+    // --- R-24 (F-61): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn test_validate_accepts_started_game() {
+        let (g, _) = Game::start(3, 1).unwrap();
+        assert!(g.validate().is_ok());
+        let (g2, _) = Game::start(2, 1).unwrap();
+        assert!(g2.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_each_short_parallel_vector() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        assert!(g.validate().is_ok());
+
+        g.hands = vec![];
+        assert!(g.validate().is_err());
+        let (mut g, _) = Game::start(3, 1).unwrap();
+
+        g.playing = vec![];
+        assert!(g.validate().is_err());
+        let (mut g, _) = Game::start(3, 1).unwrap();
+
+        g.played = vec![];
+        assert!(g.validate().is_err());
+        let (mut g, _) = Game::start(3, 1).unwrap();
+
+        g.player_points = vec![];
+        assert!(g.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_bad_scalar_fields() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.players = 1;
+        assert!(g.validate().is_err());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.players = 6;
+        assert!(g.validate().is_err());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.all_players = 99;
+        assert!(g.validate().is_err());
+
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.all_players = 2;
+        assert!(g.validate().is_err());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.controller = 3;
+        assert!(g.validate().is_err());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.round = 0;
+        assert!(g.validate().is_err());
+
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.round = 4;
+        assert!(g.validate().is_err());
     }
 }
