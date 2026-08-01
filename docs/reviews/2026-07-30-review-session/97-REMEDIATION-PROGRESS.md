@@ -48,7 +48,7 @@ restored per owner instruction.)
 | R-23 | done(3db5c06) | 3db5c06e95fe78a6b521e87a4cd2e27aab77093b | closes F-60/F-62/F-63/F-64; strictly two crates (lost-cities-1, lost-cities-2); -1 validate() + direct player_state defense + named no-panic test; -2 three unreachable!() player-count helpers -> Result errors propagated through score/end_round/draw_hand_full + direct/command-path four-player Err tests; AC4 score_3p_works coverage-only (passed pre-fix, no rules change); per-crate test/clippy/fmt all pass; comprehensive review APPROVE/PASS, no Critical/Important/Minor findings |
 | R-24 | done(d37c423) | d37c4231d10704d17a0466fffc732103107ec769 | closes F-61/F-65/F-210; `validate()` override asserts players 2..=5, all_players==if 2 then 3 else players, four parallel vector lengths==all_players, controller<players, round 1..=TOTAL_ROUNDS; six render-path sites converted to `.get()`/`.first()` defined fallbacks with six `*_no_panic` tests; `draw_count` -> `Result<usize, GameError>` total (no `_` arm, no `unreachable!()`) propagated via `?` through start_round/end_round/end_hand/play_cards; TDD RED/GREEN (AC2 panic RED, AC3 compile-error RED, AC1 assertion-failure RED per default trait validate); `cargo test -p sushi-go-2 --lib` 50 pass / 0 fail, clippy `-D warnings` exit 0, fmt exit 0; raw-index sweep 37 hits all justified, `unreachable!()` zero; comprehensive review APPROVE, no Critical/Important, one non-blocking Minor (implementation report mischaracterizes AC1 validate tests as compile-error RED; the trait default means they compile and fail assertions pre-fix) |
 | R-25 | done(df3d1ce) | df3d1ce25b8b50ba6b1fe292d4c8ff21d6054939 | closes F-24 (alhambra-1), F-31 (starship-catan-1), F-33 (seven-wonders-1), F-37 (splendor-2), F-49 (cathedral-2), F-51 (sushizock-2), F-54 (jaipur-2), F-70 (for-sale-2 + battleship-2), F-82 (tic-tac-toe-2); all TEN named crates covered (plan prose says "nine" but the Files list and per-crate AC enumerate ten - discrepancy reported, not resolved); AC1 all ten have a `validate()` override plus a direct malformed-state validate test calling it (assertion-failure RED pre-fix per the still-present trait-default validate); AC2 all ten have a direct render entry-point no-panic test (fixed-array exceptions: starship render.rs clamps `current`/`viewer` to `boards.len()-1`, jaipur lib `hands.get(player)` :737, tic-tac-toe fixed board has no panic surface; already-defensive exceptions: for-sale/battleship/cathedral render paths were pre-hardened so their no-panic tests are regression guards); F-49 cathedral BOTH command-path boundary fixes each with a test (off-by-one `>`->`>=` at :150 tested by `can_play_piece_rejects_piece_equal_to_catalogue_len`; untrusted-tile i32 wrap guarded via let-chain `get_mut` at :347 tested by `check_captures_handles_zero_piece_type_without_panicking` and `check_captures_handles_out_of_range_player_without_panicking`); F-70 player-count bound added INSIDE both existing validates (for-sale `players in 3..=5` at :401 mirroring red7-1, battleship `players == NUM_PLAYERS` at :426; existing checks preserved verbatim); per-crate serial verification family `cargo test -p <crate>` + `cargo clippy -p <crate> --all-targets -- -D warnings` + `cargo fmt -p <crate> -- --check` + `git diff --check` all exit 0: alhambra 45, starship 47, seven-wonders 49, splendor 67, cathedral 40, sushizock 53, jaipur 72, for-sale 22, battleship 41, tic-tac-toe 28 (lib passed; 0 failed) plus each crate's contract test 1 passed; comprehensive independent review APPROVE, no Critical/Important, one non-blocking Minor (jaipur render.rs viewer-index raw indexing left unhardened - explicitly out of R-25's deserialized-`current_player` scope: the production render path loops `0..player_count()` which returns the compile-time `NUM_PLAYERS` constant, so only viewers 0/1 are ever rendered; the residual is a request-input-validation concern at the requester boundary, not the F-06 class R-25 targets); no additional review performed under the owner rule; R-07 untouched, R-22 still parked/blocked, R-21 remains gated; no push; no migration; no `scripts/rust-test.sh` (not required - per-crate verification performed) |
-| R-26 | pending | | |
+| R-26 | done(a302112) | a302112f28104e2c7045df299a60f4c2668eb060 | closes F-66/F-67/F-68/F-74/F-76; strictly three crates (category-5-2, zombie-dice-2, red7-1); F-66 category `validate` rejects resolving-with-no-played-card for `choose_player` + `can_choose` now requires a played card so `choose`'s `expect` is unreachable, direct validate/no-panic tests; F-67/F-74 equal-hand-size check inside `validate` + direct validate/no-panic tests, false equal-hands comment deleted not corrected, F-73/`draw_cards`/R-31 explicitly untouched; F-68 zombie 13-dice conservation across cup/kept/current_roll inside `validate` + saturating `take_dice` drain + direct validate/no-panic tests; F-76 red7 `validate` rejects non-finished all-eliminated + `leader`/`leader_with_suit` return `Option` (no `player_map[l_index]` panic), all four production call sites handle `None`, direct tests; TDD RED category 4 / zombie 2 / red7 2 then GREEN; per-crate serial test/clippy/fmt all exit 0 (category 26+1, zombie 28+1, red7 26+1), `git diff --check` exit 0; comprehensive review PASS WITH NON-BLOCKING NOTES, no Critical/Important, three non-blocking Minor (all_dice allocation per validate, auto-play swallowed Err, pre-existing web fmt debt); no migration, no scripts/rust-test.sh, no Tilt/kind/production, no push; R-07-HANDOVER.md untouched, R-22/R-21/R-07 untouched |
 | R-27 | pending | | |
 | R-28 | pending | | |
 | R-29 | pending | | |
@@ -1030,3 +1030,111 @@ doc, Cargo, or other-tracker changes in the code commit.
 - **No push:** nothing was pushed.
 
 - **R-07-HANDOVER.md:** untouched.
+
+## R-26 evidence
+
+Code commit `a302112f28104e2c7045df299a60f4c2668eb060` (verified via
+`git rev-parse`; parent/base `ad67cd2dea6961994c4c5e73da7f43ef878f6673`,
+also verified via `git rev-parse`; message `R-26: enforce cross-field
+invariants in validate, harden panic paths (F-66, F-67, F-68, F-74, F-76)`;
++146/-27). Closes F-66, F-67, F-68, F-74, F-76. No migration, doc, Cargo, or
+other-tracker changes in the code commit.
+
+- **Status:** done.
+
+- **Changed source files (exactly three):** `rust/game/category-5-2/src/lib.rs`,
+  `rust/game/zombie-dice-2/src/lib.rs`, `rust/game/red7-1/src/lib.rs`.
+
+- **F-66 (category-5-2, resolving-with-no-played-card):** `validate` rejects
+  `self.resolving && self.plays[self.choose_player].is_none()` with
+  `GameError::internal("category-5-2: resolving with no played card for
+  choose_player")`; `can_choose` now additionally requires
+  `self.plays.get(player).is_some_and(|p| p.is_some())`, so the selected play
+  is `Some` whenever `can_choose` is true and `choose`'s former `expect` is
+  unreachable. Direct tests: `test_validate_rejects_resolving_without_played_card`
+  (validate -> `Err`) and `test_choose_does_not_panic_on_resolving_without_played_card`
+  (`choose(0,1).is_err()`, no panic).
+
+- **F-67 / F-74 (category-5-2, equal hand sizes):** the equal-hand-size check
+  lives INSIDE `validate` (`equal_hands` via `hands.first().is_none_or(..all
+  same len..)`, rejecting with `GameError::internal("category-5-2: hands are
+  not all the same size")`). The false comment "All hands have equal size by
+  construction (dealt simultaneously each round)." was DELETED, not corrected
+  (F-74). The auto-play loop was hardened from raw `self.hands[p][0]` +
+  `.expect("auto-play should only play valid cards")` to
+  `let Some(&card) = self.hands[p].first() else { continue }` +
+  `if let Ok(play_logs) = self.play(p, card)`. Direct tests:
+  `test_validate_rejects_unequal_hand_sizes` (validate -> `Err`) and
+  `test_resolve_plays_does_not_panic_on_unequal_hands` (no panic on an empty
+  hand). F-73, `draw_cards`, and R-31 were explicitly NOT touched.
+
+- **F-68 (zombie-dice-2, dice conservation):** `validate` rejects states where
+  `self.cup.len() + self.kept.len() + self.current_roll.len()` != the 13-dice
+  total (`all_dice().len()`), with `GameError::internal("zombie-dice-2: dice
+  not conserved across cup, kept, and current_roll")`. `take_dice` drain is now
+  saturating: `let take = n.min(self.cup.len()); self.cup.drain(..take)`, so an
+  empty cup no longer panics. Direct tests:
+  `test_validate_rejects_missing_dice_conservation` (empties cup/kept/current_roll,
+  validate -> `Err`) and `test_take_dice_does_not_panic_on_empty_cup_and_kept`
+  (`take_dice(ROLL_DICE_COUNT)` returns an empty `taken`, no panic).
+
+- **F-76 (red7-1, all-eliminated leader panic):** `validate` rejects a
+  non-finished all-eliminated state (`!self.finished &&
+  self.eliminated.iter().all(|&e| e)` -> `GameError::internal("red7-1: all
+  players eliminated")`). `leader` and `leader_with_suit` now return
+  `Option<(usize, Vec<Card>)>`; the panic site `player_map[l_index]` became
+  `player_map.get(l_index).map(|&p| (p, palette))`, and the stale PRECONDITION
+  doc comment was replaced. All four production call sites handle `None`:
+  `start_round` (`self.leader().map(|(i, _)| i).unwrap_or(0)`), `end_turn`
+  (`self.leader().map(|(i, _)| i)` + `is_some_and(|i| i != self.current_player)`),
+  `end_round` (`match self.leader() { Some(leader) => leader, None => return }`),
+  and `discard` (`match self.leader_with_suit(card.suit) { Some((idx, _)) => idx,
+  None => return Err(..) }`). Direct tests:
+  `test_leader_returns_none_when_all_eliminated` (`leader_with_suit`/`leader`
+  -> `None`), `test_validate_rejects_all_eliminated_unfinished` (validate ->
+  `Err`), and `test_discard_does_not_panic_on_all_eliminated`
+  (`leader_with_suit` no panic + `discard(0, card).is_err()`).
+
+- **TDD RED/GREEN:** pre-fix RED was category-5-2 four failures
+  (`test_choose_does_not_panic_on_resolving_without_played_card` panicked at
+  `choose`'s `expect`, `test_resolve_plays_does_not_panic_on_unequal_hands`
+  panicked at the `self.hands[1][0]` index, plus the two assertion-failure
+  validate tests `test_validate_rejects_resolving_without_played_card` and
+  `test_validate_rejects_unequal_hand_sizes`); zombie-dice-2 two failures
+  (`test_take_dice_does_not_panic_on_empty_cup_and_kept` panicked at the
+  `drain`, `test_validate_rejects_missing_dice_conservation` assertion failure);
+  red7-1 two failures (`test_discard_does_not_panic_on_all_eliminated` panicked
+  at the `player_map[l_index]` leader index, `test_validate_rejects_all_eliminated_unfinished`
+  assertion failure). All RED tests pass post-fix (GREEN).
+
+- **Verification (per-package, serial, one crate per cargo command; run from
+  `rust/`):** `cargo test -p category-5-2` -> EXIT=0, lib 26 passed / 0 failed
+  plus contract 1 passed (26+1); `cargo test -p zombie-dice-2` -> EXIT=0, lib
+  28 passed / 0 failed plus contract 1 passed (28+1); `cargo test -p red7-1` ->
+  EXIT=0, lib 26 passed / 0 failed plus contract 1 passed (26+1);
+  `cargo clippy -p <crate> --all-targets -- -D warnings` -> EXIT=0 for all three;
+  `cargo fmt -p <crate> -- --check` -> EXIT=0 for all three;
+  `git diff --check ad67cd2..a302112` -> EXIT=0. No workspace-wide cargo, no
+  `scripts/rust-test.sh`, no Tilt/kind, no global installs, no production
+  operation, no push. A full workspace `cargo fmt --all -- --check` was NOT
+  claimed passing (see review note 3).
+
+- **Review:** comprehensive independent review
+  (`/tmp/opencode/r26-comprehensive-review.md`) verdict
+  **PASS WITH NON-BLOCKING NOTES**; no Critical or Important findings; three
+  non-blocking Minor notes - (1) `zombie-dice-2/src/lib.rs:476` `all_dice().len()`
+  builds a fresh 13-element `Vec` per `validate` call (a `const` count would be
+  cleaner; correctness unaffected); (2) `category-5-2/src/lib.rs:237` auto-play
+  `if let Ok(..)` silently swallows the `play` `Err` (defensive malformed-state
+  hardening that makes the path total; acceptable); (3) pre-existing
+  `rust/web/` fmt violations - `cargo fmt --all -- --check` exits 1 but every
+  diff is in `rust/web/src/**` and `rust/web/tests/**`, files R-26 did not
+  touch (present at base; out of R-26 scope, flagged as repo hygiene only).
+
+- **Scope exclusions:** no migrations; no `scripts/rust-test.sh`; no
+  Tilt/kind; no production operations; F-73/`draw_cards`/R-31 untouched.
+
+- **No push:** nothing was pushed.
+
+- **R-07-HANDOVER.md:** untouched. R-22 (PARKED), R-21 (gated), and R-07
+  (PARKED) statuses and files untouched.
