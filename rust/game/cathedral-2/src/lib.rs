@@ -122,6 +122,14 @@ impl Game {
 
     /// Port of `Game.CanPlay` (`play_command.go`).
     pub fn can_play(&self, player: i32) -> bool {
+        // F-56: `play` can set `finished = true` while `no_open_tiles` stays
+        // false (the finish branch skips the simultaneous-mode branch), and
+        // in that state the else arm below would keep returning true for the
+        // last mover, leaving `command_spec` advertising `play` on a finished
+        // game. A finished game accepts no commands.
+        if self.finished {
+            return false;
+        }
         if self.no_open_tiles {
             self.can_play_something(player, LocFilter::Playable)
         } else {
@@ -544,27 +552,26 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
-        match output {
+        let was_finished = self.is_finished();
+        let (mut logs, can_undo, remaining) = match output {
             Ok(ParseOutput {
                 value: Command::Play { piece, loc, dir },
                 remaining,
                 ..
-            }) => {
-                let mut logs = self.play(player as i32, piece, loc, dir)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.players)
-                        .map(|p| (p, -self.remaining_piece_size(p as i32).unwrap_or(0)))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
-                }
-                Ok(CommandResponse {
-                    logs,
-                    can_undo: true,
-                    remaining_input: remaining.to_string(),
-                })
-            }
-            Err(e) => Err(GameError::invalid_input(e.to_string())),
+            }) => (self.play(player as i32, piece, loc, dir)?, true, remaining),
+            Err(e) => return Err(GameError::invalid_input(e.to_string())),
+        };
+        if !was_finished && self.is_finished() {
+            let scores: Vec<(usize, i32)> = (0..self.players)
+                .map(|p| (p, -self.remaining_piece_size(p as i32).unwrap_or(0)))
+                .collect();
+            logs.push(placings_log(&self.placings(), Some(&scores)));
         }
+        Ok(CommandResponse {
+            logs,
+            can_undo,
+            remaining_input: remaining.to_string(),
+        })
     }
 
     fn command_spec(&self, player: usize) -> Option<CommandSpec> {
@@ -1125,6 +1132,70 @@ C1C1C1..........G4G4
         assert!(logs.iter().any(|l| {
             log_plain(l).contains("The game is finished, remaining piece size is as follows:")
         }));
+    }
+
+    // --- R-32 (F-18, F-56): !was_finished epilogue gate, finished command
+    // availability ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finished_game_emits_one_epilogue_and_no_play_command() {
+        let p = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        // Every piece for both players is played except one single-tile piece
+        // for player 0, and the board is otherwise full, so the next play
+        // genuinely finishes the game while `no_open_tiles` stays false - the
+        // F-56 state where `can_play` used to stay true for the last mover.
+        for pl in 0..2 {
+            for i in 0..g.played_pieces[pl].len() {
+                g.played_pieces[pl][i] = true;
+            }
+        }
+        g.played_pieces[0][12] = false;
+        for l in loc::all_locs() {
+            if l == Loc::new(0, 0) {
+                continue;
+            }
+            g.board.insert(
+                l.to_key(),
+                Tile {
+                    player: 1,
+                    typ: 2,
+                    owner: NO_PLAYER,
+                    text: String::new(),
+                },
+            );
+        }
+        g.current_player = 0;
+        assert!(!g.no_open_tiles);
+        assert!(g.command_spec(0).is_some());
+
+        // The finishing move emits exactly one placings epilogue, appended
+        // after the game-end log.
+        let resp = g.command(0, "play 13 a1 down", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(
+            !g.no_open_tiles,
+            "the game finished before simultaneous mode was reached"
+        );
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+
+        // A finished game no longer advertises `play` for either player, and
+        // a further command is rejected outright.
+        assert!(g.command_spec(0).is_none());
+        assert!(g.command_spec(1).is_none());
+        assert!(g.command(0, "play 13 a1 down", &p).is_err());
     }
 
     #[test]
