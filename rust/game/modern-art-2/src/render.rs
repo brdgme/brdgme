@@ -89,6 +89,7 @@ fn render(
     // Players / purchases table.
     let mut rows: Vec<Row> = vec![vec![
         (A::Left, vec![N::Bold(vec![N::text("Players")])]),
+        (A::Left, vec![N::Bold(vec![N::text("Cards")])]),
         (A::Left, vec![N::Bold(vec![N::text("Purchases")])]),
     ]];
     for op in 0..pub_state.players {
@@ -105,8 +106,10 @@ fn render(
             }
             N::Group(nodes)
         };
+        let hand_count = pub_state.hand_counts.get(op).copied().unwrap_or(0);
         rows.push(vec![
             (A::Left, vec![N::Player(op)]),
+            (A::Left, vec![N::text(hand_count.to_string())]),
             (A::Left, vec![cards_node]),
         ]);
     }

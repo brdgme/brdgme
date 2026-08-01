@@ -70,6 +70,8 @@ pub struct PubState {
     pub current_bid: Option<(usize, i32)>,
     /// Cards purchased this round, indexed by player. Each inner vec holds that player's bought cards, sorted. Cleared at the start of each round.
     pub purchases: Vec<Vec<Card>>,
+    /// Number of cards in each player's hand, indexed by player. Hand size is open information.
+    pub hand_counts: Vec<usize>,
     /// Artist value awarded per completed round. Each entry is one round's awards (a map of artist to the $30/$20/$10 it earned). Sum across rounds for an artist's total value.
     pub value_board: Vec<HashMap<Suit, i32>>,
 }
@@ -306,6 +308,7 @@ impl Game {
             "It is the end of the round",
         )])])];
         self.currently_auctioning = vec![];
+        self.bids = HashMap::new();
         self.state = State::PlayCard;
         let mut counts: HashMap<Suit, usize> = HashMap::new();
         for s in suits() {
@@ -339,12 +342,19 @@ impl Game {
                 p_total += self.suit_value(c.suit);
             }
             logs.push(Log::public(vec![
-                N::text("Paying "),
                 N::Player(p),
-                N::text(" "),
-                render::money(p_total),
-                N::text(" for selling all their cards"),
+                N::text(" sold all their cards"),
             ]));
+            logs.push(Log::private(
+                vec![
+                    N::text("Paying "),
+                    N::Player(p),
+                    N::text(" "),
+                    render::money(p_total),
+                    N::text(" for selling all their cards"),
+                ],
+                vec![p],
+            ));
             self.player_money[p] += p_total;
         }
         if self.round == ROUNDS - 1 {
@@ -358,11 +368,14 @@ impl Game {
                     ),
                 ]);
             }
-            logs.push(Log::public(vec![
-                N::Bold(vec![N::text("End of the game, final player money:")]),
-                N::text("\n"),
-                brdgme_markup::table_with_gap(&money_rows, 1),
-            ]));
+            logs.push(Log::private(
+                vec![
+                    N::Bold(vec![N::text("End of the game, final player money:")]),
+                    N::text("\n"),
+                    brdgme_markup::table_with_gap(&money_rows, 1),
+                ],
+                (0..self.players).collect(),
+            ));
             self.finished = true;
         } else {
             self.round += 1;
@@ -429,6 +442,7 @@ impl Game {
 
     fn settle_auction(&mut self, winner: usize, price: i32) -> Vec<Log> {
         let mut logs = vec![];
+        self.bids = HashMap::new();
         self.player_money[winner] -= price;
         let cards = std::mem::take(&mut self.currently_auctioning);
         self.player_purchases[winner].extend(cards.clone());
@@ -443,11 +457,21 @@ impl Game {
             N::Player(winner),
             N::text(" bought "),
             render::card_names(&cards),
-            N::text(", paying "),
-            render::money(price),
-            N::text(" to "),
-            paid_to,
         ]));
+        let mut parties = vec![winner];
+        if winner != self.current_player {
+            parties.push(self.current_player);
+        }
+        logs.push(Log::private(
+            vec![
+                N::Player(winner),
+                N::text(" paid "),
+                render::money(price),
+                N::text(" to "),
+                paid_to,
+            ],
+            parties,
+        ));
         self.state = State::PlayCard;
         self.next_player();
         logs.extend(self.advance_past_empty_hands());
@@ -641,6 +665,7 @@ impl Gamer for Game {
                 None
             },
             purchases: self.player_purchases.clone(),
+            hand_counts: self.player_hands.iter().map(Vec::len).collect(),
             value_board: self.value_board.clone(),
         }
     }
@@ -703,10 +728,7 @@ impl Gamer for Game {
             Err(e) => return Err(e),
         };
         if self.is_finished() {
-            let scores: Vec<(usize, i32)> = (0..self.players)
-                .map(|p| (p, self.player_money[p]))
-                .collect();
-            logs.push(placings_log(&self.placings(), Some(&scores)));
+            logs.push(placings_log(&self.placings(), None));
         }
         Ok(CommandResponse {
             logs,
@@ -778,6 +800,11 @@ impl Gamer for Game {
                 "modern-art-2: current_player {} >= players {}",
                 self.current_player, self.players
             )));
+        }
+        if self.state == State::PlayCard && !self.bids.is_empty() {
+            return Err(GameError::internal(
+                "modern-art-2: bids not empty outside an auction",
+            ));
         }
         Ok(())
     }
@@ -1157,12 +1184,236 @@ mod tests {
         let pub_state = g.pub_state();
         let json = serde_json::to_string(&pub_state).unwrap();
         assert!(!json.contains("money"));
-        assert!(!json.contains("hand"));
+        assert!(!json.contains("\"hand\""));
         assert!(!json.contains("current_bid") || json.contains("\"current_bid\":null"));
     }
 
     fn log_plain(log: &Log) -> String {
         brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
+    }
+
+    #[test]
+    fn auction_settlement_amount_is_private_to_the_parties() {
+        // F-28: the price paid in an auction settle is secret-money detail;
+        // the public log names the purchase only.
+        let p = players(4);
+        let mut g = mock_game();
+        g.current_player = MICK;
+        g.player_hands[MICK].push(Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        });
+        let mut all_logs: Vec<Log> = vec![];
+        all_logs.extend(g.command(MICK, "play lmop", &p).unwrap().logs);
+        all_logs.extend(g.command(STEVE, "bid 10", &p).unwrap().logs);
+        all_logs.extend(g.command(MICK, "pass", &p).unwrap().logs);
+        all_logs.extend(g.command(ELVA, "pass", &p).unwrap().logs);
+        all_logs.extend(g.command(BJ, "pass", &p).unwrap().logs);
+        assert_eq!(State::PlayCard, g.state);
+
+        for log in all_logs.iter().filter(|l| l.public) {
+            let t = log_plain(log);
+            assert!(
+                !t.contains("paying $"),
+                "public log must not publish the price: {}",
+                t
+            );
+            assert!(
+                !t.contains("paid $"),
+                "public log must not publish the price: {}",
+                t
+            );
+        }
+        assert!(
+            all_logs
+                .iter()
+                .filter(|l| l.public)
+                .any(|l| log_plain(l).contains("bought")),
+            "the purchase itself stays public"
+        );
+        let private_payments: Vec<&Log> = all_logs
+            .iter()
+            .filter(|l| !l.public && log_plain(l).contains("paid $"))
+            .collect();
+        assert_eq!(1, private_payments.len(), "one private payment log");
+        assert_eq!(
+            vec![STEVE, MICK],
+            private_payments[0].to,
+            "the amount goes to the buyer and the seller"
+        );
+        assert!(
+            g.bids.is_empty(),
+            "bids must be cleared once the auction settles (F-30)"
+        );
+    }
+
+    #[test]
+    fn round_end_payout_amount_is_private_to_the_player() {
+        // F-28: the end-of-round payout is secret-money detail; the public
+        // log names the sale only.
+        let p = players(3);
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.current_player = MICK;
+        let lm_open = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        };
+        let lm_double = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Double,
+        };
+        g.player_purchases = vec![vec![lm_double], vec![lm_double], vec![lm_double]];
+        g.player_hands[MICK] = vec![lm_double, lm_double, lm_double, lm_double];
+        g.player_hands[STEVE] = vec![lm_open, lm_open, lm_open, lm_open];
+        let mut all_logs: Vec<Log> = vec![];
+        all_logs.extend(g.command(MICK, "play lmdb", &p).unwrap().logs);
+        all_logs.extend(g.command(MICK, "pass", &p).unwrap().logs);
+        all_logs.extend(g.command(STEVE, "add lmop", &p).unwrap().logs);
+        assert_eq!(1, g.round);
+
+        for log in all_logs.iter().filter(|l| l.public) {
+            let t = log_plain(log);
+            assert!(
+                !t.contains("for selling all their cards"),
+                "public log must not publish the payout: {}",
+                t
+            );
+            assert!(
+                !t.contains("Paying "),
+                "public log must not publish the payout: {}",
+                t
+            );
+        }
+        let private_payouts: Vec<&Log> = all_logs
+            .iter()
+            .filter(|l| !l.public && log_plain(l).contains("for selling all their cards"))
+            .collect();
+        assert_eq!(3, private_payouts.len(), "one private payout per player");
+        for (i, l) in private_payouts.iter().enumerate() {
+            assert_eq!(vec![i], l.to, "the payout amount goes to that player only");
+        }
+    }
+
+    #[test]
+    fn final_round_money_stays_out_of_public_logs() {
+        // F-28: the final money table and the placings scores are secret
+        // until the end, and even then go to entitled players privately.
+        let p = players(4);
+        let mut g = mock_game();
+        let lm_open = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        };
+        g.round = 3;
+        g.player_purchases[MICK] = vec![lm_open, lm_open];
+        g.player_purchases[STEVE] = vec![lm_open];
+        g.player_purchases[BJ] = vec![lm_open];
+        g.player_hands[MICK].push(lm_open);
+        let resp = g.command(MICK, "play lmop", &p).unwrap();
+        assert!(g.is_finished());
+
+        for log in resp.logs.iter().filter(|l| l.public) {
+            let t = log_plain(log);
+            assert!(
+                !t.contains("final player money"),
+                "final money table must not be public: {}",
+                t
+            );
+            assert!(
+                !t.contains("Final scores"),
+                "placings must not publish scores: {}",
+                t
+            );
+            assert!(
+                !t.contains("Paying "),
+                "round-end payout must not be public: {}",
+                t
+            );
+        }
+        assert!(
+            resp.logs
+                .iter()
+                .any(|l| !l.public && log_plain(l).contains("final player money")),
+            "the final money table is delivered privately"
+        );
+        let placings: Vec<&Log> = resp
+            .logs
+            .iter()
+            .filter(|l| {
+                let t = log_plain(l);
+                t.contains("wins!") || t.contains("tie!")
+            })
+            .collect();
+        assert_eq!(1, placings.len(), "exactly one placings log");
+        assert!(placings[0].public, "the winner announcement stays public");
+        assert!(
+            !log_plain(placings[0]).contains("Final scores"),
+            "the placings log must not carry per-player money"
+        );
+    }
+
+    #[test]
+    fn bids_cleared_when_settle_ends_the_round() {
+        // F-30: a settle that empties all hands flows into end_round with
+        // stale bids present; both must leave `bids` empty.
+        let p = players(3);
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.round = 3;
+        g.state = State::PlayCard;
+        g.current_player = MICK;
+        let lm_open = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        };
+        g.player_hands = vec![vec![lm_open], vec![], vec![]];
+        g.player_purchases = vec![vec![]; 3];
+        g.command(MICK, "play lmop", &p).unwrap();
+        g.command(STEVE, "pass", &p).unwrap();
+        g.command(BJ, "pass", &p).unwrap();
+        assert!(g.is_finished(), "round 4 with no cards left must end");
+        assert_eq!(State::PlayCard, g.state);
+        assert!(
+            g.bids.is_empty(),
+            "bids must be cleared when the round ends mid-auction"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_bids_outside_an_auction() {
+        // F-30: PlayCard with leftover bids is an invalid persisted state.
+        let mut g = mock_game();
+        g.bids.insert(0, 5);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn pub_state_exposes_hand_counts() {
+        // F-29: hand size is open information in Modern Art and belongs in
+        // PubState plus the public render.
+        use brdgme_game::Renderer;
+        let g = mock_game();
+        let ps = g.pub_state();
+        assert_eq!(vec![9, 9, 9, 9], ps.hand_counts);
+        let render = brdgme_markup::plain(&brdgme_markup::transform(&ps.render(), &[]));
+        assert!(
+            render.contains("Cards"),
+            "players table must show a hand-count column, got:\n{}",
+            render
+        );
+
+        let p = players(4);
+        let mut g = mock_game();
+        g.current_player = MICK;
+        g.player_hands[MICK].push(Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        });
+        g.command(MICK, "play lmop", &p).unwrap();
+        assert_eq!(
+            g.player_hands[MICK].len(),
+            g.pub_state().hand_counts[MICK],
+            "hand counts track the actual hands"
+        );
     }
 
     #[test]

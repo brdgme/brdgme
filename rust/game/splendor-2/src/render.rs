@@ -161,11 +161,13 @@ fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
     }
     let mut rows: Vec<Row> = vec![header];
     for (l, r) in pub_state.board.iter().enumerate() {
+        let deck_count = pub_state.deck_counts.get(l).copied().unwrap_or(0);
         let mut upper: Row = vec![cel(
             A::Left,
             vec![grey(vec![
                 N::text("Level "),
                 N::Bold(vec![N::text((l + 1).to_string())]),
+                N::text(format!(" ({} left)", deck_count)),
             ])],
         )];
         let mut lower: Row = vec![blank_cell()];

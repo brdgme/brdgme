@@ -722,10 +722,13 @@ impl Game {
                 break;
             }
             self.to_resolve.remove(0);
-            logs.push(Log::public(vec![
-                N::Player(player),
-                N::text(" has no cards they can take from the discard pile"),
-            ]));
+            logs.push(Log::private(
+                vec![
+                    N::Player(player),
+                    N::text(" has no cards they can take from the discard pile"),
+                ],
+                vec![player],
+            ));
         }
         logs
     }
@@ -1020,6 +1023,10 @@ mod tests {
     fn cmd(g: &mut Game, player: usize, input: &str) -> Result<CommandResponse, GameError> {
         let p = players();
         g.command(player, input, &p)
+    }
+
+    fn log_plain(log: &Log) -> String {
+        brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
     }
 
     fn new_game() -> Game {
@@ -1361,6 +1368,49 @@ mod tests {
             g.whose_turn(),
             vec![MICK, STEVE, GREG],
             "the hand must have ended and passed for everyone"
+        );
+    }
+
+    #[test]
+    fn no_takeable_discard_log_is_private_to_the_player() {
+        // F-34: the discard-pile contents are hidden (discard_count only in
+        // PubState), so the prune reason must be private to the affected
+        // player, not a public assertion about the hidden pile.
+        let mut g = new_game();
+        for p in 0..3 {
+            g.cities[p] = giza_a();
+        }
+        g.hands[MICK][0] = db_card("Halicarnassus A Wonder Stage 2");
+        g.cards[MICK] = vec![db_card("Ore Vein"), db_card("Foundry"), db_card("Palace")];
+        g.hands[STEVE][0] = db_card("Lumber Yard");
+        g.hands[GREG][0] = db_card("Clay Pool");
+        g.discard = vec![db_card("Palace")];
+
+        let mut all_logs: Vec<Log> = vec![];
+        all_logs.extend(cmd(&mut g, MICK, "build 1").unwrap().logs);
+        all_logs.extend(cmd(&mut g, STEVE, "build 1").unwrap().logs);
+        all_logs.extend(cmd(&mut g, GREG, "build 1").unwrap().logs);
+        assert!(g.to_resolve.is_empty());
+
+        let prune_texts: Vec<&Log> = all_logs
+            .iter()
+            .filter(|l| log_plain(l).contains("has no cards they can take"))
+            .collect();
+        assert_eq!(1, prune_texts.len(), "the prune is logged exactly once");
+        assert!(
+            !prune_texts[0].public,
+            "the prune reason must not be public"
+        );
+        assert_eq!(
+            vec![MICK],
+            prune_texts[0].to,
+            "the prune reason goes to the affected player"
+        );
+        assert!(
+            all_logs
+                .iter()
+                .all(|l| !l.public || !log_plain(l).contains("has no cards they can take")),
+            "no public log may describe the hidden pile"
         );
     }
 

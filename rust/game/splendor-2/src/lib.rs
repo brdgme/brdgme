@@ -74,14 +74,15 @@ pub struct PubPlayer {
 }
 
 /// Ported from what `render.go`'s `PubRender` (`pNum == -1`) actually shows:
-/// deck contents/sizes are never rendered so are omitted; reserve card
-/// contents are never shown for any player in the pub view.
+/// reserve card contents are never shown for any player in the pub view.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PubState {
     /// Number of players in the game, 2 through 4.
     pub players: usize,
     /// Face-up development cards available to buy or reserve, indexed by level (0 = level 1, 1 = level 2, 2 = level 3). Each level holds up to 4 cards; a slot disappears once its deck is empty.
     pub board: Vec<Vec<Card>>,
+    /// Remaining draw pile size per level (0 = level 1, 1 = level 2, 2 = level 3). The deck contents are hidden; the size is public.
+    pub deck_counts: Vec<usize>,
     /// Nobles currently available to visit, each worth 3 prestige and requiring a cost paid in permanent card bonuses.
     pub nobles: Vec<Noble>,
     /// The bank's remaining supply of each gem and Gold token.
@@ -215,16 +216,16 @@ impl Game {
     }
 
     /// Ported from `game.go`'s `DiscardPhase`.
-    fn discard_phase(&mut self) -> Vec<Log> {
+    fn discard_phase(&mut self) -> Result<Vec<Log>, GameError> {
         self.phase = Phase::Discard;
         if self.player_boards[self.current_player].tokens.sum() <= MAX_TOKENS {
             return self.next_phase();
         }
-        vec![]
+        Ok(vec![])
     }
 
     /// Ported from `game.go`'s `VisitPhase`.
-    fn visit_phase(&mut self) -> Vec<Log> {
+    fn visit_phase(&mut self) -> Result<Vec<Log>, GameError> {
         self.phase = Phase::Visit;
         let pb_bonuses = self.player_boards[self.current_player].bonuses();
         let can_visit: Vec<usize> = (0..self.nobles.len())
@@ -232,10 +233,8 @@ impl Game {
             .collect();
         match can_visit.len() {
             0 => self.next_phase(),
-            1 => self
-                .visit(self.current_player, can_visit[0])
-                .unwrap_or_else(|e| vec![Log::public(vec![N::text(e.to_string())])]),
-            _ => vec![],
+            1 => self.visit(self.current_player, can_visit[0]),
+            _ => Ok(vec![]),
         }
     }
 
@@ -252,11 +251,11 @@ impl Game {
     }
 
     /// Ported from `game.go`'s `NextPhase`.
-    fn next_phase(&mut self) -> Vec<Log> {
+    fn next_phase(&mut self) -> Result<Vec<Log>, GameError> {
         match self.phase {
             Phase::Main => self.visit_phase(),
             Phase::Visit => self.discard_phase(),
-            Phase::Discard => self.next_player(),
+            Phase::Discard => Ok(self.next_player()),
         }
     }
 
@@ -352,7 +351,7 @@ impl Game {
         let amount = Cost::from_keys(tokens.iter().copied());
         self.player_boards[player].tokens = self.player_boards[player].tokens.add(&amount);
         self.tokens = self.tokens.sub(&amount);
-        logs.extend(self.next_phase());
+        logs.extend(self.next_phase()?);
         Ok(logs)
     }
 
@@ -412,7 +411,7 @@ impl Game {
             }
             _ => return Err(GameError::invalid_input("that is not a valid row")),
         }
-        logs.extend(self.next_phase());
+        logs.extend(self.next_phase()?);
         Ok(logs)
     }
 
@@ -456,7 +455,7 @@ impl Game {
         } else {
             self.board[row].remove(col);
         }
-        logs.extend(self.next_phase());
+        logs.extend(self.next_phase()?);
         Ok(logs)
     }
 
@@ -490,7 +489,7 @@ impl Game {
         let mut logs = vec![Log::public(parts)];
 
         if self.player_boards[player].tokens.sum() <= MAX_TOKENS {
-            logs.extend(self.next_phase());
+            logs.extend(self.next_phase()?);
         }
         Ok(logs)
     }
@@ -519,7 +518,7 @@ impl Game {
             noble_node(&n),
         ])];
         self.nobles.remove(noble);
-        logs.extend(self.next_phase());
+        logs.extend(self.next_phase()?);
         Ok(logs)
     }
 }
@@ -592,6 +591,7 @@ impl Gamer for Game {
         PubState {
             players: self.players,
             board: self.board.clone(),
+            deck_counts: self.decks.iter().map(|d| d.len()).collect(),
             nobles: self.nobles.clone(),
             tokens: self.tokens.clone(),
             player_boards: self
@@ -1144,7 +1144,7 @@ mod tests {
         g.phase = Phase::Main;
         // No bonuses at all, no noble is affordable (nobles cost at least 3
         // of something).
-        g.visit_phase();
+        g.visit_phase().unwrap();
         assert_eq!(Phase::Main, g.phase);
     }
 
@@ -1157,9 +1157,33 @@ mod tests {
         }];
         g.player_boards[0].cards = vec![card_with_cost(Resource::Diamond, &[])];
         g.phase = Phase::Main;
-        let logs = g.visit_phase();
+        let logs = g.visit_phase().unwrap();
         assert_eq!(1, g.player_boards[0].nobles.len());
         assert!(!logs.is_empty());
+    }
+
+    #[test]
+    fn auto_visit_failure_propagates_without_public_log() {
+        // F-38: a failed auto-visit must surface as a GameError, never as a
+        // public log carrying raw internal error text.
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.nobles = vec![Noble {
+            prestige: 3,
+            cost: brdgme_cost::Cost(std::collections::HashMap::from([(Resource::Diamond, 1)])),
+        }];
+        g.player_boards[0].cards = vec![card_with_cost(Resource::Diamond, &[])];
+        g.phase = Phase::Main;
+        g.ended = true;
+        let err = g.visit_phase().unwrap_err();
+        assert!(
+            !err.to_string().is_empty(),
+            "the error surfaces with its message"
+        );
+        assert_eq!(
+            0,
+            g.player_boards[0].nobles.len(),
+            "a failed auto-visit awards nothing"
+        );
     }
 
     #[test]
@@ -1180,7 +1204,7 @@ mod tests {
             card_with_cost(Resource::Sapphire, &[]),
         ];
         g.phase = Phase::Main;
-        g.visit_phase();
+        g.visit_phase().unwrap();
         assert_eq!(Phase::Visit, g.phase);
         assert!(g.can_visit(0));
 
@@ -1264,6 +1288,34 @@ mod tests {
         assert_eq!(1, placings[0]);
         assert_eq!(1, placings[1]);
         assert_eq!(3, placings[2]);
+    }
+
+    #[test]
+    fn pub_state_exposes_deck_counts() {
+        // F-39: per-level deck sizes are public information in Splendor and
+        // belong in PubState plus the public render.
+        use brdgme_game::Renderer;
+        let g = Game::start(3, 1).unwrap().0;
+        let ps = g.pub_state();
+        assert_eq!(vec![36, 26, 16], ps.deck_counts);
+        let render = brdgme_markup::plain(&brdgme_markup::transform(&ps.render(), &[]));
+        assert!(
+            render.contains("36 left"),
+            "level 1 deck size must render, got:\n{}",
+            render
+        );
+        assert!(
+            render.contains("26 left"),
+            "level 2 deck size must render, got:\n{}",
+            render
+        );
+        assert!(
+            render.contains("16 left"),
+            "level 3 deck size must render, got:\n{}",
+            render
+        );
+        let json = serde_json::to_string(&ps).unwrap();
+        assert!(!json.contains("\"decks\""));
     }
 
     #[test]

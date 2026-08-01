@@ -172,11 +172,18 @@ impl Game {
                 g.boards[p].cards.push(c);
             }
             if !drew.is_empty() {
-                let card_strs: Vec<String> = drew.iter().map(|c| c.to_string()).collect();
                 logs.push(Log::public(vec![
                     N::Player(p),
-                    N::text(format!(" drew {}", card_strs.join(", "))),
+                    N::text(format!(" drew {} cards", drew.len())),
                 ]));
+                let card_strs: Vec<String> = drew.iter().map(|c| c.to_string()).collect();
+                logs.push(Log::private(
+                    vec![
+                        N::Player(p),
+                        N::text(format!(" drew {}", card_strs.join(", "))),
+                    ],
+                    vec![p],
+                ));
             }
         }
 
@@ -471,9 +478,8 @@ impl Game {
                 content.push(N::text("\n"));
                 content.push(N::Player(p));
                 content.push(N::text(format!(
-                    " had the most money for {} with {} and got {}",
+                    " had the most money for {} and got {}",
                     currency.name(),
-                    best_value,
                     tile.tile_type.abbr().trim()
                 )));
             }
@@ -1490,6 +1496,85 @@ mod tests {
         assert!(
             combined.contains("had the most money for blue"),
             "expected currency detail in: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn start_game_logs_do_not_expose_dealt_card_codes() {
+        // F-22: opening money-card identities are private to the drawing
+        // player; public logs carry only a count.
+        let (g, logs) = Game::start(3, 0).unwrap();
+        let dealt: Vec<String> = (0..g.human_players)
+            .flat_map(|p| g.boards[p].cards.iter().map(|c| c.to_string()))
+            .collect();
+        assert!(!dealt.is_empty());
+        for log in logs.iter().filter(|l| l.public) {
+            let text = log_plain(log);
+            for code in &dealt {
+                assert!(
+                    !text.contains(code.as_str()),
+                    "public log must not expose dealt card {}: {}",
+                    code,
+                    text
+                );
+            }
+        }
+        assert!(
+            logs.iter()
+                .filter(|l| l.public)
+                .any(|l| log_plain(l).contains("drew")),
+            "a public count line must announce the opening draw"
+        );
+        for p in 0..g.human_players {
+            let detail: Vec<String> = logs
+                .iter()
+                .filter(|l| !l.public && l.to == vec![p] && log_plain(l).contains("drew"))
+                .map(log_plain)
+                .collect();
+            assert_eq!(1, detail.len(), "one private draw log per player");
+            let expected: Vec<String> = g.boards[p].cards.iter().map(|c| c.to_string()).collect();
+            assert!(
+                expected.iter().all(|code| detail[0].contains(code)),
+                "private draw log must list the drawn cards: {} vs {}",
+                detail[0],
+                expected.join(", ")
+            );
+        }
+    }
+
+    #[test]
+    fn final_place_public_log_hides_private_hand_value() {
+        // F-23: best_value is an aggregate over the winner's private hand
+        // and must not appear in the public final-placement log.
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.phase = Phase::Place;
+        g.current_player = 0;
+        g.boards[0].place = vec![];
+        g.boards[1].place = vec![];
+        g.boards[2].place = vec![];
+        g.tiles[0] = Tile::new(TileType::Pavillion, 5, &[]);
+        g.tiles[1] = Tile::empty();
+        g.tiles[2] = Tile::empty();
+        g.tiles[3] = Tile::empty();
+        g.boards[0].cards = vec![Card::new(Currency::Blue, 9)];
+        g.boards[1].cards = vec![Card::new(Currency::Blue, 3)];
+        g.boards[2].cards = vec![Card::new(Currency::Blue, 5)];
+        let logs = g.final_place_phase();
+        let combined: String = logs
+            .iter()
+            .filter(|l| l.public)
+            .map(log_plain)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            combined.contains("had the most money for blue"),
+            "winner and tile stay public: {}",
+            combined
+        );
+        assert!(
+            !combined.contains(" with 9"),
+            "private hand value must not be published: {}",
             combined
         );
     }
