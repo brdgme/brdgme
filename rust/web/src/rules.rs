@@ -257,10 +257,11 @@ fn non_empty(s: String) -> Option<String> {
 
 /// Fetches basic + advanced strategy for a game version. Returns
 /// `(basic, advanced)`; each is `None` when absent/empty or when the game is V1.
-/// The strategy handlers are static `include_str!` content that IGNORE their
-/// `game`/`player` request fields (verified: `rust/lib/cmd/src/requester/gamer.rs`
-/// matches `BasicStrategy { .. }` and never parses `game`), so an empty `game`
-/// string works - no throwaway `Request::New` state is needed.
+/// The V2 strategy handlers VALIDATE the `game`/`player` request fields
+/// (`rust/lib/cmd/src/requester/gamer.rs` deserializes and `validate()`s the
+/// state and bounds-checks the player), so a valid scratch game is created via
+/// `New` (using the first supported `PlayerCounts` count) and its serialized
+/// state plus player 0 is sent in both requests.
 #[cfg(feature = "ssr")]
 pub(crate) async fn fetch_strategy(
     http: &reqwest::Client,
@@ -272,12 +273,45 @@ pub(crate) async fn fetch_strategy(
     if !strategy_supported(interface_version) {
         return Ok((None, None));
     }
+    let players =
+        match crate::game::client::request(http, uri, name, &Request::PlayerCounts).await? {
+            Response::PlayerCounts { player_counts } => player_counts,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "unexpected response to PlayerCounts request"
+                ));
+            }
+        };
+    let players = match players.first() {
+        Some(&players) => players,
+        None => {
+            return Err(anyhow::anyhow!(
+                "game service reported no supported player counts"
+            ));
+        }
+    };
+    let state = match crate::game::client::request(
+        http,
+        uri,
+        name,
+        &Request::New {
+            players,
+            seed: None,
+        },
+    )
+    .await?
+    {
+        Response::New { game, .. } => game.state,
+        _ => {
+            return Err(anyhow::anyhow!("unexpected response to New request"));
+        }
+    };
     let basic = match crate::game::client::request(
         http,
         uri,
         name,
         &Request::BasicStrategy {
-            game: String::new(),
+            game: state.clone(),
             player: 0,
         },
     )
@@ -295,7 +329,7 @@ pub(crate) async fn fetch_strategy(
         uri,
         name,
         &Request::AdvancedStrategy {
-            game: String::new(),
+            game: state,
             player: 0,
         },
     )
@@ -507,6 +541,140 @@ mod tests {
         assert_eq!(non_empty(String::new()), None);
         assert_eq!(non_empty("   \n".to_string()), None);
         assert_eq!(non_empty("x".to_string()), Some("x".to_string()));
+    }
+
+    /// A minimal V2 game whose `start`/`player_counts` only support 2 players.
+    /// The mock game service below runs it through the REAL hardened
+    /// `GameRequester`, so `fetch_strategy`'s payloads must pass the same
+    /// deserialize + `validate()` + player bounds-check the F-16 change added
+    /// (`rust/lib/cmd/src/requester/gamer.rs`). Pre-fix `fetch_strategy` sent
+    /// `game: ""`, which this requester rejects with `RequestError::Parse`.
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    struct MockGame {
+        players: usize,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct MockState;
+
+    impl brdgme_game::Renderer for MockState {
+        fn render(&self) -> Vec<brdgme_markup::Node> {
+            vec![]
+        }
+    }
+
+    impl brdgme_game::Gamer for MockGame {
+        type PubState = MockState;
+        type PlayerState = MockState;
+
+        fn start(
+            players: usize,
+            _seed: u64,
+        ) -> Result<(Self, Vec<brdgme_game::Log>), brdgme_game::errors::GameError> {
+            if players != 2 {
+                return Err(brdgme_game::errors::GameError::PlayerCount {
+                    min: 2,
+                    max: 2,
+                    given: players,
+                });
+            }
+            Ok((MockGame { players }, vec![]))
+        }
+
+        fn pub_state(&self) -> MockState {
+            MockState
+        }
+
+        fn player_state(&self, _player: usize) -> MockState {
+            MockState
+        }
+
+        fn command(
+            &mut self,
+            _player: usize,
+            _input: &str,
+            _players: &[String],
+        ) -> Result<brdgme_game::CommandResponse, brdgme_game::errors::GameError> {
+            Ok(brdgme_game::CommandResponse {
+                logs: vec![],
+                can_undo: false,
+                remaining_input: String::new(),
+            })
+        }
+
+        fn status(&self) -> brdgme_game::Status {
+            brdgme_game::Status::Active {
+                whose_turn: vec![0],
+                eliminated: vec![],
+            }
+        }
+
+        fn command_spec(&self, _player: usize) -> Option<brdgme_game::command::Spec> {
+            None
+        }
+
+        fn player_count(&self) -> usize {
+            self.players
+        }
+
+        fn player_counts() -> Vec<usize> {
+            vec![2]
+        }
+
+        fn basic_strategy() -> String {
+            "mock basic strategy".to_string()
+        }
+
+        fn advanced_strategy() -> String {
+            "mock advanced strategy".to_string()
+        }
+    }
+
+    /// Regression (R-29/F-16): `fetch_strategy` must send a valid, validated
+    /// scratch game state and a valid player to the V2 strategy endpoints. The
+    /// in-process mock runs the real `GameRequester`, so a payload with an
+    /// empty/unparseable `game` or an out-of-range `player` is rejected exactly
+    /// as a deployed V2 game service would reject it.
+    #[tokio::test]
+    async fn fetch_strategy_sends_validated_payloads_and_receives_strategy() {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{Request, Response};
+        use brdgme_cmd::requester::Requester;
+        use brdgme_cmd::requester::gamer;
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(|Json(payload): Json<Request>| async move {
+                let mut requester = gamer::new::<MockGame>();
+                Json(
+                    requester
+                        .request(&payload)
+                        .unwrap_or_else(|e| Response::SystemError {
+                            message: e.to_string(),
+                        }),
+                )
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let http = reqwest::Client::new();
+        let (basic, advanced) = fetch_strategy(&http, &format!("http://{addr}"), "test-game-2", 2)
+            .await
+            .expect("fetch_strategy must succeed against a V2 game service");
+        assert_eq!(basic.as_deref(), Some("mock basic strategy"));
+        assert_eq!(advanced.as_deref(), Some("mock advanced strategy"));
+
+        // V1 games are skipped without any request (uri/name never reached).
+        let (basic, advanced) = fetch_strategy(&http, "http://127.0.0.1:1", "test-game-1", 1)
+            .await
+            .unwrap();
+        assert_eq!(basic, None);
+        assert_eq!(advanced, None);
     }
 
     // DB integration test (runs in CI where Postgres exists; fails to connect
