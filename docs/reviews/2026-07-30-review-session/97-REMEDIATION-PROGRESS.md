@@ -46,7 +46,7 @@ restored per owner instruction.)
 | R-21 | blocked(R-22..R-26, R-48) | | closing commit of game family |
 | R-22 | blocked(AC1 test quantity unsatisfiable; needs owner amendment) | | AC1 requires seven per-player-vector short-state tests, but current `texas-holdem-2::Game` has exactly four such vectors (`player_hands`, `player_money`, `bets`, `folded_players`); its specific test quantity cannot be satisfied without owner amendment. Evidence report `/tmp/opencode/r22-root-cause.md` is ephemeral and is not an authoritative repository artifact. |
 | R-23 | done(3db5c06) | 3db5c06e95fe78a6b521e87a4cd2e27aab77093b | closes F-60/F-62/F-63/F-64; strictly two crates (lost-cities-1, lost-cities-2); -1 validate() + direct player_state defense + named no-panic test; -2 three unreachable!() player-count helpers -> Result errors propagated through score/end_round/draw_hand_full + direct/command-path four-player Err tests; AC4 score_3p_works coverage-only (passed pre-fix, no rules change); per-crate test/clippy/fmt all pass; comprehensive review APPROVE/PASS, no Critical/Important/Minor findings |
-| R-24 | pending | | |
+| R-24 | done(d37c423) | d37c4231d10704d17a0466fffc732103107ec769 | closes F-61/F-65/F-210; `validate()` override asserts players 2..=5, all_players==if 2 then 3 else players, four parallel vector lengths==all_players, controller<players, round 1..=TOTAL_ROUNDS; six render-path sites converted to `.get()`/`.first()` defined fallbacks with six `*_no_panic` tests; `draw_count` -> `Result<usize, GameError>` total (no `_` arm, no `unreachable!()`) propagated via `?` through start_round/end_round/end_hand/play_cards; TDD RED/GREEN (AC2 panic RED, AC3 compile-error RED, AC1 assertion-failure RED per default trait validate); `cargo test -p sushi-go-2 --lib` 50 pass / 0 fail, clippy `-D warnings` exit 0, fmt exit 0; raw-index sweep 37 hits all justified, `unreachable!()` zero; comprehensive review APPROVE, no Critical/Important, one non-blocking Minor (implementation report mischaracterizes AC1 validate tests as compile-error RED; the trait default means they compile and fail assertions pre-fix) |
 | R-25 | pending | | L; re-size per crate |
 | R-26 | pending | | |
 | R-27 | pending | | |
@@ -934,3 +934,99 @@ Code commit `973ea62a3cb407127e527acbb64063305c65414d` (verified via
   hardening), R-38 (admin surface + db module). 5.4 is done; those items'
   "blocked by 5.4" condition is removed. 5.3/R-17/R-37/R-38 themselves remain
   pending or blocked on other dependencies - not marked done here.
+
+## R-24 evidence
+
+Code commit `d37c4231d10704d17a0466fffc732103107ec769` (verified via
+`git rev-parse`; parent/base `83c6bd8ad2afbe164c32db3af6c0e7cff2fc967d`;
+message `sushi-go-2: validate state and make render path total (R-24)`;
+tracked change exactly one file: `rust/game/sushi-go-2/src/lib.rs`,
++217/-31). Closes F-61 (High), F-65 (Medium), F-210 (Medium). No migration,
+doc, Cargo, or other-tracker changes in the code commit.
+
+- **Status:** done.
+
+- **Changed file:** exactly `rust/game/sushi-go-2/src/lib.rs`.
+
+- **AC1 (F-61, validate() exists and is tested):** `Gamer::validate` override
+  at `lib.rs:775-813`, shape-copied from the lost-cities-2 reference. Asserts
+  all required invariants: `players` in `2..=5` (776), `all_players ==
+  if players==2 {3} else {players}` (782-788), all four parallel vector lengths
+  (`hands`/`playing`/`played`/`player_points`) `== all_players` (789-802),
+  `controller < players` (803), `round` in `1..=TOTAL_ROUNDS` (806). Invoked
+  immediately after `serde_json::from_str(game)?` at the requester boundary for
+  Status/Play/PubRender/PlayerRender (`rust/lib/cmd/src/requester/gamer.rs:
+  45,59,71,80`), so a short deserialized state now returns `SystemError`
+  instead of failing open. Tests: `test_validate_accepts_started_game`
+  (positive control, 2p+3p), `test_validate_rejects_each_short_parallel_vector`
+  (truncates each of the four vectors in turn, asserts `Err`),
+  `test_validate_rejects_bad_scalar_fields` (players range both ends,
+  all_players mismatch incl. the 2p->3 rule, controller, round range both
+  ends).
+
+- **AC2 (F-61, six render-path sites total, no-panic tests, raw-index sweep):**
+  all six sites converted to defined fallbacks - `is_finished`
+  `playing.first().is_some_and(..)` (230), `can_dummy`
+  `playing.get(DUMMY).is_some_and(..)` (249), `pudding_cards`
+  `played.get(player).map(..).unwrap_or(0)` (261-264), `placings`
+  `player_points.get(p).copied().unwrap_or(0)` (271), `pub_state`
+  `player_points.get(p).copied().unwrap_or(0)` (841), `player_state`
+  `playing.get(DUMMY).cloned().flatten()` (864). Six `*_no_panic` tests each
+  call the converted site on a short state and assert a defined result
+  (`lib.rs:1699-1749`); pre-fix these panic at exactly the cited lines
+  (228/245/257/265/791/813) - accurate RED evidence for AC2.
+
+- **AC3 (F-65/F-210, draw_count total, no `_`/`unreachable!()`, tested):**
+  `draw_count` (`lib.rs:140-149`) returns `Result<usize, GameError>`; arms
+  `2|3 => Ok(9)`, `4 => Ok(8)`, `5 => Ok(7)`, `n => Err(GameError::internal(..))`.
+  No `_` arm, no `unreachable!()`. Error propagated via `?` through
+  `start_round` (298), `end_round` (660), `end_hand` (361); `play_cards`
+  returns `self.end_hand()` directly (732); `start` (771) and `command`
+  (892/897) already return `Result`. F-210 root cause addressed:
+  `draw_count(self.all_players)` (298) is now total instead of panicking, and
+  `validate()` additionally bounds `all_players` to `{2,3,4,5}` before the
+  command path (defense in depth). Tests:
+  `test_draw_count_out_of_range_is_defined_not_panic` (F-210: 0/1/6/999 ->
+  `Err`, no panic) and `test_draw_count_out_of_range_is_not_silent_nine`
+  (F-65: `!matches!(.., Ok(9))`); `test_draw_counts` updated to `.unwrap()`
+  the happy path.
+
+- **TDD RED/GREEN:** AC2 six no-panic tests panicked pre-fix at the cited
+  lines, pass post-fix. AC3 tests failed to compile pre-fix (`draw_count`
+  returned `usize`, so `.unwrap()`/`.is_err()` do not compile), pass post-fix.
+  AC1 reject tests are assertion-failure RED (the `Gamer` trait default
+  `validate()` returns `Ok(())`, so they compile pre-fix and fail their `Err`
+  assertions), not compile-error RED; the positive control passes pre-fix.
+  All AC1 tests are valid RED->GREEN and AC1 is fully met.
+
+- **Raw-index sweep:** `rg 'self\.(hands|playing|played|player_points)\['
+  src/lib.rs` = **37 hits, all justified** (guarded in-expression at
+  229/243/854/859; bounds-rejected in-expression at 709/715/722/724;
+  loop-bounded by `0..all_players`/`0..players`/enumerate and made in-bounds
+  by the new `validate()` invariant at 281/290/295/311/319-333/341-360/
+  391/468/545/640/644/676/683/684/726/728/916; out-of-finding-scope separate
+  files `render.rs:204/207` and `command.rs:18/21`, unmodified and bounded by
+  the same validated invariant). The six converted F-61 sites no longer appear
+  in the raw-index list. `rg 'unreachable!\(\)' rust/game/sushi-go-2/src/` =
+  **0 hits**.
+
+- **Verification (per-package, serial, one crate per cargo command):**
+  `cargo test -p sushi-go-2 --lib` -> EXIT=0, 50 passed / 0 failed;
+  `cargo clippy -p sushi-go-2 --all-targets -- -D warnings` -> EXIT=0;
+  `cargo fmt -p sushi-go-2 -- --check` -> EXIT=0; `git diff --check
+  83c6bd8..d37c423` -> EXIT=0; `git status --porcelain` -> empty (clean
+  worktree). No workspace-wide cargo, no `scripts/rust-test.sh`, no Tilt/kind,
+  no global installs, no production operation was run.
+
+- **Review:** comprehensive independent review (`/tmp/opencode/r24-review.md`)
+  verdict **APPROVE**; no Critical or Important findings; one non-blocking
+  Minor - the implementation report inaccurately states the AC1 `validate`
+  tests were compile-error RED pre-fix, whereas the `Gamer` trait default
+  `validate()` (`rust/lib/game/src/game.rs:106-108`) means they compile and
+  fail their assertions pre-fix (assertion-failure RED, not compile-error
+  RED). Does not affect delivered code or AC compliance; not addressed by a
+  code or report change per task instruction.
+
+- **No push:** nothing was pushed.
+
+- **R-07-HANDOVER.md:** untouched.
