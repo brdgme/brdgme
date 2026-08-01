@@ -50,7 +50,7 @@ restored per owner instruction.)
 | R-25 | done(df3d1ce) | df3d1ce25b8b50ba6b1fe292d4c8ff21d6054939 | closes F-24 (alhambra-1), F-31 (starship-catan-1), F-33 (seven-wonders-1), F-37 (splendor-2), F-49 (cathedral-2), F-51 (sushizock-2), F-54 (jaipur-2), F-70 (for-sale-2 + battleship-2), F-82 (tic-tac-toe-2); all TEN named crates covered (plan prose says "nine" but the Files list and per-crate AC enumerate ten - discrepancy reported, not resolved); AC1 all ten have a `validate()` override plus a direct malformed-state validate test calling it (assertion-failure RED pre-fix per the still-present trait-default validate); AC2 all ten have a direct render entry-point no-panic test (fixed-array exceptions: starship render.rs clamps `current`/`viewer` to `boards.len()-1`, jaipur lib `hands.get(player)` :737, tic-tac-toe fixed board has no panic surface; already-defensive exceptions: for-sale/battleship/cathedral render paths were pre-hardened so their no-panic tests are regression guards); F-49 cathedral BOTH command-path boundary fixes each with a test (off-by-one `>`->`>=` at :150 tested by `can_play_piece_rejects_piece_equal_to_catalogue_len`; untrusted-tile i32 wrap guarded via let-chain `get_mut` at :347 tested by `check_captures_handles_zero_piece_type_without_panicking` and `check_captures_handles_out_of_range_player_without_panicking`); F-70 player-count bound added INSIDE both existing validates (for-sale `players in 3..=5` at :401 mirroring red7-1, battleship `players == NUM_PLAYERS` at :426; existing checks preserved verbatim); per-crate serial verification family `cargo test -p <crate>` + `cargo clippy -p <crate> --all-targets -- -D warnings` + `cargo fmt -p <crate> -- --check` + `git diff --check` all exit 0: alhambra 45, starship 47, seven-wonders 49, splendor 67, cathedral 40, sushizock 53, jaipur 72, for-sale 22, battleship 41, tic-tac-toe 28 (lib passed; 0 failed) plus each crate's contract test 1 passed; comprehensive independent review APPROVE, no Critical/Important, one non-blocking Minor (jaipur render.rs viewer-index raw indexing left unhardened - explicitly out of R-25's deserialized-`current_player` scope: the production render path loops `0..player_count()` which returns the compile-time `NUM_PLAYERS` constant, so only viewers 0/1 are ever rendered; the residual is a request-input-validation concern at the requester boundary, not the F-06 class R-25 targets); no additional review performed under the owner rule; R-07 untouched, R-22 still parked/blocked, R-21 remains gated; no push; no migration; no `scripts/rust-test.sh` (not required - per-crate verification performed) |
 | R-26 | done(a302112) | a302112f28104e2c7045df299a60f4c2668eb060 | closes F-66/F-67/F-68/F-74/F-76; strictly three crates (category-5-2, zombie-dice-2, red7-1); F-66 category `validate` rejects resolving-with-no-played-card for `choose_player` + `can_choose` now requires a played card so `choose`'s `expect` is unreachable, direct validate/no-panic tests; F-67/F-74 equal-hand-size check inside `validate` + direct validate/no-panic tests, false equal-hands comment deleted not corrected, F-73/`draw_cards`/R-31 explicitly untouched; F-68 zombie 13-dice conservation across cup/kept/current_roll inside `validate` + saturating `take_dice` drain + direct validate/no-panic tests; F-76 red7 `validate` rejects non-finished all-eliminated + `leader`/`leader_with_suit` return `Option` (no `player_map[l_index]` panic), all four production call sites handle `None`, direct tests; TDD RED category 4 / zombie 2 / red7 2 then GREEN; per-crate serial test/clippy/fmt all exit 0 (category 26+1, zombie 28+1, red7 26+1), `git diff --check` exit 0; comprehensive review PASS WITH NON-BLOCKING NOTES, no Critical/Important, three non-blocking Minor (all_dice allocation per validate, auto-play swallowed Err, pre-existing web fmt debt); no migration, no scripts/rust-test.sh, no Tilt/kind/production, no push; R-07-HANDOVER.md untouched, R-22/R-21/R-07 untouched |
 | R-27 | done(1a2d82a) | 1a2d82ae658c9e37f4bcca1c136fa5567e77c56c + 9ec9949a86c04e9c937e7f48f40a1e62f6f663df | closes F-05/F-69 (for-sale-2 deadlock and short-deck stall) plus the section-7 escalation (pass()/take_first_open_card panic); short building/cheque-deck round-start transitions produce Finished and logs (`start_buying_round` lib.rs:143-144 and `start_selling_round` :157-158 return `finish()`; tests `start_buying_round_short_deck_finishes_game`, `start_selling_round_short_deck_finishes_game` assert `is_finished`, `Status::Finished`, empty whose_turn, non-empty logs); all-passed direct `next_bidder()` returns `Err(GameError::Internal)` within the 2s bounded timeout (:316-317; `next_bidder_all_passed_terminates_with_internal_error` - second commit 9ec9949 corrected the literal AC2 note by calling `next_bidder()` directly instead of through `bid()`); empty `take_first_open_card` returns `Err(Internal)` not panic (:302-305) and selling distribution surfaces `Err(Internal)` not panic (:281-284); AC4 `pass()` half-bid rounding deliberately unchanged - confirmed parked as WP-11 `f F14` under D-30 + D-35 (BLOCKED-ON-USER-RULES-REVIEW, do not pick up) per `04c-games-cleanup-parity-wp33.md:455-474`, not a remediation gap; fresh commands all exit 0: `cargo test -p for-sale-2` (28 lib + 1 contract pass), `cargo clippy -p for-sale-2 --all-targets -- -D warnings`, `cargo fmt -p for-sale-2 -- --check`, `git diff --check`; independent review APPROVE WITH NON-BLOCKING NOTES; residual risk: pre-existing `start_selling_round` autoplay `if let Ok` (lib.rs:170) still swallows corrupted-state `play` errors (no normal-play effect, same class as R-26's auto-play note); no standalone R-27 docs/changes document existed and nothing was archived; no push |
-| R-28 | pending | | |
+| R-28 | done(34a1222) | 34a1222f4213916094e2e24e8a3a56617a49ea73 | closes F-09 (High) + F-10 (Medium); only file `rust/lib/rand_bot/src/lib.rs` (+113/-11); Int inverted bounds -> empty tokens (was `panic!`); Many None-max/inverted -> `max.unwrap_or(3).max(min)` honors min (was `assert!` trip); Many out-of-i32-range bounds rejected empty, no `as i32` narrowing (was i32 wrap); `bounded_i32` total; six new tests genuine RED by construction, incl. the AC1 reviewer-confirmation re-fixture of the out-of-i32-range-min test (naive `i32::MAX+1` passes pre-fix; re-fixtured to `(1<<32)+5`); fresh commands all exit 0: `cargo test -p brdgme_rand_bot` (10 lib), `cargo clippy -p brdgme_rand_bot --all-targets -- -D warnings`, `cargo fmt -p brdgme_rand_bot -- --check`, `git diff --check`; residual: in-range Many count up to `i32::MAX` emitted in full (no cap); no standalone R-28 change doc existed, nothing archived; no push |
 | R-29 | pending | | |
 | R-30 | pending | | |
 | R-31 | pending | | |
@@ -1138,3 +1138,100 @@ other-tracker changes in the code commit.
 
 - **R-07-HANDOVER.md:** untouched. R-22 (PARKED), R-21 (gated), and R-07
   (PARKED) statuses and files untouched.
+
+## R-28 evidence
+
+Code commit `34a1222f4213916094e2e24e8a3a56617a49ea73` (verified via
+`git rev-parse`; parent/base `ac97c8dc6531f4642da9c356feeb1b54d085a2a2`;
+message `R-28: handle degenerate rand_bot specs without panicking (F-09,
+F-10)`). Closes F-09 (High) and F-10 (Medium). Tracked change exactly one
+file: `rust/lib/rand_bot/src/lib.rs`, +113/-11. No migration, doc, Cargo, or
+other-tracker changes in the code commit.
+
+- **Status:** done.
+
+- **Changed file:** exactly `rust/lib/rand_bot/src/lib.rs`.
+
+- **F-09 (Int inverted bounds no longer panic):** `Spec::Int { min, max }`
+  with `min > max` returns an empty token vector instead of `panic!`
+  (`lib.rs:36-38`); `Spec::Many`'s bound derivation is
+  `let max = max.unwrap_or(3).max(min)` (`lib.rs:77`), so
+  `Many { min: Some(5), max: None }` and inverted `max < min` honor the
+  requested minimum instead of tripping `bounded_i32`'s `assert!(min <= max)`.
+  `bounded_i32` is now total (`if min > max { return min }`, `lib.rs:15-17`).
+  This is the same degenerate-spec class WP-07 (`63063a4`) fixed for
+  `OneOf`/`Enum`/`Player` but left for `Int`/`Many`; `lib/game` and `rand_bot`
+  now agree on graceful degradation again.
+
+- **F-10 (no `as i32` narrowing on out-of-range bounds):** the `Many` arm no
+  longer casts `min.unwrap_or(0) as i32` / `max.unwrap_or(3) as i32`
+  (`lib.rs:74-83`); bounds stay `usize`, and `if max > i32::MAX as usize {
+  return vec![] }` rejects an out-of-range count rather than narrowing it (the
+  pre-fix wrap turned a large `min` negative, which then passed
+  `assert!(min <= max)` and emitted a spec-violating command). `Spec::Int` is
+  `Option<i32>`/`Option<i32>` (`command/mod.rs:15-18`), so its arm never
+  narrowed.
+
+- **AC1 tests (degenerate Int + Many, no panic, defined result):** six new
+  tests call `spec_to_command` (the spec walker) directly (`lib.rs:179-267`):
+  `int_spec_with_inverted_bounds_yields_no_tokens_instead_of_panicking`,
+  `many_spec_with_none_max_below_min_honors_min_instead_of_panicking`
+  (asserts 5 tokens for `min: Some(5), max: None`),
+  `many_spec_with_inverted_bounds_honors_min_instead_of_panicking` (5 tokens
+  for `min: Some(5), max: Some(1)`),
+  `many_spec_with_out_of_i32_range_max_is_rejected_without_narrowing`,
+  `many_spec_with_out_of_i32_range_min_is_rejected_without_narrowing` (AC2),
+  and `many_spec_with_in_range_bounds_yields_requested_count` (positive
+  control, also passes pre-fix). Module `#[test]` count: 10 (6 new + 4
+  pre-existing). The plan's AC1 says "asserts an error, not a panic"; per the
+  F-09 remediation guidance the defined non-panicking result is an empty token
+  vector (the WP-07 `OneOf`/`Enum`/`Player` pattern), not a `Result` error.
+
+- **AC1 reviewer-confirmation and the one re-fixture (TDD RED/GREEN):** the
+  plan's AC1 requires the reviewer to confirm each test genuinely fails
+  pre-fix ("WP-07 already has a test that does not"). The out-of-i32-range
+  `min` case as first written asserted an empty vector for
+  `min: Some(i32::MAX as usize + 1)`, but that PASSES pre-fix: `as i32` wraps
+  it to `i32::MIN`, and `bounded_i32(v, i32::MIN, 3)` returns `<= 0` on
+  999,997 of 1,000,000 sampled seeds, so the `for i in 0..n` loop emits no
+  tokens (probe `/tmp/opencode/pre_fix_check.rs` + compiled binary). The test
+  was re-fixtured to `min: Some((1usize << 32) + 5)`: that truncates to i32
+  `5`, above the pre-fix default `max` of 3, so pre-fix trips
+  `assert!(min <= max)` and panics - a genuine RED (documented in the test's
+  own comment, `lib.rs:239-241`). The other five new tests are RED by
+  construction (pre-fix `panic!` on Int inverted; pre-fix `assert!` on Many
+  none-max / Many inverted / out-of-i32-range max via `i32::MAX+1 -> i32::MIN`).
+
+- **Verification (per-package, serial, one crate per cargo command; run from
+  `rust/`):** `cargo test -p brdgme_rand_bot` -> EXIT=0 (10 lib tests);
+  `cargo clippy -p brdgme_rand_bot --all-targets -- -D warnings` -> EXIT=0;
+  `cargo fmt -p brdgme_rand_bot -- --check` -> EXIT=0;
+  `git diff --check ac97c8dc..34a1222` -> EXIT=0 (re-verified in this tracker
+  session). Cargo outcomes are the implementation session's recorded results;
+  no cargo command was re-run here (no-cargo constraint; tests not rerun). No
+  workspace-wide cargo, no `scripts/rust-test.sh`, no Tilt/kind, no global
+  installs, no production operation, no push.
+
+- **Review:** no R-28 review report file is persisted (this session's reviews
+  live in ephemeral `/tmp/opencode/`; none exists for R-28). The substantive
+  review outcome is the AC1 reviewer-confirmation re-fixture above: the
+  out-of-i32-range-`min` test was corrected because its initial form would not
+  fail pre-fix, and the corrected test genuinely trips the pre-fix `assert!`.
+  No blocking defect was identified in the committed code during this
+  correction pass.
+
+- **Residual risk (accepted):** a legitimate but extremely large **in-range**
+  `Many` count (up to `i32::MAX`, 2,147,483,647) is still emitted in full -
+  the `max > i32::MAX as usize` guard rejects only out-of-range bounds and
+  there is no output/count cap on the emission loop. A wire-supplied or
+  game-bug-supplied spec with a huge in-range `max` causes excessive token
+  output and work. Pre-existing class (the pre-fix loop was equally
+  unbounded); not narrowed by this change.
+
+- **No change doc:** no standalone R-28 `docs/changes/` document existed and
+  nothing was archived (verified: no `R-28`/`rand_bot` entry under
+  `docs/changes/` or `docs/changes/archive/`).
+
+- **Scope / R-07:** `R-07-HANDOVER.md` untouched (last modified by `5c1995d`,
+  pre-dating R-28; absent from the R-28 commit diff); R-07 (PARKED), R-21
+  (gated), R-22 (PARKED) statuses and files untouched; no push.
