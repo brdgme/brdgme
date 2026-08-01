@@ -1046,17 +1046,17 @@ mod tests {
     #[test]
     fn next_bidder_all_passed_terminates_with_internal_error() {
         let (mut g, _) = Game::start(3, 1).unwrap();
-        // Every player has already finished bidding; bid() must not hang.
+        // Every player has already finished bidding; next_bidder() must not hang.
         g.finished_bidding = vec![true, true, true];
         g.phase = Some(Phase::Buying);
         g.bidding_player = MICK;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(g.bid(MICK, 5));
+            let _ = tx.send(g.next_bidder());
         });
         let result = rx
             .recv_timeout(std::time::Duration::from_secs(2))
-            .expect("bid() must return, not hang, when every player has passed");
+            .expect("next_bidder() must return, not hang, when every player has passed");
         assert!(matches!(result, Err(GameError::Internal { .. })));
     }
 
