@@ -44,6 +44,13 @@ pub struct Game {
     pub finished: bool,
     pub currently_auctioning: Vec<Card>,
     pub bids: HashMap<usize, i32>,
+    // Migration shim: states persisted before settle_auction/end_round
+    // cleared bids can carry stale PlayCard bids. Current code always clears
+    // them; this flag marks that guarantee so validate() rejects PlayCard
+    // bids only for those states while letting legacy ones load.
+    // Remove once no pre-R-30 states remain active.
+    #[serde(default)]
+    pub bids_cleared_outside_auction: bool,
     // Migration shim: pre-seed games get a fresh RNG on first load.
     // Remove once no pre-RNG games remain active.
     #[serde(default = "GameRng::from_entropy")]
@@ -309,6 +316,7 @@ impl Game {
         )])])];
         self.currently_auctioning = vec![];
         self.bids = HashMap::new();
+        self.bids_cleared_outside_auction = true;
         self.state = State::PlayCard;
         let mut counts: HashMap<Suit, usize> = HashMap::new();
         for s in suits() {
@@ -433,6 +441,7 @@ impl Game {
         ])];
         self.currently_auctioning.push(c);
         self.bids = HashMap::new();
+        self.bids_cleared_outside_auction = true;
         self.state = State::Auction;
         if self.suit_cards_on_table(c.suit) >= 5 {
             logs.extend(self.end_round());
@@ -443,6 +452,7 @@ impl Game {
     fn settle_auction(&mut self, winner: usize, price: i32) -> Vec<Log> {
         let mut logs = vec![];
         self.bids = HashMap::new();
+        self.bids_cleared_outside_auction = true;
         self.player_money[winner] -= price;
         let cards = std::mem::take(&mut self.currently_auctioning);
         self.player_purchases[winner].extend(cards.clone());
@@ -630,6 +640,7 @@ impl Gamer for Game {
             player_purchases: vec![vec![]; players],
             deck,
             rng,
+            bids_cleared_outside_auction: true,
             ..Game::default()
         };
         let logs = g.start_round();
@@ -801,7 +812,10 @@ impl Gamer for Game {
                 self.current_player, self.players
             )));
         }
-        if self.state == State::PlayCard && !self.bids.is_empty() {
+        if self.bids_cleared_outside_auction
+            && self.state == State::PlayCard
+            && !self.bids.is_empty()
+        {
             return Err(GameError::internal(
                 "modern-art-2: bids not empty outside an auction",
             ));
@@ -1378,12 +1392,69 @@ mod tests {
         );
     }
 
+    fn legacy_playcard_json_with_stale_bids() -> String {
+        // A pre-R-30 persisted state: PlayCard holding a concluded auction's
+        // stale bids, with no `bids_cleared_outside_auction` field (added
+        // later). Stripped here to prove the field defaults compatibly when
+        // absent.
+        let mut g = mock_game();
+        g.state = State::PlayCard;
+        g.bids.insert(MICK, 5);
+        let mut value = serde_json::to_value(&g).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("bids_cleared_outside_auction");
+        value.to_string()
+    }
+
     #[test]
     fn validate_rejects_bids_outside_an_auction() {
-        // F-30: PlayCard with leftover bids is an invalid persisted state.
+        // F-30/R-30-04: PlayCard with leftover bids is an invalid persisted
+        // state for anything written by current code (which marks the
+        // invariant). Legacy states lacking the marker are covered by
+        // legacy_playcard_with_stale_bids_loads_and_plays.
         let mut g = mock_game();
+        assert!(
+            g.bids_cleared_outside_auction,
+            "new games must mark the invariant as enforced"
+        );
         g.bids.insert(0, 5);
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn legacy_playcard_with_stale_bids_loads_and_plays() {
+        // R-30-04: states persisted before settle_auction/end_round cleared
+        // bids can carry stale bids in PlayCard. Stored state is validated on
+        // every request, so they must still load and validate; the next
+        // normal action must transition them into a conformant state.
+        let p = players(4);
+        let mut g: Game = serde_json::from_str(&legacy_playcard_json_with_stale_bids()).unwrap();
+        assert!(
+            g.validate().is_ok(),
+            "legacy PlayCard with stale bids must load and validate"
+        );
+
+        g.current_player = STEVE;
+        g.player_hands[STEVE].push(Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        });
+        g.command(STEVE, "play lmop", &p).unwrap();
+        g.command(MICK, "pass", &p).unwrap();
+        g.command(BJ, "pass", &p).unwrap();
+        g.command(ELVA, "pass", &p).unwrap();
+        assert_eq!(State::PlayCard, g.state);
+        assert!(g.bids.is_empty(), "the next play must clear the stale bids");
+        assert!(
+            g.bids_cleared_outside_auction,
+            "the next play must mark the invariant as enforced"
+        );
+        assert!(
+            g.validate().is_ok(),
+            "the transitioned state must be conformant"
+        );
     }
 
     #[test]
