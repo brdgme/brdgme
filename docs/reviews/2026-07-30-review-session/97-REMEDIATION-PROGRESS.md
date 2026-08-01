@@ -52,7 +52,7 @@ restored per owner instruction.)
 | R-27 | done(1a2d82a) | 1a2d82ae658c9e37f4bcca1c136fa5567e77c56c + 9ec9949a86c04e9c937e7f48f40a1e62f6f663df | closes F-05/F-69 (for-sale-2 deadlock and short-deck stall) plus the section-7 escalation (pass()/take_first_open_card panic); short building/cheque-deck round-start transitions produce Finished and logs (`start_buying_round` lib.rs:143-144 and `start_selling_round` :157-158 return `finish()`; tests `start_buying_round_short_deck_finishes_game`, `start_selling_round_short_deck_finishes_game` assert `is_finished`, `Status::Finished`, empty whose_turn, non-empty logs); all-passed direct `next_bidder()` returns `Err(GameError::Internal)` within the 2s bounded timeout (:316-317; `next_bidder_all_passed_terminates_with_internal_error` - second commit 9ec9949 corrected the literal AC2 note by calling `next_bidder()` directly instead of through `bid()`); empty `take_first_open_card` returns `Err(Internal)` not panic (:302-305) and selling distribution surfaces `Err(Internal)` not panic (:281-284); AC4 `pass()` half-bid rounding deliberately unchanged - confirmed parked as WP-11 `f F14` under D-30 + D-35 (BLOCKED-ON-USER-RULES-REVIEW, do not pick up) per `04c-games-cleanup-parity-wp33.md:455-474`, not a remediation gap; fresh commands all exit 0: `cargo test -p for-sale-2` (28 lib + 1 contract pass), `cargo clippy -p for-sale-2 --all-targets -- -D warnings`, `cargo fmt -p for-sale-2 -- --check`, `git diff --check`; independent review APPROVE WITH NON-BLOCKING NOTES; residual risk: pre-existing `start_selling_round` autoplay `if let Ok` (lib.rs:170) still swallows corrupted-state `play` errors (no normal-play effect, same class as R-26's auto-play note); no standalone R-27 docs/changes document existed and nothing was archived; no push |
 | R-28 | done(34a1222) | 34a1222f4213916094e2e24e8a3a56617a49ea73 | closes F-09 (High) + F-10 (Medium); only file `rust/lib/rand_bot/src/lib.rs` (+113/-11); Int inverted bounds -> empty tokens (was `panic!`); Many None-max/inverted -> `max.unwrap_or(3).max(min)` honors min (was `assert!` trip); Many out-of-i32-range bounds rejected empty, no `as i32` narrowing (was i32 wrap); `bounded_i32` total; six new tests genuine RED by construction, incl. the AC1 reviewer-confirmation re-fixture of the out-of-i32-range-min test (naive `i32::MAX+1` passes pre-fix; re-fixtured to `(1<<32)+5`); fresh commands all exit 0: `cargo test -p brdgme_rand_bot` (10 lib), `cargo clippy -p brdgme_rand_bot --all-targets -- -D warnings`, `cargo fmt -p brdgme_rand_bot -- --check`, `git diff --check`; residual: in-range Many count up to `i32::MAX` emitted in full (no cap); no standalone R-28 change doc existed, nothing archived; no push |
 | R-29 | done(fcda3e6) | fcda3e6d096f3db929fca9c5a33353c7b11bac23 + a48c783a9b00212fb5dfff98ad0570a9ee6fc4bd | closes F-17 (High) + F-16 (Low) + F-191 (Low); files `rust/lib/cmd/src/repl.rs`, `requester/gamer.rs`, `http.rs`, `rust/web/src/rules.rs`; AC1 repl.rs unwrap/expect/panic survivor grep count exactly 0, so no survivor justification applies (scope excludes test_support/startup expects); AC2 `response_error_message` seam renders a `Response::UserError` message without panicking, test `user_error_response_produces_message_without_panicking`; AC3 all three payload variants (DataDocs/BasicStrategy/AdvancedStrategy) deserialize + `validate()` + player bounds-check, tests: 3 malformed -> `Err(Parse)`, 3 validate-error -> SystemError, 2 out-of-range player -> UserError, 3 valid unchanged; AC4 settled contract (per 98-REMEDIATION-PLAN.md:979-983 + 00-STATE.md:541-543): true malformed envelope syntax (`{ not json`) -> Axum 400 text/plain via `route::<G>()` with non-JSON body (test `malformed_envelope_returns_400_text_plain`), while malformed inner game state remains 200 SystemError; fresh commands: `cargo test -p brdgme_cmd` 31 pass / 0 fail, `cargo clippy -p brdgme_cmd --all-targets -- -D warnings` exit 0, `cargo fmt -p brdgme_cmd -- --check` exit 0, `cargo check -p tic-tac-toe-2` exit 0, allowed gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0, `git diff --check` exit 0; web clippy NOT passed - five pre-existing unrelated warnings (notify.rs `Reminder` dead-code, sweep.rs x2 auto-deref, auth/server.rs x2 redundant closure, none in rules.rs), web fmt NOT passed - pre-existing drift, none in rules.rs; web runtime test `fetch_strategy_sends_validated_payloads_and_receives_strategy` passes: from `rust/` `SQLX_OFFLINE=true cargo test -p web --features ssr fetch_strategy_sends_validated_payloads_and_receives_strategy` exit 0, target result `1 passed; 0 failed; 0 ignored; 0 measured; 651 filtered out`, duration 0.02s, in-process (no DB/NATS); no R-29 defect found; independent initial review REJECTed web empty-state caller regression (fcda3e6 sent `game: ""`), bounded correction a48c783 added PlayerCounts->New->strategy valid scratch-state flow, targeted re-review APPROVE with no findings; residuals: four sequential strategy HTTP calls, pre-existing web lint/fmt debt; no standalone R-29 change doc existed and nothing was archived; protected R-07-HANDOVER.md untouched; no push |
-| R-30 | done(fc90116) | fc90116ce063261c3c643c64a85a6771e092c0fe + 8814bb0e00b3dcd9937f2ff49a1c94964025ca66 | closes F-22/F-23/F-28/F-29/F-30/F-34/F-38/F-39; four crates despite plan Size prose "three crates" (four named Files governed; discrepancy recorded, see R-30 evidence); per-crate test/clippy/fmt all pass; independent review PASS after bounded legacy-bids correction (see R-30 evidence) |
+| R-30 | done(fc90116) | fc90116ce063261c3c643c64a85a6771e092c0fe + 8814bb0e00b3dcd9937f2ff49a1c94964025ca66 + 196200c9d1182271a8345529e68778ebdb80b3e6 | closes F-22/F-23/F-28/F-29/F-30/F-34/F-38/F-39; four crates despite plan Size prose "three crates" (four named Files governed; discrepancy recorded, see R-30 evidence); per-crate test/clippy/fmt all pass; independent review PASS after bounded legacy-bids correction (see R-30 evidence); final AC1 Splendor test-completion commit 196200c (test-only, no gameplay behaviour change; see R-30 evidence) |
 | R-31 | pending | | |
 | R-32 | pending | | |
 | R-33 | pending | | |
@@ -1241,14 +1241,20 @@ other-tracker changes in the code commit.
 Implementation commits `fc90116ce063261c3c643c64a85a6771e092c0fe` (initial
 four-crate implementation; message `R-30: redact private values from
 Log::public in four game crates (F-22, F-23, F-28, F-29, F-30, F-34, F-38,
-F-39)`) and `8814bb0e00b3dcd9937f2ff49a1c94964025ca66` (persisted-state
+F-39)`), `8814bb0e00b3dcd9937f2ff49a1c94964025ca66` (persisted-state
 compatibility correction; message `fix(modern-art-2): allow legacy stale
-PlayCard bids to load while enforcing the invariant (R-30-04)`), both verified
-via `git rev-parse`. HEAD at completion is `8814bb0`. Tracked changes only:
+PlayCard bids to load while enforcing the invariant (R-30-04)`), and
+`196200c9d1182271a8345529e68778ebdb80b3e6` (final AC1 Splendor test-completion
+commit; message `test(splendor-2): assert reserve public log hides card cost
+(R-30-08)`), all verified via `git rev-parse`. HEAD at completion is `196200c`.
+The final commit is test-only - it adds the Splendor rendered-public-log AC1
+test (`reserve_public_log_hides_reserved_card_cost`) and changes no gameplay
+behaviour (51 insertions, one `#[test]`, nothing else). Tracked changes only:
 `rust/game/alhambra-1/src/lib.rs`, `rust/game/modern-art-2/src/lib.rs`,
 `rust/game/modern-art-2/src/render.rs`, `rust/game/seven-wonders-1/src/lib.rs`,
 `rust/game/splendor-2/src/lib.rs`, `rust/game/splendor-2/src/render.rs`. No
-migration, doc, Cargo, CI, or other-tracker changes in either commit.
+migration, doc, Cargo, CI, or other-tracker changes in any of the three
+commits.
 
 - **Status:** done.
 
@@ -1318,14 +1324,23 @@ migration, doc, Cargo, CI, or other-tracker changes in either commit.
     and `next_phase` now return `Result<Vec<Log>, GameError>` (lib.rs:219,
     :228, :254); the `unwrap_or_else(|e| vec![Log::public(e.to_string())])` is
     replaced by propagating the error via `?` at the five command call sites
-    (lib.rs:354, :414, :458, :492, :521). Test
-    `auto_visit_failure_propagates_without_public_log` (lib.rs:1166) forces a
+    (lib.rs:354, :414, :458, :492, :521). The F-38 propagation test
+    `auto_visit_failure_propagates_without_public_log` (lib.rs:1217) forces a
     failing auto-visit and asserts `Err` surfaces with its message and no noble
     is awarded.
+  - **splendor-2 AC1 (rendered-public-log test, final commit `196200c`):**
+    `reserve_public_log_hides_reserved_card_cost` (lib.rs:1104-1152) drives the
+    real command path `g.command(0, "reserve A1", &players(2))` (lib.rs:1121)
+    against a board seeded with a Ruby-7/Onyx-3 card, renders every public log
+    through `plain(transform(...))` (lib.rs:1130-1135), and asserts the concrete
+    private reserved-card cost string ("7-3") is absent from all public logs
+    while the public `reserved` action remains (lib.rs:1140-1151). This is
+    direct `Log::public` content coverage - the same AC1 shape the old
+    Splendor tests lacked - not F-81 inference.
   - **splendor-2 F-39 (Low) + AC3 (over-redaction restore):** `PubState` gains
     `deck_counts: Vec<usize>` (lib.rs:85, populated :594), and the public
     render shows "Level N (N left)" per level (render.rs:164-171). Test
-    `pub_state_exposes_deck_counts` (lib.rs:1294) asserts
+    `pub_state_exposes_deck_counts` (lib.rs:1345) asserts
     `deck_counts == vec![36, 26, 16]` post-start and that the rendered board
     contains "36 left"/"26 left"/"16 left".
 
@@ -1376,9 +1391,15 @@ migration, doc, Cargo, CI, or other-tracker changes in either commit.
   --all-targets -- -D warnings` and `cargo fmt -p <crate> -- --check` in the
   initial run, and `git diff --check` EXIT=0. The corrected modern-art (commit
   `8814bb0`) re-ran `cargo test -p modern-art-2` (26 lib + 1 contract passed),
-  clippy, fmt, and `git diff --check` - all EXIT=0. No workspace-wide cargo,
-  no `scripts/rust-test.sh`, no Tilt/kind, no global installs, no production
-  operation, no push.
+  clippy, fmt, and `git diff --check` - all EXIT=0. After the final AC1
+  test-completion commit `196200c` (test-only, one new Splendor test), the
+  splendor-2 run is **70 passed** (`cargo test -p splendor-2` EXIT=0, the
+  initial 69 plus the new `reserve_public_log_hides_reserved_card_cost`),
+  with `cargo clippy -p splendor-2 --all-targets -- -D warnings`, `cargo fmt
+  -p splendor-2 -- --check`, and `git diff --check` all EXIT=0. The initial 69
+  above is the historically accurate pre-196200c result and is left unchanged.
+  No workspace-wide cargo, no `scripts/rust-test.sh`, no Tilt/kind, no global
+  installs, no production operation, no push.
 
 - **Review:** the independent security/privacy review originally REJECTed the
   implementation on one Important finding only - the legacy Modern Art
