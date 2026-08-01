@@ -10,7 +10,11 @@ use brdgme_game::command;
 pub struct RandBot;
 
 fn bounded_i32(v: i32, min: i32, max: i32) -> i32 {
-    assert!(min <= max);
+    // Callers reject or normalize inverted ranges (F-09); keep this guard so
+    // the function stays total even if one reaches it.
+    if min > max {
+        return min;
+    }
     let mut v = i64::from(v);
     let min64 = i64::from(min);
     let max64 = i64::from(max);
@@ -23,14 +27,14 @@ fn bounded_i32(v: i32, min: i32, max: i32) -> i32 {
 
 pub fn spec_to_command(
     spec: &command::Spec,
-    ctx: &command::Spec,
+    _ctx: &command::Spec,
     players: &[String],
     rng: &mut ThreadRng,
 ) -> Vec<String> {
     match *spec {
         command::Spec::Int { min, max } => {
             if min.is_some() && max.is_some() && min > max {
-                panic!("invalid Int spec\nSpec: {:?}\nContext: {:?}", spec, ctx)
+                return vec![];
             }
             vec![format!(
                 "{}",
@@ -52,11 +56,11 @@ pub fn spec_to_command(
             .unwrap_or_default(),
         command::Spec::Chain(ref chain) => chain
             .iter()
-            .flat_map(|c| spec_to_command(c, ctx, players, rng))
+            .flat_map(|c| spec_to_command(c, _ctx, players, rng))
             .collect(),
         command::Spec::Opt(ref spec) => {
             if rng.random() {
-                spec_to_command(spec, ctx, players, rng)
+                spec_to_command(spec, _ctx, players, rng)
             } else {
                 vec![]
             }
@@ -67,21 +71,28 @@ pub fn spec_to_command(
             max,
             ref delim,
         } => {
-            let min = min.unwrap_or(0) as i32;
-            let max = max.unwrap_or(3) as i32;
-            let n = bounded_i32(rng.random(), min, max);
+            let min = min.unwrap_or(0);
+            // A None max (or an inverted max) must not drop below the
+            // requested minimum (F-09).
+            let max = max.unwrap_or(3).max(min);
+            // A count beyond i32::MAX cannot be emitted feasibly, so reject
+            // the spec rather than narrow its bounds via `as i32` (F-10).
+            if max > i32::MAX as usize {
+                return vec![];
+            }
+            let n = rng.random_range(min..=max);
             let mut parts: Vec<String> = vec![];
             for i in 0..n {
                 if i != 0
                     && let Some(d) = delim
                 {
-                    parts.extend(spec_to_command(d, ctx, players, rng));
+                    parts.extend(spec_to_command(d, _ctx, players, rng));
                 }
-                parts.extend(spec_to_command(spec, ctx, players, rng));
+                parts.extend(spec_to_command(spec, _ctx, players, rng));
             }
             parts
         }
-        command::Spec::Doc { ref spec, .. } => spec_to_command(spec, ctx, players, rng),
+        command::Spec::Doc { ref spec, .. } => spec_to_command(spec, _ctx, players, rng),
         command::Spec::Player => players
             .choose(rng)
             .map(|p| vec![p.to_owned()])
@@ -161,6 +172,97 @@ mod tests {
         assert_eq!(
             Vec::<String>::new(),
             spec_to_command(&spec, &spec, &[], &mut rng)
+        );
+    }
+
+    #[test]
+    fn int_spec_with_inverted_bounds_yields_no_tokens_instead_of_panicking() {
+        let mut rng = rand::rng();
+        let spec = Spec::Int {
+            min: Some(5),
+            max: Some(1),
+        };
+        assert_eq!(
+            Vec::<String>::new(),
+            spec_to_command(&spec, &spec, &["a".to_string()], &mut rng)
+        );
+    }
+
+    #[test]
+    fn many_spec_with_none_max_below_min_honors_min_instead_of_panicking() {
+        let mut rng = rand::rng();
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Token("a".to_string())),
+            min: Some(5),
+            max: None,
+            delim: None,
+        };
+        assert_eq!(
+            vec!["a".to_string(); 5],
+            spec_to_command(&spec, &spec, &["a".to_string()], &mut rng)
+        );
+    }
+
+    #[test]
+    fn many_spec_with_inverted_bounds_honors_min_instead_of_panicking() {
+        let mut rng = rand::rng();
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Token("a".to_string())),
+            min: Some(5),
+            max: Some(1),
+            delim: None,
+        };
+        assert_eq!(
+            vec!["a".to_string(); 5],
+            spec_to_command(&spec, &spec, &["a".to_string()], &mut rng)
+        );
+    }
+
+    #[test]
+    fn many_spec_with_out_of_i32_range_max_is_rejected_without_narrowing() {
+        let mut rng = rand::rng();
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Token("a".to_string())),
+            min: None,
+            max: Some(i32::MAX as usize + 1),
+            delim: None,
+        };
+        assert_eq!(
+            Vec::<String>::new(),
+            spec_to_command(&spec, &spec, &["a".to_string()], &mut rng)
+        );
+    }
+
+    #[test]
+    fn many_spec_with_out_of_i32_range_min_is_rejected_without_narrowing() {
+        let mut rng = rand::rng();
+        // 2^32 + 5 is out of i32 range, and truncates to i32 5 via `as` -
+        // greater than the pre-fix default max of 3, so pre-fix trips its
+        // `assert!(min <= max)` instead of passing via a chance empty loop.
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Token("a".to_string())),
+            min: Some((1usize << 32) + 5),
+            max: None,
+            delim: None,
+        };
+        assert_eq!(
+            Vec::<String>::new(),
+            spec_to_command(&spec, &spec, &["a".to_string()], &mut rng)
+        );
+    }
+
+    #[test]
+    fn many_spec_with_in_range_bounds_yields_requested_count() {
+        let mut rng = rand::rng();
+        let spec = Spec::Many {
+            spec: Box::new(Spec::Token("a".to_string())),
+            min: Some(2),
+            max: Some(2),
+            delim: None,
+        };
+        assert_eq!(
+            vec!["a".to_string(); 2],
+            spec_to_command(&spec, &spec, &["a".to_string()], &mut rng)
         );
     }
 
