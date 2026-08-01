@@ -111,34 +111,37 @@ impl Game {
         self.phase.unwrap_or_else(|| self.infer_phase())
     }
 
+    fn finish(&mut self) -> Vec<Log> {
+        self.phase = Some(Phase::Finished);
+        use brdgme_markup::{Align as A, Row, table_with_gap};
+        let mut rows: Vec<Row> = vec![];
+        for p in 0..self.players {
+            rows.push(vec![
+                (A::Left, vec![N::Player(p)]),
+                (A::Left, vec![render::bold_num(self.player_points(p))]),
+            ]);
+        }
+        vec![Log::public(vec![
+            N::Bold(vec![N::text("The game has finished!  The scores are:")]),
+            N::text("\n"),
+            table_with_gap(&rows, 1),
+        ])]
+    }
+
     fn start_round(&mut self) -> Vec<Log> {
         let phase = self.infer_phase();
         self.phase = Some(phase);
         match phase {
             Phase::Buying => self.start_buying_round(),
             Phase::Selling => self.start_selling_round(),
-            Phase::Finished => {
-                use brdgme_markup::{Align as A, Row, table_with_gap};
-                let mut rows: Vec<Row> = vec![];
-                for p in 0..self.players {
-                    rows.push(vec![
-                        (A::Left, vec![N::Player(p)]),
-                        (A::Left, vec![render::bold_num(self.player_points(p))]),
-                    ]);
-                }
-                vec![Log::public(vec![
-                    N::Bold(vec![N::text("The game has finished!  The scores are:")]),
-                    N::text("\n"),
-                    table_with_gap(&rows, 1),
-                ])]
-            }
+            Phase::Finished => self.finish(),
         }
     }
 
     fn start_buying_round(&mut self) -> Vec<Log> {
         let n = self.players;
         if self.building_deck.len() < n {
-            return vec![];
+            return self.finish();
         }
         self.open_cards = self.building_deck.split_off(self.building_deck.len() - n);
         self.open_cards.sort();
@@ -152,7 +155,7 @@ impl Game {
     fn start_selling_round(&mut self) -> Vec<Log> {
         let n = self.players;
         if self.cheque_deck.len() < n {
-            return vec![];
+            return self.finish();
         }
         self.open_cards = self.cheque_deck.split_off(self.cheque_deck.len() - n);
         self.open_cards.sort();
@@ -232,7 +235,7 @@ impl Game {
             N::text(" bid "),
             N::Bold(vec![N::text(amount.to_string())]),
         ])];
-        logs.extend(self.next_bidder());
+        logs.extend(self.next_bidder()?);
         Ok(logs)
     }
 
@@ -242,7 +245,7 @@ impl Game {
                 "you are not able to pass at the moment",
             ));
         }
-        let c = self.take_first_open_card(player);
+        let c = self.take_first_open_card(player)?;
         let half_bid = self.bids[player] / 2;
         self.chips[player] -= half_bid;
         self.finished_bidding[player] = true;
@@ -253,7 +256,7 @@ impl Game {
             N::text(" for "),
             render::building(c),
         ])];
-        logs.extend(self.next_bidder());
+        logs.extend(self.next_bidder()?);
         Ok(logs)
     }
 
@@ -275,6 +278,11 @@ impl Game {
             let mut played: Vec<(i32, usize)> =
                 (0..self.players).map(|p| (self.bids[p], p)).collect();
             played.sort();
+            if self.open_cards.len() < played.len() {
+                return Err(GameError::internal(
+                    "for-sale-2: not enough open cards to resolve the round",
+                ));
+            }
             for (bldg, p) in played {
                 let cheque = self.open_cards.remove(0);
                 self.cheques[p].push(cheque);
@@ -291,20 +299,26 @@ impl Game {
         Ok(logs)
     }
 
-    fn take_first_open_card(&mut self, player: usize) -> i32 {
+    fn take_first_open_card(&mut self, player: usize) -> Result<i32, GameError> {
+        if self.open_cards.is_empty() {
+            return Err(GameError::internal("for-sale-2: no open cards to take"));
+        }
         let c = self.open_cards.remove(0);
         self.hands[player].push(c);
         self.hands[player].sort();
-        c
+        Ok(c)
     }
 
-    fn next_bidder(&mut self) -> Vec<Log> {
+    fn next_bidder(&mut self) -> Result<Vec<Log>, GameError> {
         let remaining = (0..self.players)
             .filter(|p| !self.finished_bidding[*p])
             .count();
+        if remaining == 0 {
+            return Err(GameError::internal("for-sale-2: no remaining bidders"));
+        }
         if remaining == 1 {
             let (player, amount) = self.highest_bid();
-            let c = self.take_first_open_card(player);
+            let c = self.take_first_open_card(player)?;
             self.chips[player] -= amount;
             self.bidding_player = player;
             let mut logs = vec![Log::public(vec![
@@ -315,7 +329,7 @@ impl Game {
                 render::building(c),
             ])];
             logs.extend(self.start_round());
-            return logs;
+            return Ok(logs);
         }
         loop {
             self.bidding_player = (self.bidding_player + 1) % self.players;
@@ -323,7 +337,7 @@ impl Game {
                 break;
             }
         }
-        vec![]
+        Ok(vec![])
     }
 
     fn highest_bid(&self) -> (usize, i32) {
@@ -984,5 +998,113 @@ mod tests {
         let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
         let player_nodes = g.player_state(0).render();
         let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-27 (F-05, F-69): short-deck finish, next_bidder termination, no panics ---
+
+    #[test]
+    fn start_buying_round_short_deck_finishes_game() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        // building_deck too short for a full buying round.
+        g.building_deck = vec![1, 2];
+        g.open_cards = vec![];
+        g.phase = Some(Phase::Buying);
+        let logs = g.start_round();
+        assert!(
+            g.is_finished(),
+            "a short building deck must finish the game, not wedge it as Active"
+        );
+        assert!(
+            matches!(g.status(), Status::Finished { .. }),
+            "status() must report Finished after the short-deck transition"
+        );
+        assert!(g.whose_turn().is_empty());
+        assert!(!logs.is_empty(), "the finish transition must emit a log");
+    }
+
+    #[test]
+    fn start_selling_round_short_deck_finishes_game() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        // Selling phase with a cheque deck too short for a full round.
+        g.building_deck = vec![];
+        g.cheque_deck = vec![1];
+        g.open_cards = vec![];
+        g.phase = Some(Phase::Selling);
+        let logs = g.start_round();
+        assert!(
+            g.is_finished(),
+            "a short cheque deck must finish the game, not wedge it as Active"
+        );
+        assert!(
+            matches!(g.status(), Status::Finished { .. }),
+            "status() must report Finished after the short-deck transition"
+        );
+        assert!(g.whose_turn().is_empty());
+        assert!(!logs.is_empty(), "the finish transition must emit a log");
+    }
+
+    #[test]
+    fn next_bidder_all_passed_terminates_with_internal_error() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        // Every player has already finished bidding; bid() must not hang.
+        g.finished_bidding = vec![true, true, true];
+        g.phase = Some(Phase::Buying);
+        g.bidding_player = MICK;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(g.bid(MICK, 5));
+        });
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("bid() must return, not hang, when every player has passed");
+        assert!(matches!(result, Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn take_first_open_card_empty_open_cards_does_not_panic() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.open_cards = vec![];
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            g.take_first_open_card(MICK)
+        }))
+        .expect("take_first_open_card must not panic with empty open_cards");
+        assert!(matches!(result, Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn start_selling_round_empty_open_cards_finishes_game() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        // Selling phase with no open cards, an exhausted cheque deck, and one
+        // card in each hand: the round-start must finish, not wedge.
+        g.building_deck = vec![];
+        g.cheque_deck = vec![];
+        g.open_cards = vec![];
+        g.hands = vec![vec![17], vec![18], vec![16]];
+        g.phase = Some(Phase::Selling);
+        let logs = g.start_selling_round();
+        assert!(
+            g.is_finished(),
+            "a selling round with empty open_cards must finish, not wedge"
+        );
+        assert!(!logs.is_empty(), "the finish transition must emit a log");
+    }
+
+    #[test]
+    fn play_round_resolution_with_empty_open_cards_does_not_panic() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        // Last player plays, triggering the cheque distribution with no open
+        // cheques to give out.
+        g.building_deck = vec![];
+        g.cheque_deck = vec![];
+        g.open_cards = vec![];
+        g.hands = vec![vec![17], vec![18], vec![16]];
+        g.bids = vec![17, 18, 16];
+        g.finished_bidding = vec![true, true, false];
+        g.phase = Some(Phase::Selling);
+        let result = g.play(2, 16);
+        assert!(
+            matches!(result, Err(GameError::Internal { .. })),
+            "the distribution must surface a checked error, not panic"
+        );
     }
 }
