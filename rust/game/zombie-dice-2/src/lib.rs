@@ -250,7 +250,8 @@ impl Game {
             self.kept = vec![];
             self.shake_cup();
         }
-        let taken: Vec<Dice> = self.cup.drain(..n).collect();
+        let take = n.min(self.cup.len());
+        let taken: Vec<Dice> = self.cup.drain(..take).collect();
         (taken, logs)
     }
 
@@ -470,6 +471,12 @@ impl Gamer for Game {
                     "zombie-dice-2: roll_off_players entry out of range",
                 ));
             }
+        }
+        let total_dice = self.cup.len() + self.kept.len() + self.current_roll.len();
+        if total_dice != all_dice().len() {
+            return Err(GameError::internal(
+                "zombie-dice-2: dice not conserved across cup, kept, and current_roll",
+            ));
         }
         Ok(())
     }
@@ -1066,6 +1073,27 @@ mod tests {
 
         g.roll_off_players = vec![g.players];
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_rejects_missing_dice_conservation() {
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.cup = vec![];
+        g.kept = vec![];
+        g.current_roll = vec![];
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_take_dice_does_not_panic_on_empty_cup_and_kept() {
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.cup = vec![];
+        g.kept = vec![];
+        g.current_roll = vec![];
+        // Previously panicked at `self.cup.drain(..n)` (range out of bounds)
+        // once the best-effort refill returned nothing.
+        let (taken, _logs) = g.take_dice(ROLL_DICE_COUNT);
+        assert!(taken.is_empty());
     }
 
     #[test]

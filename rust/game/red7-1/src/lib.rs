@@ -100,7 +100,7 @@ impl Game {
             self.palettes[p] = vec![self.deck.remove(0)];
         }
 
-        let leader_idx = self.leader().0;
+        let leader_idx = self.leader().map(|(i, _)| i).unwrap_or(0);
         self.current_player = self.next_player(leader_idx);
         self.start_turn(&mut logs);
         logs
@@ -156,8 +156,8 @@ impl Game {
 
     fn end_turn(&mut self, logs: &mut Vec<Log>) {
         if !self.eliminated[self.current_player] {
-            let leader_idx = self.leader().0;
-            if leader_idx != self.current_player {
+            let leader_idx = self.leader().map(|(i, _)| i);
+            if leader_idx.is_some_and(|i| i != self.current_player) {
                 self.eliminate(
                     self.current_player,
                     " for not being the leader at the end of their turn",
@@ -176,7 +176,10 @@ impl Game {
     }
 
     fn end_round(&mut self, logs: &mut Vec<Log>) {
-        let (leader_idx, leader_palette) = self.leader();
+        let (leader_idx, leader_palette) = match self.leader() {
+            Some(leader) => leader,
+            None => return,
+        };
         let pts = points(&leader_palette);
         self.scored_cards[leader_idx].extend(&leader_palette);
         self.palettes[leader_idx].retain(|c| !leader_palette.contains(c));
@@ -233,22 +236,15 @@ impl Game {
         ]));
     }
 
-    pub fn leader(&self) -> (usize, Vec<Card>) {
+    pub fn leader(&self) -> Option<(usize, Vec<Card>)> {
         self.leader_with_suit(self.current_rule())
     }
 
     /// Returns the leading player index under `suit`'s rule and their
-    /// rule-fulfilling cards.
-    ///
-    /// PRECONDITION: at least one player must not be eliminated. With every
-    /// player eliminated, `player_map` is empty, `card::leader` returns index
-    /// 0 for the empty slice, and the final `player_map[l_index]` would
-    /// panic. All four call sites satisfy this: `start_round` (has just reset
-    /// `eliminated` to all-false), `end_turn` (guarded by
-    /// `!self.eliminated[self.current_player]`), `end_round` (only entered
-    /// when exactly one player remains), and `discard` (the current player is
-    /// never eliminated while current). (e F34)
-    pub fn leader_with_suit(&self, suit: Suit) -> (usize, Vec<Card>) {
+    /// rule-fulfilling cards, or `None` when every player is eliminated and
+    /// there is no leader. Callers handle the `None` case rather than
+    /// assuming a leader exists. (e F34)
+    pub fn leader_with_suit(&self, suit: Suit) -> Option<(usize, Vec<Card>)> {
         let rule_fn = suit_rule(suit);
         let mut player_map: Vec<usize> = vec![];
         let mut entries: Vec<(Vec<Card>, Vec<Card>)> = vec![];
@@ -262,7 +258,7 @@ impl Game {
         }
 
         let (l_index, palette) = leader(&entries);
-        (player_map[l_index], palette)
+        player_map.get(l_index).map(|&p| (p, palette))
     }
 
     pub fn current_rule(&self) -> Suit {
@@ -336,7 +332,12 @@ impl Game {
             .position(|&c| c == card)
             .ok_or_else(|| GameError::invalid_input("you don't have that card"))?;
 
-        let (leader_idx, _) = self.leader_with_suit(card.suit);
+        let leader_idx = match self.leader_with_suit(card.suit) {
+            Some((idx, _)) => idx,
+            None => {
+                return Err(GameError::invalid_input("you can't discard at the moment"));
+            }
+        };
         if leader_idx != player {
             return Err(GameError::invalid_input(
                 "you wouldn't be the leader after discarding that card",
@@ -575,6 +576,9 @@ impl Gamer for Game {
         if self.eliminated.len() != self.num_players {
             return Err(GameError::internal("red7-1: eliminated length mismatch"));
         }
+        if !self.finished && self.eliminated.iter().all(|&e| e) {
+            return Err(GameError::internal("red7-1: all players eliminated"));
+        }
         if self.current_player >= self.num_players {
             return Err(GameError::internal("red7-1: current_player out of range"));
         }
@@ -624,9 +628,17 @@ mod tests {
     fn test_game_leader() {
         let (mut g, _) = Game::start(2, 0).unwrap();
         g.palettes = vec![crds(&["y3"]), crds(&["b4"])];
-        let (leader_idx, palette) = g.leader();
+        let (leader_idx, palette) = g.leader().unwrap();
         assert_eq!(1, leader_idx);
         assert_eq!(crds(&["b4"]), palette);
+    }
+
+    #[test]
+    fn test_leader_returns_none_when_all_eliminated() {
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.eliminated = vec![true, true];
+        assert!(g.leader_with_suit(Suit::Red).is_none());
+        assert!(g.leader().is_none());
     }
 
     #[test]
@@ -804,6 +816,27 @@ mod tests {
         let (mut g, _) = Game::start(2, 0).unwrap();
         g.current_player = g.num_players;
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_rejects_all_eliminated_unfinished() {
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.finished = false;
+        g.eliminated = vec![true, true];
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_discard_does_not_panic_on_all_eliminated() {
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.finished = false;
+        g.current_player = 0;
+        g.eliminated = vec![true, true];
+        let card = g.hands[0][0];
+        // Both previously panicked in `leader_with_suit` -> `player_map[l_index]`
+        // on an empty `player_map`.
+        let _ = g.leader_with_suit(Suit::Red);
+        assert!(g.discard(0, card).is_err());
     }
 
     #[test]

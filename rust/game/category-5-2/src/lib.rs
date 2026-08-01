@@ -128,7 +128,9 @@ impl Game {
     }
 
     pub fn can_choose(&self, player: usize) -> bool {
-        self.resolving && self.choose_player == player
+        self.resolving
+            && self.choose_player == player
+            && self.plays.get(player).is_some_and(|p| p.is_some())
     }
 
     pub fn start_round(&mut self) -> Vec<Log> {
@@ -225,16 +227,16 @@ impl Game {
             self.plays[lowest_player] = None;
         }
         self.resolving = false;
-        // All hands have equal size by construction (dealt simultaneously each round).
         match self.hands[0].len() {
             0 => logs.extend(self.end_round()),
             1 => {
                 for p in 0..self.players {
-                    let card = self.hands[p][0];
-                    let play_logs = self
-                        .play(p, card)
-                        .expect("auto-play should only play valid cards");
-                    logs.extend(play_logs);
+                    let Some(&card) = self.hands[p].first() else {
+                        continue;
+                    };
+                    if let Ok(play_logs) = self.play(p, card) {
+                        logs.extend(play_logs);
+                    }
                 }
             }
             _ => {}
@@ -389,6 +391,15 @@ impl Gamer for Game {
         if self.hands.len() != self.players {
             return Err(GameError::internal("category-5-2: hands length mismatch"));
         }
+        let equal_hands = self
+            .hands
+            .first()
+            .is_none_or(|first| self.hands.iter().all(|h| h.len() == first.len()));
+        if !equal_hands {
+            return Err(GameError::internal(
+                "category-5-2: hands are not all the same size",
+            ));
+        }
         if self.player_cards.len() != self.players {
             return Err(GameError::internal(
                 "category-5-2: player_cards length mismatch",
@@ -400,6 +411,11 @@ impl Gamer for Game {
         if self.choose_player >= self.players {
             return Err(GameError::internal(
                 "category-5-2: choose_player out of range",
+            ));
+        }
+        if self.resolving && self.plays[self.choose_player].is_none() {
+            return Err(GameError::internal(
+                "category-5-2: resolving with no played card for choose_player",
             ));
         }
         let check_card = |c: &Card| -> Result<(), GameError> {
@@ -677,6 +693,7 @@ mod tests {
         assert!(!g.can_choose(1));
         g.resolving = true;
         g.choose_player = 0;
+        g.plays[0] = Some(Card(5));
         assert!(!g.can_play(0));
         assert!(g.can_choose(0));
         assert!(!g.can_choose(1));
@@ -907,5 +924,46 @@ mod tests {
         let mut g = Game::start(3, 1).unwrap().0;
         g.deck.push(Card(0));
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_rejects_resolving_without_played_card() {
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.resolving = true;
+        g.choose_player = 0;
+        g.plays[0] = None;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_choose_does_not_panic_on_resolving_without_played_card() {
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.resolving = true;
+        g.choose_player = 0;
+        g.plays[0] = None;
+        // Previously panicked at `expect("choosing player has a played card")`;
+        // now `can_choose` is false so this is a clean error.
+        assert!(g.choose(0, 1).is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_unequal_hand_sizes() {
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.hands[0] = vec![Card(5)];
+        g.hands[1] = vec![];
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_resolve_plays_does_not_panic_on_unequal_hands() {
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.board = [vec![Card(1)], vec![Card(2)], vec![Card(3)], vec![Card(4)]];
+        g.hands[0] = vec![Card(5)];
+        g.hands[1] = vec![];
+        g.plays = vec![None, None];
+        g.resolving = false;
+        // Previously panicked at `self.hands[1][0]` (empty hand) in the
+        // auto-play loop.
+        let _ = g.resolve_plays();
     }
 }
