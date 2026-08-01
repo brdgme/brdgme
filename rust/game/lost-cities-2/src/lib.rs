@@ -639,6 +639,7 @@ impl Gamer for Game {
             None => return Err(GameError::invalid_input("not your turn")),
         }
         .parse(input, players);
+        let was_finished = self.is_finished();
         match output {
             Ok(ParseOutput {
                 value: Command::Play(c),
@@ -672,7 +673,7 @@ impl Gamer for Game {
                 remaining,
                 ..
             }) => self.draw(player).map(|mut l| {
-                if self.is_finished() {
+                if !was_finished && self.is_finished() {
                     let scores: Vec<(usize, i32)> = (0..self.players)
                         .map(|p| (p, self.player_score(p) as i32))
                         .collect();
@@ -1169,5 +1170,57 @@ mod tests {
             "no cards may be drawn into an over-full hand"
         );
         assert!(!logs.is_empty(), "the draw attempt must still be logged");
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let names = vec!["a".to_string(), "b".to_string()];
+
+        // A non-finishing play emits no placings log and keeps can_undo.
+        let (mut game, _) = Game::start(2, 1).unwrap();
+        let c = game.hands[0][0];
+        let resp = game.command(0, &format!("play {}", c), &names).unwrap();
+        assert!(resp.can_undo, "Play arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing play emits no placings log"
+        );
+
+        // Wind to the final round with an 8-card deck, so the next draw
+        // empties it and ends the game.
+        let (mut game, _) = Game::start(2, 1).unwrap();
+        game.round = START_ROUND + ROUNDS - 1;
+        game.phase = Phase::DrawOrTake;
+        game.current_player = 0;
+        game.hands = vec![vec![], vec![]];
+        game.discards = vec![];
+        game.deck = game.deck[..HAND_SIZE_2P].to_vec();
+        let resp = game.command(0, "draw", &names).unwrap();
+        assert!(game.is_finished());
+        assert!(!resp.can_undo, "Draw arm can_undo must be unchanged");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        assert_eq!(vec![1, 1], game.placings());
+        match game.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 1], placings),
+            _ => panic!("game should be finished"),
+        }
+
+        // The finished parser rejects a second invocation, so no duplicate
+        // epilogue is appended.
+        assert!(game.command(0, "draw", &names).is_err());
     }
 }

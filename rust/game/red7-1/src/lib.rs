@@ -284,6 +284,13 @@ impl Game {
         points(&self.scored_cards[player])
     }
 
+    fn finish_epilogue(&self, logs: &mut Vec<Log>) {
+        let scores: Vec<(usize, i32)> = (0..self.num_players)
+            .map(|p| (p, self.player_points(p) as i32))
+            .collect();
+        logs.push(placings_log(&self.placings(), Some(&scores)));
+    }
+
     fn remaining_players(&self) -> Vec<usize> {
         (0..self.num_players)
             .filter(|&p| !self.eliminated[p])
@@ -473,6 +480,8 @@ impl Gamer for Game {
         }
         .parse(input, players);
 
+        let was_finished = self.is_finished();
+
         match output {
             Ok(ParseOutput {
                 remaining,
@@ -492,11 +501,8 @@ impl Gamer for Game {
                 ..
             }) => {
                 let mut logs = self.discard(player, card)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.num_players)
-                        .map(|p| (p, self.player_points(p) as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                if !was_finished && self.is_finished() {
+                    self.finish_epilogue(&mut logs);
                 }
                 Ok(CommandResponse {
                     logs,
@@ -510,11 +516,8 @@ impl Gamer for Game {
                 ..
             }) => {
                 let mut logs = self.done(player)?;
-                if self.is_finished() {
-                    let scores: Vec<(usize, i32)> = (0..self.num_players)
-                        .map(|p| (p, self.player_points(p) as i32))
-                        .collect();
-                    logs.push(placings_log(&self.placings(), Some(&scores)));
+                if !was_finished && self.is_finished() {
+                    self.finish_epilogue(&mut logs);
                 }
                 Ok(CommandResponse {
                     logs,
@@ -860,5 +863,80 @@ mod tests {
             json.get("rng").is_none(),
             "PubState must not contain an rng field"
         );
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    // A single-survivor game where player 0 wins the round and reaches the
+    // 40-point end target. Player 0's scored cards total 42, so whichever
+    // rule decides the round, end_game fires.
+    fn near_finish_game() -> Game {
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.eliminated = vec![false, true];
+        g.current_player = 0;
+        g.palettes = vec![crds(&["r7"]), vec![]];
+        g.scored_cards = vec![crds(&["b7", "g7", "y7", "o7", "v7", "i7"]), vec![]];
+        g
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        // A non-finishing play emits no placings log and keeps can_undo.
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.current_player = 0;
+        let card = g.hands[0][0];
+        let resp = g.command(0, &format!("play {}", card), &[]).unwrap();
+        assert!(!resp.can_undo, "Play arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing play emits no placings log"
+        );
+
+        // The Done arm ends the round for the sole survivor and finishes.
+        let mut g = near_finish_game();
+        g.has_played = true;
+        let resp = g.command(0, "done", &[]).unwrap();
+        assert!(g.is_finished());
+        assert!(!resp.can_undo, "Done arm can_undo must be unchanged");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        assert_eq!(vec![1, 2], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
+            _ => panic!("game should be finished"),
+        }
+
+        // The finished parser rejects a second invocation, so no duplicate
+        // epilogue is appended.
+        assert!(g.command(0, "done", &[]).is_err());
+        assert!(g.command(0, "play r7", &[]).is_err());
+    }
+
+    #[test]
+    fn discard_finish_path_emits_one_placings_epilogue() {
+        // The Discard arm can also reach end_game; with only player 0
+        // remaining it stays the leader whatever rule the discard sets.
+        let mut g = near_finish_game();
+        let card = g.hands[0][0];
+        let resp = g.command(0, &format!("discard {}", card), &[]).unwrap();
+        assert!(g.is_finished());
+        assert!(!resp.can_undo, "Discard arm can_undo must be unchanged");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(g.command(0, &format!("discard {}", card), &[]).is_err());
     }
 }

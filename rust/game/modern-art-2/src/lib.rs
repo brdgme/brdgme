@@ -705,6 +705,7 @@ impl Gamer for Game {
             }
         }
         .parse(input, players);
+        let was_finished = self.is_finished();
         let (remaining, mut logs) = match output {
             Ok(ParseOutput {
                 remaining,
@@ -738,7 +739,7 @@ impl Gamer for Game {
             }) => (remaining, self.set_price(player, amount)?),
             Err(e) => return Err(e),
         };
-        if self.is_finished() {
+        if !was_finished && self.is_finished() {
             logs.push(placings_log(&self.placings(), None));
         }
         Ok(CommandResponse {
@@ -1698,5 +1699,70 @@ mod tests {
             "real bids must still render, got:\n{}",
             with_bid
         );
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        let t = log_plain(l);
+        t.contains("wins!") || t.contains("tie!")
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let p = players(4);
+        let lm_open = Card {
+            suit: Suit::LiteMetal,
+            rank: Rank::Open,
+        };
+
+        // Non-finishing auction actions emit no placings log and keep
+        // can_undo.
+        {
+            let mut g = mock_game();
+            g.current_player = MICK;
+            g.player_hands[MICK].push(lm_open);
+            let resp = g.command(MICK, "play lmop", &p).unwrap();
+            assert!(!resp.can_undo, "can_undo must be unchanged");
+            assert!(
+                !resp.logs.iter().any(is_placings_log),
+                "a non-finishing play emits no placings log"
+            );
+            let resp = g.command(STEVE, "bid 10", &p).unwrap();
+            assert!(!resp.can_undo, "can_undo must be unchanged");
+            assert!(
+                !resp.logs.iter().any(is_placings_log),
+                "a non-finishing bid emits no placings log"
+            );
+        }
+
+        // The fifth Lite Metal in the final round ends the game.
+        let mut g = mock_game();
+        g.round = 3;
+        g.player_purchases[MICK] = vec![lm_open, lm_open];
+        g.player_purchases[STEVE] = vec![lm_open];
+        g.player_purchases[BJ] = vec![lm_open];
+        g.player_hands[MICK].push(lm_open);
+        let resp = g.command(MICK, "play lmop", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(!resp.can_undo, "can_undo must be unchanged");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(g.placings(), placings),
+            _ => panic!("game should be finished"),
+        }
+
+        // The finished parser rejects further commands, so nothing is
+        // appended.
+        assert!(g.command(MICK, "play lmop", &p).is_err());
+        assert!(g.command(STEVE, "pass", &p).is_err());
     }
 }

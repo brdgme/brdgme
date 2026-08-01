@@ -335,8 +335,9 @@ impl Gamer for Game {
                 value: Command::Take,
                 ..
             }) => {
+                let was_finished = self.is_finished();
                 let mut logs = self.take(player)?;
-                if self.is_finished() {
+                if !was_finished && self.is_finished() {
                     let scores: Vec<(usize, i32)> = (0..self.players)
                         .map(|p| (p, self.final_player_score(p)))
                         .collect();
@@ -592,5 +593,55 @@ mod tests {
 
         g.currently_moving = g.players;
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let p = players(3);
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.remaining_cards = vec![30, 31];
+        g.currently_moving = MICK;
+        g.player_hands = vec![vec![], vec![], vec![]];
+        g.player_chips = vec![11, 11, 11];
+        g.centre_chips = 0;
+
+        // A take that leaves cards in the deck does not finish and emits no
+        // placings log; the Take arm's can_undo is unchanged.
+        let resp = g.command(MICK, "take", &p).unwrap();
+        assert!(!resp.can_undo, "Take arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing take emits no placings log"
+        );
+
+        // The last take empties the deck and finishes the game.
+        let resp = g.command(MICK, "take", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(!resp.can_undo, "Take arm can_undo must be unchanged");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        // MICK's run 30-31 (19 points) loses to both empty hands (-11 each).
+        assert_eq!(vec![3, 1, 1], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![3, 1, 1], placings),
+            _ => panic!("game should be finished"),
+        }
+
+        // The finished parser rejects a second invocation, so no duplicate
+        // epilogue is appended.
+        assert!(g.command(MICK, "take", &p).is_err());
     }
 }

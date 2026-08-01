@@ -247,8 +247,9 @@ impl Gamer for Game {
                 value: Command::Play(loc),
                 ..
             }) => {
+                let was_finished = self.is_finished();
                 let mut logs = self.play(player, loc)?;
-                if self.is_finished() {
+                if !was_finished && self.is_finished() {
                     logs.push(placings_log(&self.placings(), None));
                 }
                 Ok(CommandResponse {
@@ -721,5 +722,55 @@ mod tests {
         game.current_player = 9;
         let _ = game.status();
         let _ = game.pub_state();
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        let t = brdgme_markup::to_string(&l.content);
+        t.contains("wins!") || t.contains("tie!")
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let mut game = game_with_starter(0);
+
+        // A non-finishing play emits no placings log and keeps can_undo.
+        let resp = game.command(0, "play a", &players()).unwrap();
+        assert!(resp.can_undo, "Play arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing play emits no placings log"
+        );
+
+        // Player 0 completes the top row and wins.
+        game.board = [
+            [Cell::X, Cell::X, Cell::Empty],
+            [Cell::O, Cell::O, Cell::Empty],
+            [Cell::Empty, Cell::Empty, Cell::Empty],
+        ];
+        game.current_player = 0;
+        let resp = game.command(0, "play c", &players()).unwrap();
+        assert!(game.is_finished());
+        assert!(resp.can_undo, "Play arm can_undo must be unchanged");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        assert_eq!(vec![1, 2], game.placings());
+        match game.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
+            _ => panic!("game should be finished"),
+        }
+
+        // The finished parser rejects a second invocation, so no duplicate
+        // epilogue is appended.
+        assert!(game.command(0, "play d", &players()).is_err());
+        assert!(game.command(1, "play d", &players()).is_err());
     }
 }

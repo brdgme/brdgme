@@ -335,8 +335,9 @@ impl Gamer for Game {
                 remaining,
                 ..
             }) => {
+                let was_finished = self.is_finished();
                 let mut resp = self.call(player, remaining)?;
-                if self.is_finished() {
+                if !was_finished && self.is_finished() {
                     let scores: Vec<(usize, i32)> = (0..self.players)
                         .map(|p| (p, self.player_dice[p].len() as i32))
                         .collect();
@@ -508,5 +509,55 @@ mod tests {
             Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
             _ => panic!("game should be finished"),
         }
+    }
+
+    // --- R-32 (F-18): !was_finished epilogue gate ---
+
+    fn is_placings_log(l: &Log) -> bool {
+        l.content.contains(&N::text(" Final scores: "))
+    }
+
+    #[test]
+    fn finish_path_twice_emits_one_placings_epilogue() {
+        let p = players(2);
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.player_dice = vec![vec![2, 3, 4, 5, 6], vec![1]];
+        g.bid_quantity = 0;
+        g.bid_value = 0;
+        g.bid_player = 0;
+        g.current_player = 0;
+
+        // A non-finishing bid emits no placings log and keeps can_undo.
+        let resp = g.command(0, "bid 2 5", &p).unwrap();
+        assert!(resp.can_undo, "Bid arm can_undo must be unchanged");
+        assert!(
+            !resp.logs.iter().any(is_placings_log),
+            "a non-finishing bid emits no placings log"
+        );
+
+        // Player 1 calls on a single die, loses it and is eliminated.
+        let resp = g.command(1, "call", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(!resp.can_undo, "Call arm can_undo must be unchanged");
+        assert_eq!(
+            1,
+            resp.logs.iter().filter(|l| is_placings_log(l)).count(),
+            "exactly one placings epilogue"
+        );
+        assert!(
+            is_placings_log(resp.logs.last().unwrap()),
+            "placings log is last"
+        );
+        // Player 0 keeps all 5 dice (place 1), player 1 is on none (place 2).
+        assert_eq!(vec![1, 2], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2], placings),
+            _ => panic!("game should be finished"),
+        }
+
+        // The finished parser rejects a second invocation, so no duplicate
+        // epilogue is appended.
+        assert!(g.command(1, "call", &p).is_err());
+        assert!(g.command(0, "bid 2 5", &p).is_err());
     }
 }
