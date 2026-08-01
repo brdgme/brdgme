@@ -106,10 +106,13 @@ fn double_row(mut left: Vec<Cell>, right: Vec<Cell>) -> Row {
 const DESCRIPTION_WRAP_WIDTH: usize = 60;
 
 fn render(pub_state: &PubState, player: Option<usize>, peeking: Option<&[SectorCard]>) -> Vec<N> {
-    let viewer = player.unwrap_or(0);
-    let opponent = (viewer + 1) % 2;
     let boards = &pub_state.player_boards;
-    let current = pub_state.current_player;
+    // Defence in depth: validate() rejects an out-of-range current_player at
+    // the deserialization boundary (F-31), so clamping here only ever affects
+    // a state that has already been refused; it keeps the render total.
+    let viewer = player.unwrap_or(0).min(boards.len() - 1);
+    let opponent = (viewer + 1) % 2;
+    let current = pub_state.current_player.min(boards.len() - 1);
     let remaining_moves = pub_state.yellow_dice + boards[current].res(Resource::Booster)
         - pub_state.flight_cards.len() as i32;
     let remaining_actions = boards[current].actions() - pub_state.flight_actions_used as i32;

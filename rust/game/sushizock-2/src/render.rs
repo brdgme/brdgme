@@ -142,31 +142,35 @@ fn render(pub_state: &PubState, _player: Option<usize>) -> Vec<N> {
         (A::Left, vec![N::Bold(vec![N::text("Red")])]),
     ]];
     for p in 0..pub_state.players {
-        let blue_text: Vec<N> = if !pub_state.player_blue_tiles[p].is_empty() {
-            let last = &pub_state.player_blue_tiles[p][pub_state.player_blue_tiles[p].len() - 1];
+        let blue = pub_state
+            .player_blue_tiles
+            .get(p)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let red = pub_state
+            .player_red_tiles
+            .get(p)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let blue_text: Vec<N> = if !blue.is_empty() {
+            let last = &blue[blue.len() - 1];
             vec![
                 tile(last),
                 N::Fg(
                     NamedColor::Grey.into(),
-                    vec![N::text(format!(
-                        " ({} tiles)",
-                        pub_state.player_blue_tiles[p].len()
-                    ))],
+                    vec![N::text(format!(" ({} tiles)", blue.len()))],
                 ),
             ]
         } else {
             vec![N::Fg(NamedColor::Grey.into(), vec![N::text("none")])]
         };
-        let red_text: Vec<N> = if !pub_state.player_red_tiles[p].is_empty() {
-            let last = &pub_state.player_red_tiles[p][pub_state.player_red_tiles[p].len() - 1];
+        let red_text: Vec<N> = if !red.is_empty() {
+            let last = &red[red.len() - 1];
             vec![
                 tile(last),
                 N::Fg(
                     NamedColor::Grey.into(),
-                    vec![N::text(format!(
-                        " ({} tiles)",
-                        pub_state.player_red_tiles[p].len()
-                    ))],
+                    vec![N::text(format!(" ({} tiles)", red.len()))],
                 ),
             ]
         } else {

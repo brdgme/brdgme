@@ -3,7 +3,7 @@ use brdgme_game::Renderer;
 use brdgme_markup::{Align as A, Node as N, Row, table_with_gap};
 
 use crate::card::*;
-use crate::{DIRK, PlayerState, PubBoard, PubState};
+use crate::{DIRK, PlayerState, PubState};
 
 fn currency_color(c: Currency) -> NamedColor {
     match c {
@@ -226,7 +226,9 @@ fn render_player_summary(state: &PubState) -> N {
     ]];
 
     for p in 0..state.all_players {
-        let board = &state.boards[p];
+        let Some(board) = state.boards.get(p) else {
+            continue;
+        };
         let counts = grid_tile_counts(&board.grid);
         let is_dirk = state.human_players == 2 && p == DIRK;
 
@@ -418,8 +420,9 @@ fn render_game(state: &PubState, viewer: Option<usize>, hand: Option<&[Card]>) -
         rows.push(vec![]);
     }
 
-    if let Some(p) = viewer {
-        let board = &state.boards[p];
+    if let Some(p) = viewer
+        && let Some(board) = state.boards.get(p)
+    {
         let place_nodes = render_place_tiles(&board.place);
         if !place_nodes.is_empty() {
             rows.push(vec![(A::Center, place_nodes)]);
@@ -435,7 +438,9 @@ fn render_game(state: &PubState, viewer: Option<usize>, hand: Option<&[Card]>) -
     let start = viewer.unwrap_or(0);
     for i in 0..state.all_players {
         let p = (start + i) % state.all_players;
-        let board: &PubBoard = &state.boards[p];
+        let Some(board) = state.boards.get(p) else {
+            continue;
+        };
         rows.push(vec![(
             A::Center,
             vec![N::Bold(vec![N::Player(p)]), N::text(" grid")],

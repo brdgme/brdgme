@@ -515,13 +515,16 @@ impl Game {
             for target in target_kinds {
                 match target {
                     BonusTarget::Kind(kind) => {
-                        count += self.cards[target_player]
-                            .iter()
+                        count += self
+                            .cards
+                            .get(target_player)
+                            .into_iter()
+                            .flatten()
                             .filter(|c| c.kind == *kind)
                             .count() as i32;
                     }
                     BonusTarget::DefeatTokens => {
-                        count += self.defeat_tokens[target_player];
+                        count += self.defeat_tokens.get(target_player).copied().unwrap_or(0);
                     }
                 }
             }
@@ -894,7 +897,7 @@ impl Gamer for Game {
     fn status(&self) -> Status {
         if self.finished {
             let metrics: Vec<Vec<i32>> = (0..self.players)
-                .map(|p| vec![self.player_vp(p), self.coins[p]])
+                .map(|p| vec![self.player_vp(p), self.coins.get(p).copied().unwrap_or(0)])
                 .collect();
             let placings = gen_placings(&metrics);
             Status::Finished {
@@ -909,13 +912,14 @@ impl Gamer for Game {
         } else {
             let whose_turn: Vec<usize> = (0..self.players)
                 .filter(|&p| {
-                    if self.hands[p].is_empty() {
+                    if self.hands.get(p).map(|h| h.is_empty()).unwrap_or(true) {
                         return false;
                     }
-                    match &self.actions[p] {
-                        None => true,
-                        Some(Action::Build { chosen, .. }) => !chosen,
-                        Some(Action::Discard { .. }) => false,
+                    match self.actions.get(p) {
+                        Some(None) => true,
+                        Some(Some(Action::Build { chosen, .. })) => !chosen,
+                        Some(Some(Action::Discard { .. })) => false,
+                        None => false,
                     }
                 })
                 .collect();
@@ -952,6 +956,51 @@ impl Gamer for Game {
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "seven-wonders-1: players {} out of range",
+                self.players
+            )));
+        }
+        if self.hands.len() != self.players {
+            return Err(GameError::internal(
+                "seven-wonders-1: hands length mismatch",
+            ));
+        }
+        if self.actions.len() != self.players {
+            return Err(GameError::internal(
+                "seven-wonders-1: actions length mismatch",
+            ));
+        }
+        if self.cards.len() != self.players {
+            return Err(GameError::internal(
+                "seven-wonders-1: cards length mismatch",
+            ));
+        }
+        if self.coins.len() != self.players {
+            return Err(GameError::internal(
+                "seven-wonders-1: coins length mismatch",
+            ));
+        }
+        if self.victory_tokens.len() != self.players {
+            return Err(GameError::internal(
+                "seven-wonders-1: victory_tokens length mismatch",
+            ));
+        }
+        if self.defeat_tokens.len() != self.players {
+            return Err(GameError::internal(
+                "seven-wonders-1: defeat_tokens length mismatch",
+            ));
+        }
+        if self.cities.len() != self.players {
+            return Err(GameError::internal(
+                "seven-wonders-1: cities length mismatch",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1769,5 +1818,103 @@ mod tests {
                 );
             }
         }
+    }
+
+    // --- R-25 (F-33): render path must not panic on a short/inconsistent state ---
+
+    fn shorten_all(g: &mut Game) {
+        g.hands.pop();
+        g.actions.pop();
+        g.cards.pop();
+        g.coins.pop();
+        g.victory_tokens.pop();
+        g.defeat_tokens.pop();
+        g.cities.pop();
+    }
+
+    #[test]
+    fn status_finished_does_not_panic_on_short_vectors() {
+        let mut g = new_game();
+        g.finished = true;
+        shorten_all(&mut g);
+        let _ = g.status();
+    }
+
+    #[test]
+    fn status_active_does_not_panic_on_short_vectors() {
+        let mut g = new_game();
+        g.finished = false;
+        shorten_all(&mut g);
+        let _ = g.status();
+    }
+
+    #[test]
+    fn player_vp_does_not_panic_on_short_vectors() {
+        let mut g = new_game();
+        shorten_all(&mut g);
+        let _ = g.player_vp(0);
+        assert_eq!(0, g.player_vp(2));
+    }
+
+    #[test]
+    fn render_does_not_panic_on_short_vectors() {
+        use brdgme_game::Renderer;
+        let mut g = new_game();
+        shorten_all(&mut g);
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-25 (F-33): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        for players in MIN_PLAYERS..=MAX_PLAYERS {
+            let (g, _) = Game::start_game(players, 1).unwrap();
+            assert!(g.validate().is_ok(), "players={players}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_bad_players() {
+        let mut g = new_game();
+        g.players = 2;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_game();
+        g.players = 8;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_each_short_vector() {
+        let mut g = new_game();
+        g.hands.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_game();
+        g.actions.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_game();
+        g.cards.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_game();
+        g.coins.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_game();
+        g.victory_tokens.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_game();
+        g.defeat_tokens.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_game();
+        g.cities.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

@@ -398,6 +398,9 @@ impl Gamer for Game {
     }
 
     fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal("for-sale-2: players out of range"));
+        }
         if self.hands.len() != self.players {
             return Err(GameError::internal("for-sale-2: hands length mismatch"));
         }
@@ -934,5 +937,52 @@ mod tests {
         let (mut g, _) = Game::start(3, 1).unwrap();
         g.bidding_player = g.players;
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    // --- R-25 (F-70): validate() must bound the player count ---
+
+    #[test]
+    fn validate_rejects_too_few_players() {
+        // Vectors kept consistent with the (invalid) player count so only the
+        // player-count bound can reject this state.
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.players = 1;
+        g.hands.truncate(1);
+        g.cheques.truncate(1);
+        g.chips.truncate(1);
+        g.bids.truncate(1);
+        g.finished_bidding.truncate(1);
+        g.bidding_player = 0;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_too_many_players() {
+        let (mut g, _) = Game::start(5, 1).unwrap();
+        g.players = 7;
+        g.hands.resize(7, vec![]);
+        g.cheques.resize(7, vec![]);
+        g.chips.resize(7, 0);
+        g.bids.resize(7, 0);
+        g.finished_bidding.resize(7, false);
+        g.bidding_player = 0;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn render_does_not_panic_on_out_of_range_players() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.players = 1;
+        g.hands.truncate(1);
+        g.cheques.truncate(1);
+        g.chips.truncate(1);
+        g.bids.truncate(1);
+        g.finished_bidding.truncate(1);
+        g.bidding_player = 0;
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
     }
 }

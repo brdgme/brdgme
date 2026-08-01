@@ -6,7 +6,7 @@ use crate::card::{CardEffect, CardKind, DIR_LEFT, DIR_NEIGHBOURS, Field, all_fie
 impl Game {
     pub fn science_vp(&self, player: usize) -> i32 {
         let mut field_options: Vec<Vec<Field>> = vec![];
-        for card in &self.cards[player] {
+        for card in self.cards.get(player).into_iter().flatten() {
             if let CardEffect::Science { fields } = &card.effect {
                 field_options.push(fields.clone());
             }
@@ -57,11 +57,12 @@ impl Game {
     }
 
     pub fn player_vp(&self, player: usize) -> i32 {
-        let mut vp = self.victory_tokens[player] - self.defeat_tokens[player];
-        vp += self.coins[player] / 3;
+        let mut vp = self.victory_tokens.get(player).copied().unwrap_or(0)
+            - self.defeat_tokens.get(player).copied().unwrap_or(0);
+        vp += self.coins.get(player).copied().unwrap_or(0) / 3;
         vp += self.science_vp(player);
 
-        for card in &self.cards[player] {
+        for card in self.cards.get(player).into_iter().flatten() {
             match &card.effect {
                 CardEffect::VP { vp: card_vp } => vp += card_vp,
                 CardEffect::Bonus {
@@ -91,7 +92,7 @@ impl Game {
             } else {
                 (player + 1) % self.players
             };
-            for card in &self.cards[neighbor] {
+            for card in self.cards.get(neighbor).into_iter().flatten() {
                 if card.kind != CardKind::Guild {
                     continue;
                 }

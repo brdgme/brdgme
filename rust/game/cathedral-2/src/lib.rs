@@ -131,11 +131,11 @@ impl Game {
 
     /// Port of `Game.CanPlayPiece` (`play_command.go`).
     ///
-    /// `piece` is signed to preserve the Go bounds-check defect verbatim
-    /// (`piece < 0 || piece > len(Pieces[player])`, an off-by-one that
-    /// should be `>=`; see the port plan's suspected-defects list). This is
-    /// unreachable through the normal command parser, which bounds `piece`
-    /// to `1..=len(Pieces[player])` before subtracting 1.
+    /// The Go bounds check was off by one (`piece > len(Pieces[player])`
+    /// admitted `piece == len`, which then panicked indexing the catalogue
+    /// and `played_pieces`). Fixed to `>=` (F-49); the normal command parser
+    /// already bounds `piece` to `1..=len(Pieces[player])` before subtracting
+    /// 1, so this only hardens the direct/deserialized path.
     pub fn can_play_piece(
         &self,
         player: i32,
@@ -147,7 +147,7 @@ impl Game {
             Some(p) => p,
             None => return Err("that is not a player in this game".to_string()),
         };
-        if piece < 0 || piece as usize > all_pieces.len() {
+        if piece < 0 || piece as usize >= all_pieces.len() {
             return Err("that is not a valid piece number".to_string());
         }
         let piece_idx = piece as usize;
@@ -340,7 +340,15 @@ impl Game {
                 for pt in &pieces_found {
                     if pt.player != PLAYER_CATHEDRAL {
                         captured_piece_count += 1;
-                        self.played_pieces[pt.player as usize][(pt.typ - 1) as usize] = false;
+                        // `pt.player`/`pt.typ` come off a board tile and are
+                        // untrusted; `typ == 0` would wrap `(typ - 1) as usize`
+                        // to `usize::MAX`. Guard the indexing so a malformed
+                        // tile cannot panic the capture (F-49).
+                        if let Some(row) = self.played_pieces.get_mut(pt.player as usize)
+                            && let Some(slot) = row.get_mut((pt.typ - 1) as usize)
+                        {
+                            *slot = false;
+                        }
                     }
                 }
                 for &area_loc in &area {
@@ -605,6 +613,31 @@ impl Gamer for Game {
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if self.players != PLAYERS {
+            return Err(GameError::internal("cathedral-2: players must be 2"));
+        }
+        if self.played_pieces.len() != self.players {
+            return Err(GameError::internal(
+                "cathedral-2: played_pieces length mismatch",
+            ));
+        }
+        for p in 0..self.players {
+            let expected = pieces(p as i32).map(|v| v.len()).unwrap_or(0);
+            if self.played_pieces[p].len() != expected {
+                return Err(GameError::internal(format!(
+                    "cathedral-2: played_pieces[{p}] length mismatch"
+                )));
+            }
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "cathedral-2: current_player out of range",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1418,5 +1451,111 @@ C1C1C1..G1G1G.G.G1G.
         let markup = brdgme_game::Renderer::render(&g.player_state(0));
         let text = brdgme_markup::plain(&brdgme_markup::transform(&markup, &[]));
         assert!(!text.contains("not a player in this game"));
+    }
+
+    // --- R-25 (F-49): command-path boundary fixes ---
+
+    #[test]
+    fn can_play_piece_rejects_piece_equal_to_catalogue_len() {
+        // Off-by-one: `piece == len` used to slip past the `>` bound and panic
+        // indexing `played_pieces`/the catalogue at `piece_idx == len`.
+        let (g, _) = Game::start(2, 1).unwrap();
+        let len = piece::player_0_pieces().len() as i32;
+        let result = g.can_play_piece(0, len, Loc::new(0, 0), loc::DIR_DOWN);
+        assert!(result.is_err());
+    }
+
+    fn game_with_enclosed_tile(player: i32, typ: i32) -> Game {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.played_pieces[1][0] = true; // Cathedral played, enabling captures.
+        let center = Loc::new(5, 5);
+        g.board.insert(
+            center.to_key(),
+            Tile {
+                player,
+                typ,
+                owner: NO_PLAYER,
+                text: String::new(),
+            },
+        );
+        for dir in loc::dirs() {
+            let n = center.neighbour(dir);
+            g.board.insert(
+                n.to_key(),
+                Tile {
+                    player: 0,
+                    typ: 9,
+                    owner: NO_PLAYER,
+                    text: String::new(),
+                },
+            );
+        }
+        g
+    }
+
+    #[test]
+    fn check_captures_handles_zero_piece_type_without_panicking() {
+        // `typ == 0` makes `(typ - 1) as usize == usize::MAX`; the untrusted
+        // board tile value must be bounds-checked, not index `played_pieces`.
+        let mut g = game_with_enclosed_tile(1, 0);
+        let _ = g.check_captures(Loc::new(5, 4));
+    }
+
+    #[test]
+    fn check_captures_handles_out_of_range_player_without_panicking() {
+        // An untrusted board tile may name a player that is not a valid
+        // `played_pieces` index; the capture must not index out of bounds.
+        let mut g = game_with_enclosed_tile(5, 1);
+        let _ = g.check_captures(Loc::new(5, 4));
+    }
+
+    // --- R-25 (F-49): render entry point stays panic-free on malformed state ---
+
+    #[test]
+    fn render_does_not_panic_on_malformed_state() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.played_pieces = vec![];
+        g.current_player = 9;
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-25 (F-49): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        let (g, _) = Game::start(2, 1).unwrap();
+        assert!(g.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_bad_players() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.players = 3;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_short_played_pieces() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.played_pieces.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_short_inner_played_pieces() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.played_pieces[0].pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_current_player_out_of_range() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

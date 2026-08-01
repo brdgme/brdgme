@@ -115,9 +115,11 @@ fn card_cells(c: &Card, afford: Option<(&Cost, &Cost)>) -> (Cell, Cell) {
 fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
     let mut out: Vec<N> = vec![];
 
-    let bonuses_tokens = player.map(|(p, _)| {
-        let pb = &pub_state.player_boards[p];
-        (pb.bonuses.clone(), pb.tokens.clone())
+    let bonuses_tokens = player.and_then(|(p, _)| {
+        pub_state
+            .player_boards
+            .get(p)
+            .map(|pb| (pb.bonuses.clone(), pb.tokens.clone()))
     });
     let afford = bonuses_tokens
         .as_ref()
@@ -278,7 +280,9 @@ fn render(pub_state: &PubState, player: Option<(usize, &[Card])>) -> Vec<N> {
     let mut rows: Vec<Row> = vec![header];
     for p in 0..pub_state.players {
         let bold = player.map(|(pi, _)| pi == p).unwrap_or(false);
-        let pb = &pub_state.player_boards[p];
+        let Some(pb) = pub_state.player_boards.get(p) else {
+            continue;
+        };
         let mut row: Row = vec![cel(A::Left, vec![N::Player(p)])];
         for &gem in GEMS.iter() {
             let text = N::text(format!("{}+{}", pb.bonuses.get(&gem), pb.tokens.get(&gem)));

@@ -48,7 +48,9 @@ fn effect_desc(effect: &CardEffect) -> String {
 }
 
 fn render_player_tableau(state: &PubState, player: usize) -> N {
-    let cards = &state.cards[player];
+    let Some(cards) = state.cards.get(player) else {
+        return N::text("(no cards)");
+    };
     if cards.is_empty() {
         return N::text("(no cards)");
     }
@@ -78,35 +80,32 @@ fn render_player_summary(state: &PubState) -> N {
     ]];
 
     for p in 0..state.players {
-        let city = &state.cities[p];
-        let stages_built = state.cards[p]
-            .iter()
-            .filter(|c| c.kind == CardKind::Wonder)
-            .count();
+        let Some(city) = state.cities.get(p) else {
+            continue;
+        };
+        let Some(cards) = state.cards.get(p) else {
+            continue;
+        };
+        let stages_built = cards.iter().filter(|c| c.kind == CardKind::Wonder).count();
         let total_stages = city.wonder_stages.len();
-        let tableau_count = state.cards[p]
-            .iter()
-            .filter(|c| c.kind != CardKind::Wonder)
-            .count();
+        let tableau_count = cards.iter().filter(|c| c.kind != CardKind::Wonder).count();
+        let coins = state.coins.get(p).copied().unwrap_or(0);
+        let victory_tokens = state.victory_tokens.get(p).copied().unwrap_or(0);
+        let defeat_tokens = state.defeat_tokens.get(p).copied().unwrap_or(0);
+        let hand_size = state.hand_sizes.get(p).copied().unwrap_or(0);
 
         rows.push(vec![
             (A::Left, vec![N::Player(p)]),
             (A::Left, vec![N::text(city.name.clone())]),
-            (A::Center, vec![N::text(format!("{}", state.coins[p]))]),
-            (
-                A::Center,
-                vec![N::text(format!("{}", state.victory_tokens[p]))],
-            ),
-            (
-                A::Center,
-                vec![N::text(format!("{}", state.defeat_tokens[p]))],
-            ),
+            (A::Center, vec![N::text(format!("{}", coins))]),
+            (A::Center, vec![N::text(format!("{}", victory_tokens))]),
+            (A::Center, vec![N::text(format!("{}", defeat_tokens))]),
             (
                 A::Center,
                 vec![N::text(format!("{}/{}", stages_built, total_stages))],
             ),
             (A::Center, vec![N::text(format!("{}", tableau_count))]),
-            (A::Center, vec![N::text(format!("{}", state.hand_sizes[p]))]),
+            (A::Center, vec![N::text(format!("{}", hand_size))]),
         ]);
     }
     table_with_gap(&rows, 2)
@@ -124,7 +123,10 @@ fn render_pending(state: &PubState) -> Vec<N> {
         ];
     }
     let waiting: Vec<usize> = (0..state.players)
-        .filter(|&p| !state.actions_chosen[p] && state.hand_sizes[p] > 0)
+        .filter(|&p| {
+            !state.actions_chosen.get(p).copied().unwrap_or(true)
+                && state.hand_sizes.get(p).copied().unwrap_or(0) > 0
+        })
         .collect();
     if waiting.is_empty() {
         return vec![];
@@ -194,11 +196,16 @@ fn render_game(state: &PubState, viewer: Option<usize>, hand: Option<&[crate::Ca
     let start = viewer.unwrap_or(0);
     for i in 0..state.players {
         let p = (start + i) % state.players;
+        let city_name = state
+            .cities
+            .get(p)
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
         rows.push(vec![(
             A::Center,
             vec![
                 N::Bold(vec![N::Player(p)]),
-                N::text(format!(" - {}", state.cities[p].name)),
+                N::text(format!(" - {}", city_name)),
             ],
         )]);
         rows.push(vec![(A::Center, vec![render_player_tableau(state, p)])]);

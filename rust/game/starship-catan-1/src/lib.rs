@@ -2039,6 +2039,23 @@ impl Gamer for Game {
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
     }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if self.players != 2 {
+            return Err(GameError::internal("starship-catan-1: players must be 2"));
+        }
+        if self.current_player >= 2 {
+            return Err(GameError::internal(
+                "starship-catan-1: current_player out of range",
+            ));
+        }
+        if self.gain_player >= 2 {
+            return Err(GameError::internal(
+                "starship-catan-1: gain_player out of range",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -2668,5 +2685,47 @@ mod tests {
             placings_count, 0,
             "no placings log on non-finishing command"
         );
+    }
+
+    // --- R-25 (F-31): render path must not panic on a bad current_player ---
+
+    #[test]
+    fn render_does_not_panic_on_bad_current_player() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.current_player = 2;
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-25 (F-31): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        let (g, _) = Game::start(2, 1).unwrap();
+        assert!(g.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_bad_players() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.players = 3;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_current_player_out_of_range() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.current_player = 2;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_gain_player_out_of_range() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.gain_player = 2;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

@@ -423,6 +423,12 @@ impl Gamer for Game {
     }
 
     fn validate(&self) -> Result<(), GameError> {
+        if self.players != NUM_PLAYERS {
+            return Err(GameError::internal(format!(
+                "battleship-2: players {} != NUM_PLAYERS {}",
+                self.players, NUM_PLAYERS
+            )));
+        }
         if self.boards.len() != self.players {
             return Err(GameError::internal(format!(
                 "battleship-2: boards.len() {} != players {}",
@@ -1052,5 +1058,45 @@ mod tests {
         let mut g = mock_game();
         g.current_player = g.players;
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    // --- R-25 (F-70): validate() must bound the player count to NUM_PLAYERS ---
+
+    #[test]
+    fn validate_rejects_too_many_players() {
+        // Vectors kept consistent with the (invalid) player count so only the
+        // fixed-player-count bound can reject this state.
+        let mut g = mock_game();
+        g.players = 3;
+        let board = g.boards[0];
+        g.boards.push(board);
+        g.left_to_place.push(g.left_to_place[0].clone());
+        g.current_player = 0;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_too_few_players() {
+        let mut g = mock_game();
+        g.players = 1;
+        g.boards.truncate(1);
+        g.left_to_place.truncate(1);
+        g.current_player = 0;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn render_does_not_panic_on_wrong_player_count() {
+        use brdgme_game::Renderer;
+        let mut g = mock_game();
+        g.players = 3;
+        let board = g.boards[0];
+        g.boards.push(board);
+        g.left_to_place.push(g.left_to_place[0].clone());
+        g.current_player = 0;
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
     }
 }

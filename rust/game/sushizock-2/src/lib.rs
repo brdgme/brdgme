@@ -276,9 +276,13 @@ fn score(blue: &[Tile], red: &[Tile]) -> i32 {
 
 impl Game {
     pub fn player_score(&self, player: usize) -> i32 {
+        // Fetched defensively so a short per-player vector scores 0 instead of
+        // panicking every viewer (F-51); validate() rejects such states at the
+        // deserialization boundary.
+        let empty = Vec::new();
         score(
-            &self.player_blue_tiles[player],
-            &self.player_red_tiles[player],
+            self.player_blue_tiles.get(player).unwrap_or(&empty),
+            self.player_red_tiles.get(player).unwrap_or(&empty),
         )
     }
 
@@ -827,6 +831,31 @@ impl Gamer for Game {
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "sushizock-2: players {} out of range",
+                self.players
+            )));
+        }
+        if self.player_blue_tiles.len() != self.players {
+            return Err(GameError::internal(
+                "sushizock-2: player_blue_tiles length mismatch",
+            ));
+        }
+        if self.player_red_tiles.len() != self.players {
+            return Err(GameError::internal(
+                "sushizock-2: player_red_tiles length mismatch",
+            ));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "sushizock-2: current_player out of range",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1938,5 +1967,97 @@ mod tests {
             }
             other => panic!("expected InvalidInput, got {:?}", other),
         }
+    }
+
+    // --- R-25 (F-51): render path must not panic on a short/inconsistent state ---
+
+    fn shorten_per_player(g: &mut Game) {
+        g.player_blue_tiles.pop();
+        g.player_red_tiles.pop();
+    }
+
+    #[test]
+    fn player_score_does_not_panic_on_short_vectors() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        shorten_per_player(&mut g);
+        let _ = g.player_score(0);
+        assert_eq!(0, g.player_score(2));
+    }
+
+    #[test]
+    fn status_does_not_panic_on_short_vectors() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.blue_tiles = vec![];
+        g.red_tiles = vec![];
+        shorten_per_player(&mut g);
+        let _ = g.status();
+    }
+
+    #[test]
+    fn pub_state_does_not_panic_on_short_vectors() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.blue_tiles = vec![];
+        g.red_tiles = vec![];
+        shorten_per_player(&mut g);
+        let _ = g.pub_state();
+    }
+
+    #[test]
+    fn points_does_not_panic_on_short_vectors() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        shorten_per_player(&mut g);
+        assert_eq!(vec![0.0, 0.0, 0.0], g.points());
+    }
+
+    #[test]
+    fn render_does_not_panic_on_short_vectors() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        shorten_per_player(&mut g);
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-25 (F-51): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        for n in MIN_PLAYERS..=MAX_PLAYERS {
+            let (g, _) = Game::start(n, 1).unwrap();
+            assert!(g.validate().is_ok(), "players={n}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_bad_players() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.players = 1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.players = 6;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_short_player_blue_tiles() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.player_blue_tiles.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_short_player_red_tiles() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.player_red_tiles.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_current_player_out_of_range() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

@@ -195,11 +195,9 @@ impl Game {
     fn placings(&self) -> Vec<usize> {
         gen_placings(
             &(0..self.players)
-                .map(|p| {
-                    vec![
-                        self.player_boards[p].prestige(),
-                        self.player_boards[p].cards.len() as i32,
-                    ]
+                .map(|p| match self.player_boards.get(p) {
+                    Some(pb) => vec![pb.prestige(), pb.cards.len() as i32],
+                    None => vec![0, 0],
                 })
                 .collect::<Vec<Vec<i32>>>(),
         )
@@ -618,7 +616,11 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            reserve: self.player_boards[player].reserve.clone(),
+            reserve: self
+                .player_boards
+                .get(player)
+                .map(|pb| pb.reserve.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -682,7 +684,12 @@ impl Gamer for Game {
 
     fn points(&self) -> Vec<f32> {
         (0..self.players)
-            .map(|p| self.player_boards[p].prestige() as f32)
+            .map(|p| {
+                self.player_boards
+                    .get(p)
+                    .map(|pb| pb.prestige() as f32)
+                    .unwrap_or(0.0)
+            })
             .collect()
     }
 
@@ -708,6 +715,32 @@ impl Gamer for Game {
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "splendor-2: players {} out of range",
+                self.players
+            )));
+        }
+        if self.player_boards.len() != self.players {
+            return Err(GameError::internal(
+                "splendor-2: player_boards length mismatch",
+            ));
+        }
+        if self.board.len() != 3 {
+            return Err(GameError::internal("splendor-2: board length mismatch"));
+        }
+        if self.decks.len() != 3 {
+            return Err(GameError::internal("splendor-2: decks length mismatch"));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "splendor-2: current_player out of range",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1361,5 +1394,89 @@ mod tests {
             resp.logs.iter().all(|l| !is_placings_log(l)),
             "non-finishing command must not emit a placings log"
         );
+    }
+
+    // --- R-25 (F-37): render path must not panic on a short/inconsistent state ---
+
+    #[test]
+    fn player_state_does_not_panic_on_short_player_boards() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.player_boards = vec![];
+        assert!(g.player_state(0).reserve.is_empty());
+        assert!(g.player_state(1).reserve.is_empty());
+    }
+
+    #[test]
+    fn status_does_not_panic_on_short_player_boards() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.ended = true;
+        g.player_boards = vec![];
+        let _ = g.status();
+    }
+
+    #[test]
+    fn points_does_not_panic_on_short_player_boards() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.player_boards = vec![];
+        assert_eq!(vec![0.0, 0.0], g.points());
+    }
+
+    #[test]
+    fn render_does_not_panic_on_short_player_boards() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.player_boards = vec![];
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-25 (F-37): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        for n in MIN_PLAYERS..=MAX_PLAYERS {
+            let (g, _) = Game::start(n, 1).unwrap();
+            assert!(g.validate().is_ok(), "players={n}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_bad_players() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.players = 1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.players = 5;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_short_player_boards() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.player_boards.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_wrong_board_len() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.board.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_wrong_decks_len() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.decks.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_current_player_out_of_range() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.current_player = g.players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

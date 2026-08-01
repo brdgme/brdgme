@@ -846,7 +846,11 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            hand: self.boards[player].cards.clone(),
+            hand: self
+                .boards
+                .get(player)
+                .map(|b| b.cards.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -912,7 +916,7 @@ impl Gamer for Game {
     fn status(&self) -> Status {
         if self.phase == Phase::End {
             let metrics: Vec<Vec<i32>> = (0..self.human_players)
-                .map(|p| vec![self.boards[p].points])
+                .map(|p| vec![self.boards.get(p).map(|b| b.points).unwrap_or(0)])
                 .collect();
             let placings = gen_placings(&metrics);
             Status::Finished {
@@ -933,7 +937,7 @@ impl Gamer for Game {
 
     fn points(&self) -> Vec<f32> {
         (0..self.human_players)
-            .map(|p| self.boards[p].points as f32)
+            .map(|p| self.boards.get(p).map(|b| b.points as f32).unwrap_or(0.0))
             .collect()
     }
 
@@ -959,6 +963,38 @@ impl Gamer for Game {
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.human_players) {
+            return Err(GameError::internal(format!(
+                "alhambra-1: human_players {} out of range",
+                self.human_players
+            )));
+        }
+        let expected_all = if self.human_players == 2 {
+            3
+        } else {
+            self.human_players
+        };
+        if self.all_players != expected_all {
+            return Err(GameError::internal(format!(
+                "alhambra-1: all_players {} does not match human_players {}",
+                self.all_players, self.human_players
+            )));
+        }
+        if self.boards.len() != self.all_players {
+            return Err(GameError::internal("alhambra-1: boards length mismatch"));
+        }
+        if self.tiles.len() != 4 {
+            return Err(GameError::internal("alhambra-1: tiles length mismatch"));
+        }
+        if self.current_player >= self.human_players {
+            return Err(GameError::internal(
+                "alhambra-1: current_player out of range",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1830,5 +1866,92 @@ mod tests {
             "expected currency.name() in: {}",
             err
         );
+    }
+
+    // --- R-25 (F-24): render path must not panic on a short/inconsistent state ---
+
+    #[test]
+    fn player_state_does_not_panic_on_short_boards() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.boards = vec![];
+        assert!(g.player_state(0).hand.is_empty());
+        assert!(g.player_state(2).hand.is_empty());
+    }
+
+    #[test]
+    fn status_does_not_panic_on_short_boards() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.phase = Phase::End;
+        g.boards = vec![];
+        let _ = g.status();
+    }
+
+    #[test]
+    fn points_does_not_panic_on_short_boards() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.boards = vec![];
+        assert_eq!(vec![0.0, 0.0, 0.0], g.points());
+    }
+
+    #[test]
+    fn render_does_not_panic_on_short_boards() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.boards = vec![];
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-25 (F-24): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        let (g, _) = Game::start(3, 1).unwrap();
+        assert!(g.validate().is_ok());
+        let (g2, _) = Game::start(2, 1).unwrap();
+        assert!(g2.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_bad_human_players() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.human_players = 1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.human_players = 7;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_inconsistent_all_players() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.all_players = 4;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.all_players = 2;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_short_boards() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.boards.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_wrong_tiles_len() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.tiles.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_current_player_out_of_range() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        g.current_player = g.human_players;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

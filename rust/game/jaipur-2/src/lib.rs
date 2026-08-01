@@ -734,7 +734,7 @@ impl Gamer for Game {
         PlayerState {
             public: self.pub_state(),
             player,
-            hand: self.hands[player].clone(),
+            hand: self.hands.get(player).cloned().unwrap_or_default(),
         }
     }
 
@@ -822,6 +822,13 @@ impl Gamer for Game {
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if self.current_player >= NUM_PLAYERS {
+            return Err(GameError::internal("jaipur-2: current_player out of range"));
+        }
+        Ok(())
     }
 }
 
@@ -1737,5 +1744,39 @@ mod tests {
             Status::Finished { placings, .. } => assert_eq!(placings[player], 1),
             _ => panic!("expected finished"),
         }
+    }
+
+    // --- R-25 (F-54): render path must not panic on a bad current_player ---
+
+    #[test]
+    fn player_state_does_not_panic_on_bad_player() {
+        let (g, _) = Game::start(2, 0).unwrap();
+        assert!(g.player_state(2).hand.is_empty());
+    }
+
+    #[test]
+    fn render_does_not_panic_on_bad_current_player() {
+        use brdgme_game::Renderer;
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.current_player = 2;
+        let pub_nodes = g.pub_state().render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&pub_nodes, &[]));
+        let player_nodes = g.player_state(0).render();
+        let _ = brdgme_markup::plain(&brdgme_markup::transform(&player_nodes, &[]));
+    }
+
+    // --- R-25 (F-54): validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        let (g, _) = Game::start(2, 0).unwrap();
+        assert!(g.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_current_player_out_of_range() {
+        let (mut g, _) = Game::start(2, 0).unwrap();
+        g.current_player = NUM_PLAYERS;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
     }
 }

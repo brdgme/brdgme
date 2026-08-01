@@ -200,6 +200,12 @@ impl Gamer for Game {
                 self.start_player
             )));
         }
+        if self.current_player >= NUM_PLAYERS {
+            return Err(GameError::internal(format!(
+                "tic-tac-toe-2: current_player must be < {NUM_PLAYERS}, got {}",
+                self.current_player
+            )));
+        }
         Ok(())
     }
 
@@ -701,5 +707,19 @@ mod tests {
         let mut game = Game::start(NUM_PLAYERS, 1).unwrap().0;
         game.start_player = NUM_PLAYERS;
         assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        // R-25 (F-82): current_player is published verbatim by status/pub_state,
+        // so it must be bounded too.
+        let mut game = Game::start(NUM_PLAYERS, 1).unwrap().0;
+        game.current_player = NUM_PLAYERS;
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn status_and_pub_state_do_not_panic_on_bad_current_player() {
+        let mut game = Game::start(NUM_PLAYERS, 1).unwrap().0;
+        game.current_player = 9;
+        let _ = game.status();
+        let _ = game.pub_state();
     }
 }
