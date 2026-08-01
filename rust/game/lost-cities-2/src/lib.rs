@@ -169,7 +169,7 @@ impl Game {
         for p in 0..self.players {
             let mut round_score: isize = 0;
             if let Some(p_exp) = self.expeditions.get(p) {
-                round_score = score(self.players, p_exp);
+                round_score = score(self.players, p_exp)?;
             }
             if let Some(s) = self.scores.get_mut(p) {
                 s.push(round_score);
@@ -426,7 +426,7 @@ impl Game {
         let mut logs: Vec<Log> = vec![];
         match self.hands.get_mut(player) {
             Some(hand) => {
-                let mut num = hand_size(self.players).saturating_sub(hand.len());
+                let mut num = hand_size(self.players)?.saturating_sub(hand.len());
                 let dl = self.deck.len();
                 if num > dl {
                     num = dl;
@@ -727,33 +727,42 @@ fn next_player(player: usize, players: usize) -> usize {
     (player + 1) % players
 }
 
-fn expedition_cost(players: usize) -> isize {
+fn expedition_cost(players: usize) -> Result<isize, GameError> {
     match players {
-        2 => EXP_COST_2P,
-        3 => EXP_COST_3P,
-        _ => unreachable!(),
+        2 => Ok(EXP_COST_2P),
+        3 => Ok(EXP_COST_3P),
+        _ => Err(GameError::internal(format!(
+            "lost-cities-2: players {} out of range",
+            players
+        ))),
     }
 }
 
-fn hand_size(players: usize) -> usize {
+fn hand_size(players: usize) -> Result<usize, GameError> {
     match players {
-        2 => HAND_SIZE_2P,
-        3 => HAND_SIZE_3P,
-        _ => unreachable!(),
+        2 => Ok(HAND_SIZE_2P),
+        3 => Ok(HAND_SIZE_3P),
+        _ => Err(GameError::internal(format!(
+            "lost-cities-2: players {} out of range",
+            players
+        ))),
     }
 }
 
-fn expedition_bonus_size(players: usize) -> isize {
+fn expedition_bonus_size(players: usize) -> Result<isize, GameError> {
     match players {
-        2 => EXP_BONUS_SIZE_2P,
-        3 => EXP_BONUS_SIZE_3P,
-        _ => unreachable!(),
+        2 => Ok(EXP_BONUS_SIZE_2P),
+        3 => Ok(EXP_BONUS_SIZE_3P),
+        _ => Err(GameError::internal(format!(
+            "lost-cities-2: players {} out of range",
+            players
+        ))),
     }
 }
 
-pub fn score(players: usize, cards: &[Card]) -> isize {
-    let exp_cost = expedition_cost(players);
-    let exp_bonus_size = expedition_bonus_size(players);
+pub fn score(players: usize, cards: &[Card]) -> Result<isize, GameError> {
+    let exp_cost = expedition_cost(players)?;
+    let exp_bonus_size = expedition_bonus_size(players)?;
 
     let mut exp_cards: HashMap<Expedition, isize> = HashMap::new();
     let mut exp_inv: HashMap<Expedition, isize> = HashMap::new();
@@ -772,13 +781,15 @@ pub fn score(players: usize, cards: &[Card]) -> isize {
             }
         }
     }
-    expeditions().iter().fold(0, |acc, &e| {
+    Ok(expeditions().iter().fold(0, |acc, &e| {
         let Some(&cards) = exp_cards.get(&e) else {
             return acc;
         };
+        // The completion bonus deliberately reuses exp_cost as its value: at
+        // 2p both are 20, and at 3p the bonus is therefore 15 (F-64).
         acc + (exp_sum.get(&e).unwrap_or(&0) - exp_cost) * (exp_inv.get(&e).unwrap_or(&0) + 1)
             + if cards >= exp_bonus_size { exp_cost } else { 0 }
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -875,8 +886,11 @@ mod tests {
 
     #[test]
     fn score_works() {
-        assert_eq!(0, score(2, &[]));
-        assert_eq!(-17, score(2, &[(Expedition::Red, Value::N(3)).into()]));
+        assert_eq!(0, score(2, &[]).unwrap());
+        assert_eq!(
+            -17,
+            score(2, &[(Expedition::Red, Value::N(3)).into()]).unwrap()
+        );
         assert_eq!(
             -34,
             score(
@@ -886,6 +900,7 @@ mod tests {
                     (Expedition::Green, Value::N(3)).into(),
                 ],
             )
+            .unwrap()
         );
         assert_eq!(
             -30,
@@ -897,6 +912,7 @@ mod tests {
                     (Expedition::Green, Value::N(4)).into(),
                 ],
             )
+            .unwrap()
         );
         assert_eq!(
             -37,
@@ -909,6 +925,7 @@ mod tests {
                     (Expedition::Green, Value::N(6)).into(),
                 ],
             )
+            .unwrap()
         );
         assert_eq!(
             44,
@@ -925,6 +942,53 @@ mod tests {
                     (Expedition::Green, Value::N(9)).into(),
                 ],
             )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn score_3p_works() {
+        // F-64: the 3-player scoring constants (EXP_COST_3P = 15,
+        // EXP_BONUS_SIZE_3P = 7) had no coverage; score_works only ever
+        // called score(2, ..).
+        // 15-point expedition cost: (3 - 15) * 1 = -12.
+        assert_eq!(
+            -12,
+            score(3, &[(Expedition::Red, Value::N(3)).into()]).unwrap()
+        );
+        // No completion bonus below the 7-card threshold: (27 - 15) * 1 = 12.
+        assert_eq!(
+            12,
+            score(
+                3,
+                &[
+                    (Expedition::Green, Value::N(2)).into(),
+                    (Expedition::Green, Value::N(3)).into(),
+                    (Expedition::Green, Value::N(4)).into(),
+                    (Expedition::Green, Value::N(5)).into(),
+                    (Expedition::Green, Value::N(6)).into(),
+                    (Expedition::Green, Value::N(7)).into(),
+                ],
+            )
+            .unwrap()
+        );
+        // 7 cards hit the threshold; the completion bonus reuses exp_cost
+        // (15), so (35 - 15) * 1 + 15 = 35.
+        assert_eq!(
+            35,
+            score(
+                3,
+                &[
+                    (Expedition::Green, Value::N(2)).into(),
+                    (Expedition::Green, Value::N(3)).into(),
+                    (Expedition::Green, Value::N(4)).into(),
+                    (Expedition::Green, Value::N(5)).into(),
+                    (Expedition::Green, Value::N(6)).into(),
+                    (Expedition::Green, Value::N(7)).into(),
+                    (Expedition::Green, Value::N(8)).into(),
+                ],
+            )
+            .unwrap()
         );
     }
 
@@ -937,6 +1001,27 @@ mod tests {
         assert_eq!(vec![2, 1], g.placings());
         g.scores = vec![vec![100, 50, 40], vec![100, 50, 40]];
         assert_eq!(vec![1, 1], g.placings());
+    }
+
+    #[test]
+    fn score_rejects_invalid_player_count() {
+        // F-63: expedition_cost / expedition_bonus_size used unreachable!()
+        // outside 2..=3 players; they must reject instead of panicking.
+        assert!(matches!(score(4, &[]), Err(GameError::Internal { .. })));
+        assert!(matches!(score(1, &[]), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn draw_rejects_invalid_player_count() {
+        // F-63: hand_size used unreachable!() outside 2..=3 players. It is
+        // reached from the command path via draw_hand_full, which must return
+        // Err rather than panic when validate() has not gated the state.
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.players = 4;
+        let p = game.current_player;
+        let c = game.hands[p][0];
+        game.discard(p, c).unwrap();
+        assert!(matches!(game.draw(p), Err(GameError::Internal { .. })));
     }
 
     #[test]

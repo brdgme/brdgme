@@ -507,6 +507,29 @@ impl Gamer for Game {
         Ok((g, logs))
     }
 
+    fn validate(&self) -> Result<(), GameError> {
+        if self.hands.len() != PLAYERS {
+            return Err(GameError::internal("lost-cities-1: hands length mismatch"));
+        }
+        if self.scores.len() != PLAYERS {
+            return Err(GameError::internal("lost-cities-1: scores length mismatch"));
+        }
+        if self.expeditions.len() != PLAYERS {
+            return Err(GameError::internal(
+                "lost-cities-1: expeditions length mismatch",
+            ));
+        }
+        if self.stats.len() != PLAYERS {
+            return Err(GameError::internal("lost-cities-1: stats length mismatch"));
+        }
+        if self.current_player >= PLAYERS {
+            return Err(GameError::internal(
+                "lost-cities-1: current_player out of range",
+            ));
+        }
+        Ok(())
+    }
+
     fn status(&self) -> Status {
         if self.round >= START_ROUND + ROUNDS {
             Status::Finished {
@@ -547,11 +570,12 @@ impl Gamer for Game {
             public: self.pub_state(),
             player,
             // Documented (and DATA_DOCS.md) contract: sorted by expedition
-            // then value, which is exactly Card's derived Ord. Indexing is
-            // left unchecked deliberately - the bounds fix for a crafted
-            // PlayerRender is WP-09's (e F18 / e F36), not ours.
+            // then value, which is exactly Card's derived Ord. The hand is
+            // fetched defensively so a short `hands` vector renders an empty
+            // hand instead of panicking every viewer (F-60); validate()
+            // rejects such states at the deserialization boundary.
             hand: {
-                let mut hand = self.hands[player].clone();
+                let mut hand = self.hands.get(player).cloned().unwrap_or_default();
                 hand.sort();
                 hand
             },
@@ -899,5 +923,41 @@ mod test {
             "no cards may be drawn into an over-full hand"
         );
         assert!(!logs.is_empty(), "the draw attempt must still be logged");
+    }
+
+    #[test]
+    fn validate_works() {
+        assert!(Game::start(2, 1).unwrap().0.validate().is_ok());
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.hands.pop();
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.scores.pop();
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.expeditions.pop();
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.stats.pop();
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.current_player = PLAYERS;
+        assert!(matches!(game.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn player_state_does_not_panic_on_short_hands() {
+        // F-60: a persisted Game with `hands` shorter than the player index
+        // (e.g. empty, which serde accepts) panicked player_state() for every
+        // viewer because the render path indexed `self.hands[player]` raw.
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.hands = vec![];
+        assert!(game.player_state(0).hand.is_empty());
+        assert!(game.player_state(1).hand.is_empty());
     }
 }
