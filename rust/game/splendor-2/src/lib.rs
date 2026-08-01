@@ -1101,6 +1101,57 @@ mod tests {
     }
 
     #[test]
+    fn reserve_public_log_hides_reserved_card_cost() {
+        // AC1 (splendor-2): a successful reserve is a real public log-producing
+        // path carrying a concrete private per-player value - the reserved
+        // card's exact identity. The public log announces the reserve action
+        // but must not carry the card's cost (the field that pins down which
+        // specific card was hidden in the reserve).
+        use crate::card::RESOURCES;
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let card = Card {
+            resource: Resource::Ruby,
+            prestige: 0,
+            cost: brdgme_cost::Cost(std::collections::HashMap::from([
+                (Resource::Ruby, 7),
+                (Resource::Onyx, 3),
+            ])),
+        };
+        g.board[0][0] = card.clone();
+        let resp = g.command(0, "reserve A1", &players(2)).unwrap();
+        assert_eq!(&card, &g.player_boards[0].reserve[0]);
+        let cost_rendered: String = RESOURCES
+            .iter()
+            .filter(|&&r| card.cost.get(&r) > 0)
+            .map(|&r| card.cost.get(&r).to_string())
+            .collect::<Vec<_>>()
+            .join("-");
+        assert!(!cost_rendered.is_empty());
+        let public_logs: Vec<String> = resp
+            .logs
+            .iter()
+            .filter(|l| l.public)
+            .map(|l| brdgme_markup::plain(&brdgme_markup::transform(&l.content, &[])))
+            .collect();
+        assert!(
+            !public_logs.is_empty(),
+            "reserving a card must produce a public log"
+        );
+        for text in &public_logs {
+            assert!(
+                !text.contains(&cost_rendered),
+                "public log must not expose the reserved card's cost ({}): {}",
+                cost_rendered,
+                text
+            );
+        }
+        assert!(
+            public_logs.iter().any(|t| t.contains("reserved")),
+            "the public reserve action must remain in the logs"
+        );
+    }
+
+    #[test]
     fn test_discard_down_to_ten_resumes_main_for_next_player() {
         let (mut g, _) = Game::start(2, 1).unwrap();
         g.current_player = 0;
