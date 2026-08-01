@@ -1357,8 +1357,8 @@ migration, doc, Cargo, CI, or other-tracker changes in either commit.
   persisted pre-R-30 games carrying concluded-auction stale bids (the F-30
   invariant fix, applied retroactively). The correction adds
   `bids_cleared_outside_auction: bool` (`#[serde(default)]`, lib.rs:47-53),
-  set `true` at `start_round`, `add_card_to_auction`, `settle_auction`, and
-  `Game::new`; `validate()` rejects PlayCard bids only when the flag is set
+  set `true` at `Game::start`, `end_round`, `add_card_to_auction`, and
+  `settle_auction`; `validate()` rejects PlayCard bids only when the flag is set
   (lib.rs:815-822). Legacy persisted states (flag absent -> default `false`)
   load and validate; the next normal play clears the stale bids and sets the
   flag, transitioning the state to conformant. Test
