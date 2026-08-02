@@ -70,7 +70,7 @@ restored per owner instruction.)
 | R-44 | blocked(5.2) | | |
 | R-45 | partial/parked(provenance) | af71e05fd31b86691c27d48bf9c66aa94fbb8d6e, a2e1b9402e792f16183bd8e6d4547afdcbcc9ffa | R45.1 inventories all confirmed copied third-party source and bundles; AC1 remains partial because `blocked_domains.rs` has no copy-time revision or licence record. R45.2 limits its completed `session_store` directory guard to AC3. |
 | R-46 | partial/parked(policy) | 0b7bce71e3fa4d7a5a6a483badb6df30ca6649c1, a425af2048157e2203c9f8883d3475cb5cc050d1 | R-46.0 corrected F-197's stale count to two remaining `.rls.toml` files, citing WP-65 (`2c28ae8`) for the three prior deletions, then removed both. `rg --files -g '.rls.toml' rust` returned no paths; `git diff --check` passed. R-46.1..R-46.4 are parked for the later parked-item review pending owner selection of the non-empty rust-lint baseline and threshold/policy choices. Threshold 11 plus refactoring the sole 20-argument helper is a Lead proposal only, not an approved decision. R-47 is the next unblocked package. |
-| R-47 | pending | | |
+| R-47 | done(6c4009f) | 65f08f678e363928b19615f2c2aa8af9be1e6640, 6c4009f4ac68f4ce9bf09fcaf94d711821a57991 | Closes F-205. AC1: SUMMARY headline and WP-67 record correct the false sentry premise; AC2: traceability maps current F-205 to 99-UNIFIED-REPORT.md and legacy dp F12 to immutable 868094a6 findings; AC3: two archive docs name the shared brdgme_game_bin entrypoint and 0.0.0.0:8080. Source/default and all 44 explicit deployment ADDR settings verified; targeted stale-text checks and git diff --check pass; Lead inspected both diffs. No Cargo command or independent review. |
 | R-48 | pending | | |
 | R-49 | pending | | |
 | R-50 | pending | | F-83 follows 5.1 |
