@@ -10,10 +10,10 @@ decisions live in `97-REMEDIATION-PROGRESS.md` - start there. Package-number
 order is not execution order when blockers exist; the tracker's status column
 decides what is next.
 
-- **Active package: R-49** (`in-progress`). R-47 and R-48 are done (see 97 for
-  commits). R-45 is `partial/parked` on the unpinned `blocked_domains.rs`
-  provenance record; see 97. R-37 and R-43 are parked by user process; R-38
-  remains blocked on 5.3. R-46 is `partial/parked` after R-46.0; see 97.
+- **R-49 is done** (see 97 for commits), as are R-47 and R-48. R-45 is
+  `partial/parked` on the unpinned `blocked_domains.rs` provenance record; see
+  97. R-37 and R-43 are parked by user process; R-38 remains blocked on 5.3.
+  R-46 is `partial/parked` after R-46.0; see 97.
 - **R-35 is blocked on a user decision:** removing `Status` leaves no approved
   public points source - `Response::Status` is the only response carrying
   `GameResponse.points`, and `Response::PlayerRender` carries no `points`. The
