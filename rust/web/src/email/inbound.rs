@@ -90,6 +90,9 @@ pub enum InboundRoute {
 
 pub fn parse_reply_address(addr: &str) -> Option<InboundRoute> {
     let local = addr.split('@').next().unwrap_or(addr);
+    if local == "i-noreply" {
+        return None;
+    }
     let (tok, route) = if let Some(tok) = local.strip_prefix("g-") {
         (tok, InboundRoute::Game(tok.to_string()))
     } else if let Some(tok) = local.strip_prefix("i-") {
@@ -1884,6 +1887,11 @@ mod tests {
             parse_reply_address("i-xyz@example.com"),
             Some(InboundRoute::Invite("xyz".to_string()))
         );
+    }
+
+    #[test]
+    fn parse_reply_address_reserved_noreply() {
+        assert_eq!(parse_reply_address("i-noreply@brdg.me"), None);
     }
 
     #[test]
