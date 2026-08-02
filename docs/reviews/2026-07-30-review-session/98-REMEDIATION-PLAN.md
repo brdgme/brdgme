@@ -1661,7 +1661,7 @@ created.
 
 - **Closes:** F-203 (Low), F-204 (Low), F-197 (Low).
 - **Files:** `rust/Cargo.toml:78-79`, `:56-76`;
-  `rust/game/love-letter-2/.rls.toml` (+3 sites).
+  `rust/game/love-letter-2/.rls.toml`, `rust/lib/rand_bot/.rls.toml`.
 - **Size: S** - basis: one table to add and ten dependency entries to respell.
 - **Depends on:** **owner decision 6.3** - WP-64's rider 1 forbids bare-major
   spellings while §3b of the **same spec** endorses them. The criterion is
@@ -1677,8 +1677,9 @@ created.
    half is wanted.
 2. The ten bare-major entries are respelled, or rider 1 is struck. **One or the
    other - not both left standing.**
-3. F-197: the four identical sibling `.rls.toml` files are removed; a reviewer
-   greps for `.rls.toml` and records the remaining count.
+3. F-197: the two remaining `.rls.toml` files are removed; WP-65
+   (`2c28ae8`) already removed the other three siblings. A reviewer greps for
+   `.rls.toml` and records the remaining count.
 
 ---
 
