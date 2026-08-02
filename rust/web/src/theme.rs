@@ -9,12 +9,12 @@ use brdgme_color::{
     IN_USE_MIXES, IN_USE_SOFTENS, NamedColor, ThemeCategory, palette_css_vars, themes,
 };
 
-/// Chrome-only soften expressions (main.scss surfaces: my-turn/finished/hover
-/// tints) - kept separate from `IN_USE_SOFTENS` so the game-text contrast
-/// gate in `brdgme_color` stays scoped to games; see THEMING.md.
+/// Chrome-only soften additions on top of `IN_USE_SOFTENS` (main.scss's
+/// my-turn/hover tints; its remaining soften tokens come from
+/// `IN_USE_SOFTENS`) - kept separate so the game-text contrast gate in
+/// `brdgme_color` stays scoped to games; see THEMING.md.
 const CHROME_SOFTENS: &[(NamedColor, u8)] = &[
     (NamedColor::Orange, 86),
-    (NamedColor::Red, 86),
     (NamedColor::Foreground, 96),
 ];
 
