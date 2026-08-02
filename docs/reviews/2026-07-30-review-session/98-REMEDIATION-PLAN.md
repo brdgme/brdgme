@@ -10,10 +10,10 @@ decisions live in `97-REMEDIATION-PROGRESS.md` - start there. Package-number
 order is not execution order when blockers exist; the tracker's status column
 decides what is next.
 
-- **Next unblocked package: R-47.** R-45 is `partial/parked` on the
-  unpinned `blocked_domains.rs` provenance record; see 97. R-37 and R-43 are
-  parked by user process; R-38 remains blocked on 5.3. R-46 is
-  `partial/parked` after R-46.0; see 97.
+- **Active package: R-49** (`in-progress`). R-47 and R-48 are done (see 97 for
+  commits). R-45 is `partial/parked` on the unpinned `blocked_domains.rs`
+  provenance record; see 97. R-37 and R-43 are parked by user process; R-38
+  remains blocked on 5.3. R-46 is `partial/parked` after R-46.0; see 97.
 - **R-35 is blocked on a user decision:** removing `Status` leaves no approved
   public points source - `Response::Status` is the only response carrying
   `GameResponse.points`, and `Response::PlayerRender` carries no `points`. The
@@ -1758,27 +1758,53 @@ already prevents duplicate epilogues. The epilogue is not part of this package.
 
 ### R-49 - `lib/markup` and the command parser
 
-- **Closes:** F-01, F-02, F-03, F-04, F-07 (Low), F-08 (Medium).
+- **Closes:** F-01, F-02, F-03, F-04, F-08 (Medium). F-07 is **REFUTED**, not
+  closed here (see F-07 disposition below).
 - **Files:** `rust/lib/markup/src/lib.rs:43-56`, `src/parser.rs:737-757`,
   `src/wrap.rs:14-24`; `rust/lib/game/src/command/parser/mod.rs:45-62` and
-  `:1095-1100` (+3 sites); `rust/lib/game/src/command/suggest.rs:39-52`;
-  `rust/game/no-thanks-2/src/render.rs:74-77`.
-- **Size: M** - basis: six findings, of which F-08 (Chain2/3/4 `expected()`
+  `:1095-1100` (+3 sites); `rust/lib/game/src/command/suggest.rs:39-52`.
+- **Size: M** - basis: five findings, of which F-08 (Chain2/3/4 `expected()`
   parity) touches four sites and is the only non-trivial one.
 - **Depends on:** nothing.
 
+**F-07 disposition (refuted)**
+
+F-07 is refuted under the current trusted `no-thanks-2` contract. Active
+`Game::pub_state()` (`rust/game/no-thanks-2/src/lib.rs:269-295`) derives
+`current_card` as `Some(self.peek_top_card())` whenever the game is unfinished,
+and `Game` has no `current_card` field, so no such field can be validated at the
+proposed location. No response-validation layer, render fallback,
+`no-thanks-2` code change, or new contract is added. Hostile or mismatched
+service-response validation requires separately approved scope.
+
+**Implementation scope**
+
+- **R49.1:** F-01, F-02, F-04 (`lib/markup`).
+- **R49.2:** F-03, F-08 (command parser and suggest parity).
+
 **Acceptance criteria**
 
-1. F-08: a test **calls `expected()`** on Chain2, Chain3 and Chain4 and asserts
-   parity with Chain1's contract, at all four sites.
-2. F-03: a test asserts parse and suggest fold identically for the same input.
-3. F-02: the disjunctive overflow assertions are replaced with assertions that
+**R49.1**
+
+1. F-01: the dead `&str` is removed from the return tuple.
+2. F-02: the disjunctive overflow assertions are replaced with assertions that
    pin a specific outcome. **An assertion that cannot fail is a decoy** (tooth 3
    applied to assertions rather than call sites).
-4. F-01: the dead `&str` is removed from the return tuple.
-5. F-04: `wrap_segment` is no longer O(n^2); a benchmark-free complexity argument
+3. F-04: `wrap_segment` is no longer O(n^2); a benchmark-free complexity argument
    is recorded in a comment. **Do not run benchmarks.**
-6. F-07: the silently dropped card line renders.
+
+**R49.2**
+
+4. F-03: a test asserts parse and suggest fold identically for the same input -
+   Unicode fold parity for complete tokens while preserving intentionally
+   incomplete autocomplete fragments.
+5. F-08: a test **calls `expected()`** on Chain2, Chain3 and Chain4 and asserts
+   parity with Chain1's contract, at all four sites.
+
+The duplicated `impl Parser for CommandSpec`
+(`rust/lib/game/src/command/parser/mod.rs:878`) is deliberately retained as the
+suggest engine's advancement mechanism and must not be removed; see
+`docs/decisions/COMMAND_PARSER_SPEC_DEDUP.md`.
 
 ---
 
