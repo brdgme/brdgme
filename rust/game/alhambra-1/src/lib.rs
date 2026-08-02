@@ -385,6 +385,10 @@ impl Game {
                     next_player = (next_player + 1) % self.human_players;
                     if next_player == self.current_player {
                         self.phase = Phase::End;
+                        // F-26: the final scoring always uses the round-3
+                        // tier, even when the deck scoring cards never
+                        // surfaced before tile exhaustion.
+                        self.round = 3;
                         let score_logs = self.score_round();
                         logs.extend(score_logs);
                         break;
@@ -1577,6 +1581,85 @@ mod tests {
             "private hand value must not be published: {}",
             combined
         );
+    }
+
+    #[test]
+    fn early_final_scoring_uses_round_three_rewards() {
+        // F-26: a game that reaches FinalPlace with the round-1 tier still
+        // active (deck scoring cards not yet surfaced) must still score the
+        // final table with the full round-3 rewards, not "whatever round it
+        // is". Drive the real FinalPlace -> End transition, not score_round().
+        let (mut g, _) = Game::start(3, 42).unwrap();
+        g.phase = Phase::FinalPlace;
+        g.round = 1;
+        g.current_player = 0;
+        for b in g.boards.iter_mut() {
+            b.place = vec![];
+        }
+        g.boards[0]
+            .grid
+            .insert(Vect { x: 1, y: 0 }, Tile::new(TileType::Pavillion, 0, &[]));
+        g.next_phase();
+        assert_eq!(Phase::End, g.phase);
+        assert_eq!(3, g.round, "final scoring must use the round-3 tier");
+        assert_eq!(
+            16, g.boards[0].points,
+            "one Pavillion must score the round-3 16, not the round-1 1"
+        );
+    }
+
+    #[test]
+    fn scoring_cards_fire_at_official_fifth_pile_bounds() {
+        // F-25 refuted: the two scoring cards sit in the second and fourth of
+        // the five official Queen Games piles. Draws come from the BACK of
+        // card_pile (card_pile.pop() in draw_cards), so with L money cards at
+        // injection and f = L / 5 the rounds must fire after the draw-count
+        // windows below - positions are not restored to the historic Go
+        // one-card-shifted round-1 distribution.
+        for players in 2..=6 {
+            for seed in 0..25 {
+                let (mut g, _) = Game::start(players, seed).unwrap();
+                let l = g.card_pile.len() - 2;
+                let f = l / 5;
+                if f == 0 {
+                    continue;
+                }
+                let mut money_draws = 0;
+                let mut scoring_rounds = vec![];
+                loop {
+                    let (logs, drawn) = g.draw_cards(1);
+                    if logs
+                        .iter()
+                        .any(|l| log_plain(l).starts_with("It is now scoring round"))
+                    {
+                        scoring_rounds.push(money_draws);
+                    }
+                    if drawn.is_empty() {
+                        break;
+                    }
+                    money_draws += drawn.len();
+                }
+                assert_eq!(
+                    2,
+                    scoring_rounds.len(),
+                    "both scoring cards must surface before the deck empties"
+                );
+                assert!(
+                    (l - 4 * f..=l - 3 * f - 1).contains(&scoring_rounds[0]),
+                    "round 1 fired after {} money draws, want [{}, {}]",
+                    scoring_rounds[0],
+                    l - 4 * f,
+                    l - 3 * f - 1
+                );
+                assert!(
+                    (l - 2 * f + 1..=l - f).contains(&scoring_rounds[1]),
+                    "round 2 fired after {} money draws, want [{}, {}]",
+                    scoring_rounds[1],
+                    l - 2 * f + 1,
+                    l - f
+                );
+            }
+        }
     }
 
     #[test]

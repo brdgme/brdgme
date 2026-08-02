@@ -1116,16 +1116,31 @@ crate that copy-pasted the epilogue.
 
 ### R-34 - `alhambra-1` scoring order
 
-- **Closes:** F-25 (Low), F-26 (Low).
-- **Files:** `rust/game/alhambra-1/src/lib.rs:216-229`, `:377-383` (+1 site).
-- **Size: S** - basis: two off-by-one/ordering bugs in one crate.
+- **Disposition:** F-25 (Low) **refuted** - `inject_scoring_cards` places the
+  two scoring cards in the second and fourth of five piles, which is the
+  official Queen Games distribution once the back-pop draw direction is
+  accounted for; no production change. F-26 (Low) **closed/fixed** - the
+  final score is forced to the round-3 reward tier.
+- **Files:** `rust/game/alhambra-1/src/lib.rs:223-236`, `:381-398` (+1 site:
+  `:337-375`).
+- **Size: S** - basis: one regression test (F-25, no production change) plus
+  a one-line final-scoring fix with a test (F-26).
 - **Depends on:** R-30 (same crate, same file; sequence after to avoid conflict).
 
 **Acceptance criteria**
 
-1. A test asserts scoring cards are inserted from the correct end (F-25).
-2. A test plays to the final scoring round and asserts the **final** scoring
-   table is used, not "whatever round it is" (F-26).
+1. A regression test locks the current official Queen Games five-pile behavior
+   and the explicit back-pop draw direction of `draw_cards`
+   (`card_pile.pop()`, `lib.rs:249`). With `L` money cards remaining at
+   injection and `f = floor(L / 5)`, every applicable valid setup size must
+   fire round 1 after between `L - 4f` and `L - 3f - 1` money-card draws and
+   round 2 after between `L - 2f + 1` and `L - f` money-card draws. The
+   historic Go port's one-card-shifted round-1 distribution is **not**
+   restored.
+2. A test drives the early-final path directly: a valid 3-player game at
+   round 1 in `FinalPlace` with all placement queues empty and one Pavillion
+   on board 0, advanced through the real `FinalPlace` -> `End` transition,
+   must end at round 3 and score 16 points, not the round-1 1 point.
 
 ---
 
