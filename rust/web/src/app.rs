@@ -62,8 +62,11 @@ fn sentry_init_snippet(dsn: &str, release: Option<&str>) -> String {
     let release_field = release
         .map(|r| format!(r#","release":"{}""#, js_string_escape(r)))
         .unwrap_or_default();
+    // `tracesSampleRate` is deliberately absent, not `0` - the Sentry SaaS
+    // exception disables frontend tracing entirely so transactions never
+    // consume the 5k/month error quota (SENTRY_SAAS_EXCEPTION.md).
     format!(
-        r#"window.Sentry.init({{"dsn":"{}","integrations":[window.SentryWasmIntegration(),window.Sentry.browserTracingIntegration()],"sendDefaultPii":false,"tracesSampleRate":0.1{},"beforeSend":{}}});"#,
+        r#"window.Sentry.init({{"dsn":"{}","integrations":[window.SentryWasmIntegration(),window.Sentry.browserTracingIntegration()],"sendDefaultPii":false{},"beforeSend":{}}});"#,
         js_string_escape(dsn),
         release_field,
         SENTRY_BEFORE_SEND_JS,
@@ -1002,5 +1005,37 @@ mod tests {
         // Navigating to another game must not carry game A's seq over.
         let state = track_game_seq(Some(state), Some(game_b), Some((game_a, 7)));
         assert_eq!(state, (Some(game_b), None));
+    }
+
+    // wfe F63 (F-176): a literal `</script>` in either interpolated value (DSN
+    // or release) must not survive into the emitted snippet - `js_string_escape`
+    // rewrites the `<` as `\u003c`, so the script tag cannot be closed early.
+    // Also locks the existing Sentry configuration in place, including the
+    // absence of `tracesSampleRate` (SENTRY_SAAS_EXCEPTION.md: frontend
+    // tracing is disabled entirely - the key is omitted, not `0`).
+    #[test]
+    fn sentry_snippet_escapes_closing_script_tag_in_dsn_and_release() {
+        let snippet = sentry_init_snippet(
+            "https://key@o0.ingest.sentry.io/0</script>",
+            Some("brdgme/web@1.0.0</script>"),
+        );
+        assert!(!snippet.contains("</script>"));
+        assert!(snippet.contains("\"dsn\":\"https://key@o0.ingest.sentry.io/0\\u003c/script>\""));
+        assert!(snippet.contains("\"release\":\"brdgme/web@1.0.0\\u003c/script>\""));
+        assert!(snippet.contains("\"sendDefaultPii\":false"));
+        assert!(!snippet.contains("tracesSampleRate"));
+        assert!(snippet.contains("window.SentryWasmIntegration()"));
+        assert!(snippet.contains("window.Sentry.browserTracingIntegration()"));
+    }
+
+    // wfe F63 (F-176): with no release, the `release` field must be absent
+    // entirely, not empty. `tracesSampleRate` must also stay absent
+    // (SENTRY_SAAS_EXCEPTION.md), not merely become `0` when the config is
+    // otherwise trimmed.
+    #[test]
+    fn sentry_snippet_omits_release_field_when_absent() {
+        let snippet = sentry_init_snippet("https://key@o0.ingest.sentry.io/0", None);
+        assert!(!snippet.contains("\"release\""));
+        assert!(!snippet.contains("tracesSampleRate"));
     }
 }

@@ -52,7 +52,17 @@ pub async fn try_send_rendered_email(
     for (k, v) in email.headers {
         opts = opts.with_header(&k, &v);
     }
-    match resend.emails.send(opts).await {
+    record_delivery_result(resend.emails.send(opts).await, to)
+}
+
+/// The send-result branch of [`try_send_rendered_email`], split out (F-176
+/// F46) so the sent/failed metric branches are testable without a live Resend
+/// transport.
+fn record_delivery_result(
+    send_result: Result<resend_rs::types::Email, resend_rs::Error>,
+    to: &str,
+) -> bool {
+    match send_result {
         Ok(_) => {
             axum_prometheus::metrics::counter!("game_emails_sent_total").increment(1);
             true
@@ -598,5 +608,50 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    // F-176 F46: the no-key dev path of `try_send_rendered_email` succeeds
+    // without a transport (it logs the mail and returns true).
+    #[tokio::test]
+    async fn try_send_rendered_email_without_resend_returns_true() {
+        let email = crate::email::render::RenderedEmail {
+            subject: "subject".into(),
+            text: "text".into(),
+            html: "<p>html</p>".into(),
+            headers: std::collections::BTreeMap::new(),
+            reply_to: "reply@b.c".into(),
+        };
+        assert!(try_send_rendered_email(None, email, "a@b.c").await);
+    }
+
+    // F-176 F46: a successful Resend result hits the sent branch and returns
+    // true. Fails pre-split if the Ok branch were dropped or flipped.
+    #[test]
+    fn record_delivery_result_ok_counts_sent_and_returns_true() {
+        let email = resend_rs::types::Email {
+            id: resend_rs::types::EmailId::new("test"),
+            from: "brdg.me <mail@brdg.me>".into(),
+            to: vec!["a@b.c".into()],
+            subject: "subject".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            html: None,
+            text: None,
+            bcc: vec![],
+            cc: vec![],
+            reply_to: None,
+            last_event: resend_rs::types::EmailEvent::Sent,
+            scheduled_at: None,
+        };
+        assert!(record_delivery_result(Ok(email), "a@b.c"));
+    }
+
+    // F-176 F46: a failed Resend result hits the failed branch and returns
+    // false. Fails pre-split if the Err branch were dropped or flipped.
+    #[test]
+    fn record_delivery_result_err_counts_failed_and_returns_false() {
+        assert!(!record_delivery_result(
+            Err(resend_rs::Error::Other("boom".into())),
+            "a@b.c"
+        ));
     }
 }
