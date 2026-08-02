@@ -1689,7 +1689,7 @@ created.
 
 - **Closes:** F-205 (Low).
 - **Files:** this section; `docs/reviews/2026-07-23-rust-review/SUMMARY.md:44-46`
-  and `:139` plus a new traceability record; and two archive docs that still
+  and `:141-143` plus a new traceability record; and two archive docs that still
   assert the `0.0.0.0:80` default and cite a WP-73-deleted bin path.
 - **Size: S** - basis: four files, six text locations.
 - **Depends on:** nothing.
@@ -1711,7 +1711,7 @@ finding live.
 
 **Acceptance criteria**
 
-1. `SUMMARY.md:44-46` (headline dependencies bullet) and `:139` (WP-67 record)
+1. `SUMMARY.md:44-46` (headline dependencies bullet) and `:141-143` (WP-67 record)
    are amended to state the disproved premise and the correct fact. **Closing
    the finding without amending it is the defect** - do not simply mark it done
    a second time.
