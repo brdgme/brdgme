@@ -68,7 +68,7 @@ restored per owner instruction.)
 | R-42 | done(6739e4c) | 5bd293ee421775fa5f134f14895796008350d77d, 6bec344112e845722366b9e39f527254700c2f1b, ee2ffee43e8ff6e3415a74b42dffb8722ad2fad0, e16d4d46b877cd28a59797a3807d94d2f5f0f42f, 6739e4cacbceceee955052789365226657e4ccd0 | F-164 tokenized the badge; `palette_css_vars` emits `--mk-orange` in every theme block and `(N new)` remains the non-hue cue. F-165 retains Closed-only `open()` but unconditionally bumps `last_update` on visible/online. F-166 applies `name DESC` to both selectors and adds a tied-created_at test calling both without changing visibility predicates. F-167 removes Red/86. F-168 asserts `href="#"` with an accurate focus-affordance comment. Approved staged and final `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` pass (known warnings only); independent review PASS with no findings. DB/SSR runtime tests are CI-pending. F-15 remains latent and parked; no enforcement is claimed. |
 | R-43 | parked-by-user-process | | active latest-dependency governance conflicts with AC2's `tower-http` downgrade; widening to upgrade all 0.6 consumers is not approved. See R-43 parking below; no acceptance criterion is complete. |
 | R-44 | blocked(5.2) | | |
-| R-45 | partial/parked(provenance) | | R45.1 inventories all confirmed copied third-party source and bundles; AC1 remains partial because `blocked_domains.rs` has no copy-time revision or licence record. R45.2 is limited to the `session_store` directory guard. R-46 is the next unblocked package, not selected. |
+| R-45 | partial/parked(provenance) | af71e05fd31b86691c27d48bf9c66aa94fbb8d6e, a2e1b9402e792f16183bd8e6d4547afdcbcc9ffa | R45.1 inventories all confirmed copied third-party source and bundles; AC1 remains partial because `blocked_domains.rs` has no copy-time revision or licence record. R45.2 limits its completed `session_store` directory guard to AC3. R-46 is the next unblocked package, not selected. |
 | R-46 | pending | | EXPANDED scope: eliminate all 22 lint overrides (owner ruling) |
 | R-47 | pending | | |
 | R-48 | pending | | |
@@ -114,7 +114,10 @@ restored per owner instruction.)
   copied blocklist has no recorded copy-time version or licence.
 - **AC2:** complete. Every inventory entry states whether its obligation is
   machine-checked.
-- **AC3:** pending R45.2. The guard covers only `rust/lib/session_store/`.
+- **AC3:** complete at `a2e1b9402e792f16183bd8e6d4547afdcbcc9ffa`.
+  `.github/workflows/ci.yml:80-85` runs the approved single assertion for the
+  `session_store` MIT licence text and exact upstream attribution header. The
+  assertion and `git diff --check` passed locally; no Cargo command was run.
 - **AC4:** complete for its approved scope: F-200 is recorded for
   `rust/lib/session_store/`; no file-level upstream-defect sweep is claimed.
 
