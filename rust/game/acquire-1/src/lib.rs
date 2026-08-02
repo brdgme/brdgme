@@ -224,7 +224,7 @@ able to win the game.",
     }
 
     fn pub_state(&self) -> Self::PubState {
-        self.to_owned().into()
+        self.into()
     }
 
     fn player_state(&self, player: usize) -> Self::PlayerState {
@@ -449,14 +449,11 @@ impl Game {
                 message: "You can't play a tile right now".to_string(),
             });
         }
-        let pos = match self.players[player].tiles.iter().position(|l| l == loc) {
-            Some(p) => p,
-            None => {
-                return Err(GameError::InvalidInput {
-                    message: "You don't have that tile".to_string(),
-                });
-            }
-        };
+        if !self.players[player].tiles.contains(loc) {
+            return Err(GameError::InvalidInput {
+                message: "You don't have that tile".to_string(),
+            });
+        }
         let mut logs: Vec<Log> = vec![Log::public(vec![
             N::Player(player),
             N::text(" played "),
@@ -515,7 +512,7 @@ impl Game {
                 can_undo = new_can_undo
             }
         }
-        self.players[player].tiles.swap_remove(pos);
+        self.players[player].tiles.retain(|l| l != loc);
         Ok((logs, can_undo))
     }
 
@@ -574,7 +571,12 @@ impl Game {
         }
         self.board.extend_corp(&at, corp);
         {
-            let corp_shares = self.shares.entry(corp).or_insert(STARTING_SHARES);
+            let corp_shares = self
+                .shares
+                .get_mut(&corp)
+                .ok_or_else(|| GameError::Internal {
+                    message: format!("bank shares missing for {}", corp),
+                })?;
             if *corp_shares > 0 {
                 let player_shares = self.players[player].shares.entry(corp).or_insert(0);
                 *player_shares += 1;
@@ -1108,15 +1110,19 @@ impl Game {
     }
 
     fn take_shares(&mut self, player: usize, n: usize, corp: Corp) -> Result<(), GameError> {
-        let corp_shares = self.shares.get(&corp).copied().unwrap_or_default();
-        if corp_shares < n {
+        let corp_shares = self
+            .shares
+            .get_mut(&corp)
+            .ok_or_else(|| GameError::Internal {
+                message: format!("bank shares missing for {}", corp),
+            })?;
+        if *corp_shares < n {
             return Err(GameError::InvalidInput {
-                message: format!("{} only has {} left", corp, corp_shares),
+                message: format!("{} only has {} left", corp, *corp_shares),
             });
         }
         let player_shares = self.players[player].shares.entry(corp).or_insert(0);
         *player_shares += n;
-        let corp_shares = self.shares.entry(corp).or_insert(STARTING_SHARES);
         *corp_shares -= n;
         Ok(())
     }
@@ -1132,9 +1138,14 @@ impl Game {
                 message: format!("only has {} left", player_shares),
             });
         }
+        let corp_shares = self
+            .shares
+            .get_mut(&corp)
+            .ok_or_else(|| GameError::Internal {
+                message: format!("bank shares missing for {}", corp),
+            })?;
         let player_shares = self.players[player].shares.entry(corp).or_insert(0);
         *player_shares -= n;
-        let corp_shares = self.shares.entry(corp).or_insert(STARTING_SHARES);
         *corp_shares += n;
         Ok(())
     }
@@ -1166,11 +1177,7 @@ impl Game {
 
     pub fn handle_end_command(&mut self, player: usize) -> Result<Vec<Log>, GameError> {
         self.assert_not_finished()?;
-        if self.phase.main_turn_player() != player {
-            return Err(GameError::InvalidInput {
-                message: "can't end the game during another player's turn".to_string(),
-            });
-        }
+        self.assert_player_turn(player)?;
         if self.can_end() != CanEnd::True {
             return Err(GameError::InvalidInput {
                 message: "can't end the game at the moment".to_string(),
@@ -1221,13 +1228,13 @@ fn corp_hash_map(initial: usize) -> HashMap<Corp, usize> {
     hm
 }
 
-impl From<Game> for PubState {
-    fn from(val: Game) -> Self {
+impl From<&Game> for PubState {
+    fn from(val: &Game) -> Self {
         PubState {
-            phase: val.phase,
-            players: val.players.iter().map(|v| v.to_owned().into()).collect(),
-            board: val.board,
-            shares: val.shares,
+            phase: val.phase.clone(),
+            players: val.players.iter().map(|v| v.into()).collect(),
+            board: val.board.clone(),
+            shares: val.shares.clone(),
             remaining_tiles: val.draw_tiles.len(),
             last_turn: val.last_turn,
             finished: val.finished,
@@ -1235,11 +1242,11 @@ impl From<Game> for PubState {
     }
 }
 
-impl From<Player> for PubPlayer {
-    fn from(val: Player) -> Self {
+impl From<&Player> for PubPlayer {
+    fn from(val: &Player) -> Self {
         PubPlayer {
             money: val.money,
-            shares: val.shares,
+            shares: val.shares.clone(),
         }
     }
 }
@@ -1488,12 +1495,86 @@ mod tests {
     }
 
     #[test]
-    fn end_tolerates_missing_share_keys() {
+    fn end_with_missing_bank_key_errors_without_minting() {
         let mut g = game_missing_american_key();
         g.players[0].shares.insert(Corp::American, 3);
-        let logs = g.end().expect("game end must not panic or error");
-        assert!(!logs.is_empty(), "ending the game must log bonus payouts");
-        assert!(g.finished);
+        match g.end() {
+            Err(GameError::Internal { message }) => {
+                assert!(message.contains("bank"), "unexpected: {}", message)
+            }
+            Ok(_) => panic!("ending with a missing bank key must error, not mint"),
+            Err(e) => panic!("expected GameError::Internal, got: {}", e),
+        }
+        assert_eq!(
+            None,
+            g.shares.get(&Corp::American),
+            "no phantom bank entry may be inserted"
+        );
+        let total = |g: &Game| {
+            g.shares.get(&Corp::American).copied().unwrap_or_default()
+                + g.players
+                    .iter()
+                    .map(|p| p.shares.get(&Corp::American).copied().unwrap_or_default())
+                    .sum::<usize>()
+        };
+        assert_eq!(
+            3,
+            total(&g),
+            "a failed end must not mint shares for the missing bank entry"
+        );
+    }
+
+    #[test]
+    fn missing_bank_key_never_mints_shares() {
+        let mut g: Game = "AA01".into();
+        for p in &mut g.players {
+            p.shares.remove(&Corp::American);
+        }
+        g.players[0].shares.insert(Corp::American, STARTING_SHARES);
+        g.shares.remove(&Corp::American);
+        let total = |g: &Game| {
+            g.shares.get(&Corp::American).copied().unwrap_or_default()
+                + g.players
+                    .iter()
+                    .map(|p| p.shares.get(&Corp::American).copied().unwrap_or_default())
+                    .sum::<usize>()
+        };
+        assert_eq!(STARTING_SHARES, total(&g));
+        assert!(matches!(
+            g.take_shares(0, 1, Corp::American),
+            Err(GameError::Internal { .. })
+        ));
+        assert!(matches!(
+            g.return_shares(0, 1, Corp::American),
+            Err(GameError::Internal { .. })
+        ));
+        assert!(matches!(
+            g.sell(0, 1, Corp::American),
+            Err(GameError::Internal { .. })
+        ));
+        assert_eq!(None, g.shares.get(&Corp::American));
+        assert_eq!(
+            STARTING_SHARES,
+            total(&g),
+            "whole-board total must be conserved, not just one bank value"
+        );
+    }
+
+    #[test]
+    fn found_with_missing_bank_key_errors_without_minting() {
+        let players = vec!["mick".to_string(), "steve".to_string()];
+        let mut g: Game = "...
+                           #0.
+                           ..."
+        .into();
+        g.shares.remove(&Corp::Festival);
+        g.command(0, "play b2", &players)
+            .expect("expected playing tile to work");
+        assert!(matches!(
+            g.command(0, "found fe", &players),
+            Err(GameError::Internal { .. })
+        ));
+        assert_eq!(None, g.shares.get(&Corp::Festival));
     }
 
     #[test]
@@ -1631,5 +1712,70 @@ mod tests {
             again.iter().all(|l| l.content != expected),
             "directly re-running the finish path emits no second placings log"
         );
+    }
+
+    #[test]
+    fn merger_cascade_removes_played_tile_by_current_identity() {
+        let players = vec!["mick".to_string(), "steve".to_string()];
+        let mut g: Game = ".FF.
+                           A000.
+                           III."
+            .into();
+        // The played tile sits at hand index 0 with two survivors after it.
+        let played = Loc { row: 1, col: 1 };
+        let survivors = vec![Loc { row: 1, col: 2 }, Loc { row: 1, col: 3 }];
+        assert_eq!(played, g.players[0].tiles[0]);
+        g.command(0, "play b2", &players)
+            .expect("expected 'play b2' to work");
+        // The whole cascade ran inside the single play command: both mergers
+        // (Festival then American into Imperial) completed with no held
+        // shares, and the game landed in a buy phase.
+        assert!(matches!(g.phase, Phase::Buy { .. }));
+        assert_eq!(7, g.board.corp_size(Corp::Imperial));
+        assert_eq!(0, g.board.corp_size(Corp::Festival));
+        assert_eq!(0, g.board.corp_size(Corp::American));
+        // Removal used the played tile's current identity, not a stale index:
+        // the played tile is gone and the survivors keep their original
+        // relative order. The old swap_remove(pos) turned [played, s1, s2]
+        // into [s2, s1]; identity removal keeps [s1, s2].
+        assert_eq!(survivors, g.players[0].tiles);
+        assert!(!g.players[0].tiles.contains(&played));
+    }
+
+    #[test]
+    fn pub_state_covers_public_fields_and_redacts_private_state() {
+        let mut g: Game = "AA01".into();
+        g.phase = Phase::Buy {
+            player: 1,
+            remaining: 2,
+        };
+        g.players[0].money = 7000;
+        g.players[0].shares.insert(Corp::Festival, 4);
+        g.draw_tiles = vec![Loc { row: 3, col: 4 }];
+        g.last_turn = true;
+        g.finished = false;
+        let public = g.pub_state();
+        // All public fields are carried over...
+        assert_eq!(
+            Phase::Buy {
+                player: 1,
+                remaining: 2,
+            },
+            public.phase
+        );
+        assert_eq!(7000, public.players[0].money);
+        assert_eq!(Some(&4), public.players[0].shares.get(&Corp::Festival));
+        assert_eq!(g.board, public.board);
+        assert_eq!(g.shares, public.shares);
+        assert_eq!(1, public.remaining_tiles);
+        assert!(public.last_turn);
+        assert!(!public.finished);
+        // ...and private state (hand tiles, draw bag contents) is redacted.
+        let mut redacted = g.clone();
+        for p in &mut redacted.players {
+            p.tiles = vec![];
+        }
+        redacted.draw_tiles = vec![Loc { row: 8, col: 8 }];
+        assert_eq!(public, redacted.pub_state());
     }
 }
