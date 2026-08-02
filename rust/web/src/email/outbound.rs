@@ -59,7 +59,7 @@ pub async fn try_send_rendered_email(
 /// F46) so the sent/failed metric branches are testable without a live Resend
 /// transport.
 fn record_delivery_result(
-    send_result: Result<resend_rs::types::Email, resend_rs::Error>,
+    send_result: Result<resend_rs::types::CreateEmailResponse, resend_rs::Error>,
     to: &str,
 ) -> bool {
     match send_result {
@@ -628,19 +628,8 @@ mod tests {
     // true. Fails pre-split if the Ok branch were dropped or flipped.
     #[test]
     fn record_delivery_result_ok_counts_sent_and_returns_true() {
-        let email = resend_rs::types::Email {
+        let email = resend_rs::types::CreateEmailResponse {
             id: resend_rs::types::EmailId::new("test"),
-            from: "brdg.me <mail@brdg.me>".into(),
-            to: vec!["a@b.c".into()],
-            subject: "subject".into(),
-            created_at: "2026-01-01T00:00:00Z".into(),
-            html: None,
-            text: None,
-            bcc: vec![],
-            cc: vec![],
-            reply_to: None,
-            last_event: resend_rs::types::EmailEvent::Sent,
-            scheduled_at: None,
         };
         assert!(record_delivery_result(Ok(email), "a@b.c"));
     }
