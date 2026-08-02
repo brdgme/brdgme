@@ -76,7 +76,7 @@ restored per owner instruction.)
 | R-50 | pending | | F-83 follows 5.1 |
 | R-51 | parked(later-review) | | F-196/F-140 remain unimplemented; no acceptance criterion is complete. Pending rulings: immediate migration-backed authoritative-version repair versus delayed repair, and email game-bound deprecated rules access only versus public `/rules/<id>` widening. R-52 is the next unblocked package. |
 | R-52 | done(65fc01c) | 65fc01ce43d04d38e19dc27f08ddcc18257d1586 | Read-only immutable-commit re-walk confirms Unit 07b covered all three named surfaces: six `RealInviteMailer` workflows, `spawn_sweep`'s six production call sites, and `notify_owner_decline` gating. WP-53's three residual cosmetics remain below finding threshold; supplied `restart_core` disposition recorded without re-derivation; no new finding. Evidence: `R-52-WP51-WP53-COVERAGE.md`; `git diff --check` passed; no Cargo. |
-| R-53 | pending | | |
+| R-53 | parked(later-review) | | Public semantic contract decision. `higher-is-better` is recommended but not approved; Cathedral negates remaining-piece values for placings while `points()` returns positive values; the exact conformance population remains unsized and the plan's "other 27 crates" estimate is unverified. No AC is complete and no source or conformance sweep starts before the ruling. R-54 is the next dependency-free candidate; do not start it in this package. |
 | R-54 | pending | | U8 sequenced last within package |
 | R-55 | pending | | review package; before R-05/R-06 if capacity |
 

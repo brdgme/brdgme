@@ -1913,12 +1913,20 @@ earlier brief wrongly said otherwise.
 **Objective:** give `points()` a documented contract, because at least one crate
 disagrees with itself about its sign.
 
+**Execution status:** Parked for the later parked-item review. `higher-is-better`
+is recommended from `gen_placings` and prevailing score semantics, but is not an
+approved contract. Cathedral currently negates remaining-piece values for
+placings while returning positive values from `points()`. The exact game-crate
+conformance population remains unsized, and the "other 27 crates" estimate is
+unverified. No acceptance criterion is complete and no source or conformance
+sweep starts before the ruling.
+
 - **Closes:** U2 (no F-number exists anywhere for this).
 - **Files:** `rust/lib/game/src/game.rs` (the trait),
   `rust/game/cathedral-2/src/lib.rs:580-584` and its `calc_placings`.
 - **Size: S** for the contract and the `cathedral-2` fix; **unsized** for the
-  sweep of the other 27 crates until the contract is written - say so rather than
-  guessing.
+  game-crate conformance sweep until its population is inventoried. The current
+  "other 27 crates" estimate is unverified.
 - **Depends on:** nothing. **Do not route this to another review unit.** Unit 08
   handed it **back**: WP-52 touches no `lib/game` surface and stats read DB
   columns only, so no review unit will ever own it. It needs a remediation owner.
