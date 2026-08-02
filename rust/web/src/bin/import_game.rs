@@ -5,6 +5,8 @@
 //! Reads DATABASE_URL (via .env / environment), ingests the bundle into
 //! local Postgres under fresh IDs. Dev-only; never deployed.
 
+use std::io::Read;
+
 fn usage() -> ! {
     eprintln!("usage: import-game <bundle.json>");
     std::process::exit(2);
