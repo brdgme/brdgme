@@ -59,12 +59,9 @@ Repo: `/home/beefsack/Development/brdgme`, branch `master`.
   only files anyone writes are the reports in the session directory.
 - Reports stay **uncommitted** until the owner says otherwise.
 
-## Role/model ruling
+## Coordination
 
-**Opus for every role - Orchestrator, Leads and Workers alike.** Never pass a
-`sonnet` model override to any subagent; pass no `model` override at all so
-everyone inherits opus. One subagent at a time, serially, at every tier - never two
-dispatches in one response.
+- One subagent at a time, serially, at every tier - never two dispatches in one response.
 
 ## Where we are
 
@@ -246,7 +243,7 @@ Refined across 22 units. Include, in this order:
    Delegate all shell commands to Workers, one at a time, serially - never two
    dispatches in one response. You may read files yourself but must not run shell
    commands."
-2. The model ruling above.
+2. The serial-delegation rule above.
 3. The hard constraints, verbatim.
 4. "Read `00-STATE.md` first", then the specific unit section. Point at the state
    file; do not re-explain accumulated context in the brief.

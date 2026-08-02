@@ -9,28 +9,26 @@ This repo assumes the [superpowers](https://github.com/obra/superpowers)
 plugin/skill system is available. If it is not installed, alert the user
 before proceeding.
 
-## Read the top-level docs first
+## Read critical context first
 
-At the start of every session, read the following files in full:
+At the start of every session, read `docs/VISION.md` in full to establish
+product direction. When the project has a principles document, read it in full
+at the start of every session.
 
-- `docs/ARCHITECTURE.md`
-- `docs/BACKLOG.md`
-- `docs/CODING.md`
-- `docs/DEV.md`
-- `docs/DEPLOY.md`
-- `docs/VISION.md`
+Read `docs/BACKLOG.md` when work involves prioritization, selecting or ordering
+work, cross-change coordination, or otherwise needs current project
+priorities.
 
-Everything else under `docs/` is out of scope for this bootstrap step - read
-on demand when the task at hand references it. That includes the
-subdirectories (`docs/decisions/`, `docs/porting/`, `docs/authoring/`,
-`docs/changes/`) and the on-demand references directly under `docs/`,
-notably `docs/hydration.md` (Leptos SSR hydration mechanics, hazards, and
-troubleshooting - read it before touching Suspense/Transition/resource
-structure in `rust/web` or when debugging a hydration panic) and
+Read governing decisions and all other implementation, change, and reference
+documentation only when the current task makes them relevant, including
+architecture, coding, development, deployment, source, and review materials.
+In particular, read `docs/hydration.md` (Leptos SSR hydration mechanics,
+hazards, and troubleshooting) before touching Suspense/Transition/resource
+structure in `rust/web` or when debugging a hydration panic, and read
 `docs/email.md` (outbound email rendering mechanics, the Gmail
 `font-size:0`/foster-parenting hazard, and a headless-Chromium verification
-playbook - read it before touching `rust/web/src/email/` or debugging a
-"the email looks wrong" report).
+playbook) before touching `rust/web/src/email/` or debugging a "the email looks
+wrong" report.
 
 ## Reference facts agents get wrong
 

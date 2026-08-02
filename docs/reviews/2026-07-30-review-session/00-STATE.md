@@ -10,11 +10,7 @@ against `docs/reviews/2026-07-23-rust-review/SUMMARY.md`.
 - Do NOT run tests, benchmarks or lints. Running Rust tests crashes the machine.
   `git`, `rg`, `wc`, `ls` and file reads only.
 - Do not commit, stage or push. Do not modify source. Read-and-report only.
-- **Owner ruling 2026-07-30: use opus for EVERY role - Orchestrator, Leads and
-  Workers alike.** Never pass a `sonnet` model override to any subagent. This
-  supersedes the earlier "Workers on sonnet / sonnet Leads for non-review work"
-  guidance wherever it still appears. One subagent at a time, serially, at every
-  tier.
+- One subagent at a time, serially, at every tier.
 - Leads write their report incrementally, flushing each finding to disk as it is
   confirmed. Quota loss is expected; unflushed context is lost work.
 
