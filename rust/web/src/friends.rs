@@ -632,3 +632,21 @@ pub fn FriendsPage() -> impl IntoView {
         </MainLayout>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test]
+    async fn block_user_rejects_unknown_target(pool: sqlx::PgPool) {
+        let err = crate::test_support::non_admin(&pool, || async {
+            block_user(Uuid::new_v4()).await
+        })
+        .await
+        .expect_err("blocking an unknown user must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, "User not found"),
+            other => panic!("expected ServerError(\"User not found\"), got {other:?}"),
+        }
+    }
+}
