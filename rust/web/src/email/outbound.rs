@@ -124,53 +124,56 @@ pub async fn ensure_email_token_tx(
 }
 
 /// Returns the user's `settings_email_token`, generating and persisting one on
-/// first use (lazy population, per the WP-56 migration). Plain query, matching
-/// `ensure_email_token`.
+/// first use (lazy population, per the WP-56 migration). Atomic COALESCE update:
+/// an unexpired, unused token is returned as-is, otherwise a fresh 24h token is
+/// minted (R-02 expiry/single-use window). Errors for an unknown user.
 pub async fn ensure_settings_email_token(pool: &PgPool, user_id: Uuid) -> anyhow::Result<String> {
-    let row: Option<(
-        Option<String>,
-        Option<time::OffsetDateTime>,
-        Option<time::OffsetDateTime>,
-    )> = sqlx::query_as(
-        "SELECT settings_email_token, settings_token_expires_at, settings_token_used_at FROM users WHERE id = $1",
+    let token = generate_email_token();
+    let row: Option<(String,)> = sqlx::query_as(
+        "UPDATE users SET
+            settings_email_token = COALESCE(
+                CASE WHEN settings_email_token IS NOT NULL
+                          AND settings_token_expires_at > NOW()
+                          AND settings_token_used_at IS NULL
+                     THEN settings_email_token END,
+                $1
+            ),
+            settings_token_expires_at = CASE WHEN settings_email_token IS NOT NULL
+                  AND settings_token_expires_at > NOW()
+                  AND settings_token_used_at IS NULL
+             THEN settings_token_expires_at
+             ELSE NOW() + interval '24 hours' END,
+            settings_token_used_at = NULL,
+            updated_at = NOW()
+         WHERE id = $2
+         RETURNING settings_email_token",
     )
+    .bind(&token)
     .bind(user_id)
     .fetch_optional(pool)
     .await?;
-    if let Some((Some(tok), Some(expires), used)) = row
-        && expires > time::OffsetDateTime::now_utc()
-        && used.is_none()
-    {
-        return Ok(tok);
+    match row {
+        Some((tok,)) => Ok(tok),
+        None => anyhow::bail!("user {} not found", user_id),
     }
-    let token = generate_email_token();
-    sqlx::query("UPDATE users SET settings_email_token = $1, settings_token_expires_at = NOW() + interval '24 hours', settings_token_used_at = NULL, updated_at = NOW() WHERE id = $2")
-        .bind(&token)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(token)
 }
 
 /// Returns the user's `unsubscribe_token`, generating and persisting one on
-/// first use (lazy population, per the WP-58 migration). Plain query, matching
-/// `ensure_settings_email_token`.
+/// first use (lazy population, per the WP-58 migration). Atomic COALESCE update,
+/// matching `ensure_email_token`. Errors for an unknown user.
 pub async fn ensure_unsubscribe_token(pool: &PgPool, user_id: Uuid) -> anyhow::Result<String> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT unsubscribe_token FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await?;
-    if let Some((Some(tok),)) = row {
-        return Ok(tok);
-    }
     let token = generate_email_token();
-    sqlx::query("UPDATE users SET unsubscribe_token = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&token)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(token)
+    let row: Option<(String,)> = sqlx::query_as(
+        "UPDATE users SET unsubscribe_token = COALESCE(unsubscribe_token, $1), updated_at = NOW() WHERE id = $2 RETURNING unsubscribe_token",
+    )
+    .bind(&token)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    match row {
+        Some((tok,)) => Ok(tok),
+        None => anyhow::bail!("user {} not found", user_id),
+    }
 }
 
 /// Everything needed to decide whether (and how) to email one game-player slot:
@@ -385,16 +388,13 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    // Runs only where a Postgres is available (CI); expected to fail to connect
-    // locally (backlog #40). Plain queries throughout to avoid `.sqlx` churn.
-    #[sqlx::test]
-    async fn ensure_email_token_generates_and_reuses(pool: PgPool) {
+    async fn seed_game_player(pool: &PgPool) -> Uuid {
         let game_type_id: Uuid = sqlx::query_scalar(
             "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",
         )
         .bind(format!("Test Game {}", Uuid::new_v4()))
         .bind(vec![2i32])
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .unwrap();
 
@@ -403,7 +403,7 @@ mod tests {
              VALUES ($1, '1.0.0', 'http://localhost:0/mock', true, false) RETURNING id",
         )
         .bind(game_type_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .unwrap();
 
@@ -412,7 +412,7 @@ mod tests {
              VALUES ($1, false, 'initial') RETURNING id",
         )
         .bind(game_version_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .unwrap();
 
@@ -421,11 +421,11 @@ mod tests {
         )
         .bind("player")
         .bind(Vec::<String>::new())
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .unwrap();
 
-        let game_player_id: Uuid = sqlx::query_scalar(
+        sqlx::query_scalar(
             "INSERT INTO game_players
                 (game_id, user_id, position, color, has_accepted, is_turn,
                  is_turn_at, last_turn_at, is_eliminated, is_read)
@@ -434,9 +434,16 @@ mod tests {
         )
         .bind(game_id)
         .bind(user_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
-        .unwrap();
+        .unwrap()
+    }
+
+    // Runs only where a Postgres is available (CI); expected to fail to connect
+    // locally (backlog #40). Plain queries throughout to avoid `.sqlx` churn.
+    #[sqlx::test]
+    async fn ensure_email_token_generates_and_reuses(pool: PgPool) {
+        let game_player_id = seed_game_player(&pool).await;
 
         let first = ensure_email_token(&pool, game_player_id).await.unwrap();
         let second = ensure_email_token(&pool, game_player_id).await.unwrap();
@@ -450,6 +457,39 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stored, Some(first));
+    }
+
+    // F-176 F44: concurrent ensures must converge on one persisted token - the
+    // atomic COALESCE update means a losing write keeps the winner's token.
+    // Fails pre-fix under select-then-update, where two reads of an absent
+    // token each mint and each persist a different one.
+    #[sqlx::test]
+    async fn ensure_email_token_concurrent_calls_converge_on_one_token(pool: PgPool) {
+        let game_player_id = seed_game_player(&pool).await;
+
+        let tokens = futures_util::future::join_all(
+            (0..8).map(|_| ensure_email_token(&pool, game_player_id)),
+        )
+        .await;
+        let first = tokens[0].as_ref().unwrap();
+        assert!(tokens.iter().all(|t| t.as_ref().unwrap() == first));
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT email_token FROM game_players WHERE id = $1")
+                .bind(game_player_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored.as_ref(), Some(first));
+    }
+
+    // F-176 F45: an unknown game_player errors instead of minting a token for
+    // a row that does not exist. Fails pre-fix, which returned Ok on a
+    // no-op UPDATE.
+    #[sqlx::test]
+    async fn ensure_email_token_errors_for_unknown_game_player(pool: PgPool) {
+        let err = ensure_email_token(&pool, Uuid::new_v4()).await.unwrap_err();
+        assert!(err.to_string().contains("not found"));
     }
 
     // Runs only where a Postgres is available (CI); expected to fail to connect
@@ -473,6 +513,40 @@ mod tests {
         assert_eq!(stored, Some(first));
     }
 
+    // F-175: concurrent ensures must converge on one persisted token - the
+    // atomic COALESCE update means a losing write keeps the winner's token.
+    // Fails pre-fix under select-then-update, where two reads of an absent
+    // token each mint and each persist a different one.
+    #[sqlx::test]
+    async fn ensure_settings_email_token_concurrent_calls_converge_on_one_token(pool: PgPool) {
+        let user_id = seed_user(&pool).await;
+
+        let tokens = futures_util::future::join_all(
+            (0..8).map(|_| ensure_settings_email_token(&pool, user_id)),
+        )
+        .await;
+        let first = tokens[0].as_ref().unwrap();
+        assert!(tokens.iter().all(|t| t.as_ref().unwrap() == first));
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT settings_email_token FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored.as_ref(), Some(first));
+    }
+
+    // F-175: an unknown user errors instead of minting a token for a row that
+    // does not exist. Fails pre-fix, which returned Ok on a no-op UPDATE.
+    #[sqlx::test]
+    async fn ensure_settings_email_token_errors_for_unknown_user(pool: PgPool) {
+        let err = ensure_settings_email_token(&pool, Uuid::new_v4())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
     #[sqlx::test]
     async fn ensure_unsubscribe_token_generates_and_reuses(pool: PgPool) {
         let user_id = seed_user(&pool).await;
@@ -490,5 +564,39 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stored, Some(first));
+    }
+
+    // F-175: concurrent ensures must converge on one persisted token - the
+    // atomic COALESCE update means a losing write keeps the winner's token.
+    // Fails pre-fix under select-then-update, where two reads of an absent
+    // token each mint and each persist a different one.
+    #[sqlx::test]
+    async fn ensure_unsubscribe_token_concurrent_calls_converge_on_one_token(pool: PgPool) {
+        let user_id = seed_user(&pool).await;
+
+        let tokens = futures_util::future::join_all(
+            (0..8).map(|_| ensure_unsubscribe_token(&pool, user_id)),
+        )
+        .await;
+        let first = tokens[0].as_ref().unwrap();
+        assert!(tokens.iter().all(|t| t.as_ref().unwrap() == first));
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT unsubscribe_token FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored.as_ref(), Some(first));
+    }
+
+    // F-175: an unknown user errors instead of minting a token for a row that
+    // does not exist. Fails pre-fix, which returned Ok on a no-op UPDATE.
+    #[sqlx::test]
+    async fn ensure_unsubscribe_token_errors_for_unknown_user(pool: PgPool) {
+        let err = ensure_unsubscribe_token(&pool, Uuid::new_v4())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not found"));
     }
 }
