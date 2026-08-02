@@ -3,7 +3,22 @@
 Derived from `99-UNIFIED-REPORT.md` (211 findings, F-01..F-211) against the
 127-commit remediation effort of 2026-07-25..2026-07-30.
 
-**This document and the rest of this directory are intentionally uncommitted.**
+## Execution status
+
+This directory is committed; execution state, per-package blockers, and owner
+decisions live in `97-REMEDIATION-PROGRESS.md` - start there. Package-number
+order is not execution order when blockers exist; the tracker's status column
+decides what is next.
+
+- **Next unblocked package: R-37** (web auth hardening). Its dependency 5.4
+  (request-parts harness) is done (`973ea62`); build the harness first per the
+  R-37 section's "Depends on".
+- **R-35 is blocked on a user decision:** removing `Status` leaves no approved
+  public points source - `Response::Status` is the only response carrying
+  `GameResponse.points`, and `Response::PlayerRender` carries no `points`. The
+  owner must either approve optional all-seat `points` in `Response::PlayerRender`
+  (populated by Rust handlers, absent for existing Go handlers) or specify
+  another Go-compatible source. See Pending User Decisions in 97.
 
 ## 1. How to use this document
 
