@@ -1997,10 +1997,26 @@ verifiable acceptance criteria at all.
 3. **U15:** the two test modules are audited, not just the four spec-named
    functions that were read. The audit asks tooth-3 of every test: does it call
    the function under test?
-4. **U17:** **WP-36 has neither a spec nor a checklist row**, so Unit 05's crypto
-   verdict rests on a commit message. Treat WP-36 as **unverified** until a spec
-   is reconstructed from the commit and the owner confirms it. This is the same
-   class as WP-72 (section 4.3) but with a security verdict resting on it.
+4. **U17:** WP-36's archived specification is recoverable at
+   `868094a6:docs/reviews/2026-07-23-rust-review/planning/specs/archive/WP-36-crypto-deploy-hardening.md`.
+   Treat its operative status and the AAD decline as **unverified** until the
+   owner confirms both. This does not declare any historical checklist operative
+   or create an AAD decision record.
+
+**Execution units (2026-08-03):**
+
+- `r55-u10` is covered-clean for its original scope: `rust/bot/src/routing.rs`
+  was read in full. Its possible mismatch with the Vision's round-robin promise
+  is a separate focused confirmation candidate, not a finding or remediation.
+- `r55-u15a`: audit every `proposals.rs` test for a direct call to its stated
+  function under test.
+- `r55-u15b`: audit every `email/sweep.rs` test for a direct call to its stated
+  function under test.
+- `r55-u16a`: line-level review of `admin.rs:1560-3488`.
+- `r55-u16b`: line-level review of the unread `game_write.rs` remainder.
+- `r55-u17` is partially blocked pending owner confirmation that the recovered
+  WP-36 specification is operative and a ruling on the AAD disposition. It does
+  not block the independent audits.
 
 
 ## 3. Deployment checklist family
