@@ -41,7 +41,8 @@ async fn main() -> anyhow::Result<()> {
         serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
 
     let pool = web::db::create_pool().await?;
-    let outcome = web::game::import::import_bundle(&pool, &bundle).await?;
+    let http_client = reqwest::Client::new();
+    let outcome = web::game::import::import_bundle(&pool, &http_client, &bundle).await?;
 
     for warning in &outcome.warnings {
         eprintln!("warning: {warning}");

@@ -5,6 +5,7 @@
 
 use crate::game::export::{BUNDLE_SCHEMA_VERSION, ExportBundle};
 use anyhow::{Context, anyhow};
+use brdgme_cmd::api::{Request, Response};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -14,7 +15,11 @@ pub struct ImportOutcome {
     pub warnings: Vec<String>,
 }
 
-pub async fn import_bundle(pool: &PgPool, bundle: &ExportBundle) -> anyhow::Result<ImportOutcome> {
+pub async fn import_bundle(
+    pool: &PgPool,
+    http_client: &reqwest::Client,
+    bundle: &ExportBundle,
+) -> anyhow::Result<ImportOutcome> {
     if bundle.schema_version != BUNDLE_SCHEMA_VERSION {
         return Err(anyhow!(
             "unsupported bundle schema_version {} (this build supports {})",
@@ -52,6 +57,33 @@ pub async fn import_bundle(pool: &PgPool, bundle: &ExportBundle) -> anyhow::Resu
             "bundle was exported from game version {:?} but the local service runs {:?} - the state blob may not load or may behave differently",
             bundle.game_version_name, local_version.name
         ));
+    }
+
+    // F-122: `undo_core` replays a non-NULL `undo_game_state` by loading it
+    // back from the local game service with a `Status` request before applying
+    // the undo. Validate each imported undo state the same way - before the
+    // first DB write - so a bundle whose undo state the local service cannot
+    // load persists nothing.
+    for player in &bundle.players {
+        let Some(undo_state) = &player.undo_game_state else {
+            continue;
+        };
+        let resp = crate::game::client::request(
+            http_client,
+            &local_version.uri,
+            &local_version.name,
+            &Request::Status {
+                game: undo_state.clone(),
+            },
+        )
+        .await
+        .map_err(|e| anyhow!("validating undo state for player {:?}: {e}", player.name))?;
+        if !matches!(resp, Response::Status { .. }) {
+            return Err(anyhow!(
+                "unexpected response validating undo state for player {:?}",
+                player.name
+            ));
+        }
     }
 
     let mut tx = pool.begin().await?;
@@ -228,8 +260,34 @@ mod tests {
     use super::*;
     use crate::game::export::build_export_bundle;
     use crate::game::server_fns::BotSlot;
+    use axum::{Json, Router, routing::post};
     use sqlx::PgPool;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
     use uuid::Uuid;
+
+    /// In-process mock game service that answers every request with whatever
+    /// `handler` returns; mirrors the pattern in `server_fns` tests so a
+    /// bundle's undo state can be validated without a real game service.
+    async fn spawn_mock_game_service<F>(handler: F) -> String
+    where
+        F: Fn(Request) -> Response + Send + Sync + 'static,
+    {
+        let handler = Arc::new(handler);
+        let app = Router::new().route(
+            "/",
+            post(move |Json(payload): Json<Request>| {
+                let handler = handler.clone();
+                async move { Json(handler(payload)) }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{}", addr)
+    }
 
     async fn make_exported_game(pool: &PgPool) -> crate::game::export::ExportBundle {
         let creator = Uuid::new_v4();
@@ -308,7 +366,7 @@ mod tests {
     async fn import_bundle_round_trips_a_game(pool: PgPool) {
         let bundle = make_exported_game(&pool).await;
 
-        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
         assert_ne!(outcome.game_id, bundle.game.id);
         // Same local version name as the bundle - no fidelity warning.
         assert!(
@@ -405,7 +463,7 @@ mod tests {
             }
         }
 
-        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
         let human = crate::db::find_game_extended(&pool, outcome.game_id)
             .await
             .unwrap()
@@ -427,7 +485,7 @@ mod tests {
         let mut bundle = make_exported_game(&pool).await;
         bundle.game_version_name = "v0-ancient".to_string();
 
-        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
         assert!(
             outcome.warnings.iter().any(|w| w.contains("v0-ancient")),
             "expected version-mismatch warning, got {:?}",
@@ -440,7 +498,7 @@ mod tests {
         let mut bundle = make_exported_game(&pool).await;
         bundle.game_type_name = "No Such Game".to_string();
 
-        let result = import_bundle(&pool, &bundle).await;
+        let result = import_bundle(&pool, &reqwest::Client::new(), &bundle).await;
         assert!(result.is_err());
     }
 
@@ -449,8 +507,59 @@ mod tests {
         let mut bundle = make_exported_game(&pool).await;
         bundle.schema_version = 999;
 
-        let result = import_bundle(&pool, &bundle).await;
+        let result = import_bundle(&pool, &reqwest::Client::new(), &bundle).await;
         assert!(result.is_err());
+    }
+
+    /// F-122: bundle-supplied `undo_game_state` was written verbatim with no
+    /// validation, and `undo_core` later replays it against the local game
+    /// service. Each non-NULL undo state must be validated before any import
+    /// DB write: a game service that rejects the state must fail the import
+    /// with nothing persisted.
+    #[sqlx::test]
+    async fn import_bundle_rejects_undo_state_the_game_service_cannot_load(pool: PgPool) {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+        let uri = spawn_mock_game_service(move |req| {
+            received_clone.lock().unwrap().push(req);
+            Response::SystemError {
+                message: "cannot load undo state".to_string(),
+            }
+        })
+        .await;
+
+        let mut bundle = make_exported_game(&pool).await;
+        // Point the locally-mapped game version at the mock (the bundle's own
+        // URI is the exporting environment's and is not used for the check).
+        // Plain `query` form: no `.sqlx` offline entry for this statement, so
+        // avoid the macro's compile-time DB dependency.
+        sqlx::query("UPDATE game_versions SET uri = $1")
+            .bind(uri)
+            .execute(&pool)
+            .await
+            .unwrap();
+        bundle.players[0].undo_game_state = Some("malformed".to_string());
+
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = import_bundle(&pool, &reqwest::Client::new(), &bundle).await;
+        assert!(result.is_err(), "a state the service cannot load must fail the import");
+
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            after, before,
+            "no import write may persist when undo-state validation fails"
+        );
+
+        let received = received.lock().unwrap();
+        assert_eq!(received.len(), 1, "the undo state must be validated once");
+        assert!(matches!(&received[0], Request::Status { game } if game.as_str() == "malformed"));
     }
 
     #[sqlx::test]
@@ -466,7 +575,7 @@ mod tests {
             log.created_at = past;
         }
 
-        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
 
         let game_row = sqlx::query!(
             "SELECT created_at, updated_at FROM games WHERE id = $1",
@@ -497,7 +606,7 @@ mod tests {
         );
         bundle.game.updated_at = past;
 
-        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
 
         let rows = sqlx::query!(
             "SELECT is_turn_at, last_turn_at FROM game_players WHERE game_id = $1 ORDER BY position",
