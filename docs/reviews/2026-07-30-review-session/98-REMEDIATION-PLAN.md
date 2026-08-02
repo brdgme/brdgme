@@ -1106,7 +1106,7 @@ crate that copy-pasted the epilogue.
 1. F-40: the missing-share default no longer **mints phantom shares**. A test
    calls the share path with a missing entry and asserts total share conservation
    across the whole board - a conservation assertion, not a single-value check.
-2. F-42: A test drives the real Festival-then-American-into-Imperial cascade in one `play b2` command, with the played tile at hand index 0 and two survivors, and asserts the played tile is gone and survivors retain their original relative order.
+2. A test drives the real Festival-then-American-into-Imperial cascade in one `play b2` command, with the played tile at hand index 0 and two survivors, and asserts the played tile is gone and survivors retain their original relative order.
 3. F-43: the turn check goes through `assert_player_turn`; a reviewer greps for
    turn checks that bypass it and records zero.
 4. F-46: `pub_state()` no longer deep-clones the whole game.
