@@ -1478,7 +1478,8 @@ duplicates `html_escape` (F-178). Help text advertises unavailable verbs (F-174)
    functions: `ensure_email_token` concurrently and with an unknown id (F44/F45),
    `try_send_rendered_email` plus its smallest private delivery-result boundary
    for the success/failure metric branches (F46), and `sentry_init_snippet` with
-   `</script>` in both interpolated values (F63).
+   `</script>` in both interpolated values and no frontend `tracesSampleRate`
+   key (F63; `SENTRY_SAAS_EXCEPTION.md` compliance).
 3. F-170: delete `pref_column()` and its callerless test. Parameterized
    unsubscribe endpoint tests cover all four `EmailKind` slugs and assert the
    live preference mapping changes only its intended column. Note the game-start
@@ -1486,8 +1487,9 @@ duplicates `html_escape` (F-178). Help text advertises unavailable verbs (F-174)
 4. F-171: a test asserts `List-Unsubscribe` is **absent** where the row specified
    it - this is the fifth confirmed "Test? y" with no test and the most explicit,
    because the row said exactly what to assert.
-5. F-172: the sanitiser **replaces** CRLF; a test asserts content after the CRLF
-   survives.
+5. F-172: folded CR/LF followed by header whitespace collapses to one space, so
+   content after the fold survives; bare CR/LF terminates parsing, preserving the
+   existing `Bcc:` injection rejection. Tests assert both boundaries.
 6. F-177/F-178: one escaping helper, used by all four hrefs; a reviewer greps for
    the duplicate and confirms it is gone.
 7. F-184: the pre-settle default no longer stores `"medium"`. **The settled-path

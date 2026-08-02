@@ -63,7 +63,7 @@ restored per owner instruction.)
 | R-38 | blocked(5.3) | | 5.4 done (973ea62) |
 | R-39 | done(3c4c1ca) | afbca143ce59e4e2f0ad6cfe41b9ad94975c44bf, 6dd0c41e4852172e730eb047857f6ac014d93679, b2e2021fa6f0e9c6099867c1fd981aaef7156601, 68140350ed56fe05f34771281611b5d8a8c3e71d, 1db7266404db772de630cc9458bb745c81d4f9ab, 9867e5396091e9f2c9827eaf0d081eeeeb25bf1b, 3c4c1ca4ce18485acd7524dc3887f2c2a85e4b2f | F-132 refuted by the per-connection, viewer-fixed `VisibilityCache` lifetime; no cache or SSE change. Static checks and final allowed web cargo check pass; runtime DB/SSR tests CI-pending. Independent authorization/visibility review PASS with no findings. |
 | R-40 | done(1be0583) | 2c0fee15daa18563b57e40ae8e14d03d1f00cd00, 1c1bfbe9a5e37cfcf9c7a6eb559a6e69bd6b24cb, 9f3e5742e6539d9c82e33929bf88e78b17247be3, b6435094ce8384078ff8e973ff9bf741111aba17, 1be0583fac259118e6926ec6ce5181912d03854b | F-139 savepoint retry, F-121 capped actual read, F-122 pre-write undo-state validation; final approved web checks pass, runtime tests CI-pending. |
-| R-41 | in-progress | | Approved survey corrections committed; units 41.1 through 41.5 execute serially. |
+| R-41 | done(e96c5bb) | 4788a90, 02e9883, a77b752, c442267, 5dd0f63, 928863d, e96c5bb | F-170..F-178/F-184 closed; final approved web check passed and independent review PASS; runtime/DB tests CI-pending. |
 | R-42 | pending | | |
 | R-43 | pending | | |
 | R-44 | blocked(5.2) | | |
@@ -1583,3 +1583,37 @@ unaccepted, none reflected in a done row):
   non-failing `unused_mut` warning in `import-game`, and Cargo's
   `proc-macro-error2` future-incompatibility notice. Runtime DB/mock-service
   tests are CI-pending under laptop limits.
+
+## R-41 evidence
+
+- **Status:** done. Source units: `4788a90` (41.1), `02e9883` (41.2),
+  `a77b752` (41.3), `c442267` (41.4), `5dd0f63` (41.5). Compile corrections:
+  `928863d` (`CreateEmailResponse`) and `e96c5bb` (awaited unsubscribe test).
+- **F-175/F-176:** all three token ensures use atomic `UPDATE ... RETURNING` and
+  error for an unknown row; direct concurrency/unknown-id tests cover each.
+  Delivery success/failure metrics retain their existing names behind the smallest
+  private result helper. Sentry snippets escape `</script>` in DSN and release,
+  omit `tracesSampleRate` per `SENTRY_SAAS_EXCEPTION.md`, and retain
+  `sendDefaultPii:false` and both integrations.
+- **F-170/F-177/F-178:** the callerless `pref_column()` and duplicate escape
+  helper are deleted. All four unsubscribe kinds exercise the live preference
+  mapping; one shared escaping helper covers all four game-email hrefs and the
+  unsubscribe GET reflection.
+- **F-171/F-172/F-174:** rules replies retain threading and omit both
+  `List-Unsubscribe*` headers. Folded CR/LF plus header whitespace collapses to
+  one space; bare CR/LF terminates parsing and retains the `Bcc:` rejection.
+  Standalone help lists only standalone commands while game-context help remains
+  unchanged.
+- **F-184:** Bot selection is disabled until `bot_names` settles, preventing the
+  pre-settle `"medium"` fallback from entering state; the settled canonical path
+  is unchanged.
+- **Verification:** `git diff --check` passed per accepted unit. Final allowed
+  command `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr`
+  passed after the two focused compile corrections. It emitted pre-existing
+  `NotifyKind::Reminder` dead-code and `import-game` `unused_mut` warnings, plus
+  Cargo's `proc-macro-error2` future-incompatibility notice. No other Cargo
+  command ran.
+- **Review:** independent review PASS, no concrete defects. Runtime/DB tests,
+  including the SQLx token and unsubscribe tests, remain CI-pending under laptop
+  limits. Residual test gap: delivery-result tests assert result branches rather
+  than reading global counters; the production metric calls were inspected.
