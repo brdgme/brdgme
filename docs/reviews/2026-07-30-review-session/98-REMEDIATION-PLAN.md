@@ -1503,12 +1503,31 @@ duplicates `html_escape` (F-178). Help text advertises unavailable verbs (F-174)
 - **Closes:** F-164, F-165, F-166, F-167, F-168 (Low), and records F-15
   (Medium) as **latent**.
 - **Files:** `rust/web/style/main.scss:1091-1094`;
-  `rust/web/src/websocket_client.rs:84-101`;
-  `rust/web/src/game_info/queries.rs:14-24` (+1 site);
-  `rust/web/src/theme.rs:12-19`; `rust/web/tests/ssr_pages.rs:256-266`
-  (+1 site); `rust/lib/color/src/css.rs:13-28` (+2 sites).
+   `rust/web/src/websocket_client.rs:84-101`;
+   `rust/web/src/game_info/queries.rs:14-24` (+1 site);
+   `rust/web/src/theme.rs:12-19`; `rust/web/tests/ssr_pages.rs:256-266`
+   (+1 site).
 - **Size: M** - basis: five small independent fixes across the frontend.
 - **Depends on:** nothing.
+
+**Approved execution units and evidence**
+
+1. **U42.1 (F-164):** `rust/web/style/main.scss` only. Replace the literal with
+   `var(--mk-orange)`; source inspection confirms the existing `(N new)` text is
+   the non-hue cue. No Cargo command for this CSS-only unit.
+2. **U42.2 (F-165):** `rust/web/src/websocket_client.rs` only. Move only the
+   `last_update` bump outside each `Closed` guard; do not redesign EventSource
+   liveness. Source inspection is the acceptance evidence; this row remains
+   `Test? n`.
+3. **U42.3 (F-166):** `rust/web/src/game_info/queries.rs` only. Apply the
+   existing `name DESC` tiebreak and add a tied-`created_at` regression test
+   that calls both selectors. Review records the two-selector count and
+   unchanged visibility predicates.
+4. **U42.4 (F-167):** `rust/web/src/theme.rs` only. Remove the dead Red/86
+   expression and correct the comment; inspect generated-token expectations.
+5. **U42.5 (F-168):** `rust/web/tests/ssr_pages.rs` only. Assert the relevant
+   accessible `href="#"` properties rather than the absent styling marker.
+   Runtime DB/SSR evidence remains CI-pending.
 
 **Acceptance criteria**
 
@@ -1523,13 +1542,15 @@ duplicates `html_escape` (F-178). Help text advertises unavailable verbs (F-174)
    removed.
 5. F-168: the a11y tests assert **presence** of the accessible property, not
    absence of the inaccessible one.
-6. **F-15 stays LATENT - do not re-run the sweep.** Obligation 4 is discharged:
-   every `--mk-soften-*` token referenced anywhere is emitted; game crates emit
-   exactly `{(Pink,80),(Foreground,80),(Foreground,90)}` from three sites,
-   identical to `IN_USE_SOFTENS`, and no game emits a `mix`. The remaining work is
-   only to **enforce** the `IN_USE_SOFTENS`/`IN_USE_MIXES` whitelist in
-   `rust/web/src/theme.rs` so it cannot silently drift - a compile-time or test
-   assertion, not a sweep.
+6. **F-15 stays LATENT and is PARKED for the later parked-item review.**
+   Obligation 4 remains discharged: every `--mk-soften-*` token referenced
+   anywhere is emitted; game crates emit exactly
+   `{(Pink,80),(Foreground,80),(Foreground,90)}` from three sites, identical to
+   `IN_USE_SOFTENS`, and no game emits a `mix`. A local equality test would not
+   enforce future renderer output because `rust/web/src/theme.rs` has no
+   producer relationship with game renderers. Source scanning, build-time
+   generation, and parser validation are not justified inside R-42. This does
+   not resolve the latent issue.
 
 ---
 
