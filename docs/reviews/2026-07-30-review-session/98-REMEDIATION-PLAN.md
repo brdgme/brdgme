@@ -1742,19 +1742,17 @@ finding live.
 - **Depends on:** nothing. **Blocks:** R-21. **Related:** R-16 (its delivery
   gap).
 
-**The defects:** `validate` **never relates `phase` to `pending`**, so a crafted
-state either wedges the game or loses cards (F-209). The crate has a **single
-unguarded epilogue site at `:833` and no `finish_epilogue`** - it copied the
-**pre-WP-08** pattern, so it arrived already carrying the defect R-32 exists to
-remove.
+**The defect:** `validate` **never relates `phase` to `pending`**, so a crafted
+state either wedges the game or loses cards (F-209).
+
+**Scope correction (2026-08-03):** the existing
+`!was_finished && self.is_finished()` guard at `lib.rs:830` predates F-209 and
+already prevents duplicate epilogues. The epilogue is not part of this package.
 
 **Acceptance criteria**
 
 1. A test **calls `validate`** with a `phase`/`pending` mismatch and asserts
    `Err`, covering all four cited sites.
-2. The epilogue is gated on `!was_finished` and goes through `finish_epilogue`
-   like the migrated crates; a test calls the finish path twice and asserts one
-   epilogue.
 
 ---
 
