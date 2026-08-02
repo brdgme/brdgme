@@ -77,6 +77,12 @@ jobs:
       - name: Check delivery-list consistency
         working-directory: .
         run: bash scripts/check-delivery-lists.sh
+      # Vendored-code guard (R-45 AC3): session_store is `publish = false` and
+      # skipped by cargo-deny, so assert its MIT licence text and upstream
+      # attribution header directly.
+      - name: Check session_store licence and attribution
+        working-directory: .
+        run: grep -q "Permission is hereby granted" rust/lib/session_store/LICENSE && grep -q "Vendored from tower-sessions-sqlx-store 0.15.0" rust/lib/session_store/src/lib.rs
       # GitHub Actions `services:` containers can't take extra CLI args (no
       # way to append `-js` to the image's default command), so NATS is
       # started as a plain step instead - JetStream needs that flag.
