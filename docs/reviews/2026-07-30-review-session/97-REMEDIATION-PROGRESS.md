@@ -65,7 +65,7 @@ restored per owner instruction.)
 | R-40 | done(1be0583) | 2c0fee15daa18563b57e40ae8e14d03d1f00cd00, 1c1bfbe9a5e37cfcf9c7a6eb559a6e69bd6b24cb, 9f3e5742e6539d9c82e33929bf88e78b17247be3, b6435094ce8384078ff8e973ff9bf741111aba17, 1be0583fac259118e6926ec6ce5181912d03854b | F-139 savepoint retry, F-121 capped actual read, F-122 pre-write undo-state validation; final approved web checks pass, runtime tests CI-pending. |
 | R-41 | done(e96c5bb) | 4788a90, 02e9883, a77b752, c442267, 5dd0f63, 928863d, e96c5bb | F-170..F-178/F-184 closed; final approved web check passed and independent review PASS; runtime/DB tests CI-pending. |
 | R-42 | done(6739e4c) | 5bd293ee421775fa5f134f14895796008350d77d, 6bec344112e845722366b9e39f527254700c2f1b, ee2ffee43e8ff6e3415a74b42dffb8722ad2fad0, e16d4d46b877cd28a59797a3807d94d2f5f0f42f, 6739e4cacbceceee955052789365226657e4ccd0 | F-164 tokenized the badge; `palette_css_vars` emits `--mk-orange` in every theme block and `(N new)` remains the non-hue cue. F-165 retains Closed-only `open()` but unconditionally bumps `last_update` on visible/online. F-166 applies `name DESC` to both selectors and adds a tied-created_at test calling both without changing visibility predicates. F-167 removes Red/86. F-168 asserts `href="#"` with an accurate focus-affordance comment. Approved staged and final `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` pass (known warnings only); independent review PASS with no findings. DB/SSR runtime tests are CI-pending. F-15 remains latent and parked; no enforcement is claimed. |
-| R-43 | pending | | |
+| R-43 | parked-by-user-process | | active latest-dependency governance conflicts with AC2's `tower-http` downgrade; widening to upgrade all 0.6 consumers is not approved. See R-43 parking below; no acceptance criterion is complete. |
 | R-44 | blocked(5.2) | | |
 | R-45 | pending | | start early; feeds owner 6.1 |
 | R-46 | pending | | EXPANDED scope: eliminate all 22 lint overrides (owner ruling) |
@@ -78,6 +78,14 @@ restored per owner instruction.)
 | R-53 | pending | | |
 | R-54 | pending | | U8 sequenced last within package |
 | R-55 | pending | | review package; before R-05/R-06 if capacity |
+
+## R-43 parking
+
+- **Status:** parked-by-user-process. Revisit during the later parked-item review; do not implement beforehand.
+- **Governance conflict:** active latest-dependency governance conflicts with R-43 AC2's `tower-http` downgrade. Widening the package to upgrade all 0.6 consumers is not approved.
+- **Unresolved evidence:** all 29 `deny.toml` skips and the falsified all-upstream rebuttal remain unresolved.
+- **Pending owner rulings:** select the skip review-date cadence and explicitly rule whether workspace-scoped `cargo deny` verification is permitted under laptop constraints.
+- **Acceptance:** no R-43 acceptance criterion is claimed complete.
 
 ## Coverage items
 

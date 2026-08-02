@@ -10,9 +10,8 @@ decisions live in `97-REMEDIATION-PROGRESS.md` - start there. Package-number
 order is not execution order when blockers exist; the tracker's status column
 decides what is next.
 
-- **Next unblocked package: R-41** (email rendering, escaping and preference
-  mapping). It is `pending` and depends on nothing. R-37 is parked by user; R-38 remains
-  blocked on 5.3.
+- **Next unblocked package: R-45.** It is `pending` and depends on nothing.
+  R-37 and R-43 are parked by user process; R-38 remains blocked on 5.3.
 - **R-35 is blocked on a user decision:** removing `Status` leaves no approved
   public points source - `Response::Status` is the only response carrying
   `GameResponse.points`, and `Response::PlayerRender` carries no `points`. The
