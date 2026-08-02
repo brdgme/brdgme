@@ -1950,7 +1950,7 @@ finding number covers.
 - **Closes:** U8, U9, U14.
 - **Files:** `.github/workflows/` (the e2e job),
   `rust/web/src/auth/server.rs:92`,
-  `rust/web/src/email/inbound.rs:95-96` and `:856-866`.
+  `rust/web/src/email/inbound.rs:95-96` and `:678-693`.
 - **Size: S** - basis: each is a few lines; the e2e item may reveal a backlog of
   real failures once it starts gating.
 - **Depends on:** nothing. Sequence U8 last - turning the gate on will surface
@@ -1959,9 +1959,9 @@ finding number covers.
 **Acceptance criteria**
 
 1. **U8:** the e2e job is no longer `continue-on-error: true`, so it gates merges
-   and deploys. It currently gates **nothing**, which is why F-211's weakened
-   assertion went unnoticed - the two compound. If the hydration race makes it
-   flaky, that flake becomes a tracked defect, not a reason to keep the gate off.
+   and deploys. It currently gates **nothing**. F-211's assertion was restored
+   separately in R-16. If the hydration race makes it flaky, that flake becomes a
+   tracked defect, not a reason to keep the gate off.
 2. **U9:** `login_emails_sent_total` is incremented **after** a successful send,
    and a failure counter exists. A test asserts a failed send does not increment
    the success counter. The `wfe F46` fix has this shape but was scoped outside
