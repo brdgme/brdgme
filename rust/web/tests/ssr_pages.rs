@@ -490,10 +490,7 @@ async fn game_page_player_names_link_to_profiles_for_human_opponents(pool: PgPoo
             creator_id: user.id,
             opponent_ids: &[opponent.id],
             opponent_emails: &[],
-            bot_slots: &[BotSlot {
-                name: "Botty".to_string(),
-                bot_name: "easy".to_string(),
-            }],
+            bot_slots: &[],
             chat_id: None,
             game_state: "state",
             all_accepted: false,
