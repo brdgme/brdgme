@@ -224,6 +224,7 @@ pub fn OpponentSlotEditor(
                         type="radio"
                         name=radio_group.clone()
                         prop:checked=move || mode() == SlotMode::Bot
+                        disabled=move || bot_names.get().is_none()
                         on:change=move |_| set_mode(SlotMode::Bot)
                     />
                     " Bot"
