@@ -736,25 +736,19 @@ mod tests {
     }
 
     #[test]
-    fn overflowing_u8_returns_err_not_panic() {
-        let result = markup().parse("{{fg rgb(999,1,1)}}x{{/fg}}");
-        assert!(
-            result.is_err() || {
-                let (nodes, _) = result.unwrap();
-                !nodes.iter().any(|n| matches!(n, N::Fg(..)))
-            }
-        );
+    fn overflowing_u8_leaves_tag_unconsumed() {
+        let input = "{{fg rgb(999,1,1)}}x{{/fg}}";
+        let (nodes, rest) = markup().parse(input).unwrap();
+        assert!(nodes.is_empty());
+        assert_eq!(rest, input);
     }
 
     #[test]
-    fn overflowing_usize_returns_err_not_panic() {
-        let result = markup().parse("{{player 99999999999999999999}}");
-        assert!(
-            result.is_err() || {
-                let (nodes, _) = result.unwrap();
-                !nodes.iter().any(|n| matches!(n, N::Player(..)))
-            }
-        );
+    fn overflowing_usize_leaves_tag_unconsumed() {
+        let input = "{{player 99999999999999999999}}";
+        let (nodes, rest) = markup().parse(input).unwrap();
+        assert!(nodes.is_empty());
+        assert_eq!(rest, input);
     }
 
     #[test]

@@ -10,20 +10,26 @@ pub fn word_wrap(s: &str, width: usize) -> String {
 fn wrap_segment(s: &str, width: usize) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
+    // Running char count keeps this linear; recounting current per word is O(n^2).
+    let mut current_len = 0;
 
     for word in s.split(' ') {
-        if current.is_empty() {
+        let word_len = word.chars().count();
+        if current_len == 0 {
             current = word.to_owned();
-        } else if current.chars().count() + 1 + word.chars().count() <= width {
+            current_len = word_len;
+        } else if current_len + 1 + word_len <= width {
             current.push(' ');
             current.push_str(word);
+            current_len += 1 + word_len;
         } else {
             lines.push(current);
             current = word.to_owned();
+            current_len = word_len;
         }
     }
 
-    if !current.is_empty() {
+    if current_len != 0 {
         lines.push(current);
     }
 

@@ -255,7 +255,7 @@ fn response_error_message(response: &Response, context: &str) -> String {
 fn output_logs(logs: Vec<CliLog>, players: &[Player]) {
     for l in logs {
         let content = match brdgme_markup::from_string(&l.content) {
-            Ok((nodes, _)) => nodes,
+            Ok(nodes) => nodes,
             Err(_) => vec![Node::text(&l.content)],
         };
         let mut l_line = vec![Node::Bold(vec![Node::text(format!("{}", l.at))])];
@@ -300,7 +300,7 @@ fn output_error<I: Into<String>>(s: I) {
 
 fn output_markup(markup: &str, players: &[Player]) {
     let nodes = match brdgme_markup::from_string(markup) {
-        Ok((nodes, _)) => nodes,
+        Ok(nodes) => nodes,
         Err(_) => vec![Node::text(markup.to_string())],
     };
     output_nodes(&nodes, players)

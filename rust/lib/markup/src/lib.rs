@@ -40,7 +40,7 @@ pub fn plain(input: &[TNode]) -> String {
 /// Unknown `rgb(r,g,b)` values in stored content fall back to `Foreground`
 /// (legacy Go brdgme compat); this is silent by design - making it an error
 /// would break stored game logs.
-pub fn from_string(input: &str) -> Result<(Vec<Node>, &str), MarkupError> {
+pub fn from_string(input: &str) -> Result<Vec<Node>, MarkupError> {
     let (nodes, rest) = markup()
         .parse(input)
         .map_err(|e| MarkupError::Parse(e.to_string()))?;
@@ -52,7 +52,7 @@ pub fn from_string(input: &str) -> Result<(Vec<Node>, &str), MarkupError> {
             offset, snippet
         )));
     }
-    Ok((nodes, rest))
+    Ok(nodes)
 }
 
 pub fn to_string(input: &[Node]) -> String {
@@ -290,9 +290,8 @@ mod tests {
     }
 
     #[test]
-    fn from_string_well_formed_returns_empty_rest() {
-        let (nodes, rest) = from_string("{{b}}x{{/b}}").unwrap();
-        assert_eq!(rest, "");
+    fn from_string_well_formed_returns_nodes() {
+        let nodes = from_string("{{b}}x{{/b}}").unwrap();
         assert_eq!(nodes, vec![N::Bold(vec![N::text("x")])]);
     }
 
@@ -300,8 +299,7 @@ mod tests {
     fn round_trip_text_with_braces() {
         let nodes = vec![N::text("a{{b}}c")];
         let s = to_string(&nodes);
-        let (parsed, rest) = from_string(&s).unwrap();
-        assert_eq!(rest, "");
+        let parsed = from_string(&s).unwrap();
         assert_eq!(parsed, nodes);
     }
 }

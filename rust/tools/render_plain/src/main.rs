@@ -27,6 +27,6 @@ fn main() {
         .read_to_string(&mut input)
         .expect("failed to read markup from stdin");
 
-    let (nodes, _) = from_string(&input).expect("failed to parse markup");
+    let nodes = from_string(&input).expect("failed to parse markup");
     print!("{}", plain(&transform(&nodes, &players)));
 }

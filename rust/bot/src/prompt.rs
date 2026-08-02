@@ -46,7 +46,7 @@ pub struct UserContext {
 /// All other markup tags are passed through unchanged.
 pub fn markup_resolve_players(markup: &str, names: &[String]) -> String {
     match brdgme_markup::from_string(markup) {
-        Ok((nodes, _)) => brdgme_markup::to_string(&resolve_players(&nodes, names)),
+        Ok(nodes) => brdgme_markup::to_string(&resolve_players(&nodes, names)),
         Err(_) => markup.to_string(),
     }
 }

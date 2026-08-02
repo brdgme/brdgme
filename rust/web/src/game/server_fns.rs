@@ -281,7 +281,7 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
     // Convert markup to HTML, semantically: colours stay symbolic (CSS
     // classes referencing `--mk-*` vars) rather than baked-in hex, so the
     // rendered board follows the viewer's active theme.
-    let (nodes, _) = brdgme_markup::from_string(&render_resp.render)
+    let nodes = brdgme_markup::from_string(&render_resp.render)
         .map_err(internal("get_game_details: parse markup"))?;
 
     let html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
@@ -434,7 +434,7 @@ pub(crate) async fn render_game_public(
     .await
     .map_err(internal("render_game_public: render game"))?;
 
-    let (nodes, _) = brdgme_markup::from_string(&render_resp.render)
+    let nodes = brdgme_markup::from_string(&render_resp.render)
         .map_err(internal("render_game_public: parse markup"))?;
     let semantic_players = ge.semantic_players();
     let html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
@@ -453,9 +453,9 @@ pub(crate) async fn render_game_public(
         .map_err(internal("render_game_public: load logs"))?
         .into_iter()
         .map(|log| {
-            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|e| {
+            let nodes = brdgme_markup::from_string(&log.body).unwrap_or_else(|e| {
                 tracing::warn!(game_id = %game_id, log_id = %log.id, error = %e, "failed to parse log markup");
-                (vec![], "")
+                vec![]
             });
             let body_html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
                 &nodes,
@@ -750,9 +750,9 @@ pub async fn get_game_logs(game_id: Uuid) -> Result<Vec<GameLogEntry>, ServerFnE
     let entries = logs
         .into_iter()
         .map(|log| {
-            let (nodes, _) = brdgme_markup::from_string(&log.body).unwrap_or_else(|e| {
+            let nodes = brdgme_markup::from_string(&log.body).unwrap_or_else(|e| {
                 tracing::warn!(game_id = %game_id, log_id = %log.id, error = %e, "failed to parse log markup");
-                (vec![], "")
+                vec![]
             });
             let body_html = brdgme_markup::html_class(&brdgme_markup::transform_semantic(
                 &nodes,

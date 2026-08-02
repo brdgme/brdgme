@@ -219,7 +219,7 @@ const SAMPLE_MARKUP: &str = "{{bg red}}     {{/bg}}{{bg green}}     {{/bg}}\
 {{bg brown}}     {{/bg}}{{bg grey}}     {{/bg}}";
 
 fn build_sample_html() -> String {
-    let (nodes, _) = brdgme_markup::from_string(SAMPLE_MARKUP).unwrap_or_default();
+    let nodes = brdgme_markup::from_string(SAMPLE_MARKUP).unwrap_or_default();
     let tnodes = brdgme_markup::transform_semantic(&nodes, &[]);
     brdgme_markup::html_class(&tnodes)
 }

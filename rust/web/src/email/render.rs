@@ -123,7 +123,7 @@ pub fn player_for_slot(name: &str, color_name: &str, palette: &Palette) -> Playe
 
 fn render_block(markup: &str, players: &[Player], palette: &Palette) -> (String, String) {
     let nodes = match brdgme_markup::from_string(markup) {
-        Ok((nodes, _)) => nodes,
+        Ok(nodes) => nodes,
         Err(e) => {
             let prefix: String = markup.chars().take(80).collect();
             tracing::warn!("email: markup parse failed: {e}; prefix: {prefix:?}");

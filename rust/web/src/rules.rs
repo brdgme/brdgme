@@ -142,7 +142,7 @@ fn render_fence(
     players: &[brdgme_markup::SemanticPlayer],
     player_style: &str,
 ) -> Result<String, RenderError> {
-    let (nodes, _) = brdgme_markup::from_string(content).map_err(|_| RenderError::Markup)?;
+    let nodes = brdgme_markup::from_string(content).map_err(|_| RenderError::Markup)?;
     validate_player_indices(&nodes, players.len())?;
     let inner = brdgme_markup::html_class(&brdgme_markup::transform_semantic(&nodes, players));
     Ok(format!(
