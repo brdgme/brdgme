@@ -59,7 +59,7 @@ restored per owner instruction.)
 | R-34 | done | | F-25 REFUTED: current five-pile placement is official Queen Games behavior once back-pop draw direction is accounted for - regression test `scoring_cards_fire_at_official_fifth_pile_bounds` consumes the deck via the real `draw_cards` pop-from-back path and asserts round 1 in [L-4f, L-3f-1] and round 2 in [L-2f+1, L-f] money-card draws over players 2-6 x seeds 0..24 (125 games, all pass; fails against the thirds distribution, verified); historic Go one-card-shifted round-1 distribution NOT restored; NO production change for F-25. F-26 FIXED: `self.round = 3` forced immediately before the final `score_round()` in the `FinalPlace` -> `End` transition (`lib.rs:388-391`); test `early_final_scoring_uses_round_three_rewards` drives the real final path (3p, round 1, FinalPlace, all place queues empty, one Pavillion on board 0) and asserts round 3 + 16 points - pre-fix RED (round 2, 1 pt), post-fix GREEN. `cargo test -p alhambra-1` 50 lib + 1 contract pass / 0 fail; `cargo clippy -p alhambra-1 --all-targets -- -D warnings` exit 0; `cargo fmt -p alhambra-1 -- --check` exit 0; `git diff --check` exit 0. No PORT_PARITY gameplay change (F-26 round-3 force is the approved fix; nothing else altered). Uncommitted per work-unit brief. |
 | R-35 | blocked(owner decision pending) | | sequence with 5.8; see Pending User Decisions |
 | R-36 | done(b80a943) | b80a9434926a031beb56d44108562855cb21d599 | AC1 F-194: bot no longer requests Status or carries points; fetch_game_data uses PubRender/PlayerRender and a mock regression test proves hidden Status points never reach bot data. AC2 F-195: prompt TRACE fields replaced by count-only redaction boundary, with a sentinel-hand capture test; stale Score template line removed. AC3 F-190 verified inherited from R-13 (afe85b2): startup .expect plus loader error tests already fail invalid/missing keys; no new F-190 implementation claimed here. AC4 adds bot rustls aws-lc-rs process-default install and dependency. AC5 narrows module dead-code allows to two unused fields. Targeted game-client/bot/crypto tests, bot and game-client fmt/clippy, and diff check pass; independent security review APPROVE (two non-blocking Low findings: inherited attribution recorded, fmt-output assertion format coupling). |
-| R-37 | pending | | 5.4 done (973ea62); unblocked |
+| R-37 | in-progress | | R-37.0 source and acceptance reconciliation complete; 5.4 done (973ea62); R-37.1/R-37.2 await recorded dependencies and owner decisions |
 | R-38 | blocked(5.3) | | 5.4 done (973ea62) |
 | R-39 | pending | | |
 | R-40 | pending | | |
@@ -1472,3 +1472,34 @@ unaccepted, none reflected in a done row):
   verification of the five commits remain outstanding.
 - **Scope:** tracker-only change to this file; protected
   `docs/reviews/2026-07-30-review-session/R-07-HANDOVER.md` untouched.
+
+## R-37.0 evidence
+
+- **Status:** source and acceptance reconciliation complete. `R-37` is
+  `in-progress`; this unit made no production change and ran no Cargo command.
+- **Dependency:** 5.4 is done at `973ea62a3cb407127e527acbb64063305c65414d`.
+  Its `crate::test_support::{anonymous, non_admin, admin}` harness is available
+  to direct server-fn tests.
+- **Current source map:** F-86's swallowed session-read error is
+  `rust/web/src/auth/server.rs:548-554`; F-87's pending-email deletion/account
+  fork is `:462-507`; F-89/F-95 share `validate_confirmation_code` at `:400-429`;
+  F-95's current concurrent test is `:1656-1688` and asserts only
+  `attempts >= CONFIRM_MAX_ATTEMPTS_PER_CODE`; F-94 has no in-app middleware in
+  `rust/web/src/router.rs:114-208`; the Turnstile test is `auth/server.rs:1897-1902`;
+  and shared crypto is `rust/lib/crypto/src/lib.rs`, not the one-line web facade.
+- **Stale plan corrections:** source paths now name shared crypto and current
+  Turnstile locations. The shared loader already has tests at
+  `rust/lib/crypto/src/lib.rs:120-162`; its AAD decline remains undocumented.
+- **R-37.1 blockers:** obtain the authoritative WP-34 rows naming F-92's three
+  server-fn tests; supply explicit closure criteria for F-87/F-88; and choose
+  F-95's conditional-increment upper-bound implementation or formally amend the
+  upper-bound criterion. Current unconditional increment can exceed the cap under
+  concurrency.
+- **R-37.2 owner decisions:** choose an in-memory middleware, a DB-backed
+  limiter, or another mechanism that still satisfies the middleware criterion;
+  choose the trusted client-IP source, rejection shape, and limiter-store failure
+  behavior. Existing counters alone do not satisfy R-37 AC1. No policy choice was
+  made here.
+- **Serial boundary:** R-37.1 changes confirmation-attempt control flow first;
+  R-37.2 follows after its policy decision. Security/authorization work and the
+  required test assertion changes trigger independent review.

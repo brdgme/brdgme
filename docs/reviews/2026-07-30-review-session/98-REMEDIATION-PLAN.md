@@ -995,7 +995,8 @@ in this package.
    *envelope* now yields a **400 with a text body** rather than a
    `Response::SystemError` JSON - different from what WP-06's test implies. Decide
    which contract is correct, write it down, and add an envelope-level test on
-   `route::<G>()` (section 7 records there is none).
+   `route::<G>()` (the unified report's section 7 unowned item, carried forward
+   under plan section 5.7, records there is none).
 
 ---
 
@@ -1235,16 +1236,68 @@ checklist falsification and **not** a WP-64 regression; the omission is original
 
 - **Closes:** F-86, F-87, F-89, F-92, F-93, F-94 (all Medium), F-95, F-88,
   F-91 (Low).
-- **Files:** `rust/web/src/auth/session.rs:68-74`;
-  `rust/web/src/auth/server.rs:459-501`, `:394-423` (+1 site), `:1001-1996`,
-  `:853-900`, `:31-48` (+1 site), `:1621-1652`, `:904-924` (+1 site);
-  `rust/web/src/crypto.rs:20-43` (+1 site).
+- **Files:** `rust/web/src/auth/session.rs:67-72`; the confirmation, login,
+  email-address, and test paths in `rust/web/src/auth/server.rs`; the auth and
+  inbound route surfaces in `rust/web/src/router.rs` and
+  `rust/web/src/email/inbound.rs`; and shared crypto at
+  `rust/lib/crypto/src/lib.rs:21-44,120-162` (not the one-line
+  `rust/web/src/crypto.rs` re-export).
 - **Size: L** - basis: nine findings across the auth surface, plus the fact that
   **there is no rate-limiting middleware anywhere in `rust/web`** (F-94), which is
   a new component rather than a fix.
-- **Depends on:** 5.4 (the request-parts harness) - section 7 records that its
+- **Depends on:** 5.4 (the request-parts harness) - section 5.7's U3 records that its
   absence is the **structural cause of F-92** and the reason **F-85 was
   uncatchable**. Build the harness first.
+
+#### R-37.0 - Source and acceptance reconciliation
+
+- **Depends on:** 5.4.
+- **Scope:** no production change. Reconcile every R-37 finding and acceptance
+  criterion to current source and test locations; correct stale source references;
+  define the serial boundaries below; and record, without deciding, the rate-limit
+  and F-95 choices that require approval.
+- **Acceptance evidence:** current source map in
+  `97-REMEDIATION-PROGRESS.md`'s R-37.0 evidence; `R-37.1` and `R-37.2` have
+  explicit dependencies and scopes; no implementation or test result is claimed.
+
+#### R-37.1 - Auth and session integrity
+
+- **Depends on:** R-37.0, the authoritative WP-34 rows naming F-92's three
+  server-fn tests, and an owner choice for F-95's upper-bound implementation or
+  formal amendment.
+- **Scope:** F-86 session-store error propagation, F-87 pending-email/account
+  integrity, F-89 authorization-before-attempt accounting, F-92's three
+  server-fn regressions, F-93 registration indistinguishability, and F-95's
+  concurrency bound. F-87 and F-88 require explicit acceptance criteria before
+  either may be closed.
+- **Acceptance evidence:** direct session and server-fn regression tests using
+  the 5.4 harness where applicable; F-95 asserts the owner-approved upper bound
+  or cites the owner-approved amendment. Runtime web tests remain CI evidence;
+  local verification is targeted `cargo check -p web` only.
+
+#### R-37.2 - Rate-limit and external-auth hardening
+
+- **Depends on:** R-37.0, R-37.1, and an approved rate-limit policy.
+- **Scope:** F-94's login, registration, and inbound-email rate limiting;
+  F-91's AAD-decline record; the Turnstile no-live-network regression coverage;
+  and shared-crypto loader coverage.
+- **Acceptance evidence:** the approved policy is implemented at every named
+  ingress surface; the false per-IP justification comments are corrected; the
+  Turnstile test has no Cloudflare dependency and covers transport, non-200,
+  malformed-JSON, and `success: false` responses; and the AAD decision is
+  recorded in source or documentation. Runtime web tests remain CI evidence;
+  local verification is targeted `cargo check -p web` only.
+
+**Pending owner decisions for R-37.2:** choose the rate-limit mechanism,
+trusted client-IP source, rejection shape, and limiter-store failure behavior.
+Do not select those policy values during implementation. The source map presents
+in-memory, DB-backed, and existing-counter-only alternatives; the last cannot
+satisfy the middleware acceptance criterion.
+
+**Pending owner decision for R-37.1:** F-95's current unconditional increment
+can exceed the cap under concurrency. Adopt a conditional increment with an
+upper-bound regression assertion, or formally amend the upper-bound criterion;
+the test must not choose between those outcomes.
 
 **The defects:** session-store errors are swallowed, so a transient blip
 **de-authenticates the user** (F-86). A legitimate pending email row is deleted
@@ -1275,13 +1328,13 @@ a **lower** bound where the spec prescribed an **upper** bound.
    request errors rather than proceeding as anonymous.
 7. F-91: the AAD decline is recorded **in the code or a doc**, not only in a
    commit message.
-8. **Also fix here** (from section 7, no F-number):
+8. **Also fix here** (from unified report section 7, carried forward under plan
+   section 5.7, no F-number):
    `verify_turnstile_rejects_on_transport_error` makes a **real network call to
    Cloudflare** and passes for the wrong reason
-   (`auth/server.rs:1856-1862`); non-200, malformed JSON and live
-   `success: false` are all uncovered. And `rust/web/src/crypto.rs` has **no
-   `load_key` test**, so the whole `ws F16` fix is unexercised while the unfixed
-   bot copy tests all three paths.
+   (`auth/server.rs:1897-1902`); non-200, malformed JSON and live
+   `success: false` are all uncovered. Shared crypto's `load_key` tests now live
+   in `rust/lib/crypto/src/lib.rs:120-162`; do not claim an unfixed bot copy.
 
 ---
 
@@ -1601,7 +1654,8 @@ back into the finding. It never was.
    `0.0.0.0:80` -> `:8080` change is **inert** in production - all 43 k8s
    Deployments set `ADDR` explicitly to `8080` - so this is a documentation fix,
    not a behaviour change.
-3. Also record, from section 7: `SUMMARY.md` at HEAD carries **no `wd Fnn` /
+3. Also record, from the unified report's section 7 traceability item carried
+   forward under plan section 5.7: `SUMMARY.md` at HEAD carries **no `wd Fnn` /
    `wfe Fnn` identifiers**, and the finding text survives only at
    `868094a6:.../findings/*.md`. Restore the identifiers or record where they
    live, otherwise every future citation in this plan is unresolvable.
@@ -1719,7 +1773,7 @@ a now-deprecated version lose their rules page.
 1. A test **calls the version guard** deprecating the newest version and asserts
    `game_types` is not stranded.
 2. A test **calls `cleanup`** - it currently has zero test callers - including
-   the already-newest-to-deprecated case section 7 names as untested.
+   the already-newest-to-deprecated case section 5.7's U13 names as untested.
 3. F-140: a test calls the rules lookup for an in-flight game on a deprecated
    version and asserts the rules are returned.
 
@@ -2354,5 +2408,4 @@ survives the review itself: **F-59's status**, since the `lords-of-vegas-1` WIP
 ruling names only F-50 and F-57. Section 11 records it as "ambiguous coverage,
 unresolved". Treat it as excluded until the owner says otherwise, but do not
 record it as settled.
-
 
