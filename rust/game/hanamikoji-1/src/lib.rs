@@ -726,6 +726,30 @@ impl Gamer for Game {
                 }
             }
         }
+        match self.phase {
+            Phase::OpponentChoose => {
+                let Some(pending) = &self.pending else {
+                    return Err(GameError::internal(
+                        "hanamikoji-1: opponent choice phase requires a pending choice",
+                    ));
+                };
+                let actor = match pending {
+                    Pending::Gift { actor, .. } | Pending::Competition { actor, .. } => *actor,
+                };
+                if actor != self.current {
+                    return Err(GameError::internal(
+                        "hanamikoji-1: pending choice actor does not match current",
+                    ));
+                }
+            }
+            Phase::ChooseAction | Phase::Finished => {
+                if self.pending.is_some() {
+                    return Err(GameError::internal(
+                        "hanamikoji-1: pending choice outside opponent choice phase",
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1098,6 +1122,65 @@ mod tests {
 
         g.winner = Some(5);
         assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_rejects_opponent_choose_without_pending() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::OpponentChoose;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_rejects_gift_pending_outside_opponent_choose() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.pending = Some(Pending::Gift {
+            actor: 0,
+            cards: vec![Geisha::Flute, Geisha::Koto, Geisha::Fan],
+        });
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_rejects_competition_pending_outside_opponent_choose() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.pending = Some(Pending::Competition {
+            actor: 0,
+            sets: [
+                vec![Geisha::Flute, Geisha::Koto],
+                vec![Geisha::Fan, Geisha::Tea],
+            ],
+        });
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_rejects_pending_actor_mismatch() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::OpponentChoose;
+        g.pending = Some(Pending::Gift {
+            actor: 1 - g.current,
+            cards: vec![Geisha::Flute, Geisha::Koto, Geisha::Fan],
+        });
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn test_validate_accepts_gift_flow_invariant() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        let actor = g.current;
+        let opp = 1 - actor;
+        g.hands[actor] = vec![Geisha::Flute, Geisha::Koto, Geisha::Fan, Geisha::Tea];
+        g.command(actor, "gift flute koto fan", &names()).unwrap();
+        assert_eq!(Phase::OpponentChoose, g.phase);
+        assert!(matches!(
+            g.pending,
+            Some(Pending::Gift { actor: a, .. }) if a == actor
+        ));
+        assert!(g.validate().is_ok());
+        g.command(opp, "choose flute", &names()).unwrap();
+        assert!(g.pending.is_none());
+        assert!(g.validate().is_ok());
     }
 
     #[test]
