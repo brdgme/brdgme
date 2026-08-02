@@ -132,7 +132,25 @@ pub fn extract_plain_text(raw: &str) -> Option<String> {
 }
 
 pub fn extract_addr_spec(value: &str) -> Option<String> {
-    let sanitized = value.split(['\r', '\n']).next().unwrap_or("");
+    // A fold (CR/LF followed by whitespace) is one logical header line: replace
+    // it with a space so an address after the fold survives. A bare CR/LF
+    // terminates the header, so stop there to keep injection rejection.
+    let mut sanitized = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\r' || ch == '\n' {
+            while matches!(chars.peek(), Some('\r' | '\n')) {
+                chars.next();
+            }
+            if matches!(chars.peek(), Some(c) if c.is_whitespace()) {
+                sanitized.push(' ');
+            } else {
+                break;
+            }
+        } else {
+            sanitized.push(ch);
+        }
+    }
     let value = sanitized.trim();
     if value.is_empty() {
         return None;
@@ -1514,6 +1532,28 @@ async fn send_game_failure_report(
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 
+/// Builds the natural "rules" reply: threaded under the game's message id, and
+/// deliberately carries NO `List-Unsubscribe` headers - it is a one-shot reply
+/// to a sent game notification, not a notification itself.
+fn rules_reply_message(
+    game_id: uuid::Uuid,
+    token: &str,
+    text: String,
+    html: String,
+) -> crate::email::render::RenderedEmail {
+    let mut headers = std::collections::BTreeMap::new();
+    let msg_id = format!("<game-{game_id}@brdg.me>");
+    headers.insert("In-Reply-To".to_string(), msg_id.clone());
+    headers.insert("References".to_string(), msg_id);
+    crate::email::render::RenderedEmail {
+        subject: "Rules".to_string(),
+        text,
+        html,
+        headers,
+        reply_to: crate::email::notify::reply_address(token),
+    }
+}
+
 async fn send_rules_reply_response(
     state: &AppState,
     player: &EmailPlayer,
@@ -1536,18 +1576,7 @@ async fn send_rules_reply_response(
         "<html><body style=\"background-color:{bg};color:{fg};font-family:sans-serif;padding:16px;\">{html}</body></html>"
     );
 
-    let mut headers = std::collections::BTreeMap::new();
-    let msg_id = format!("<game-{}@brdg.me>", player.game_id);
-    headers.insert("In-Reply-To".to_string(), msg_id.clone());
-    headers.insert("References".to_string(), msg_id);
-
-    let rendered = crate::email::render::RenderedEmail {
-        subject: "Rules".to_string(),
-        text,
-        html: full_html,
-        headers,
-        reply_to: crate::email::notify::reply_address(token),
-    };
+    let rendered = rules_reply_message(player.game_id, token, text, full_html);
     crate::email::outbound::send_rendered_email(state.resend.as_ref(), rendered, from).await;
 }
 
@@ -2143,6 +2172,42 @@ body\r\n";
             extract_addr_spec("Alice <alice@example.com>\r\nBcc: evil@x.com").as_deref(),
             Some("alice@example.com")
         );
+    }
+
+    #[test]
+    fn extract_addr_spec_keeps_address_after_fold() {
+        assert_eq!(
+            extract_addr_spec("Alice\r\n <alice@example.com>").as_deref(),
+            Some("alice@example.com")
+        );
+        assert_eq!(
+            extract_addr_spec("Alice\n\t<alice@example.com>").as_deref(),
+            Some("alice@example.com")
+        );
+    }
+
+    #[test]
+    fn rules_reply_message_keeps_threading_and_omits_list_unsubscribe() {
+        let game_id = uuid::Uuid::new_v4();
+        let rendered = rules_reply_message(
+            game_id,
+            "tok-rules",
+            "rules text".to_string(),
+            "<p>rules html</p>".to_string(),
+        );
+        let msg_id = format!("<game-{game_id}@brdg.me>");
+        assert_eq!(rendered.subject, "Rules");
+        assert_eq!(
+            rendered.headers.get("In-Reply-To").map(String::as_str),
+            Some(msg_id.as_str())
+        );
+        assert_eq!(
+            rendered.headers.get("References").map(String::as_str),
+            Some(msg_id.as_str())
+        );
+        assert_eq!(rendered.headers.get("List-Unsubscribe"), None);
+        assert_eq!(rendered.headers.get("List-Unsubscribe-Post"), None);
+        assert_eq!(rendered.reply_to, "g-tok-rules@brdg.me");
     }
 
     #[test]

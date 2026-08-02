@@ -207,6 +207,27 @@ pub fn help_text() -> String {
         .to_string()
 }
 
+/// Help for the no-game path: only the commands available without a game
+/// context, so game-only verbs are not advertised where they would error.
+pub fn standalone_help_text() -> String {
+    "Commands you can send by email:\n\
+     \n\
+     list - list the available game types\n\
+     help - show this message\n\
+     \n\
+     Settings commands:\n\
+     name <display name> - set your display name\n\
+     colors <c1,c2,c3> - set your 3 preferred colours (alias: colours)\n\
+     theme <name> - set your theme (or 'theme system' for the default)\n\
+     emails - list your email addresses\n\
+     email addresses - add, confirm, switch or remove on the website under Settings\n\
+     emails on | emails off - toggle turn-notification emails\n\
+     emails invite on | emails invite off - toggle invite-notification emails\n\
+     emails reminder on | emails reminder off - toggle reminder-notification emails\n\
+     settings - show your current settings"
+        .to_string()
+}
+
 pub struct SettingsSummary {
     pub name: String,
     pub pref_colors: Vec<String>,
@@ -306,7 +327,7 @@ pub async fn dispatch_settings_standalone(
     let trimmed = line.trim();
     let verb = trimmed.split_once(' ').map(|(v, _)| v).unwrap_or(trimmed);
     if matches!(verb.to_ascii_lowercase().as_str(), "help" | "commands") {
-        return Ok(CommandReply::Status(help_text()));
+        return Ok(CommandReply::Status(standalone_help_text()));
     }
     if verb.eq_ignore_ascii_case("list") {
         return run_list_command(pool).await;
@@ -1684,6 +1705,53 @@ mod tests {
         assert!(!t.contains("emails active"));
         assert!(!t.contains("emails remove"));
         assert!(t.contains("emails on"));
+    }
+
+    #[test]
+    fn standalone_help_text_omits_game_only_commands() {
+        let t = standalone_help_text();
+        for verb in [
+            "new",
+            "concede",
+            "end",
+            "undo",
+            "bump",
+            "restart",
+            "rules",
+            "subscribe",
+            "unsubscribe",
+        ] {
+            assert!(
+                !t.lines().any(|line| line.trim_start().starts_with(verb)),
+                "standalone help must not advertise the game-only verb {verb}"
+            );
+        }
+    }
+
+    #[test]
+    fn standalone_help_text_lists_available_commands() {
+        let t = standalone_help_text();
+        assert!(t.contains("list"));
+        assert!(t.contains("help"));
+        assert!(t.contains("name"));
+        assert!(t.contains("colors"));
+        assert!(t.contains("theme"));
+        assert!(t.contains("emails on"));
+        assert!(t.contains("emails invite on"));
+        assert!(t.contains("emails reminder on"));
+        assert!(t.contains("settings"));
+    }
+
+    #[sqlx::test]
+    async fn standalone_help_reply_uses_standalone_text(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "help-user").await;
+        let reply = dispatch_settings_standalone(&pool, None, user_id, "help")
+            .await
+            .unwrap();
+        let CommandReply::Status(msg) = reply else {
+            panic!("expected a status reply");
+        };
+        assert_eq!(msg, standalone_help_text());
     }
 
     #[sqlx::test]
