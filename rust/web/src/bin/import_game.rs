@@ -10,6 +10,24 @@ fn usage() -> ! {
     std::process::exit(2);
 }
 
+const MAX_BUNDLE_BYTES: u64 = 100 * 1024 * 1024;
+
+fn read_bundle_limited<R: std::io::Read>(
+    mut reader: R,
+    path: &str,
+    max_bytes: u64,
+) -> anyhow::Result<String> {
+    let mut raw = String::new();
+    let bytes_read = reader
+        .take(max_bytes + 1)
+        .read_to_string(&mut raw)
+        .map_err(|e| anyhow::anyhow!("reading {path}: {e}"))?;
+    if bytes_read > max_bytes {
+        anyhow::bail!("{path}: exceeds the {max_bytes} byte sanity limit");
+    }
+    Ok(raw)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
@@ -17,17 +35,8 @@ async fn main() -> anyhow::Result<()> {
         usage()
     };
 
-    let metadata = std::fs::metadata(&path).map_err(|e| anyhow::anyhow!("stat {path}: {e}"))?;
-    const MAX_BUNDLE_BYTES: u64 = 100 * 1024 * 1024;
-    if metadata.len() > MAX_BUNDLE_BYTES {
-        anyhow::bail!(
-            "{path}: {} bytes exceeds the {} MiB sanity limit",
-            metadata.len(),
-            MAX_BUNDLE_BYTES / 1024 / 1024
-        );
-    }
-
-    let raw = std::fs::read_to_string(&path).map_err(|e| anyhow::anyhow!("reading {path}: {e}"))?;
+    let file = std::fs::File::open(&path).map_err(|e| anyhow::anyhow!("opening {path}: {e}"))?;
+    let raw = read_bundle_limited(file, &path, MAX_BUNDLE_BYTES)?;
     let bundle: web::game::export::ExportBundle =
         serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
 
@@ -43,4 +52,28 @@ async fn main() -> anyhow::Result<()> {
     );
     println!("open: /games/{}", outcome.game_id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_path_rejects_over_limit_without_file_metadata() {
+        let over_limit = vec![b'{'; 8];
+        let err = read_bundle_limited(std::io::Cursor::new(over_limit), "test-bundle", 4)
+            .expect_err("over-limit input must be rejected by the read path itself");
+        assert!(
+            err.to_string().contains("exceeds the 4 byte sanity limit"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn read_path_accepts_under_limit_source() {
+        let under_limit = vec![b'{'; 4];
+        let raw = read_bundle_limited(std::io::Cursor::new(under_limit), "test-bundle", 8)
+            .expect("under-limit input must be accepted");
+        assert_eq!(raw, "{{{{");
+    }
 }
