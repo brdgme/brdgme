@@ -300,7 +300,7 @@ async fn home_page_logged_in_renders_index_shell(pool: PgPool) {
         "expected the sidebar logout link: {body}"
     );
     assert!(
-        !body.contains("cursor:pointer"),
+        body.contains("href=\"#\""),
         "the sidebar logout anchor still has no href: {body}"
     );
 }
@@ -316,11 +316,11 @@ async fn login_page_anonymous(pool: PgPool) {
         "Enter your email address to start",
     );
     // wfe F61: the click-only anchors on this page were not focusable. Their
-    // inline `style="cursor:pointer"` is the marker that they lacked an href;
-    // the codebase has no other inline cursor style.
+    // `href="#"` is the asserted keyboard/focus affordance, which makes the
+    // anchors focusable and keyboard-activatable.
     assert!(
-        !body.contains("cursor:pointer"),
-        "a click-only anchor without href is still present: {body}"
+        body.contains("href=\"#\""),
+        "expected the login-code anchor to carry href=\"#\": {body}"
     );
     assert!(
         body.contains("I already have a login code"),
