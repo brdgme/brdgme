@@ -43,7 +43,11 @@ pub async fn is_proposal_visible_to_user(
     viewer_id: Uuid,
 ) -> Result<bool> {
     Ok(sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM game_proposal_players WHERE proposal_id = $1 AND user_id = $2)",
+        "SELECT EXISTS(
+            SELECT 1 FROM game_proposal_players WHERE proposal_id = $1 AND user_id = $2
+            UNION ALL
+            SELECT 1 FROM game_proposals WHERE id = $1 AND owner_user_id = $2
+        )",
     )
     .bind(proposal_id)
     .bind(viewer_id)
@@ -184,6 +188,25 @@ mod tests {
         );
         assert!(
             is_proposal_visible_to_user(&pool, proposal, player.id)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[sqlx::test]
+    async fn is_proposal_visible_to_user_owner_without_roster_is_visible(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let owner = make_user(&pool, "owner").await;
+        let stranger = make_user(&pool, "stranger").await;
+        let proposal = make_proposal(&pool, gv, owner.id).await;
+
+        assert!(
+            is_proposal_visible_to_user(&pool, proposal, owner.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !is_proposal_visible_to_user(&pool, proposal, stranger.id)
                 .await
                 .unwrap()
         );
