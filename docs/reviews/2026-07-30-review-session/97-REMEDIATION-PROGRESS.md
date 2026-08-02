@@ -62,7 +62,7 @@ restored per owner instruction.)
 | R-37 | parked-by-user | 0270f296a39755b44feacf85d6d2220d7c8b4f80 | R-37.0 complete; all remaining work is parked until the simpler unblocked remediation plan is complete and the user explicitly revisits it. Preserve R-37.1 before R-37.2; no implementation units, migrations, or rollout approved. |
 | R-38 | blocked(5.3) | | 5.4 done (973ea62) |
 | R-39 | done(3c4c1ca) | afbca143ce59e4e2f0ad6cfe41b9ad94975c44bf, 6dd0c41e4852172e730eb047857f6ac014d93679, b2e2021fa6f0e9c6099867c1fd981aaef7156601, 68140350ed56fe05f34771281611b5d8a8c3e71d, 1db7266404db772de630cc9458bb745c81d4f9ab, 9867e5396091e9f2c9827eaf0d081eeeeb25bf1b, 3c4c1ca4ce18485acd7524dc3887f2c2a85e4b2f | F-132 refuted by the per-connection, viewer-fixed `VisibilityCache` lifetime; no cache or SSE change. Static checks and final allowed web cargo check pass; runtime DB/SSR tests CI-pending. Independent authorization/visibility review PASS with no findings. |
-| R-40 | pending | | |
+| R-40 | done(1be0583) | 2c0fee15daa18563b57e40ae8e14d03d1f00cd00, 1c1bfbe9a5e37cfcf9c7a6eb559a6e69bd6b24cb, 9f3e5742e6539d9c82e33929bf88e78b17247be3, b6435094ce8384078ff8e973ff9bf741111aba17, 1be0583fac259118e6926ec6ce5181912d03854b | F-139 savepoint retry, F-121 capped actual read, F-122 pre-write undo-state validation; final approved web checks pass, runtime tests CI-pending. |
 | R-41 | pending | | |
 | R-42 | pending | | |
 | R-43 | pending | | |
@@ -1560,3 +1560,26 @@ unaccepted, none reflected in a done row):
   readability, maintainability, and simplicity, and reassesses whether the generic
   webhook limiter and keyed-digest machinery remain proportionate.
 - **Not approved:** exact implementation units, migrations, and rollout.
+
+## R-40 evidence
+
+- **Status:** done. R-40.1 is `2c0fee15daa18563b57e40ae8e14d03d1f00cd00`;
+  R-40.2 is `1c1bfbe9a5e37cfcf9c7a6eb559a6e69bd6b24cb`; R-40.3 is
+  `9f3e5742e6539d9c82e33929bf88e78b17247be3`; compile corrections are
+  `b6435094ce8384078ff8e973ff9bf741111aba17` and
+  `1be0583fac259118e6926ec6ce5181912d03854b`.
+- **F-139:** the collision-prone placeholder-user insert runs in a savepoint;
+  a deterministic trigger forces its unique violation and proves fallback
+  generation succeeds without 25P02.
+- **F-121:** `import-game` caps the actual file read at 100 MiB plus one byte;
+  unit tests exercise the bounded reader without file metadata.
+- **F-122:** each non-NULL bundle `undo_game_state` receives a local-version
+  `Status` request before `pool.begin()`; a mock rejection test asserts no game
+  row is written.
+- **Verification:** `git diff --check` passed. Both approved commands passed:
+  `SQLX_OFFLINE=true cargo check -p web --lib --tests --features ssr` and
+  `SQLX_OFFLINE=true cargo check -p web --bin import-game --features ssr`.
+  They emitted the pre-existing `NotifyKind::Reminder` dead-code warning, a new
+  non-failing `unused_mut` warning in `import-game`, and Cargo's
+  `proc-macro-error2` future-incompatibility notice. Runtime DB/mock-service
+  tests are CI-pending under laptop limits.
