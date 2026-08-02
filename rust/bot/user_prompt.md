@@ -6,7 +6,6 @@ All of the current players in the game are listed below, including yourself. If 
 
 {% for player in players %}
 - {{ player.name }}{% if player.is_me %} (you){% endif %}
-  - Score: {{ player.score }}
   - Colour: {{ player.colour }}
 {% endfor %}
 

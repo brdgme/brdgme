@@ -6,6 +6,7 @@ use crate::crypto;
 
 #[derive(Debug, Clone)]
 pub struct BotConfig {
+    #[allow(dead_code)]
     pub name: String,
     pub include_basic_strategy: bool,
     pub include_advanced_strategy: bool,
@@ -19,6 +20,7 @@ pub struct ProviderConfig {
     pub model: String,
     pub reasoning_effort: Option<String>,
     pub extra_body: Option<Value>,
+    #[allow(dead_code)]
     pub priority: i32,
 }
 

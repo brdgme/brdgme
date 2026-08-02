@@ -1,9 +1,4 @@
-// config.rs and crypto.rs expose a fuller API (e.g. encrypt, BotConfig.name,
-// ProviderConfig.priority) than the binary currently consumes at runtime; the
-// unused items are exercised by their own unit tests.
-#[allow(dead_code)]
 mod config;
-#[allow(dead_code)]
 mod crypto;
 mod nats;
 mod prompt;
@@ -281,14 +276,7 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             failed_commands.clone(),
         )
         .with_context(|| format!("Failed to build messages on attempt {}", attempt + 1))?;
-
-        tracing::trace!(
-            trace_id = %trace_id,
-            attempt,
-            system_prompt = %messages.first().map(|m| m.content.as_str()).unwrap_or(""),
-            user_prompt = %messages.get(1).map(|m| m.content.as_str()).unwrap_or(""),
-            "Rendered prompt"
-        );
+        log_messages_redacted(&messages);
 
         let llm_start = Instant::now();
         let raw_response = match call_llm(
@@ -591,7 +579,6 @@ fn build_messages(
         .map(|(i, name)| PlayerInfo {
             name: name.clone(),
             colour: format!("{}", LIGHT.player_color(i)),
-            score: bot_ctx.game_data.points.get(i).copied().unwrap_or(0.0),
             is_me: i == player_position,
         })
         .collect();
@@ -623,6 +610,13 @@ fn build_messages(
             content: user_content,
         },
     ])
+}
+
+/// Redacted logging boundary for LLM messages: emits only the message count,
+/// never message contents or any derived measure of them (e.g. lengths) - the
+/// user prompt embeds `player_state_yaml`, i.e. the bot's own hand.
+fn log_messages_redacted(messages: &[ChatMessage]) {
+    tracing::trace!(message_count = messages.len(), "built LLM messages");
 }
 
 /// Applies a JSON Merge Patch (RFC 7396) to `target` in place: keys set to
@@ -784,6 +778,14 @@ async fn wait_for_turn_consumer(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Both rustls backends are enabled in this binary's graph (reqwest ->
+    // aws-lc-rs, sqlx/async-nats -> ring), so any crate reading the process
+    // default provider would panic without an explicit install. See
+    // docs/CODING.md "rustls crypto backends" and rust/operator/src/main.rs.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     let _sentry_guard = std::env::var("SENTRY_DSN_SERVER").ok().map(|dsn| {
         sentry::init((
             dsn,
@@ -1054,5 +1056,106 @@ mod tests {
     async fn resolve_bot_config_matches_case_insensitively(pool: PgPool) {
         let config = resolve_bot_config(&pool, "EASY").await.unwrap();
         assert_eq!(config.name, "easy");
+    }
+
+    #[derive(Clone, Default)]
+    struct CaptureWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl CaptureWriter {
+        fn buffer(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
+    impl std::io::Write for CaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl tracing_subscriber::fmt::MakeWriter<'_> for CaptureWriter {
+        type Writer = Self;
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn test_bot_ctx(private_hand: &str) -> BotContext {
+        BotContext {
+            game_state: "{}".to_string(),
+            game_data: brdgme_game_client::GameData {
+                pub_state_yaml: "board: empty".to_string(),
+                player_state_yaml: format!("hand:\n  - {private_hand}\n"),
+                data_docs: "data docs".to_string(),
+                basic_strategy: "basic strategy".to_string(),
+                advanced_strategy: "advanced strategy".to_string(),
+                command_spec: None,
+                rules: "rules".to_string(),
+            },
+            recent_logs: vec![],
+        }
+    }
+
+    fn test_bot_cfg() -> config::BotConfig {
+        config::BotConfig {
+            name: "test".to_string(),
+            include_basic_strategy: true,
+            include_advanced_strategy: false,
+            temperature: 0.2,
+        }
+    }
+
+    /// F-195 regression: the rendered prompt legitimately contains the bot's
+    /// private hand (it is sent to the LLM), but logging must never emit it.
+    /// Runs the real prompt-building path plus the redaction boundary under a
+    /// fmt subscriber capturing every level up to TRACE and asserts the
+    /// private-hand sentinel appears in the prompt yet is absent from all
+    /// captured log output.
+    #[test]
+    fn private_hand_reaches_prompt_but_not_logs() {
+        const SENTINEL: &str = "PRIVATE_HAND_SENTINEL_7H";
+        let capture = CaptureWriter::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .with_writer(capture.clone())
+            .finish();
+        let bot_ctx = test_bot_ctx(SENTINEL);
+        let bot_cfg = test_bot_cfg();
+        let messages = tracing::subscriber::with_default(subscriber, || {
+            let messages = build_messages(
+                &bot_cfg,
+                &bot_ctx,
+                &["Alice".to_string(), "Bob".to_string()],
+                0,
+                "Bot 1",
+                vec![],
+            )
+            .expect("build_messages failed");
+            log_messages_redacted(&messages);
+            messages
+        });
+        let prompt = messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            prompt.contains(SENTINEL),
+            "private hand must still reach the LLM prompt so the leak vector is exercised"
+        );
+        let log_output = capture.buffer();
+        assert!(
+            log_output.contains("message_count=2"),
+            "redaction boundary did not run: {log_output}"
+        );
+        assert!(
+            !log_output.contains(SENTINEL),
+            "private hand leaked into log output: {log_output}"
+        );
     }
 }

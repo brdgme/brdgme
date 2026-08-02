@@ -290,7 +290,6 @@ pub struct GameData {
     pub advanced_strategy: String,
     pub command_spec: Option<CommandSpec>,
     pub rules: String,
-    pub points: Vec<f32>,
 }
 
 fn json_to_yaml(json: &str) -> Result<String, GameClientError> {
@@ -299,6 +298,12 @@ fn json_to_yaml(json: &str) -> Result<String, GameClientError> {
     serde_yaml_ng::to_string(&value).map_err(GameClientError::from)
 }
 
+/// Fetches everything the bot needs for a turn, using only the redaction
+/// boundary render endpoints (`PubRender`/`PlayerRender`) plus the separate
+/// rules/strategy/data-docs endpoints. Deliberately never requests
+/// `Status`: `Response::Status` carries the full `GameResponse` (including
+/// the raw `points` of every seat, bypassing the per-player redaction
+/// boundary), so the bot must not ask for it (F-194).
 pub async fn fetch_game_data(
     client: &reqwest::Client,
     uri: &str,
@@ -307,28 +312,11 @@ pub async fn fetch_game_data(
     player: usize,
     interface_version: i32,
 ) -> Result<GameData, GameClientError> {
-    let status_resp = request(
-        client,
-        uri,
-        version_name,
-        &Request::Status { game: game.clone() },
-    )
-    .await?;
-    let (public_render, player_renders, points) = match status_resp {
-        Response::Status {
-            game,
-            public_render,
-            player_renders,
-            ..
-        } => (public_render, player_renders, game.points),
-        _ => return Err(GameClientError::UnexpectedResponse { request: "Status" }),
-    };
-    let player_render = player_renders
-        .get(player)
-        .ok_or(GameClientError::NoPlayerRender { player })?;
+    let public_render = pub_render(client, uri, version_name, game.clone()).await?;
+    let player_render = player_render(client, uri, version_name, game.clone(), player).await?;
 
-    let pub_state_yaml = json_to_yaml(&public_render.pub_state)?;
-    let player_state_yaml = json_to_yaml(&player_render.player_state)?;
+    let pub_state_yaml = json_to_yaml(&public_render.state)?;
+    let player_state_yaml = json_to_yaml(&player_render.state)?;
     let command_spec = player_render.command_spec.clone();
 
     let rules_fut = async {
@@ -405,7 +393,6 @@ pub async fn fetch_game_data(
         advanced_strategy,
         command_spec,
         rules,
-        points,
     })
 }
 
@@ -414,9 +401,23 @@ mod tests {
     use super::*;
     use axum::{Json, Router, http::StatusCode, routing::post};
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tokio::net::TcpListener;
+
+    fn request_kind(request: &Request) -> &'static str {
+        match request {
+            Request::Status { .. } => "Status",
+            Request::PubRender { .. } => "PubRender",
+            Request::PlayerRender { .. } => "PlayerRender",
+            Request::Rules => "Rules",
+            Request::DataDocs { .. } => "DataDocs",
+            Request::BasicStrategy { .. } => "BasicStrategy",
+            Request::AdvancedStrategy { .. } => "AdvancedStrategy",
+            _ => "Other",
+        }
+    }
 
     fn tiny_config() -> RetryConfig {
         RetryConfig {
@@ -758,31 +759,25 @@ mod tests {
 
     fn mock_game_response(Json(payload): Json<Request>) -> Json<Response> {
         Json(match payload {
-            Request::Status { .. } => Response::Status {
-                game: brdgme_cmd::api::GameResponse {
-                    state: "{}".to_string(),
-                    points: vec![0.0, 0.0],
-                    status: brdgme_game::Status::Active {
-                        whose_turn: vec![0],
-                        eliminated: vec![],
-                    },
-                },
-                public_render: PubRender {
+            Request::PubRender { .. } => Response::PubRender {
+                render: PubRender {
                     pub_state: r#"{"board":"empty","round":1}"#.to_string(),
                     render: "render".to_string(),
                 },
-                player_renders: vec![
-                    PlayerRender {
+            },
+            Request::PlayerRender { player, .. } => Response::PlayerRender {
+                render: match player {
+                    0 => PlayerRender {
                         player_state: r#"{"hand":["A","K"],"score":10}"#.to_string(),
                         render: "p0".to_string(),
                         command_spec: None,
                     },
-                    PlayerRender {
+                    _ => PlayerRender {
                         player_state: r#"{"hand":["Q"],"score":5}"#.to_string(),
                         render: "p1".to_string(),
                         command_spec: None,
                     },
-                ],
+                },
             },
             Request::DataDocs { .. } => Response::DataDocs {
                 data_docs: "V2 data docs".to_string(),
@@ -1060,6 +1055,114 @@ mod tests {
                 err
             );
         }
+    }
+
+    /// F-194 regression: `fetch_game_data` must request only the redaction
+    /// boundary render endpoints (PubRender + PlayerRender), never `Status`.
+    /// The mock answers a `Status` request with a distinctive hidden points
+    /// value and records every request it receives; the test asserts the
+    /// endpoint choices and that the hidden value never reaches any field of
+    /// the returned game data.
+    #[tokio::test]
+    async fn test_fetch_game_data_never_requests_status_and_omits_hidden_points() {
+        const HIDDEN_POINTS: f32 = 9876543.0;
+        let seen = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let seen2 = Arc::clone(&seen);
+        let app = Router::new().route(
+            "/",
+            post(move |Json(payload): Json<Request>| async move {
+                seen2.lock().unwrap().push(request_kind(&payload));
+                Json(match payload {
+                    Request::Status { .. } => Response::Status {
+                        game: brdgme_cmd::api::GameResponse {
+                            state: "{}".to_string(),
+                            points: vec![HIDDEN_POINTS, HIDDEN_POINTS],
+                            status: brdgme_game::Status::Active {
+                                whose_turn: vec![0],
+                                eliminated: vec![],
+                            },
+                        },
+                        public_render: PubRender {
+                            pub_state: "{}".to_string(),
+                            render: String::new(),
+                        },
+                        player_renders: vec![],
+                    },
+                    Request::PubRender { .. } => Response::PubRender {
+                        render: PubRender {
+                            pub_state: r#"{"board":"empty"}"#.to_string(),
+                            render: String::new(),
+                        },
+                    },
+                    Request::PlayerRender { player, .. } => Response::PlayerRender {
+                        render: PlayerRender {
+                            player_state: r#"{"hand":["A","K"]}"#.to_string(),
+                            render: format!("p{}", player),
+                            command_spec: None,
+                        },
+                    },
+                    Request::DataDocs { .. } => Response::DataDocs {
+                        data_docs: "docs".to_string(),
+                    },
+                    Request::BasicStrategy { .. } => Response::BasicStrategy {
+                        strategy: "bs".to_string(),
+                    },
+                    Request::AdvancedStrategy { .. } => Response::AdvancedStrategy {
+                        strategy: "as".to_string(),
+                    },
+                    Request::Rules => Response::Rules {
+                        rules: "rules".to_string(),
+                    },
+                    _ => Response::SystemError {
+                        message: "unsupported in mock".to_string(),
+                    },
+                })
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let uri = format!("http://{}", addr);
+        let data = fetch_game_data(&client, &uri, "test-v2", "{}".to_string(), 0, 2)
+            .await
+            .expect("fetch_game_data failed");
+
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen.contains(&"PubRender"),
+            "fetch_game_data must request PubRender, saw: {:?}",
+            seen
+        );
+        assert!(
+            seen.contains(&"PlayerRender"),
+            "fetch_game_data must request PlayerRender, saw: {:?}",
+            seen
+        );
+        assert!(
+            !seen.contains(&"Status"),
+            "fetch_game_data must never request Status, saw: {:?}",
+            seen
+        );
+        drop(seen);
+
+        let all_content = format!(
+            "{}{}{}{}{}{}",
+            data.pub_state_yaml,
+            data.player_state_yaml,
+            data.data_docs,
+            data.basic_strategy,
+            data.advanced_strategy,
+            data.rules
+        );
+        assert!(
+            !all_content.contains(&format!("{HIDDEN_POINTS}")),
+            "hidden Status points value must not reach game data: {:?}",
+            all_content
+        );
     }
 
     #[tokio::test]

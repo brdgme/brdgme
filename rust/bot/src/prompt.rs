@@ -11,7 +11,6 @@ const USER_TEMPLATE: &str = include_str!("../user_prompt.md");
 pub struct PlayerInfo {
     pub name: String,
     pub colour: String,
-    pub score: f32,
     pub is_me: bool,
 }
 
@@ -168,13 +167,11 @@ mod tests {
                 PlayerInfo {
                     name: "Alice".to_string(),
                     colour: "#4caf50".to_string(),
-                    score: 6000.0,
                     is_me: true,
                 },
                 PlayerInfo {
                     name: "Bob".to_string(),
                     colour: "#f44336".to_string(),
-                    score: 4500.0,
                     is_me: false,
                 },
             ],
@@ -268,13 +265,11 @@ mod tests {
     }
 
     #[test]
-    fn render_user_renders_players_with_score_and_colour() {
+    fn render_user_renders_players_with_name_and_colour() {
         let output = render_user(&user_ctx()).unwrap();
         assert!(output.contains("Alice"), "player 1 name missing");
-        assert!(output.contains("6000"), "player 1 score missing");
         assert!(output.contains("#4caf50"), "player 1 colour missing");
         assert!(output.contains("Bob"), "player 2 name missing");
-        assert!(output.contains("4500"), "player 2 score missing");
         assert!(output.contains("#f44336"), "player 2 colour missing");
     }
 
@@ -285,6 +280,15 @@ mod tests {
         assert!(
             !output.contains("Bob (you)"),
             "Bob incorrectly marked as self"
+        );
+    }
+
+    #[test]
+    fn render_user_omits_stale_score_line() {
+        let output = render_user(&user_ctx()).unwrap();
+        assert!(
+            !output.contains("Score:"),
+            "stale Score template line still rendered: {output}"
         );
     }
 
@@ -394,13 +398,11 @@ mod tests {
             PlayerInfo {
                 name: "Alice".to_string(),
                 colour: "#4caf50".to_string(),
-                score: 100.0,
                 is_me: true,
             },
             PlayerInfo {
                 name: "Alice".to_string(),
                 colour: "#f44336".to_string(),
-                score: 200.0,
                 is_me: false,
             },
         ];

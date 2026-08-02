@@ -33,6 +33,7 @@ serde_yaml_ng.workspace = true
 async-nats.workspace = true
 futures-util.workspace = true
 axum.workspace = true
+rustls.workspace = true
 zeroize = "1"
 
 [dev-dependencies]

@@ -738,6 +738,7 @@ dependencies = [
  "futures-util",
  "minijinja",
  "reqwest",
+ "rustls",
  "sentry",
  "sentry-tracing",
  "serde",
