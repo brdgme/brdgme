@@ -49,21 +49,42 @@ impl Parser for Token {
     type T = String;
 
     fn parse<'a>(&self, input: &'a str, names: &[String]) -> Result<Output<'a, String>, GameError> {
-        let t_len = self.token.len();
-        // get() returns None when t_len exceeds the input or is not a char
-        // boundary of the input; both are mismatches, never panics.
-        match input.get(..t_len) {
-            Some(prefix) if UniCase::new(prefix) == UniCase::new(&self.token) => Ok(Output {
+        let folded_token = UniCase::new(&self.token).to_folded_case();
+        if folded_token.is_empty() {
+            // An empty token matches the empty prefix, leaving the input whole.
+            return Ok(Output {
                 value: self.token.to_owned(),
-                consumed: prefix,
-                remaining: &input[t_len..],
-            }),
-            _ => Err(GameError::Parse {
-                message: None,
-                expected: self.expected(names),
-                offset: 0,
-            }),
+                consumed: &input[..0],
+                remaining: input,
+            });
         }
+        // Match in the folded domain, walking input char by char rather than
+        // slicing by the token's byte length: case folding can change the byte
+        // length (e.g. U+0130, 2 bytes, folds to "i\u{307}", 3 bytes), so
+        // a token-byte-length slice rejects completed folds (F-03). The
+        // accumulated folded prefix is monotonic, so a broken `starts_with`
+        // can never recover; equality is reached exactly when the folded
+        // prefix reaches the token's folded length.
+        let mut folded_prefix = String::new();
+        for (i, c) in input.char_indices() {
+            let end = i + c.len_utf8();
+            folded_prefix.push_str(&UniCase::new(c.to_string()).to_folded_case());
+            if !folded_token.starts_with(&folded_prefix) {
+                break;
+            }
+            if folded_prefix.len() == folded_token.len() {
+                return Ok(Output {
+                    value: self.token.to_owned(),
+                    consumed: &input[..end],
+                    remaining: &input[end..],
+                });
+            }
+        }
+        Err(GameError::Parse {
+            message: None,
+            expected: self.expected(names),
+            offset: 0,
+        })
     }
 
     fn expected(&self, _names: &[String]) -> Vec<String> {
@@ -1794,6 +1815,47 @@ mod tests {
             },
             parser.parse("sí!", &[]).expect("expected 'sí!' to parse")
         );
+    }
+
+    #[test]
+    fn token_parser_and_suggest_agree_on_fold_length_change() {
+        // F-03: U+0130 is 2 bytes but full-folds to "i\u{307}" (3 bytes).
+        // The old parse sliced the input by the token's byte length, so a
+        // completed folded input was rejected even though the suggester
+        // offered the token for it.
+        let parser = Token::new("\u{130}");
+        let out = parser
+            .parse("i\u{307}!", &[])
+            .expect("expected the fully-folded token to parse");
+        assert_eq!(out.value, "\u{130}");
+        assert_eq!(out.consumed, "i\u{307}");
+        assert_eq!(out.remaining, "!");
+        // The spec token parser delegates to Token::parse and must agree.
+        let out = CommandSpec::Token("\u{130}".into())
+            .parse("i\u{307}", &[])
+            .expect("expected the spec token parser to accept the folded form");
+        assert_eq!(out.consumed, "i\u{307}");
+        assert_eq!(out.remaining, "");
+        // Both sides offer the token for the complete folded form.
+        let spec = CommandSpec::Token("\u{130}".into());
+        let values: Vec<String> = spec
+            .suggest("i\u{307}", &[])
+            .into_iter()
+            .map(|s| s.value)
+            .collect();
+        assert_eq!(values, vec!["\u{130}"]);
+        // A bare "i" is only a folded prefix of the token - still suggested
+        // as an incomplete autocomplete fragment, but never recast as a
+        // successful parse.
+        parser
+            .parse("i", &[])
+            .expect_err("expected the incomplete fragment 'i' to be rejected");
+        let values: Vec<String> = spec
+            .suggest("i", &[])
+            .into_iter()
+            .map(|s| s.value)
+            .collect();
+        assert_eq!(values, vec!["\u{130}"]);
     }
 
     #[test]

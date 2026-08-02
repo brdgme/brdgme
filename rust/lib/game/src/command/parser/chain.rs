@@ -61,7 +61,10 @@ where
     }
 
     fn expected(&self, names: &[String]) -> Vec<String> {
-        self.a.expected(names)
+        // Report the same expectations as the spec projection (F-08): both
+        // skip a leading Space, so a hand-built Space-leading chain matches
+        // the CommandSpec::Chain contract instead of "whitespace".
+        self.to_spec().expected(names)
     }
 
     fn to_spec(&self) -> CommandSpec {
@@ -116,7 +119,10 @@ where
     }
 
     fn expected(&self, names: &[String]) -> Vec<String> {
-        self.a.expected(names)
+        // Report the same expectations as the spec projection (F-08): both
+        // skip a leading Space, so a hand-built Space-leading chain matches
+        // the CommandSpec::Chain contract instead of "whitespace".
+        self.to_spec().expected(names)
     }
 
     fn to_spec(&self) -> CommandSpec {
@@ -175,7 +181,10 @@ where
     }
 
     fn expected(&self, names: &[String]) -> Vec<String> {
-        self.a.expected(names)
+        // Report the same expectations as the spec projection (F-08): both
+        // skip a leading Space, so a hand-built Space-leading chain matches
+        // the CommandSpec::Chain contract instead of "whitespace".
+        self.to_spec().expected(names)
     }
 
     fn to_spec(&self) -> CommandSpec {
@@ -214,5 +223,35 @@ mod tests {
                 .parse("123egg  chairs", &[])
                 .expect("expected '123egg  chairs' to parse")
         )
+    }
+
+    #[test]
+    fn chain_expected_skips_a_leading_space_at_all_sites() {
+        // F-08: Chain2/3/4::expected must match the existing
+        // CommandSpec::Chain contract (the "Chain1" contract): a leading
+        // Space is skipped, so a hand-built Space-leading chain reports the
+        // next element's expectations rather than "whitespace".
+        use crate::command::parser::{Space, Token};
+
+        // Chain1 site: the CommandSpec::Chain contract itself.
+        let spec = CommandSpec::Chain(vec![CommandSpec::Space, CommandSpec::Token("card".into())]);
+        assert_eq!(spec.expected(&[]), vec!["card"]);
+
+        let chain2 = Chain2::new(Space {}, Token::new("card"));
+        assert_eq!(chain2.expected(&[]), vec!["card"]);
+        assert_eq!(chain2.expected(&[]), chain2.to_spec().expected(&[]));
+
+        let chain3 = Chain3::new(Space {}, Token::new("card"), Token::new("play"));
+        assert_eq!(chain3.expected(&[]), vec!["card"]);
+        assert_eq!(chain3.expected(&[]), chain3.to_spec().expected(&[]));
+
+        let chain4 = Chain4::new(
+            Space {},
+            Token::new("card"),
+            Token::new("play"),
+            Token::new("tile"),
+        );
+        assert_eq!(chain4.expected(&[]), vec!["card"]);
+        assert_eq!(chain4.expected(&[]), chain4.to_spec().expected(&[]));
     }
 }
