@@ -235,7 +235,8 @@ mod tests {
             Query(UnsubscribeQuery {
                 t: "a&b\"c<d'e".to_string(),
             }),
-        );
+        )
+        .await;
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
             .unwrap();
