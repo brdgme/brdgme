@@ -10,9 +10,9 @@ decisions live in `97-REMEDIATION-PROGRESS.md` - start there. Package-number
 order is not execution order when blockers exist; the tracker's status column
 decides what is next.
 
-- **Next unblocked package: R-37** (web auth hardening). Its dependency 5.4
-  (request-parts harness) is done (`973ea62`); build the harness first per the
-  R-37 section's "Depends on".
+- **Next unblocked package: R-39** (visibility, bounds and untested guards).
+  It is `pending` and depends on nothing. R-37 is parked by user; R-38 remains
+  blocked on 5.3.
 - **R-35 is blocked on a user decision:** removing `Status` leaves no approved
   public points source - `Response::Status` is the only response carrying
   `GameResponse.points`, and `Response::PlayerRender` carries no `points`. The
@@ -1245,59 +1245,69 @@ checklist falsification and **not** a WP-64 regression; the omission is original
 - **Size: L** - basis: nine findings across the auth surface, plus the fact that
   **there is no rate-limiting middleware anywhere in `rust/web`** (F-94), which is
   a new component rather than a fix.
-- **Depends on:** 5.4 (the request-parts harness) - section 5.7's U3 records that its
-  absence is the **structural cause of F-92** and the reason **F-85 was
-  uncatchable**. Build the harness first.
+- **Status:** parked by user. R-37.0 is complete at
+  `0270f296a39755b44feacf85d6d2220d7c8b4f80`. Do not implement the remaining
+  R-37 work until the simpler unblocked remediation plan is complete and the user
+  explicitly revisits R-37.
+- **Ordering:** preserve R-37.1 before R-37.2 when revisited. No exact
+  implementation units, migrations, or rollout are approved.
 
 #### R-37.0 - Source and acceptance reconciliation
 
 - **Depends on:** 5.4.
-- **Scope:** no production change. Reconcile every R-37 finding and acceptance
-  criterion to current source and test locations; correct stale source references;
-  define the serial boundaries below; and record, without deciding, the rate-limit
-  and F-95 choices that require approval.
-- **Acceptance evidence:** current source map in
-  `97-REMEDIATION-PROGRESS.md`'s R-37.0 evidence; `R-37.1` and `R-37.2` have
-  explicit dependencies and scopes; no implementation or test result is claimed.
+- **Status:** complete at `0270f296a39755b44feacf85d6d2220d7c8b4f80`.
+- **Scope and evidence:** no production change; current source map and the approved
+  park record are in `97-REMEDIATION-PROGRESS.md`'s R-37.0 evidence.
 
 #### R-37.1 - Auth and session integrity
 
-- **Depends on:** R-37.0, the authoritative WP-34 rows naming F-92's three
-  server-fn tests, and an owner choice for F-95's upper-bound implementation or
-  formal amendment.
-- **Scope:** F-86 session-store error propagation, F-87 pending-email/account
-  integrity, F-89 authorization-before-attempt accounting, F-92's three
-  server-fn regressions, F-93 registration indistinguishability, and F-95's
-  concurrency bound. F-87 and F-88 require explicit acceptance criteria before
-  either may be closed.
-- **Acceptance evidence:** direct session and server-fn regression tests using
-  the 5.4 harness where applicable; F-95 asserts the owner-approved upper bound
-  or cites the owner-approved amendment. Runtime web tests remain CI evidence;
-  local verification is targeted `cargo check -p web` only.
+- **Status:** parked by user; preserve before R-37.2.
+- **Approved behavior when revisited:**
+  - F-87 confirmations are purpose-bound as `login` and `add_email`; a wrong
+    endpoint consumes neither flow, while valid login keeps D-14's true-owner
+    stealing behavior.
+  - Expire every ambiguous active or legacy confirmation in the migration; an
+    old-pod insert must never default to `login`.
+  - Retain the 10-attempt cap. Incorrect codes for the same purpose count;
+    wrong-purpose submissions do not. This supersedes stale non-consumption
+    wording.
+  - F-93 `add_email` returns generic acceptance and creates state or sends only
+    when valid. F-92's historical `add_email` global-cap `Err` expectation is
+    superseded: its eventual test asserts generic acceptance with no pending row,
+    code, or send.
+  - F-95 uses a conditional attempt increment capped at 10, with concurrent
+    upper-bound evidence. F-88 remains in scope and is not closed by this record.
 
 #### R-37.2 - Rate-limit and external-auth hardening
 
-- **Depends on:** R-37.0, R-37.1, and an approved rate-limit policy.
-- **Scope:** F-94's login, registration, and inbound-email rate limiting;
-  F-91's AAD-decline record; the Turnstile no-live-network regression coverage;
-  and shared-crypto loader coverage.
-- **Acceptance evidence:** the approved policy is implemented at every named
-  ingress surface; the false per-IP justification comments are corrected; the
-  Turnstile test has no Cloudflare dependency and covers transport, non-200,
-  malformed-JSON, and `success: false` responses; and the AAD decision is
-  recorded in source or documentation. Runtime web tests remain CI evidence;
-  local verification is targeted `cargo check -p web` only.
+- **Status:** parked by user; follows R-37.1 when R-37 is explicitly revisited.
+- **Approved behavior when revisited:**
+  - Any rate limiting is PostgreSQL-backed in `web`: no standalone service and no
+    Gubernator compatibility. It uses fixed-window counters keyed by scoped,
+    opaque digests and never application-observed IP.
+  - Retain settled login and confirmation caps. The former all-three-ingress and
+    router-middleware criterion is superseded: the only new generic limiter is
+    for signed Resend webhooks after signature verification.
+  - Webhooks allow 600 verified events per five minutes globally and 20 accepted
+    messages per canonical sender and validated route capability per five minutes.
+    On denial or limiter database failure, return retryable generic `503` and
+    write no processed marker.
+  - F-91 accepts the no-AAD risk. Revisit it before another encrypted data
+    category, credential movement or import, or multiple interchangeable
+    ciphertext contexts; no crypto migration now.
 
-**Pending owner decisions for R-37.2:** choose the rate-limit mechanism,
-trusted client-IP source, rejection shape, and limiter-store failure behavior.
-Do not select those policy values during implementation. The source map presents
-in-memory, DB-backed, and existing-counter-only alternatives; the last cannot
-satisfy the middleware acceptance criterion.
+**Unresolved before implementation:**
 
-**Pending owner decision for R-37.1:** F-95's current unconditional increment
-can exceed the cap under concurrency. Adopt a conditional increment with an
-upper-bound regression assertion, or formally amend the upper-bound criterion;
-the test must not choose between those outcomes.
+- The last proposed migration retained `email` as a single-column primary key,
+  which cannot satisfy approved coexistence of `login` and `add_email`
+  confirmations for one address.
+- Safe rolling deployment and legacy-pod compatibility remain unresolved.
+  Temporary `Recreate`, a new table, staged migrations, or another simpler design
+  require later value/complexity review and user approval.
+- Before implementation, perform a deliberate overengineering review. The selected
+  design must justify complexity relative to value and protect readability,
+  maintainability, and simplicity; reassess whether the generic webhook limiter
+  and keyed-digest machinery remain proportionate.
 
 **The defects:** session-store errors are swallowed, so a transient blip
 **de-authenticates the user** (F-86). A legitimate pending email row is deleted
@@ -1310,25 +1320,20 @@ a **lower** bound where the spec prescribed an **upper** bound.
 
 **Acceptance criteria**
 
-1. Rate-limiting middleware exists and is applied to the login, registration and
-   inbound-email surfaces (F-94). **The two doc comments that assert a per-IP
-   limit as design justification are false and must be corrected in the same
-   change** - leaving them is how the gap survived.
+1. The approved, purpose-bound confirmation and add-email behavior above is
+   implemented with regression evidence; F-95 demonstrates the concurrent upper
+   bound.
 2. F-92: the three WP-34 regression tests exist and each **calls the server fn
-   the spec row names**.
-3. F-95: the concurrency test asserts the **upper** bound the spec prescribed, or
-   the spec is formally amended by the owner with the reason the bound is
-   unachievable. **Silently renegotiating the criterion in the test is the defect
-   itself** - either outcome must be written down.
-4. F-89: a test calls the login path with a wrong code and asserts the victim's
-   code is still usable.
-5. F-93: a test asserts a registration attempt against an existing address is
-   indistinguishable from one against a new address.
-6. F-86: a test calls the session middleware with a failing store and asserts the
+   the spec row names**, including generic `add_email` acceptance with no pending
+   row, code, or send at its historical global cap.
+3. The approved verified-Resend-webhook limiter has its fixed-window, opaque-digest,
+   denial, and database-failure behavior evidenced; no generic login,
+   registration, or inbound-email router limiter is added.
+4. F-86: a test calls the session middleware with a failing store and asserts the
    request errors rather than proceeding as anonymous.
-7. F-91: the AAD decline is recorded **in the code or a doc**, not only in a
-   commit message.
-8. **Also fix here** (from unified report section 7, carried forward under plan
+5. F-91's accepted risk and revisit triggers are recorded without a crypto
+   migration.
+6. **Also fix here** (from unified report section 7, carried forward under plan
    section 5.7, no F-number):
    `verify_turnstile_rejects_on_transport_error` makes a **real network call to
    Cloudflare** and passes for the wrong reason
@@ -2408,4 +2413,3 @@ survives the review itself: **F-59's status**, since the `lords-of-vegas-1` WIP
 ruling names only F-50 and F-57. Section 11 records it as "ambiguous coverage,
 unresolved". Treat it as excluded until the owner says otherwise, but do not
 record it as settled.
-
