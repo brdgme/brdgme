@@ -1376,11 +1376,13 @@ function. F-100 pins an **absent** session expiry as if intended.
 
 ### R-39 - Visibility, bounds and untested guards
 
-- **Closes:** F-141 (Low), F-142 (Low), F-149 (Low), F-157 (Low), F-132 (Low),
-  F-133 (Low).
-- **Files:** `rust/web/src/proposals.rs:973` (+2 sites);
-  `rust/web/tests/ssr_pages.rs:1290-1300`; `rust/web/src/friends.rs:229-231`,
-  `:100-108` (+1 site); `rust/web/src/visibility_cache.rs:11`;
+- **Closes:** F-141 (Low), F-142 (Low), F-149 (Low), F-157 (Low), F-133
+  (Low). F-132 is refuted: `VisibilityCache` is local to one SSE connection,
+  whose viewer is fixed before its task is spawned; no cache or SSE change is
+  approved.
+- **Files:** `rust/web/src/proposals.rs:1047,1087,1162`;
+  `rust/web/tests/ssr_pages.rs:1290-1300`; `rust/web/src/friends.rs:99-107`,
+  `:221-234`; `rust/web/src/game_info/mod.rs:44-52`;
   `rust/web/src/db/proposals.rs:40-52`.
 - **Size: M** - basis: three unbounded queries, two untested guards and a cache
   key.
@@ -1394,13 +1396,29 @@ function. F-100 pins an **absent** session expiry as if intended.
    reviewer confirms this.
 3. F-149: `block_user`'s guard gets a test. `rust/web/src/friends.rs` currently
    **has no tests at all**.
-4. F-132: the `VisibilityCache` key includes the viewer, and the invariant is
-   expressed in the type or an assertion rather than left implicit. **The
-   cross-user leak itself is refuted** - each instance is a local inside the
-   per-request spawn at `events.rs:65` - so this is a hardening change, not a
-   vulnerability fix.
+4. F-132: refuted, not implemented. `events_handler` fixes `viewer` before its
+   per-connection task and constructs one local `VisibilityCache`; the cache is
+   never shared between viewers. Preserve the two-stream SSE topology without
+   additional cache machinery.
 5. F-133: a proposal owner who is not a player can see their own proposal.
 6. F-157: the eleven collapsed error contexts are restored.
+
+**Approved execution units and evidence**
+
+| Unit | Depends on | Allowed files | Acceptance evidence |
+|------|------------|---------------|---------------------|
+| R-39.1 | none | `rust/web/src/proposals.rs` | F-141: a shared proposal-sweep cap of 200 bounds all three candidate queries; a DB test calls each query with more than 200 candidates and asserts the bound. |
+| R-39.2 | none | `rust/web/tests/ssr_pages.rs` | F-142: the existing non-admin export-route test seeds a real game and private-log sentinel, then asserts both 403 and sentinel absence. |
+| R-39.3 | none | `rust/web/src/db/proposals.rs` | F-133: direct DB tests prove an owner without a roster row is visible and a stranger is not. |
+| R-39.4 | none | `rust/web/src/friends.rs` | F-149: a direct server-function test, using `crate::test_support::non_admin`, calls `block_user` with an unknown id and asserts `User not found`. |
+| R-39.5 | after R-39.4 (shared file only) | `rust/web/src/friends.rs`, `rust/web/src/game_info/mod.rs` | F-157: static inspection confirms six distinct friends-query contexts and five distinct game-info-query contexts inside their `try_join!` calls. |
+
+- Run `git diff --check` and static acceptance inspection after each unit.
+- After all source units, run exactly once from `rust/`:
+  `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr`.
+- Runtime DB and SSR tests are CI-pending under the laptop constraint. An
+  independent review is required after the final check because R-39.2 and
+  R-39.3 exercise authorization and visibility boundaries.
 
 ---
 

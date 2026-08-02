@@ -61,7 +61,7 @@ restored per owner instruction.)
 | R-36 | done(b80a943) | b80a9434926a031beb56d44108562855cb21d599 | AC1 F-194: bot no longer requests Status or carries points; fetch_game_data uses PubRender/PlayerRender and a mock regression test proves hidden Status points never reach bot data. AC2 F-195: prompt TRACE fields replaced by count-only redaction boundary, with a sentinel-hand capture test; stale Score template line removed. AC3 F-190 verified inherited from R-13 (afe85b2): startup .expect plus loader error tests already fail invalid/missing keys; no new F-190 implementation claimed here. AC4 adds bot rustls aws-lc-rs process-default install and dependency. AC5 narrows module dead-code allows to two unused fields. Targeted game-client/bot/crypto tests, bot and game-client fmt/clippy, and diff check pass; independent security review APPROVE (two non-blocking Low findings: inherited attribution recorded, fmt-output assertion format coupling). |
 | R-37 | parked-by-user | 0270f296a39755b44feacf85d6d2220d7c8b4f80 | R-37.0 complete; all remaining work is parked until the simpler unblocked remediation plan is complete and the user explicitly revisits it. Preserve R-37.1 before R-37.2; no implementation units, migrations, or rollout approved. |
 | R-38 | blocked(5.3) | | 5.4 done (973ea62) |
-| R-39 | pending | | |
+| R-39 | in-progress | | Approved execution: R-39.1..R-39.5. F-132 refuted by the per-connection, viewer-fixed `VisibilityCache` lifetime; no cache or SSE change. Runtime DB/SSR tests are CI-pending; one final allowed web cargo check and independent authorization/visibility review remain required. |
 | R-40 | pending | | |
 | R-41 | pending | | |
 | R-42 | pending | | |
@@ -1492,6 +1492,21 @@ unaccepted, none reflected in a done row):
 - **Stale plan corrections:** source paths now name shared crypto and current
   Turnstile locations. The shared loader already has tests at
   `rust/lib/crypto/src/lib.rs:120-162`; its AAD decline remains undocumented.
+
+## R-39 evidence
+
+- **Status:** in progress. Approved units are R-39.1 sweep bounds, R-39.2
+  non-admin export regression coverage, R-39.3 proposal-owner visibility,
+  R-39.4 `block_user` guard coverage, and R-39.5 per-query error contexts.
+- **Scope correction:** F-132 is refuted, not hardened. `VisibilityCache` is a
+  local value inside each per-connection SSE task after `viewer` is fixed; do
+  not modify `visibility_cache.rs` or `events.rs`.
+- **Verification:** static inspection and `git diff --check` per unit; after
+  all source units, exactly one `SQLX_OFFLINE=true cargo check -p web
+  --all-targets --features ssr` from `rust/`. Runtime DB/SSR tests are
+  CI-pending under laptop limits.
+- **Review:** one independent authorization/visibility review follows the final
+  cargo check. No other remediation package is selected.
 - **Approved confirmation and add-email behavior:** F-87 uses purpose-bound
   `login` and `add_email`; a wrong endpoint consumes neither flow, while valid
   login retains D-14 true-owner stealing. Expire all ambiguous active or legacy
