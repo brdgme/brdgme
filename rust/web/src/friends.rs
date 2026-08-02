@@ -8,6 +8,8 @@ use uuid::Uuid;
 
 #[cfg(feature = "ssr")]
 use crate::error::internal;
+#[cfg(feature = "ssr")]
+use futures_util::future::TryFutureExt;
 
 pub const INVITE_POLICIES: [(&str, &str); 3] = [
     ("open", "Anyone can invite me to a game"),
@@ -97,14 +99,19 @@ pub async fn get_friends_overview() -> Result<FriendsOverview, ServerFnError> {
     let pool = expect_context::<PgPool>();
     let user = require_user().await?;
     let (friends, incoming, outgoing, blocked, invite_policy, game_visibility) = tokio::try_join!(
-        crate::db::list_friends(&pool, user.id),
-        crate::db::list_incoming_friend_requests(&pool, user.id),
-        crate::db::list_outgoing_friend_requests(&pool, user.id),
-        crate::db::list_blocked(&pool, user.id),
-        crate::db::get_invite_policy(&pool, user.id),
-        crate::db::get_game_visibility(&pool, user.id),
-    )
-    .map_err(internal("get_friends_overview: queries"))?;
+        crate::db::list_friends(&pool, user.id)
+            .map_err(internal("get_friends_overview: friends")),
+        crate::db::list_incoming_friend_requests(&pool, user.id)
+            .map_err(internal("get_friends_overview: incoming")),
+        crate::db::list_outgoing_friend_requests(&pool, user.id)
+            .map_err(internal("get_friends_overview: outgoing")),
+        crate::db::list_blocked(&pool, user.id)
+            .map_err(internal("get_friends_overview: blocked")),
+        crate::db::get_invite_policy(&pool, user.id)
+            .map_err(internal("get_friends_overview: policy")),
+        crate::db::get_game_visibility(&pool, user.id)
+            .map_err(internal("get_friends_overview: visibility")),
+    )?;
     let entry = |(user_id, name): (Uuid, String)| FriendEntry { user_id, name };
     Ok(FriendsOverview {
         friends: friends.into_iter().map(entry).collect(),
