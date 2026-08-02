@@ -1142,6 +1142,17 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_rejects_finished_with_pending() {
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        g.phase = Phase::Finished;
+        g.pending = Some(Pending::Gift {
+            actor: 0,
+            cards: vec![Geisha::Flute, Geisha::Koto, Geisha::Fan],
+        });
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
     fn test_validate_rejects_competition_pending_outside_opponent_choose() {
         let (mut g, _) = Game::start(2, 1).unwrap();
         g.pending = Some(Pending::Competition {
