@@ -10,8 +10,10 @@ decisions live in `97-REMEDIATION-PROGRESS.md` - start there. Package-number
 order is not execution order when blockers exist; the tracker's status column
 decides what is next.
 
-- **Next unblocked package: R-45.** It is `pending` and depends on nothing.
-  R-37 and R-43 are parked by user process; R-38 remains blocked on 5.3.
+- **Next unblocked package: R-46.** R-45 is `partial/parked` on the
+  unpinned `blocked_domains.rs` provenance record; see 97. R-37 and R-43 are
+  parked by user process; R-38 remains blocked on 5.3. R-46 is not selected
+  by this package.
 - **R-35 is blocked on a user decision:** removing `Status` leaves no approved
   public points source - `Response::Status` is the only response carrying
   `GameResponse.points`, and `Response::PlayerRender` carries no `points`. The
@@ -2286,12 +2288,12 @@ which is exactly the property F-192 and F-193 turn on.
 
 ## 6. Owner decisions required before work starts
 
-### 6.1 Vendoring policy - OPEN, blocks `R-VEND`
+### 6.1 Vendoring policy - RESOLVED (2026-07-31)
 
-The owner's position (recorded 2026-07-31) is that vendoring third-party code
-**should be forbidden except in rare circumstances where there is no alternative
-and the work is completely blocked**. This is a policy question, not a review
-finding, and a Lead may not decide it.
+The owner ruled on 2026-07-31 that vendoring third-party code is **forbidden
+except where there is no alternative and the work is completely blocked**. The
+ruling is recorded in `97-REMEDIATION-PROGRESS.md`; R-VEND may inventory the
+existing code under that ruling, but it must not make a new vendoring decision.
 
 What the review has already established - **do not re-derive**:
 
@@ -2313,10 +2315,10 @@ What the review has already established - **do not re-derive**:
   config** and that **no** cargo-deny setting could machine-check the vendored MIT
   obligations - so the obligation is satisfied by hand, permanently.
 
-**The decision:** should "no compatible upstream release yet" be sufficient
-grounds to vendor at all, versus waiting, pinning the old major, or upstreaming a
-patch? Whatever the answer, it becomes a rule in `docs/CODING.md` and a mandatory
-section in every future dependency spec (see 4.8).
+**Ruling:** "no compatible upstream release yet" is not sufficient by itself.
+Vendoring is permitted only where there is no alternative and work is completely
+blocked. The ruling becomes a rule in `docs/CODING.md` and a mandatory section in
+every future dependency spec (see 4.8).
 
 **Not a decision but a consequence:** **the scope of vendoring across the repo has
 never been swept.** Only `session_store` is known. That sweep is itself a work

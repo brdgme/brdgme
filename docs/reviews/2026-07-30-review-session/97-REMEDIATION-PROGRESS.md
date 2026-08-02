@@ -17,7 +17,8 @@ restored per owner instruction.)
 
 ## Status legend
 
-- `pending` / `blocked(<reason>)` / `in-progress` / `done(<commit>)` / `owner-gap`
+- `pending` / `blocked(<reason>)` / `in-progress` / `partial/parked(<reason>)` /
+  `done(<commit>)` / `owner-gap`
 
 ## Work packages
 
@@ -67,7 +68,7 @@ restored per owner instruction.)
 | R-42 | done(6739e4c) | 5bd293ee421775fa5f134f14895796008350d77d, 6bec344112e845722366b9e39f527254700c2f1b, ee2ffee43e8ff6e3415a74b42dffb8722ad2fad0, e16d4d46b877cd28a59797a3807d94d2f5f0f42f, 6739e4cacbceceee955052789365226657e4ccd0 | F-164 tokenized the badge; `palette_css_vars` emits `--mk-orange` in every theme block and `(N new)` remains the non-hue cue. F-165 retains Closed-only `open()` but unconditionally bumps `last_update` on visible/online. F-166 applies `name DESC` to both selectors and adds a tied-created_at test calling both without changing visibility predicates. F-167 removes Red/86. F-168 asserts `href="#"` with an accurate focus-affordance comment. Approved staged and final `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` pass (known warnings only); independent review PASS with no findings. DB/SSR runtime tests are CI-pending. F-15 remains latent and parked; no enforcement is claimed. |
 | R-43 | parked-by-user-process | | active latest-dependency governance conflicts with AC2's `tower-http` downgrade; widening to upgrade all 0.6 consumers is not approved. See R-43 parking below; no acceptance criterion is complete. |
 | R-44 | blocked(5.2) | | |
-| R-45 | pending | | start early; feeds owner 6.1 |
+| R-45 | partial/parked(provenance) | | R45.1 inventories all confirmed copied third-party source and bundles; AC1 remains partial because `blocked_domains.rs` has no copy-time revision or licence record. R45.2 is limited to the `session_store` directory guard. R-46 is the next unblocked package, not selected. |
 | R-46 | pending | | EXPANDED scope: eliminate all 22 lint overrides (owner ruling) |
 | R-47 | pending | | |
 | R-48 | pending | | |
@@ -86,6 +87,36 @@ restored per owner instruction.)
 - **Unresolved evidence:** all 29 `deny.toml` skips and the falsified all-upstream rebuttal remain unresolved.
 - **Pending owner rulings:** select the skip review-date cadence and explicitly rule whether workspace-scoped `cargo deny` verification is permitted under laptop constraints.
 - **Acceptance:** no R-43 acceptance criterion is claimed complete.
+
+## R-45 evidence
+
+- **Status:** partial/parked on the mutable `blocked_domains.rs` provenance
+  record. This package does not select the next package.
+- **Approved inventory boundary:** include committed copied third-party source
+  files and generated JavaScript bundles; exclude transformed palette facts.
+  The Source Code Pro font's missing OFL text is a parked asset-compliance item
+  for the later parked-item review, not vendored code in R-45.
+
+| Path | Upstream and provenance | Licence and attribution | Reason | Machine-checked? | Known inherited defects |
+|------|-------------------------|-------------------------|--------|------------------|-------------------------|
+| `rust/lib/session_store/` | `tower-sessions-sqlx-store` 0.15.0; `src/lib.rs:1-3`; introduced by `667c8f42` | MIT `LICENSE`; upstream header in `src/lib.rs:1-3` | Upstream store pinned sqlx 0.8 while the workspace unified on 0.9 | No: `deny.toml:45-49` ignores private crates and `Cargo.toml:5` is `publish = false` | F-200: duplicate-key `migrate()` returns success before table creation/commit; it is the sole session-table creator |
+| `rust/web/src/auth/blocked_domains.rs` | `disposable-email-domains/disposable-email-domains` mutable `main`; header at `:1`; introduced by `ed4bedb` | Copy-time revision and licence unknown. Current upstream `LICENSE.txt` was observed as CC0 1.0; no local licence text | Static disposable-domain blocklist | No | Not assessed: R-45 AC4 applies only to the confirmed vendored-code directory |
+| `rust/web/public/sentry.js` | Generated bundle of `@sentry/browser` and `@sentry/wasm` 10.65.0; `js/package.json:6-11`, bundle `:167-174`; introduced by `3d5bc86` | Upstream Sentry MIT; bundle attribution footer at `:31120-31124` | Browser error reporting and WASM symbolication | No | Not assessed: R-45 AC4 applies only to the confirmed vendored-code directory |
+| `brdgme-go/assert/assert.go:159-171` | Go `go test` helper; source comment `:159`; introduced by `6e26a2e` | Go BSD-3-Clause upstream; source attribution comment at `:159` | Dependency-free test-name matching helper | No | Not assessed: R-45 AC4 applies only to the confirmed vendored-code directory |
+
+- **Excluded:** `rust/lib/color/src/palette.rs` contains attributed and adjusted
+  palette facts, not copied source. `serde_yaml_ng` is a registry dependency,
+  not vendored code.
+- **Parked residual:** `rust/web/public/fonts/source-code-pro-latin.woff2` is a
+  third-party asset without accompanying OFL text. It is outside R-45's approved
+  vendored-code boundary and remains for the later parked-item review.
+- **AC1:** partial. The inventory is complete for the approved boundary, but the
+  copied blocklist has no recorded copy-time version or licence.
+- **AC2:** complete. Every inventory entry states whether its obligation is
+  machine-checked.
+- **AC3:** pending R45.2. The guard covers only `rust/lib/session_store/`.
+- **AC4:** complete for its approved scope: F-200 is recorded for
+  `rust/lib/session_store/`; no file-level upstream-defect sweep is claimed.
 
 ## Coverage items
 
