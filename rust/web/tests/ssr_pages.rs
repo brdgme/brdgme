@@ -1301,7 +1301,10 @@ async fn admin_export_route_rejects_non_admin(pool: PgPool) {
             creator_id: owner.id,
             opponent_ids: &[],
             opponent_emails: &[],
-            bot_slots: &[],
+            bot_slots: &[BotSlot {
+                name: "Botty".to_string(),
+                bot_name: "easy".to_string(),
+            }],
             chat_id: None,
             game_state: "opaque_state_blob",
             all_accepted: false,
