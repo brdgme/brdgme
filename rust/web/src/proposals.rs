@@ -1044,6 +1044,9 @@ pub struct NudgeCandidate {
 }
 
 #[cfg(feature = "ssr")]
+const PROPOSAL_SWEEP_CAP: i64 = 200;
+
+#[cfg(feature = "ssr")]
 pub async fn fetch_nudge_candidates(pool: &PgPool, threshold_secs: i64) -> Vec<NudgeCandidate> {
     let rows = sqlx::query_as::<_, NudgeCandidate>(
         "SELECT pp.id AS game_proposal_player_id, gp.id AS proposal_id, pp.user_id, pp.email_token \
@@ -1051,9 +1054,11 @@ pub async fn fetch_nudge_candidates(pool: &PgPool, threshold_secs: i64) -> Vec<N
          JOIN game_proposal_players pp ON pp.proposal_id = gp.id \
          WHERE gp.status = 'open' AND pp.nudged_at IS NULL \
            AND gp.created_at < NOW() - ($1 * interval '1 second') \
-           AND pp.response = 'pending' AND pp.user_id IS NOT NULL",
+           AND pp.response = 'pending' AND pp.user_id IS NOT NULL \
+         LIMIT $2",
     )
     .bind(threshold_secs)
+    .bind(PROPOSAL_SWEEP_CAP)
     .fetch_all(pool)
     .await;
     match rows {
@@ -1086,9 +1091,10 @@ pub async fn mark_proposal_player_nudged(pool: &PgPool, game_proposal_player_id:
 #[cfg(feature = "ssr")]
 pub async fn fetch_expiry_candidates(pool: &PgPool, threshold_secs: i64) -> Vec<Uuid> {
     let rows = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM game_proposals WHERE status = 'open' AND created_at < NOW() - ($1 * interval '1 second')",
+        "SELECT id FROM game_proposals WHERE status = 'open' AND created_at < NOW() - ($1 * interval '1 second') LIMIT $2",
     )
     .bind(threshold_secs)
+    .bind(PROPOSAL_SWEEP_CAP)
     .fetch_all(pool)
     .await;
     match rows {
@@ -1170,9 +1176,11 @@ pub async fn fetch_auto_decline_candidates(
          WHERE gp.status = 'open' \
            AND pp.response = 'pending' \
            AND pp.user_id IS NOT NULL \
-           AND pp.updated_at < NOW() - ($1 * interval '1 second')",
+           AND pp.updated_at < NOW() - ($1 * interval '1 second') \
+         LIMIT $2",
     )
     .bind(threshold_secs)
+    .bind(PROPOSAL_SWEEP_CAP)
     .fetch_all(pool)
     .await;
     match rows {
@@ -2828,6 +2836,70 @@ mod tests {
         assert!(fetch_nudge_candidates(&pool, 7200).await.is_empty());
         assert!(fetch_expiry_candidates(&pool, 7200).await.is_empty());
         assert!(fetch_auto_decline_candidates(&pool, 7200).await.is_empty());
+    }
+
+    // wf F-141: the sweep candidate queries are capped at PROPOSAL_SWEEP_CAP.
+    // Seed more qualifying candidates than the cap and assert each query stops
+    // at exactly PROPOSAL_SWEEP_CAP rows.
+    #[sqlx::test]
+    async fn sweep_candidate_queries_capped_at_proposal_sweep_cap(pool: PgPool) {
+        let gv = seed_game_version(&pool).await;
+        let owner = seed_invite_user(&pool, true).await;
+        let invitee = seed_invite_user(&pool, true).await;
+        let seeded = PROPOSAL_SWEEP_CAP as usize + 5;
+        let mut tx = pool.begin().await.unwrap();
+        for i in 0..seeded {
+            let pid = sqlx::query_scalar(
+                "INSERT INTO game_proposals (game_version_id, owner_user_id, status)
+                 VALUES ($1, $2, 'open') RETURNING id",
+            )
+            .bind(gv)
+            .bind(owner)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+            insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
+                .await
+                .unwrap();
+            insert_proposal_player(
+                &mut tx,
+                pid,
+                1,
+                Some(invitee),
+                None,
+                None,
+                "pending",
+                Some(format!("tok-cap-{i}")),
+            )
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+        sqlx::query("UPDATE game_proposals SET created_at = created_at - interval '1 hour'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE game_proposal_players SET updated_at = updated_at - interval '1 hour'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(
+            seeded > PROPOSAL_SWEEP_CAP as usize,
+            "test must seed more candidates than the cap"
+        );
+        assert_eq!(
+            fetch_nudge_candidates(&pool, 60).await.len(),
+            PROPOSAL_SWEEP_CAP as usize
+        );
+        assert_eq!(
+            fetch_expiry_candidates(&pool, 60).await.len(),
+            PROPOSAL_SWEEP_CAP as usize
+        );
+        assert_eq!(
+            fetch_auto_decline_candidates(&pool, 60).await.len(),
+            PROPOSAL_SWEEP_CAP as usize
+        );
     }
 
     // wfe F34: auto-decline reports a real transition exactly once. The first
