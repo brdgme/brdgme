@@ -38,7 +38,7 @@
 - No change: `rust/docker-bake.hcl`
 
 **Interfaces:**
-- Consumes: existing `ADDR` env var support in each game binary's entrypoint (`rust/lib/cmd/src/http.rs`, defaults `0.0.0.0:80`); existing exec-form CMD and tcpSocket probes.
+- Consumes: existing `ADDR` env var support in each game binary's entrypoint (`rust/lib/game_bin/src/lib.rs`, defaults `0.0.0.0:8080`); existing exec-form CMD and tcpSocket probes.
 - Produces: each of the 22 game images runs as `gcr.io/distroless/cc-debian12@sha256:<digest>`, non-root `USER 65532`, listening on `0.0.0.0:8080` (set via `ADDR` env in the Deployment), with matching containerPort/probe/Service targetPort of 8080.
 
 - [x] **Step 1: Resolve and record the distroless digest**

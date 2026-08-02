@@ -1688,10 +1688,10 @@ created.
 **Objective:** the corpus currently records a fact that is false. Fix the record.
 
 - **Closes:** F-205 (Low).
-- **Files:** `docs/reviews/2026-07-23-rust-review/SUMMARY.md:44-46` and `:139`;
-  `.../findings/dependencies.md:103-108` and `:157`; plus two stale docs that
-  still assert the `0.0.0.0:80` default and cite a WP-73-deleted path.
-- **Size: S** - basis: four text locations.
+- **Files:** this section; `docs/reviews/2026-07-23-rust-review/SUMMARY.md:44-46`
+  and `:139` plus a new traceability record; and two archive docs that still
+  assert the `0.0.0.0:80` default and cite a WP-73-deleted bin path.
+- **Size: S** - basis: four files, six text locations.
 - **Depends on:** nothing.
 
 **The defect:** `dp F12`'s "sentry drags actix-web + ureq into every build" was
@@ -1700,20 +1700,36 @@ are still inert `[[package]]` entries in `rust/Cargo.lock` at HEAD **after a
 later regeneration**. WP-67's own **rider 2 required** the downgrade be written
 back into the finding. It never was.
 
+**The historical findings are immutable.** The original dp F12 text
+(`findings/dependencies.md:103-108` and the `:157` svix follow-on) survives
+**only** at the immutable revision
+`868094a6c8177858dededdd5321ce0c03882ada5` - it is not in the current tree and
+cannot be amended. This plan corrects the record with **current-tree
+traceability** instead: the false claim is struck from `SUMMARY.md`, and a
+traceability record states where the legacy dp F12 text and the current F-205
+finding live.
+
 **Acceptance criteria**
 
-1. Each of the four locations is amended to state the disproved premise and the
-   correct fact. **Closing the finding without amending it is the defect** - do
-   not simply mark it done a second time.
-2. The two stale docs asserting the `0.0.0.0:80` default are corrected. The
-   `0.0.0.0:80` -> `:8080` change is **inert** in production - all 43 k8s
-   Deployments set `ADDR` explicitly to `8080` - so this is a documentation fix,
-   not a behaviour change.
-3. Also record, from the unified report's section 7 traceability item carried
-   forward under plan section 5.7: `SUMMARY.md` at HEAD carries **no `wd Fnn` /
-   `wfe Fnn` identifiers**, and the finding text survives only at
-   `868094a6:.../findings/*.md`. Restore the identifiers or record where they
-   live, otherwise every future citation in this plan is unresolvable.
+1. `SUMMARY.md:44-46` (headline dependencies bullet) and `:139` (WP-67 record)
+   are amended to state the disproved premise and the correct fact. **Closing
+   the finding without amending it is the defect** - do not simply mark it done
+   a second time.
+2. `SUMMARY.md` gains a concise traceability record: current F-205 is documented
+   in `docs/reviews/2026-07-30-review-session/99-UNIFIED-REPORT.md` (P11,
+   section 5, and the tooth-4 sign-off rule, section 10); the original legacy
+   dp F12 text exists only at the immutable revision
+   `868094a6c8177858dededdd5321ce0c03882ada5` in
+   `docs/reviews/2026-07-23-rust-review/findings/dependencies.md:103-108,157`.
+   `SUMMARY.md` carries no `wd Fnn` / `wfe Fnn` identifiers, so citations
+   resolve to the unified report or the immutable revision above. The findings
+   corpus is **not** recreated.
+3. The two archive docs asserting the `0.0.0.0:80` default are corrected to
+   `0.0.0.0:8080`, and the WP-73-deleted bin path is replaced with the current
+   `brdgme_game_bin` entrypoint. The `0.0.0.0:80` -> `:8080` change is **inert**
+   in production - all 44 current k8s Deployments under `k8s/base/game` set
+   `ADDR` explicitly to `0.0.0.0:8080` (verified count) - so this is a
+   documentation fix, not a behaviour change.
 
 ---
 

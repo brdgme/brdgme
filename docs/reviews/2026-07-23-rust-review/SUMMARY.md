@@ -41,9 +41,11 @@ directory's commit range (see the final line).
   extension for long turns, hand-rolled operator finalizer races, fuzzer
   hanging forever on worker failure.
 - dependencies: core stack currency genuinely good; structural problems - no
-  `[workspace.dependencies]`, a sqlx 0.8/0.9 split, sentry dragging
-  actix-web + ureq into every build, and unmaintained/duplicated crates
-  (term_size RUSTSEC-2020-0163, archived serde_yaml, combine, warp-beside-axum).
+  `[workspace.dependencies]`, a sqlx 0.8/0.9 split, and unmaintained/duplicated
+  crates (term_size RUSTSEC-2020-0163, archived serde_yaml, combine,
+  warp-beside-axum). The "sentry drags actix-web + ureq into every build" item
+  (dp F12) is **struck as false** - neither is a sentry 0.48 default and nothing
+  enabled them; see the traceability record below.
 
 Cross-cutting themes: request-reachable panics (char/byte confusion +
 deserialized-state trust); privacy/visibility gates built but not wired;
@@ -137,6 +139,8 @@ Dependencies / build:
 - WP-65 - workspace hygiene + weekly deps-currency job.
 - WP-66 - sqlx unified 0.9 workspace-wide; session store vendored (D-17).
 - WP-67 - sentry trimmed to explicit features, no functionality lost (D-18).
+  The dp F12 finding this closed asserted a mechanism that was **never true**,
+  and rider 2's mandated downgrade never landed (F-205; traceability below).
 - WP-69 - deny.toml hardened: bans + sources deny, stale ignores cleared (D-23).
 - WP-70 - serde_yaml -> serde_yaml_ng, byte-identical (D-21; backend half open).
 - WP-71 - warp -> axum in lib/cmd (D-22).
@@ -189,6 +193,20 @@ Deliberate product holds, not unfinished remediation:
   serde_yaml_ng after the WP-70 front half landed (BACKLOG #57).
 - Non-default build targets not CI-gated - non-ssr `cargo test -p web` never
   compiled; wasm clippy `-D warnings` fails on pre-existing lints (BACKLOG #58).
+
+## Finding corpus traceability
+
+- Current **F-205** - `dp F12` closed on a premise that was never true, never
+  amended - is documented in the 2026-07-30 review session:
+  `docs/reviews/2026-07-30-review-session/99-UNIFIED-REPORT.md` (P11, section
+  5, and the tooth-4 sign-off rule, section 10).
+- The original legacy dp F12 text ("sentry default features drag actix-web 4 and
+  ureq 3 into every server build") and its svix follow-on survive **only** at
+  the immutable revision `868094a6c8177858dededdd5321ce0c03882ada5` in
+  `docs/reviews/2026-07-23-rust-review/findings/dependencies.md:103-108,157`.
+  They are not amended here; the record is corrected in this file instead.
+- `SUMMARY.md` at HEAD carries no `wd Fnn` / `wfe Fnn` identifiers; future
+  citations resolve to the unified report above or the immutable revision.
 
 ---
 
