@@ -52,25 +52,13 @@ pub async fn unsubscribe_get(
     let Some(kind) = crate::email::render::EmailKind::from_slug(&kind) else {
         return (StatusCode::BAD_REQUEST, "Unknown subscription type.").into_response();
     };
-    let slug = html_escape(kind.slug());
-    let token = html_escape(&params.t);
+    let slug = crate::email::render::escape_html_attr(kind.slug());
+    let token = crate::email::render::escape_html_attr(&params.t);
     let label = kind.link_label();
     let html = format!(
         "<html><body style=\"font-family:sans-serif;padding:24px;\"><p>{label}</p><form method=\"post\" action=\"/api/unsubscribe/{slug}?t={token}\"><button type=\"submit\">Unsubscribe</button></form></body></html>"
     );
     (StatusCode::OK, Html(html)).into_response()
-}
-
-/// Minimal HTML escaping for the untrusted `t` query value (and the slug) before
-/// reflecting them into the confirmation page. `&` first so later replacements
-/// are not double-escaped. No public HTML-escape helper exists in this crate
-/// (brdgme_markup's is `pub(crate)`), so this is private to the module.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 #[cfg(all(test, feature = "ssr"))]
@@ -157,19 +145,29 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn post_disables_only_the_matching_pref(pool: PgPool) {
+    async fn post_disables_only_intended_pref_for_each_slug(pool: PgPool) {
         let app = app(&pool).await;
-        let user_id = seed_with_token(&pool, "tok-reminder").await;
-
-        assert_eq!(
-            post_unsubscribe(&app, "reminder", "tok-reminder").await,
-            StatusCode::OK
-        );
-
-        let (turn, invite, reminder) = prefs(&pool, user_id).await;
-        assert!(!reminder);
-        assert!(turn);
-        assert!(invite);
+        for (slug, token) in [
+            ("turn", "tok-turn"),
+            ("game", "tok-game"),
+            ("reminder", "tok-reminder"),
+            ("invite", "tok-invite"),
+        ] {
+            let user_id = seed_with_token(&pool, token).await;
+            assert_eq!(post_unsubscribe(&app, slug, token).await, StatusCode::OK);
+            let (turn, invite, reminder) = prefs(&pool, user_id).await;
+            let expected = match slug {
+                "turn" | "game" => (false, true, true),
+                "reminder" => (true, true, false),
+                "invite" => (true, false, true),
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                (turn, invite, reminder),
+                expected,
+                "slug {slug} must disable only its own live preference"
+            );
+        }
     }
 
     #[sqlx::test]
@@ -230,9 +228,25 @@ mod tests {
         );
     }
 
-    #[test]
-    fn html_escape_escapes_untrusted_input() {
-        assert_eq!(html_escape("<a & \"b\">"), "&lt;a &amp; &quot;b&quot;&gt;");
-        assert_eq!(html_escape("it's"), "it&#39;s");
+    #[tokio::test]
+    async fn get_reflects_slug_and_token_escaped() {
+        let resp = unsubscribe_get(
+            Path("reminder".to_string()),
+            Query(UnsubscribeQuery {
+                t: "a&b\"c<d'e".to_string(),
+            }),
+        );
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(
+            html.contains("/api/unsubscribe/reminder?t=a&amp;b&quot;c&lt;d&#39;e"),
+            "reflected action href must be escaped: {html}"
+        );
+        assert!(
+            !html.contains("t=a&b\"c<d'e"),
+            "raw token must not be reflected: {html}"
+        );
     }
 }

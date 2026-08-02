@@ -32,15 +32,6 @@ impl EmailKind {
         }
     }
 
-    pub fn pref_column(self) -> &'static str {
-        match self {
-            EmailKind::Turn => "turn_emails_enabled",
-            EmailKind::GameEvent => "turn_emails_enabled",
-            EmailKind::Reminder => "reminder_emails_enabled",
-            EmailKind::Invite => "invite_emails_enabled",
-        }
-    }
-
     pub fn link_label(self) -> &'static str {
         match self {
             EmailKind::Turn => "Unsubscribe from turn notifications",
@@ -149,18 +140,12 @@ fn fallback_html(bg: &str, fg: &str, body: &str) -> String {
     )
 }
 
-fn escape_html_attr(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(c),
-        }
-    }
-    out
+pub(crate) fn escape_html_attr(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 /// Renders one outbound game email. `palette`/`players` are the recipient's
@@ -251,8 +236,8 @@ pub fn render_game_email(
         body.push_str(&format!("<span style=\"color:{muted};\">{f}</span>"));
     }
     if let Some(u) = &unsubscribe {
-        let unsub = unsubscribe_url(u.kind, u.token);
-        let manage = manage_subscriptions_url();
+        let unsub = escape_html_attr(&unsubscribe_url(u.kind, u.token));
+        let manage = escape_html_attr(&manage_subscriptions_url());
         body.push_str(&format!(
             "<a href=\"{unsub}\" style=\"color:{muted};font-size:12px;\">{}</a>\n\n",
             u.kind.link_label()
@@ -367,6 +352,7 @@ pub fn render_game_email(
 mod tests {
     use super::*;
     use brdgme_color::{DARK, DRACULA, LIGHT};
+    use serial_test::serial;
 
     fn two_players(palette: &Palette) -> Vec<Player> {
         vec![
@@ -675,6 +661,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn unsubscribe_some_reminder_emits_https_headers_and_links() {
         let email = render_game_email(
             &minimal_content(),
@@ -717,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    fn email_kind_slug_roundtrip_and_columns() {
+    fn email_kind_slug_roundtrip() {
         for k in [
             EmailKind::Turn,
             EmailKind::GameEvent,
@@ -727,9 +714,94 @@ mod tests {
             assert_eq!(EmailKind::from_slug(k.slug()), Some(k));
         }
         assert_eq!(EmailKind::from_slug("nope"), None);
-        assert_eq!(EmailKind::Reminder.pref_column(), "reminder_emails_enabled");
-        assert_eq!(EmailKind::Turn.pref_column(), "turn_emails_enabled");
-        assert_eq!(EmailKind::GameEvent.pref_column(), "turn_emails_enabled");
-        assert_eq!(EmailKind::Invite.pref_column(), "invite_emails_enabled");
+    }
+
+    #[test]
+    fn escape_html_attr_escapes_hostile_input() {
+        assert_eq!(
+            escape_html_attr("<a & \"b\" 'c'>"),
+            "&lt;a &amp; &quot;b&quot; &#39;c&#39;&gt;"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn render_game_email_escapes_all_four_hrefs() {
+        struct RestoreBaseUrl(Option<String>);
+        impl Drop for RestoreBaseUrl {
+            fn drop(&mut self) {
+                match &self.0 {
+                    Some(prior) => unsafe { std::env::set_var("PUBLIC_BASE_URL", prior) },
+                    None => unsafe { std::env::remove_var("PUBLIC_BASE_URL") },
+                }
+            }
+        }
+        let prior = std::env::var("PUBLIC_BASE_URL").ok();
+        unsafe { std::env::set_var("PUBLIC_BASE_URL", "https://evil.test/a\"&b'") };
+        let _restore = RestoreBaseUrl(prior);
+
+        let content = EmailContent {
+            subject: "S".into(),
+            header: None,
+            digest: None,
+            board: None,
+            you_can: None,
+            browser_url: Some("https://evil.test/p?q=\"&x".into()),
+            rules_url: Some("https://evil.test/r?q=\"&y".into()),
+            footer: None,
+        };
+        let email = render_game_email(
+            &content,
+            &LIGHT,
+            &[],
+            None,
+            true,
+            "g-tok@brdg.me",
+            Some(Unsubscribe {
+                kind: EmailKind::Reminder,
+                token: "tok\"&'z",
+            }),
+        );
+
+        assert!(
+            email
+                .html
+                .contains("href=\"https://evil.test/p?q=&quot;&amp;x\""),
+            "browser href must be escaped: {}",
+            email.html
+        );
+        assert!(
+            email
+                .html
+                .contains("href=\"https://evil.test/r?q=&quot;&amp;y\""),
+            "rules href must be escaped: {}",
+            email.html
+        );
+        assert!(
+            email.html.contains(
+                "href=\"https://evil.test/a&quot;&amp;b&#39;/api/unsubscribe/reminder?t=tok&quot;&amp;&#39;z\""
+            ),
+            "unsubscribe href must be escaped: {}",
+            email.html
+        );
+        assert!(
+            email
+                .html
+                .contains("href=\"https://evil.test/a&quot;&amp;b&#39;/settings\""),
+            "manage href must be escaped: {}",
+            email.html
+        );
+        assert!(
+            !email.html.contains("https://evil.test/p?q=\"&x"),
+            "raw browser url must not appear in html: {}",
+            email.html
+        );
+        assert!(
+            email
+                .text
+                .contains("https://evil.test/a\"&b'/api/unsubscribe/reminder?t=tok\"&'z"),
+            "text part must keep raw urls unescaped: {}",
+            email.text
+        );
     }
 }
