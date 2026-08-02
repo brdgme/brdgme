@@ -490,7 +490,10 @@ async fn game_page_player_names_link_to_profiles_for_human_opponents(pool: PgPoo
             creator_id: user.id,
             opponent_ids: &[opponent.id],
             opponent_emails: &[],
-            bot_slots: &[],
+            bot_slots: &[BotSlot {
+                name: "Botty".to_string(),
+                bot_name: "easy".to_string(),
+            }],
             chat_id: None,
             game_state: "state",
             all_accepted: false,
@@ -1288,16 +1291,53 @@ async fn admin_export_route_requires_login(pool: PgPool) {
 
 #[sqlx::test]
 async fn admin_export_route_rejects_non_admin(pool: PgPool) {
+    let owner = make_user(&pool, "owner").await;
+    let game_version_id = make_game_version(&pool, "http://localhost:0/mock").await;
+    let game = db::create_game_with_users(
+        &pool,
+        CreateGameOpts {
+            game_version_id,
+            whose_turn: &[0],
+            eliminated: &[],
+            placings: &[],
+            points: &[],
+            creator_id: owner.id,
+            opponent_ids: &[],
+            opponent_emails: &[],
+            bot_slots: &[],
+            chat_id: None,
+            game_state: "opaque_state_blob",
+            all_accepted: false,
+        },
+    )
+    .await
+    .unwrap();
+
+    let private_log_sentinel = "private-log-leak-sentinel-f142";
+    sqlx::query(
+        "INSERT INTO game_logs (id, game_id, body, is_public, logged_at) VALUES ($1, $2, $3, false, NOW())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(game.id)
+    .bind(private_log_sentinel)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let user = make_user(&pool, "pleb").await;
     let cookie = login_cookie(&pool, &user, "pleb@example.com").await;
     let app = build_router(make_state(pool).await).await;
-    let (status, _, _) = get(
+    let (status, _, body) = get(
         app,
-        &format!("/admin/games/{}/export", uuid::Uuid::new_v4()),
+        &format!("/admin/games/{}/export", game.id),
         Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        !body.contains(private_log_sentinel),
+        "private log leaked to non-admin: {body}"
+    );
 }
 
 #[sqlx::test]
