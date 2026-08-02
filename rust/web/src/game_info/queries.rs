@@ -15,7 +15,7 @@ pub async fn game_info_rules_version_id(pool: &PgPool, game_type_id: Uuid) -> Re
     let row: Option<(Uuid,)> = sqlx::query_as(
         "SELECT id FROM game_versions
          WHERE game_type_id = $1 AND is_public = true AND is_deprecated = false
-         ORDER BY created_at DESC LIMIT 1",
+         ORDER BY created_at DESC, name DESC LIMIT 1",
     )
     .bind(game_type_id)
     .fetch_optional(pool)
@@ -375,6 +375,52 @@ mod tests {
             .expect("a version is picked");
         assert_eq!(picked, newer, "must pick newest created_at, not name order");
         assert_ne!(picked, older);
+    }
+
+    #[sqlx::test]
+    async fn rules_version_id_ties_created_at_by_name_desc(pool: PgPool) {
+        // Two public, non-deprecated versions with identical created_at.
+        // created_at DESC alone cannot order them, so name DESC must pick
+        // '2.0.0' (lexicographically greater) in both selectors.
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (id, name, player_counts)
+             VALUES (uuid_generate_v4(), $1, '{2,3,4}') RETURNING id",
+        )
+        .bind("Tied Game")
+        .fetch_one(&pool)
+        .await
+        .expect("insert game_type");
+
+        let higher: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated, created_at)
+             VALUES (uuid_generate_v4(), $1, '2.0.0', 'http://localhost:0/mock', true, false, '2024-01-01 00:00:00')
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert higher-name version");
+
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated, created_at)
+             VALUES (uuid_generate_v4(), $1, '1.0.0', 'http://localhost:0/mock', true, false, '2024-01-01 00:00:00')
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert lower-name version");
+
+        let rules_version_id = game_info_rules_version_id(&pool, game_type_id)
+            .await
+            .expect("query ok")
+            .expect("a version is picked");
+        let latest = crate::db::find_latest_non_deprecated_game_version(&pool, game_type_id)
+            .await
+            .expect("query ok")
+            .expect("a version is picked");
+        assert_eq!(rules_version_id, latest.id, "both selectors must agree on the tie");
+        assert_eq!(rules_version_id, higher, "name DESC must pick '2.0.0'");
     }
 
     #[sqlx::test]
