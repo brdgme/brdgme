@@ -87,10 +87,6 @@ async fn send_login_email(
         return Ok(());
     };
 
-    // Counts actual Resend API calls only (feeds the Resend quota alert), not
-    // the dev-mode logging fallback above which never touches Resend at all.
-    axum_prometheus::metrics::counter!("login_emails_sent_total").increment(1);
-
     let from_addr =
         std::env::var("EMAIL_FROM").unwrap_or_else(|_| "brdg.me <mail@brdg.me>".to_string());
     let (text_body, html_body) = login_email_bodies(token);
@@ -102,11 +98,31 @@ async fn send_login_email(
     .with_text(&text_body)
     .with_html(&html_body);
 
-    if let Err(e) = resend.emails.send(email).await {
-        tracing::error!("Failed to send login email to {}: {}", to_email, e);
+    if !record_login_email_result(resend.emails.send(email).await, to_email) {
         return Err(());
     }
     Ok(())
+}
+
+/// The send-result metric branch of [`send_login_email`], split out (U9) so
+/// the sent/failed metric branches are testable without a live Resend
+/// transport. The dev-mode log fallback never reaches here; only actual
+/// Resend API calls are counted.
+fn record_login_email_result(
+    send_result: Result<resend_rs::types::CreateEmailResponse, resend_rs::Error>,
+    to_email: &str,
+) -> bool {
+    match send_result {
+        Ok(_) => {
+            axum_prometheus::metrics::counter!("login_emails_sent_total").increment(1);
+            true
+        }
+        Err(e) => {
+            axum_prometheus::metrics::counter!("login_emails_failed_total").increment(1);
+            tracing::error!("Failed to send login email to {}: {}", to_email, e);
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1316,6 +1332,16 @@ mod tests {
         send_login_email(None, "someone@example.com", "123456")
             .await
             .unwrap();
+    }
+
+    // U9: a failed Resend result hits the failed branch (increments the
+    // failure counter, not the success counter) and returns false.
+    #[test]
+    fn record_login_email_result_err_counts_failed_and_returns_false() {
+        assert!(!record_login_email_result(
+            Err(resend_rs::Error::Other("boom".into())),
+            "someone@example.com"
+        ));
     }
 
     #[test]
