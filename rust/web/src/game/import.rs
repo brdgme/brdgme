@@ -187,16 +187,26 @@ async fn placeholder_user(tx: &mut sqlx::PgConnection, name: &str) -> anyhow::Re
             .await
             .context("generate placeholder username")?
     };
+    // A concurrent import can claim `final_name` between the availability
+    // check above and this INSERT, and a 23505 aborts the outer transaction -
+    // the fallback below would then always fail 25P02. Insert under a
+    // savepoint so a collision rolls back cleanly and the fallback runs on
+    // the usable outer transaction.
+    let mut sp = sqlx::Acquire::begin(&mut *tx).await?;
     let insert_res = sqlx::query_scalar!(
         "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
         final_name,
         &Vec::<String>::new()
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *sp)
     .await;
     match insert_res {
-        Ok(id) => Ok(id),
+        Ok(id) => {
+            sp.commit().await?;
+            Ok(id)
+        }
         Err(sqlx::Error::Database(de)) if de.is_unique_violation() => {
+            sp.rollback().await?;
             let fallback_name = crate::db::generate_unique_username(&mut *tx)
                 .await
                 .context("generate placeholder username after unique violation")?;
@@ -355,6 +365,61 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap()
+    }
+
+    /// F-139 regression: the placeholder-user unique-violation retry used to
+    /// run on the aborted outer transaction and always fail 25P02. The trigger
+    /// claims the bundle's human name mid-INSERT (the availability check has
+    /// already passed), forcing the retry onto the savepoint fallback path.
+    #[sqlx::test]
+    async fn import_bundle_retries_placeholder_user_on_unique_violation(pool: PgPool) {
+        sqlx::query(
+            r#"
+            CREATE FUNCTION claim_import_collision() RETURNS trigger AS $$
+            BEGIN
+                IF NEW.name = 'import-collide' AND NOT EXISTS (
+                    SELECT 1 FROM users WHERE lower(name) = lower('import-collide')
+                ) AND pg_trigger_depth() = 1 THEN
+                    INSERT INTO users (name, pref_colors) VALUES ('import-collide', '{}'::text[]);
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER claim_import_collision BEFORE INSERT ON users
+             FOR EACH ROW EXECUTE FUNCTION claim_import_collision()",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut bundle = make_exported_game(&pool).await;
+        for player in &mut bundle.players {
+            if player.bot_name.is_none() {
+                player.name = "import-collide".to_string();
+            }
+        }
+
+        let outcome = import_bundle(&pool, &bundle).await.unwrap();
+        let human = crate::db::find_game_extended(&pool, outcome.game_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .game_players
+            .into_iter()
+            .find(|p| p.user.is_some())
+            .unwrap()
+            .user
+            .unwrap();
+        assert_ne!(
+            human.name, "import-collide",
+            "the collision must be resolved with the generated fallback name"
+        );
     }
 
     #[sqlx::test]
