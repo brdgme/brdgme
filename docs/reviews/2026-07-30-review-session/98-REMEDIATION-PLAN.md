@@ -1452,10 +1452,12 @@ function. F-100 pins an **absent** session expiry as if intended.
 - **Closes:** F-175, F-176 (Medium), F-170 (Medium), F-171 (Medium), F-172,
   F-174, F-177, F-178, F-184 (Low).
 - **Files:** `rust/web/src/email/outbound.rs:123-139` (+1 site), `:301-364`
-  (+2 sites); `rust/web/src/email/render.rs:35-42` (+1 site), `:252-262`,
-  `:152-164`; `rust/web/src/email/inbound.rs:135`, `:1377-1380`;
-  `rust/web/src/email/commands.rs:179-208` (`:192`);
-  `rust/web/src/components/opponent_slot.rs:93-97` (+2 sites).
+   (+2 sites); `rust/web/src/email/render.rs:35-42` (+1 site), `:252-262`,
+   `:152-164`; `rust/web/src/email/inbound.rs:135`, `:1377-1380`;
+   `rust/web/src/email/commands.rs:179-208` (`:192`);
+   `rust/web/src/email/unsubscribe.rs:159-173` (+3 sites);
+   `rust/web/src/app.rs:55-70`;
+   `rust/web/src/components/opponent_slot.rs:93-97` (+2 sites).
 - **Size: M** - basis: nine findings in one module family, mostly localised.
 - **Depends on:** nothing.
 
@@ -1469,13 +1471,18 @@ duplicates `html_escape` (F-178). Help text advertises unavailable verbs (F-174)
 
 **Acceptance criteria**
 
-1. F-175: token creation is atomic (upsert or transactional); a test calls it
-   concurrently and asserts one persisted token.
-2. F-176: the four `Test? y` rows get tests that **call the functions the rows
-   name**.
-3. F-170: `pref_column()` gets a caller or is deleted. **The live mapping must be
-   the tested one** - a callerless function with a passing test is tooth-2 dead.
-   Note the game-start half of F-170 is **refuted**; only the row itself is open.
+1. F-175: both sibling user-token ensure functions use an atomic update; tests
+   call each concurrently and assert convergence on one persisted token, and call
+   each with an unknown user id and assert an error.
+2. F-176: the four `Test? y` rows get discriminating tests that call the named
+   functions: `ensure_email_token` concurrently and with an unknown id (F44/F45),
+   `try_send_rendered_email` plus its smallest private delivery-result boundary
+   for the success/failure metric branches (F46), and `sentry_init_snippet` with
+   `</script>` in both interpolated values (F63).
+3. F-170: delete `pref_column()` and its callerless test. Parameterized
+   unsubscribe endpoint tests cover all four `EmailKind` slugs and assert the
+   live preference mapping changes only its intended column. Note the game-start
+   half of F-170 is **refuted**; only the row itself is open.
 4. F-171: a test asserts `List-Unsubscribe` is **absent** where the row specified
    it - this is the fifth confirmed "Test? y" with no test and the most explicit,
    because the row said exactly what to assert.

@@ -63,7 +63,7 @@ restored per owner instruction.)
 | R-38 | blocked(5.3) | | 5.4 done (973ea62) |
 | R-39 | done(3c4c1ca) | afbca143ce59e4e2f0ad6cfe41b9ad94975c44bf, 6dd0c41e4852172e730eb047857f6ac014d93679, b2e2021fa6f0e9c6099867c1fd981aaef7156601, 68140350ed56fe05f34771281611b5d8a8c3e71d, 1db7266404db772de630cc9458bb745c81d4f9ab, 9867e5396091e9f2c9827eaf0d081eeeeb25bf1b, 3c4c1ca4ce18485acd7524dc3887f2c2a85e4b2f | F-132 refuted by the per-connection, viewer-fixed `VisibilityCache` lifetime; no cache or SSE change. Static checks and final allowed web cargo check pass; runtime DB/SSR tests CI-pending. Independent authorization/visibility review PASS with no findings. |
 | R-40 | done(1be0583) | 2c0fee15daa18563b57e40ae8e14d03d1f00cd00, 1c1bfbe9a5e37cfcf9c7a6eb559a6e69bd6b24cb, 9f3e5742e6539d9c82e33929bf88e78b17247be3, b6435094ce8384078ff8e973ff9bf741111aba17, 1be0583fac259118e6926ec6ce5181912d03854b | F-139 savepoint retry, F-121 capped actual read, F-122 pre-write undo-state validation; final approved web checks pass, runtime tests CI-pending. |
-| R-41 | pending | | |
+| R-41 | in-progress | | Approved survey corrections committed; units 41.1 through 41.5 execute serially. |
 | R-42 | pending | | |
 | R-43 | pending | | |
 | R-44 | blocked(5.2) | | |
