@@ -24,7 +24,7 @@ fn read_bundle_limited<R: std::io::Read>(
         .take(max_bytes + 1)
         .read_to_string(&mut raw)
         .map_err(|e| anyhow::anyhow!("reading {path}: {e}"))?;
-    if bytes_read > max_bytes {
+    if bytes_read as u64 > max_bytes {
         anyhow::bail!("{path}: exceeds the {max_bytes} byte sanity limit");
     }
     Ok(raw)
