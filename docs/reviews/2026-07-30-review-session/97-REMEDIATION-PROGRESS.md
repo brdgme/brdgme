@@ -57,7 +57,7 @@ restored per owner instruction.)
 | R-32 | blocked(AC4 owner amendment/sign-off) | | AC4 non-2-player fixture unreachable: starship-catan-1 is fixed two-player, so no truthful non-2-player game can be constructed; requires owner amendment/sign-off (see R-32 blocker evidence) |
 | R-33 | done(ad6fa645) | ad6fa6452da9752bca43a4c726bb5c7caa51b6f9 | closes F-40/F-42/F-43/F-46/F-47 in rust/game/acquire-1/src/lib.rs. AC1 F-40: three bank sites (handle_found_command, take_shares, return_shares) get_mut + GameError::Internal, grep or_insert(STARTING_SHARES)=0 hits, whole-board conservation regression. AC2 F-42 (owner-amended plan AC2): `merger_cascade_removes_played_tile_by_current_identity` drives the real Festival->American->Imperial cascade in one `play b2` command with played at hand index 0 and two survivors; asserts survivors == [s1, s2] (exact order) and played absent. Pre-fix failure logic RED-verified: swap_remove(0) on [played, s1, s2] yields [s2, s1] and the order assertion fails exactly as predicted; GREEN with the retained identity-removal `tiles.retain(|l| l != loc)`. AC3 F-43: handle_end_command routes through assert_player_turn (9/9 command handlers); main_turn_player only in Phase def + player_can_end parser gate. AC4 F-46: pub_state() = self.into() (From<&Game>), no whole-Game clone. AC5 F-47: 26 passing (25 lib incl board + 1 contract). Gates all exit 0: cargo test -p acquire-1 (25+1), cargo clippy -p acquire-1 --all-targets -- -D warnings, cargo fmt -p acquire-1 -- --check, git diff --check. No gameplay/rules/PORT_PARITY change. Independent review PASS, no blocking findings; two non-blocking residuals: buy-path missing bank key is a read-only InvalidInput rather than Internal; F-46 regression test is coverage rather than discriminating |
 | R-34 | done | | F-25 REFUTED: current five-pile placement is official Queen Games behavior once back-pop draw direction is accounted for - regression test `scoring_cards_fire_at_official_fifth_pile_bounds` consumes the deck via the real `draw_cards` pop-from-back path and asserts round 1 in [L-4f, L-3f-1] and round 2 in [L-2f+1, L-f] money-card draws over players 2-6 x seeds 0..24 (125 games, all pass; fails against the thirds distribution, verified); historic Go one-card-shifted round-1 distribution NOT restored; NO production change for F-25. F-26 FIXED: `self.round = 3` forced immediately before the final `score_round()` in the `FinalPlace` -> `End` transition (`lib.rs:388-391`); test `early_final_scoring_uses_round_three_rewards` drives the real final path (3p, round 1, FinalPlace, all place queues empty, one Pavillion on board 0) and asserts round 3 + 16 points - pre-fix RED (round 2, 1 pt), post-fix GREEN. `cargo test -p alhambra-1` 50 lib + 1 contract pass / 0 fail; `cargo clippy -p alhambra-1 --all-targets -- -D warnings` exit 0; `cargo fmt -p alhambra-1 -- --check` exit 0; `git diff --check` exit 0. No PORT_PARITY gameplay change (F-26 round-3 force is the approved fix; nothing else altered). Uncommitted per work-unit brief. |
-| R-35 | pending | | sequence with 5.8 |
+| R-35 | blocked(owner decision pending) | | sequence with 5.8; see Pending User Decisions |
 | R-36 | pending | | |
 | R-37 | pending | | 5.4 done (973ea62); unblocked |
 | R-38 | blocked(5.3) | | 5.4 done (973ea62) |
@@ -128,6 +128,12 @@ restored per owner instruction.)
 | Web crate commands | cargo check/clippy -p web ALLOWED; build/test/run against web banned | 2026-07-31 |
 | Commit policy | commit after each item; never push | 2026-07-31 |
 | Review-dir edits | Allowed (restriction lifted 2026-07-31); agents must never delete/move files or changes outside their own work scope - leave unrelated working-tree changes alone | 2026-07-31 |
+
+## Pending User Decisions
+
+| Item | Pending decision |
+|------|------------------|
+| R-35 | Removing `Status` lacks an approved public points source: `Response::Status` is the only response carrying `GameResponse.points`, and `Response::PlayerRender` carries no `points`. Required decision: either approve optional all-seat `points` in `Response::PlayerRender` (populated by Rust handlers, absent for existing Go handlers) or specify another Go-compatible source. R-35 is blocked on this decision; sequence with 5.8 preserved. |
 
 ## Incident log
 
