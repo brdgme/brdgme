@@ -28,6 +28,25 @@ KEDA_HTTP_ADDON_VERSION="0.15.0"
 
 set -euo pipefail
 
+# --- Memory guard ---
+# Tilt and Kind exhaust host memory below 32 GiB (docs/DEV.md "Kind Parity
+# Lane"), so reject low-memory hosts before any cluster setup begins.
+# BRDGME_KIND_MEMTOTAL_KB is a bounded test seam (KiB) overriding the
+# /proc/meminfo read; never set in normal use.
+MIN_MEM_GIB=32
+mem_total_kib="${BRDGME_KIND_MEMTOTAL_KB:-$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)}"
+if ! [[ "$mem_total_kib" =~ ^[0-9]+$ ]]; then
+    echo "error: cannot determine host memory; nothing was started" >&2
+    exit 1
+fi
+mem_total_gib=$((mem_total_kib / 1024 / 1024))
+if (( mem_total_gib < MIN_MEM_GIB )); then
+    echo "error: Kind/Tilt need >= ${MIN_MEM_GIB} GiB RAM (this host reports ${mem_total_gib} GiB)" >&2
+    echo "       Tilt and Kind exhaust host memory below that threshold (docs/DEV.md); nothing was started." >&2
+    echo "       Use the default Compose lane instead: docker compose up + cargo leptos watch (docs/DEV.md)." >&2
+    exit 1
+fi
+
 # --- Kind cluster + local registry ---
 echo "==> Applying ctlptl.yaml (Kind cluster + kind-registry)..."
 ctlptl apply -f ctlptl.yaml

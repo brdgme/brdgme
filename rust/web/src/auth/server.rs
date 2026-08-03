@@ -108,6 +108,7 @@ async fn send_login_email(
 /// the sent/failed metric branches are testable without a live Resend
 /// transport. The dev-mode log fallback never reaches here; only actual
 /// Resend API calls are counted.
+#[cfg(feature = "ssr")]
 fn record_login_email_result(
     send_result: Result<resend_rs::types::CreateEmailResponse, resend_rs::Error>,
     to_email: &str,

@@ -5,6 +5,20 @@
 # declared in.
 ARG SHORT_SHA=dev
 
+# Optional build-concurrency limit (no default, so Cargo keeps its own default
+# unless the caller explicitly passes it, e.g. `--build-arg
+# CARGO_BUILD_JOBS=8`). Like SHORT_SHA, it must be re-declared in each stage
+# whose cargo build should honour it; the value is then passed to Cargo as
+# `--jobs` through `${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"}` on each
+# cargo-chef/cargo build invocation, which expands to nothing when the caller
+# leaves it unset. The `cargo leptos build` RUN in web-builder does NOT use
+# that CLI form: cargo-leptos 0.3.7's build subcommand rejects `--jobs`. The
+# ARG value still reaches that build's child cargo - a supplied ARG is present
+# in the RUN environment (an unset ARG stays absent), cargo-leptos spawns
+# cargo inheriting it, and Cargo natively honours `CARGO_BUILD_JOBS` as its
+# job count. Unset, the variable is simply absent and Cargo keeps its default.
+ARG CARGO_BUILD_JOBS
+
 # Pinned to a specific bookworm-based tag (not `latest-rust-1`, which floats
 # onto whatever Debian release cargo-chef currently publishes). Game runtime
 # stages below are `gcr.io/distroless/cc-debian12` (also Debian 12/bookworm,
@@ -28,16 +42,25 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 # --- Builder for Games (Standard Rust) ---
 FROM chef AS builder
+ARG CARGO_BUILD_JOBS
 COPY --from=planner /app/recipe.json recipe.json
-# Cook standard dependencies for the workspace
-RUN cargo chef cook --release --recipe-path recipe.json
+# Cook standard dependencies for the workspace. The Cargo registry/git cache
+# mounts keep the crate downloads across builds and across the parallel
+# builder/web-builder stages of a bake graph; sharing=locked serialises
+# writers so concurrent builds cannot corrupt the registry index or git db.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
+    cargo chef cook --release --recipe-path recipe.json ${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"}
 COPY rust .
 # Build game services (exclude web to save time/resources here)
-RUN cargo build --release --workspace --exclude web
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
+    cargo build --release --workspace --exclude web ${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"}
 
 # --- Builder for Web (Leptos) ---
 FROM chef AS web-builder
 ARG SHORT_SHA
+ARG CARGO_BUILD_JOBS
 # Install Web Tools (Sass, binstall, cargo-leptos, wasm target)
 RUN curl -L https://github.com/sass/dart-sass/releases/download/1.101.0/dart-sass-1.101.0-linux-x64.tar.gz | tar -xz \
     && mv dart-sass /usr/local/lib/dart-sass \
@@ -69,8 +92,12 @@ RUN curl -L https://github.com/WebAssembly/binaryen/releases/download/version_12
 
 COPY --from=planner /app/recipe.json recipe.json
 # Cook Web Dependencies (Host & WASM)
-RUN cargo chef cook --release --recipe-path recipe.json -p web --features ssr --no-default-features
-RUN cargo chef cook --release --target wasm32-unknown-unknown --recipe-path recipe.json -p web --features hydrate --no-default-features
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
+    cargo chef cook --release --recipe-path recipe.json -p web --features ssr --no-default-features ${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"}
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
+    cargo chef cook --release --target wasm32-unknown-unknown --recipe-path recipe.json -p web --features hydrate --no-default-features ${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"}
 
 COPY rust .
 ENV SQLX_OFFLINE=true
@@ -86,7 +113,11 @@ RUN cd js && npm ci && npm run build
 # wasm-bindgen/wasm-opt pipeline never sees DWARF), which still produces the
 # server binary, styles, assets and JS glue - then rebuild the shipped wasm
 # manually below, splitting the DWARF out BEFORE wasm-opt runs.
-RUN cargo leptos build --release
+# cargo-leptos 0.3.7 rejects `--jobs` on its build subcommand; the ARG's value
+# reaches cargo via the inherited CARGO_BUILD_JOBS env var (see top of file).
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
+    cargo leptos build --release
 # Re-run wasm-bindgen on the raw wasm with --keep-debug so the DWARF (from
 # `debug = true` on [profile.wasm-release]) survives into the output. Same
 # wasm-bindgen version and input wasm as cargo-leptos's own run, so the JS
@@ -137,6 +168,18 @@ RUN apt-get -y update && apt-get install -y --no-install-recommends libpq5 ca-ce
 COPY --from=migrate-builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
 COPY rust/web/migrations /migrations
 CMD ["sqlx", "migrate", "run", "--source", "/migrations"]
+
+# --- Final Stage for register (local dev tool: idempotent game registration) ---
+# Dev-only target for the root Compose lane (bulk `register set`), not part of
+# the production bake. The tool reads canonical manifests from
+# ./k8s/base/game/<game>/game-version.yaml relative to CWD, so the manifests are
+# shipped into the image rather than bind-mounted from the host.
+FROM debian:bookworm-slim AS register
+RUN apt-get -y update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/register /register
+COPY k8s/base/game /k8s/base/game
+WORKDIR /
+ENTRYPOINT ["/register"]
 
 # --- Final Stage for Web ---
 FROM debian:bookworm-slim AS web

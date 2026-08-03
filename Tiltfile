@@ -10,6 +10,32 @@
 #
 # Prerequisites: run scripts/setup-kind-cluster.sh once before `tilt up`.
 
+# --- Resource guard (docs/DEV.md "Kind Parity Lane") ---
+# Tilt and Kind exhaust host memory below 32 GiB, so reject low-memory hosts
+# before any build or resource is created. BRDGME_MEMTOTAL_KB is a bounded
+# test seam (KiB) overriding the /proc/meminfo read; never set in normal use.
+MIN_MEM_GIB = 32
+MEM_TOTAL_KB = os.getenv("BRDGME_MEMTOTAL_KB")
+
+def _mem_total_kib():
+    if MEM_TOTAL_KB != None and MEM_TOTAL_KB != "":
+        return int(MEM_TOTAL_KB)
+    for line in str(read_file("/proc/meminfo")).split("\n"):
+        if line.startswith("MemTotal:"):
+            return int(line.split()[1])
+    fail("cannot determine host memory from /proc/meminfo")
+
+def _mem_total_gib():
+    return _mem_total_kib() // (1024 * 1024)
+
+if _mem_total_gib() < MIN_MEM_GIB:
+    fail(
+        ("Tilt and Kind exhaust host memory below %d GiB; this host reports %d GiB. "
+         + "Use the default Compose lane (docker compose up + cargo leptos watch) "
+         + "instead - see docs/DEV.md.")
+        % (MIN_MEM_GIB, _mem_total_gib())
+    )
+
 WEB_IN_CLUSTER = os.getenv("WEB_IN_CLUSTER", "") == "1"
 
 # Dev environment only - credentials are not sensitive here.

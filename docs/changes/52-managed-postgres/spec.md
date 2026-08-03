@@ -5,6 +5,16 @@ Status: Approved (design). To be executed LATER than the Sentry and
 Alloy-removal workstreams. Replaces the CloudNativePG setup designed in
 `docs/changes/archive/2026-07-08-19-cloudnativepg/spec.md`.
 
+## 2026-08-03 Factual Addendum
+
+- The default local Postgres is Compose `postgres:18`.
+- Retained Kind parity still uses CloudNativePG.
+- This production-only migration remains open and does not migrate local
+  Compose Postgres.
+- Future execution must not treat a default Tilt Postgres as the local
+  baseline. Dev-unaffected checks use root Compose, or retained Kind parity
+  where that parity is specifically relevant.
+
 ## Problem
 
 Postgres runs in-cluster under CloudNativePG (CNPG): a `Cluster` CR

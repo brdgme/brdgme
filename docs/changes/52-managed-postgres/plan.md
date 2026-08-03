@@ -8,6 +8,17 @@
 
 **Tech Stack:** OpenTofu (digitalocean provider), DigitalOcean Managed PostgreSQL, sqlx (TLS), kustomize/ArgoCD, kubectl.
 
+## 2026-08-03 Factual Addendum
+
+- The default local database is Compose `postgres:18`; retained Kind parity
+  uses CloudNativePG.
+- This unchecked, production-only plan does not migrate local Compose
+  Postgres.
+- For future execution, original runbook references to default Tilt Postgres,
+  including Task 9's dev-unaffected check, are superseded. Validate default
+  local isolation against root Compose, and use CNPG only when retained Kind
+  parity is relevant.
+
 ## Global Constraints
 
 - Prod-only. Dev keeps its existing local/Kind Postgres and its own `DATABASE_URL`; no dev change.

@@ -13,16 +13,14 @@ Status table below into [`docs/archive/BACKLOG.md`](archive/BACKLOG.md),
 adding a Resolution and the date resolved - that file is append-only and
 keeps this one from filling up with closed work.
 
-**Priority order (updated 2026-07-26):**
+**Priority order (updated 2026-08-03):**
 **Immediate next:** #31 Rust-only repository (delete legacy trio + brdgme-go,
 lift `rust/` to root; #23 game ports now complete so WP3-5 unblocked).
 **Then:** #52 managed Postgres migration (CNPG to DO Managed Database, frees
-~600Mi cluster memory), #50 dev environment reassessment (make local dev viable
-again - kubernetes/kind/tilt too heavy; consider docker compose or partial
-deployments), #15 tails (CI deploy job, delete stale k8s/argocd/, admin-password
-rotation), #54 maximum-performance fuzzer (after #31, which reworks the workspace
-layout the fuzz bins sit on; a faster fuzzer makes every subsequent game port and
-remediation package cheaper to validate).
+~600Mi cluster memory), #15 tails (CI deploy job, delete stale k8s/argocd/,
+admin-password rotation), #54 maximum-performance fuzzer (after #31, which
+reworks the workspace layout the fuzz bins sit on; a faster fuzzer makes every
+subsequent game port and remediation package cheaper to validate).
 **Unscheduled post-go-live:** #27 remainder (WebSocketTrigger deletion, flaky
 NATS tests), #36 Web Push, #37 game verification, #38 "new version" notification,
 #40 DB tests opt-in, #46 turn timer, #48 moderation, #49 sqlx macros (review first),
@@ -59,7 +57,7 @@ old services (`rust/api`, `web`, `websocket`) remain untouched until cutover.
 ## Status
 
 Fully done/resolved/superseded items (1-14, 17-26, 28-30,
-32-34, 41-45, 47, Quick wins, Review findings 2026-07-04, Development Workflow)
+32-34, 41-45, 47, 50, Quick wins, Review findings 2026-07-04, Development Workflow)
 have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 
 | # | Title | Status | Spec | Plan |
@@ -75,7 +73,6 @@ have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 | 48 | Basic moderation - initially just usernames, may extend to more later | Captured 2026-07-17 - post-go-live, needs brainstorming | - | - |
 | 49 | Convert #30 friends plain sqlx queries to compile-time-checked macros now that the .sqlx prepare workflow is healthy (the friends-related queries in `rust/web/src/db.rs` currently use plain (runtime-checked) `sqlx::query`/`sqlx::query_as` calls by old convention; convert them to `query!`/`query_as!` macros and add cache entries via `cargo sqlx prepare` per docs/DEV.md) | Captured 2026-07-18 - unscheduled; **note 2026-07-24: review first to ensure direction is correct and appropriate before executing** | - | - |
 | 51 | Bot dynamic sqlx queries mask schema drift (`rust/bot/src/main.rs` + `config.rs`: `row.try_get(..).unwrap_or(..)` turns query bugs into silent wrong behaviour - e.g. broken `is_turn` column makes bot silently never play; switch to checked `sqlx::query!` macros or replace `unwrap_or` defaults with `.context(..)?`) | Captured 2026-07-24 (split from Bug fixes plan); unscheduled | - | [plan](changes/51-bot-sqlx-queries/plan.md) |
-| 50 | Dev environment reassessment - review the whole dev env with a view to making it viable to run locally again; the kind/tilt kubernetes setup is too heavy now (host crashes, 32GB RAM minimum per AGENTS.md); consider docker compose or allowing partial deployments | Captured 2026-07-19, prioritised 2026-07-24 | - | - |
 | 52 | Managed Postgres migration - move prod Postgres from in-cluster CloudNativePG to DigitalOcean Managed Database (~$15.15/mo, 1GB/1vCPU/10GB, syd1, private VPC); provision via OpenTofu, load prod data directly into managed instance, then remove CNPG resources (frees ~600Mi cluster memory); dev unaffected (keeps local Postgres) | Approved 2026-07-21, prioritised 2026-07-24; supersedes archived #19 | [spec](changes/52-managed-postgres/spec.md) | [plan](changes/52-managed-postgres/plan.md) |
 | 53 | Game rules review (parity park) | **PARKED - awaiting a product decision (per-game rules review).** The 2026-07-23 Rust review found ~30 port-parity findings (code vs official rules vs RULES.md). The global port-parity policy (D-35: official rules authoritative, no gameplay change without per-game sign-off, parked) now lives in [`docs/decisions/PORT_PARITY.md`](decisions/PORT_PARITY.md). The detailed per-rule parity list (D-26..D-32, D-34) was NOT migrated and is retained only in git history under the review's commit range (`f0589894c1937c2c1134cf99523f1fd4e9a8f944..868094a6c8177858dededdd5321ce0c03882ada5`, file `docs/reviews/2026-07-23-rust-review/planning/DECISIONS.md`). The review's surviving summary is [`docs/reviews/2026-07-23-rust-review/SUMMARY.md`](reviews/2026-07-23-rust-review/SUMMARY.md). All of these are PARKED-PENDING-USER-RULES-REVIEW: some RULES.md content was AI-generated and may be wrong, and edition/variation choices are a product decision. **No gameplay change without per-game sign-off.** Packages WP-11, WP-12, WP-16, WP-20, WP-26, WP-30 are BLOCKED-ON-USER-RULES-REVIEW - implementing agents must not pick them up. Rules-content work WP-74 (red7-1 empty-hand elimination sentence) and WP-75 (RULES_AUTHORING strategy-docs rewrite) is also queued behind this park. Three cases (a F1, b F7, e F30) are flagged for immediate fix and are outside the park; b F4 was re-parked and d F37 was rejected as not-a-bug. Liveness fixes WP-15/WP-25 are NOT parked. | - | - |
 | 54 | Maximum-performance fuzzer (three independent modes) | Captured 2026-07-26 from the 2026-07-23 Rust review (D-51); scheduled 2026-07-26 into the Then tier after #31 (D-53), nothing measured. Rationale (D-43): "the value of the fuzzer is basically directly correlated by how fast it can run and how many games it can pump through." Three modes on two **independent** axes - renders and serialisation: (1) **game logic only** (default, maximum speed) - game kept live in memory, no serialisation, no rendering, drives `Gamer` directly; (2) **opt-in renders** - pub render plus all private renders after every successful command (stricter than the current loop); (3) **opt-in serialisation** - the "end to end fuzz" exercising the full `api::Request`/`api::Response` path as today. Key findings: the in-process path is **not** serialisation-free - every move already does a full state decode + encode, a pub render, every player's state JSON and N+1 markup renders, of which the loop uses only the acting player's `command_spec` and the opaque state string; `fuzz()` is **already** parallel across `num_cpus::get()` threads, so parallelism is not an available win; two free wins sit in `Fuzzer::command` - a whole-`PlayerRender` clone taken for one field, and a full state-string clone, both per move. Tradeoff: the current loop catches render-panics and serialise-panics for free, and mode 1 gives that up - which is exactly why modes 2 and 3 exist. **Nothing has been measured** (no cargo available in the planning session); the settling commands are in section 6 of the full analysis: [`docs/fuzz-throughput-evaluation.md`](fuzz-throughput-evaluation.md) | - | - |

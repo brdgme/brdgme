@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum.workspace = true
+brdgme_registration = { path = "../lib/registration" }
 futures = "0.3"
 k8s-openapi = { version = "0.28", features = ["v1_36"] }
 kube = { version = "4", features = ["runtime", "derive", "client"] }
@@ -31,12 +32,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-uuid = { workspace = true, features = ["serde"] }
-
-[dev-dependencies]
-# Adds the test/migrate machinery for #[sqlx::test]; feature-unified with the
-# main sqlx dependency when building tests.
-sqlx = { workspace = true, features = ["macros", "migrate"] }
 
 [lints]
 workspace = true

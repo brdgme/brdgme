@@ -1,0 +1,10 @@
+# Scoped ignore for brdgme-go/Dockerfile builds only; takes precedence over the
+# root .dockerignore. The Go Dockerfile only COPYs brdgme-go/ and go.mod, so
+# everything else is dropped from the context. The Dockerfile and this ignore
+# file are always sent regardless.
+*
+!brdgme-go
+!go.mod
+**/.git
+**/node_modules
+**/target

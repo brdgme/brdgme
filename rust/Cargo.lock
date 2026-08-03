@@ -759,6 +759,7 @@ dependencies = [
  "axum",
  "brdgme_cmd",
  "brdgme_game_client",
+ "brdgme_registration",
  "futures",
  "k8s-openapi",
  "kube",
@@ -772,7 +773,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -904,6 +904,33 @@ dependencies = [
  "brdgme_game",
  "rand 0.10.2",
  "serde_json",
+]
+
+[[package]]
+name = "brdgme_register"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "brdgme_cmd",
+ "brdgme_game_client",
+ "brdgme_registration",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
+name = "brdgme_registration"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml_ng",
+ "sqlx",
+ "thiserror 2.0.19",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

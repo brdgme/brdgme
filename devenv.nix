@@ -61,6 +61,9 @@
   '';
 
   env.DATABASE_URL = "postgres://brdgme_user:brdgme_password@localhost:5432/brdgme";
+  env.NATS_URL = "nats://localhost:4222";
+  env.ALLOW_INSECURE_DEFAULT_KEY = "true";
+  env.SECURE_COOKIE = "false";
   env.PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
   env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
 }

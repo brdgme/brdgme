@@ -1,0 +1,31 @@
+{
+  "games": [
+    {"game": "acquire-1", "probeUrl": "http://acquire-1:8080", "uri": "http://127.0.0.1:8080"},
+    {"game": "age-of-war-2", "probeUrl": "http://age-of-war-2:8080", "uri": "http://127.0.0.1:8081"},
+    {"game": "alhambra-1", "probeUrl": "http://alhambra-1:8080", "uri": "http://127.0.0.1:8082"},
+    {"game": "battleship-2", "probeUrl": "http://battleship-2:8080", "uri": "http://127.0.0.1:8083"},
+    {"game": "category-5-2", "probeUrl": "http://category-5-2:8080", "uri": "http://127.0.0.1:8084"},
+    {"game": "cathedral-2", "probeUrl": "http://cathedral-2:8080", "uri": "http://127.0.0.1:8085"},
+    {"game": "farkle-2", "probeUrl": "http://farkle-2:8080", "uri": "http://127.0.0.1:8086"},
+    {"game": "for-sale-2", "probeUrl": "http://for-sale-2:8080", "uri": "http://127.0.0.1:8087"},
+    {"game": "greed-2", "probeUrl": "http://greed-2:8080", "uri": "http://127.0.0.1:8088"},
+    {"game": "hanamikoji-1", "probeUrl": "http://hanamikoji-1:8080", "uri": "http://127.0.0.1:8089"},
+    {"game": "jaipur-2", "probeUrl": "http://jaipur-2:8080", "uri": "http://127.0.0.1:8090"},
+    {"game": "liars-dice-2", "probeUrl": "http://liars-dice-2:8080", "uri": "http://127.0.0.1:8091"},
+    {"game": "lost-cities-1", "probeUrl": "http://lost-cities-1:8080", "uri": "http://127.0.0.1:8092"},
+    {"game": "lost-cities-2", "probeUrl": "http://lost-cities-2:8080", "uri": "http://127.0.0.1:8093"},
+    {"game": "love-letter-2", "probeUrl": "http://love-letter-2:8080", "uri": "http://127.0.0.1:8094"},
+    {"game": "modern-art-2", "probeUrl": "http://modern-art-2:8080", "uri": "http://127.0.0.1:8095"},
+    {"game": "no-thanks-2", "probeUrl": "http://no-thanks-2:8080", "uri": "http://127.0.0.1:8096"},
+    {"game": "red7-1", "probeUrl": "http://red7-1:8080", "uri": "http://127.0.0.1:8097"},
+    {"game": "roll-through-the-ages-2", "probeUrl": "http://roll-through-the-ages-2:8080", "uri": "http://127.0.0.1:8098"},
+    {"game": "seven-wonders-1", "probeUrl": "http://seven-wonders-1:8080", "uri": "http://127.0.0.1:8099"},
+    {"game": "splendor-2", "probeUrl": "http://splendor-2:8080", "uri": "http://127.0.0.1:8100"},
+    {"game": "starship-catan-1", "probeUrl": "http://starship-catan-1:8080", "uri": "http://127.0.0.1:8101"},
+    {"game": "sushi-go-2", "probeUrl": "http://sushi-go-2:8080", "uri": "http://127.0.0.1:8102"},
+    {"game": "sushizock-2", "probeUrl": "http://sushizock-2:8080", "uri": "http://127.0.0.1:8103"},
+    {"game": "texas-holdem-2", "probeUrl": "http://texas-holdem-2:8080", "uri": "http://127.0.0.1:8104"},
+    {"game": "tic-tac-toe-2", "probeUrl": "http://tic-tac-toe-2:8080", "uri": "http://127.0.0.1:8105"},
+    {"game": "zombie-dice-2", "probeUrl": "http://zombie-dice-2:8080", "uri": "http://127.0.0.1:8106"}
+  ]
+}

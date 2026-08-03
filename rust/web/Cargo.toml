@@ -178,7 +178,6 @@ reload-port = 3001
 end2end-cmd = "npx playwright test"
 end2end-dir = "end2end"
 browserquery = "defaults"
-env = "DEV"
 bin-features = ["ssr"]
 bin-default-features = false
 lib-features = ["hydrate"]

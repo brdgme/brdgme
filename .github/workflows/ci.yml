@@ -31,7 +31,10 @@ jobs:
               - 'rust/**'
               - 'scripts/rust-ci-commands.sh'
               - 'scripts/rust-test.sh'
+              - 'scripts/register-wait.sh'
               - 'docker-bake.hcl'
+              - 'compose.yaml'
+              - 'compose/**'
               - '.github/workflows/ci.yml'
             go:
               - 'brdgme-go/**'
@@ -77,6 +80,18 @@ jobs:
       - name: Check delivery-list consistency
         working-directory: .
         run: bash scripts/check-delivery-lists.sh
+      # Direct Compose validation: render the root compose.yaml with the same
+      # parser `docker compose up` uses (validates all 27 game services, their
+      # build targets, ports, and the YAML watch aliases).
+      - name: Validate Compose config
+        working-directory: .
+        run: docker compose config --quiet
+      # Direct Buildx check for the dev `register` target (the Compose bulk
+      # registration image). --check parses the build graph and resolves the
+      # target without building images.
+      - name: Check register build target
+        working-directory: .
+        run: docker buildx build --check --target register -f rust/Dockerfile .
       # Vendored-code guard (R-45 AC3): session_store is `publish = false` and
       # skipped by cargo-deny, so assert its MIT licence text and upstream
       # attribution header directly.

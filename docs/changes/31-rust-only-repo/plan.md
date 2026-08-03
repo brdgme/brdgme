@@ -15,6 +15,18 @@ YAML, OpenTofu HCL, Dockerfiles, devenv.nix, shell scripts.
 
 **Spec:** `docs/changes/31-rust-only-repo/spec.md`
 
+## 2026-08-03 Factual Addendum
+
+- Default root Compose already excludes the legacy Go games; this does not
+  complete or change the unchecked WP3 removal work.
+- WP3 still removes Go builds and `-1` development overlays from the retained
+  Kind parity lane. Production `-1` manifests remain until their separate
+  shelving lifecycle permits removal.
+- WP5's path inventory must include `compose.yaml`,
+  `compose/register-set.json`, `scripts/register-wait.sh`, and
+  `rust/Dockerfile.dockerignore`. Delete `brdgme-go/Dockerfile.dockerignore`
+  with `brdgme-go/` in WP3.
+
 ## WP1: Delete the legacy stack (pre-cutover, unblocked)
 
 Supersedes the matching lines of the #16 decommission list; #16 keeps the

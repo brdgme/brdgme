@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use brdgme_cmd::api::{Request, Response};
+use brdgme_registration::{Registration, set_public, upsert};
 use futures::StreamExt;
 use kube::{
     Api, Client, ResourceExt,
@@ -16,9 +17,8 @@ use kube::{
 use serde_json::json;
 use sqlx::PgPool;
 use tracing::{error, info};
-use uuid::Uuid;
 
-use crate::crd::{GameVersion, GameVersionStatus};
+use crate::crd::{GameVersion, GameVersionSpec, GameVersionStatus};
 
 const FINALIZER: &str = "brdgme.com/game-version";
 
@@ -28,6 +28,8 @@ pub enum Error {
     Kube(#[from] kube::Error),
     #[error("Database error: {0}")]
     Sql(#[from] sqlx::Error),
+    #[error("Registration error: {0}")]
+    Registration(#[from] brdgme_registration::RegistrationError),
     #[error("Game service error: {0}")]
     GameService(String),
     #[error("Finalizer error: {0}")]
@@ -140,17 +142,9 @@ async fn apply(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
         }
     };
 
-    upsert_game_type_and_version(
+    upsert(
         &ctx.pool,
-        &obj.spec.type_name,
-        &player_counts,
-        obj.spec.weight,
-        &obj.spec.blurb,
-        &name,
-        &uri,
-        obj.spec.is_deprecated,
-        obj.spec.interface_version,
-        &rules,
+        &registration_from_spec(&obj.spec, &name, &uri, player_counts, rules),
     )
     .await?;
 
@@ -174,102 +168,28 @@ async fn apply(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
 async fn cleanup(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     let name = obj.name_any();
     info!(name, "Marking game version unavailable");
-    sqlx::query(
-        "UPDATE game_versions SET is_public = false, updated_at = NOW() \
-         WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2)",
-    )
-    .bind(&name)
-    .bind(&obj.spec.type_name)
-    .execute(&ctx.pool)
-    .await?;
+    set_public(&ctx.pool, &name, &obj.spec.type_name, false).await?;
     Ok(Action::await_change())
 }
 
-// Splitting these into a params struct would be a larger refactor than warranted here.
-#[allow(clippy::too_many_arguments)]
-async fn upsert_game_type_and_version(
-    pool: &PgPool,
-    type_name: &str,
-    player_counts: &[i32],
-    weight: f32,
-    blurb: &str,
+fn registration_from_spec(
+    spec: &GameVersionSpec,
     version_name: &str,
     uri: &str,
-    is_deprecated: bool,
-    interface_version: i32,
-    rules: &str,
-) -> Result<(), sqlx::Error> {
-    let game_type_id: Uuid = sqlx::query_scalar(
-        r#"
-        INSERT INTO game_types (name, player_counts, weight, blurb)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (name) DO UPDATE
-            SET updated_at = NOW()
-        RETURNING id
-        "#,
-    )
-    .bind(type_name)
-    .bind(player_counts)
-    .bind(weight)
-    .bind(blurb)
-    .fetch_one(pool)
-    .await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated, interface_version, rules)
-        VALUES ($1, $2, $3, true, $4, $5, $6)
-        ON CONFLICT (game_type_id, name) DO UPDATE
-            SET uri               = EXCLUDED.uri,
-                is_public         = true,
-                is_deprecated     = EXCLUDED.is_deprecated,
-                interface_version = EXCLUDED.interface_version,
-                rules             = EXCLUDED.rules,
-                updated_at        = NOW()
-        "#,
-    )
-    .bind(game_type_id)
-    .bind(version_name)
-    .bind(uri)
-    .bind(is_deprecated)
-    .bind(interface_version)
-    .bind(rules)
-    .execute(pool)
-    .await?;
-
-    if !is_deprecated {
-        sqlx::query(
-            r#"
-            UPDATE game_types
-            SET player_counts = $2,
-                weight        = $3,
-                blurb         = $4,
-                updated_at    = NOW()
-            WHERE id = $1
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM game_versions newer
-                  WHERE newer.game_type_id = $1
-                    AND newer.is_deprecated = false
-                    AND (newer.created_at, newer.name) > (
-                        SELECT cur.created_at, cur.name
-                        FROM game_versions cur
-                        WHERE cur.game_type_id = $1
-                          AND cur.name = $5
-                    )
-              )
-            "#,
-        )
-        .bind(game_type_id)
-        .bind(player_counts)
-        .bind(weight)
-        .bind(blurb)
-        .bind(version_name)
-        .execute(pool)
-        .await?;
+    player_counts: Vec<i32>,
+    rules: String,
+) -> Registration {
+    Registration {
+        type_name: spec.type_name.clone(),
+        version_name: version_name.to_string(),
+        weight: spec.weight,
+        blurb: spec.blurb.clone(),
+        is_deprecated: spec.is_deprecated,
+        interface_version: spec.interface_version,
+        player_counts,
+        uri: uri.to_string(),
+        rules,
     }
-
-    Ok(())
 }
 
 fn error_policy(obj: Arc<GameVersion>, err: &Error, _ctx: Arc<Ctx>) -> Action {
@@ -338,216 +258,32 @@ mod tests {
         assert_eq!(spec_default.interface_version, 1);
     }
 
-    // Applies the web crate's migrations so the schema matches production.
-    // The operator itself never runs migrations (docs/DEV.md).
-    #[sqlx::test(migrations = "../web/migrations")]
-    async fn upsert_writes_weight_and_blurb(pool: PgPool) {
-        upsert_game_type_and_version(
-            &pool,
-            "Test Game",
-            &[2, 3],
-            2.7,
-            "A test blurb.",
-            "test-game-1",
-            "http://localhost:0/mock",
-            false,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
+    #[test]
+    fn registration_from_spec_maps_crd_fields() {
+        use crate::crd::GameVersionSpec;
 
-        let (weight, blurb): (f32, String) =
-            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Test Game'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(weight, 2.7f32);
-        assert_eq!(blurb, "A test blurb.");
-
-        // Upsert path: a second reconcile updates the existing row in place.
-        upsert_game_type_and_version(
-            &pool,
-            "Test Game",
-            &[2, 3],
-            3.0,
-            "New blurb.",
-            "test-game-1",
-            "http://localhost:0/mock",
-            false,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
-
-        let (weight, blurb): (f32, String) =
-            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Test Game'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(weight, 3.0);
-        assert_eq!(blurb, "New blurb.");
-        let versions: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM game_versions WHERE name = 'test-game-1'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(versions, 1);
-    }
-
-    #[sqlx::test(migrations = "../web/migrations")]
-    async fn authoritative_version_wins_regardless_of_order_deprecated_first(pool: PgPool) {
-        upsert_game_type_and_version(
-            &pool,
-            "Lost Cities",
-            &[2],
-            1.0,
-            "old blurb",
-            "lost-cities-1",
-            "http://localhost:0/mock",
-            true,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
-
-        upsert_game_type_and_version(
-            &pool,
-            "Lost Cities",
-            &[2, 3],
-            2.0,
-            "new blurb",
-            "lost-cities-2",
-            "http://localhost:0/mock",
-            false,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
-
-        let player_counts: Vec<i32> =
-            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Lost Cities'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(player_counts, vec![2, 3]);
-        let (weight, blurb): (f32, String) =
-            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Lost Cities'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(weight, 2.0f32);
-        assert_eq!(blurb, "new blurb");
-
-        upsert_game_type_and_version(
-            &pool,
-            "Lost Cities",
-            &[2],
-            1.0,
-            "old blurb",
-            "lost-cities-1",
-            "http://localhost:0/mock",
-            true,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
-
-        let player_counts: Vec<i32> =
-            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Lost Cities'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(player_counts, vec![2, 3]);
-        let (weight, blurb): (f32, String) =
-            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Lost Cities'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(weight, 2.0f32);
-        assert_eq!(blurb, "new blurb");
-    }
-
-    #[sqlx::test(migrations = "../web/migrations")]
-    async fn authoritative_version_wins_regardless_of_order_non_deprecated_first(pool: PgPool) {
-        upsert_game_type_and_version(
-            &pool,
-            "Lost Cities",
-            &[2, 3],
-            2.0,
-            "new blurb",
-            "lost-cities-2",
-            "http://localhost:0/mock",
-            false,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
-
-        upsert_game_type_and_version(
-            &pool,
-            "Lost Cities",
-            &[2],
-            1.0,
-            "old blurb",
-            "lost-cities-1",
-            "http://localhost:0/mock",
-            true,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
-
-        let player_counts: Vec<i32> =
-            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Lost Cities'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(player_counts, vec![2, 3]);
-        let (weight, blurb): (f32, String) =
-            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Lost Cities'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(weight, 2.0f32);
-        assert_eq!(blurb, "new blurb");
-    }
-
-    #[sqlx::test(migrations = "../web/migrations")]
-    async fn first_write_deprecated_only_still_writes_values(pool: PgPool) {
-        upsert_game_type_and_version(
-            &pool,
-            "Solo Game",
-            &[1],
-            0.5,
-            "solo blurb",
-            "solo-game-1",
-            "http://localhost:0/mock",
-            true,
-            1,
-            "rules text",
-        )
-        .await
-        .unwrap();
-
-        let player_counts: Vec<i32> =
-            sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Solo Game'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(player_counts, vec![1]);
-        let (weight, blurb): (f32, String) =
-            sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Solo Game'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(weight, 0.5f32);
-        assert_eq!(blurb, "solo blurb");
+        let spec = GameVersionSpec {
+            type_name: "Tic-tac-toe".to_string(),
+            weight: 1.0,
+            blurb: "A blurb.".to_string(),
+            is_deprecated: false,
+            interface_version: 2,
+        };
+        let registration = registration_from_spec(
+            &spec,
+            "tic-tac-toe-2",
+            "http://interceptor:8080",
+            vec![2],
+            "rules text".to_string(),
+        );
+        assert_eq!(registration.type_name, "Tic-tac-toe");
+        assert_eq!(registration.version_name, "tic-tac-toe-2");
+        assert_eq!(registration.weight, 1.0);
+        assert_eq!(registration.blurb, "A blurb.");
+        assert!(!registration.is_deprecated);
+        assert_eq!(registration.interface_version, 2);
+        assert_eq!(registration.player_counts, vec![2]);
+        assert_eq!(registration.uri, "http://interceptor:8080");
+        assert_eq!(registration.rules, "rules text");
     }
 }

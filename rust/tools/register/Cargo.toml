@@ -1,0 +1,28 @@
+[package]
+name = "brdgme_register"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "register"
+path = "src/main.rs"
+
+[dependencies]
+brdgme_cmd = { path = "../../lib/cmd", default-features = false }
+brdgme_game_client = { path = "../../lib/game_client" }
+brdgme_registration = { path = "../../lib/registration" }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+axum.workspace = true
+sqlx = { workspace = true, features = ["macros", "migrate"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,607 @@
+# Default local lane (backlog #50 unit-04b): plain `docker compose` from the
+# repo root discovers this file - no custom lifecycle script or COMPOSE_FILE.
+#
+# Owns the always-on local dependencies plus every deployable Rust game as a
+# container service, matching the production delivery lists (rust/Dockerfile
+# distroless stages, docker-bake.hcl targets, and
+# k8s/base/game/<game>/game-version.yaml manifests). The web monolith runs on
+# the host via `cargo leptos watch`; each game is public locally on
+# 127.0.0.1:<port> and registered into the local database with that
+# host-reachable URI.
+#
+# One-shot services:
+#   migrate   applies rust/web/migrations/ (idempotent sqlx migrate run)
+#   register  bulk `register set` after migrate and bounded game readiness
+#
+# Exclusions: the 17 legacy Go games and undeployed lords-of-vegas-1 are not
+# here; CI validates the exact 27-game inventory natively with `docker compose
+# config`.
+#
+# Named volumes (postgres-data, nats-data) persist across `docker compose
+# down`; nothing here ever removes them (`down` never uses -v).
+
+name: brdgme-dev
+
+x-build-base: &build-base
+  context: .
+  dockerfile: rust/Dockerfile
+
+x-game-env: &game-env
+  ADDR: "0.0.0.0:8080"
+
+# Shared Compose Watch mapping items (all-Rust context), anchored once and
+# aliased into every game service's watch list below.
+x-watch-lib: &watch-lib
+  path: rust/lib
+  action: rebuild
+x-watch-cargo-toml: &watch-cargo-toml
+  path: rust/Cargo.toml
+  action: rebuild
+x-watch-cargo-lock: &watch-cargo-lock
+  path: rust/Cargo.lock
+  action: rebuild
+x-watch-dockerfile: &watch-dockerfile
+  path: rust/Dockerfile
+  action: rebuild
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: brdgme_user
+      POSTGRES_PASSWORD: brdgme_password
+      POSTGRES_DB: brdgme
+    ports:
+      - "127.0.0.1:5432:5432"
+    # postgres:18+ keeps data in PGDATA=/var/lib/postgresql/18/docker (the
+    # default), so the volume mounts the parent dir, not /data as in older
+    # images - see docker-library/postgres#1259.
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brdgme_user -d brdgme"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  nats:
+    # Same image/flags as k8s/base/nats/stateful-set.yaml: JetStream data under
+    # /data (persisted), monitoring on 8222 for the /healthz healthcheck.
+    image: nats:2.11-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8222/healthz || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  migrate:
+    build:
+      <<: *build-base
+      target: migrate
+    environment:
+      DATABASE_URL: postgres://brdgme_user:brdgme_password@postgres:5432/brdgme
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  register:
+    # Dev-only bulk registration one-shot. Entrypoint is a bash wait script
+    # (bind-mounted) that polls every game's probe URL over TCP - the distroless
+    # game images have no shell, so Compose cannot healthcheck them - then runs
+    # `register set` against the static set input. The set input (also
+    # bind-mounted) carries each game's Compose service-DNS probe URL and its
+    # persisted host-localhost URI.
+    build:
+      <<: *build-base
+      target: register
+    entrypoint: ["/bin/bash", "/register-wait.sh"]
+    environment:
+      DATABASE_URL: postgres://brdgme_user:brdgme_password@postgres:5432/brdgme
+    volumes:
+      - ./scripts/register-wait.sh:/register-wait.sh:ro
+      - ./compose/register-set.json:/register-set.json:ro
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      acquire-1:
+        condition: service_started
+      age-of-war-2:
+        condition: service_started
+      alhambra-1:
+        condition: service_started
+      battleship-2:
+        condition: service_started
+      category-5-2:
+        condition: service_started
+      cathedral-2:
+        condition: service_started
+      farkle-2:
+        condition: service_started
+      for-sale-2:
+        condition: service_started
+      greed-2:
+        condition: service_started
+      hanamikoji-1:
+        condition: service_started
+      jaipur-2:
+        condition: service_started
+      liars-dice-2:
+        condition: service_started
+      lost-cities-1:
+        condition: service_started
+      lost-cities-2:
+        condition: service_started
+      love-letter-2:
+        condition: service_started
+      modern-art-2:
+        condition: service_started
+      no-thanks-2:
+        condition: service_started
+      red7-1:
+        condition: service_started
+      roll-through-the-ages-2:
+        condition: service_started
+      seven-wonders-1:
+        condition: service_started
+      splendor-2:
+        condition: service_started
+      starship-catan-1:
+        condition: service_started
+      sushi-go-2:
+        condition: service_started
+      sushizock-2:
+        condition: service_started
+      texas-holdem-2:
+        condition: service_started
+      tic-tac-toe-2:
+        condition: service_started
+      zombie-dice-2:
+        condition: service_started
+
+  acquire-1:
+    build:
+      <<: *build-base
+      target: acquire-1
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8080:8080"
+    develop:
+      watch:
+        - path: rust/game/acquire-1
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  age-of-war-2:
+    build:
+      <<: *build-base
+      target: age-of-war-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8081:8080"
+    develop:
+      watch:
+        - path: rust/game/age-of-war-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  alhambra-1:
+    build:
+      <<: *build-base
+      target: alhambra-1
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8082:8080"
+    develop:
+      watch:
+        - path: rust/game/alhambra-1
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  battleship-2:
+    build:
+      <<: *build-base
+      target: battleship-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8083:8080"
+    develop:
+      watch:
+        - path: rust/game/battleship-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  category-5-2:
+    build:
+      <<: *build-base
+      target: category-5-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8084:8080"
+    develop:
+      watch:
+        - path: rust/game/category-5-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  cathedral-2:
+    build:
+      <<: *build-base
+      target: cathedral-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8085:8080"
+    develop:
+      watch:
+        - path: rust/game/cathedral-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  farkle-2:
+    build:
+      <<: *build-base
+      target: farkle-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8086:8080"
+    develop:
+      watch:
+        - path: rust/game/farkle-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  for-sale-2:
+    build:
+      <<: *build-base
+      target: for-sale-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8087:8080"
+    develop:
+      watch:
+        - path: rust/game/for-sale-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  greed-2:
+    build:
+      <<: *build-base
+      target: greed-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8088:8080"
+    develop:
+      watch:
+        - path: rust/game/greed-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  hanamikoji-1:
+    build:
+      <<: *build-base
+      target: hanamikoji-1
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8089:8080"
+    develop:
+      watch:
+        - path: rust/game/hanamikoji-1
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  jaipur-2:
+    build:
+      <<: *build-base
+      target: jaipur-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8090:8080"
+    develop:
+      watch:
+        - path: rust/game/jaipur-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  liars-dice-2:
+    build:
+      <<: *build-base
+      target: liars-dice-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8091:8080"
+    develop:
+      watch:
+        - path: rust/game/liars-dice-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  lost-cities-1:
+    build:
+      <<: *build-base
+      target: lost-cities-1
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8092:8080"
+    develop:
+      watch:
+        - path: rust/game/lost-cities-1
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  lost-cities-2:
+    build:
+      <<: *build-base
+      target: lost-cities-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8093:8080"
+    develop:
+      watch:
+        - path: rust/game/lost-cities-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  love-letter-2:
+    build:
+      <<: *build-base
+      target: love-letter-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8094:8080"
+    develop:
+      watch:
+        - path: rust/game/love-letter-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  modern-art-2:
+    build:
+      <<: *build-base
+      target: modern-art-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8095:8080"
+    develop:
+      watch:
+        - path: rust/game/modern-art-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  no-thanks-2:
+    build:
+      <<: *build-base
+      target: no-thanks-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8096:8080"
+    develop:
+      watch:
+        - path: rust/game/no-thanks-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  red7-1:
+    build:
+      <<: *build-base
+      target: red7-1
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8097:8080"
+    develop:
+      watch:
+        - path: rust/game/red7-1
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  roll-through-the-ages-2:
+    build:
+      <<: *build-base
+      target: roll-through-the-ages-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8098:8080"
+    develop:
+      watch:
+        - path: rust/game/roll-through-the-ages-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  seven-wonders-1:
+    build:
+      <<: *build-base
+      target: seven-wonders-1
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8099:8080"
+    develop:
+      watch:
+        - path: rust/game/seven-wonders-1
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  splendor-2:
+    build:
+      <<: *build-base
+      target: splendor-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8100:8080"
+    develop:
+      watch:
+        - path: rust/game/splendor-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  starship-catan-1:
+    build:
+      <<: *build-base
+      target: starship-catan-1
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8101:8080"
+    develop:
+      watch:
+        - path: rust/game/starship-catan-1
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  sushi-go-2:
+    build:
+      <<: *build-base
+      target: sushi-go-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8102:8080"
+    develop:
+      watch:
+        - path: rust/game/sushi-go-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  sushizock-2:
+    build:
+      <<: *build-base
+      target: sushizock-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8103:8080"
+    develop:
+      watch:
+        - path: rust/game/sushizock-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  texas-holdem-2:
+    build:
+      <<: *build-base
+      target: texas-holdem-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8104:8080"
+    develop:
+      watch:
+        - path: rust/game/texas-holdem-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  tic-tac-toe-2:
+    build:
+      <<: *build-base
+      target: tic-tac-toe-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8105:8080"
+    develop:
+      watch:
+        - path: rust/game/tic-tac-toe-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+  zombie-dice-2:
+    build:
+      <<: *build-base
+      target: zombie-dice-2
+    environment: *game-env
+    ports:
+      - "127.0.0.1:8106:8080"
+    develop:
+      watch:
+        - path: rust/game/zombie-dice-2
+          action: rebuild
+        - *watch-lib
+        - *watch-cargo-toml
+        - *watch-cargo-lock
+        - *watch-dockerfile
+
+volumes:
+  postgres-data:
+  nats-data:

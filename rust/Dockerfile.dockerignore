@@ -1,0 +1,13 @@
+# Scoped ignore for rust/Dockerfile builds only; takes precedence over the root
+# .dockerignore. The build context stays the repo root, but only the paths the
+# Rust build graph COPYs from the context are kept: rust/ (all `COPY rust .`
+# sources and rust/web/migrations) and k8s/base/game (register target manifests).
+# `*` plus `!` keep-list; the Dockerfile and this ignore file are always sent
+# regardless. The standard excludes are re-applied here because this file
+# replaces the root one.
+*
+!rust
+!k8s/base/game
+**/.git
+**/node_modules
+**/target

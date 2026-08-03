@@ -1872,6 +1872,7 @@ pub async fn start_proposal(proposal_id: Uuid) -> Result<Uuid, ServerFnError> {
 /// Canonicalize and validate a proposal invite email before any account is
 /// touched. Rejects empty / `@`-less input so a junk address can never mint a
 /// verified ghost account (R-07 / F-124 / F-126).
+#[cfg(feature = "ssr")]
 fn validate_proposal_email(
     raw: &str,
 ) -> Result<crate::auth::email_addr::CanonicalEmail, ServerFnError> {
