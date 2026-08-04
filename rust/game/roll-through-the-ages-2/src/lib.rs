@@ -653,17 +653,20 @@ impl Game {
         self.rolled_dice = self.roll_n(n.max(0) as usize);
         let mut logs = vec![self.log_roll(self.rolled_dice.clone(), vec![])];
         self.kept_dice = vec![];
-        logs.extend(self.keep_skulls());
+        let (skull_logs, _) = self.keep_skulls();
+        logs.extend(skull_logs);
         logs
     }
 
-    /// Port of `KeepSkulls`.
-    fn keep_skulls(&mut self) -> Vec<Log> {
+    /// Port of `KeepSkulls`. Returns whether it advanced the phase, so callers
+    /// can distinguish "skulls kept, no advance" from "skulls kept and the
+    /// phase advanced (possibly full circle back to the same phase value)".
+    fn keep_skulls(&mut self) -> (Vec<Log>, bool) {
         // Go: "You can reroll skulls in single player" - `PlayerCount()==1`
         // guard. Dead in this platform (`PlayerCounts()` is `[2,3,4]`), but
         // ported anyway for source fidelity.
         if self.players == 1 {
-            return vec![];
+            return (vec![], false);
         }
         let mut kept_skulls = 0;
         self.rolled_dice.retain(|&d| {
@@ -683,9 +686,10 @@ impl Game {
                     .developments
                     .contains(&DevelopmentId::Leadership))
         {
-            return self.next_phase();
+            let logs = self.next_phase();
+            return (logs, true);
         }
-        vec![]
+        (vec![], false)
     }
 
     /// Port of `LogRoll`.
@@ -739,8 +743,9 @@ impl Game {
         let mut logs = vec![self.log_roll(rolled.clone(), old_dice)];
         self.rolled_dice = rolled.into_iter().chain(kept).collect();
         let phase_before = self.phase;
-        logs.extend(self.keep_skulls());
-        if self.phase == phase_before {
+        let (skull_logs, advanced) = self.keep_skulls();
+        logs.extend(skull_logs);
+        if !advanced {
             match phase_before {
                 Phase::Roll => {
                     self.remaining_rolls -= 1;
@@ -3119,6 +3124,25 @@ mod tests {
 
     #[test]
     fn test_roll_all_skulls_advances_player_without_decrementing_next() {
+        // WP-83 spec case: a roll that comes back all skulls cascades every
+        // phase through to the next player's fresh turn. The new player must
+        // keep their full 2 rolls - the phase-equality guard (fixed in R-50
+        // F-83) previously decremented it to 1.
+        let mut g = new_blank(2);
+        g.rng = GameRng::seed_from_u64(21);
+        g.rolled_dice = vec![Die::Skull];
+        let res = g.command(MICK, "roll 1", &test_players());
+        assert!(res.is_ok());
+        assert_eq!(STEVE, g.current_player);
+        assert_eq!(Phase::Roll, g.phase);
+        assert_eq!(2, g.remaining_rolls);
+    }
+
+    #[test]
+    fn test_roll_all_skulls_phase_can_stop_at_buy() {
+        // Non-full-cascade shape: more skulls mean more goods, so the cascade
+        // stops at Buy for the same player - the shape where the old
+        // phase-equality guard happened to be harmless.
         let mut g = new_blank(2);
         g.rng = GameRng::seed_from_u64(21);
         g.rolled_dice = vec![Die::Skull, Die::Skull];

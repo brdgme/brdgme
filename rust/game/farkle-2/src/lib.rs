@@ -257,7 +257,7 @@ impl Game {
                 return Err(GameError::invalid_input("You don't have those dice"));
             }
         };
-        self.turn_score += value;
+        self.turn_score = self.turn_score.saturating_add(value);
         self.taken_this_roll = true;
         self.remaining_dice = remaining;
         Ok(vec![Log::public(vec![
@@ -301,16 +301,15 @@ impl Game {
             return Err(GameError::invalid_input("can't call done at the moment"));
         }
         let mut logs: Vec<Log> = vec![];
+        let banked = self.scores[player].saturating_add(self.turn_score);
         logs.push(Log::public(vec![
             N::Player(self.current_player),
             N::text(" took "),
             N::Bold(vec![N::text(self.turn_score.to_string())]),
             N::text(" points, now on "),
-            N::Bold(vec![N::text(
-                (self.scores[player] + self.turn_score).to_string(),
-            )]),
+            N::Bold(vec![N::text(banked.to_string())]),
         ]));
-        self.scores[player] += self.turn_score;
+        self.scores[player] = banked;
         self.current_player = (self.current_player + 1) % self.players;
         if !self.finished() {
             logs.extend(self.start_turn());

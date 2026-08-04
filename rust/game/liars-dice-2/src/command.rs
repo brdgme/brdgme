@@ -38,14 +38,17 @@ pub fn bid_parser(players: usize) -> impl Parser<T = Command> {
                 "bid the number of dice under all players' cups",
                 Token::new("bid"),
             ),
-            AfterSpace::new(Doc::name_desc(
-                "quantity",
-                "the quantity of dice to bid",
-                Int {
+            AfterSpace::new(Doc {
+                name: "quantity".to_string(),
+                desc: Some(format!(
+                    "the quantity of dice to bid (there are {} dice in play; bidding above it is a legal bluff)",
+                    players * START_DICE_COUNT
+                )),
+                parser: Int {
                     min: Some(MIN_BID_QUANTITY),
-                    max: Some((players * START_DICE_COUNT) as i32),
+                    max: None,
                 },
-            )),
+            }),
             AfterSpace::new(Doc::name_desc(
                 "value",
                 "the face value of dice to bid, including wild dice (1)",
@@ -85,27 +88,22 @@ mod tests {
     }
 
     #[test]
-    fn bid_parser_quantity_max_is_total_dice() {
+    fn bid_parser_accepts_every_boundary_bid() {
         let players = 3;
         let cap = (players * START_DICE_COUNT) as i32;
         let parser = bid_parser(players);
-        assert_eq!(quantity_max(&parser.to_spec()), Some(Some(cap)));
 
-        let at_cap = format!("bid {} 6", cap);
-        let out = parser
-            .parse(&at_cap, &[])
-            .expect("a bid at the cap must parse");
-        assert_eq!(
-            out.value,
-            Command::Bid {
-                quantity: cap,
-                value: 6
-            }
-        );
+        // The quantity parser must not reject a bid the rules allow: any
+        // strictly-increasing quantity is a legal (if losing) bluff, even
+        // above the number of dice in play.
+        assert_eq!(quantity_max(&parser.to_spec()), Some(None));
 
-        let over_cap = format!("bid {} 6", cap + 1);
-        parser
-            .parse(&over_cap, &[])
-            .expect_err("a bid above the cap must be rejected");
+        for quantity in [MIN_BID_QUANTITY, cap, cap + 1, i32::MAX] {
+            let input = format!("bid {} 6", quantity);
+            let out = parser
+                .parse(&input, &[])
+                .unwrap_or_else(|e| panic!("legal bid {input} rejected: {e}"));
+            assert_eq!(out.value, Command::Bid { quantity, value: 6 });
+        }
     }
 }

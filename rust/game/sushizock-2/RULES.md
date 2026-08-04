@@ -4,8 +4,8 @@ A 2-5 player dice and tile game. Roll dice to take blue tiles (positive points) 
 
 ## Setup
 
-- 12 blue tiles: two each valued 1 through 6, shuffled face down.
-- 12 red tiles: five -1s, four -2s, two -3s, one -4, shuffled face down.
+- 12 blue tiles: two each valued 1 through 6, shuffled and laid out face up in a row.
+- 12 red tiles: five -1s, four -2s, two -3s, one -4, shuffled and laid out face up in a row.
 - 5 dice with 6 faces: 2 sushi, 2 bones, 1 blue chopsticks, 1 red chopsticks.
 - Each player rolls 5 dice to start their turn.
 

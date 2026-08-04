@@ -251,6 +251,25 @@ impl PlayerBoard {
         }
     }
 
+    /// Constructs the public view of a board. Every `PlayerBoard` field is
+    /// open information by design, so this must copy each field explicitly
+    /// (never clone the private `Game` field straight through) - a new field
+    /// then forces a deliberate decision about whether it stays public.
+    fn pub_view(&self) -> Self {
+        PlayerBoard {
+            player: self.player,
+            resources: self.resources.clone(),
+            modules: self.modules.clone(),
+            completed_adventures: self.completed_adventures.clone(),
+            colonies: self.colonies.clone(),
+            trading_posts: self.trading_posts.clone(),
+            defeated_pirates: self.defeated_pirates.clone(),
+            friend_of_the_people: self.friend_of_the_people,
+            hero_of_the_people: self.hero_of_the_people,
+            last_sectors: self.last_sectors.clone(),
+        }
+    }
+
     pub fn res(&self, r: Resource) -> i32 {
         self.resources.get(&r).copied().unwrap_or(0)
     }
@@ -1850,7 +1869,10 @@ impl Gamer for Game {
             phase: self.phase,
             current_player: self.current_player,
             current_sector: self.current_sector,
-            player_boards: self.player_boards.clone(),
+            player_boards: [
+                self.player_boards[0].pub_view(),
+                self.player_boards[1].pub_view(),
+            ],
             flight_cards: self.flight_cards.clone(),
             trade_amount: self.trade_amount,
             player_trade_amount: self.player_trade_amount,
@@ -2060,6 +2082,7 @@ impl Gamer for Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn players() -> Vec<String> {
         vec!["Mick".to_string(), "Steve".to_string()]
@@ -2217,53 +2240,46 @@ mod tests {
         }
     }
 
-    fn collect_keys(value: &serde_json::Value, keys: &mut Vec<String>) {
-        match value {
-            serde_json::Value::Object(map) => {
-                for (k, v) in map {
-                    keys.push(k.clone());
-                    collect_keys(v, keys);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for v in items {
-                    collect_keys(v, keys);
-                }
-            }
-            _ => {}
-        }
-    }
-
     #[test]
     fn pub_state_does_not_leak_hidden_info() {
         let (mut g, _) = Game::start(2, 1).unwrap();
         g.peeking = vec![colony_card()];
         let json = serde_json::to_value(g.pub_state()).unwrap();
-
         let obj = json.as_object().unwrap();
-        assert!(obj.contains_key("adventure_deck_len"));
-        assert!(obj.contains_key("sector_pile_lens"));
-        assert!(obj.contains_key("sector_draw_pile_len"));
+
+        // Allow-list: every PubState field must be declared here, so a new
+        // field forces a deliberate decision instead of going public silently.
+        let actual_keys: BTreeSet<&str> = obj.keys().map(|k| k.as_str()).collect();
+        let expected_keys: BTreeSet<&str> = [
+            "phase",
+            "current_player",
+            "current_sector",
+            "player_boards",
+            "flight_cards",
+            "trade_amount",
+            "player_trade_amount",
+            "yellow_dice",
+            "flight_actions_used",
+            "card_finished",
+            "losing_module",
+            "current_adventure_cards",
+            "adventure_deck_len",
+            "sector_pile_lens",
+            "sector_draw_pile_len",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            actual_keys, expected_keys,
+            "PubState field set drifted; add or remove fields deliberately"
+        );
+
+        // Deck data is exposed only as counts/lengths, never the ordered piles.
         assert!(obj["adventure_deck_len"].is_number());
         assert!(obj["sector_draw_pile_len"].is_number());
         assert!(obj["sector_pile_lens"].is_object());
         for (_, v) in obj["sector_pile_lens"].as_object().unwrap() {
             assert!(v.is_number());
-        }
-
-        let mut keys = vec![];
-        collect_keys(&json, &mut keys);
-        for forbidden in [
-            "peeking",
-            "sector_draw_pile",
-            "sector_cards",
-            "adventure_cards",
-        ] {
-            assert!(
-                !keys.iter().any(|k| k == forbidden),
-                "PubState leaked hidden field {}",
-                forbidden
-            );
         }
     }
 

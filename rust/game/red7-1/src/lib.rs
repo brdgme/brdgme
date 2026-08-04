@@ -19,9 +19,9 @@ pub const MAX_PLAYERS: usize = 4;
 
 /// Points needed to end the game: 40 for 2 players, 35 for 3, 30 for 4.
 ///
-/// Only `MIN_PLAYERS..=MAX_PLAYERS` are meaningful (`Gamer::start` rejects
-/// anything else), but `Game` deserializes `num_players` unvalidated, so the
-/// arithmetic saturates at 0 rather than underflowing (e F35).
+/// `Gamer::validate` rejects a `num_players` outside `MIN_PLAYERS..=MAX_PLAYERS`
+/// on load, so the arithmetic below only ever sees meaningful inputs; the
+/// saturating operations remain as defence in depth.
 pub fn end_points(players: usize) -> u32 {
     50usize.saturating_sub(players.saturating_mul(5)) as u32
 }

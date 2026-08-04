@@ -356,16 +356,15 @@ impl Game {
         {
             logs.extend(self.score(player, &s.dice.clone())?);
         }
+        let banked = self.scores[player].saturating_add(self.turn_score);
         logs.push(Log::public(vec![
             N::Player(self.current_player),
             N::text(" took "),
             N::Bold(vec![N::text(self.turn_score.to_string())]),
             N::text(" points, now on "),
-            N::Bold(vec![N::text(
-                (self.scores[player] + self.turn_score).to_string(),
-            )]),
+            N::Bold(vec![N::text(banked.to_string())]),
         ]));
-        self.scores[player] = self.scores[player].saturating_add(self.turn_score);
+        self.scores[player] = banked;
         self.current_player = (self.current_player + 1) % self.players;
         if !self.finished() {
             logs.extend(self.start_turn());

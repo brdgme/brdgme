@@ -21,7 +21,7 @@ pub fn render_dice(dice: &[Die], delim: &str) -> N {
     N::Group(nodes)
 }
 
-fn display_name(dice: &[Die]) -> &str {
+fn combination_name(dice: &[Die]) -> &'static str {
     match dice {
         [1] => "Single 1",
         [5] => "Single 5",
@@ -31,7 +31,7 @@ fn display_name(dice: &[Die]) -> &str {
         [4, 4, 4] => "Three 4s",
         [5, 5, 5] => "Three 5s",
         [6, 6, 6] => "Three 6s",
-        _ => "Unknown",
+        _ => unreachable!("every combination in scores() has a display name"),
     }
 }
 
@@ -44,7 +44,7 @@ fn scoring_table() -> Vec<Row> {
     combos.sort_by_key(|s| (s.dice.len(), s.dice[0]));
     for s in combos {
         table.push(vec![
-            (A::Left, vec![N::text(display_name(&s.dice))]),
+            (A::Left, vec![N::text(combination_name(&s.dice))]),
             (A::Right, vec![N::text(s.value.to_string())]),
         ]);
     }
@@ -104,27 +104,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_scoring_table_matches_legacy_output() {
-        let legacy: &[(&str, i32)] = &[
-            ("Single 1", 100),
-            ("Single 5", 50),
-            ("Three 1s", 1000),
-            ("Three 2s", 200),
-            ("Three 3s", 300),
-            ("Three 4s", 400),
-            ("Three 5s", 500),
-            ("Three 6s", 600),
-        ];
+    fn test_scoring_table_matches_scores() {
+        // The rendered table is derived from scores(), so a combination added
+        // to SCORES appears here too - never from a hardcoded list.
+        let mut combos = scores().iter().collect::<Vec<_>>();
+        combos.sort_by_key(|s| (s.dice.len(), s.dice[0]));
         let mut expected: Vec<Row> = vec![vec![
             (A::Left, vec![N::Bold(vec![N::text("Combination")])]),
             (A::Right, vec![N::Bold(vec![N::text("Points")])]),
         ]];
-        for (name, pts) in legacy {
+        for s in combos {
             expected.push(vec![
-                (A::Left, vec![N::text(*name)]),
-                (A::Right, vec![N::text(pts.to_string())]),
+                (A::Left, vec![N::text(combination_name(&s.dice))]),
+                (A::Right, vec![N::text(s.value.to_string())]),
             ]);
         }
         assert_eq!(expected, scoring_table());
+        assert_eq!(scoring_table().len(), scores().len() + 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_combination_name_rejects_unknown_combination() {
+        // A combination without a display name must fail loudly, so a new
+        // SCORES entry cannot silently render as "Unknown".
+        combination_name(&[2, 3]);
     }
 }

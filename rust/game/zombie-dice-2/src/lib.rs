@@ -255,13 +255,17 @@ impl Game {
         (taken, logs)
     }
 
-    pub fn start_turn(&mut self) -> Vec<Log> {
+    fn reset_turn(&mut self) {
         self.cup = all_dice();
         self.shake_cup();
         self.kept = vec![];
         self.current_roll = vec![];
         self.round_brains = 0;
         self.round_shotguns = 0;
+    }
+
+    pub fn start_turn(&mut self) -> Vec<Log> {
+        self.reset_turn();
         self.roll()
     }
 
@@ -292,12 +296,7 @@ impl Game {
             if self.should_skip_in_rolloff(self.current_turn) {
                 continue;
             }
-            self.cup = all_dice();
-            self.shake_cup();
-            self.kept = vec![];
-            self.current_roll = vec![];
-            self.round_brains = 0;
-            self.round_shotguns = 0;
+            self.reset_turn();
             let (roll_logs, busted) = self.roll_inner();
             logs.extend(roll_logs);
             if busted {

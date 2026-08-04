@@ -134,6 +134,13 @@ impl Game {
         }
         let mut boards: Vec<Vec<City>> = by_board.into_values().collect();
         boards.shuffle(&mut rng);
+        if boards.len() < players {
+            return Err(GameError::internal(format!(
+                "seven-wonders-1: city data yielded {} boards, fewer than {} players",
+                boards.len(),
+                players
+            )));
+        }
         let assigned_cities: Vec<City> = boards[..players]
             .iter()
             .map(|sides| sides[rng.random_range(0..sides.len())].clone())
@@ -1916,7 +1923,7 @@ mod tests {
 
     #[test]
     fn test_start_game_no_duplicate_boards() {
-        for players in 3..=4 {
+        for players in MIN_PLAYERS..=MAX_PLAYERS {
             for seed in 0..200u64 {
                 let (g, _) = Game::start_game(players, seed).unwrap();
                 let mut board_names: Vec<String> = g
