@@ -139,18 +139,20 @@ pub(crate) async fn set_stale(pool: &PgPool, user_id: Uuid) {
         .unwrap();
 }
 
-/// Test-only row counter. **The `format!`-built SQL is safe ONLY because
-/// every caller passes a hard-coded table-name literal.** Do not copy this
-/// pattern outside `mod tests`, and never pass a runtime value for `table`
-/// (ws F51(3)).
+/// Test-only row counter. The SQL is a compile-time constant per table; an
+/// unlisted `table` panics here rather than being interpolated (F-202).
 pub(crate) async fn count_rows(pool: &PgPool, table: &str) -> i64 {
-    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT COUNT(*) FROM {}",
-        table
-    )))
-    .fetch_one(pool)
-    .await
-    .unwrap()
+    let query = match table {
+        "friends" => "SELECT COUNT(*) FROM friends",
+        "games" => "SELECT COUNT(*) FROM games",
+        "game_players" => "SELECT COUNT(*) FROM game_players",
+        "game_bots" => "SELECT COUNT(*) FROM game_bots",
+        "game_logs" => "SELECT COUNT(*) FROM game_logs",
+        "game_log_targets" => "SELECT COUNT(*) FROM game_log_targets",
+        "users" => "SELECT COUNT(*) FROM users",
+        other => panic!("count_rows: unsupported table {other:?}"),
+    };
+    sqlx::query_scalar(query).fetch_one(pool).await.unwrap()
 }
 
 /// `create_game_with_users` shuffles slot order before assigning

@@ -13,5 +13,11 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tower-sessions = "0.14"
 
+[dev-dependencies]
+# Adds the test/migrate machinery for #[sqlx::test]; feature-unified with the
+# main sqlx dependency when building tests.
+sqlx = { workspace = true, features = ["macros", "migrate"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
 [lints]
 workspace = true
