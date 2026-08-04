@@ -15,12 +15,12 @@ decides what is next.
   97. R-37 and R-43 are parked by user process; R-38 remains blocked on 5.3.
   R-46 is `partial/parked` after R-46.0; R-51 is parked for the later
   parked-item review pending two scope rulings; see 97.
-- **R-35 is blocked on a user decision:** removing `Status` leaves no approved
-  public points source - `Response::Status` is the only response carrying
-  `GameResponse.points`, and `Response::PlayerRender` carries no `points`. The
-  owner must either approve optional all-seat `points` in `Response::PlayerRender`
-  (populated by Rust handlers, absent for existing Go handlers) or specify
-  another Go-compatible source. See Pending User Decisions in 97.
+- **R-35 is done (uncommitted):** `game_client::fetch_game_data` remains
+  scoreless and must never request `Status` to obtain points. No game-service
+  JSON-contract change, `Response::PlayerRender` change, or points endpoint was
+  made. Persisted `game_players.points` remains the source for any future
+  explicit monolith or legacy-Go score consumer; the current bot has no score
+  consumer. See 97 for acceptance evidence.
 
 ## 1. How to use this document
 
@@ -1166,23 +1166,34 @@ crate that copy-pasted the epilogue.
 
 ### R-35 - `game_client`: stop shipping every seat's private state
 
-**Objective:** the hidden-information-to-third-party class **did** land - not in
-`prompt.rs`, but one layer below it.
+**Objective:** preserve the scoreless redaction boundary and prevent
+game-service response bodies from leaving it through errors, while correcting
+the remaining response and retry handling.
 
 - **Closes:** F-192 (Medium), F-193 (Medium), F-11 (Medium), F-12 (Medium),
   F-13 (Low), F-14 (Low).
-- **Files:** `rust/lib/game_client/src/lib.rs:25-35` (+2 sites), `:310-331`
-  (+1 site), `:188-191`, `:192-195`, `:57-65` (+2 sites), `:104-117`, `:435-442`.
-- **Size: M** - basis: an error-`Display` change, a request-scope change, and a
-  retry/timeout correction in one crate.
+- **Files:** `rust/lib/game_client/src/lib.rs` and `Cargo.toml` (test-only
+  virtual-clock support); `rust/web/src/game/mod.rs` and `rust/bot/src/main.rs`
+  (typed UserError compatibility mappings).
+- **Size: M** - basis: error redaction and retry/timeout correction in one
+  client crate plus two direct caller compatibility mappings.
 - **Depends on:** nothing.
 
-**The defect:** the error `Display` embeds the **whole game-service response
-body**; for `fetch_game_data` that body carries **every** seat's `player_renders`
-plus raw state, and it reaches `tracing::error!(error = ?e)` with
-`sentry_tracing` installed - i.e. private game state leaves the system to a
-third-party error tracker. F-193 is the cause: `fetch_game_data` requests **all
-seats and discards all but one**.
+**Score-source decision (approved):** `fetch_game_data` remains scoreless. It
+uses only `PubRender` and the acting seat's `PlayerRender`; it must not request
+`Status` to obtain points. Do not change the stable game-service JSON contract,
+`ARCHITECTURE.md`, `Response::PlayerRender`, or add a points endpoint. Existing
+persisted `game_players.points` is the source for a future explicit
+monolith/legacy-Go score consumer. The current bot has no score consumer, so do
+not add one speculatively. Legitimate web `Status` uses for undo/import
+validation remain in scope for those callers and are unaffected.
+
+**Defects addressed:** error `Display` previously embedded the **whole
+game-service response body**; that body can include private state and reaches
+`tracing::error!(error = ?e)` with `sentry_tracing` installed. `request` also
+previously left `Response::UserError` to each caller, and retry timeouts applied
+per attempt rather than to the complete call. The old retry test relied on a
+startup race.
 
 **Refuted, do not re-raise:** `rust/bot/src/prompt.rs` is a pure renderer over a
 closed field list, its pattern-2 sibling check passes, and it predates the
@@ -1190,17 +1201,22 @@ programme.
 
 **Acceptance criteria**
 
-1. Error `Display` carries a status code and a bounded, redacted excerpt - never
-   the response body. A test **calls the error's `Display`** on a full game body
-   and asserts no seat identifier or private field appears.
-2. `fetch_game_data` requests **only the acting seat**. A test asserts the
-   outbound request scope.
-3. F-11: `Response::UserError` is handled and the service message surfaced, not
-   discarded.
-4. F-12: the timeout ceiling is **per call, not per attempt** - it is currently
-   ~6 minutes per call. A test asserts the total elapsed bound.
-5. F-14's retry test no longer races the backoff; a flaky test is not an accepted
-   outcome. F-13's version-name check rejects non-DNS labels.
+1. Error diagnostics carry the HTTP status and only a bounded redaction marker
+   or metadata - never response-body content. Neither `Display` nor `Debug` may
+   expose a full game body, player/seat identifier, private field, prompt, or
+   secret. A test **calls both `Display` and `Debug`** on a full game body and
+   asserts those sentinels are absent.
+2. `fetch_game_data` remains scoreless: it requests only `PubRender` and the
+   acting seat's `PlayerRender`, never `Status`; returned bot data carries no
+   points. A mock test proves an unavailable `Status` response with hidden
+   points cannot reach bot data. No score consumer is added.
+3. F-11: `Response::UserError` maps to a typed service error and surfaces its
+   service message without response-body retention.
+4. F-12: the timeout ceiling is **per complete call, including retries, backoff,
+   and response-body read**. A test asserts the total elapsed bound and does not
+   rely on scheduler timing.
+5. F-14's retry test is deterministic and proves one retry reaches a controlled
+   recovery. F-13's version-name check continues to reject non-DNS labels.
 
 ---
 

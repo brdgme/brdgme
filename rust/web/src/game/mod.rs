@@ -133,7 +133,10 @@ pub async fn execute_command(
         },
     )
     .await
-    .map_err(anyhow::Error::from)?;
+    .map_err(|e| match e {
+        client::GameClientError::UserError { message } => ExecuteCommandError::UserError(message),
+        e => anyhow::Error::from(e).into(),
+    })?;
 
     let (game_response, logs, can_undo, remaining_input) = match resp {
         Response::Play {
@@ -1073,7 +1076,12 @@ mod tests {
         .await;
 
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("invalid command"));
+        match err {
+            ExecuteCommandError::UserError(msg) => {
+                assert_eq!("invalid command", msg);
+            }
+            e => panic!("expected UserError, got {:?}", e),
+        }
         let ge = db::find_game_extended(&pool, game_id)
             .await
             .unwrap()

@@ -8,6 +8,11 @@
 /// anyhow strings so callers can branch on kind (ls F32, WP-07). Display
 /// messages are self-contained (they embed the underlying cause) because
 /// two callers log via `Display` only.
+///
+/// Response bodies are never retained by these errors: a game-service body
+/// can contain every seat's private state, so neither `Display` nor `Debug`
+/// may expose it (F-192). Only bounded metadata (status, parse error) and
+/// in-band service `message` values are carried.
 #[derive(Debug, thiserror::Error)]
 pub enum GameClientError {
     /// `version_name` is interpolated into the Host header the KEDA
@@ -18,24 +23,32 @@ pub enum GameClientError {
     InvalidVersionName { name: String },
     #[error("transport error calling game service: {0}")]
     Transport(#[from] reqwest::Error),
-    /// The crate-level per-attempt ceiling fired (ls F31). Callers with a
-    /// tighter `reqwest::Client` timeout see `Transport` instead.
+    /// The crate-enforced whole-call ceiling fired (ls F31, F-12): attempts,
+    /// backoff sleeps, and the response-body read together exceeded
+    /// `RetryConfig::request_timeout`. Callers with a tighter
+    /// `reqwest::Client` timeout see `Transport` instead.
     #[error("game service request timed out after {after:?}")]
     Timeout { after: std::time::Duration },
-    #[error("game service returned {status}: {body}")]
-    HttpStatus {
-        status: reqwest::StatusCode,
-        body: String,
-    },
-    #[error("error parsing game service response: {source}; body: {body}")]
+    /// The service returned a non-2xx status. The response body is
+    /// deliberately not retained or read: it may carry private game state,
+    /// so it must never reach logs, Sentry, or a caller through this error.
+    #[error("game service returned {status}")]
+    HttpStatus { status: reqwest::StatusCode },
+    /// The response body failed to parse as a game-service response. The
+    /// body is deliberately not retained; `serde_json` parse diagnostics
+    /// never embed the input content.
+    #[error("error parsing game service response: {source}")]
     ParseResponse {
-        body: String,
         #[source]
         source: serde_json::Error,
     },
     /// The service reported an in-band `Response::SystemError`.
     #[error("game service system error: {message}")]
     SystemError { message: String },
+    /// The service reported an in-band `Response::UserError` - a game-logic
+    /// rejection of the request, surfaced with the service's own message.
+    #[error("game service rejected the request: {message}")]
+    UserError { message: String },
     #[error("unexpected response to {request} request")]
     UnexpectedResponse { request: &'static str },
     #[error("no player render for position {player}")]
@@ -55,14 +68,17 @@ use std::time::Duration;
 /// Does not retry on any received HTTP response, including non-2xx status -
 /// those are game-logic errors, not transport failures.
 ///
-/// `request_timeout` is a crate-enforced per-attempt ceiling applied with
-/// `tokio::time::timeout`, NOT `reqwest`'s per-request timeout: reqwest's
-/// would *replace* the caller's client-level timeout (web 10s, bot 60s),
-/// whereas a ceiling composes - the tighter of the two always wins. It
-/// exists so the guarantee holds even for callers that configure no client
-/// timeout at all (the operator, ls F31). It must stay above 60s: the KEDA
-/// interceptor holds requests open while a game pod cold-starts, and bot
-/// deliberately allows 60s for that.
+/// `request_timeout` is a crate-enforced ceiling applied with
+/// `tokio::time::timeout` across the COMPLETE call: every attempt, every
+/// backoff sleep, and the response-body read together (F-12). It is NOT
+/// `reqwest`'s per-request timeout: reqwest's would *replace* the caller's
+/// client-level timeout (web 10s, bot 60s), whereas a ceiling composes - the
+/// tighter of the two always wins. It exists so the guarantee holds even for
+/// callers that configure no client timeout at all (the operator, ls F31).
+/// It must stay above 60s: the KEDA interceptor holds requests open while a
+/// game pod cold-starts, and bot deliberately allows 60s for that. Because
+/// the ceiling bounds the whole call, a single hung attempt consumes it;
+/// retries only help failures that surface quickly within the budget.
 #[derive(Debug, Clone)]
 struct RetryConfig {
     base_delay: Duration,
@@ -145,21 +161,13 @@ async fn send_with_retry(
             }
         }
 
-        match tokio::time::timeout(config.request_timeout, request_builder.send()).await {
-            Ok(Ok(res)) => return Ok(res),
-            Ok(Err(e)) => {
+        match request_builder.send().await {
+            Ok(res) => return Ok(res),
+            Err(e) => {
                 let retryable = e.is_connect() || e.is_timeout() || e.is_request();
                 attempt += 1;
                 if !retryable || attempt >= config.max_attempts {
                     return Err(e.into());
-                }
-            }
-            Err(_elapsed) => {
-                attempt += 1;
-                if attempt >= config.max_attempts {
-                    return Err(GameClientError::Timeout {
-                        after: config.request_timeout,
-                    });
                 }
             }
         }
@@ -176,23 +184,27 @@ async fn request_with_config(
     config: &RetryConfig,
 ) -> Result<Response, GameClientError> {
     validate_version_name(version_name)?;
-    let res = send_with_retry(client, uri, version_name, request, config).await?;
-    let status = res.status();
-    let body = tokio::time::timeout(config.request_timeout, res.text())
+    let call = async {
+        let res = send_with_retry(client, uri, version_name, request, config).await?;
+        let status = res.status();
+        if !status.is_success() {
+            // Do not read or retain the body: it may carry private state.
+            return Err(GameClientError::HttpStatus { status });
+        }
+        let body = res.text().await.map_err(GameClientError::Transport)?;
+        let resp: Response = serde_json::from_str(&body)
+            .map_err(|source| GameClientError::ParseResponse { source })?;
+        match resp {
+            Response::SystemError { message } => Err(GameClientError::SystemError { message }),
+            Response::UserError { message } => Err(GameClientError::UserError { message }),
+            other => Ok(other),
+        }
+    };
+    tokio::time::timeout(config.request_timeout, call)
         .await
         .map_err(|_| GameClientError::Timeout {
             after: config.request_timeout,
         })?
-        .map_err(GameClientError::Transport)?;
-    if !status.is_success() {
-        return Err(GameClientError::HttpStatus { status, body });
-    }
-    let resp: Response = serde_json::from_str(&body)
-        .map_err(|source| GameClientError::ParseResponse { body, source })?;
-    match resp {
-        Response::SystemError { message } => Err(GameClientError::SystemError { message }),
-        other => Ok(other),
-    }
 }
 
 #[tracing::instrument(name = "game_service_request", skip(client, request), fields(game.uri = %uri))]
@@ -429,54 +441,61 @@ mod tests {
         }
     }
 
+    /// F-14 regression: deterministic retry recovery. A raw TCP server drops
+    /// the first connection after reading the request (a connection-reset
+    /// transport failure) and serves a valid response on the second. No
+    /// sleeps or startup races - the server behavior is controlled per
+    /// connection, so exactly one retry must reach the recovery response.
     #[tokio::test]
-    async fn test_retry_on_connect_refused_then_success() {
-        // Reserve a free port, then drop the listener so the port refuses
-        // connections (nothing is listening).
+    async fn test_retry_reaches_controlled_recovery() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        // Known race, accepted (ls F37): the server task binds ~15ms in while
-        // the first jittered backoff is 20-40ms; with max_attempts=3 the
-        // window for outright failure is negligible. If this ever flakes in
-        // CI, bind the replacement listener on a second port first and point
-        // the retry at that.
-        drop(listener);
-
-        // Bring up a real server on the same port shortly after, before the
-        // retry loop's backoff elapses, so the first attempt(s) hit
-        // connection-refused and a later attempt succeeds.
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let accepted2 = accepted.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(15)).await;
-            let app = Router::new().route(
-                "/",
-                post(|Json(payload): Json<Request>| async move {
-                    match payload {
-                        Request::PubRender { .. } => Json(Response::PubRender {
-                            render: PubRender {
-                                pub_state: "pub".to_string(),
-                                render: "render".to_string(),
-                            },
-                        }),
-                        _ => Json(Response::SystemError {
-                            message: "unsupported in mock".to_string(),
-                        }),
+            let mut conn = 0;
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                conn += 1;
+                accepted2.fetch_add(1, Ordering::SeqCst);
+                let mut seen: Vec<u8> = vec![];
+                let mut buf = [0u8; 8192];
+                loop {
+                    let n = socket.read(&mut buf).await.unwrap();
+                    if n == 0 {
+                        break;
                     }
-                }),
-            );
-            let listener = TcpListener::bind(addr).await.unwrap();
-            axum::serve(listener, app).await.unwrap();
+                    seen.extend_from_slice(&buf[..n]);
+                    if seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                if conn == 1 {
+                    // Reset before any response bytes: retryable.
+                    drop(socket);
+                    continue;
+                }
+                let body = serde_json::to_string(&Response::PubRender {
+                    render: PubRender {
+                        pub_state: "pub".to_string(),
+                        render: "render".to_string(),
+                    },
+                })
+                .unwrap();
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                socket.write_all(resp.as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
+            }
         });
 
-        let config = RetryConfig {
-            base_delay: Duration::from_millis(40),
-            multiplier: 2.0,
-            cap: Duration::from_millis(200),
-            max_attempts: 3,
-            request_timeout: Duration::from_secs(90),
-        };
         let client = reqwest::Client::new();
         let uri = format!("http://{}", addr);
-        let start = std::time::Instant::now();
         let resp = request_with_config(
             &client,
             &uri,
@@ -484,16 +503,18 @@ mod tests {
             &Request::PubRender {
                 game: "g".to_string(),
             },
-            &config,
+            &tiny_config(),
         )
         .await;
-        assert!(resp.is_ok(), "expected eventual success, got {:?}", resp);
-        // Guaranteed minimum backoff before the retry is half of base_delay
-        // (40ms) = 20ms; use a slightly looser bound to avoid flakiness.
         assert!(
-            start.elapsed() >= Duration::from_millis(15),
-            "expected at least one backoff sleep before success, elapsed={:?}",
-            start.elapsed()
+            matches!(resp, Ok(Response::PubRender { .. })),
+            "expected retry to reach the recovery response, got {:?}",
+            resp
+        );
+        assert_eq!(
+            2,
+            accepted.load(Ordering::SeqCst),
+            "expected exactly one reset followed by one successful retry"
         );
     }
 
@@ -919,62 +940,262 @@ mod tests {
         );
     }
 
+    /// F-192 regression: an error raised from a full sensitive response body
+    /// must not expose body content through either `Display` or `Debug`.
+    /// The mock answers a 500 with a complete game body carrying private
+    /// hand state, seat identifiers, a prompt, and a secret; the test formats
+    /// the resulting `HttpStatus` error both ways and proves every sentinel
+    /// is absent while the HTTP status survives.
     #[tokio::test]
-    async fn test_crate_timeout_bounds_client_without_timeout() {
-        let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        std_listener.set_nonblocking(true).unwrap();
-        let addr = std_listener.local_addr().unwrap();
-        let listener = TcpListener::from_std(std_listener).unwrap();
-
-        let counter = Arc::new(AtomicUsize::new(0));
-        let counter2 = counter.clone();
+    async fn test_http_status_error_redacts_response_body() {
+        const SENTINELS: &[&str] = &[
+            "OPPONENT_PRIVATE_STATE_SENTINEL",
+            "SEAT_NAME_SENTINEL",
+            "PROMPT_SENTINEL",
+            "9876543.5",
+            "hunter2",
+        ];
+        let body = r#"{"game":{"state":{"players":[{"name":"SEAT_NAME_SENTINEL","hand":["OPPONENT_PRIVATE_STATE_SENTINEL"]}]},"points":[9876543.5,9876543.5]},"prompt":"PROMPT_SENTINEL","password":"hunter2"}"#;
+        let app = Router::new().route(
+            "/",
+            post(move |_req_body: String| async move { (StatusCode::INTERNAL_SERVER_ERROR, body) }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            loop {
-                if let Ok((socket, _)) = listener.accept().await {
-                    counter2.fetch_add(1, Ordering::SeqCst);
-                    tokio::spawn(async move {
-                        let _socket = socket;
-                        tokio::time::sleep(Duration::from_secs(60)).await;
-                    });
-                }
-            }
+            axum::serve(listener, app).await.unwrap();
         });
-
         let client = reqwest::Client::new();
-        let config = RetryConfig {
-            base_delay: Duration::from_millis(5),
-            multiplier: 2.0,
-            cap: Duration::from_millis(20),
-            max_attempts: 3,
-            request_timeout: Duration::from_millis(50),
-        };
         let uri = format!("http://{}", addr);
-        let start = std::time::Instant::now();
-        let resp = request_with_config(
+        let err = request(
             &client,
             &uri,
             "test-game-1",
             &Request::PubRender {
                 game: "g".to_string(),
             },
-            &config,
         )
-        .await;
+        .await
+        .unwrap_err();
+        match &err {
+            GameClientError::HttpStatus { status } => {
+                assert_eq!(StatusCode::INTERNAL_SERVER_ERROR, *status)
+            }
+            e => panic!("expected HttpStatus, got {:?}", e),
+        }
+        let display = err.to_string();
+        let debug = format!("{err:?}");
+        for sentinel in SENTINELS {
+            assert!(
+                !display.contains(sentinel),
+                "Display leaked {sentinel:?}: {display}"
+            );
+            assert!(
+                !debug.contains(sentinel),
+                "Debug leaked {sentinel:?}: {debug}"
+            );
+        }
+    }
+
+    /// F-192 regression for the parse path: a malformed 200 response whose
+    /// body carries sentinels produces a `ParseResponse` error whose
+    /// `Display` and `Debug` never expose the body content.
+    #[tokio::test]
+    async fn test_parse_error_redacts_response_body() {
+        const SENTINELS: &[&str] = &["OPPONENT_PRIVATE_STATE_SENTINEL", "9876543.5", "hunter2"];
+        let body = r#"{"hand":["OPPONENT_PRIVATE_STATE_SENTINEL"],"points":[9876543.5],"password":"hunter2""#;
+        let app = Router::new().route(
+            "/",
+            post(move |_req_body: String| async move { (StatusCode::OK, body) }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+        let uri = format!("http://{}", addr);
+        let err = request(
+            &client,
+            &uri,
+            "test-game-1",
+            &Request::PubRender {
+                game: "g".to_string(),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, GameClientError::ParseResponse { .. }),
+            "expected ParseResponse, got {:?}",
+            err
+        );
+        let display = err.to_string();
+        let debug = format!("{err:?}");
+        for sentinel in SENTINELS {
+            assert!(
+                !display.contains(sentinel),
+                "Display leaked {sentinel:?}: {display}"
+            );
+            assert!(
+                !debug.contains(sentinel),
+                "Debug leaked {sentinel:?}: {debug}"
+            );
+        }
+    }
+
+    /// F-11 regression: an in-band `Response::UserError` maps to a typed
+    /// error that surfaces exactly the service message, with no response
+    /// body retained or exposed.
+    #[tokio::test]
+    async fn test_user_error_maps_to_typed_error_with_message() {
+        let app = Router::new().route(
+            "/",
+            post(|Json(_): Json<Request>| async move {
+                Json(Response::UserError {
+                    message: "expected buy or done".to_string(),
+                })
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+        let uri = format!("http://{}", addr);
+        let err = request(
+            &client,
+            &uri,
+            "test-game-1",
+            &Request::PubRender {
+                game: "g".to_string(),
+            },
+        )
+        .await
+        .unwrap_err();
+        match &err {
+            GameClientError::UserError { message } => {
+                assert_eq!("expected buy or done", message)
+            }
+            e => panic!("expected UserError, got {:?}", e),
+        }
+        assert!(
+            err.to_string().contains("expected buy or done"),
+            "UserError must surface the service message, got: {err}"
+        );
+        assert_eq!(
+            format!("{err:?}"),
+            "UserError { message: \"expected buy or done\" }",
+            "Debug must retain exactly the message and no response body"
+        );
+    }
+
+    /// F-12 regression: the timeout ceiling is per complete call, not per
+    /// attempt. The first two connections are reset after the request (fast
+    /// retryable failures that consume two backoff sleeps); the third
+    /// returns response headers but never the body, so the body read hangs.
+    /// The single whole-call ceiling must bound the two retries, both
+    /// backoff sleeps, and the hanging body read together: the call must end
+    /// at exactly `request_timeout` of elapsed time, never near "ceiling per
+    /// attempt plus body-read ceiling" (the pre-fix code spends the two
+    /// backoff sleeps AND a second full ceiling on the body read, ending at
+    /// ~650-800ms).
+    ///
+    /// The clock is paused (test-util) and driven forward 1ms at a time, so
+    /// the assertion is exact in virtual time and independent of scheduler
+    /// wakeup variation (F-12's "does not rely on scheduler timing"). The
+    /// loop yields to the reactor on every step, so the loopback connection
+    /// resets and the third request complete in real time long before the
+    /// 500ms ceiling.
+    #[tokio::test(start_paused = true)]
+    async fn test_whole_call_timeout_covers_attempts_backoff_and_body_read() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let accepted2 = accepted.clone();
+        tokio::spawn(async move {
+            let mut conn = 0;
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                conn += 1;
+                accepted2.fetch_add(1, Ordering::SeqCst);
+                let mut seen: Vec<u8> = vec![];
+                let mut buf = [0u8; 8192];
+                loop {
+                    let n = socket.read(&mut buf).await.unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    seen.extend_from_slice(&buf[..n]);
+                    if seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                if conn < 3 {
+                    drop(socket);
+                    continue;
+                }
+                // Headers promise a body that never arrives.
+                let resp = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100000\r\nconnection: close\r\n\r\n";
+                socket.write_all(resp.as_bytes()).await.unwrap();
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        });
+
+        let client = reqwest::Client::new();
+        let config = RetryConfig {
+            base_delay: Duration::from_millis(100),
+            multiplier: 2.0,
+            cap: Duration::from_millis(200),
+            max_attempts: 3,
+            request_timeout: Duration::from_millis(500),
+        };
+        let uri = format!("http://{}", addr);
+        let start = tokio::time::Instant::now();
+        let task = tokio::spawn(async move {
+            request_with_config(
+                &client,
+                &uri,
+                "test-game-1",
+                &Request::PubRender {
+                    game: "g".to_string(),
+                },
+                &config,
+            )
+            .await
+        });
+        // Let the spawned call anchor its whole-call ceiling at the paused
+        // clock's zero point so the elapsed assertion is exact.
+        tokio::task::yield_now().await;
+        while !task.is_finished() {
+            tokio::time::advance(Duration::from_millis(1)).await;
+            // Let a timer-woken task run to completion before re-checking, so
+            // the elapsed assertion sees the exact ceiling boundary.
+            tokio::task::yield_now().await;
+            if start.elapsed() > Duration::from_secs(2) {
+                panic!("whole-call timeout did not fire; task still running");
+            }
+        }
+        let resp = task.await.unwrap();
+        let elapsed = start.elapsed();
         match resp {
             Err(GameClientError::Timeout { after }) => {
-                assert_eq!(Duration::from_millis(50), after)
+                assert_eq!(Duration::from_millis(500), after)
             }
             r => panic!("expected Timeout, got {:?}", r),
         }
         assert_eq!(
             3,
-            counter.load(Ordering::SeqCst),
-            "ceiling timeouts must be retried up to max_attempts"
+            accepted.load(Ordering::SeqCst),
+            "expected two retries plus the hanging third attempt within the ceiling"
         );
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "must not hang; elapsed={:?}",
-            start.elapsed()
+        assert_eq!(
+            Duration::from_millis(500),
+            elapsed,
+            "whole-call ceiling must end at exactly request_timeout, never per-attempt + body-read (pre-fix ends ~650-800ms); elapsed={elapsed:?}"
         );
     }
 

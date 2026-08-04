@@ -422,7 +422,10 @@ async fn run_bot_turn(state: &AppState, req: BotTurnEvent, trace_id: Uuid) -> Re
             }
             Ok(Response::UserError { message }) => message,
             Ok(_) => "Unexpected response from game service".to_string(),
-            Err(e) => e.to_string(),
+            Err(e) => match e {
+                brdgme_game_client::GameClientError::UserError { message } => message,
+                e => e.to_string(),
+            },
         };
 
         if attempt + 1 == MAX_ATTEMPTS {
