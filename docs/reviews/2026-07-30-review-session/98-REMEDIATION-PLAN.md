@@ -1102,8 +1102,9 @@ crate that copy-pasted the epilogue.
    one end log (F-52 currently produces a **double end log**).
 3. F-19: the placings metric is written **once**, not twice, in the four affected
    crates.
-4. F-20: `starship-catan-1`'s hardcoded `0..2` for placings is replaced by the
-   real player count; a test with a non-2-player game asserts correct placings.
+4. F-20 is not applicable: Starship Catan is fixed at two players, so `0..2` for
+   placings is correct. Do not change its source, player limit, gameplay, or add
+   a non-two-player fixture or test.
 5. F-21: `acquire-1`, a migrated crate with **no regression test**, gets one.
 6. F-56: a finished `cathedral-2` game no longer advertises `play` in its command
    spec; a test asserts the spec is empty at finish.

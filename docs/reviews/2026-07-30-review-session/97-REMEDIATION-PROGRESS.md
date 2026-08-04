@@ -55,7 +55,7 @@ restored per owner instruction.)
 | R-29 | done(fcda3e6) | fcda3e6d096f3db929fca9c5a33353c7b11bac23 + a48c783a9b00212fb5dfff98ad0570a9ee6fc4bd | closes F-17 (High) + F-16 (Low) + F-191 (Low); files `rust/lib/cmd/src/repl.rs`, `requester/gamer.rs`, `http.rs`, `rust/web/src/rules.rs`; AC1 repl.rs unwrap/expect/panic survivor grep count exactly 0, so no survivor justification applies (scope excludes test_support/startup expects); AC2 `response_error_message` seam renders a `Response::UserError` message without panicking, test `user_error_response_produces_message_without_panicking`; AC3 all three payload variants (DataDocs/BasicStrategy/AdvancedStrategy) deserialize + `validate()` + player bounds-check, tests: 3 malformed -> `Err(Parse)`, 3 validate-error -> SystemError, 2 out-of-range player -> UserError, 3 valid unchanged; AC4 settled contract (per 98-REMEDIATION-PLAN.md:979-983 + 00-STATE.md:541-543): true malformed envelope syntax (`{ not json`) -> Axum 400 text/plain via `route::<G>()` with non-JSON body (test `malformed_envelope_returns_400_text_plain`), while malformed inner game state remains 200 SystemError; fresh commands: `cargo test -p brdgme_cmd` 31 pass / 0 fail, `cargo clippy -p brdgme_cmd --all-targets -- -D warnings` exit 0, `cargo fmt -p brdgme_cmd -- --check` exit 0, `cargo check -p tic-tac-toe-2` exit 0, allowed gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0, `git diff --check` exit 0; web clippy NOT passed - five pre-existing unrelated warnings (notify.rs `Reminder` dead-code, sweep.rs x2 auto-deref, auth/server.rs x2 redundant closure, none in rules.rs), web fmt NOT passed - pre-existing drift, none in rules.rs; web runtime test `fetch_strategy_sends_validated_payloads_and_receives_strategy` passes: from `rust/` `SQLX_OFFLINE=true cargo test -p web --features ssr fetch_strategy_sends_validated_payloads_and_receives_strategy` exit 0, target result `1 passed; 0 failed; 0 ignored; 0 measured; 651 filtered out`, duration 0.02s, in-process (no DB/NATS); no R-29 defect found; independent initial review REJECTed web empty-state caller regression (fcda3e6 sent `game: ""`), bounded correction a48c783 added PlayerCounts->New->strategy valid scratch-state flow, targeted re-review APPROVE with no findings; residuals: four sequential strategy HTTP calls, pre-existing web lint/fmt debt; no standalone R-29 change doc existed and nothing was archived; protected R-07-HANDOVER.md untouched; no push |
 | R-30 | done(fc90116) | fc90116ce063261c3c643c64a85a6771e092c0fe + 8814bb0e00b3dcd9937f2ff49a1c94964025ca66 + 196200c9d1182271a8345529e68778ebdb80b3e6 | closes F-22/F-23/F-28/F-29/F-30/F-34/F-38/F-39; four crates despite plan Size prose "three crates" (four named Files governed; discrepancy recorded, see R-30 evidence); per-crate test/clippy/fmt all pass; independent review PASS after bounded legacy-bids correction (see R-30 evidence); final AC1 Splendor test-completion commit 196200c (test-only, no gameplay behaviour change; see R-30 evidence) |
 | R-31 | parked-by-user | | Owner ruling: retain the 8-player cap because the platform supports only eight pre-approved player colors; 9-10 players are unsuitable now. Do not implement the published 2-10-player variant. The broader player-limit issue may be revisited in a future per-game review. F-73 remains parked because it cannot proceed under this indivisible R-31 plan; no source/doc implementation occurs. |
-| R-32 | blocked(AC4 owner amendment/sign-off) | | AC4 non-2-player fixture unreachable: starship-catan-1 is fixed two-player, so no truthful non-2-player game can be constructed; requires owner amendment/sign-off (see R-32 blocker evidence) |
+| R-32 | done(uncommitted) | 932b7e79ad8dd610698e84c97c6a2b9eef4314e2, eb811900d418428b9c200f35590bbcec05dd8d84, 4f97c92f798f9f6ab76abc0ba92feaada9074d87, 2d245b696dcdf3cff4c073bab24749d38d87c12f, 0091658b299ea399b595cf1da3702ae2a2eb6356 | Closes F-18/F-71/F-52/F-19/F-21/F-56. F-20 is N/A: Starship Catan is fixed two-player, so `0..2` placings remains correct; no source, gameplay, player-limit, or non-two-player-fixture change. AC1 static sweep found zero ungated epilogues; AC2 direct finish-path tests in all 19 affected crates assert one final epilogue (and Sushizock one end log); AC3 deduplicates placings in all five affected crates; AC5 Acquire regression and AC6 Cathedral finished command-spec tests pass. Serial per-crate test/clippy/fmt gates and `git diff --check` pass. Independent review found no blocker; parser rejection makes a second finished command unavailable, limiting direct true-branch guard coverage without a new unapproved harness. |
 | R-33 | done(ad6fa645) | ad6fa6452da9752bca43a4c726bb5c7caa51b6f9 | closes F-40/F-42/F-43/F-46/F-47 in rust/game/acquire-1/src/lib.rs. AC1 F-40: three bank sites (handle_found_command, take_shares, return_shares) get_mut + GameError::Internal, grep or_insert(STARTING_SHARES)=0 hits, whole-board conservation regression. AC2 F-42 (owner-amended plan AC2): `merger_cascade_removes_played_tile_by_current_identity` drives the real Festival->American->Imperial cascade in one `play b2` command with played at hand index 0 and two survivors; asserts survivors == [s1, s2] (exact order) and played absent. Pre-fix failure logic RED-verified: swap_remove(0) on [played, s1, s2] yields [s2, s1] and the order assertion fails exactly as predicted; GREEN with the retained identity-removal `tiles.retain(|l| l != loc)`. AC3 F-43: handle_end_command routes through assert_player_turn (9/9 command handlers); main_turn_player only in Phase def + player_can_end parser gate. AC4 F-46: pub_state() = self.into() (From<&Game>), no whole-Game clone. AC5 F-47: 26 passing (25 lib incl board + 1 contract). Gates all exit 0: cargo test -p acquire-1 (25+1), cargo clippy -p acquire-1 --all-targets -- -D warnings, cargo fmt -p acquire-1 -- --check, git diff --check. No gameplay/rules/PORT_PARITY change. Independent review PASS, no blocking findings; two non-blocking residuals: buy-path missing bank key is a read-only InvalidInput rather than Internal; F-46 regression test is coverage rather than discriminating |
 | R-34 | done | | F-25 REFUTED: current five-pile placement is official Queen Games behavior once back-pop draw direction is accounted for - regression test `scoring_cards_fire_at_official_fifth_pile_bounds` consumes the deck via the real `draw_cards` pop-from-back path and asserts round 1 in [L-4f, L-3f-1] and round 2 in [L-2f+1, L-f] money-card draws over players 2-6 x seeds 0..24 (125 games, all pass; fails against the thirds distribution, verified); historic Go one-card-shifted round-1 distribution NOT restored; NO production change for F-25. F-26 FIXED: `self.round = 3` forced immediately before the final `score_round()` in the `FinalPlace` -> `End` transition (`lib.rs:388-391`); test `early_final_scoring_uses_round_three_rewards` drives the real final path (3p, round 1, FinalPlace, all place queues empty, one Pavillion on board 0) and asserts round 3 + 16 points - pre-fix RED (round 2, 1 pt), post-fix GREEN. `cargo test -p alhambra-1` 50 lib + 1 contract pass / 0 fail; `cargo clippy -p alhambra-1 --all-targets -- -D warnings` exit 0; `cargo fmt -p alhambra-1 -- --check` exit 0; `git diff --check` exit 0. No PORT_PARITY gameplay change (F-26 round-3 force is the approved fix; nothing else altered). Uncommitted per work-unit brief. |
 | R-35 | blocked(owner decision pending) | | sequence with 5.8; see Pending User Decisions |
@@ -1470,16 +1470,10 @@ commits.
   pre-dating R-30; absent from both R-30 commit diffs); R-07 (PARKED), R-21
   (gated), R-22 (PARKED) statuses and files untouched; no push.
 
-## R-32 blocker evidence
+## R-32 acceptance evidence
 
-Status `blocked(AC4 owner amendment/sign-off)`. No accepted R-32 commit exists:
-the five implementation commits listed below are in progress and unaccepted, so
-R-32 is NOT complete, and independent review plus full per-crate verification
-remain outstanding. No invalid/forged test fixture will be fabricated to
-satisfy AC4.
-
-Existing implementation commits (all verified via `git rev-parse`; all
-unaccepted, none reflected in a done row):
+Status `done(uncommitted)`. The five implementation commits are accepted after
+Lead inspection, full serial per-crate verification, and independent review:
 
 - `932b7e79ad8dd610698e84c97c6a2b9eef4314e2`
 - `eb811900d418428b9c200f35590bbcec05dd8d84`
@@ -1487,10 +1481,9 @@ unaccepted, none reflected in a done row):
 - `2d245b696dcdf3cff4c073bab24749d38d87c12f`
 - `0091658b299ea399b595cf1da3702ae2a2eb6356`
 
-- **AC4 (the blocker):** `98-REMEDIATION-PLAN.md:1086-1087` (F-20) requires
-  replacing `starship-catan-1`'s hardcoded placings `0..2` with the real player
-  count AND a test with a non-2-player game asserting correct placings. The
-  non-2-player half is unreachable.
+- **AC4 / F-20:** the approved plan amendment classifies F-20 as not applicable.
+  Starship Catan is fixed two-player, so `0..2` placings remains correct. No
+  source, gameplay, player-limit, or non-two-player-fixture/test change occurred.
 - **Fixed two-player invariants (`rust/game/starship-catan-1/src/lib.rs`):**
   the boards field is the fixed array `[PlayerBoard; 2]` (:493); `start_game`
   rejects `players != 2` with a `PlayerCount { min: 2, max: 2 }` error
@@ -1500,22 +1493,15 @@ unaccepted, none reflected in a done row):
 - **Supporting docs:** `RULES.md:3` ("Starship Catan is a 2-player ... game")
   and `PORTING_NOTES.md:82-84` ("This game only ever has two players") both
   confirm the two-player-only design.
-- **Owner sign-off requirement:** `docs/decisions/PORT_PARITY.md:26-32`
-  (Decision 2) prohibits any gameplay change without per-game sign-off;
-  constructing a non-2-player game would be a prohibited
-  player-count/gameplay change.
-- **Commit `4f97c92f798f9f6ab76abc0ba92feaada9074d87` (F-19 placings dedup):**
-  deduplicated placings into a single per-crate `placings()` but retained the
-  hardcoded `0..2`. Rewriting it as `0..self.players` would be behavior-neutral
-  under the two-player invariant but cannot yield a truthful, valid
-  non-2-player test fixture, so it would not satisfy AC4's test requirement.
-- **No fabrication:** no invalid/forged fixture will be fabricated; AC4 needs
-  owner amendment/sign-off (acceptance without the non-2-player test, or an
-  owner-ratified player-count/gameplay change) to proceed.
-- **Outstanding:** R-32 is NOT complete; independent review and full per-crate
-  verification of the five commits remain outstanding.
-- **Scope:** tracker-only change to this file; protected
-  `docs/reviews/2026-07-30-review-session/R-07-HANDOVER.md` untouched.
+- **Verification:** static sweep found zero ungated epilogues. All 19 affected
+  crates passed serial `cargo test -p`, `cargo clippy -p <crate> --all-targets --
+  -D warnings`, and `cargo fmt -p <crate> -- --check`; `git diff --check` passed.
+  Independent review found no blocker. Its non-blocking test-strength note is
+  retained: finished-game parser rejection makes a second `command()` unavailable,
+  so exercising the `was_finished == true` branch would require a new unapproved
+  harness.
+- **Scope:** no invalid fixture was fabricated; no Starship Catan source/gameplay
+  change occurred; protected `R-07-HANDOVER.md` remains untouched.
 
 ## R-37.0 evidence
 

@@ -196,6 +196,9 @@ work breakdown. Still uncommitted.
   supports only eight pre-approved player colors, so 9-10 players are unsuitable
   now. Do not implement the published 2-10-player variant; revisit the broader
   player-limit question in a future per-game review.
+- **R-32 / F-20 is not applicable to `starship-catan-1`.** The game is fixed at
+  two players, so its `0..2` placings range is correct. Do not change its source,
+  player limit, gameplay, or add a non-two-player fixture or test.
 - **`lords-of-vegas-1` is work in progress.** Its missing endgame (never assigns
   `finished = true`) is out of scope. Do not raise findings about missing or
   incomplete functionality there. F-50/F-57 and the no-`finished` observation are
