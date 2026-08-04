@@ -65,7 +65,7 @@ pub async fn find_game_type_player_counts(
 #[cfg(feature = "ssr")]
 pub async fn find_game_version_rules(pool: &PgPool, id: Uuid) -> Result<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT rules FROM game_versions WHERE id = $1 AND is_public = true AND is_deprecated = false",
+        "SELECT rules FROM game_versions WHERE id = $1 AND is_public = true",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -82,7 +82,7 @@ pub async fn find_game_version_render_meta(
     id: Uuid,
 ) -> Result<Option<(String, String, i32)>> {
     sqlx::query_as(
-        "SELECT uri, name, interface_version FROM game_versions WHERE id = $1 AND is_public = true AND is_deprecated = false",
+        "SELECT uri, name, interface_version FROM game_versions WHERE id = $1 AND is_public = true",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -253,6 +253,70 @@ mod tests {
                 .await
                 .unwrap(),
             None
+        );
+    }
+
+    /// F-140: deprecation excludes a version from new-game creation, not from
+    /// access to authored public rules. A public deprecated version must return
+    /// both lookups; a non-public version must return neither, regardless of
+    /// deprecation.
+    #[sqlx::test]
+    async fn rules_lookups_public_deprecated_is_readable_non_public_is_not(pool: PgPool) {
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        sqlx::query("UPDATE game_versions SET rules = $1, is_deprecated = true WHERE id = $2")
+            .bind("## Authored rules\n\nBody text.")
+            .bind(gv)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            find_game_version_rules(&pool, gv).await.unwrap(),
+            Some("## Authored rules\n\nBody text.".to_string()),
+            "public deprecated version must keep authored rules readable"
+        );
+        assert_eq!(
+            find_game_version_render_meta(&pool, gv).await.unwrap(),
+            Some((
+                "http://localhost:0/mock".to_string(),
+                "test-v1".to_string(),
+                1
+            )),
+            "public deprecated version must keep render metadata readable"
+        );
+
+        sqlx::query("UPDATE game_versions SET is_public = false WHERE id = $1")
+            .bind(gv)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            find_game_version_rules(&pool, gv).await.unwrap().is_none(),
+            "non-public deprecated version must not expose rules"
+        );
+        assert!(
+            find_game_version_render_meta(&pool, gv)
+                .await
+                .unwrap()
+                .is_none(),
+            "non-public deprecated version must not expose render metadata"
+        );
+
+        sqlx::query("UPDATE game_versions SET is_deprecated = false WHERE id = $1")
+            .bind(gv)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            find_game_version_rules(&pool, gv).await.unwrap().is_none(),
+            "non-public non-deprecated version must stay hidden"
+        );
+        assert!(
+            find_game_version_render_meta(&pool, gv)
+                .await
+                .unwrap()
+                .is_none(),
+            "non-public non-deprecated version must stay hidden"
         );
     }
 

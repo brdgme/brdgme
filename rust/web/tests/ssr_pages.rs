@@ -1496,6 +1496,24 @@ async fn rules_page_renders_when_strategy_fetch_fails(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn rules_page_anonymous_renders_rules_for_public_deprecated_version(pool: PgPool) {
+    // V1 version (interface_version default 1) -> strategy fetch is skipped, so
+    // the uri is never dereferenced. F-140: deprecating a public version must
+    // not hide its authored rules from the anonymous rules page.
+    let game_version_id = make_game_version(&pool, "http://localhost:0/mock").await;
+    sqlx::query("UPDATE game_versions SET rules = $1, is_deprecated = true WHERE id = $2")
+        .bind("# How to Play\n\nDeprecated but still readable.")
+        .bind(game_version_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(app, &format!("/rules/{}", game_version_id), None).await;
+    assert_clean_html_body(status, &content_type, &body, "How to Play");
+}
+
+#[sqlx::test]
 async fn create_proposal_without_opponent_emails_succeeds(pool: PgPool) {
     let uri = spawn_mock_new_game_service().await;
     let game_version_id = make_game_version(&pool, &uri).await;
