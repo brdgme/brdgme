@@ -259,9 +259,21 @@ Key tables in PostgreSQL:
 
 - **`users`**: User identities, credentials, and preferences.
 - **`game_types`**: Game type identities (e.g. "Lost Cities"). Managed by the operator.
+  The `player_counts`, `weight`, and `blurb` descriptors are re-pointed, on every
+  lifecycle change, from the newest fully snapshotted authoritative version.
 - **`game_versions`**: Deployed game versions. Managed by the operator. Includes
   `is_public`, `is_deprecated`, and `interface_version` (1 or 2) flags;
-  unique constraint on `(game_type_id, name)`.
+  unique constraint on `(game_type_id, name)`. Stores nullable per-version
+  snapshots for `player_counts`, `weight`, and `blurb`.
+- Authoritative means `is_public = true AND is_deprecated = false`, ordered
+  `created_at DESC, name DESC`. Availability for new games is determined by the
+  authoritative predicate alone: if no authoritative version exists, the type is
+  unavailable for new games and its descriptors are left unchanged. An
+  authoritative version with incomplete snapshots is still available, but its
+  shared descriptors remain unchanged until a later fully snapshotted
+  reconciliation re-points them. The snapshot columns are an additive nullable
+  migration old binaries tolerate; the snapshot-aware operator starts only after
+  it completes.
 - **`games`**: Active and finished game instances. Stores the serialized
   `game_state` blob. `is_finished` is one-way for a rated game - a finished
   game can be deleted by an admin but never un-finished (see docs/CODING.md,

@@ -1,4 +1,6 @@
-use sqlx::{Acquire, PgPool};
+use std::collections::HashSet;
+
+use sqlx::{Acquire, PgConnection, PgPool, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -65,33 +67,54 @@ where
     A: Acquire<'c, Database = sqlx::Postgres>,
 {
     let mut conn = acquire.acquire().await?;
-    let game_type_id: Uuid = sqlx::query_scalar(
-        r#"
-        INSERT INTO game_types (name, player_counts, weight, blurb)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (name) DO UPDATE
-            SET updated_at = NOW()
-        RETURNING id
-        "#,
-    )
-    .bind(&reg.type_name)
-    .bind(&reg.player_counts)
-    .bind(reg.weight)
-    .bind(&reg.blurb)
-    .fetch_one(&mut *conn)
-    .await?;
+    // A version that is not authoritative (deprecated) must never seed the
+    // type's descriptor values; schema defaults apply until a fully
+    // snapshotted authoritative version reconciles them.
+    let game_type_id: Uuid = if reg.is_deprecated {
+        sqlx::query_scalar(
+            r#"
+            INSERT INTO game_types (name)
+            VALUES ($1)
+            ON CONFLICT (name) DO UPDATE
+                SET updated_at = NOW()
+            RETURNING id
+            "#,
+        )
+        .bind(&reg.type_name)
+        .fetch_one(&mut *conn)
+        .await?
+    } else {
+        sqlx::query_scalar(
+            r#"
+            INSERT INTO game_types (name, player_counts, weight, blurb)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (name) DO UPDATE
+                SET updated_at = NOW()
+            RETURNING id
+            "#,
+        )
+        .bind(&reg.type_name)
+        .bind(&reg.player_counts)
+        .bind(reg.weight)
+        .bind(&reg.blurb)
+        .fetch_one(&mut *conn)
+        .await?
+    };
 
     sqlx::query(
         r#"
-        INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated, interface_version, rules)
-        VALUES ($1, $2, $3, true, $4, $5, $6)
+        INSERT INTO game_versions (game_type_id, name, uri, is_public, is_deprecated, interface_version, rules, snapshot_player_counts, snapshot_weight, snapshot_blurb)
+        VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (game_type_id, name) DO UPDATE
-            SET uri               = EXCLUDED.uri,
-                is_public         = true,
-                is_deprecated     = EXCLUDED.is_deprecated,
-                interface_version = EXCLUDED.interface_version,
-                rules             = EXCLUDED.rules,
-                updated_at        = NOW()
+            SET uri                    = EXCLUDED.uri,
+                is_public              = true,
+                is_deprecated          = EXCLUDED.is_deprecated,
+                interface_version      = EXCLUDED.interface_version,
+                rules                  = EXCLUDED.rules,
+                snapshot_player_counts = EXCLUDED.snapshot_player_counts,
+                snapshot_weight        = EXCLUDED.snapshot_weight,
+                snapshot_blurb         = EXCLUDED.snapshot_blurb,
+                updated_at             = NOW()
         "#,
     )
     .bind(game_type_id)
@@ -100,42 +123,72 @@ where
     .bind(reg.is_deprecated)
     .bind(reg.interface_version)
     .bind(&reg.rules)
+    .bind(&reg.player_counts)
+    .bind(reg.weight)
+    .bind(&reg.blurb)
     .execute(&mut *conn)
     .await?;
 
-    if !reg.is_deprecated {
-        sqlx::query(
-            r#"
-            UPDATE game_types
-            SET player_counts = $2,
-                weight        = $3,
-                blurb         = $4,
-                updated_at    = NOW()
-            WHERE id = $1
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM game_versions newer
-                  WHERE newer.game_type_id = $1
-                    AND newer.is_deprecated = false
-                    AND (newer.created_at, newer.name) > (
-                        SELECT cur.created_at, cur.name
-                        FROM game_versions cur
-                        WHERE cur.game_type_id = $1
-                          AND cur.name = $5
-                    )
-              )
-            "#,
-        )
-        .bind(game_type_id)
-        .bind(&reg.player_counts)
-        .bind(reg.weight)
-        .bind(&reg.blurb)
-        .bind(&reg.version_name)
-        .execute(&mut *conn)
-        .await?;
-    }
+    reconcile_game_type_descriptors_conn(&mut conn, game_type_id).await?;
 
     Ok(game_type_id)
+}
+
+/// Re-points one game type's `player_counts`, `weight`, and `blurb` descriptor
+/// values from its newest fully snapshotted authoritative version: the
+/// `game_versions` row for that type that is `is_public = true`,
+/// `is_deprecated = false`, and has all three snapshot columns non-NULL,
+/// ordered by `created_at DESC, name DESC`. If no such version exists no
+/// descriptor field is written - deprecated, non-public, and incompletely
+/// snapshotted rows never supply descriptor values, and defaults are never
+/// synthesized. Every registration and operator lifecycle path that can change
+/// which version is authoritative calls this after the mutation so deprecating,
+/// demoting, or deleting the newest version re-points `game_types` instead of
+/// stranding it.
+pub async fn reconcile_game_type_descriptors<'c, A>(
+    acquire: A,
+    game_type_id: Uuid,
+) -> Result<(), RegistrationError>
+where
+    A: Acquire<'c, Database = sqlx::Postgres>,
+{
+    let mut conn = acquire.acquire().await?;
+    reconcile_game_type_descriptors_conn(&mut conn, game_type_id).await
+}
+
+async fn reconcile_game_type_descriptors_conn(
+    conn: &mut PgConnection,
+    game_type_id: Uuid,
+) -> Result<(), RegistrationError> {
+    sqlx::query(
+        r#"
+        WITH src AS (
+            SELECT snapshot_player_counts AS player_counts,
+                   snapshot_weight        AS weight,
+                   snapshot_blurb         AS blurb
+            FROM game_versions
+            WHERE game_type_id = $1
+              AND is_public = true
+              AND is_deprecated = false
+              AND snapshot_player_counts IS NOT NULL
+              AND snapshot_weight IS NOT NULL
+              AND snapshot_blurb IS NOT NULL
+            ORDER BY created_at DESC, name DESC
+            LIMIT 1
+        )
+        UPDATE game_types
+        SET player_counts = src.player_counts,
+            weight        = src.weight,
+            blurb         = src.blurb,
+            updated_at    = NOW()
+        FROM src
+        WHERE game_types.id = $1
+        "#,
+    )
+    .bind(game_type_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// Idempotently reconciles the stored set to exactly `regs`: every requested
@@ -144,7 +197,9 @@ where
 /// and the demotion run in one transaction, so any database error rolls the
 /// whole set back. Rows are never deleted. The set must already be
 /// deduplicated on (game type, version); callers validate input before
-/// calling.
+/// calling. Types that had a version demoted have their descriptor values
+/// re-pointed from their newest fully snapshotted authoritative version
+/// before commit.
 pub async fn bulk_set(pool: &PgPool, regs: &[Registration]) -> Result<SetStats, RegistrationError> {
     let mut tx = pool.begin().await?;
     let mut game_type_ids = Vec::with_capacity(regs.len());
@@ -163,45 +218,64 @@ pub async fn bulk_set(pool: &PgPool, regs: &[Registration]) -> Result<SetStats, 
             WHERE selected.game_type_id = game_versions.game_type_id
               AND selected.name = game_versions.name
         )
+        RETURNING game_type_id
         "#,
     )
     .bind(&game_type_ids)
     .bind(&version_names)
-    .execute(&mut *tx)
-    .await?
-    .rows_affected();
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut demoted_types = HashSet::new();
+    for row in &demoted {
+        demoted_types.insert(row.get::<Uuid, _>("game_type_id"));
+    }
+    for game_type_id in demoted_types {
+        reconcile_game_type_descriptors(&mut tx, game_type_id).await?;
+    }
     tx.commit().await?;
     Ok(SetStats {
         registered: regs.len(),
-        demoted,
+        demoted: demoted.len() as u64,
     })
 }
 
 /// Flips `is_public` for one game version. The operator's finalizer cleanup
 /// uses it to hide a deleted version; the local CLI uses it when demoting a
-/// non-selected version.
+/// non-selected version. Reconciles the type's descriptor values afterwards,
+/// so demoting the newest authoritative version re-points them to the newest
+/// remaining fully snapshotted authoritative version. The visibility flip and
+/// the reconciliation run in one transaction, so a reconciliation failure
+/// rolls the flip back instead of stranding a demoted type.
 pub async fn set_public(
     pool: &PgPool,
     version_name: &str,
     type_name: &str,
     is_public: bool,
 ) -> Result<(), RegistrationError> {
-    sqlx::query(
+    let mut tx = pool.begin().await?;
+    let game_type_id: Option<Uuid> = sqlx::query_scalar(
         "UPDATE game_versions SET is_public = $3, updated_at = NOW() \
-         WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2)",
+         WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2) \
+         RETURNING game_type_id",
     )
     .bind(version_name)
     .bind(type_name)
     .bind(is_public)
-    .execute(pool)
+    .fetch_optional(&mut *tx)
     .await?;
+    if let Some(game_type_id) = game_type_id {
+        reconcile_game_type_descriptors(&mut tx, game_type_id).await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
 /// Marks every stored game version except `keep_version_name` non-public.
 /// The Compose lane registers all 27 deployable games as peer services in one
 /// bulk set, so a version is public only while it is in that set. Rows are
-/// never deleted. Returns the number of rows demoted.
+/// never deleted. Returns the number of rows demoted. Types that had a version
+/// demoted have their descriptor values re-pointed from their newest fully
+/// snapshotted authoritative version, matching `bulk_set`.
 /// Accepts anything that can acquire a connection or borrow a transaction, so
 /// callers that need the demotion to be atomic with a preceding upsert run it
 /// inside the same transaction.
@@ -213,13 +287,21 @@ where
     A: Acquire<'c, Database = sqlx::Postgres>,
 {
     let mut conn = acquire.acquire().await?;
-    Ok(sqlx::query(
-        "UPDATE game_versions SET is_public = false, updated_at = NOW() WHERE name <> $1",
+    let demoted = sqlx::query(
+        "UPDATE game_versions SET is_public = false, updated_at = NOW() \
+         WHERE name <> $1 RETURNING game_type_id",
     )
     .bind(keep_version_name)
-    .execute(&mut *conn)
-    .await?
-    .rows_affected())
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut game_type_ids = HashSet::new();
+    for row in &demoted {
+        game_type_ids.insert(row.get::<Uuid, _>("game_type_id"));
+    }
+    for game_type_id in game_type_ids {
+        reconcile_game_type_descriptors_conn(&mut conn, game_type_id).await?;
+    }
+    Ok(demoted.len() as u64)
 }
 
 #[cfg(test)]
@@ -241,6 +323,56 @@ mod tests {
             uri: uri.to_string(),
             rules: "rules text".to_string(),
         }
+    }
+
+    fn registration(
+        type_name: &str,
+        version_name: &str,
+        player_counts: Vec<i32>,
+        weight: f32,
+        blurb: &str,
+        is_deprecated: bool,
+    ) -> Registration {
+        Registration {
+            type_name: type_name.to_string(),
+            version_name: version_name.to_string(),
+            weight,
+            blurb: blurb.to_string(),
+            is_deprecated,
+            interface_version: 2,
+            player_counts,
+            uri: "http://localhost:0/mock".to_string(),
+            rules: "rules text".to_string(),
+        }
+    }
+
+    async fn set_created_at(pool: &PgPool, type_name: &str, version_name: &str, created_at: &str) {
+        sqlx::query(
+            "UPDATE game_versions SET created_at = $1::timestamp \
+             WHERE name = $2 AND game_type_id = (SELECT id FROM game_types WHERE name = $3)",
+        )
+        .bind(created_at)
+        .bind(version_name)
+        .bind(type_name)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn type_id(pool: &PgPool, type_name: &str) -> Uuid {
+        sqlx::query_scalar("SELECT id FROM game_types WHERE name = $1")
+            .bind(type_name)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn descriptor_values(pool: &PgPool, type_name: &str) -> (Vec<i32>, f32, String) {
+        sqlx::query_as("SELECT player_counts, weight, blurb FROM game_types WHERE name = $1")
+            .bind(type_name)
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
 
     #[test]
@@ -535,7 +667,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../../web/migrations")]
-    async fn first_write_deprecated_only_still_writes_values(pool: PgPool) {
+    async fn first_write_deprecated_only_uses_schema_defaults(pool: PgPool) {
         upsert(
             &pool,
             &Registration {
@@ -553,19 +685,44 @@ mod tests {
         .await
         .unwrap();
 
+        // An ineligible (deprecated) version must not seed descriptors; the
+        // schema defaults create the row instead.
         let player_counts: Vec<i32> =
             sqlx::query_scalar("SELECT player_counts FROM game_types WHERE name = 'Solo Game'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(player_counts, vec![1]);
+        assert!(player_counts.is_empty());
         let (weight, blurb): (f32, String) =
             sqlx::query_as("SELECT weight, blurb FROM game_types WHERE name = 'Solo Game'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(weight, 0.5f32);
-        assert_eq!(blurb, "solo blurb");
+        assert_eq!(weight, 0.0f32);
+        assert_eq!(blurb, "");
+
+        // Only reconciliation from a fully snapshotted authoritative version
+        // sets descriptors.
+        upsert(
+            &pool,
+            &Registration {
+                type_name: "Solo Game".to_string(),
+                version_name: "solo-game-2".to_string(),
+                weight: 2.0,
+                blurb: "authoritative blurb".to_string(),
+                is_deprecated: false,
+                interface_version: 1,
+                player_counts: vec![1, 2],
+                uri: "http://localhost:0/mock".to_string(),
+                rules: "rules text".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Solo Game").await,
+            (vec![1, 2], 2.0, "authoritative blurb".to_string())
+        );
     }
 
     #[sqlx::test(migrations = "../../web/migrations")]
@@ -593,6 +750,45 @@ mod tests {
                 .await
                 .unwrap();
         assert!(is_public);
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn set_public_rolls_back_demotion_when_reconciliation_fails(pool: PgPool) {
+        upsert(&pool, &tic_tac_toe_registration("http://localhost:0/mock"))
+            .await
+            .unwrap();
+
+        // Force the post-demotion descriptor reconciliation to fail so the
+        // visibility flip and reconciliation roll back together.
+        sqlx::query(
+            "CREATE OR REPLACE FUNCTION fail_game_type_update() RETURNS trigger AS \
+             $$ BEGIN RAISE EXCEPTION 'forced failure'; END $$ LANGUAGE plpgsql",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER fail_game_type_update \
+             BEFORE UPDATE ON game_types FOR EACH ROW EXECUTE FUNCTION fail_game_type_update()",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = set_public(&pool, "tic-tac-toe-2", "Tic-tac-toe", false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RegistrationError::Sql(_)));
+
+        let is_public: bool =
+            sqlx::query_scalar("SELECT is_public FROM game_versions WHERE name = 'tic-tac-toe-2'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            is_public,
+            "demotion must roll back when descriptor reconciliation fails"
+        );
     }
 
     #[sqlx::test(migrations = "../../web/migrations")]
@@ -653,6 +849,52 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(versions, 2);
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn mark_others_non_public_demoting_newest_repoints_to_fallback(pool: PgPool) {
+        upsert(
+            &pool,
+            &registration(
+                "Lost Cities",
+                "lost-cities-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        set_created_at(&pool, "Lost Cities", "lost-cities-1", "2026-01-01 00:00:00").await;
+        upsert(
+            &pool,
+            &registration(
+                "Lost Cities",
+                "lost-cities-2",
+                vec![2, 3, 4],
+                3.0,
+                "newest blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Lost Cities").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+
+        // Keeping the older version demotes the newest, so descriptors must
+        // re-point to the newest remaining fully snapshotted version.
+        let demoted = mark_others_non_public(&pool, "lost-cities-1")
+            .await
+            .unwrap();
+        assert_eq!(demoted, 1);
+        assert_eq!(
+            descriptor_values(&pool, "Lost Cities").await,
+            (vec![2], 1.0, "fallback blurb".to_string())
+        );
     }
 
     #[sqlx::test(migrations = "../../web/migrations")]
@@ -949,5 +1191,338 @@ mod tests {
             );
         }
         assert_eq!(identities.len(), 27);
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn newest_fully_snapshotted_authoritative_version_wins_all_fields(pool: PgPool) {
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-2",
+                vec![2, 3, 4],
+                3.0,
+                "newest blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        set_created_at(
+            &pool,
+            "Reconciliation Game",
+            "recon-game-1",
+            "2026-01-01 00:00:00",
+        )
+        .await;
+        set_created_at(
+            &pool,
+            "Reconciliation Game",
+            "recon-game-2",
+            "2026-01-02 00:00:00",
+        )
+        .await;
+        reconcile_game_type_descriptors(&pool, type_id(&pool, "Reconciliation Game").await)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn deprecating_newest_authoritative_repoints_descriptors_to_fallback(pool: PgPool) {
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        set_created_at(
+            &pool,
+            "Reconciliation Game",
+            "recon-game-1",
+            "2026-01-01 00:00:00",
+        )
+        .await;
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-2",
+                vec![2, 3, 4],
+                3.0,
+                "newest blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+
+        // Deprecate the newest through the real apply path: the operator maps
+        // the GameVersion CR's isDeprecated into the same upsert.
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-2",
+                vec![2, 3, 4],
+                3.0,
+                "newest blurb",
+                true,
+            ),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2], 1.0, "fallback blurb".to_string())
+        );
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn set_public_demoting_newest_authoritative_repoints_to_fallback(pool: PgPool) {
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        set_created_at(
+            &pool,
+            "Reconciliation Game",
+            "recon-game-1",
+            "2026-01-01 00:00:00",
+        )
+        .await;
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-2",
+                vec![2, 3, 4],
+                3.0,
+                "newest blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+
+        // Operator finalizer cleanup marks a deleted version non-public.
+        set_public(&pool, "recon-game-2", "Reconciliation Game", false)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2], 1.0, "fallback blurb".to_string())
+        );
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn no_eligible_or_incomplete_source_leaves_descriptors_unchanged(pool: PgPool) {
+        // A deprecated-only write seeds the type row via the initial insert.
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                true,
+            ),
+        )
+        .await
+        .unwrap();
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-2",
+                vec![2, 3, 4],
+                3.0,
+                "newest blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+
+        // Simulate a row persisted before snapshot backfill: still the newest
+        // public, non-deprecated version, but incompletely snapshotted.
+        sqlx::query("UPDATE game_versions SET snapshot_blurb = NULL WHERE name = 'recon-game-2'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Demoting it leaves only deprecated/incomplete rows; descriptors stay.
+        set_public(&pool, "recon-game-2", "Reconciliation Game", false)
+            .await
+            .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+
+        // Even re-public, the incomplete row must not supply descriptor values.
+        set_public(&pool, "recon-game-2", "Reconciliation Game", true)
+            .await
+            .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn tied_created_at_selects_higher_name(pool: PgPool) {
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-a",
+                vec![2],
+                1.0,
+                "a blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        upsert(
+            &pool,
+            &registration(
+                "Reconciliation Game",
+                "recon-game-b",
+                vec![2, 3],
+                2.0,
+                "b blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        set_created_at(
+            &pool,
+            "Reconciliation Game",
+            "recon-game-a",
+            "2026-01-01 00:00:00",
+        )
+        .await;
+        set_created_at(
+            &pool,
+            "Reconciliation Game",
+            "recon-game-b",
+            "2026-01-01 00:00:00",
+        )
+        .await;
+        reconcile_game_type_descriptors(&pool, type_id(&pool, "Reconciliation Game").await)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            descriptor_values(&pool, "Reconciliation Game").await,
+            (vec![2, 3], 2.0, "b blurb".to_string())
+        );
+    }
+
+    #[sqlx::test(migrations = "../../web/migrations")]
+    async fn bulk_set_demotion_repoints_descriptors_to_newest_remaining(pool: PgPool) {
+        upsert(
+            &pool,
+            &registration(
+                "Lost Cities",
+                "lost-cities-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        set_created_at(&pool, "Lost Cities", "lost-cities-1", "2026-01-01 00:00:00").await;
+        upsert(
+            &pool,
+            &registration(
+                "Lost Cities",
+                "lost-cities-2",
+                vec![2, 3, 4],
+                3.0,
+                "newest blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            descriptor_values(&pool, "Lost Cities").await,
+            (vec![2, 3, 4], 3.0, "newest blurb".to_string())
+        );
+
+        // Selecting the older version demotes the newest, so descriptors must
+        // re-point to the newest remaining fully snapshotted version.
+        bulk_set(
+            &pool,
+            &[registration(
+                "Lost Cities",
+                "lost-cities-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                false,
+            )],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            descriptor_values(&pool, "Lost Cities").await,
+            (vec![2], 1.0, "fallback blurb".to_string())
+        );
     }
 }

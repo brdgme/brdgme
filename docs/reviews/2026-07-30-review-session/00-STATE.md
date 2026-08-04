@@ -402,9 +402,11 @@ Owner-requested investigation, done 2026-07-30. Conclusions, do not re-derive:
     which **acks and discards** the turn. The sibling "no providers" path returns
     `Err` and is retried - so the wrong-case path is the one that fails silently.
     Remediate as one item with F-104, F-138, F-183.
-  - **F-196:** WP-62's authoritative-version guard only writes forward, so
-    deprecating the newest version permanently strands `game_types`; `cleanup` has
-    the same shape and zero test callers.
+  - **F-196 (accepted, uncommitted):** immutable migration 031 adds nullable
+    per-version descriptor snapshots; apply backfills them despite an unchanged
+    observed generation, and the atomic lifecycle reconciliation re-points
+    `game_types` from the newest fully snapshotted public, non-deprecated version.
+    Availability remains public/non-deprecated-only while snapshots are incomplete.
 
 - **From Unit 09b (F-164..F-174):**
   - **The `ssr` feature-gate question is REFUTED, definitively - do not re-raise.**

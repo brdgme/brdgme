@@ -7,5 +7,6 @@ mod registration;
 
 pub use manifest::{GameVersionManifest, GameVersionManifestSpec, ManifestError};
 pub use registration::{
-    Registration, RegistrationError, SetStats, bulk_set, mark_others_non_public, set_public, upsert,
+    Registration, RegistrationError, SetStats, bulk_set, mark_others_non_public,
+    reconcile_game_type_descriptors, set_public, upsert,
 };

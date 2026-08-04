@@ -1891,27 +1891,80 @@ suggest engine's advancement mechanism and must not be removed; see
 
 ### R-51 - Operator and game-type version lifecycle
 
-- **Closes:** F-196 (Medium), F-140 (Medium).
-- **Files:** `rust/operator/src/controller.rs:240` (+2 sites);
-  `rust/web/src/db/game_types.rs:81-91` (+1 site).
-- **Size: M** - basis: a guard that must learn to write backwards, plus a filter
-  fix, in a crate with **no test coverage at all** for `cleanup`.
+- **Closes:** F-196 (Medium). F-140 remains parked and untouched: this package
+  does not change deprecated-version rules access or public `/rules/<id>`
+  behavior.
+- **Files:** new immutable `rust/web/migrations/NNN_*.sql` selected from the
+  repository's current highest migration number immediately before creation;
+  `rust/lib/registration/src/registration.rs`; `rust/operator/src/controller.rs`;
+  selector consumers and focused tests; `docs/ARCHITECTURE.md`.
+- **Size: M** - basis: additive schema plus an operator/registration lifecycle
+  invariant, including first reconciliation of existing rows and direct cleanup
+  coverage.
 - **Depends on:** nothing.
 
-**The defects:** WP-62's authoritative-version guard **only writes forward**, so
-deprecating the newest version permanently strands `game_types`; `cleanup` has
-the same shape and **zero test callers** (F-196). F-140's deprecated-version
-filter breaks the rules lookup for **in-flight games** - games already running on
-a now-deprecated version lose their rules page.
+**The defect:** WP-62's authoritative-version guard **only writes forward**, so
+deprecating or deleting the newest version permanently strands `game_types`;
+`cleanup` has the same shape and **zero test callers** (F-196). `game_types`
+must describe the same authoritative version the new-game selectors will hand
+out, not whichever version most recently reconciled.
+
+**Design and rollout constraints**
+
+1. The sole authoritative-version predicate is `is_public = true AND
+   is_deprecated = false`, ordered by `created_at DESC, name DESC`. Registration
+   reconciliation and every new-game version selector use that exact predicate
+   and order. This does not widen rules access for deprecated in-flight games.
+2. Add a **new** immutable migration only; never alter an existing migration.
+   It adds nullable per-version snapshot columns on `game_versions` for exactly
+   `player_counts`, `weight`, and `blurb`. The migration must complete before a
+   new operator that queries those columns starts. Old web and operator binaries
+   remain compatible after the additive nullable migration during the rollout.
+3. Existing rows start with incomplete snapshots. `apply` must bypass its
+   unchanged-generation short-circuit while any of its three snapshot values is
+   NULL, fetch `PlayerCounts` from that version's matching game service, take
+   `weight` and `blurb` from that GameVersion CR, persist all three snapshots,
+   and only then write `observedGeneration`. Once complete, the normal generation
+   guard applies again.
+4. Every apply, deprecation, cleanup, or deletion lifecycle change re-points the
+   affected `game_types.player_counts`, `weight`, and `blurb` from the newest
+   fully snapshotted authoritative version in one database operation. Manual
+   descriptor edits are intentionally overwritten under the established
+   operator/CR/service ownership model.
+5. New-game availability is determined only by the authoritative predicate in
+   constraint 1. If no authoritative version exists, leave existing
+   `game_types` descriptor values unchanged and expose no new-game option for
+   that type. If an authoritative version has incomplete snapshots, keep the
+   type available and leave its shared descriptors unchanged until a later fully
+   snapshotted reconciliation re-points them. Do not source descriptors from an
+   ineligible version.
+6. No games, game state, users, GameVersion CR objects, or unrelated F-140 code
+   changes are in scope.
 
 **Acceptance criteria**
 
-1. A test **calls the version guard** deprecating the newest version and asserts
-   `game_types` is not stranded.
-2. A test **calls `cleanup`** - it currently has zero test callers - including
-   the already-newest-to-deprecated case section 5.7's U13 names as untested.
-3. F-140: a test calls the rules lookup for an in-flight game on a deprecated
-   version and asserts the rules are returned.
+1. Migration inspection proves the new columns are additive and nullable, and
+   no existing migration changed. Old binary queries remain valid before and
+   after it.
+2. A direct lifecycle test creates authoritative and fallback versions with
+   distinct three-field snapshots, deprecates the newest through the real apply
+   path, and asserts all three `game_types` descriptors re-point to the fallback.
+3. A test **calls `cleanup`** on the newest authoritative version and asserts
+   `is_public = false` plus re-pointing to the newest remaining fully snapshotted
+   authoritative version. It must not merely test `set_public` in isolation.
+4. A test with unchanged `observedGeneration` and NULL snapshots **calls
+   `apply`**, verifies its service request and persisted three-field snapshot,
+   then verifies `observedGeneration` is written. A completed snapshot on the
+   same generation still takes the normal no-request generation guard.
+5. A test shows a newer non-public or deprecated version cannot supply either
+   the selector or the descriptor values; tied timestamps select `name DESC`.
+6. No-authoritative-version tests assert descriptors are not copied from an
+   ineligible row and the type is absent from new-game availability. An
+   incomplete-snapshot authoritative version remains available while its shared
+   descriptors stay unchanged until backfill completes.
+7. Focused registration/operator tests and the allowed targeted checks pass.
+   Database-backed lifecycle tests may remain CI-only where local Postgres is
+   unavailable; record them as such rather than claiming a local pass.
 
 ---
 

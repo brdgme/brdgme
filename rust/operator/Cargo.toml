@@ -33,5 +33,10 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
+[dev-dependencies]
+# Adds the test/migrate machinery for #[sqlx::test]; feature-unified with the
+# main sqlx dependency when building tests.
+sqlx = { workspace = true, features = ["macros", "migrate"] }
+
 [lints]
 workspace = true

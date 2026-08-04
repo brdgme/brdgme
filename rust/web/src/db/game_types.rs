@@ -24,22 +24,21 @@ pub async fn find_game_version(
     .map_err(Into::into)
 }
 
+/// Plain query (not `query_as!`) to avoid `.sqlx` cache churn; there is no
+/// local DB to `cargo sqlx prepare` against (see `find_game_version_rules`).
 #[cfg(feature = "ssr")]
 pub async fn find_latest_non_deprecated_game_version(
     pool: &PgPool,
     game_type_id: Uuid,
 ) -> Result<Option<crate::models::game::GameVersion>> {
-    sqlx::query_as!(
-        crate::models::game::GameVersion,
-        r#"
-        SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated
-        FROM game_versions
-        WHERE game_type_id = $1 AND is_deprecated = false
-        ORDER BY created_at DESC, name DESC
-        LIMIT 1
-        "#,
-        game_type_id
+    sqlx::query_as::<_, crate::models::game::GameVersion>(
+        "SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated
+         FROM game_versions
+         WHERE game_type_id = $1 AND is_public = true AND is_deprecated = false
+         ORDER BY created_at DESC, name DESC
+         LIMIT 1",
     )
+    .bind(game_type_id)
     .fetch_optional(pool)
     .await
     .map_err(Into::into)
@@ -107,10 +106,15 @@ pub async fn find_available_game_types(
     .fetch_all(pool)
     .await?;
 
-    let versions = sqlx::query_as!(
-        crate::models::game::GameVersion,
+    // Plain query (not `query_as!`) to avoid `.sqlx` cache churn; there is no
+    // local DB to `cargo sqlx prepare` against (see
+    // `find_latest_non_deprecated_game_version`). Ordering is the availability
+    // order: newest `created_at` first, `name DESC` on ties - the first entry
+    // is the default version offered for new games.
+    let versions = sqlx::query_as::<_, crate::models::game::GameVersion>(
         "SELECT id, created_at, updated_at, game_type_id, name, uri, is_public, is_deprecated \
-         FROM game_versions WHERE is_public = true AND is_deprecated = false ORDER BY name"
+         FROM game_versions WHERE is_public = true AND is_deprecated = false \
+         ORDER BY created_at DESC, name DESC",
     )
     .fetch_all(pool)
     .await?;
@@ -171,6 +175,68 @@ mod tests {
         assert_eq!(gt.weight, 2.5);
         assert_eq!(gt.blurb, "A short blurb.");
         assert_eq!(versions.len(), 1);
+    }
+
+    #[sqlx::test]
+    async fn find_available_game_types_orders_versions_newest_first_then_name_desc(
+        pool: PgPool,
+    ) {
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (name, player_counts) VALUES ('Ordered', $1) RETURNING id",
+        )
+        .bind(vec![2i32])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // `created_at` is set explicitly via string literals: the sqlx `time`
+        // feature is not enabled in this crate, so `PrimitiveDateTime` cannot
+        // be bound. Two versions share the later timestamp to exercise the
+        // `name DESC` tie-break.
+        for (name, created_at) in [
+            ("1.0.0", "2024-01-01 00:00:00"),
+            ("2.1.0", "2024-02-01 00:00:00"),
+            ("2.0.0", "2024-02-01 00:00:00"),
+        ] {
+            sqlx::query(
+                "INSERT INTO game_versions \
+                 (game_type_id, name, uri, is_public, is_deprecated, created_at) \
+                 VALUES ($1, $2, $3, true, false, $4::timestamp)",
+            )
+            .bind(game_type_id)
+            .bind(name)
+            .bind("http://localhost:0/mock")
+            .bind(created_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // R-51: the fixture inserts omit the snapshot columns, so every
+        // eligible (public, non-deprecated) version here has an incomplete
+        // snapshot. Such versions must still be listed as available.
+        let snapshots: Vec<(Option<Vec<i32>>, Option<f32>, Option<String>)> = sqlx::query_as(
+            "SELECT snapshot_player_counts, snapshot_weight, snapshot_blurb \
+             FROM game_versions WHERE game_type_id = $1 AND is_public = true AND is_deprecated = false",
+        )
+        .bind(game_type_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(snapshots.len(), 3);
+        for (player_counts, weight, blurb) in &snapshots {
+            assert!(
+                player_counts.is_none() && weight.is_none() && blurb.is_none(),
+                "eligible versions must start with incomplete snapshots"
+            );
+        }
+
+        let types = find_available_game_types(&pool).await.unwrap();
+        let (_, versions) = types
+            .iter()
+            .find(|(gt, _)| gt.name == "Ordered")
+            .expect("Ordered game type present");
+        let names: Vec<_> = versions.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, ["2.1.0", "2.0.0", "1.0.0"]);
     }
 
     #[sqlx::test]

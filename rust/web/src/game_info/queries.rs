@@ -475,5 +475,73 @@ mod tests {
             picked, good,
             "non-public and deprecated versions must be skipped"
         );
+
+        // find_latest_non_deprecated_game_version uses the same eligibility
+        // predicate and must pick the same older eligible row.
+        let latest = crate::db::find_latest_non_deprecated_game_version(&pool, game_type_id)
+            .await
+            .expect("query ok")
+            .expect("a version is picked");
+        assert_eq!(
+            latest.id, good,
+            "both selectors must pick the same older eligible row"
+        );
+    }
+
+    #[sqlx::test]
+    async fn selectors_return_none_without_eligible_version(pool: PgPool) {
+        // A type whose only versions are non-public and/or deprecated has no
+        // eligible version: both selectors must return None.
+        let game_type_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO game_types (id, name, player_counts)
+             VALUES (uuid_generate_v4(), $1, '{2,3,4}') RETURNING id",
+        )
+        .bind("Empty Game")
+        .fetch_one(&pool)
+        .await
+        .expect("insert game_type");
+
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated)
+             VALUES (uuid_generate_v4(), $1, '1.0.0', 'http://localhost:0/mock', false, false)
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert non-public version");
+
+        sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO game_versions (id, game_type_id, name, uri, is_public, is_deprecated)
+             VALUES (uuid_generate_v4(), $1, '2.0.0', 'http://localhost:0/mock', true, true)
+             RETURNING id",
+        )
+        .bind(game_type_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert deprecated version");
+
+        assert!(
+            game_info_rules_version_id(&pool, game_type_id)
+                .await
+                .expect("query ok")
+                .is_none(),
+            "no eligible version must yield None"
+        );
+        assert!(
+            crate::db::find_latest_non_deprecated_game_version(&pool, game_type_id)
+                .await
+                .expect("query ok")
+                .is_none(),
+            "no eligible version must yield None"
+        );
+
+        let available = crate::db::find_available_game_types(&pool)
+            .await
+            .expect("query ok");
+        assert!(
+            !available.iter().any(|(gt, _)| gt.id == game_type_id),
+            "a type with only ineligible versions must be absent from new-game availability"
+        );
     }
 }
