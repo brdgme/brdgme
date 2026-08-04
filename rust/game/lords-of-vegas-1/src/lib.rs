@@ -221,6 +221,12 @@ impl Gamer for Game {
         (2..7).collect()
     }
 
+    // WIP owner-approved exception: lords-of-vegas-1 is excluded from R-21's
+    // mandatory validation. Does not claim complete validation.
+    fn validate(&self) -> Result<(), GameError> {
+        Ok(())
+    }
+
     fn rules() -> String {
         include_str!("../RULES.md").to_string()
     }

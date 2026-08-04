@@ -85,6 +85,10 @@ impl Gamer for TestGame {
     fn player_counts() -> Vec<usize> {
         vec![1, 2, 3, 4]
     }
+
+    fn validate(&self) -> Result<(), GameError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,5 +153,9 @@ impl Gamer for BrokenRenderGame {
 
     fn player_counts() -> Vec<usize> {
         vec![2]
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        Ok(())
     }
 }

@@ -628,6 +628,10 @@ mod tests {
         fn advanced_strategy() -> String {
             "mock advanced strategy".to_string()
         }
+
+        fn validate(&self) -> Result<(), brdgme_game::errors::GameError> {
+            Ok(())
+        }
     }
 
     /// Regression (R-29/F-16): `fetch_strategy` must send a valid, validated

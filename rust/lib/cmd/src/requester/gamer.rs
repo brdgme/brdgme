@@ -393,6 +393,9 @@ mod tests {
         fn player_counts() -> Vec<usize> {
             vec![2]
         }
+        fn validate(&self) -> Result<(), GameError> {
+            Ok(())
+        }
     }
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

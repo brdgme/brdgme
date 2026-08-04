@@ -184,9 +184,11 @@ work breakdown. Still uncommitted.
 5. **The `_ => <default>` substitution.** Converting a lookup-with-default into a
    `match` with a catch-all arm satisfies "make this exhaustive so no caller can
    silently fall back" rows without changing any behaviour (F-65).
-6. **F-06 (High):** `Gamer::validate` defaults to `Ok(())`, so the D-36 trust
-   boundary is fail-open. 13 of 28 game crates never override it; list in
-   `00-sweeps.md`.
+6. **F-06 (High, remediated by R-21):** `Gamer::validate` formerly defaulted to
+   `Ok(())`, making the D-36 trust boundary fail-open for 13 of 28 game crates
+   (`00-sweeps.md`). R-21 makes it required: 27 supported games provide explicit
+   validation, while `lords-of-vegas-1` retains only its explicit, commented
+   owner-approved WIP exception and does not claim complete validation.
 
 ## Owner rulings - do not re-litigate
 
