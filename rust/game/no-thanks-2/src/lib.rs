@@ -644,4 +644,38 @@ mod tests {
         // epilogue is appended.
         assert!(g.command(MICK, "take", &p).is_err());
     }
+
+    // --- R-53: positive lower-is-better raw scores drive placings ---
+
+    #[test]
+    fn lower_raw_score_places_ahead_but_points_stay_positive() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        // Lowest final score (card runs minus chips) wins; `points()` returns
+        // the raw values while `placings()` ranks the lower total ahead.
+        g.player_hands = vec![vec![15, 16, 17], vec![5, 6, 20], vec![30]];
+        g.player_chips = vec![2, 1, 0];
+        g.remaining_cards = vec![];
+        assert_eq!(vec![13.0f32, 24.0f32, 30.0f32], g.points());
+        assert_eq!(vec![1, 2, 3], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 2, 3], placings),
+            _ => panic!("game should be finished"),
+        }
+    }
+
+    #[test]
+    fn equal_raw_scores_share_first_place() {
+        let (mut g, _) = Game::start(3, 1).unwrap();
+        // Two players tie on the lowest final score and share first place
+        // rather than `points()` resolving a winner by numeric comparison.
+        g.player_hands = vec![vec![5, 6], vec![5, 6], vec![10, 11]];
+        g.player_chips = vec![0, 0, 0];
+        g.remaining_cards = vec![];
+        assert_eq!(vec![5.0f32, 5.0f32, 10.0f32], g.points());
+        assert_eq!(vec![1, 1, 3], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 1, 3], placings),
+            _ => panic!("game should be finished"),
+        }
+    }
 }

@@ -2003,16 +2003,15 @@ earlier brief wrongly said otherwise.
 
 ### R-53 - `Gamer::points()` ordering contract
 
-**Objective:** give `points()` a documented contract, because at least one crate
-disagrees with itself about its sign.
+**Objective:** document `points()` as human-facing score/state data whose
+direction is game-specific. `Status::Finished.placings` is the sole result and
+rating authority, including ties and game-specific tie-breakers.
 
-**Execution status:** Parked for the later parked-item review. `higher-is-better`
-is recommended from `gen_placings` and prevailing score semantics, but is not an
-approved contract. Cathedral currently negates remaining-piece values for
-placings while returning positive values from `points()`. The exact game-crate
-conformance population remains unsized, and the "other 27 crates" estimate is
-unverified. No acceptance criterion is complete and no source or conformance
-sweep starts before the ruling.
+**Execution status:** Done. Positive, lower-is-better raw points remain in
+Category 5, No Thanks, and Cathedral. Cathedral's shared final-score log now
+displays positive remaining-piece sizes; only `calc_placings` negates that
+ranking metric. The separate web manual-end fallback that orders `points DESC`
+remains an unresolved owner decision and is out of scope.
 
 - **Closes:** U2 (no F-number exists anywhere for this).
 - **Files:** `rust/lib/game/src/game.rs` (the trait),
@@ -2026,12 +2025,20 @@ sweep starts before the ruling.
 
 **Acceptance criteria**
 
-1. `Gamer::points()` has a documented ordering contract (higher-is-better or
-   lower-is-better, stated once).
-2. `cathedral-2`'s sign is consistent with its own `calc_placings`; a test
-   **calls both** and asserts they agree.
-3. A sweep records, per crate, whether `points()` matches the contract. Record
-   the count of conforming crates; do not assume.
+1. `Gamer::points()` documents its human-facing, game-specific direction once;
+   `Status::Finished.placings` is documented as the sole result/rating authority.
+2. Category 5, No Thanks, and Cathedral retain positive lower-is-better raw
+   points. Focused tests call their raw-score and placing paths, including ties,
+   and prove a lower raw score places ahead without repurposing `points()` as a
+   ranking metric.
+3. Cathedral's shared final-score log displays positive remaining-piece sizes,
+   while `calc_placings` alone negates remaining-piece size for ranking. A test
+   calls both paths and proves the distinction.
+4. The bounded Rust `Gamer` population is recorded accurately: 28 implementations,
+   26 `points()` overrides, 23 higher-is-better raw values, the three named
+   lower-is-better games, and empty defaults only in Seven Wonders and WIP Lords
+   of Vegas. The web manual-end `points DESC` fallback is recorded as a separate
+   unresolved owner decision, not redesigned here.
 
 ---
 

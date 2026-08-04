@@ -1014,4 +1014,36 @@ mod tests {
         // epilogue total stays at exactly one.
         assert!(g.command(STEVE, "play 7", &p).is_err());
     }
+
+    // --- R-53: positive lower-is-better raw points drive placings ---
+
+    #[test]
+    fn lower_raw_points_place_ahead_but_points_stay_positive() {
+        let mut g = Game::start(3, 1).unwrap().0;
+        // Fewest bullheads wins; raw `points()` stays positive while
+        // `placings()` ranks the lower raw total ahead.
+        g.player_points = vec![34, 66, 45];
+        g.hands = vec![vec![], vec![], vec![]];
+        assert_eq!(vec![34.0f32, 66.0f32, 45.0f32], g.points());
+        assert_eq!(vec![1, 3, 2], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 3, 2], placings),
+            _ => panic!("game should be finished"),
+        }
+    }
+
+    #[test]
+    fn equal_raw_points_share_first_place() {
+        let mut g = Game::start(3, 1).unwrap().0;
+        // The two lowest-equal raw totals share first place rather than
+        // `points()` resolving a winner by numeric comparison.
+        g.player_points = vec![10, 10, 66];
+        g.hands = vec![vec![], vec![], vec![]];
+        assert_eq!(vec![10.0f32, 10.0f32, 66.0f32], g.points());
+        assert_eq!(vec![1, 1, 3], g.placings());
+        match g.status() {
+            Status::Finished { placings, .. } => assert_eq!(vec![1, 1, 3], placings),
+            _ => panic!("game should be finished"),
+        }
+    }
 }

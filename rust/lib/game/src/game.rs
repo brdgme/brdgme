@@ -24,6 +24,8 @@ pub enum Status {
         eliminated: Vec<usize>,
     },
     Finished {
+        /// Sole result/rating authority for the game: 1-based placing per
+        /// player, including ties and game-specific tie-breakers.
         placings: Vec<usize>,
         stats: Vec<HashMap<String, Stat>>,
     },
@@ -112,6 +114,13 @@ pub trait Gamer: Sized {
         }
     }
 
+    /// Public human-facing score/state data for display to players.
+    ///
+    /// The value direction (higher-is-better or lower-is-better) is
+    /// game-specific, so `points()` is not comparable across games. It is not
+    /// a result or rating authority: `Status::Finished.placings` is the sole
+    /// source for who won and where players finished, including ties and
+    /// game-specific tie-breakers.
     fn points(&self) -> Vec<f32> {
         vec![]
     }

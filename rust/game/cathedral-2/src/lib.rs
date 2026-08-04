@@ -562,8 +562,11 @@ impl Gamer for Game {
             Err(e) => return Err(GameError::invalid_input(e.to_string())),
         };
         if !was_finished && self.is_finished() {
+            // R-53: the shared final-score log shows positive, human-facing
+            // remaining-piece sizes. `calc_placings` alone negates the metric
+            // for ranking (lower remaining size places ahead).
             let scores: Vec<(usize, i32)> = (0..self.players)
-                .map(|p| (p, -self.remaining_piece_size(p as i32).unwrap_or(0)))
+                .map(|p| (p, self.remaining_piece_size(p as i32).unwrap_or(0)))
                 .collect();
             logs.push(placings_log(&self.placings(), Some(&scores)));
         }
@@ -1234,6 +1237,84 @@ C1C1C1..........G4G4
         // Global Constraints note).
         let placings = gen_placings(&[vec![-5i32], vec![-5i32], vec![-9i32]]);
         assert_eq!(vec![1, 1, 3], placings);
+    }
+
+    // --- R-53: positive lower-is-better raw points, negated metric only in
+    // `calc_placings`, and a positive shared final-score log ---
+
+    fn all_pieces_played_except(g: &mut Game, kept: &[(usize, usize)]) {
+        for pl in 0..2 {
+            for i in 0..g.played_pieces[pl].len() {
+                g.played_pieces[pl][i] = true;
+            }
+        }
+        for &(pl, piece) in kept {
+            g.played_pieces[pl][piece] = false;
+        }
+    }
+
+    #[test]
+    fn lower_remaining_size_places_first_but_points_stay_positive() {
+        // Player 0 keeps a single size-1 piece (index 12), player 1 keeps a
+        // single size-2 piece (index 11): remaining sizes [1, 2].
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        all_pieces_played_except(&mut g, &[(0, 12), (1, 11)]);
+
+        // Raw human-facing points stay positive and lower-is-better.
+        assert_eq!(vec![1.0f32, 2.0f32], g.points());
+
+        // The ranking metric negates remaining size inside `calc_placings`,
+        // so the lower positive remaining size places ahead.
+        assert_eq!(vec![1, 2], g.calc_placings());
+    }
+
+    #[test]
+    fn equal_remaining_size_ties_share_placings() {
+        // Both players keep a single size-1 piece (player 0 index 12, player
+        // 1 index 13): remaining sizes [1, 1].
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        all_pieces_played_except(&mut g, &[(0, 12), (1, 13)]);
+
+        assert_eq!(vec![1.0f32, 1.0f32], g.points());
+        assert_eq!(vec![1, 1], g.calc_placings());
+    }
+
+    #[test]
+    fn finished_placings_log_shows_positive_remaining_sizes() {
+        let p = players();
+        let (mut g, _) = Game::start(2, 1).unwrap();
+        // Player 0 keeps two size-1 pieces (indices 12, 13) and player 1
+        // keeps a size-2 piece (index 11); playing one of player 0's pieces
+        // finishes the game with remaining sizes [1, 2].
+        all_pieces_played_except(&mut g, &[(0, 12), (0, 13), (1, 11)]);
+        // Fill the board except one cell so the finishing move leaves neither
+        // player able to place a remaining piece. Player 0's own tiles block
+        // the capture walk, so no capture returns anything to either hand.
+        for l in loc::all_locs() {
+            if l == Loc::new(0, 0) {
+                continue;
+            }
+            g.board.insert(
+                l.to_key(),
+                Tile {
+                    player: 0,
+                    typ: 9,
+                    owner: NO_PLAYER,
+                    text: String::new(),
+                },
+            );
+        }
+        g.current_player = 0;
+        let resp = g.command(0, "play 14 a1 down", &p).unwrap();
+        assert!(g.is_finished());
+        assert!(is_placings_log(resp.logs.last().unwrap()));
+        // The shared final-score log shows positive remaining-piece sizes,
+        // matching `points()` (not the negated ranking metric).
+        let text = log_plain(resp.logs.last().unwrap());
+        assert!(
+            text.contains(" Final scores: <Player 0>: 1, <Player 1>: 2"),
+            "unexpected placings log: {text}"
+        );
     }
 
     #[test]

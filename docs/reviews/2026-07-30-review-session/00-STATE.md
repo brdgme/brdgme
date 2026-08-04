@@ -199,6 +199,15 @@ work breakdown. Still uncommitted.
 - **R-32 / F-20 is not applicable to `starship-catan-1`.** The game is fixed at
   two players, so its `0..2` placings range is correct. Do not change its source,
   player limit, gameplay, or add a non-two-player fixture or test.
+- **R-53 / `Gamer::points()` is human-facing score/state data with game-specific
+  direction.** `Status::Finished.placings` is the sole result/rating authority,
+  including ties and game-specific tie-breakers. Category 5, No Thanks, and
+  Cathedral retain positive lower-is-better raw points; Cathedral's shared final
+  score log displays positive remaining-piece sizes while `calc_placings` alone
+  negates that ranking metric. The web manual-end `points DESC` fallback remains
+  a separate unresolved owner decision and is not part of R-53. R-53 completed
+  with the 28/26/23/3/2 implementation inventory and focused lower-is-better
+  conformance tests.
 - **`lords-of-vegas-1` is work in progress.** Its missing endgame (never assigns
   `finished = true`) is out of scope. Do not raise findings about missing or
   incomplete functionality there. F-50/F-57 and the no-`finished` observation are
