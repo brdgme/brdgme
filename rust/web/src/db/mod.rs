@@ -56,7 +56,7 @@
 //! `is_expired_unverified`, `cap_digest`) are `ssr`-gated even though they are
 //! pure; every caller is server-side, so leave them gated.
 #[cfg(feature = "ssr")]
-use anyhow::Result;
+use anyhow::{Context, Result};
 #[cfg(feature = "ssr")]
 use sqlx::postgres::PgPool;
 
@@ -93,7 +93,8 @@ pub use visibility::*;
 
 #[cfg(feature = "ssr")]
 pub async fn create_pool() -> Result<PgPool> {
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    // F-103: propagate the missing-var error with context instead of panicking.
+    let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
 
     let pool = PgPool::connect(&database_url).await?;
 
@@ -133,24 +134,6 @@ mod tests {
 
         assert!(validate_session_token(&pool, token_id).await.unwrap());
 
-        // NOTE: validate_session_token performs a pure existence check with no
-        // created_at comparison - the 30-day window described in the plan is
-        // enforced only by the tower_sessions cookie expiry
-        // (Expiry::OnInactivity(Duration::days(30)) in auth/session.rs
-        // create_session_layer), not by this DB query. A token inserted 40 days
-        // ago is still "valid" from the DB's point of view.
-        sqlx::query!(
-            "UPDATE user_auth_tokens SET created_at = NOW() - INTERVAL '40 days' WHERE id = $1",
-            token_id
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        assert!(
-            validate_session_token(&pool, token_id).await.unwrap(),
-            "DB layer has no created_at expiry check - session expiry is cookie-side only"
-        );
-
         invalidate_auth_token(&pool, token_id).await.unwrap();
         assert!(!validate_session_token(&pool, token_id).await.unwrap());
 
@@ -158,16 +141,13 @@ mod tests {
         assert!(!validate_session_token(&pool, Uuid::new_v4()).await.unwrap());
     }
 
-    /// ws F35 guard: the functions listed below were among the 27 public db.rs
-    /// functions with ZERO test references at review time. 25 of them are now
-    /// covered by name in this module; the two exclusions are documented in the
-    /// WP-41 spec (`create_pool` needs a real DATABASE_URL outside the
-    /// per-test database; `create_game_with_users_tx` is the body of the
-    /// `create_game_with_users` wrapper, exercised by every fixture game).
+    /// ws F35 guard: reachability check for exactly the 26 db.rs functions
+    /// called by this test, each of which had zero test references at review
+    /// time. Re-asserting the cheapest invariant of each keeps the reminder
+    /// live so that deleting one of the behavioral tests above still leaves a
+    /// failing signal here.
     ///
-    /// This test is a *reminder*, not a mechanism: it re-asserts the cheapest
-    /// invariant of each newly covered function so that deleting one of the
-    /// tests above still leaves a failing signal here.
+    /// This test is a *reminder*, not a mechanism.
     #[sqlx::test]
     async fn ws_f35_previously_untested_functions_are_reachable(pool: PgPool) {
         let (game_type_id, gv) = make_game_type_and_version(&pool).await;

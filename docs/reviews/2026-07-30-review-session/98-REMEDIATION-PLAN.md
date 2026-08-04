@@ -1347,32 +1347,54 @@ a **lower** bound where the spec prescribed an **upper** bound.
 
 ### R-38 - Admin surface and db module
 
-- **Closes:** F-97, F-98, F-99 (Medium), F-106, F-100, F-103 (Low).
-- **Files:** `rust/web/src/admin.rs:254-262` (+2 sites), `:515-533` (+1 site),
-  `:787-813`; `rust/web/src/db/mod.rs:161-256`, `:119-159`, `:94-101`.
-- **Size: M** - basis: two input-validation fixes plus a test module that names
-  22 functions and asserts only degenerate cases.
+- **Closes:** F-98, F-99 (corrected coverage acceptance), F-106, F-103 (Low).
+  F-97 and F-100 are explicit accepted deviations, not source fixes.
+- **Files:** `rust/web/src/admin.rs:515-615`, `:787-813` and their focused
+  tests; `rust/web/src/db/mod.rs:94-101`, `:119-159`, `:161-256`; existing
+  behavioral DB tests in the owning `rust/web/src/db/*.rs` modules. No
+  migration, network/crypto change, URL-lockdown code, or absolute-expiry
+  implementation/test is in scope.
+- **Size: M** - basis: two input/error-handling fixes, one narrow test cleanup,
+  and an audit of behavioral coverage for 26 named DB functions. The reminder
+  test remains a reachability/population guard, not the behavioral mechanism.
 - **Depends on:** 5.4 and 5.3 (the `require_admin` true-path coverage).
 
-**The defects:** a prefix-only URL check makes the provider test an **admin
-read-SSRF** (F-97). `api_key` is unvalidated - empty keys are stored, displayed
-as `(set)`, and unbounded in length (F-98). One smoke test **names 22 functions
-and asserts only degenerate cases** (F-99). F-103's pool panics from a `Result`
-function. F-100 pins an **absent** session expiry as if intended.
+**Accepted decisions and remaining defects:** F-97 retains arbitrary HTTP/HTTPS
+LLM-provider addresses under the trusted-admin threat model. This accepts the
+admin-triggered SSRF and infrastructure-access risk; do not add URL lockdown,
+DNS pinning, redirect restrictions, private-address filtering, or crypto/network
+migration. Revisit if provider configuration becomes available to untrusted
+users, admin roles are delegated, or deployment exposes sensitive internal HTTP
+services. F-100 retains cookie-only expiry; do not add a 30-day absolute
+server-side auth-token lifetime. Remove only the remediation-only test material
+that asserts an absolute-expiry policy, while retaining valid session lifecycle
+coverage. F-98 still permits empty/unbounded API keys, F-99's reminder needs an
+audited behavioral-coverage population, F-106 drops response read errors, and
+F-103 panics from a `Result`-returning pool constructor.
 
 **Acceptance criteria**
 
-1. F-97: the URL check validates scheme, host and resolved address, not a prefix.
-   A test calls the provider-test endpoint with a loopback and a link-local URL
-   and asserts rejection.
+1. F-97 accepted risk: arbitrary admin-configured HTTP/HTTPS provider addresses
+   remain supported. No URL restriction, resolver, redirect, private-address,
+   crypto, or network source/test change is introduced; the accepted-risk
+   rationale and revisit triggers above remain recorded.
 2. F-98: empty and oversized `api_key` values are rejected at the boundary; a
    test asserts each.
-3. F-99: the smoke test is replaced by per-function tests that **call each of the
-   22 functions** with a non-degenerate fixture. A count of 22 real tests is the
-   acceptance bar.
-4. F-100: the test is rewritten to assert the **intended** expiry once one
-   exists, or deleted. Pinning an absent behaviour as intended is pattern 4b.
-5. F-103: the pool constructor returns `Err`, not `panic!`.
+3. F-99: audit the 26 named functions in the reminder against existing behavioral
+   tests. Each function has behavioral coverage, which may be grouped in fewer
+   than 26 tests; the reminder remains only a reachability/population guard.
+   Correct its count/prose or add the smallest focused behavioral test only where
+   audit evidence identifies a gap.
+4. F-100 accepted deviation: cookie-only expiry remains intentional. The
+   `session_token_validation` test retains valid issued/revoked/nonexistent-token
+   coverage but removes the remediation-only 40-day assertion/comment that
+   misstates an absent DB expiry as a plan requirement. No absolute-lifetime
+   production predicate or test is added.
+5. F-106: a capped-response body read exposes its `reqwest` transport error in the
+   diagnostic result rather than silently discarding it; focused source tests
+   cover the unchanged cap/error representation where practical.
+6. F-103: the pool constructor returns `Err`, not `panic!`, when `DATABASE_URL`
+   is absent. Pool sizing remains Unit 08 scope.
 
 ---
 

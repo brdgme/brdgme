@@ -2,6 +2,8 @@
 use crate::error::internal;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ssr")]
+use std::error::Error;
 use uuid::Uuid;
 
 type BotUpdateAction =
@@ -521,7 +523,14 @@ pub async fn create_provider(
     let name = require_text(&name, "Provider name", 64)?;
     let url = validate_provider_url(&url)?;
 
-    let api_key_encrypted: Option<Vec<u8>> = match &api_key {
+    // F-98: the api_key is a credential; reject blank/oversized values before
+    // encryption, like every other user-supplied string on this surface.
+    let api_key_validated: Option<String> = match &api_key {
+        Some(key_str) => Some(require_text(key_str, "API key", 512)?),
+        None => None,
+    };
+
+    let api_key_encrypted: Option<Vec<u8>> = match &api_key_validated {
         Some(key_str) => {
             let enc_key =
                 crate::crypto::load_key().map_err(internal("admin_create_provider: load key"))?;
@@ -542,7 +551,7 @@ pub async fn create_provider(
     .await
     .map_err(internal("admin_create_provider: insert"))?;
 
-    let api_key_masked = api_key.as_deref().map(mask_api_key);
+    let api_key_masked = api_key_validated.as_deref().map(mask_api_key);
 
     Ok(ProviderRow {
         id: row.0,
@@ -567,6 +576,8 @@ pub async fn update_provider(
 
     let rows = match api_key {
         ApiKeyUpdate::Set(key_str) => {
+            // F-98: reject blank/oversized keys before encryption.
+            let key_str = require_text(&key_str, "API key", 512)?;
             let enc_key =
                 crate::crypto::load_key().map_err(internal("admin_update_provider: load key"))?;
             let encrypted = crate::crypto::encrypt(&enc_key, key_str.as_bytes())
@@ -802,7 +813,31 @@ async fn read_capped_body(mut resp: reqwest::Response) -> String {
                 }
             }
             Ok(None) => break,
-            Err(_) => return String::from_utf8_lossy(&buf).into_owned() + "\n<error reading body>",
+            Err(e) => {
+                // F-106: surface the transport error and its source chain -
+                // this tool exists to diagnose a misconfigured provider, so
+                // "connection reset" and "TLS error" must not collapse into one
+                // placeholder string. reqwest's own Display for a streamed-body
+                // read failure is the generic "error decoding response body";
+                // the io cause (e.g. ConnectionReset) only appears in the source
+                // chain, so walk it. Bounded so a pathological chain cannot
+                // bloat the admin diagnostic.
+                let mut diagnostic = e.to_string();
+                let mut source = e.source();
+                let mut links = 0;
+                while let Some(err) = source {
+                    if links >= 8 {
+                        diagnostic.push_str(" <cause chain truncated>");
+                        break;
+                    }
+                    diagnostic.push_str(&format!(" <- {err}"));
+                    source = err.source();
+                    links += 1;
+                }
+                tracing::warn!("admin test body read failed: {diagnostic}");
+                let partial = String::from_utf8_lossy(&buf).into_owned();
+                return format!("{partial}\n<error reading body: {diagnostic}>");
+            }
         }
     }
     let mut text = String::from_utf8_lossy(&buf).into_owned();
@@ -3471,6 +3506,100 @@ mod tests {
         .unwrap();
         assert_eq!(p.name, "trimmed");
         assert_eq!(p.url, "https://a.example");
+
+        // F-98: blank and oversized api_key values are rejected at the create
+        // boundary before they reach encryption.
+        for key in ["", "   "] {
+            let err = create_provider(
+                &pool,
+                "p".to_string(),
+                "https://a.example".to_string(),
+                Some(key.to_string()),
+            )
+            .await
+            .expect_err("blank api_key must be rejected");
+            assert!(err.to_string().contains("API key is required"), "{err}");
+        }
+        let err = create_provider(
+            &pool,
+            "p".to_string(),
+            "https://a.example".to_string(),
+            Some("x".repeat(513)),
+        )
+        .await
+        .expect_err("over-long api_key must be rejected");
+        assert!(err.to_string().contains("at most 512"), "{err}");
+
+        // The 512-character boundary is inclusive, and the key is trimmed
+        // before it is encrypted (the returned mask reflects the stored value).
+        let p = create_provider(
+            &pool,
+            "p".to_string(),
+            "https://a.example".to_string(),
+            Some("  sk-ok-1234  ".to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(p.api_key_masked.as_deref(), Some("...1234"));
+    }
+
+    /// F-98: the update boundary must reject blank and oversized keys before
+    /// encryption, and must not write anything on rejection.
+    #[sqlx::test]
+    async fn test_admin_update_provider_rejects_blank_and_oversized_api_key(pool: sqlx::PgPool) {
+        let provider = create_provider(
+            &pool,
+            "upd-boundary".to_string(),
+            "https://a.example".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        for key in ["", "   "] {
+            let err = update_provider(
+                &pool,
+                provider.id,
+                "upd-boundary".to_string(),
+                "https://a.example".to_string(),
+                ApiKeyUpdate::Set(key.to_string()),
+                true,
+            )
+            .await
+            .expect_err("blank api_key must be rejected");
+            assert!(err.to_string().contains("API key is required"), "{err}");
+        }
+        let err = update_provider(
+            &pool,
+            provider.id,
+            "upd-boundary".to_string(),
+            "https://a.example".to_string(),
+            ApiKeyUpdate::Set("x".repeat(513)),
+            true,
+        )
+        .await
+        .expect_err("over-long api_key must be rejected");
+        assert!(err.to_string().contains("at most 512"), "{err}");
+
+        let stored: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT api_key_encrypted FROM llm_providers WHERE id = $1")
+                .bind(provider.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(stored.is_none(), "rejected Set must not store a key");
+
+        // A valid, padded key still lands, trimmed.
+        update_provider(
+            &pool,
+            provider.id,
+            "upd-boundary".to_string(),
+            "https://a.example".to_string(),
+            ApiKeyUpdate::Set("  sk-ok-5678  ".to_string()),
+            true,
+        )
+        .await
+        .unwrap();
     }
 
     #[sqlx::test]
@@ -4037,5 +4166,34 @@ mod tests {
             .unwrap();
         assert_eq!(resp.body, r#"{"ok":true}"#);
         assert!(!resp.body.contains("truncated"));
+    }
+
+    /// F-106: a body read error surfaces its source chain in the diagnostic
+    /// string. reqwest's own Display for a streamed-read failure is the
+    /// generic "error decoding response body", so the io cause
+    /// ("simulated upstream failure") must arrive through the rendered source
+    /// chain; bytes read before the failure are preserved.
+    #[tokio::test]
+    async fn test_read_capped_body_surfaces_chunk_error() {
+        let stream = futures_util::stream::iter(vec![
+            Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"partial")),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "simulated upstream failure",
+            )),
+        ]);
+        let resp = reqwest::Response::from(axum::http::Response::new(
+            reqwest::Body::wrap_stream(stream),
+        ));
+        let out = read_capped_body(resp).await;
+        assert!(out.starts_with("partial"), "partial body lost: {out}");
+        assert!(
+            out.contains("error decoding response body"),
+            "reqwest top-level error must be surfaced: {out}"
+        );
+        assert!(
+            out.contains("simulated upstream failure"),
+            "io cause from the source chain must be surfaced: {out}"
+        );
     }
 }
