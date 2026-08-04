@@ -1161,4 +1161,64 @@ mod tests {
             "private hand leaked into log output: {log_output}"
         );
     }
+
+    /// F-192/F-193/U12 regression: `build_messages` must render the user prompt
+    /// exclusively from `game_data` (the redaction-boundary PubRender/PlayerRender
+    /// outputs). The raw `game_state` is a status-like body carrying opponent
+    /// private state and the full Status render; if a Status/opponent path were
+    /// reintroduced, its markers would leak into the prompt. Each marker is
+    /// distinct so any leak is unambiguous.
+    #[test]
+    fn build_messages_renders_game_data_not_raw_game_state() {
+        const PUBLIC_MARKER: &str = "PUB_STATE_MARKER_public_board";
+        const PRIVATE_MARKER: &str = "PLAYER_STATE_MARKER_my_hand";
+        const OPPONENT_MARKER: &str = "OPPONENT_PRIVATE_MARKER_bobs_hand";
+        const STATUS_MARKER: &str = "FULL_STATUS_MARKER_points_logs";
+
+        let bot_ctx = BotContext {
+            game_state: format!(
+                "status-like body\n  opponent: {}\n  status: {}\n",
+                OPPONENT_MARKER, STATUS_MARKER
+            ),
+            game_data: brdgme_game_client::GameData {
+                pub_state_yaml: format!("board:\n  marker: {}\n", PUBLIC_MARKER),
+                player_state_yaml: format!("hand:\n  marker: {}\n", PRIVATE_MARKER),
+                data_docs: String::new(),
+                basic_strategy: String::new(),
+                advanced_strategy: String::new(),
+                command_spec: None,
+                rules: String::new(),
+            },
+            recent_logs: vec![],
+        };
+        let bot_cfg = test_bot_cfg();
+
+        let messages = build_messages(
+            &bot_cfg,
+            &bot_ctx,
+            &["Alice".to_string(), "Bob".to_string()],
+            0,
+            "Bot 1",
+            vec![],
+        )
+        .expect("build_messages failed");
+
+        let user_message = &messages[1].content;
+        assert!(
+            user_message.contains(PUBLIC_MARKER),
+            "public state missing from user prompt: {user_message}"
+        );
+        assert!(
+            user_message.contains(PRIVATE_MARKER),
+            "acting-seat private state missing from user prompt: {user_message}"
+        );
+        assert!(
+            !user_message.contains(OPPONENT_MARKER),
+            "opponent private state leaked into user prompt: {user_message}"
+        );
+        assert!(
+            !user_message.contains(STATUS_MARKER),
+            "full Status render leaked into user prompt: {user_message}"
+        );
+    }
 }
