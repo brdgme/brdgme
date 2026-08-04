@@ -97,7 +97,10 @@ impl Game {
     /// Port of `RemainingPlayers`.
     pub fn remaining_players(&self) -> Vec<usize> {
         (0..self.players)
-            .filter(|&p| self.player_money[p] > 0 || self.bets[p] > 0)
+            .filter(|&p| {
+                self.player_money.get(p).is_some_and(|m| *m > 0)
+                    || self.bets.get(p).is_some_and(|b| *b > 0)
+            })
             .collect()
     }
 
@@ -305,13 +308,14 @@ impl Game {
 
     /// Port of `CanRaise`.
     ///
-    /// Go quirk preserved: the local variable is named `minRaise` but is
-    /// assigned `g.LargestRaise`, not `g.MinRaise()` - so the guard doesn't
-    /// actually use the minimum-bet floor. Kept verbatim per the porting
-    /// correctness rule.
+    /// Deliberate deviation from Go: the guard uses `min_raise()` - the same
+    /// quantity the raise parser's `Int` bounds use - rather than Go's
+    /// `LargestRaise`. The Go code gates on `LargestRaise` alone, which let
+    /// the parser advertise inverted bounds (min > max) for a player
+    /// short-stacked relative to the minimum bet (F-44).
     pub fn can_raise(&self, player: usize) -> bool {
         let current_bet = self.current_bet();
-        let min_raise = self.largest_raise;
+        let min_raise = self.min_raise();
         self.current_player == player
             && self.player_money[player] > current_bet - self.bets[player] + min_raise
             && !self.is_finished()
@@ -635,13 +639,14 @@ impl Game {
     /// Port of `EliminatedPlayerList`.
     pub fn eliminated_player_list(&self) -> Vec<usize> {
         (0..self.players)
-            .filter(|&p| self.player_money[p] == 0 && self.bets[p] == 0)
+            .filter(|&p| self.player_money.get(p) == Some(&0) && self.bets.get(p) == Some(&0))
             .collect()
     }
 
     /// Port of `PlayerTotalMoney`.
     pub fn player_total_money(&self, player: usize) -> i32 {
-        self.bets[player] + self.player_money[player]
+        self.bets.get(player).copied().unwrap_or(0)
+            + self.player_money.get(player).copied().unwrap_or(0)
     }
 
     /// Port of `Placings`.
@@ -780,6 +785,69 @@ impl Gamer for Game {
                 eliminated: self.eliminated_player_list(),
             }
         }
+    }
+
+    /// Rejects deserialized states where the per-player parallel vectors are
+    /// inconsistent with `players`, before any raw-indexed accessor can run
+    /// (F-36). `remaining_players()` (`player_money`/`bets`), `player_state`
+    /// (`player_hands`) and `next_player_in_set` all index raw, so a short
+    /// vector would panic on the first `status()`/render without this guard.
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "texas-holdem-2: players {} out of range",
+                self.players
+            )));
+        }
+        for (name, len) in [
+            ("player_hands", self.player_hands.len()),
+            ("player_money", self.player_money.len()),
+            ("bets", self.bets.len()),
+            ("folded_players", self.folded_players.len()),
+        ] {
+            if len != self.players {
+                return Err(GameError::internal(format!(
+                    "texas-holdem-2: {name} length {} != players {}",
+                    len, self.players
+                )));
+            }
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "texas-holdem-2: current_player out of range",
+            ));
+        }
+        if self.current_dealer >= self.players {
+            return Err(GameError::internal(
+                "texas-holdem-2: current_dealer out of range",
+            ));
+        }
+        if self.first_betting_player >= self.players {
+            return Err(GameError::internal(
+                "texas-holdem-2: first_betting_player out of range",
+            ));
+        }
+        if !matches!(self.community_cards.len(), 0 | 3 | 4 | 5) {
+            return Err(GameError::internal(format!(
+                "texas-holdem-2: community_cards length {} not in 0/3/4/5",
+                self.community_cards.len()
+            )));
+        }
+        for (p, money) in self.player_money.iter().enumerate() {
+            if *money < 0 {
+                return Err(GameError::internal(format!(
+                    "texas-holdem-2: player {p} has negative money {money}"
+                )));
+            }
+        }
+        for (p, bet) in self.bets.iter().enumerate() {
+            if *bet < 0 {
+                return Err(GameError::internal(format!(
+                    "texas-holdem-2: player {p} has negative bet {bet}"
+                )));
+            }
+        }
+        Ok(())
     }
 
     fn player_count(&self) -> usize {
@@ -1430,5 +1498,88 @@ mod tests {
             Status::Finished { placings, .. } => assert_eq!(vec![2, 1], placings),
             _ => panic!("expected finished status"),
         }
+    }
+
+    // --- R-22 (F-36): validate() rejects short per-player parallel vectors ---
+
+    #[test]
+    fn validate_rejects_each_short_vector() {
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.player_hands.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.player_money.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.bets.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.folded_players.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn status_does_not_panic_on_short_state() {
+        // A short `player_money` is rejected by `validate()`, but
+        // `remaining_players()`/`eliminated_player_list()` index it raw on
+        // the `status()` path, so calling `status()` on that state must not
+        // panic (F-36).
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.player_money.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let _ = g.status();
+    }
+
+    #[test]
+    fn raise_parser_bounds_do_not_invert_on_short_stack() {
+        // F-44: `can_raise` used to gate the raise parser on `largest_raise`
+        // alone while the parser's `Int` used `min_raise()`, so with
+        // `minimum_bet > largest_raise` a short-stacked player was offered a
+        // raise whose bounds inverted (min 10, max 5). `can_raise` now gates
+        // on the same `min_raise()` the parser uses, so the raise is never
+        // offered when `max < min`.
+        let mut g = Game::start(3, 1).unwrap().0;
+        g.current_player = 0;
+        g.bets = vec![0, 10, 0];
+        g.minimum_bet = 10;
+        g.largest_raise = 0;
+        g.player_money = vec![15, 100, 100];
+        assert!(
+            !g.can_raise(0),
+            "short-stacked player must not be offered an unaffordable raise"
+        );
+        let names = vec!["Mick".to_string(), "Steve".to_string(), "BJ".to_string()];
+        let parser = g.command_parser(0).unwrap();
+        assert!(
+            parser.parse("raise 10", &names).is_err(),
+            "raise must not be offered when its Int bounds would be inverted"
+        );
+    }
+
+    #[test]
+    fn showdown_log_text_is_identical_across_runs() {
+        // F-45: `winning_hand_result` iterated a `HashMap`, whose order is
+        // randomised per process, so a multi-winner showdown log text was not
+        // byte-reproducible between replays. Winners are now sorted by seat,
+        // so two identical games must produce identical log text.
+        let build = |g: &mut Game| {
+            g.current_dealer = 0;
+            g.community_cards = no_pair_board();
+            for p in 0..3 {
+                g.player_hands[p] = aces();
+            }
+            g.player_hands[3] = rag();
+            g.bets = vec![10, 10, 10, 10];
+            g.folded_players = vec![false, false, false, false];
+            g.player_money = vec![0, 0, 0, 0];
+        };
+        let mut a = Game::start(4, 1).unwrap().0;
+        let mut b = Game::start(4, 1).unwrap().0;
+        build(&mut a);
+        build(&mut b);
+        assert_eq!(log_text(&a.showdown()), log_text(&b.showdown()));
     }
 }

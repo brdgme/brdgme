@@ -784,13 +784,14 @@ the whole game-crate panic family.
 - **Closes:** F-36 (High), F-44 (Medium), F-45 (Low).
 - **Files:** `rust/game/texas-holdem-2/src/lib.rs:663-814` (+3 sites),
   `src/command.rs:47-69` (+1 site), `src/poker.rs:348-377` (+1 site).
-- **Size: M** - basis: **seven parallel per-player vectors** raw-indexed with no
+- **Size: M** - basis: **four parallel per-player vectors** raw-indexed with no
   `validate()`, so a short deserialized state panics `status()`.
 - **Depends on:** nothing. **Blocks:** R-21.
 
 **Acceptance criteria**
 
-1. A test **calls `validate`** with each of the seven vectors short by one and
+1. A test **calls `validate`** with each of the four per-player arrays
+   (`player_hands`, `player_money`, `bets`, `folded_players`) short by one and
    asserts `Err` in every case. Bounding the player index against
    `player_count()` is not sufficient - `check_player`
    (`rust/lib/cmd/src/requester/gamer.rs:24-36`) does exactly that and gives **no

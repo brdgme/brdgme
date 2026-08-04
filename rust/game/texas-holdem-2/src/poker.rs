@@ -348,10 +348,18 @@ pub fn cards_by_rank(hand: &Deck) -> HashMap<u8, Deck> {
 pub fn winning_hand_result(hand_results: &HashMap<i32, HandResult>) -> Vec<i32> {
     let mut hand_scores: HashMap<i32, Vec<i32>> = HashMap::new();
     let mut next_pass: Vec<i32> = vec![];
-    for (id, hr) in hand_results {
+    // Iterate in sorted hand-index order (F-45): `HashMap` iteration order is
+    // randomised per process, which previously made the returned winner
+    // vector's order - and therefore the split-pot showdown log text -
+    // nondeterministic across replays. The leader loop preserves relative
+    // order, so the result stays sorted throughout.
+    let mut ids: Vec<i32> = hand_results.keys().cloned().collect();
+    ids.sort_unstable();
+    for id in ids {
+        let hr = &hand_results[&id];
         if hr.category != Category::None {
-            hand_scores.insert(*id, hr.hand_score());
-            next_pass.push(*id);
+            hand_scores.insert(id, hr.hand_score());
+            next_pass.push(id);
         }
     }
     let mut val_index = 0usize;

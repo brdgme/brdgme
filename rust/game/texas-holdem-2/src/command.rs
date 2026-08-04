@@ -42,8 +42,9 @@ impl Game {
     ///
     /// The `Int` min bound uses `min_raise()` (`max(MinimumBet, LargestRaise)`),
     /// matching Go's `RaiseParser` which uses `g.MinRaise()`. This rejects
-    /// too-small raises at parse time. The separate, genuine `LargestRaise`
-    /// quirk lives in `Game::can_raise`.
+    /// too-small raises at parse time. `Game::can_raise` gates the parser's
+    /// existence on the same `min_raise()` floor, so the bounds can never be
+    /// inverted (F-44).
     fn raise_parser(&self, player: usize) -> impl Parser<T = Command> {
         let behind_current_bet = self.current_bet() - self.bets[player];
         let min = self.min_raise();
