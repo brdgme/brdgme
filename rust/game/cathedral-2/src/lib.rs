@@ -1025,10 +1025,14 @@ C1C1C1..........G4G4
     fn play_logs_exact_wording() {
         let (mut g, _) = Game::start(2, 1).unwrap();
         let logs = g.play(0, 2, Loc::new(5, 5), loc::DIR_DOWN).unwrap();
-        assert_eq!(
-            "<Player 0> played 3 (size 5) down from F6",
-            log_plain(&logs[0])
+        let log = &logs[0];
+        assert!(log.public, "the play log must be public");
+        assert!(
+            log.to.is_empty(),
+            "a public play log must address every player, got {:?}",
+            log.to
         );
+        assert_eq!("<Player 0> played 3 (size 5) down from F6", log_plain(log));
     }
 
     #[test]

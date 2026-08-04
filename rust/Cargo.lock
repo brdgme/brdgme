@@ -3442,6 +3442,7 @@ dependencies = [
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4883,6 +4884,7 @@ dependencies = [
  "brdgme_markup",
  "rand 0.10.2",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

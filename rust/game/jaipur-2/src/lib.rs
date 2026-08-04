@@ -834,6 +834,10 @@ impl Gamer for Game {
 mod tests {
     use super::*;
 
+    fn plain_log(log: &Log) -> String {
+        brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
+    }
+
     #[test]
     fn deck_has_52_cards() {
         assert_eq!(initial_deck().len(), 52);
@@ -1213,10 +1217,36 @@ mod tests {
         let player = g.current_player;
         g.hands[player] = vec![Good::Leather, Good::Leather, Good::Leather];
         let logs = g.sell(player, Good::Leather, 3).unwrap();
-        let has_private_to_player = logs.iter().any(|l| !l.public && l.to == vec![player]);
+
+        let sale_log = logs
+            .iter()
+            .find(|l| l.public)
+            .expect("expected a public sale log");
+        let sale_str = plain_log(sale_log);
+        assert!(sale_str.contains("sold 3 leather"), "got: {sale_str}");
         assert!(
-            has_private_to_player,
-            "expected a private log addressed to the selling player"
+            sale_log.to.is_empty(),
+            "a public sale log must address every player, got {:?}",
+            sale_log.to
+        );
+
+        let private_logs: Vec<&Log> = logs
+            .iter()
+            .filter(|l| !l.public && l.to == vec![player])
+            .collect();
+        assert_eq!(
+            private_logs.len(),
+            1,
+            "expected exactly one private log addressed to the selling player"
+        );
+        let private_str = plain_log(private_logs[0]);
+        assert!(
+            private_str.contains("The bonus token was"),
+            "the private log must reveal the bonus value, got: {private_str}"
+        );
+        assert!(
+            !sale_str.contains("The bonus token was"),
+            "the public sale log must hide the private bonus value, got: {sale_str}"
         );
     }
 

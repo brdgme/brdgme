@@ -1809,4 +1809,57 @@ mod tests {
         g.round = 4;
         assert!(g.validate().is_err());
     }
+
+    // --- 5.5 (R-LOG): public logs hide private hands ---
+
+    fn log_text(logs: &[Log]) -> String {
+        brdgme_markup::to_string(
+            &logs
+                .iter()
+                .flat_map(|l| l.content.clone())
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn public_logs_hide_hands_and_reveal_played_cards() {
+        let names = names();
+        let (mut g, start_logs) = Game::start(3, 1).unwrap();
+
+        // Hands are private. Pick the card STEVE plays this hand (it must
+        // surface publicly at the reveal) and one of STEVE's cards that stays
+        // in hand (it must never surface at all).
+        let played_cards: Vec<Card> = (0..g.all_players).map(|p| g.hands[p][0]).collect();
+        let played_card = played_cards[STEVE];
+        let hidden_card = g.hands[STEVE]
+            .iter()
+            .copied()
+            .find(|&c| !played_cards.contains(&c))
+            .expect("hand has a card that is not played this hand");
+
+        // Start logs are public, recipient-less, and leak nothing from any hand.
+        for log in &start_logs {
+            assert!(log.public);
+            assert!(log.to.is_empty());
+        }
+        let start_text = log_text(&start_logs);
+        assert!(start_text.contains("Starting round"), "{}", start_text);
+        assert!(!start_text.contains(played_card.name()), "{}", start_text);
+        assert!(!start_text.contains(hidden_card.name()), "{}", start_text);
+
+        // Play the whole hand; every log stays public, the played card is
+        // revealed publicly, and the still-hidden card never appears.
+        let mut logs = vec![];
+        for &p in &[MICK, STEVE, BJ] {
+            logs.extend(g.command(p, "play 1", &names).unwrap().logs);
+        }
+        for log in &logs {
+            assert!(log.public);
+            assert!(log.to.is_empty());
+        }
+        let text = log_text(&logs);
+        assert!(text.contains(played_card.name()), "{}", text);
+        assert!(text.contains("Passing hands"), "{}", text);
+        assert!(!text.contains(hidden_card.name()), "{}", text);
+    }
 }

@@ -2306,23 +2306,28 @@ and must never be read as such when scoping the work below.
 - **This is a dependency of 5.3 and of any package whose acceptance criteria
   require a server-fn test.**
 
-### 5.5 The 13 crates with no `validate` override and no redaction test
+### 5.5 Current game-crate validation, redaction, and log coverage matrix
 
-- **F-06 (High) is the root:** `Gamer::validate` defaults to `Ok(())`, so the D-36
-  trust boundary is **fail-open**. 13 of 28 game crates never override it. The
-  list is in `00-sweeps.md` - read it, do not re-derive.
-- WP-10 3a's redaction test was declared "for every game crate" and applied to
-  **3 of 28**; no later WP swept the rest, leaving 13 crates with no redaction
-  test.
-- **Also: no crate reviewed in this session has a `validate` *test*.** Pattern 2b
-  is distinct from F-06: where the override *does* exist it still misses the one
-  cross-field invariant that crate's remaining panic depends on (F-66, F-67,
-  F-68, F-76). An override with no test is not coverage.
-- **Work:** per-crate `validate` override + a `validate` test + a redaction test.
-  Track as a checklist with one row per crate (see 4.9's "every X" mechanism) -
-  **not** as a single prose claim.
-- **Size: L** - basis: 13 crates x three artefacts each, plus the 13 that have an
-  override but no test.
+- The prior "13 crates" premise is stale. Acceptance is based on the audited
+  current matrix, not the original missing-override sweep. Existing direct
+  validation, malformed-state, and redaction tests satisfy their rows after
+  evidence inspection; do not rewrite working tests merely to create changes.
+- **Work:** record one checked row per crate for direct `validate`/malformed-state
+  coverage, public/player-state redaction, and a `Log::public` assertion. The
+  current matrix is: acquire-1 (validate, malformed state, log); alhambra-1
+  (all present); cathedral-2 (log); jaipur-2 (log); lost-cities-1 (redaction,
+  log); roll-through-the-ages-2 (validate, malformed state, redaction, log);
+  seven-wonders-1 (all present); splendor-2 (all present); starship-catan-1
+  (log); sushi-go-2 (log); sushizock-2 (log); texas-holdem-2 (log only here;
+  validation and four malformed-state tests belong to R-22).
+- `lords-of-vegas-1` is WIP and owner-excluded (R-21/F-59): record it as
+  excluded, not passed; do not add source or tests for it.
+- For `roll-through-the-ages-2`, keep RNG in internal/persisted `Game` state but
+  project explicit public and player render state which omits it. Tests must prove
+  public/player serialization omits RNG while persisted `Game` serialization
+  retains it; gameplay and random outcomes remain unchanged.
+- **Size: L** - basis: twelve accepted crate rows plus one owner-excluded WIP row,
+  with remaining focused coverage additions and Roll's state-contract projection.
 
 ### 5.6 The log layer
 

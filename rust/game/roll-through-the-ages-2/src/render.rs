@@ -18,7 +18,7 @@ use crate::dice::Die;
 use crate::good::{Good, goods_reversed};
 use crate::monument::MONUMENTS;
 use crate::player_board::{BASE_CITY_SIZE, CITY_LEVELS, MAX_CITY_PROGRESS};
-use crate::{Game, Phase, PlayerState, PubState};
+use crate::{Phase, PlayerState, PubState, RenderState};
 
 /// Port of `RenderX`.
 fn render_x(player: usize, strong: bool) -> N {
@@ -106,7 +106,7 @@ fn cell_align(content: Vec<N>, align: A) -> Cell {
 }
 
 /// Port of `Game.PlayerRender`.
-fn render(game: &Game, player: usize) -> Vec<N> {
+fn render(game: &RenderState, player: usize) -> Vec<N> {
     let mut out: Vec<N> = vec![];
 
     // Dice

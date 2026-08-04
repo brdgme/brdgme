@@ -10,7 +10,7 @@ use brdgme_game::rng::GameRng;
 use brdgme_game::{CommandResponse, Gamer, Log, Status, placings_log};
 use brdgme_markup::Node as N;
 
-use crate::board::{Board, Loc, Tile};
+use crate::board::{Board, Loc, SIZE, Tile};
 use crate::command::Command;
 use crate::corp::Corp;
 pub mod board;
@@ -306,6 +306,48 @@ able to win the game.",
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players.len()) {
+            return Err(GameError::internal(format!(
+                "acquire-1: player count {} out of range",
+                self.players.len()
+            )));
+        }
+        if self.board.0.len() != SIZE {
+            return Err(GameError::internal(format!(
+                "acquire-1: board has {} tiles, expected {}",
+                self.board.0.len(),
+                SIZE
+            )));
+        }
+        if self.phase.whose_turn() >= self.players.len()
+            || self.phase.main_turn_player() >= self.players.len()
+        {
+            return Err(GameError::internal(
+                "acquire-1: phase player index out of range",
+            ));
+        }
+        for corp in Corp::iter() {
+            let bank = self.shares.get(corp).copied().ok_or_else(|| {
+                GameError::internal(format!("acquire-1: bank shares missing for {}", corp))
+            })?;
+            let held: usize = self
+                .players
+                .iter()
+                .map(|p| p.shares.get(corp).copied().unwrap_or_default())
+                .sum();
+            if bank + held != STARTING_SHARES {
+                return Err(GameError::internal(format!(
+                    "acquire-1: {} share total {} != {}",
+                    corp,
+                    bank + held,
+                    STARTING_SHARES
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1777,5 +1819,112 @@ mod tests {
         }
         redacted.draw_tiles = vec![Loc { row: 8, col: 8 }];
         assert_eq!(public, redacted.pub_state());
+    }
+
+    // --- 5.5: validate() rejects malformed deserialized state ---
+
+    #[test]
+    fn validate_accepts_started_game() {
+        for n in MIN_PLAYERS..=MAX_PLAYERS {
+            let (g, _) = Game::start(n, 1).expect("expected started game");
+            assert!(g.validate().is_ok(), "players={}", n);
+        }
+    }
+
+    #[test]
+    fn validate_rejects_player_count_out_of_range() {
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.players.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.players
+            .extend((g.players.len()..=MAX_PLAYERS).map(|_| Player::default()));
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_short_board() {
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.board.0.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_phase_player_out_of_range() {
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.phase = Phase::Play(g.players.len());
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.phase = Phase::SellOrTrade {
+            player: 0,
+            corp: Corp::American,
+            into: Corp::Festival,
+            at: Loc { row: 0, col: 0 },
+            turn_player: g.players.len(),
+        };
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_bank_share_corruption() {
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.shares.remove(&Corp::American);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        *g.shares
+            .get_mut(&Corp::American)
+            .expect("bank shares present") += 1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.players[0].shares.insert(Corp::American, STARTING_SHARES);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_rejected_state_renders_and_status_without_panicking() {
+        use brdgme_game::Renderer;
+
+        let (mut g, _) = Game::start(2, 1).expect("expected started game");
+        g.phase = Phase::SellOrTrade {
+            player: 0,
+            corp: Corp::American,
+            into: Corp::Festival,
+            at: Loc { row: 0, col: 0 },
+            turn_player: g.players.len(),
+        };
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let _ = g.pub_state().render();
+        let _ = g.player_state(0).render();
+        let _ = g.status();
+    }
+
+    #[test]
+    fn play_log_is_public_with_expected_content_and_no_private_tiles() {
+        let players = vec!["mick".to_string(), "steve".to_string()];
+        let mut g: Game = "0.0
+                           ...
+                           ..."
+        .into();
+        let resp = g
+            .command(0, "play a3", &players)
+            .expect("expected playing tile to work");
+        assert_eq!(1, resp.logs.len(), "an isolated play emits one log");
+        let log = &resp.logs[0];
+        assert!(log.public, "play log must be public");
+        assert!(log.to.is_empty(), "public logs target no players");
+        assert_eq!(
+            vec![
+                N::Player(0),
+                N::text(" played "),
+                N::Bold(vec![N::text("A3")]),
+            ],
+            log.content
+        );
+        let text = brdgme_markup::to_string(&log.content);
+        assert!(
+            !text.contains("A1"),
+            "public log must not expose the player's private hand tile: {}",
+            text
+        );
     }
 }

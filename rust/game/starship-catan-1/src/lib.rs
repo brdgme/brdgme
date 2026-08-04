@@ -2560,9 +2560,23 @@ mod tests {
         g.current_player = 0;
         g.player_boards[0].trading_posts = vec![test_trading_post(Resource::Food, 3)];
         g.player_boards[0].resources.insert(Resource::Astro, 6);
-        g.command(0, "buy 2 food", &players).unwrap();
+        let resp = g.command(0, "buy 2 food", &players).unwrap();
         assert_eq!(g.player_boards[0].res(Resource::Astro), 0);
         assert_eq!(g.player_boards[0].res(Resource::Food), 2);
+
+        assert_eq!(resp.logs.len(), 1, "a buy should emit exactly one log");
+        let log = &resp.logs[0];
+        assert!(log.public, "the buy log must be public");
+        assert!(
+            log.to.is_empty(),
+            "a public buy log must address every player, got {:?}",
+            log.to
+        );
+        let log_str = brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]));
+        assert!(
+            log_str.contains("bought 2 food"),
+            "the buy log must identify the purchase, got: {log_str}"
+        );
     }
 
     #[test]

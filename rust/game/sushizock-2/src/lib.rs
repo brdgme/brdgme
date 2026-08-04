@@ -2105,4 +2105,91 @@ mod tests {
         // totals stay at exactly one epilogue and one end log.
         assert!(g.command(STEVE, "take b", &n).is_err());
     }
+
+    // --- 5.5 (R-LOG): the open-information flow is entirely public ---
+    //
+    // Sushizock has no hidden player data (see DATA_DOCS.md), so the
+    // meaningful claim is the positive one: a real turn emits only public,
+    // recipient-less logs that restate the actual dice and the taken tile.
+
+    fn log_text(logs: &[Log]) -> String {
+        logs.iter().map(log_plain).collect::<Vec<_>>().join("\n")
+    }
+
+    fn die_face_str(d: DieFace) -> &'static str {
+        match d {
+            DieFace::Sushi => "\u{0398}",
+            DieFace::Bones => "\u{00a5}",
+            DieFace::BlueChopsticks | DieFace::RedChopsticks => "X",
+        }
+    }
+
+    fn assert_dice_in_text(text: &str, dice: &[DieFace]) {
+        for d in dice {
+            assert!(
+                text.contains(die_face_str(*d)),
+                "die face {} missing from: {}",
+                die_face_str(*d),
+                text
+            );
+        }
+    }
+
+    #[test]
+    fn public_logs_cover_the_open_information_flow() {
+        let n = names();
+        let (mut g, start_logs) = Game::start(3, 1).unwrap();
+        let mut logs: Vec<Log> = start_logs.clone();
+
+        // Game start is a real initial roll: public, recipient-less, and the
+        // faces that were rolled are stated.
+        let start_text = log_text(&start_logs);
+        assert!(start_text.contains("rolled"), "{}", start_text);
+        assert_dice_in_text(&start_text, &g.rolled_dice);
+
+        // Re-roll to a completed turn; each roll re-states the current dice.
+        for cmd in ["roll 1 2 5", "roll 2 3"] {
+            let resp = g.command(MICK, cmd, &n).unwrap();
+            logs.extend(resp.logs.clone());
+            let text = log_text(&resp.logs);
+            assert!(text.contains("rolled"), "{}", text);
+            assert_dice_in_text(&text, &all_dice(&g.rolled_dice, &g.kept_dice));
+            if g.remaining_rolls == 0 {
+                break;
+            }
+        }
+        assert_eq!(0, g.remaining_rolls);
+
+        // Finish the turn with the matching real command; on the first turn no
+        // other player holds a tile to steal, so if neither take is available
+        // the forced take already fired inside the final roll.
+        let verb = if g.can_take_blue(MICK) {
+            logs.extend(g.command(MICK, "take blue", &n).unwrap().logs);
+            "took"
+        } else if g.can_take_red(MICK) {
+            logs.extend(g.command(MICK, "take red", &n).unwrap().logs);
+            "took"
+        } else {
+            "forced to take"
+        };
+
+        // The whole exercised flow is public and recipient-less.
+        assert!(!logs.is_empty());
+        for log in &logs {
+            assert!(log.public, "expected a public log, got: {}", log_plain(log));
+            assert!(log.to.is_empty(), "public log must not be player-scoped");
+        }
+        let text = log_text(&logs);
+        let tile = g.player_blue_tiles[MICK]
+            .last()
+            .or_else(|| g.player_red_tiles[MICK].last())
+            .copied()
+            .expect("the turn should leave MICK with a tile");
+        assert!(
+            text.contains(&format!("{verb} {}", tile.value)),
+            "expected '{verb} {}' in: {}",
+            tile.value,
+            text
+        );
+    }
 }

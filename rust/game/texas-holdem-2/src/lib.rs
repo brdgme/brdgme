@@ -1500,6 +1500,56 @@ mod tests {
         }
     }
 
+    // --- 5.5 (R-LOG): a folded player's hole cards stay out of public logs ---
+
+    #[test]
+    fn folded_players_hole_cards_absent_from_public_logs() {
+        let mut g = Game::start(3, 1).unwrap().0;
+        let names3 = vec!["Mick".to_string(), "Steve".to_string(), "BJ".to_string()];
+        // STEVE folds into a full board (5 community cards), so the fold
+        // command flows straight into a real showdown.
+        g.community_cards = no_pair_board();
+        g.player_hands[MICK] = aces();
+        g.player_hands[STEVE] = vec![
+            card::Card {
+                suit: card::Suit::Spades,
+                rank: 3,
+            },
+            card::Card {
+                suit: card::Suit::Hearts,
+                rank: 4,
+            },
+        ];
+        g.player_hands[BJ] = rag();
+        g.bets = vec![10, 5, 10];
+        g.folded_players = vec![false, false, false];
+        g.player_money = vec![90, 90, 90];
+        g.current_player = STEVE;
+        g.first_betting_player = STEVE;
+        g.everyone_has_bet_once = true;
+        let steve_hole = g.player_hands[STEVE].clone();
+
+        let resp = g.command(STEVE, "fold", &names3).unwrap();
+        for log in &resp.logs {
+            assert!(log.public);
+            assert!(log.to.is_empty());
+        }
+        let text = log_text(&resp.logs);
+        assert!(text.contains("folded"), "{}", text);
+        assert!(text.contains("Showdown for pot of $25"), "{}", text);
+        assert!(text.contains("♠A"), "{}", text);
+        // The showdown reveals the non-folded hands (MICK's aces) but must
+        // not reveal the folded player's hole cards.
+        for c in &steve_hole {
+            let s = brdgme_markup::plain(&brdgme_markup::transform(&[c.render_standard_52()], &[]));
+            assert!(
+                !text.contains(&s),
+                "folded player's hole card {s} leaked: {}",
+                text
+            );
+        }
+    }
+
     // --- R-22 (F-36): validate() rejects short per-player parallel vectors ---
 
     #[test]

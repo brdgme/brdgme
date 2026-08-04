@@ -1013,4 +1013,134 @@ mod test {
         // epilogue is appended.
         assert!(game.command(0, "draw", &names).is_err());
     }
+
+    // --- 5.5: serialization redaction + R-LOG Log::public coverage ---
+
+    fn assert_no_internal_fields(json: &str) {
+        // Game-internal state that must never reach clients. Keys are matched
+        // with quotes so PubState's legitimate "deck_remaining" field name
+        // cannot trip the "deck" check.
+        for field in ["hands", "deck", "rng", "stats", "discarded_expedition"] {
+            assert!(
+                !json.contains(&format!("\"{field}\"")),
+                "internal field {field} leaked into serialized state: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn serialized_public_and_player_states_redact_private_hands() {
+        // e 5.5 redaction: the states shipped to clients are PubState and
+        // PlayerState. Their serde output must carry the public tableau but
+        // never another player's hand, and must not smuggle Game-internal
+        // fields (hands, deck, rng, stats). Hands are set so every card is
+        // distinguishable from the public tableau by expedition and value.
+        let mut game = Game::start(2, 1).unwrap().0;
+        game.hands = vec![
+            vec![(Expedition::Red, Value::N(2)).into()],
+            vec![(Expedition::Green, Value::N(3)).into()],
+        ];
+        game.discards = vec![(Expedition::Blue, Value::N(4)).into()];
+        game.expeditions = vec![vec![(Expedition::White, Value::N(5)).into()], vec![]];
+        game.deck = vec![];
+
+        // Public state carries the tableau but neither hand.
+        let public = serde_json::to_string(&game.pub_state()).unwrap();
+        for token in ["White", "Blue", "5", "4"] {
+            assert!(
+                public.contains(token),
+                "public token {token} missing from pub state: {public}"
+            );
+        }
+        for token in ["Red", "Green", "2", "3"] {
+            assert!(
+                !public.contains(token),
+                "private hand token {token} leaked into pub state: {public}"
+            );
+        }
+        assert_no_internal_fields(&public);
+
+        // Player 0's state serializes their own hand only.
+        let p0 = serde_json::to_string(&game.player_state(0)).unwrap();
+        assert!(
+            p0.contains("Red"),
+            "player 0's own hand must serialize: {p0}"
+        );
+        assert!(
+            !p0.contains("Green"),
+            "player 1's hand leaked into player 0's state: {p0}"
+        );
+        assert_no_internal_fields(&p0);
+
+        // Player 1's state serializes their own hand only.
+        let p1 = serde_json::to_string(&game.player_state(1)).unwrap();
+        assert!(
+            p1.contains("Green"),
+            "player 1's own hand must serialize: {p1}"
+        );
+        assert!(
+            !p1.contains("Red"),
+            "player 0's hand leaked into player 1's state: {p1}"
+        );
+        assert_no_internal_fields(&p1);
+    }
+
+    #[test]
+    fn start_game_public_logs_do_not_expose_drawn_hand_cards() {
+        // e R-LOG / 5.6: draw_hand_full logs drawn cards to the drawing player
+        // privately; the public logs may announce only a count. Asserting on
+        // pub_state fields would not catch a card identity leaking into the
+        // rendered Log::public content, so this walks the real start path.
+        let (game, logs) = Game::start(2, 1).unwrap();
+        let drawn: Vec<String> = (0..PLAYERS)
+            .flat_map(|p| game.hands[p].iter().map(|c| c.to_string()))
+            .collect();
+        assert!(!drawn.is_empty(), "both players must have drawn hands");
+        let public: Vec<String> = logs
+            .iter()
+            .filter(|l| l.public)
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect();
+        assert!(
+            public.iter().any(|t| t.contains("drew")),
+            "a public draw announcement must exist, got: {:?}",
+            public
+        );
+        for text in &public {
+            for code in &drawn {
+                assert!(
+                    !text.contains(code.as_str()),
+                    "public log must not expose drawn card {}, got: {}",
+                    code,
+                    text
+                );
+            }
+        }
+        // Each player gets exactly one private draw log naming their cards.
+        for p in 0..PLAYERS {
+            let detail: Vec<String> = logs
+                .iter()
+                .filter(|l| {
+                    !l.public
+                        && l.to == vec![p]
+                        && brdgme_markup::to_string(&l.content).contains("drew")
+                })
+                .map(|l| brdgme_markup::to_string(&l.content))
+                .collect();
+            assert_eq!(
+                1,
+                detail.len(),
+                "each player must get exactly one private draw log, got: {:?}",
+                detail
+            );
+            let expected: Vec<String> = game.hands[p].iter().map(|c| c.to_string()).collect();
+            assert!(
+                expected
+                    .iter()
+                    .all(|code| detail[0].contains(code.as_str())),
+                "the private draw log must name every drawn card, got: {}",
+                detail[0]
+            );
+        }
+    }
 }

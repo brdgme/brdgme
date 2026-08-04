@@ -20,6 +20,7 @@ pub struct PubState {
     /// The sector (1-4) currently being explored during flight.
     pub current_sector: i32,
     /// Full board state for both players (resources, modules, colonies, trading posts, defeated pirates, etc.).
+    /// Every `PlayerBoard` field is open information by design; private per-player state must go in `PlayerState`.
     pub player_boards: [PlayerBoard; 2],
     /// Sector cards encountered during the current flight, in order.
     pub flight_cards: Vec<SectorCard>,

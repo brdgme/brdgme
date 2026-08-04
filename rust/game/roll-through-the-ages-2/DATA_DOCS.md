@@ -1,19 +1,22 @@
 # Roll Through the Ages Data Dictionary
 
-This game has no hidden information: `PubState` and `PlayerState` both carry a
-full clone of the game, so every field described below is visible to every
-consumer (bot or spectator).
+This game has no hidden information. `PubState` and `PlayerState` both carry a
+`RenderState` projection - a full public game view with the RNG excluded - so
+every field described below is visible to every consumer (bot or spectator).
+The RNG lives only in the persisted `Game`, where it keeps save/load
+deterministic. `PlayerState` differs from `PubState` only by its requester
+marker.
 
 ## PubState (public information)
 
-- `game` (Game): The complete game state - all players' boards, the current dice, turn phase, turn supplies, and round/finish flags. See the Game section below.
+- `game` (RenderState): The complete public game view - all players' boards, the current dice, turn phase, turn supplies, and round/finish flags. See the RenderState section below.
 
 ## PlayerState (player-private information)
 
-- `game` (Game): The complete game state, identical to the public state since there is no hidden information.
+- `game` (RenderState): The complete public game view, identical to `PubState`'s since there is no hidden information.
 - `player` (usize): Which player index (0 through players-1) this state is being shown to.
 
-## Game
+## RenderState (public game view)
 
 - `players` (usize): Number of players in the game (2 through 4).
 - `current_player` (usize): Index (0 through players-1) of the player whose turn it is.
@@ -27,7 +30,12 @@ consumer (bot or spectator).
 - `remaining_coins` (i32): Coins the active player has left to spend during the Buy phase this turn.
 - `final_round` (bool): True once the end-game condition has been triggered (a player reached 7 developments, or all 7 monuments were built). Play continues until player 0 finishes their turn in this round.
 - `finished` (bool): True when the game is fully over and final scores/placings apply.
-- `rng` (GameRng): Internal random number generator state. Not meaningful to consumers.
+
+## Game (persisted state)
+
+The persisted `Game` carries every `RenderState` field above, plus:
+
+- `rng` (GameRng): Internal random number generator state. Kept only in the persisted `Game` so the same seed and command sequence reproduce the same game across save/load; never shipped to consumers.
 
 ## PlayerBoard
 

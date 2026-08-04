@@ -1037,6 +1037,18 @@ mod tests {
         brdgme_markup::plain(&brdgme_markup::transform(&log.content, &[]))
     }
 
+    fn log_plain_named(log: &Log) -> String {
+        let players: Vec<brdgme_markup::Player> = players()
+            .iter()
+            .enumerate()
+            .map(|(i, name)| brdgme_markup::Player {
+                name: name.clone(),
+                color: brdgme_color::LIGHT.player_color(i),
+            })
+            .collect();
+        brdgme_markup::plain(&brdgme_markup::transform(&log.content, &players))
+    }
+
     fn new_game() -> Game {
         let (g, _) = Game::start_game(3, 42).unwrap();
         g
@@ -1420,6 +1432,58 @@ mod tests {
                 .all(|l| !l.public || !log_plain(l).contains("has no cards they can take")),
             "no public log may describe the hidden pile"
         );
+    }
+
+    #[test]
+    fn build_public_log_preserves_content_and_hides_remaining_hand() {
+        // AC1 (seven-wonders-1, 5.5/5.6): a real command path must emit a
+        // public, recipient-less log carrying concrete content - the built
+        // card - and must not carry the identity of any card that is still
+        // private: the cards that remain in hand once the hand resolves.
+        let mut g = new_game();
+        let built = g.hands[MICK][0].clone();
+
+        let mut all_logs: Vec<Log> = vec![];
+        all_logs.extend(cmd(&mut g, MICK, "build 1").unwrap().logs);
+        all_logs.extend(cmd(&mut g, STEVE, "discard 1").unwrap().logs);
+        all_logs.extend(cmd(&mut g, GREG, "discard 1").unwrap().logs);
+
+        let public_logs: Vec<&Log> = all_logs.iter().filter(|l| l.public).collect();
+        assert!(
+            !public_logs.is_empty(),
+            "building a card must produce a public log"
+        );
+        assert!(
+            public_logs.iter().all(|l| l.to.is_empty()),
+            "public logs must be recipient-less"
+        );
+
+        let public_texts: Vec<String> = public_logs.iter().map(|l| log_plain_named(l)).collect();
+        let build_texts: Vec<&String> = public_texts
+            .iter()
+            .filter(|t| t.contains("built"))
+            .collect();
+        assert_eq!(1, build_texts.len(), "exactly one build log");
+        assert_eq!(
+            &format!("<Mick> built {}", built.name),
+            build_texts[0],
+            "the public build log names exactly the card just built"
+        );
+        assert!(
+            g.cards[MICK].iter().any(|c| c.name == built.name),
+            "the built card is now public in the builder's tableau"
+        );
+
+        for p in 0..3 {
+            for card in &g.hands[p] {
+                assert!(
+                    public_texts.iter().all(|t| !t.contains(&card.name)),
+                    "public log must not expose a card still in hand ({}): {:?}",
+                    card.name,
+                    public_texts
+                );
+            }
+        }
     }
 
     #[test]

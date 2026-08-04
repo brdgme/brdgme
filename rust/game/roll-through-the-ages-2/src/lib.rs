@@ -33,7 +33,7 @@ use development::DevelopmentId;
 use dice::Die;
 use good::{GOODS, Good, good_maximum, good_value};
 use monument::{MONUMENTS, MonumentId};
-use player_board::PlayerBoard;
+use player_board::{MAX_CITY_PROGRESS, PlayerBoard};
 use take::TakeAction;
 
 pub use command::{BuildTarget, BuyGoods, Command};
@@ -99,22 +99,62 @@ impl Default for Game {
 
 /// No hidden information in this game (`PlayerState`/`PubState` both return
 /// `nil` in Go; `PubRender()` is literally `PlayerRender(CurrentPlayer)`).
-/// Both states carry a full clone of the game so `render.rs` can port
+/// Both states carry the [`RenderState`] projection so `render.rs` can port
 /// `PlayerRender` verbatim; `PubState`'s render uses `game.current_player`,
 /// matching Go's `PubRender() = PlayerRender(CurrentPlayer)` exactly.
+///
+/// The RNG lives only in the persisted `Game` state, never in the render
+/// projection: `Game` keeps `rng` in its serialization so the same seed and
+/// command sequence reproduce the same game across save/load cycles.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct RenderState {
+    pub players: usize,
+    pub current_player: usize,
+    pub phase: Phase,
+    pub boards: Vec<PlayerBoard>,
+    pub rolled_dice: Vec<Die>,
+    pub kept_dice: Vec<Die>,
+    pub remaining_rolls: i32,
+    pub remaining_workers: i32,
+    pub remaining_ships: i32,
+    pub remaining_coins: i32,
+    pub final_round: bool,
+    pub finished: bool,
+}
+
+impl From<&Game> for RenderState {
+    fn from(game: &Game) -> Self {
+        RenderState {
+            players: game.players,
+            current_player: game.current_player,
+            phase: game.phase,
+            boards: game.boards.clone(),
+            rolled_dice: game.rolled_dice.clone(),
+            kept_dice: game.kept_dice.clone(),
+            remaining_rolls: game.remaining_rolls,
+            remaining_workers: game.remaining_workers,
+            remaining_ships: game.remaining_ships,
+            remaining_coins: game.remaining_coins,
+            final_round: game.final_round,
+            finished: game.finished,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct PubState {
-    /// The full game state: every player's board, the current dice, phase,
-    /// turn supplies, and round/finish flags. This game has no hidden
-    /// information, so the public state is a complete clone of the game.
-    pub game: Game,
+    /// The full game state as shipped to clients: every player's board, the
+    /// current dice, phase, turn supplies, and round/finish flags, without
+    /// the internal RNG. This game has no hidden information, so the public
+    /// state carries the complete game view.
+    pub game: RenderState,
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct PlayerState {
     /// The full game state, identical to the public state since there is no
     /// hidden information.
-    pub game: Game,
+    pub game: RenderState,
     /// Which player index (0 through players-1) this state is being shown to.
     pub player: usize,
 }
@@ -1527,12 +1567,14 @@ impl Gamer for Game {
     }
 
     fn pub_state(&self) -> Self::PubState {
-        PubState { game: self.clone() }
+        PubState {
+            game: RenderState::from(self),
+        }
     }
 
     fn player_state(&self, player: usize) -> Self::PlayerState {
         PlayerState {
-            game: self.clone(),
+            game: RenderState::from(self),
             player,
         }
     }
@@ -1674,6 +1716,64 @@ impl Gamer for Game {
 
     fn advanced_strategy() -> String {
         include_str!("../ADVANCED_STRATEGY.md").to_string()
+    }
+
+    fn validate(&self) -> Result<(), GameError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&self.players) {
+            return Err(GameError::internal(format!(
+                "roll-through-the-ages-2: players {} out of range",
+                self.players
+            )));
+        }
+        if self.boards.len() != self.players {
+            return Err(GameError::internal(
+                "roll-through-the-ages-2: boards length mismatch",
+            ));
+        }
+        if self.current_player >= self.players {
+            return Err(GameError::internal(
+                "roll-through-the-ages-2: current_player out of range",
+            ));
+        }
+        if self.remaining_rolls < 0
+            || self.remaining_workers < 0
+            || self.remaining_ships < 0
+            || self.remaining_coins < 0
+        {
+            return Err(GameError::internal(
+                "roll-through-the-ages-2: negative turn supply",
+            ));
+        }
+        for (i, b) in self.boards.iter().enumerate() {
+            if b.city_progress < 0 || b.city_progress > MAX_CITY_PROGRESS {
+                return Err(GameError::internal(format!(
+                    "roll-through-the-ages-2: board {i} city_progress out of range"
+                )));
+            }
+            if b.food < 0 {
+                return Err(GameError::internal(format!(
+                    "roll-through-the-ages-2: board {i} negative food"
+                )));
+            }
+            if !(0..=5).contains(&b.ships) {
+                return Err(GameError::internal(format!(
+                    "roll-through-the-ages-2: board {i} ships out of range"
+                )));
+            }
+            if b.disasters < 0 {
+                return Err(GameError::internal(format!(
+                    "roll-through-the-ages-2: board {i} negative disasters"
+                )));
+            }
+            for (&good, &n) in b.goods.iter() {
+                if n < 0 {
+                    return Err(GameError::internal(format!(
+                        "roll-through-the-ages-2: board {i} {good:?} count negative"
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -3297,5 +3397,182 @@ mod tests {
         // Re-invoking the finish path is rejected and appends nothing, so the
         // epilogue total stays at exactly one.
         assert!(g.command(STEVE, "next", &p).is_err());
+    }
+
+    // =================================================================
+    // 5.5: persisted-vs-render serialization, validate, and Log::public.
+    // =================================================================
+
+    #[test]
+    fn persisted_game_serialization_retains_rng() {
+        // The RNG is part of the persisted `Game` contract: the same seed and
+        // command sequence must reproduce the same game across save/load.
+        let mut g = new_blank(2);
+        g.rng = GameRng::seed_from_u64(42);
+        let json = serde_json::to_string(&g).unwrap();
+        assert!(
+            json.contains("\"rng\""),
+            "persisted Game serialization must retain rng: {json}"
+        );
+        let mut back: Game = serde_json::from_str(&json).unwrap();
+        let draw =
+            |g: &mut Game| -> Vec<u32> { (0..4).map(|_| g.rng.random_range(0..1000u32)).collect() };
+        assert_eq!(
+            draw(&mut g),
+            draw(&mut back),
+            "rng stream must resume where it left off across persistence"
+        );
+    }
+
+    #[test]
+    fn serialized_public_state_omits_rng() {
+        let g = new_blank(2);
+        let json = serde_json::to_string(&g.pub_state()).unwrap();
+        assert!(
+            !json.contains("\"rng\""),
+            "public serialized output must omit rng: {json}"
+        );
+        for field in [
+            "players",
+            "current_player",
+            "phase",
+            "boards",
+            "rolled_dice",
+        ] {
+            assert!(
+                json.contains(&format!("\"{field}\"")),
+                "public serialized output must still carry {field}: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn serialized_player_states_omit_rng_and_carry_only_requester() {
+        let g = new_blank(3);
+        for (json, expected_player) in [
+            (serde_json::to_string(&g.player_state(0)).unwrap(), 0),
+            (serde_json::to_string(&g.player_state(2)).unwrap(), 2),
+        ] {
+            assert!(
+                !json.contains("\"rng\""),
+                "player serialized output must omit rng: {json}"
+            );
+            let s: PlayerState = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                expected_player, s.player,
+                "player state must carry only the requesting player's private state"
+            );
+        }
+        // No hidden information: every player sees the identical game
+        // projection, differing only in the `player` marker.
+        let s0: PlayerState =
+            serde_json::from_str(&serde_json::to_string(&g.player_state(0)).unwrap()).unwrap();
+        let s2: PlayerState =
+            serde_json::from_str(&serde_json::to_string(&g.player_state(2)).unwrap()).unwrap();
+        assert_eq!(s0.game, s2.game);
+    }
+
+    #[test]
+    fn validate_accepts_started_games() {
+        for n in MIN_PLAYERS..=MAX_PLAYERS {
+            let (g, _) = Game::start(n, 1).unwrap();
+            assert!(g.validate().is_ok(), "players={n}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_malformed_state() {
+        let mut g = new_blank(2);
+        g.players = 1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_blank(2);
+        g.players = 5;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        // Boards must match players - the indexing guard behind every board
+        // access (`current_player`, phase resolves, rendering).
+        let mut g = new_blank(2);
+        g.boards.pop();
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_blank(2);
+        g.boards.push(PlayerBoard::default());
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_blank(2);
+        g.current_player = 2;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_blank(2);
+        g.remaining_rolls = -1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_blank(2);
+        g.remaining_workers = -1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+
+        let mut g = new_blank(2);
+        g.boards[MICK].city_progress = 19;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_blank(2);
+        g.boards[MICK].food = -1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_blank(2);
+        g.boards[MICK].ships = 6;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_blank(2);
+        g.boards[MICK].disasters = -1;
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+        let mut g = new_blank(2);
+        g.boards[MICK].goods.insert(Good::Spearhead, -1);
+        assert!(matches!(g.validate(), Err(GameError::Internal { .. })));
+    }
+
+    #[test]
+    fn validate_accepts_over_cap_transient_values() {
+        // Food can exceed 15 while phase is Collect (`collect_phase`/`take`
+        // add it uncapped; only `phase_resolve` clamps to 15), so a board may
+        // transiently hold more than the cap. Rejecting it would brick valid
+        // games at the request boundary.
+        let mut g = new_blank(2);
+        g.phase = Phase::Collect;
+        g.boards[MICK].food = 16;
+        assert!(g.validate().is_ok());
+
+        // The Quarrying bonus in `gain_goods` adds stone without the normal
+        // `good_maximum` cap, so a board can hold one more than the maximum.
+        let mut g = new_blank(2);
+        g.boards[MICK]
+            .goods
+            .insert(Good::Stone, good_maximum(Good::Stone) + 1);
+        assert!(g.validate().is_ok());
+    }
+
+    #[test]
+    fn all_logs_are_public_with_no_private_values() {
+        // R-LOG / 5.6: this game has no hidden information, so it never emits
+        // a private log and there is no directly private value that could leak
+        // into `Log::public` content. Drive a real command sequence and assert
+        // every emitted log is public and actually carries the (fully public)
+        // roll facts.
+        let mut g = new_blank(2);
+        g.rng = GameRng::seed_from_u64(21);
+        g.rolled_dice = vec![Die::Skull, Die::Coins];
+        let p = test_players();
+        let mut logs: Vec<Log> = vec![];
+        for cmd in ["roll 2", "next"] {
+            let resp = g.command(MICK, cmd, &p).unwrap();
+            logs.extend(resp.logs);
+        }
+        assert!(!logs.is_empty());
+        let rendered: Vec<String> = logs
+            .iter()
+            .map(|l| brdgme_markup::to_string(&l.content))
+            .collect();
+        for (l, text) in logs.iter().zip(&rendered) {
+            assert!(l.public, "this game never emits private logs, got: {text}");
+        }
+        assert!(
+            rendered.iter().any(|t| t.contains("rolled")),
+            "public logs must carry the roll facts, got: {rendered:?}"
+        );
     }
 }
