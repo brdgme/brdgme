@@ -2500,6 +2500,529 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn admin_list_dangling_bot_names_distinguishes_anonymous_non_admin_admin(
+        pool: sqlx::PgPool,
+    ) {
+        let anonymous = crate::test_support::anonymous(&pool, || async {
+            admin_list_dangling_bot_names().await
+        })
+        .await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || async {
+            admin_list_dangling_bot_names().await
+        })
+        .await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin =
+            crate::test_support::admin(&pool, || async { admin_list_dangling_bot_names().await })
+                .await;
+        assert!(
+            admin.expect("admin caller must succeed").is_empty(),
+            "no seeded game_bots references means nothing dangles"
+        );
+    }
+
+    #[sqlx::test]
+    async fn admin_create_bot_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let call = |name: String, temperature: f32| async move {
+            admin_create_bot(name, temperature, true, false, false).await
+        };
+
+        let anonymous =
+            crate::test_support::anonymous(&pool, || call("authz-bot".to_string(), 0.2)).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || call("authz-bot".to_string(), 0.2)).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call("authz-bot".to_string(), 0.2)).await;
+        assert_eq!(admin.expect("admin caller must succeed").name, "authz-bot");
+    }
+
+    #[sqlx::test]
+    async fn admin_update_bot_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let bot_id = insert_bot(&pool, "original").await;
+        let call = |id: Uuid, name: String, temperature: f32| async move {
+            admin_update_bot(id, name, temperature, true, false, true, false).await
+        };
+
+        let anonymous =
+            crate::test_support::anonymous(&pool, || call(bot_id, "renamed".to_string(), 0.4))
+                .await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || call(bot_id, "renamed".to_string(), 0.4))
+                .await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin =
+            crate::test_support::admin(&pool, || call(bot_id, "renamed".to_string(), 0.4)).await;
+        admin.expect("admin caller must succeed");
+        let stored: String = sqlx::query_scalar("SELECT name FROM bots WHERE id = $1")
+            .bind(bot_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, "renamed");
+    }
+
+    #[sqlx::test]
+    async fn admin_reorder_bots_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let a = insert_bot(&pool, "aaa").await;
+        let b = insert_bot(&pool, "bbb").await;
+        let c = insert_bot(&pool, "ccc").await;
+        let call = |ordered_ids: Vec<Uuid>| async move { admin_reorder_bots(ordered_ids).await };
+
+        let anonymous = crate::test_support::anonymous(&pool, || call(vec![c, b, a])).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || call(vec![c, b, a])).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call(vec![c, b, a])).await;
+        admin.expect("admin caller must succeed");
+    }
+
+    #[sqlx::test]
+    async fn admin_delete_bot_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let bot_id = insert_bot(&pool, "doomed").await;
+        let call = |id: Uuid| async move { admin_delete_bot(id).await };
+
+        let anonymous = crate::test_support::anonymous(&pool, || call(bot_id)).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || call(bot_id)).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call(bot_id)).await;
+        admin.expect("admin caller must succeed");
+        let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM bots WHERE id = $1")
+            .bind(bot_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[sqlx::test]
+    async fn admin_list_providers_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let anonymous =
+            crate::test_support::anonymous(&pool, || async { admin_list_providers().await }).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || async { admin_list_providers().await }).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin =
+            crate::test_support::admin(&pool, || async { admin_list_providers().await }).await;
+        assert!(
+            admin.expect("admin caller must succeed").is_empty(),
+            "no seeded providers"
+        );
+    }
+
+    #[sqlx::test]
+    async fn admin_create_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let call =
+            |name: String, url: String| async move { admin_create_provider(name, url, None).await };
+
+        let anonymous = crate::test_support::anonymous(&pool, || {
+            call(
+                "authz-provider".to_string(),
+                "http://localhost:1".to_string(),
+            )
+        })
+        .await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || {
+            call(
+                "authz-provider".to_string(),
+                "http://localhost:1".to_string(),
+            )
+        })
+        .await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || {
+            call(
+                "authz-provider".to_string(),
+                "http://localhost:1".to_string(),
+            )
+        })
+        .await;
+        let provider = admin.expect("admin caller must succeed");
+        assert_eq!(provider.name, "authz-provider");
+    }
+
+    #[sqlx::test]
+    async fn admin_update_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let provider = create_provider(
+            &pool,
+            "original".to_string(),
+            "http://localhost:1".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+        let call = |id: Uuid, name: String| async move {
+            admin_update_provider(
+                id,
+                name,
+                "http://localhost:1".to_string(),
+                ApiKeyUpdate::Keep,
+                false,
+            )
+            .await
+        };
+
+        let anonymous =
+            crate::test_support::anonymous(&pool, || call(provider.id, "renamed".to_string()))
+                .await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || call(provider.id, "renamed".to_string()))
+                .await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin =
+            crate::test_support::admin(&pool, || call(provider.id, "renamed".to_string())).await;
+        admin.expect("admin caller must succeed");
+        let stored: String = sqlx::query_scalar("SELECT name FROM llm_providers WHERE id = $1")
+            .bind(provider.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, "renamed");
+    }
+
+    #[sqlx::test]
+    async fn admin_delete_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let provider = create_provider(
+            &pool,
+            "doomed".to_string(),
+            "http://localhost:1".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+        let call = |id: Uuid| async move { admin_delete_provider(id).await };
+
+        let anonymous = crate::test_support::anonymous(&pool, || call(provider.id)).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || call(provider.id)).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call(provider.id)).await;
+        admin.expect("admin caller must succeed");
+        let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM llm_providers WHERE id = $1")
+            .bind(provider.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[sqlx::test]
+    async fn admin_list_bot_providers_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let anonymous =
+            crate::test_support::anonymous(&pool, || async { admin_list_bot_providers().await })
+                .await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || async { admin_list_bot_providers().await })
+                .await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin =
+            crate::test_support::admin(&pool, || async { admin_list_bot_providers().await }).await;
+        assert!(
+            admin.expect("admin caller must succeed").is_empty(),
+            "no seeded bot-provider links"
+        );
+    }
+
+    #[sqlx::test]
+    async fn admin_create_bot_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let bot = create_bot(&pool, "linkbot".to_string(), 0.2, true, false, false)
+            .await
+            .unwrap();
+        let provider = create_provider(
+            &pool,
+            "linkprovider".to_string(),
+            "http://localhost:1".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+        let call = |bot_id: Uuid, provider_id: Uuid, model: String| async move {
+            admin_create_bot_provider(bot_id, provider_id, model, None, None, 0).await
+        };
+
+        let anonymous =
+            crate::test_support::anonymous(&pool, || call(bot.id, provider.id, "m".to_string()))
+                .await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || call(bot.id, provider.id, "m".to_string()))
+                .await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin =
+            crate::test_support::admin(&pool, || call(bot.id, provider.id, "m".to_string())).await;
+        assert_eq!(admin.expect("admin caller must succeed").model, "m");
+    }
+
+    #[sqlx::test]
+    async fn admin_update_bot_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let bot = create_bot(&pool, "upbot".to_string(), 0.2, true, false, false)
+            .await
+            .unwrap();
+        let provider = create_provider(
+            &pool,
+            "upprovider".to_string(),
+            "http://localhost:1".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+        let link = create_bot_provider(&pool, bot.id, provider.id, "m1".to_string(), None, None, 0)
+            .await
+            .unwrap();
+        let call = |id: Uuid, model: String| async move {
+            admin_update_bot_provider(id, model, None, None, 0, true).await
+        };
+
+        let anonymous =
+            crate::test_support::anonymous(&pool, || call(link.id, "m2".to_string())).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin =
+            crate::test_support::non_admin(&pool, || call(link.id, "m2".to_string())).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call(link.id, "m2".to_string())).await;
+        admin.expect("admin caller must succeed");
+        let stored: String = sqlx::query_scalar("SELECT model FROM bot_providers WHERE id = $1")
+            .bind(link.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, "m2");
+    }
+
+    #[sqlx::test]
+    async fn admin_delete_bot_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let bot = create_bot(&pool, "dellinkbot".to_string(), 0.2, true, false, false)
+            .await
+            .unwrap();
+        let provider = create_provider(
+            &pool,
+            "dellinkprovider".to_string(),
+            "http://localhost:1".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+        let link = create_bot_provider(&pool, bot.id, provider.id, "m".to_string(), None, None, 0)
+            .await
+            .unwrap();
+        let call = |id: Uuid| async move { admin_delete_bot_provider(id).await };
+
+        let anonymous = crate::test_support::anonymous(&pool, || call(link.id)).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || call(link.id)).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call(link.id)).await;
+        admin.expect("admin caller must succeed");
+        let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM bot_providers WHERE id = $1")
+            .bind(link.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[sqlx::test]
+    async fn admin_test_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let url = spawn_upstream(
+            200,
+            br#"{"choices":[{"message":{"content":"hello"}}]}"#.to_vec(),
+            vec![],
+        )
+        .await;
+        let provider_id = provider_with_link(&pool, &url).await;
+        let call = |provider_id: Uuid| async move { admin_test_provider(provider_id, None).await };
+
+        let anonymous = crate::test_support::anonymous(&pool, || call(provider_id)).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || call(provider_id)).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call(provider_id)).await;
+        assert_eq!(admin.expect("admin caller must succeed"), "hello");
+    }
+
+    #[sqlx::test]
+    async fn admin_test_bot_provider_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
+        let url = spawn_upstream(200, br#"{"ok":true}"#.to_vec(), vec![]).await;
+        let provider_id = provider_with_link(&pool, &url).await;
+        let link_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM bot_providers WHERE provider_id = $1")
+                .bind(provider_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let call =
+            |link_id: Uuid| async move { admin_test_bot_provider(link_id, "hi".to_string()).await };
+
+        let anonymous = crate::test_support::anonymous(&pool, || call(link_id)).await;
+        let err = anonymous.expect_err("anonymous caller must be rejected");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "anonymous error was: {err}"
+        );
+
+        let non_admin = crate::test_support::non_admin(&pool, || call(link_id)).await;
+        let err = non_admin.expect_err("non-admin caller must be rejected");
+        match err {
+            ServerFnError::ServerError(msg) => assert_eq!(msg, ADMIN_REQUIRED),
+            other => panic!("expected ServerError(ADMIN_REQUIRED), got {other:?}"),
+        }
+
+        let admin = crate::test_support::admin(&pool, || call(link_id)).await;
+        assert_eq!(admin.expect("admin caller must succeed").status, 200);
+    }
+
+    #[sqlx::test]
     async fn test_admin_list_bots_rejects_non_admin(pool: sqlx::PgPool) {
         sqlx::query(
             "INSERT INTO users (id, name, pref_colors, is_admin) VALUES ($1, $2, $3, false)",
