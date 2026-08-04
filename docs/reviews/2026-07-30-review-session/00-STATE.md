@@ -192,6 +192,10 @@ work breakdown. Still uncommitted.
 
 ## Owner rulings - do not re-litigate
 
+- **R-31 / `category-5-2` stays capped at 8 players.** The current platform
+  supports only eight pre-approved player colors, so 9-10 players are unsuitable
+  now. Do not implement the published 2-10-player variant; revisit the broader
+  player-limit question in a future per-game review.
 - **`lords-of-vegas-1` is work in progress.** Its missing endgame (never assigns
   `finished = true`) is out of scope. Do not raise findings about missing or
   incomplete functionality there. F-50/F-57 and the no-`finished` observation are
