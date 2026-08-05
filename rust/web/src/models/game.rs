@@ -37,6 +37,7 @@ pub struct Game {
     pub game_state: String,
     pub chat_id: Option<Uuid>,
     pub restarted_game_id: Option<Uuid>,
+    pub end_reason: Option<String>,
 }
 
 /// Deliberate projection: omits `created_at`/`updated_at` (constructed field-by-field in db).
@@ -69,6 +70,8 @@ pub struct GamePlayer {
     pub rating_change: Option<i32>,
     pub ranked_placing: Option<i32>,
     pub left_at: Option<PrimitiveDateTime>,
+    pub departure_reason: Option<String>,
+    pub departure_sequence: Option<i32>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

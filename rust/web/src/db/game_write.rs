@@ -146,18 +146,17 @@ pub async fn create_game_with_users_tx(
 
     // 4. Create Game
     let is_finished = !opts.placings.is_empty();
-    let game = sqlx::query_as!(
-        crate::models::game::Game,
+    let game = sqlx::query_as::<_, crate::models::game::Game>(
         r#"
         INSERT INTO games (game_version_id, is_finished, game_state, chat_id)
         VALUES ($1, $2, $3, $4)
-        RETURNING *
+        RETURNING id, created_at, updated_at, game_version_id, is_finished, finished_at, game_state, chat_id, restarted_game_id, end_reason
         "#,
-        opts.game_version_id,
-        is_finished,
-        opts.game_state,
-        opts.chat_id
     )
+    .bind(opts.game_version_id)
+    .bind(is_finished)
+    .bind(opts.game_state)
+    .bind(opts.chat_id)
     .fetch_one(&mut *tx)
     .await?;
 

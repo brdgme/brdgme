@@ -150,6 +150,8 @@ pub(crate) fn build_game_player_from_row(
     rating_change: Option<i32>,
     ranked_placing: Option<i32>,
     left_at: Option<time::PrimitiveDateTime>,
+    departure_reason: Option<String>,
+    departure_sequence: Option<i32>,
 ) -> crate::models::game::GamePlayer {
     crate::models::game::GamePlayer {
         id,
@@ -171,6 +173,8 @@ pub(crate) fn build_game_player_from_row(
         rating_change,
         ranked_placing,
         left_at,
+        departure_reason,
+        departure_sequence,
     }
 }
 

@@ -9,15 +9,12 @@ use uuid::Uuid;
 #[cfg(feature = "ssr")]
 #[tracing::instrument(skip(pool), fields(game_id = %id))]
 pub async fn find_game(pool: &PgPool, id: Uuid) -> Result<Option<crate::models::game::Game>> {
-    sqlx::query_as!(
-        crate::models::game::Game,
-        r#"
-        SELECT id, created_at, updated_at, game_version_id, is_finished, finished_at, game_state, chat_id, restarted_game_id
-        FROM games
-        WHERE id = $1
-        "#,
-        id
+    sqlx::query_as::<_, crate::models::game::Game>(
+        "SELECT id, created_at, updated_at, game_version_id, is_finished, finished_at, game_state, chat_id, restarted_game_id, end_reason \
+         FROM games \
+         WHERE id = $1",
     )
+    .bind(id)
     .fetch_optional(pool)
     .await
     .map_err(Into::into)
@@ -84,6 +81,49 @@ impl GameExtended {
 }
 
 #[cfg(feature = "ssr")]
+#[derive(sqlx::FromRow)]
+struct ExtendedPlayerRow {
+    gp_id: Uuid,
+    gp_created_at: time::PrimitiveDateTime,
+    gp_updated_at: time::PrimitiveDateTime,
+    gp_game_id: Uuid,
+    gp_user_id: Option<Uuid>,
+    gp_position: i32,
+    gp_color: String,
+    gp_has_accepted: bool,
+    gp_is_turn: bool,
+    gp_is_turn_at: time::PrimitiveDateTime,
+    gp_place: Option<i32>,
+    gp_last_turn_at: time::PrimitiveDateTime,
+    gp_is_eliminated: bool,
+    gp_is_read: bool,
+    gp_points: Option<f32>,
+    gp_undo_game_state: Option<String>,
+    gp_rating_change: Option<i32>,
+    gp_ranked_placing: Option<i32>,
+    gp_left_at: Option<time::PrimitiveDateTime>,
+    gp_departure_reason: Option<String>,
+    gp_departure_sequence: Option<i32>,
+    u_id: Option<Uuid>,
+    u_created_at: Option<time::PrimitiveDateTime>,
+    u_updated_at: Option<time::PrimitiveDateTime>,
+    u_name: Option<String>,
+    u_pref_colors: Option<Vec<String>>,
+    gtu_id: Option<Uuid>,
+    gtu_created_at: Option<time::PrimitiveDateTime>,
+    gtu_updated_at: Option<time::PrimitiveDateTime>,
+    gtu_game_type_id: Option<Uuid>,
+    gtu_user_id: Option<Uuid>,
+    gtu_last_game_finished_at: Option<time::PrimitiveDateTime>,
+    gtu_rating: Option<i32>,
+    gtu_peak_rating: Option<i32>,
+    gb_id: Option<Uuid>,
+    gb_game_id: Option<Uuid>,
+    gb_name: Option<String>,
+    gb_bot_name: Option<String>,
+}
+
+#[cfg(feature = "ssr")]
 #[tracing::instrument(skip(pool), fields(game_id = %id))]
 pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameExtended>> {
     let game = find_game(pool, id).await?;
@@ -104,7 +144,7 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
     .fetch_one(pool)
     .await?;
 
-    let players_raw = sqlx::query!(
+    let players_raw = sqlx::query_as::<_, ExtendedPlayerRow>(
         r#"
         SELECT
             gp.id as gp_id, gp.created_at as gp_created_at, gp.updated_at as gp_updated_at,
@@ -115,14 +155,15 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
             gp.is_read as gp_is_read, gp.points as gp_points,
             gp.undo_game_state as gp_undo_game_state, gp.rating_change as gp_rating_change,
             gp.ranked_placing as gp_ranked_placing, gp.left_at as gp_left_at,
-            u.id as "u_id?", u.created_at as "u_created_at?", u.updated_at as "u_updated_at?",
-            u.name as "u_name?", u.pref_colors as "u_pref_colors?",
-            gtu.id as "gtu_id?", gtu.created_at as "gtu_created_at?", gtu.updated_at as "gtu_updated_at?",
-            gtu.game_type_id as "gtu_game_type_id?", gtu.user_id as "gtu_user_id?",
-            gtu.last_game_finished_at as "gtu_last_game_finished_at?", gtu.rating as "gtu_rating?",
-            gtu.peak_rating as "gtu_peak_rating?",
-            gb.id as "gb_id?", gb.game_id as "gb_game_id?", gb.name as "gb_name?",
-            gb.bot_name as "gb_bot_name?"
+            gp.departure_reason as gp_departure_reason, gp.departure_sequence as gp_departure_sequence,
+            u.id as u_id, u.created_at as u_created_at, u.updated_at as u_updated_at,
+            u.name as u_name, u.pref_colors as u_pref_colors,
+            gtu.id as gtu_id, gtu.created_at as gtu_created_at, gtu.updated_at as gtu_updated_at,
+            gtu.game_type_id as gtu_game_type_id, gtu.user_id as gtu_user_id,
+            gtu.last_game_finished_at as gtu_last_game_finished_at, gtu.rating as gtu_rating,
+            gtu.peak_rating as gtu_peak_rating,
+            gb.id as gb_id, gb.game_id as gb_game_id, gb.name as gb_name,
+            gb.bot_name as gb_bot_name
         FROM game_players gp
         LEFT JOIN users u ON gp.user_id = u.id
         LEFT JOIN game_type_users gtu ON gtu.user_id = u.id AND gtu.game_type_id = $2
@@ -130,9 +171,9 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
         WHERE gp.game_id = $1
         ORDER BY gp.position
         "#,
-        id,
-        game_version.game_type_id
     )
+    .bind(id)
+    .bind(game_version.game_type_id)
     .fetch_all(pool)
     .await?;
 
@@ -181,6 +222,8 @@ pub async fn find_game_extended(pool: &PgPool, id: Uuid) -> Result<Option<GameEx
                 p.gp_rating_change,
                 p.gp_ranked_placing,
                 p.gp_left_at,
+                p.gp_departure_reason,
+                p.gp_departure_sequence,
             ),
             user,
             game_bot,
