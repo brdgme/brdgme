@@ -801,6 +801,192 @@ mod tests {
             assert!(!header.contains(p.name()), "header must not name {}", p.name());
         }
     }
+
+    // DRM-03c2b: a normal game-service finish derives winner/order only from
+    // authoritative `game_players.place`, never from `points` or
+    // `ranked_placing`, even when those would imply a different result.
+    #[sqlx::test]
+    async fn finished_game_service_header_uses_authoritative_place(pool: sqlx::PgPool) {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{PlayerRender as PlayerRenderApi, Request, Response};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(move |Json(_): Json<Request>| async {
+                Json(Response::PlayerRender {
+                    render: PlayerRenderApi {
+                        player_state: "state".to_string(),
+                        render: "mock board".to_string(),
+                        command_spec: None,
+                    },
+                })
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mock_uri = format!("http://{addr}");
+
+        let (game_id, _players) = seed_game_with_emailable_players(&pool, 2).await;
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        sqlx::query(
+            "UPDATE games SET is_finished = true, end_reason = 'game_service' \
+             WHERE id = $1",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE game_versions SET uri = $1, name = $2 WHERE id = $3")
+            .bind(&mock_uri)
+            .bind(format!("notify-mock-{}", uuid::Uuid::new_v4().simple()))
+            .bind(ge.game.game_version_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Authoritative place says position 1 won; points and ranked_placing
+        // both say position 0 won. The header must follow `place`.
+        sqlx::query(
+            "UPDATE game_players SET \
+               place = CASE WHEN position = 0 THEN 2 ELSE 1 END, \
+               points = CASE WHEN position = 0 THEN 100 ELSE 1 END, \
+               ranked_placing = CASE WHEN position = 0 THEN 1 ELSE 2 END, \
+               rating_change = CASE WHEN position = 0 THEN 16 ELSE -16 END \
+             WHERE game_id = $1",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        let content = build_content(
+            &pool,
+            &reqwest::Client::new(),
+            &ge,
+            &ge.game_players[0],
+            NotifyKind::Finished,
+            "subject".to_string(),
+        )
+        .await;
+        let header = content.header.as_deref().expect("finished mail has a header");
+        let p0 = &ge.game_players[0];
+        let p1 = &ge.game_players[1];
+        assert_eq!(
+            header,
+            format!(
+                "Game over. Winners: {} (-16), {} (+16)",
+                p1.name(),
+                p0.name()
+            ),
+            "winner/order must come from authoritative place, not points or ranked_placing"
+        );
+        assert!(
+            !header.starts_with(&format!("Game over. Winners: {}", p0.name())),
+            "points/ranked_placing must not promote position 0 over its authoritative place 2"
+        );
+    }
+
+    // DRM-03c2b: a two-human concession finish keeps the authoritative and
+    // competitive 1/2 places even when points or ranked_placing conflict with
+    // that order.
+    #[sqlx::test]
+    async fn finished_two_human_concession_header_uses_authoritative_places(pool: sqlx::PgPool) {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{PlayerRender as PlayerRenderApi, Request, Response};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(move |Json(_): Json<Request>| async {
+                Json(Response::PlayerRender {
+                    render: PlayerRenderApi {
+                        player_state: "state".to_string(),
+                        render: "mock board".to_string(),
+                        command_spec: None,
+                    },
+                })
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mock_uri = format!("http://{addr}");
+
+        let (game_id, _players) = seed_game_with_emailable_players(&pool, 2).await;
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        sqlx::query(
+            "UPDATE games SET is_finished = true, end_reason = 'concession_forfeit' \
+             WHERE id = $1",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE game_versions SET uri = $1, name = $2 WHERE id = $3")
+            .bind(&mock_uri)
+            .bind(format!("notify-mock-{}", uuid::Uuid::new_v4().simple()))
+            .bind(ge.game.game_version_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Authoritative/competitive places are 1/2 in position order, but
+        // points and ranked_placing both name position 1 as winner. The header
+        // must retain the 1/2 forfeit order.
+        sqlx::query(
+            "UPDATE game_players SET \
+               place = position + 1, \
+               points = CASE WHEN position = 0 THEN 1 ELSE 100 END, \
+               ranked_placing = CASE WHEN position = 0 THEN 2 ELSE 1 END, \
+               rating_change = CASE WHEN position = 0 THEN 8 ELSE -8 END \
+             WHERE game_id = $1",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        let content = build_content(
+            &pool,
+            &reqwest::Client::new(),
+            &ge,
+            &ge.game_players[0],
+            NotifyKind::Finished,
+            "subject".to_string(),
+        )
+        .await;
+        let header = content.header.as_deref().expect("finished mail has a header");
+        let p0 = &ge.game_players[0];
+        let p1 = &ge.game_players[1];
+        assert_eq!(
+            header,
+            format!(
+                "Game over. Winners: {} (+8), {} (-8)",
+                p0.name(),
+                p1.name()
+            ),
+            "two-human concession must keep authoritative/competitive 1/2 order"
+        );
+    }
+
     #[test]
     fn reminder_header_contains_name() {
         let h = reminder_header_text("Alice");
@@ -1020,6 +1206,58 @@ mod tests {
 
         assert!(email_token(&pool, gp1).await.is_some());
         assert!(email_token(&pool, gp0).await.is_none());
+    }
+
+    // DRM-03c2b: a replacement concession leaves the game unfinished, stamps
+    // the conceding human's `conceded` departure metadata, and keeps that human
+    // as a participant replaced by a bot. No Finished (game not finished) and
+    // no Eliminated (conceded, not eliminated) notification is emitted - there
+    // is no replacement-concession notification type.
+    #[sqlx::test]
+    async fn replacement_concession_emits_no_finished_or_eliminated_notification(
+        pool: sqlx::PgPool,
+    ) {
+        let (game_id, players) = seed_game_with_emailable_players(&pool, 2).await;
+        let (_u0, gp0) = players[0];
+        let (_u1, gp1) = players[1];
+        let before = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+
+        // Replace the conceding human with a bot while retaining their identity
+        // and stamping the approved departure metadata (DRM-03b1a3 shape).
+        let bot_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO game_bots (game_id, name, bot_name) VALUES ($1, 'replacement', 'replacement') \
+             RETURNING id",
+        )
+        .bind(game_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET game_bot_id = $1, left_at = NOW(), \
+               departure_reason = 'conceded', departure_sequence = 1 \
+             WHERE id = $2",
+        )
+        .bind(bot_id)
+        .bind(gp0)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        notify_game_emails(None, &pool, &reqwest::Client::new(), game_id, Some(before)).await;
+
+        // A reply token is minted only for a recipient we actually mail; neither
+        // the bot-replaced conceder nor the still-active human may be mailed.
+        assert!(
+            email_token(&pool, gp0).await.is_none(),
+            "bot-replaced conceder must not get a Finished or Eliminated notification"
+        );
+        assert!(
+            email_token(&pool, gp1).await.is_none(),
+            "active player must not get a Finished or Eliminated notification"
+        );
     }
 
     // R-20 / F-180: `notify_game_started` bypasses web-presence suppression so
