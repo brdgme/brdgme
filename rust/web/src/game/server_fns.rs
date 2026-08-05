@@ -947,6 +947,15 @@ pub(crate) async fn concede_core(
         return Err(ServerFnError::new("You have already left this game"));
     }
 
+    // DRM-03b2a: exactly one active human cannot Concede (End replaces it);
+    // guard before any replacement/forfeit dispatch so web and email cannot
+    // replace the last human.
+    if count_active_humans(&ge) < 2 {
+        return Err(ServerFnError::new(
+            "Concede is not available: at least two active humans are required",
+        ));
+    }
+
     let replacement_available = crate::db::replacement_bot_available(pool)
         .await
         .map_err(internal("concede_core: replacement available"))?;
@@ -976,6 +985,51 @@ pub(crate) async fn concede_core(
             "Concede is not available: no replacement bot configured",
         ));
     }
+
+    Ok(ge)
+}
+
+#[cfg(feature = "ssr")]
+pub(crate) async fn end_core(
+    pool: &sqlx::PgPool,
+    game_id: Uuid,
+    actor: ActingPlayer,
+) -> Result<crate::db::GameExtended, ServerFnError> {
+    let ge = crate::db::find_game_extended(pool, game_id)
+        .await
+        .map_err(internal("end_core: find game"))?
+        .ok_or_else(|| ServerFnError::new("Game not found"))?;
+
+    if ge.game.is_finished {
+        return Err(ServerFnError::new("Game is already finished"));
+    }
+
+    let player = match &actor {
+        ActingPlayer::User(user_id) => ge
+            .game_players
+            .iter()
+            .find(|p| p.user.as_ref().is_some_and(|u| u.id == *user_id))
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?,
+        ActingPlayer::GamePlayer(gp_id) => ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id == *gp_id)
+            .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?,
+    };
+
+    let active_humans = count_active_humans(&ge);
+    if active_humans > 1 {
+        return Err(ServerFnError::new(
+            "End game is only available to the last human",
+        ));
+    }
+
+    // The pre-write snapshot returned to the caller is the same `ge` the
+    // writer's stale guard is checked against, so notifications diff the exact
+    // state before this lifecycle write.
+    crate::db::end_game(pool, game_id, ge.game.updated_at, player.game_player.id)
+        .await
+        .map_err(|e| conflict_or_internal("end_core: end", e))?;
 
     Ok(ge)
 }
@@ -1025,43 +1079,7 @@ pub async fn end_game(game_id: Uuid) -> Result<(), ServerFnError> {
         .await?
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
 
-    let ge = crate::db::find_game_extended(&pool, game_id)
-        .await
-        .map_err(internal("end_game: find game"))?
-        .ok_or_else(|| ServerFnError::new("Game not found"))?;
-    let before = ge.clone();
-
-    if ge.game.is_finished {
-        return Err(ServerFnError::new("Game is already finished"));
-    }
-
-    let is_player = ge
-        .game_players
-        .iter()
-        .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
-    if !is_player {
-        return Err(ServerFnError::new("You are not a player in this game"));
-    }
-
-    let active_humans = count_active_humans(&ge);
-    if active_humans > 1 {
-        return Err(ServerFnError::new(
-            "End game is only available to the last human",
-        ));
-    }
-
-    // DRM-03b1c4: forward the actor's `game_players.id` (never `users.id`) to
-    // the locked writer so it authorizes the stop under the game-row lock.
-    let actor_game_player_id = ge
-        .game_players
-        .iter()
-        .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
-        .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?
-        .game_player
-        .id;
-    crate::db::end_game(&pool, game_id, ge.game.updated_at, actor_game_player_id)
-        .await
-        .map_err(internal("end_game: end"))?;
+    let before = end_core(&pool, game_id, ActingPlayer::User(user.id)).await?;
 
     crate::game::broadcast_and_trigger(&pool, &broadcaster, &jetstream, game_id).await;
 
@@ -2866,6 +2884,193 @@ mod tests {
         assert!(
             can_add(pending_in),
             "a pending INCOMING requester must still show the add-friend affordance"
+        );
+    }
+
+    #[test]
+    fn conflict_or_internal_maps_typed_finished_and_stale_errors() {
+        let finished = conflict_or_internal("test", anyhow::anyhow!(crate::db::GameAlreadyFinished));
+        match finished {
+            leptos::prelude::ServerFnError::ServerError(m) => {
+                assert_eq!(m, "Game is already finished");
+            }
+            _ => panic!("expected ServerError, got {finished:?}"),
+        }
+
+        let stale = conflict_or_internal("test", anyhow::anyhow!(crate::db::StaleStateConflict));
+        match stale {
+            leptos::prelude::ServerFnError::ServerError(m) => {
+                assert!(
+                    m.contains("nothing was changed"),
+                    "unexpected stale message: {m}"
+                );
+            }
+            _ => panic!("expected ServerError, got {stale:?}"),
+        }
+
+        let other = conflict_or_internal("test", anyhow::anyhow!("boom"));
+        match other {
+            leptos::prelude::ServerFnError::ServerError(m) => {
+                assert_eq!(m, crate::error::INTERNAL_ERROR_MESSAGE);
+            }
+            _ => panic!("expected ServerError, got {other:?}"),
+        }
+    }
+
+    #[sqlx::test]
+    async fn end_core_rejects_finished_game(pool: PgPool) {
+        let (game_id, creator) = make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+        match end_core(&pool, game_id, ActingPlayer::User(creator)).await {
+            Err(ServerFnError::ServerError(m)) => {
+                assert_eq!(m, "Game is already finished");
+            }
+            other => panic!("expected ServerError, got {other:?}"),
+        }
+    }
+
+    #[sqlx::test]
+    async fn end_core_rejects_when_two_active_humans(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: creator,
+                opponent_ids: &[opponent],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        match end_core(&pool, game.id, ActingPlayer::User(creator)).await {
+            Err(ServerFnError::ServerError(m)) => {
+                assert_eq!(m, "End game is only available to the last human");
+            }
+            other => panic!("expected ServerError, got {other:?}"),
+        }
+        let is_finished: bool =
+            sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(!is_finished);
+    }
+
+    #[sqlx::test]
+    async fn end_core_ends_solo_human_and_returns_pre_write_snapshot(pool: PgPool) {
+        let creator = make_user(&pool, "solo").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: creator,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[BotSlot {
+                    name: "Botty".to_string(),
+                    bot_name: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let before = end_core(&pool, game.id, ActingPlayer::User(creator))
+            .await
+            .expect("last human may stop the game");
+        assert!(
+            !before.game.is_finished,
+            "the returned snapshot must be the pre-write state"
+        );
+
+        let is_finished: bool =
+            sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(is_finished, "end_core must delegate to the locked writer");
+    }
+
+    #[sqlx::test]
+    async fn concede_core_rejects_sole_active_human_before_dispatch(pool: PgPool) {
+        // A replacement bot is configured so that, without the two-active-human
+        // guard, the sole active human would be replaced. The guard must reject
+        // before any replacement/forfeit dispatch.
+        sqlx::query("INSERT INTO bots (name, can_replace_humans) VALUES ('Hard', true)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let creator = make_user(&pool, "solo").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: creator,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[BotSlot {
+                    name: "Botty".to_string(),
+                    bot_name: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        match concede_core(&pool, game.id, ActingPlayer::User(creator)).await {
+            Err(ServerFnError::ServerError(m)) => {
+                assert!(
+                    m.contains("at least two active humans"),
+                    "unexpected concede rejection: {m}"
+                );
+            }
+            other => panic!("expected ServerError, got {other:?}"),
+        }
+
+        let (is_finished, game_bot_id): (bool, Option<Uuid>) = sqlx::query_as(
+            "SELECT g.is_finished, gp.game_bot_id FROM games g \
+             JOIN game_players gp ON gp.game_id = g.id \
+             WHERE g.id = $1 AND gp.user_id = $2",
+        )
+        .bind(game.id)
+        .bind(creator)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!is_finished);
+        assert!(
+            game_bot_id.is_none(),
+            "the sole active human must not be replaced"
         );
     }
 }

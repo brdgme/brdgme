@@ -777,39 +777,13 @@ async fn run_concede(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandE
 }
 
 async fn run_end(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError> {
-    let ge = crate::db::find_game_extended(ctx.pool, ctx.game_id)
-        .await?
-        .ok_or_else(|| CommandError::User("Game not found".to_string()))?;
-
-    if ge.game.is_finished {
-        return Err(CommandError::User("Game is already finished".to_string()));
-    }
-
-    let is_player = ge
-        .game_players
-        .iter()
-        .any(|p| p.game_player.id == ctx.game_player_id);
-    if !is_player {
-        return Err(CommandError::User(
-            "You are not a player in this game".to_string(),
-        ));
-    }
-
-    let active_humans = ge
-        .game_players
-        .iter()
-        .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
-        .count();
-    if active_humans > 1 {
-        return Err(CommandError::User(
-            "End game is only available to the last human".to_string(),
-        ));
-    }
-
-    let before = ge.clone();
-    crate::db::end_game(ctx.pool, ctx.game_id, ge.game.updated_at, ctx.game_player_id)
-        .await
-        .map_err(CommandError::Internal)?;
+    let before = crate::game::server_fns::end_core(
+        ctx.pool,
+        ctx.game_id,
+        crate::game::server_fns::ActingPlayer::GamePlayer(ctx.game_player_id),
+    )
+    .await
+    .map_err(|e| classify_server_fn_error("end", e))?;
 
     crate::game::broadcast_and_trigger(ctx.pool, ctx.broadcaster, ctx.jetstream, ctx.game_id).await;
     crate::email::notify::notify_game_emails(
@@ -1840,6 +1814,71 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(before, after);
+    }
+
+    // DRM-03b2a: the email `end` command delegates to the shared web/email
+    // `end_core`, so a sole active human ending by email finishes the game
+    // through the same locked writer and pre-write snapshot as the web action.
+    #[sqlx::test]
+    async fn run_end_ends_game_for_last_human(pool: sqlx::PgPool) {
+        let user_id = seed_user(&pool, "end-solo").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: user_id,
+                opponent_ids: &[],
+                opponent_emails: &[],
+                bot_slots: &[crate::game::server_fns::BotSlot {
+                    name: "Botty".to_string(),
+                    bot_name: "easy".to_string(),
+                }],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        let game_player_id: uuid::Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = EmailCommandCtx {
+            pool: &pool,
+            http_client: &http_client,
+            broadcaster: &broadcaster,
+            jetstream: &jetstream,
+            resend: None,
+            game_id: game.id,
+            game_player_id,
+            user_id,
+            position: 0,
+        };
+
+        let reply = run_end(&ctx)
+            .await
+            .expect("end must succeed for the last human");
+        assert_eq!(status_msg(reply), "Game ended.");
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(is_finished);
     }
 
     async fn make_game_version(pool: &sqlx::PgPool) -> uuid::Uuid {
