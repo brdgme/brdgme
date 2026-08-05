@@ -1189,4 +1189,167 @@ mod tests {
         );
         Ok(())
     }
+
+    /// DRM-01c: fresh rows carry NULL end/departure metadata through both the
+    /// `Game` projection (`find_game`) and the extended player projection
+    /// (`find_game_extended`), preserving legacy and old-pod rollout nulls.
+    #[sqlx::test]
+    async fn fresh_game_and_players_read_null_metadata(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[], 1, &[0]).await;
+
+        let g = find_game(&pool, game.id).await.unwrap().unwrap();
+        assert!(g.end_reason.is_none());
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(ge.game.end_reason.is_none());
+        assert_eq!(ge.game_players.len(), 2);
+        for p in &ge.game_players {
+            assert!(p.game_player.departure_reason.is_none());
+            assert!(p.game_player.departure_sequence.is_none());
+        }
+    }
+
+    /// DRM-01c: valid checked end/departure metadata round-trips through the
+    /// `Game` and extended player projections; untouched rows stay null.
+    #[sqlx::test]
+    async fn checked_end_and_departure_metadata_round_trips(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, gv, creator.id, &[opponent.id], 0, &[0]).await;
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let player_id = ge.game_players[0].game_player.id;
+
+        sqlx::query("UPDATE games SET end_reason = 'game_service' WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET departure_reason = 'conceded', departure_sequence = 3 \
+             WHERE id = $1",
+        )
+        .bind(player_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let g = find_game(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(g.end_reason.as_deref(), Some("game_service"));
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge.game.end_reason.as_deref(), Some("game_service"));
+        let p = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id == player_id)
+            .unwrap();
+        assert_eq!(p.game_player.departure_reason.as_deref(), Some("conceded"));
+        assert_eq!(p.game_player.departure_sequence, Some(3));
+        let other = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.id != player_id)
+            .unwrap();
+        assert!(other.game_player.departure_reason.is_none());
+        assert!(other.game_player.departure_sequence.is_none());
+    }
+
+    /// DRM-01c: the migration-032 CHECK constraints reject invalid
+    /// end/departure metadata. Plain sqlx queries - migration-032 columns are
+    /// not in the offline `.sqlx` cache.
+    #[sqlx::test]
+    async fn migration_checks_reject_invalid_end_and_departure_metadata(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let player_id = ge.game_players[0].game_player.id;
+
+        // Positive control: valid metadata is accepted by the same constraints.
+        sqlx::query("UPDATE games SET end_reason = 'last_human_stop' WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET departure_reason = 'eliminated', departure_sequence = 1 \
+             WHERE id = $1",
+        )
+        .bind(player_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Invalid end reason.
+        let bad_end = sqlx::query("UPDATE games SET end_reason = 'rage_quit' WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await;
+        assert!(bad_end.is_err(), "invalid end_reason must be rejected");
+
+        // Invalid departure reason.
+        let bad_dep = sqlx::query(
+            "UPDATE game_players SET departure_reason = 'rage_quit', departure_sequence = 2 \
+             WHERE id = $1",
+        )
+        .bind(player_id)
+        .execute(&pool)
+        .await;
+        assert!(bad_dep.is_err(), "invalid departure_reason must be rejected");
+
+        // Departure reason without its paired sequence.
+        let reason_only = sqlx::query(
+            "UPDATE game_players SET departure_reason = 'conceded', departure_sequence = NULL \
+             WHERE id = $1",
+        )
+        .bind(player_id)
+        .execute(&pool)
+        .await;
+        assert!(
+            reason_only.is_err(),
+            "departure_reason without departure_sequence must be rejected"
+        );
+
+        // Sequence without its paired reason.
+        let seq_only = sqlx::query(
+            "UPDATE game_players SET departure_reason = NULL, departure_sequence = 2 \
+             WHERE id = $1",
+        )
+        .bind(player_id)
+        .execute(&pool)
+        .await;
+        assert!(
+            seq_only.is_err(),
+            "departure_sequence without departure_reason must be rejected"
+        );
+
+        // Non-positive paired sequence.
+        let non_positive = sqlx::query(
+            "UPDATE game_players SET departure_reason = 'conceded', departure_sequence = 0 \
+             WHERE id = $1",
+        )
+        .bind(player_id)
+        .execute(&pool)
+        .await;
+        assert!(
+            non_positive.is_err(),
+            "non-positive departure_sequence must be rejected"
+        );
+
+        // All four migration-032 CHECK constraints exist in the fresh schema.
+        let checks: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pg_constraint WHERE contype = 'c' AND conname IN \
+             ('games_end_reason_chk', 'game_players_departure_reason_chk', \
+              'game_players_departure_together_chk', 'game_players_departure_positive_chk')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(checks, 4, "all four migration-032 CHECK constraints must exist");
+    }
 }
