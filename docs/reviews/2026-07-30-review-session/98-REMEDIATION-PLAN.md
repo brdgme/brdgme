@@ -22,15 +22,21 @@ decides what is next.
   explicit monolith or legacy-Go score consumer; the current bot has no score
   consumer. See 97 for acceptance evidence.
 
-## Pending decisions (2026-08-05 Orchestrator ruling)
+## Decision state (2026-08-05)
 
-- **D1 - sign-off input:** choose the canonical reproducible source for the
-  four-tooth guard and its dependent historical sweeps. The `T3-B*` source files
-  are absent from the current worktree after `d89fa345`; do not choose a
-  historical revision, retained manifest, or future-only scope autonomously.
-  This parks `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
+- **D1 - sign-off input (user decision):** a compact committed historical
+  manifest is the canonical sign-off input. It must be derived from the deleted
+  review corpus at `23f8ab78e015c127f4e809d4901467e494e21bb3`, the parent of
+  corpus-deletion commit `d89fa345019ec9d52d5e56e7c6c2affa98cd7b8d`, and record
+  that source commit. Its initial extraction requires an independent audit
+  against that source before acceptance. This preserves reproducible sign-off
+  input without restoring the whole historical corpus to the worktree.
+  `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
   `rrm-4.3-wp-provenance`, `rrm-4.4-deferral-routing`,
-  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps`.
+  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps` are no longer
+  decision-parked; they await that committed, independently audited manifest.
+  The next approved state is manifest extraction and audit only; do not
+  implement a dependent unit before it is accepted.
 - **D2 - sqlx-cli version:** choose the exact explicit release and required
   compatibility evidence for the deployed migration ledger. Do not choose it
   autonomously. This parks `rrm-f207-sqlx-migrator`.
@@ -2345,14 +2351,14 @@ list. Absence of known defects must be stated explicitly, not left blank.
 | Semantic unit | Item | Status | Evidence |
 |---------------|------|--------|----------|
 | `rrm-f207-sqlx-migrator` | F-207 | parked(D2) | Exact CLI release and migration-ledger compatibility evidence await a user decision. |
-| `rrm-4.1-four-tooth-core` | 4.1 | parked(D1) | Canonical reproducible historical input awaits a user decision. |
-| `rrm-4.2-test-row-sweep` | 4.2 | parked(D1) | Depends on D1. |
-| `rrm-4.3-wp-provenance` | 4.3 | parked(D1) | Depends on D1. |
-| `rrm-4.4-deferral-routing` | 4.4 | parked(D1) | Depends on D1. |
+| `rrm-4.1-four-tooth-core` | 4.1 | blocked(manifest) | D1 resolved; awaits committed source-pinned manifest and independent extraction audit. |
+| `rrm-4.2-test-row-sweep` | 4.2 | blocked(manifest) | Awaits the D1 manifest and audit. |
+| `rrm-4.3-wp-provenance` | 4.3 | blocked(manifest) | Awaits the D1 manifest and audit. |
+| `rrm-4.4-deferral-routing` | 4.4 | blocked(manifest) | Awaits the D1 manifest and audit. |
 | `rrm-4.5-spec-code-review` | 4.5 | done | `docs/CODING.md` now requires the second reviewer, the written code-versus-spec answer, and grep/hit-count evidence; independent review and `git diff --check` passed. |
-| `rrm-4.6-stop-escalation` | 4.6 | parked(D1) | Depends on D1. |
+| `rrm-4.6-stop-escalation` | 4.6 | blocked(manifest) | Awaits the D1 manifest and audit. |
 | `rrm-4.8-vendoring-defects` | 4.8 | done | `docs/CODING.md` now carries the 6.1 prohibition and mandatory inherited-defects/spec-owner-sign-off rule; `git diff --check` passed. |
-| `rrm-4.9-pattern-sweeps` | 4.9 | parked(D1) | Depends on D1. |
+| `rrm-4.9-pattern-sweeps` | 4.9 | blocked(manifest) | Awaits the D1 manifest and audit. |
 
 ## 5. Coverage work
 

@@ -148,15 +148,15 @@ restored per owner instruction.)
 
 | Item | Status | Notes |
 |------|--------|-------|
-| 4.1 four-tooth sign-off script | parked(D1) | `rrm-4.1-four-tooth-core`; pending user decision |
-| 4.2 "Test? y with no test" sweep | parked(D1) | `rrm-4.2-test-row-sweep`; pending user decision |
-| 4.3 WP spec/checklist sign-off gate | parked(D1) | `rrm-4.3-wp-provenance`; pending user decision |
-| 4.4 deferral-state mechanism | parked(D1) | `rrm-4.4-deferral-routing`; pending user decision |
+| 4.1 four-tooth sign-off script | blocked(manifest) | `rrm-4.1-four-tooth-core`; D1 resolved, awaits committed source-pinned manifest and independent extraction audit |
+| 4.2 "Test? y with no test" sweep | blocked(manifest) | `rrm-4.2-test-row-sweep`; awaits D1 manifest and audit |
+| 4.3 WP spec/checklist sign-off gate | blocked(manifest) | `rrm-4.3-wp-provenance`; awaits D1 manifest and audit |
+| 4.4 deferral-state mechanism | blocked(manifest) | `rrm-4.4-deferral-routing`; awaits D1 manifest and audit |
 | 4.5 4b second-reviewer rule | done | `rrm-4.5-spec-code-review`: docs/CODING.md |
-| 4.6 STOP-AND-REPORT escalation rule | parked(D1) | `rrm-4.6-stop-escalation`; pending user decision |
+| 4.6 STOP-AND-REPORT escalation rule | blocked(manifest) | `rrm-4.6-stop-escalation`; awaits D1 manifest and audit |
 | 4.7 delivery-list CI guard | done(85fff2e) | same as R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | 4.8 vendoring "known defects" spec section | done | `rrm-4.8-vendoring-defects`: docs/CODING.md |
-| 4.9 named-pattern sign-off sweeps | parked(D1) | `rrm-4.9-pattern-sweeps`; pending user decision |
+| 4.9 named-pattern sign-off sweeps | blocked(manifest) | `rrm-4.9-pattern-sweeps`; awaits D1 manifest and audit |
 
 ## Owner decisions
 
@@ -167,19 +167,25 @@ restored per owner instruction.)
 | 6.3a F-203/F-204: rider 1 vs 3b | 3b stands (bare-major stays; rider 1 struck). F-203: add [workspace.lints.rust]. R-46 EXPANDED: eliminate all 22 lint overrides via workspace clippy.toml threshold + case fixes + no-new-allows CODING.md rule | 2026-07-31 |
 | 6.3b ws F55 second half (R-11) | Implement it (shutdown signal for bot consumer + email sweep, with tests) | 2026-07-31 |
 | 6.3c ALLOW_INSECURE_DEFAULT_KEY split | Leave as-is; note in pre-rollout checklist only | 2026-07-31 |
+| D1 sign-off input | Compact committed historical manifest is canonical. Derive it from `23f8ab78e015c127f4e809d4901467e494e21bb3`, record that source, and independently audit the initial extraction against it before acceptance. | 2026-08-05 |
 | F-59 status | excluded (default) | |
 | Web crate commands | cargo check/clippy -p web ALLOWED; build/test/run against web banned | 2026-07-31 |
 | Commit policy | commit after each item; never push | 2026-07-31 |
 | Review-dir edits | Allowed (restriction lifted 2026-07-31); agents must never delete/move files or changes outside their own work scope - leave unrelated working-tree changes alone | 2026-07-31 |
 
-## Pending decisions (2026-08-05 Orchestrator ruling)
+## Decision state (2026-08-05)
 
-- **D1 sign-off input:** choose the canonical reproducible input for the
-  four-tooth guard and its dependent historical sweeps. The current worktree has
-  no `T3-B*` source files; their historical corpus was removed by `d89fa345`.
-  Parks `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
+- **D1 sign-off input (user decision):** a compact committed historical manifest
+  is the canonical sign-off input, derived from deleted-corpus source
+  `23f8ab78e015c127f4e809d4901467e494e21bb3` (the parent of deletion commit
+  `d89fa345019ec9d52d5e56e7c6c2affa98cd7b8d`) and recording that source. An
+  independent audit must compare the initial extraction against that source
+  before acceptance. This resolves D1 without restoring the full corpus.
+  `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
   `rrm-4.3-wp-provenance`, `rrm-4.4-deferral-routing`,
-  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps`.
+  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps` now await the
+  manifest and audit, rather than a user decision. The next approved state is
+  extraction and audit only; no dependent unit is approved for implementation.
 - **D2 sqlx-cli version:** choose the exact explicit `sqlx-cli` release and the
   required compatibility evidence for the deployed migration ledger. Parks
   `rrm-f207-sqlx-migrator`.
