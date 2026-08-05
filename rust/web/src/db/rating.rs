@@ -756,6 +756,7 @@ mod tests {
             .iter()
             .find(|p| p.game_player.id != conceding_id)
             .unwrap();
+        assert_eq!(ge_after.game.end_reason.as_deref(), Some("concession_forfeit"));
         assert_eq!(conceder.game_player.place, Some(2));
         assert_eq!(non_conceder.game_player.place, Some(1));
         assert_eq!(conceder.game_player.rating_change, Some(-16));

@@ -337,11 +337,13 @@ pub async fn concede_game(
         return Err(anyhow::anyhow!("Player has already left this game"));
     }
 
-    let update_result = sqlx::query!(
-        "UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1 AND updated_at = $2 AND is_finished = false",
-        game_id,
-        expected_updated_at
+    let update_result = sqlx::query(
+        "UPDATE games SET is_finished = true, finished_at = NOW(), \
+         end_reason = 'concession_forfeit' \
+         WHERE id = $1 AND updated_at = $2 AND is_finished = false",
     )
+    .bind(game_id)
+    .bind(expected_updated_at)
     .execute(&mut *tx)
     .await?;
     if update_result.rows_affected() == 0 {
