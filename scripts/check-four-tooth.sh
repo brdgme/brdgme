@@ -484,6 +484,89 @@
 # content - a direct `Log::public` reference can still carry a leak, and this
 # guard does not and cannot read the logged content.
 #
+# Every-item checklist gate (4.9e): a broad sign-off claim equivalent to
+# "every X" requires an authoritative, reproducible, non-empty item universe
+# and exactly one explicit per-item checklist record for every universe item -
+# a prose claim alone proves nothing (WP-10 3a shape: "every game crate" was
+# applied to three of 28). Two optional inputs, enabled when an every-item
+# scope file is given:
+#   every-scope.tsv   one in-scope "every X" claim per line, tab-separated
+#                     fields (id universe). `universe` is the authoritative,
+#                     reproducible item universe: a file, relative to CWD,
+#                     whose distinct non-blank lines enumerate the universe
+#                     items. The authoritative enumeration, derived in
+#                     production from the spec's enumerated list / commit range
+#                     and never from the checklist records - so omitting a
+#                     claim's checklist records cannot hide an uncovered
+#                     universe. Every claim must also be linked to an actual
+#                     sign-off record in the RECORDS input, by claim ID: an
+#                     "every X" scope claim with no linked sign-off record is
+#                     an unlinked claim and is rejected. (default: none, gate
+#                     skipped)
+#   every.tsv         tab-separated per-item checklist records, one per
+#                     universe item, fields:
+#     id               claim ID, matching a scope link exactly
+#     universe         the item universe, relative to CWD; must equal the
+#                      authoritative universe named in the scope link exactly,
+#                      so a record pointing at a different list is a nearby
+#                      scan, not evidence for this claim
+#     count            the recorded current universe item count (the number of
+#                      distinct non-blank lines in the universe file); every
+#                      accepted record's count must equal the authoritative
+#                      current universe count, so a stale count on any one
+#                      record - not just the first - fails the claim
+#     item             the per-item checklist entry, matching one of the
+#                      universe's enumerated items exactly (textual equality)
+#   The checklist items must cover the authoritative universe one-to-one: an
+#   omitted universe item, a duplicate item, and a rogue extra item are all
+#   rejected, an empty universe proves nothing, and every record's count must
+#   reproduce. Every record must correspond exactly to an in-scope claim - a
+#   rogue record cannot authorize a fabricated checklist.
+# Every-item diagnostics (the claim ID is interpolated):
+#   EVERY-MALFORMED:      <id>: every-item scope link must have two
+#                         tab-separated non-empty fields (id universe) |
+#                         every-item record must have four tab-separated
+#                         non-empty fields (id universe count item) | count
+#                         must be a non-negative integer
+#   EVERY-DUPLICATE:      <id>: duplicate every-item scope link / duplicate
+#                         every-item checklist record for item <item>
+#   EVERY-MISSING:        <id>: in-scope every-item claim has no checklist
+#                         records
+#   EVERY-ROGUE:          <id>: every-item checklist record matches no
+#                         in-scope claim
+#   EVERY-UNLINKED:       <id>: every-item scope claim is not linked to a
+#                         sign-off record in <records>
+#   EVERY-OMITTED-UNIVERSE: <id>: every-item record omits the item universe
+#                         field (id universe count item)
+#   EVERY-EMPTY-SCOPE:    <scope-file>: every-item scope is empty - no
+#                         in-scope every-item claims are enumerated
+#   EVERY-EMPTY-UNIVERSE: <universe>: the authoritative universe names no
+#                         items (empty universe)
+#   EVERY-DECOY:          <id>: record universe <universe> does not match the
+#                         authoritative universe <authoritative> | declared
+#                         universe not found: <universe>
+#   EVERY-STALE-COUNT:    <id>: recorded item count <count> does not match
+#                         current count <count> in <universe>
+#   EVERY-OMITTED-ITEM:   <id>: universe item <item> has no per-item checklist
+#                         record
+#   EVERY-ROGUE-EXTRA:    <id>: checklist record names item <item> that is not
+#                         in the authoritative universe <universe>
+#
+# Every-item checklist heuristic limits: the universe enumeration is textual -
+# the universe is a file whose distinct non-blank lines are the items, matched
+# to checklist records by exact text equality. The guard establishes only
+# enumerated input coverage: it proves the checklist records enumerate exactly
+# the authoritative universe's items, one per item, that every record's count
+# reproduces the current universe count, and that each scope claim is linked to
+# a sign-off record by ID. It does not and cannot verify that any claimed fix or
+# scope actually covers an item's substance, nor the substance of the linked
+# sign-off record - a checklist record asserts enumerated
+# input coverage only, never that the underlying per-item work is correct,
+# complete, or true, and an item's line text need not correspond to any real
+# artifact. The guard cannot detect an item or checklist record living outside
+# the authoritative universe - the authoritative universe enumeration must be
+# complete for the proof to mean anything.
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -511,7 +594,7 @@
 # [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES [ESCALATION-SCOPE
 # [ESCALATION-RESPONSES [SIBLING-SCOPE [SIBLING-RECORDS [EXMATCH-SCOPE
 # [EXMATCH-RECORDS [DCSWEEP-SCOPE [DCSWEEP-RECORDS [LOGLAYER-SCOPE
-# [LOGLAYER-RECORDS]]]]]]]]]]]]]]]]]] - RECORDS
+# [LOGLAYER-RECORDS [EVERY-SCOPE [EVERY-RECORDS]]]]]]]]]]]]]]]]]]]] - RECORDS
 # defaults to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped),
 # PROVENANCE defaults to wp-provenance.tsv, ROUTING-SCOPE defaults to none
 # (4.4 gate skipped), ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
@@ -521,7 +604,9 @@
 # SIBLING-RECORDS to sibling.tsv, EXMATCH-SCOPE defaults to none (4.9b gate
 # skipped), EXMATCH-RECORDS to exhaustive-match.tsv, DCSWEEP-SCOPE defaults to
 # none (4.9c gate skipped) and DCSWEEP-RECORDS to deadcode.tsv, LOGLAYER-SCOPE
-# defaults to none (4.9d gate skipped) and LOGLAYER-RECORDS to loglayer.tsv.
+# defaults to none (4.9d gate skipped) and LOGLAYER-RECORDS to loglayer.tsv,
+# EVERY-SCOPE defaults to none (4.9e gate skipped) and EVERY-RECORDS to
+# every.tsv.
 # Uses only standard Bash/GNU utilities (grep, sed, awk).
 
 set -uo pipefail
@@ -1727,6 +1812,221 @@ if [ -n "${16:-}" ]; then
   fi
 fi
 
+# Every-item checklist gate (4.9e): a broad sign-off claim equivalent to
+# "every X" requires an authoritative, reproducible, non-empty item universe
+# and exactly one explicit per-item checklist record per universe item. When
+# an every-item scope file is given, every in-scope claim must carry per-item
+# checklist records whose items cover the authoritative universe one-to-one,
+# and the recorded item count must reproduce. The universe enumeration is a
+# documented textual heuristic (see the "Every-item checklist heuristic
+# limits" paragraph in the header): the universe is a file whose distinct
+# non-blank lines are the items, and it proves only enumerated input coverage,
+# never that any per-item work is semantically complete.
+if [ -n "${18:-}" ]; then
+  EV_SCOPE="${18}"
+  EV_RECORDS="${19:-every.tsv}"
+  if [ ! -f "$EV_SCOPE" ]; then
+    echo "EVERY-MISSING-SCOPE: no every-item scope file: $EV_SCOPE" >&2
+    fail=1
+  elif [ ! -f "$EV_RECORDS" ]; then
+    echo "EVERY-MISSING-RECORDS: no every-item checklist records file: $EV_RECORDS" >&2
+    fail=1
+  else
+    # Authoritative scope: every in-scope "every X" claim (id universe). A
+    # malformed scope link is still recorded so its claim is not cascaded into
+    # MISSING; the malformed diagnostic already fails the run.
+    declare -A ev_scope=() ev_scope_seen=() ev_scope_bad=() ev_rec_seen=() \
+      ev_item_seen=() ev_failed=() ev_bad=() ev_claim_items=() \
+      ev_univ_count=() ev_univ_items=() sign_ids=()
+    ev_lines=0
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      ev_lines=$((ev_lines + 1))
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r ev_id ev_universe <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$ev_id" ] || [ -z "$ev_universe" ]; then
+        echo "EVERY-MALFORMED: ${ev_id:-<no-id>}: every-item scope link must have two tab-separated non-empty fields (id universe)" >&2
+        [ -n "$ev_id" ] && ev_scope_bad["$ev_id"]=1
+        fail=1
+        continue
+      fi
+      if [ -n "${ev_scope_seen[$ev_id]:-}" ]; then
+        echo "EVERY-DUPLICATE: $ev_id: duplicate every-item scope link" >&2
+        fail=1
+        continue
+      fi
+      ev_scope_seen["$ev_id"]=1
+      ev_scope["$ev_id"]="$ev_universe"
+    done < "$EV_SCOPE"
+
+    # The authoritative claim enumeration must be non-empty: an every-item
+    # sign-off must enumerate a non-empty source scope, so an empty scope file
+    # is rejected outright rather than silently accepted as proof.
+    if [ "$ev_lines" -eq 0 ]; then
+      echo "EVERY-EMPTY-SCOPE: $EV_SCOPE: every-item scope is empty - no in-scope every-item claims are enumerated" >&2
+      fail=1
+    else
+      # Every in-scope claim must be linked to an actual sign-off record in
+      # the RECORDS input, by claim ID: an "every X" scope claim with no
+      # linked sign-off record is an unlinked claim, not evidence. An
+      # unlinked claim is still recorded so its checklist records are not
+      # cascaded into further diagnostics.
+      while IFS=$'\t' read -r sign_id sign_rest; do
+        [ -n "$sign_id" ] || continue
+        sign_ids["$sign_id"]=1
+      done < "$RECORDS"
+      for ev_id in "${!ev_scope[@]}"; do
+        if [ -z "${sign_ids[$ev_id]:-}" ]; then
+          echo "EVERY-UNLINKED: $ev_id: every-item scope claim is not linked to a sign-off record in $RECORDS" >&2
+          ev_bad["$ev_id"]=1
+          fail=1
+        fi
+      done
+
+      # The authoritative universe is enumerated first, independently of the
+      # checklist records: a universe that is missing or names no items proves
+      # nothing, so it is rejected outright and its claim's records are not
+      # cascaded into further diagnostics.
+      for ev_id in "${!ev_scope[@]}"; do
+        ev_universe="${ev_scope[$ev_id]}"
+        if [ ! -f "$ev_universe" ]; then
+          echo "EVERY-DECOY: $ev_id: declared universe not found: $ev_universe" >&2
+          ev_bad["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        if [ -z "${ev_univ_items[$ev_universe]:-}" ]; then
+          ev_univ_items["$ev_universe"]="$(grep -E '[^[:space:]]' "$ev_universe" 2>/dev/null | sort -u)"
+          ev_univ_count["$ev_universe"]="$(printf '%s\n' "${ev_univ_items[$ev_universe]}" | grep -c . | tr -d ' ')"
+        fi
+        if [ "${ev_univ_count[$ev_universe]:-0}" -eq 0 ]; then
+          echo "EVERY-EMPTY-UNIVERSE: $ev_universe: the authoritative universe names no items (empty universe)" >&2
+          ev_bad["$ev_id"]=1
+          fail=1
+          continue
+        fi
+      done
+
+      # Claim evidence: one per-item checklist record per universe item (id
+      # universe count item). Every record must correspond exactly to a scope
+      # link - a rogue record cannot authorize a fabricated checklist - and
+      # must scan exactly the authoritative universe, so a record pointing at
+      # a different list is a nearby scan, not evidence. The record structure
+      # is validated with awk, whose -F'\t' split preserves empty fields
+      # (unlike `read`, which collapses consecutive tabs), so an empty item
+      # universe field is diagnosed distinctly from a truncated row.
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        ev_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+        # Records of a claim whose authoritative universe is missing or empty
+        # are not cascade-checked here: the universe diagnostic already failed
+        # the run.
+        [ -n "${ev_bad[$ev_id]:-}" ] && continue
+        nf="$(printf '%s\n' "$line" | awk -F'\t' '{print NF}')"
+        empty_field="$(printf '%s\n' "$line" | awk -F'\t' '{ if ($2 == "") print "universe"; else if ($1 == "" || $3 == "" || $4 == "") print "other" }')"
+        if [ "$nf" -ne 4 ]; then
+          echo "EVERY-MALFORMED: ${ev_id:-<no-id>}: every-item record must have four tab-separated non-empty fields (id universe count item)" >&2
+          [ -n "$ev_id" ] && ev_rec_seen["$ev_id"]=1
+          [ -n "$ev_id" ] && ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "universe" ]; then
+          echo "EVERY-OMITTED-UNIVERSE: ${ev_id:-<no-id>}: every-item record omits the item universe field (id universe count item)" >&2
+          [ -n "$ev_id" ] && ev_rec_seen["$ev_id"]=1
+          [ -n "$ev_id" ] && ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "other" ]; then
+          echo "EVERY-MALFORMED: ${ev_id:-<no-id>}: every-item record must have four tab-separated non-empty fields (id universe count item)" >&2
+          [ -n "$ev_id" ] && ev_rec_seen["$ev_id"]=1
+          [ -n "$ev_id" ] && ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        IFS=$'\t' read -r ev_id ev_universe ev_rec_count ev_item <<< "$line"
+        rec_key="$ev_id|$ev_item"
+        if [ -n "${ev_item_seen[$rec_key]:-}" ]; then
+          echo "EVERY-DUPLICATE: $ev_id: duplicate every-item checklist record for item $ev_item" >&2
+          ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        ev_item_seen["$rec_key"]=1
+        ev_rec_seen["$ev_id"]=1
+        if ! [[ "$ev_rec_count" =~ ^[0-9]+$ ]]; then
+          echo "EVERY-MALFORMED: $ev_id: count must be a non-negative integer" >&2
+          ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        # A claim whose scope link was malformed is not cascade-checked here:
+        # EVERY-MALFORMED already failed the run for that line.
+        [ -n "${ev_scope_bad[$ev_id]:-}" ] && continue
+        # A rogue record that matches no in-scope claim cannot authorize a
+        # fabricated checklist.
+        if [ -z "${ev_scope_seen[$ev_id]:-}" ]; then
+          echo "EVERY-ROGUE: $ev_id: every-item checklist record matches no in-scope claim" >&2
+          ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        # The record must scan exactly the authoritative universe: a record
+        # that points at a different list is a nearby scan, not evidence.
+        if [ "$ev_universe" != "${ev_scope[$ev_id]}" ]; then
+          echo "EVERY-DECOY: $ev_id: record universe $ev_universe does not match the authoritative universe ${ev_scope[$ev_id]}" >&2
+          ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        # A checklist record naming an item outside the authoritative universe
+        # is a rogue extra, never evidence of coverage.
+        if ! printf '%s\n' "${ev_univ_items[$ev_universe]:-}" | grep -qxF -- "$ev_item"; then
+          echo "EVERY-ROGUE-EXTRA: $ev_id: checklist record names item $ev_item that is not in the authoritative universe $ev_universe" >&2
+          ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        # Every accepted checklist record must reproduce the current universe
+        # item count: a stale count on any one record, not just the first,
+        # fails the claim.
+        if [ "$ev_rec_count" != "${ev_univ_count[$ev_universe]:-}" ]; then
+          echo "EVERY-STALE-COUNT: $ev_id: recorded item count $ev_rec_count does not match current count ${ev_univ_count[$ev_universe]:-} in $ev_universe" >&2
+          ev_failed["$ev_id"]=1
+          fail=1
+          continue
+        fi
+        ev_claim_items["$ev_id"]="${ev_claim_items[$ev_id]:-}"$'\n'"$ev_item"
+      done < "$EV_RECORDS"
+
+      # The scope is authoritative: omitting a claim's checklist records cannot
+      # hide an uncovered universe, and a claim's coverage must reproduce.
+      for ev_id in "${!ev_scope_seen[@]}"; do
+        # A malformed scope link, a missing/empty universe, or a record-level
+        # diagnostic already failed the run for this claim.
+        [ -n "${ev_scope_bad[$ev_id]:-}" ] && continue
+        [ -n "${ev_bad[$ev_id]:-}" ] && continue
+        [ -n "${ev_failed[$ev_id]:-}" ] && continue
+        if [ -z "${ev_rec_seen[$ev_id]:-}" ]; then
+          echo "EVERY-MISSING: $ev_id: in-scope every-item claim has no checklist records" >&2
+          fail=1
+          continue
+        fi
+        # Every universe item must carry exactly one checklist record.
+        ev_universe="${ev_scope[$ev_id]}"
+        while IFS= read -r item; do
+          [ -n "$item" ] || continue
+          if ! printf '%s\n' "${ev_claim_items[$ev_id]:-}" | grep -qxF -- "$item"; then
+            echo "EVERY-OMITTED-ITEM: $ev_id: universe item $item has no per-item checklist record" >&2
+            fail=1
+          fi
+        done < <(printf '%s\n' "${ev_univ_items[$ev_universe]}")
+      done
+    fi
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
@@ -1739,4 +2039,5 @@ msg="every record satisfies all four teeth"
 [ -n "${12:-}" ] && msg="$msg and every in-scope exhaustive-match claim proves no wildcard match arm remains in its scope"
 [ -n "${14:-}" ] && msg="$msg and every in-scope dead-code sweep claim proves no #[allow(dead_code)] or suppression variant remains in its universe"
 [ -n "${16:-}" ] && msg="$msg and every in-scope logging-related claim proves direct Log::public content coverage at its authoritative log-layer scope"
+[ -n "${18:-}" ] && msg="$msg and every in-scope every-item claim enumerates exactly one per-item checklist record per authoritative universe item"
 echo "check-four-tooth: OK ($msg)"

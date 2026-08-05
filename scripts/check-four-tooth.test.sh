@@ -385,6 +385,87 @@
 #                                   numbers, different files). A count-only
 #                                   guard passes it; the guard must fail it as
 #                                   a decoy.
+#
+# And fourteen more committed fixtures for the every-item checklist gate
+# (4.9e), which requires every in-scope "every X" claim to name an
+# authoritative, reproducible, non-empty item universe, to be linked to an
+# actual sign-off record in the sign-offs input, and to carry exactly
+# one explicit per-item checklist record per universe item: the guard
+# re-runs the universe enumeration (the distinct non-blank lines of the
+# authoritative universe file), every record's item count must reproduce the
+# current universe count, and the checklist items must cover the universe
+# one-to-one - so an omitted item, a duplicate item, a rogue extra, an empty
+# universe, a stale count on any one record, and an unlinked claim are never
+# accepted as "every X" evidence. The every-item scope is the authoritative
+# enumeration and is never inferred from the records, so omitting a record
+# cannot hide an uncovered claim. Every fixture carries a minimal linked
+# four-teeth-valid sign-off record (F-1400 -> symbol record_game in
+# fixture-local src/game_write.rs, called from src/other.rs) so the guard's
+# linkage requirement is satisfied except where a fixture intentionally
+# breaks it:
+#   every-positive                  - one claim (F-1400, universe universe.txt
+#                                     with three items) whose checklist records
+#                                     cover every universe item exactly once
+#                                     with a reproducing count of 3, linked to
+#                                     the valid sign-off record; the guard must
+#                                     accept it.
+#   every-missing                   - the scope enumerates the claim but the
+#                                     records file omits its checklist rows
+#                                     entirely; the guard must fail it as
+#                                     missing.
+#   every-stale-count               - the per-record count bypass shape: only
+#                                     the later record's count (2) is stale
+#                                     while the earlier records reproduce 3, so
+#                                     a first-count-only check would pass it;
+#                                     the guard must fail the stale record as
+#                                     stale, never trusting the first record's
+#                                     count.
+#   every-omitted-item              - a universe item (splendor-1) has no
+#                                     per-item checklist record while the
+#                                     recorded count 3 still reproduces; the
+#                                     guard must fail it as an omitted item.
+#   every-omitted-universe          - a record with an empty item-universe
+#                                     field; the guard must fail it with the
+#                                     universe-omitted diagnostic, never
+#                                     silently reusing a neighbouring field.
+#   every-empty-universe            - an authoritative universe file that names
+#                                     no items (with no records); the guard
+#                                     must fail it as an empty universe, never
+#                                     accept a vacuous "every X" claim.
+#   every-malformed                 - a truncated record (missing the item
+#                                     field); the guard must fail it as
+#                                     malformed.
+#   every-duplicate                 - the same universe item recorded twice;
+#                                     the guard must fail it as a duplicate
+#                                     rather than silently accept the last
+#                                     row.
+#   every-rogue                     - an extra record for F-9999 matching no
+#                                     in-scope claim, paired with a complete
+#                                     valid record; the guard must fail the
+#                                     rogue record and no other claim.
+#   every-rogue-extra               - a checklist record naming an item
+#                                     (splendor-1) that is not in the
+#                                     authoritative universe; the guard must
+#                                     fail it as a rogue extra, never as
+#                                     coverage.
+#   every-decoy-nearby              - a "nearby scan" decoy: the record's
+#                                     universe other.txt differs from the
+#                                     authoritative universe universe.txt; the
+#                                     guard must fail it as a decoy.
+#   every-decoy-universe-missing    - a "missing universe" decoy: the
+#                                     authoritative universe file does not
+#                                     exist; the guard must fail it as a
+#                                     decoy.
+#   every-empty-scope               - an empty authoritative scope file (and no
+#                                     records): the guard must fail it as an
+#                                     empty scope, never silently accept a
+#                                     sign-off that enumerates no claims.
+#   every-unlinked                  - an in-scope claim (F-9999) that is not
+#                                     linked to any sign-off record in the
+#                                     sign-offs input: an "every X" scope claim
+#                                     with no linked sign-off record is not
+#                                     evidence; the guard must fail it as
+#                                     unlinked.
 
 set -uo pipefail
 
@@ -451,9 +532,16 @@ fail_fixture() {
       DCSWEEP-ALLOWANCE-REMAINS DCSWEEP-VARIANT-REMAINS \
       LOGLAYER-MALFORMED LOGLAYER-DUPLICATE LOGLAYER-MISSING LOGLAYER-ROGUE \
       LOGLAYER-OMITTED-SCOPE LOGLAYER-EMPTY-SCOPE LOGLAYER-DECOY \
-      LOGLAYER-STALE; do
+      LOGLAYER-STALE \
+      EVERY-MALFORMED EVERY-DUPLICATE EVERY-MISSING EVERY-ROGUE \
+      EVERY-OMITTED-UNIVERSE EVERY-EMPTY-SCOPE EVERY-EMPTY-UNIVERSE \
+      EVERY-DECOY EVERY-STALE-COUNT EVERY-OMITTED-ITEM EVERY-ROGUE-EXTRA \
+      EVERY-UNLINKED; do
     [ "$other" = "$marker" ] && continue
-    if grep -qF -- "$other" <<<"$out"; then
+    # Match the marker's diagnostic prefix ("MARKER:"), not the bare marker, so
+    # a marker that is a prefix of another (EVERY-ROGUE vs EVERY-ROGUE-EXTRA)
+    # cannot be falsely reported as an extra diagnostic.
+    if grep -qF -- "$other:" <<<"$out"; then
       echo "FAIL: $name emitted $other in addition to $marker" >&2
       printf '%s\n' "$out" >&2
       fail=1
@@ -692,6 +780,48 @@ fail_fixture loglayer-decoy-same-scope F-1300 LOGLAYER-DECOY \
 fail_fixture loglayer-decoy-equal-count F-1300 LOGLAYER-DECOY \
   'LOGLAYER-DECOY: F-1300: pattern "Log::public;" count 2 reproduces on different source lines than the direct Log::public invocations in src' \
   signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+
+pass_fixture every-positive \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-missing F-1400 EVERY-MISSING \
+  'EVERY-MISSING: F-1400: in-scope every-item claim has no checklist records' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-stale-count F-1400 EVERY-STALE-COUNT \
+  'EVERY-STALE-COUNT: F-1400: recorded item count 2 does not match current count 3 in universe.txt' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-omitted-item F-1400 EVERY-OMITTED-ITEM \
+  'EVERY-OMITTED-ITEM: F-1400: universe item splendor-1 has no per-item checklist record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-omitted-universe F-1400 EVERY-OMITTED-UNIVERSE \
+  'EVERY-OMITTED-UNIVERSE: F-1400: every-item record omits the item universe field (id universe count item)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-empty-universe F-1400 EVERY-EMPTY-UNIVERSE \
+  'EVERY-EMPTY-UNIVERSE: universe.txt: the authoritative universe names no items (empty universe)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-malformed F-1400 EVERY-MALFORMED \
+  'EVERY-MALFORMED: F-1400: every-item record must have four tab-separated non-empty fields (id universe count item)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-duplicate F-1400 EVERY-DUPLICATE \
+  'EVERY-DUPLICATE: F-1400: duplicate every-item checklist record for item alhambra-1' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-rogue F-9999 EVERY-ROGUE \
+  'EVERY-ROGUE: F-9999: every-item checklist record matches no in-scope claim' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-rogue-extra F-1400 EVERY-ROGUE-EXTRA \
+  'EVERY-ROGUE-EXTRA: F-1400: checklist record names item splendor-1 that is not in the authoritative universe universe.txt' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-decoy-nearby F-1400 EVERY-DECOY \
+  'EVERY-DECOY: F-1400: record universe other.txt does not match the authoritative universe universe.txt' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-decoy-universe-missing F-1400 EVERY-DECOY \
+  'EVERY-DECOY: F-1400: declared universe not found: missing.txt' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-empty-scope F-1400 EVERY-EMPTY-SCOPE \
+  'EVERY-EMPTY-SCOPE: every-scope.tsv: every-item scope is empty - no in-scope every-item claims are enumerated' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
+fail_fixture every-unlinked F-9999 EVERY-UNLINKED \
+  'EVERY-UNLINKED: F-9999: every-item scope claim is not linked to a sign-off record in signoffs.tsv' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" every-scope.tsv every.tsv
 
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
