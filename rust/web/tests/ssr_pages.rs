@@ -783,6 +783,13 @@ async fn make_game_type_with_fixed_name(pool: &PgPool, name: &str) -> (Uuid, Uui
 /// per the SQL shape in `web::stats::queries::fixtures::insert_game` (not
 /// importable here since that module is `#[cfg(test)] pub(crate)` inside the
 /// `web` crate, not exported to integration tests).
+///
+/// Competitive fixtures default each human seat's `ranked_placing` to its
+/// authoritative `place`, mirroring `stats::queries::fixtures::insert_game`;
+/// tests that need a historical null-ranked or a diverging competitive placing
+/// override it directly after insertion. The INSERT is a runtime `sqlx::query`
+/// (not the `query!` macro) precisely because it carries `ranked_placing` - the
+/// cached `.sqlx` query files only cover the pre-`ranked_placing` shapes.
 async fn insert_finished_two_player_game(
     pool: &PgPool,
     game_version_id: Uuid,
@@ -800,18 +807,19 @@ async fn insert_finished_two_player_game(
 
     const COLORS: [&str; 2] = ["Green", "Red"];
     for (i, (user_id, place, rating_change)) in players.iter().enumerate() {
-        sqlx::query!(
+        sqlx::query(
             r#"INSERT INTO game_players
                 (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
-                 is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, rating_change)
-               VALUES (uuid_generate_v4(), $1, $2, NULL, $3, $4, true, false, now(), now(), false, true, $5, $6)"#,
-            game_id,
-            user_id,
-            i as i32,
-            COLORS[i % COLORS.len()],
-            place,
-            rating_change
+                 is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, ranked_placing, rating_change)
+               VALUES (uuid_generate_v4(), $1, $2, NULL, $3, $4, true, false, now(), now(), false, true, $5, $6, $7)"#,
         )
+        .bind(game_id)
+        .bind(user_id)
+        .bind(i as i32)
+        .bind(COLORS[i % COLORS.len()])
+        .bind(place)
+        .bind(place)
+        .bind(rating_change)
         .execute(pool)
         .await
         .unwrap();
@@ -833,6 +841,23 @@ async fn players_page_renders_game_type_table(pool: PgPool) {
         &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
     )
     .await;
+
+    // A finished historical game with an authoritative place but no competitive
+    // ranked_placing must produce no marker/result on the profile: it is
+    // excluded from every competitive query, so its game type never renders.
+    let (_legacy_type_id, legacy_version_id) =
+        make_game_type_with_fixed_name(&pool, "Historical Table Game").await;
+    let legacy_game = insert_finished_two_player_game(
+        &pool,
+        legacy_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+    sqlx::query("UPDATE game_players SET ranked_placing = NULL WHERE game_id = $1")
+        .bind(legacy_game)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     sqlx::query!(
         "INSERT INTO game_type_users (id, game_type_id, user_id, rating, peak_rating)
@@ -858,6 +883,10 @@ async fn players_page_renders_game_type_table(pool: PgPool) {
     assert!(
         body.contains("By game type"),
         "expected heading in body: {body}"
+    );
+    assert!(
+        !body.contains("Historical Table Game"),
+        "historical null-ranked game must produce no marker/result: {body}"
     );
 }
 
@@ -934,15 +963,40 @@ async fn players_page_recent_games_render_with_opponent_links(pool: PgPool) {
     let user_a = make_user(&pool, "recent-player-a").await;
     let user_b = make_user(&pool, "recent-player-b").await;
 
+    // Straight win: user_a ranked 1st, user_b 2nd.
     insert_finished_two_player_game(
         &pool,
         game_version_id,
         &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
     )
     .await;
+    // Tied game: both players share ranked_placing 1 - the tie is preserved,
+    // not coerced into a 2nd place for the loser of the other game.
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 0), (user_b.id, 1, 0)],
+    )
+    .await;
+    // Competitive placing diverges from the authoritative seat: user_a's place
+    // is 1 but their ranked_placing is 2 (concede/elimination loses first).
+    let diverged = insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, -8), (user_b.id, 2, 8)],
+    )
+    .await;
+    sqlx::query("UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND user_id = $3")
+        .bind(2)
+        .bind(diverged)
+        .bind(user_a.id)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let app = build_router(make_state(pool).await).await;
-    let (status, content_type, body) = get(app, &format!("/players/{}", user_a.name), None).await;
+    let (status, content_type, body) =
+        get(app.clone(), &format!("/players/{}", user_a.name), None).await;
 
     assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
     assert!(
@@ -956,6 +1010,27 @@ async fn players_page_recent_games_render_with_opponent_links(pool: PgPool) {
     assert!(
         body.contains("+16"),
         "expected rating change in body: {body}"
+    );
+    // The placing marker must come from ranked_placing, not authoritative
+    // place: the diverged game shows "2nd of 2" despite an authoritative place
+    // of 1.
+    assert!(
+        body.contains("2nd of 2"),
+        "marker must reflect ranked_placing (2), not authoritative place (1): {body}"
+    );
+
+    // The tied game is preserved for the player who lost the straight game:
+    // user_b's only "1st of 2" is the shared tied placing; the loss still shows
+    // as "2nd of 2".
+    let (status, content_type, body) = get(app, &format!("/players/{}", user_b.name), None).await;
+    assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
+    assert!(
+        body.contains("1st of 2"),
+        "tied game must keep the shared placing for the tied player: {body}"
+    );
+    assert!(
+        body.contains("2nd of 2"),
+        "the straight loss must keep its own placing: {body}"
     );
 }
 
@@ -1112,12 +1187,21 @@ async fn deep_dive_page_renders_chart_histogram_and_games(pool: PgPool) {
     let user_a = make_user(&pool, "deep-dive-player-a").await;
     let user_b = make_user(&pool, "deep-dive-player-b").await;
 
-    insert_finished_two_player_game(
+    // Competitive placing diverges from the authoritative seat: user_a's place
+    // is 1 but their ranked_placing is 2 (concede/elimination loses first).
+    let diverged = insert_finished_two_player_game(
         &pool,
         game_version_id,
         &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
     )
     .await;
+    sqlx::query("UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND user_id = $3")
+        .bind(2)
+        .bind(diverged)
+        .bind(user_a.id)
+        .execute(&pool)
+        .await
+        .unwrap();
     insert_finished_two_player_game(
         &pool,
         game_version_id,
@@ -1162,9 +1246,16 @@ async fn deep_dive_page_renders_chart_histogram_and_games(pool: PgPool) {
         body.contains("gt-finished-games"),
         "expected gt-finished-games marker: {body}"
     );
+    // The placing marker must come from ranked_placing, not authoritative
+    // place: the diverged win shows "2nd of 2" despite an authoritative place
+    // of 1, and no game renders the authoritative "1st of 2" alternative.
     assert!(
-        body.contains("1st of 2"),
-        "expected placing in body: {body}"
+        body.contains("2nd of 2"),
+        "marker must reflect ranked_placing (2), not authoritative place (1): {body}"
+    );
+    assert!(
+        !body.contains("1st of 2"),
+        "authoritative place (1) must not render as a marker: {body}"
     );
     assert!(
         body.contains("+16"),
