@@ -839,6 +839,11 @@ fn conflict_or_internal(context: &'static str, e: anyhow::Error) -> ServerFnErro
             "The game changed while this was being processed; nothing was changed. Please try again.",
         );
     }
+    if e.downcast_ref::<crate::db::NotEnoughActiveHumans>().is_some() {
+        return ServerFnError::new(
+            "Concede is not available: at least two active humans are required",
+        );
+    }
     internal(context)(e)
 }
 
