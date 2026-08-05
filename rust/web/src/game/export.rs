@@ -42,6 +42,7 @@ pub struct BundleGame {
     pub id: Uuid,
     pub is_finished: bool,
     pub finished_at: Option<PrimitiveDateTime>,
+    pub end_reason: Option<String>,
     pub game_state: String,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
@@ -56,14 +57,25 @@ pub struct BundlePlayer {
     /// bot; `None` for humans. This is NOT `game_bots.bot_name` (the bot type),
     /// which is carried in `BundleBot.bot_name`.
     pub bot_name: Option<String>,
+    /// True when the seat holds a human `user_id`; replacement-human seats
+    /// retain their human identity (and `bot_name`) while still playing as a bot.
+    pub is_human: bool,
     pub color: String,
     pub has_accepted: bool,
     pub is_turn: bool,
     pub place: Option<i32>,
+    pub ranked_placing: Option<i32>,
     pub is_eliminated: bool,
+    pub departure_reason: Option<String>,
+    pub departure_sequence: Option<i32>,
+    pub left_at: Option<PrimitiveDateTime>,
     pub points: Option<f32>,
     pub undo_game_state: Option<String>,
     pub rating_change: Option<i32>,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
+    pub is_turn_at: PrimitiveDateTime,
+    pub last_turn_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,14 +156,23 @@ pub async fn build_export_bundle(
             position: p.game_player.position,
             name: p.name().to_string(),
             bot_name: p.game_bot.as_ref().map(|b| b.name.clone()),
+            is_human: p.user.is_some(),
             color: p.game_player.color.clone(),
             has_accepted: p.game_player.has_accepted,
             is_turn: p.game_player.is_turn,
             place: p.game_player.place,
+            ranked_placing: p.game_player.ranked_placing,
             is_eliminated: p.game_player.is_eliminated,
+            departure_reason: p.game_player.departure_reason.clone(),
+            departure_sequence: p.game_player.departure_sequence,
+            left_at: p.game_player.left_at,
             points: p.game_player.points,
             undo_game_state: p.game_player.undo_game_state.clone(),
             rating_change: p.game_player.rating_change,
+            created_at: p.game_player.created_at,
+            updated_at: p.game_player.updated_at,
+            is_turn_at: p.game_player.is_turn_at,
+            last_turn_at: p.game_player.last_turn_at,
         })
         .collect();
 
@@ -165,6 +186,7 @@ pub async fn build_export_bundle(
             id: ge.game.id,
             is_finished: ge.game.is_finished,
             finished_at: ge.game.finished_at,
+            end_reason: ge.game.end_reason,
             game_state: ge.game.game_state,
             created_at: ge.game.created_at,
             updated_at: ge.game.updated_at,
