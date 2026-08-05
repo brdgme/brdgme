@@ -97,7 +97,7 @@ pub struct FinishedGameRow {
     pub game_id: Uuid,
     pub game_type_name: String,
     pub finished_at: Option<PrimitiveDateTime>,
-    pub place: Option<i32>,
+    pub ranked_placing: Option<i32>,
     pub player_count: i64,
     pub rating_change: Option<i32>,
     pub opponents: Vec<Opponent>,

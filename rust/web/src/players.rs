@@ -154,14 +154,14 @@ pub struct PlacingHistogram {
 }
 
 /// Buckets finished games by player count (2 / 3 / 4+) and, within each
-/// bucket, counts occurrences of each placing. Rows with `place: None` are
-/// excluded from both the histogram bars and the games/wins totals. Buckets
-/// with no placed games are omitted entirely.
+/// bucket, counts occurrences of each placing. Rows with `ranked_placing:
+/// None` are excluded from both the histogram bars and the games/wins
+/// totals. Buckets with no placed games are omitted entirely.
 fn placing_histograms(games: &[FinishedGameRow]) -> Vec<PlacingHistogram> {
     let labels = ["2 players", "3 players", "4+ players"];
     let mut grouped: [Vec<i32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for g in games {
-        let Some(place) = g.place else { continue };
+        let Some(place) = g.ranked_placing else { continue };
         let idx = match g.player_count {
             2 => 0,
             3 => 1,
@@ -420,7 +420,7 @@ pub fn PlayersPage() -> impl IntoView {
                                                     .finished_at
                                                     .map(|t| t.date().to_string())
                                                     .unwrap_or_else(|| "-".to_string());
-                                                let placing = format_placing(row.place, row.player_count);
+                                                let placing = format_placing(row.ranked_placing, row.player_count);
                                                 let rating = match row.rating_change {
                                                     None => view! { "-" }.into_any(),
                                                     Some(n) if n > 0 => view! {
@@ -665,7 +665,7 @@ pub fn PlayerGameTypePage() -> impl IntoView {
                                                     .finished_at
                                                     .map(|t| t.date().to_string())
                                                     .unwrap_or_else(|| "-".to_string());
-                                                let placing = format_placing(row.place, row.player_count);
+                                                let placing = format_placing(row.ranked_placing, row.player_count);
                                                 let rating = match row.rating_change {
                                                     None => view! { "-" }.into_any(),
                                                     Some(n) if n > 0 => view! {
@@ -971,12 +971,12 @@ mod tests {
         }
     }
 
-    fn finished_game(place: Option<i32>, player_count: i64) -> FinishedGameRow {
+    fn finished_game(ranked_placing: Option<i32>, player_count: i64) -> FinishedGameRow {
         FinishedGameRow {
             game_id: Uuid::new_v4(),
             game_type_name: "Camel Up".to_string(),
             finished_at: None,
-            place,
+            ranked_placing,
             player_count,
             rating_change: None,
             opponents: Vec::new(),
@@ -1077,6 +1077,28 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn placing_histograms_tied_first_place_counts_both_as_wins() {
+        let games = vec![finished_game(Some(1), 2), finished_game(Some(1), 2)];
+        let hists = placing_histograms(&games);
+        assert_eq!(hists.len(), 1);
+        let h = &hists[0];
+        assert_eq!(h.label, "2 players");
+        assert_eq!(h.games, 2);
+        assert_eq!(h.wins, 2, "tied first place counts both as wins");
+        assert_eq!(h.buckets[0].count, 2);
+    }
+
+    #[test]
+    fn placing_histograms_rank_only_value_used_verbatim() {
+        let games = vec![finished_game(Some(2), 2), finished_game(Some(1), 2)];
+        let hists = placing_histograms(&games);
+        assert_eq!(hists.len(), 1);
+        let h = &hists[0];
+        assert_eq!(h.buckets[0].count, 1);
+        assert_eq!(h.buckets[1].count, 1, "2nd rank surfaces as its own bucket");
     }
 
     #[test]

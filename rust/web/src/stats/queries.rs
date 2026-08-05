@@ -293,7 +293,7 @@ struct FinishedGamesRow {
     game_id: Uuid,
     game_type_name: String,
     finished_at: Option<PrimitiveDateTime>,
-    place: Option<i32>,
+    ranked_placing: Option<i32>,
     rating_change: Option<i32>,
     player_count: i64,
 }
@@ -313,7 +313,7 @@ pub async fn finished_games(
             g.id AS game_id,
             gt.name AS game_type_name,
             g.finished_at,
-            gp.ranked_placing AS place,
+            gp.ranked_placing AS ranked_placing,
             gp.rating_change,
             (SELECT count(*) FROM game_players gp2
              WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL AND gp2.ranked_placing IS NOT NULL) AS player_count
@@ -353,7 +353,7 @@ pub async fn finished_games(
             game_id: row.game_id,
             game_type_name: row.game_type_name,
             finished_at: row.finished_at,
-            place: row.place,
+            ranked_placing: row.ranked_placing,
             player_count: row.player_count,
             rating_change: row.rating_change,
             opponents: opponents
@@ -1438,7 +1438,7 @@ mod tests {
             .find(|r| r.game_id == game1)
             .expect("game1 present");
         assert_eq!(row1.player_count, 2);
-        assert_eq!(row1.place, Some(1));
+        assert_eq!(row1.ranked_placing, Some(1));
         assert_eq!(row1.rating_change, Some(16));
         assert_eq!(row1.opponents.len(), 1);
         assert_eq!(row1.opponents[0].user_id, Some(opponent));
@@ -1503,7 +1503,7 @@ mod tests {
             .expect("query ok");
         assert_eq!(rows.len(), 1);
         assert_eq!(
-            rows[0].place, Some(2),
+            rows[0].ranked_placing, Some(2),
             "ranked_placing must come from ranked_placing, not authoritative place"
         );
         assert_eq!(rows[0].player_count, 2);
@@ -1647,14 +1647,14 @@ mod tests {
             .await
             .expect("query ok");
         assert_eq!(for_user.len(), 1);
-        assert_eq!(for_user[0].place, Some(1));
+        assert_eq!(for_user[0].ranked_placing, Some(1));
         assert_eq!(for_user[0].player_count, 2);
 
         let for_opponent = finished_games(&pool, opponent, None, false, None, None)
             .await
             .expect("query ok");
         assert_eq!(for_opponent.len(), 1);
-        assert_eq!(for_opponent[0].place, Some(1));
+        assert_eq!(for_opponent[0].ranked_placing, Some(1));
         assert_eq!(for_opponent[0].player_count, 2);
     }
 
