@@ -379,6 +379,111 @@
 # cannot detect a suppression outside the declared universe - the authoritative
 # universe enumeration must be complete for the proof to mean anything.
 #
+# Log-layer proof gate (4.9d): a logging-related claim - a hidden-information
+# leak closed at the log layer, or a claim of `Log::public` content coverage -
+# must prove direct `Log::public` content at the authoritative approved
+# log-layer source scope, reproducibly. The proof is a textual Bash heuristic
+# over the declared scope, documented below; it is an auditable approximation,
+# never a parser-grade or semantic proof of the log content. Two optional
+# inputs, enabled when a log-layer scope file is given:
+#   loglayer-scope.tsv one in-scope logging-related claim per line,
+#                      tab-separated fields (id scope). `scope` is the
+#                      authoritative approved log-layer source file or
+#                      directory, relative to CWD, where the claim's direct
+#                      `Log::public` content lives. The authoritative
+#                      enumeration, derived in production from the commit range
+#                      / fix records and never from the evidence records - so
+#                      omitting a claim's evidence record cannot hide it.
+#                      (default: none, gate skipped)
+#   loglayer.tsv       tab-separated evidence records, one per in-scope claim,
+#                      fields:
+#     id                   claim ID, matching a scope link exactly
+#     scope                the log-layer scope, relative to CWD; must equal the
+#                          authoritative scope named in the scope link exactly,
+#                          so a record scanning a wrapper, caller, or
+#                          lower/upper-layer file is a nearby scan, not
+#                          evidence for this claim
+#     pattern              the approved direct `Log::public` pattern, as
+#                          accepted by `grep -E`; the recorded count is the
+#                          number of matching lines returned by
+#                          `grep -E <pattern>` over the comment/string-stripped
+#                          content of the scope
+#     count                the recorded current count of direct `Log::public`
+#                          invocations in the scope (non-negative integer)
+#   The guard re-runs two heuristics against the declared scope and requires
+#   both to reproduce the recorded count on the same source lines: the
+#   direct-invocation heuristic (comment/string-stripped `Log::public(` calls)
+#   and the approved pattern applied to that same stripped content. Each
+#   heuristic yields a set of `file:line` identities and the two sets must be
+#   identical - a pattern whose count merely equals the direct count while its
+#   matches land on different source lines is rejected as a decoy, never
+#   accepted as evidence. The recorded pattern/count is therefore demonstrably
+#   tied to direct `Log::public` invocations - a pattern whose matches come only
+#   from comments or strings, or a count that merely coexists with a separate
+#   direct call, is rejected as a decoy rather than accepted as evidence. The
+#   scope must actually contain
+#   at least one direct `Log::public` invocation (a vacuous scope is not
+#   proof), the authoritative scope must be non-empty (an empty scope file is
+#   rejected outright, because a log-layer sign-off with no enumerated claims
+#   proves nothing), and every record must correspond exactly to an in-scope
+#   claim - a rogue record cannot authorize a fabricated proof.
+# Log-layer diagnostics (the claim ID is interpolated):
+#   LOGLAYER-MALFORMED:      <id>: log-layer scope link must have two
+#                           tab-separated non-empty fields (id scope) |
+#                           log-layer record must have four tab-separated
+#                           non-empty fields (id scope pattern count) |
+#                           count must be a non-negative integer
+#   LOGLAYER-DUPLICATE:      <id>: duplicate log-layer scope link / duplicate
+#                           log-layer record
+#   LOGLAYER-MISSING:        <id>: in-scope logging-related claim has no
+#                           evidence record
+#   LOGLAYER-ROGUE:          <id>: log-layer record matches no in-scope claim
+#   LOGLAYER-OMITTED-SCOPE:  <id>: log-layer record omits the log-layer scope
+#                           field (id scope pattern count)
+#   LOGLAYER-EMPTY-SCOPE:    <scope-file>: the authoritative scope file names
+#                           no in-scope logging-related claims (empty scope)
+#   LOGLAYER-DECOY:          <id>: the proof is not applicable - the record's
+#                           scope differs from the authoritative scope, the
+#                           declared scope does not exist, the scope contains
+#                           no direct `Log::public` invocation, or the recorded
+#                           pattern/count is not tied to the direct
+#                           comment/string-stripped `Log::public` invocations
+#                           (a mixed-layer, coexisting, or different-lines
+#                           count), so the coverage claim is vacuous
+#   LOGLAYER-STALE:          <id>: recorded count <count> does not match the
+#                           current direct-invocation count <count> for pattern
+#                           "<pattern>" in <scope>
+#
+# Log-layer heuristic limits: the direct-invocation heuristic strips comments
+# (`//`, `/* */`, including multi-line) and string literals first (the same awk
+# stripper the four teeth use) and counts a line whose remaining text directly
+# invokes `Log::public` - `Log::public` not as a suffix of a longer identifier,
+# followed by optional spaces and `(`. The approved pattern is re-run over the
+# same stripped content, so its matches must reproduce the recorded
+# direct-invocation count on exactly the same source lines: a pattern whose raw
+# matches include comment/string-only lines in addition to real calls, whose
+# stripped matches diverge from the direct invocations, or whose count merely
+# equals the direct count while the matches land on different lines, is
+# rejected as a decoy - a pattern/count that merely coexists with a separate
+# direct call is not proof at the direct logging layer. Line identity is
+# `file:line`, so the same line number in different *.rs files of a multi-file
+# scope does not collide: the two scans must agree file-for-file. A recorded
+# count that does not reproduce while
+# the pattern's raw matches still coincide with the direct count is plain stale
+# evidence (the code changed); a divergence between the raw and direct counts
+# is a mixed-layer decoy. Neither scan is a Rust parse: it cannot see a
+# reference split across lines, a `Log::public` reached through a wrapper
+# function or a helper at a different layer, or a reference living outside the
+# declared scope. Both the direct-invocation scan and the stripped-pattern scan
+# cover the scope's *.rs files (the log layer is Rust code); the pattern's raw
+# scan is used only to tell stale evidence from a mixed-layer decoy, never as
+# proof. The guard cannot detect coverage outside the declared scope - the
+# authoritative scope enumeration must be complete for the proof to mean
+# anything. The proof is that the recorded direct `Log::public` references
+# reproduce at the authoritative scope; it is not a semantic proof of the log
+# content - a direct `Log::public` reference can still carry a leak, and this
+# guard does not and cannot read the logged content.
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -405,7 +510,8 @@
 # Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE [ROUTING-SCOPE
 # [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES [ESCALATION-SCOPE
 # [ESCALATION-RESPONSES [SIBLING-SCOPE [SIBLING-RECORDS [EXMATCH-SCOPE
-# [EXMATCH-RECORDS [DCSWEEP-SCOPE [DCSWEEP-RECORDS]]]]]]]]]]]]]]] - RECORDS
+# [EXMATCH-RECORDS [DCSWEEP-SCOPE [DCSWEEP-RECORDS [LOGLAYER-SCOPE
+# [LOGLAYER-RECORDS]]]]]]]]]]]]]]]]]] - RECORDS
 # defaults to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped),
 # PROVENANCE defaults to wp-provenance.tsv, ROUTING-SCOPE defaults to none
 # (4.4 gate skipped), ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
@@ -414,8 +520,9 @@
 # escalation-responses.tsv, SIBLING-SCOPE defaults to none (4.9a gate skipped),
 # SIBLING-RECORDS to sibling.tsv, EXMATCH-SCOPE defaults to none (4.9b gate
 # skipped), EXMATCH-RECORDS to exhaustive-match.tsv, DCSWEEP-SCOPE defaults to
-# none (4.9c gate skipped) and DCSWEEP-RECORDS to deadcode.tsv. Uses only
-# standard Bash/GNU utilities (grep, sed, awk).
+# none (4.9c gate skipped) and DCSWEEP-RECORDS to deadcode.tsv, LOGLAYER-SCOPE
+# defaults to none (4.9d gate skipped) and LOGLAYER-RECORDS to loglayer.tsv.
+# Uses only standard Bash/GNU utilities (grep, sed, awk).
 
 set -uo pipefail
 
@@ -499,6 +606,59 @@ is_test_module() {
     tests.rs|*_test.rs) return 0 ;;
   esac
   grep -q '#\[cfg(test)\]' "$f" 2>/dev/null
+}
+
+# count_direct_log_public <scope> -> the number of direct `Log::public(`
+# invocations across the scope's *.rs files after comments and string literals
+# are stripped (the same awk stripper the four teeth use). A mention in a
+# comment, a string, or as a suffix of a longer identifier is not a direct
+# invocation.
+count_direct_log_public() {
+  local scope="$1" total=0 f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    total=$((total + $(awk -v sym='Log::public' "$awk_fns"'
+      BEGIN { in_block = 0; in_str = 0; n = 0 }
+      { if (has_call(strip_line($0))) n++ }
+      END { print n }
+    ' "$f")))
+  done < <(grep -rlw --exclude-dir=.git --include='*.rs' 'Log::public' "$scope" 2>/dev/null)
+  echo "$total"
+}
+
+# loglayer_direct_lines <scope> -> one `file:line` per source line whose
+# comment/string-stripped content directly invokes `Log::public`, across the
+# scope's *.rs files. The per-source-line identity (file and line number
+# together) is the basis the log-layer gate requires: equal counts on different
+# lines must fail, and the same line number in different files must not
+# collide.
+loglayer_direct_lines() {
+  local scope="$1" f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    awk -v sym='Log::public' -v fname="$f" "$awk_fns"'
+      BEGIN { in_block = 0; in_str = 0 }
+      { if (has_call(strip_line($0))) print fname ":" NR }
+    ' "$f"
+  done < <(find "$scope" -type f -name '*.rs' 2>/dev/null)
+}
+
+# loglayer_stripped_lines <scope> <pattern> -> one `file:line` per source line
+# whose comment/string-stripped content matches <pattern> (as `grep -E` accepts
+# it), across the scope's *.rs files. Same per-file stripper and same file
+# universe as loglayer_direct_lines, so the two line sets are comparable on a
+# per-source-line basis.
+loglayer_stripped_lines() {
+  local scope="$1" pattern="$2" f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    awk "$awk_fns"'
+      BEGIN { in_block = 0; in_str = 0 }
+      { print strip_line($0) }
+    ' "$f" \
+      | grep -nE -- "$pattern" 2>/dev/null \
+      | sed -n "s|^\([0-9][0-9]*\):.*|$f:\1|p"
+  done < <(find "$scope" -type f -name '*.rs' 2>/dev/null)
 }
 
 while IFS=$'\t' read -r id symbol file test pdisp premise amendment; do
@@ -1375,6 +1535,198 @@ if [ -n "${14:-}" ]; then
   fi
 fi
 
+# Log-layer proof gate (4.9d): a logging-related claim must prove direct
+# `Log::public` content coverage at the authoritative approved log-layer source
+# scope, reproducibly. When a log-layer scope file is given, every in-scope
+# claim must carry an evidence record whose approved `Log::public` pattern
+# re-runs to the recorded count within the declared scope, and the scope must
+# actually contain at least one direct `Log::public` invocation once comments
+# and string literals are stripped - so a comment, string, wrapper, or
+# lower/upper-layer mention is never mistaken for direct content proof. The
+# proof is a documented textual heuristic, not a Rust parse or a semantic proof
+# of the log content (see the "Log-layer heuristic limits" paragraph in the
+# header).
+if [ -n "${16:-}" ]; then
+  LOGL_SCOPE="${16}"
+  LOGL_RECORDS="${17:-loglayer.tsv}"
+  if [ ! -f "$LOGL_SCOPE" ]; then
+    echo "LOGLAYER-MISSING-SCOPE: no log-layer scope file: $LOGL_SCOPE" >&2
+    fail=1
+  elif [ ! -f "$LOGL_RECORDS" ]; then
+    echo "LOGLAYER-MISSING-RECORDS: no log-layer records file: $LOGL_RECORDS" >&2
+    fail=1
+  else
+    # Authoritative scope: every in-scope logging-related claim (id scope). A
+    # malformed scope link is still recorded so its claim is not cascaded into
+    # MISSING; the malformed diagnostic already fails the run.
+    declare -A logl_scope=() logl_scope_seen=() logl_scope_bad=() logl_rec_seen=()
+    logl_lines=0
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      logl_lines=$((logl_lines + 1))
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r lo_id lo_scope <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$lo_id" ] || [ -z "$lo_scope" ]; then
+        echo "LOGLAYER-MALFORMED: ${lo_id:-<no-id>}: log-layer scope link must have two tab-separated non-empty fields (id scope)" >&2
+        [ -n "$lo_id" ] && logl_scope_bad["$lo_id"]=1
+        fail=1
+        continue
+      fi
+      if [ -n "${logl_scope_seen[$lo_id]:-}" ]; then
+        echo "LOGLAYER-DUPLICATE: $lo_id: duplicate log-layer scope link" >&2
+        fail=1
+        continue
+      fi
+      logl_scope_seen["$lo_id"]=1
+      logl_scope["$lo_id"]="$lo_scope"
+    done < "$LOGL_SCOPE"
+
+    # The authoritative scope must be non-empty: a log-layer sign-off must
+    # enumerate a non-empty source scope, so an empty scope file is rejected
+    # outright rather than silently accepted as proof.
+    if [ "$logl_lines" -eq 0 ]; then
+      echo "LOGLAYER-EMPTY-SCOPE: $LOGL_SCOPE: log-layer scope is empty - no in-scope logging-related claims are enumerated" >&2
+      fail=1
+    else
+      # Claim evidence: one record per in-scope claim (id scope pattern count).
+      # Every record must correspond exactly to a scope link - a rogue record
+      # cannot authorize a fabricated proof - and must scan exactly the
+      # authoritative scope the link names, so a record pointing at a wrapper,
+      # caller, or lower/upper-layer file is a nearby scan, not evidence. The
+      # record structure is validated with awk, whose -F'\t' split preserves
+      # empty fields (unlike `read`, which collapses consecutive tabs), so an
+      # empty log-layer-scope field is diagnosed distinctly from a truncated
+      # row.
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        nf="$(printf '%s\n' "$line" | awk -F'\t' '{print NF}')"
+        empty_field="$(printf '%s\n' "$line" | awk -F'\t' '{ if ($2 == "") print "scope"; else if ($1 == "" || $3 == "" || $4 == "") print "other" }')"
+        if [ "$nf" -ne 4 ]; then
+          lo_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "LOGLAYER-MALFORMED: ${lo_id:-<no-id>}: log-layer record must have four tab-separated non-empty fields (id scope pattern count)" >&2
+          [ -n "$lo_id" ] && logl_rec_seen["$lo_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "scope" ]; then
+          lo_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "LOGLAYER-OMITTED-SCOPE: ${lo_id:-<no-id>}: log-layer record omits the log-layer scope field (id scope pattern count)" >&2
+          [ -n "$lo_id" ] && logl_rec_seen["$lo_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "other" ]; then
+          lo_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "LOGLAYER-MALFORMED: ${lo_id:-<no-id>}: log-layer record must have four tab-separated non-empty fields (id scope pattern count)" >&2
+          [ -n "$lo_id" ] && logl_rec_seen["$lo_id"]=1
+          fail=1
+          continue
+        fi
+        IFS=$'\t' read -r lo_id lo_scope lo_pattern lo_count <<< "$line"
+        if [ -n "${logl_rec_seen[$lo_id]:-}" ]; then
+          echo "LOGLAYER-DUPLICATE: $lo_id: duplicate log-layer record" >&2
+          fail=1
+          continue
+        fi
+        logl_rec_seen["$lo_id"]=1
+        if ! [[ "$lo_count" =~ ^[0-9]+$ ]]; then
+          echo "LOGLAYER-MALFORMED: $lo_id: count must be a non-negative integer" >&2
+          fail=1
+          continue
+        fi
+        # A claim whose scope link was malformed is not cascade-checked here:
+        # LOGLAYER-MALFORMED already failed the run for that line.
+        [ -n "${logl_scope_bad[$lo_id]:-}" ] && continue
+        # A rogue record that matches no in-scope claim cannot authorize a
+        # fabricated proof.
+        if [ -z "${logl_scope_seen[$lo_id]:-}" ]; then
+          echo "LOGLAYER-ROGUE: $lo_id: log-layer record matches no in-scope claim" >&2
+          fail=1
+          continue
+        fi
+        # The record must scan exactly the authoritative log-layer scope: a
+        # record that points at a wrapper, caller, or lower/upper-layer file is
+        # a nearby scan, not evidence for this claim.
+        if [ "$lo_scope" != "${logl_scope[$lo_id]}" ]; then
+          echo "LOGLAYER-DECOY: $lo_id: record scope $lo_scope does not match the authoritative scope ${logl_scope[$lo_id]}" >&2
+          fail=1
+          continue
+        fi
+        if [ ! -e "$lo_scope" ]; then
+          echo "LOGLAYER-DECOY: $lo_id: declared scope not found: $lo_scope" >&2
+          fail=1
+          continue
+        fi
+        # The proof must be direct, and the recorded pattern/count must be
+        # demonstrably tied to the direct `Log::public` invocations - not merely
+        # coexist with one. The direct-invocation heuristic re-runs the count
+        # of comment/string-stripped `Log::public(` calls, and the approved
+        # pattern is re-run over the same stripped content, so both must
+        # reproduce the recorded count on exactly the same source lines: the
+        # two scans must agree on the set of `file:line` identities, not just
+        # on the count.
+        direct="$(count_direct_log_public "$lo_scope")"
+        if [ "$direct" -eq 0 ]; then
+          # A scope whose references live only in comments, strings, a
+          # wrapper, or a lower/upper-layer file is not direct content proof.
+          echo "LOGLAYER-DECOY: $lo_id: scope $lo_scope contains no direct Log::public invocation, so the coverage claim is vacuous" >&2
+          fail=1
+          continue
+        fi
+        if [ "$direct" -ne "$lo_count" ]; then
+          # The recorded count does not reproduce at the direct layer. When
+          # the pattern's raw matches also diverge from the direct count, the
+          # record is a mixed-layer decoy (the count includes comment/string
+          # matches); only when they coincide is the divergence plain stale
+          # evidence of code that changed.
+          raw="$(grep -rE "$lo_pattern" "$lo_scope" 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "$raw" -eq "$direct" ]; then
+            echo "LOGLAYER-STALE: $lo_id: recorded hit count $lo_count does not match current hit count $direct for pattern \"$lo_pattern\" in $lo_scope" >&2
+          else
+            echo "LOGLAYER-DECOY: $lo_id: pattern \"$lo_pattern\" count $lo_count is not tied to the direct Log::public invocations in $lo_scope" >&2
+          fi
+          fail=1
+          continue
+        fi
+        # The recorded pattern must reproduce the recorded count on exactly
+        # the same comment/string-stripped source lines as the direct
+        # invocations - an equal count on different lines is a decoy, never
+        # proof.
+        direct_lines="$(loglayer_direct_lines "$lo_scope" | sort -u)"
+        stripped="$(loglayer_stripped_lines "$lo_scope" "$lo_pattern" | sort -u)"
+        if [ -n "$stripped" ]; then
+          stripped_count="$(printf '%s\n' "$stripped" | wc -l | tr -d ' ')"
+        else
+          stripped_count=0
+        fi
+        if [ "$stripped_count" -ne "$lo_count" ]; then
+          # The pattern's own stripped matches diverge from the direct
+          # invocations, so an arbitrary pattern that happens to match an
+          # unrelated comment/string while a separate direct call satisfies the
+          # direct count is rejected.
+          echo "LOGLAYER-DECOY: $lo_id: pattern \"$lo_pattern\" count $lo_count is not tied to the direct Log::public invocations in $lo_scope" >&2
+          fail=1
+        elif [ "$stripped" != "$direct_lines" ]; then
+          # The counts coincide but the pattern matches different source lines
+          # than the direct invocations: the recorded pattern/count is not the
+          # direct content proof it claims.
+          echo "LOGLAYER-DECOY: $lo_id: pattern \"$lo_pattern\" count $lo_count reproduces on different source lines than the direct Log::public invocations in $lo_scope" >&2
+          fail=1
+        fi
+      done < "$LOGL_RECORDS"
+
+      # The scope is authoritative: omitting a claim's evidence record cannot
+      # hide it.
+      for lo_id in "${!logl_scope_seen[@]}"; do
+        if [ -z "${logl_rec_seen[$lo_id]:-}" ]; then
+          echo "LOGLAYER-MISSING: $lo_id: in-scope logging-related claim has no evidence record" >&2
+          fail=1
+        fi
+      done
+    fi
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
@@ -1386,4 +1738,5 @@ msg="every record satisfies all four teeth"
 [ -n "${10:-}" ] && msg="$msg and every in-scope one-function-fix claim names a reproducible sibling-search pattern with a current hit count within its approved heuristic limit"
 [ -n "${12:-}" ] && msg="$msg and every in-scope exhaustive-match claim proves no wildcard match arm remains in its scope"
 [ -n "${14:-}" ] && msg="$msg and every in-scope dead-code sweep claim proves no #[allow(dead_code)] or suppression variant remains in its universe"
+[ -n "${16:-}" ] && msg="$msg and every in-scope logging-related claim proves direct Log::public content coverage at its authoritative log-layer scope"
 echo "check-four-tooth: OK ($msg)"

@@ -309,6 +309,82 @@
 #                                   while the record reports 0 variants; the
 #                                   guard must fail it as a remaining
 #                                   suppression variant.
+#
+# And fourteen more committed fixtures for the log-layer proof gate (4.9d), which
+# requires every in-scope logging-related claim to prove direct `Log::public`
+# content coverage at its authoritative approved log-layer source scope,
+# reproducibly: the guard re-runs the record's approved `Log::public` pattern
+# against the declared scope and requires the recorded hit count to reproduce,
+# and additionally requires the scope to contain at least one direct
+# `Log::public` invocation once comments and string literals are stripped - so a
+# comment, string, wrapper, or lower/upper-layer mention is never mistaken for
+# direct content proof. The log-layer scope is the authoritative enumeration and
+# is never inferred from the records, so omitting a record cannot hide a claim:
+#   loglayer-positive             - one claim (F-1300, scope src/game_write.rs)
+#                                   with two direct `Log::public` invocations,
+#                                   pattern `Log::public` re-running to the
+#                                   recorded count 2; the guard must accept it.
+#   loglayer-missing              - the scope enumerates the claim but the
+#                                   records file omits its evidence row; the
+#                                   guard must fail it as a missing record.
+#   loglayer-stale                - the recorded hit count 1 does not match the
+#                                   current count 2; the guard must fail it as
+#                                   stale, never trusting the recorded count.
+#   loglayer-omitted-scope        - a record with an empty log-layer scope field;
+#                                   the guard must fail it with the
+#                                   scope-omitted diagnostic.
+#   loglayer-empty-scope          - an empty authoritative scope file (and no
+#                                   records): the guard must fail it as an empty
+#                                   scope, never silently accept a sign-off that
+#                                   enumerates no claims.
+#   loglayer-malformed            - a truncated record (missing the count field);
+#                                   the guard must fail it as malformed.
+#   loglayer-duplicate            - the same claim recorded twice; the guard
+#                                   must fail it as a duplicate rather than
+#                                   silently accept the last row.
+#   loglayer-rogue                - an extra record for F-9999 matching no
+#                                   in-scope claim, paired with a complete
+#                                   valid record; the guard must fail the rogue
+#                                   record and no other claim.
+#   loglayer-decoy-nearby         - a "nearby wrapper/caller" decoy: the record's
+#                                   scope src/other.rs holds a wrapper and its
+#                                   caller layer, differing from the
+#                                   authoritative scope src/game_write.rs; the
+#                                   guard must fail it as a decoy.
+#   loglayer-decoy-lower-layer    - a "lower-layer" decoy: the record's scope
+#                                   src/game_log.rs is the `Log::public`
+#                                   constructor/definition layer, not the
+#                                   authoritative game-crate scope; the guard
+#                                   must fail it as a decoy.
+#   loglayer-decoy-comment        - a "comment" decoy: the only `Log::public`
+#                                   mention in the authoritative scope is a
+#                                   comment, so the pattern count reproduces
+#                                   but there is no direct `Log::public`
+#                                   invocation; the guard must fail it as a
+#                                   decoy.
+#   loglayer-decoy-string         - a "string" decoy: the only `Log::public`
+#                                   mention in the authoritative scope is a
+#                                   string literal; the guard must fail it as a
+#                                   decoy.
+#   loglayer-decoy-same-scope     - the same-scope coexistence decoy: an
+#                                   arbitrary raw-grep pattern `FORTUNE`
+#                                   matching only string mentions in the
+#                                   authoritative scope while a separate direct
+#                                   `Log::public` call in the same scope
+#                                   satisfies a naive direct-count floor. The
+#                                   recorded pattern/count is not tied to the
+#                                   direct invocations, so the guard must fail
+#                                   it as a decoy.
+#   loglayer-decoy-equal-count    - the equal-count/different-lines decoy: two
+#                                   direct `Log::public` calls and two
+#                                   `Log::public;` (non-call) mentions spread
+#                                   across two scope files with cross-swapped
+#                                   line numbers, so the recorded pattern
+#                                   reproduces the direct count 2 while its
+#                                   `file:line` identities differ (same line
+#                                   numbers, different files). A count-only
+#                                   guard passes it; the guard must fail it as
+#                                   a decoy.
 
 set -uo pipefail
 
@@ -372,7 +448,10 @@ fail_fixture() {
       EXMATCH-WILDCARD-REMAINS \
       DCSWEEP-MALFORMED DCSWEEP-DUPLICATE DCSWEEP-MISSING DCSWEEP-ROGUE \
       DCSWEEP-OMITTED-SCOPE DCSWEEP-EMPTY-SCOPE DCSWEEP-DECOY DCSWEEP-STALE \
-      DCSWEEP-ALLOWANCE-REMAINS DCSWEEP-VARIANT-REMAINS; do
+      DCSWEEP-ALLOWANCE-REMAINS DCSWEEP-VARIANT-REMAINS \
+      LOGLAYER-MALFORMED LOGLAYER-DUPLICATE LOGLAYER-MISSING LOGLAYER-ROGUE \
+      LOGLAYER-OMITTED-SCOPE LOGLAYER-EMPTY-SCOPE LOGLAYER-DECOY \
+      LOGLAYER-STALE; do
     [ "$other" = "$marker" ] && continue
     if grep -qF -- "$other" <<<"$out"; then
       echo "FAIL: $name emitted $other in addition to $marker" >&2
@@ -571,6 +650,48 @@ fail_fixture deadcode-allowance-remains F-1200 DCSWEEP-ALLOWANCE-REMAINS \
 fail_fixture deadcode-variant-remains F-1200 DCSWEEP-VARIANT-REMAINS \
   'DCSWEEP-VARIANT-REMAINS: F-1200: a dead-code suppression variant remains in src/game_write.rs (current count 5 > 0)' \
   signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+
+pass_fixture loglayer-positive \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-missing F-1300 LOGLAYER-MISSING \
+  'LOGLAYER-MISSING: F-1300: in-scope logging-related claim has no evidence record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-stale F-1300 LOGLAYER-STALE \
+  'LOGLAYER-STALE: F-1300: recorded hit count 1 does not match current hit count 2 for pattern "Log::public" in src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-omitted-scope F-1300 LOGLAYER-OMITTED-SCOPE \
+  'LOGLAYER-OMITTED-SCOPE: F-1300: log-layer record omits the log-layer scope field (id scope pattern count)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-empty-scope F-1300 LOGLAYER-EMPTY-SCOPE \
+  'LOGLAYER-EMPTY-SCOPE: loglayer-scope.tsv: log-layer scope is empty - no in-scope logging-related claims are enumerated' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-malformed F-1300 LOGLAYER-MALFORMED \
+  'LOGLAYER-MALFORMED: F-1300: log-layer record must have four tab-separated non-empty fields (id scope pattern count)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-duplicate F-1300 LOGLAYER-DUPLICATE \
+  'LOGLAYER-DUPLICATE: F-1300: duplicate log-layer record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-rogue F-9999 LOGLAYER-ROGUE \
+  'LOGLAYER-ROGUE: F-9999: log-layer record matches no in-scope claim' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-decoy-nearby F-1300 LOGLAYER-DECOY \
+  'LOGLAYER-DECOY: F-1300: record scope src/other.rs does not match the authoritative scope src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-decoy-lower-layer F-1300 LOGLAYER-DECOY \
+  'LOGLAYER-DECOY: F-1300: record scope src/game_log.rs does not match the authoritative scope src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-decoy-comment F-1300 LOGLAYER-DECOY \
+  'LOGLAYER-DECOY: F-1300: scope src/game_write.rs contains no direct Log::public invocation, so the coverage claim is vacuous' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-decoy-string F-1300 LOGLAYER-DECOY \
+  'LOGLAYER-DECOY: F-1300: scope src/game_write.rs contains no direct Log::public invocation, so the coverage claim is vacuous' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-decoy-same-scope F-1300 LOGLAYER-DECOY \
+  'LOGLAYER-DECOY: F-1300: pattern "FORTUNE" count 2 is not tied to the direct Log::public invocations in src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
+fail_fixture loglayer-decoy-equal-count F-1300 LOGLAYER-DECOY \
+  'LOGLAYER-DECOY: F-1300: pattern "Log::public;" count 2 reproduces on different source lines than the direct Log::public invocations in src' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" "" "" loglayer-scope.tsv loglayer.tsv
 
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
