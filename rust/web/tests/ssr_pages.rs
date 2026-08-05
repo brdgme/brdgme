@@ -511,6 +511,68 @@ async fn game_page_player_names_link_to_profiles_for_human_opponents(pool: PgPoo
     );
 }
 
+// The finished-game player card labels the authoritative `place` exactly
+// "Game placing": a normal finished game renders the label with each seat's
+// value, while a last-human-stop early stop with every authoritative place
+// null renders no placing label at all, even though each seat retains a
+// non-null competitive `ranked_placing` (mirroring the profile Game results
+// view).
+#[sqlx::test]
+async fn game_page_finished_renders_game_placing_only_for_authoritative_place(pool: PgPool) {
+    let uri = spawn_mock_game_service().await;
+    let game_version_id = make_game_version(&pool, &uri).await;
+    let user_a = make_user(&pool, "game-placing-player-a").await;
+    let user_b = make_user(&pool, "game-placing-player-b").await;
+    let email = "game-placing-player-a@example.com";
+    let cookie = login_cookie(&pool, &user_a, email).await;
+
+    let normal_game = insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 0), (user_b.id, 2, 0)],
+    )
+    .await;
+
+    let early_stop_game = insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 0), (user_b.id, 2, 0)],
+    )
+    .await;
+    sqlx::query("UPDATE games SET end_reason = $1 WHERE id = $2")
+        .bind("last_human_stop")
+        .bind(early_stop_game)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE game_players SET place = NULL WHERE game_id = $1")
+        .bind(early_stop_game)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(
+        app.clone(),
+        &format!("/games/{}", normal_game),
+        Some(&cookie),
+    )
+    .await;
+    assert_clean_html_body(status, &content_type, &body, "mock render");
+    assert!(
+        body.contains("Game placing: 1") && body.contains("Game placing: 2"),
+        "expected the exact Game placing label and authoritative values in the finished game body: {body}"
+    );
+
+    let (status, content_type, body) =
+        get(app, &format!("/games/{}", early_stop_game), Some(&cookie)).await;
+    assert_clean_html_body(status, &content_type, &body, "mock render");
+    assert!(
+        !body.contains("Game placing"),
+        "no Game placing label may render when authoritative place is null despite non-null competitive ranks: {body}"
+    );
+}
+
 /// Spawns an in-process mock game service answering `New` requests, for
 /// exercising `restart_game` without calling a real game service (per
 /// docs/CODING.md "Testing Conventions").

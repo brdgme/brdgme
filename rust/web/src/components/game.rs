@@ -305,7 +305,7 @@ fn PlayerInfo(
                 <div>"Points: " {player.points}</div>
                 {if is_finished {
                     place.map(|place| view! {
-                        <div>"Place: " {place}</div>
+                        <div>"Game placing: " {place}</div>
                     }.into_any())
                 } else {
                     (!player.is_bot && !form.is_empty()).then(|| view! {
