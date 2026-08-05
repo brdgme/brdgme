@@ -7,7 +7,10 @@ use crate::components::ColorRibbon;
 use crate::stats::FinishedGameRow;
 use crate::stats::FormResult;
 use crate::stats::GameTypeStats;
+use crate::stats::PlayerPageData;
+use crate::stats::ProfileUser;
 use crate::stats::viz::{FormStrip, Histogram, HistogramBucket, RatingChart, Sparkline};
+use uuid::Uuid;
 
 /// Reconstructs the recent rating series for one game type by walking
 /// backward from the current rating over the rated games' rating changes.
@@ -210,6 +213,74 @@ fn game_types_for_profile(mut game_types: Vec<GameTypeStats>) -> Vec<GameTypeSta
     game_types
 }
 
+/// The selected main-profile view. `view=results` selects the authoritative
+/// Game results; any missing or unknown value selects the default Competitive
+/// profile. The legacy `bots=1` query is ignored on the main profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProfileView {
+    Competitive,
+    Results,
+}
+
+/// Renders the shared profile header (name, colour ribbon, membership date)
+/// and the Add friend affordance for another logged-in viewer. Used by both
+/// the Competitive and Game results branches.
+fn profile_header(
+    user: &ProfileUser,
+    viewer_user_id: Option<Uuid>,
+    can_add_friend: bool,
+) -> impl IntoView {
+    let profile_user_id = user.user_id;
+    let add_friend_block = viewer_user_id
+        .filter(|vid| *vid != profile_user_id && can_add_friend)
+        .map(|_| {
+            let action = ServerAction::<crate::friends::SendFriendRequest>::new();
+            view! {
+                <div class="profile-add-friend">
+                    {move || match action.value().get() {
+                        Some(Ok(())) => view! { <span>"Friend request sent"</span> }.into_any(),
+                        Some(Err(e)) => view! { <span class="error">{e.to_string()}</span> }.into_any(),
+                        None => view! {
+                            <a href="#" on:click=move |ev| {
+                                ev.prevent_default();
+                                action.dispatch(crate::friends::SendFriendRequest {
+                                    user_id: Some(profile_user_id),
+                                    name: None,
+                                });
+                            }>"Add friend"</a>
+                        }.into_any(),
+                    }}
+                </div>
+            }
+        });
+    view! {
+        <header class="profile-header">
+            <h1>{user.name.clone()}</h1>
+            <ColorRibbon colors=user.pref_colors.clone()/>
+            <p class="profile-member-since">
+                "Member since " {user.created_at.date().to_string()}
+            </p>
+            {add_friend_block}
+        </header>
+    }
+}
+
+/// The Competitive / Game results view selector. The Competitive link omits the
+/// `view` query param; the Game results link sets `view=results`.
+fn profile_view_selector(name: &str, view: ProfileView) -> impl IntoView {
+    let enc_name = encode_path_segment(name);
+    let competitive_href = format!("/players/{}", enc_name);
+    let results_href = format!("/players/{}?view=results", enc_name);
+    let is_competitive = matches!(view, ProfileView::Competitive);
+    let is_results = matches!(view, ProfileView::Results);
+    view! {
+        <div class="history-filters">
+            <A href=competitive_href class:history-filter-selected=is_competitive>"Competitive"</A>
+            <A href=results_href class:history-filter-selected=is_results>"Game results"</A>
+        </div>
+    }
+}
+
 #[component]
 pub fn PlayersPage() -> impl IntoView {
     use crate::components::layout::MainLayout;
@@ -220,11 +291,21 @@ pub fn PlayersPage() -> impl IntoView {
         move || {
             (
                 params.get().get("name").unwrap_or_default(),
-                query.get().get("bots").as_deref() == Some("1"),
+                match query.get().get("view").as_deref() {
+                    Some("results") => ProfileView::Results,
+                    _ => ProfileView::Competitive,
+                },
             )
         },
-        |(name, include_single_human)| async move {
-            crate::stats::get_player_profile(name, include_single_human).await
+        |(name, view)| async move {
+            match view {
+                ProfileView::Competitive => crate::stats::get_player_profile(name, false)
+                    .await
+                    .map(|data| data.map(PlayerPageData::Competitive)),
+                ProfileView::Results => crate::stats::get_player_results(name)
+                    .await
+                    .map(|data| data.map(PlayerPageData::Results)),
+            }
         },
     );
 
@@ -243,7 +324,7 @@ pub fn PlayersPage() -> impl IntoView {
                                 <p>"No such player."</p>
                             </div>
                         }.into_any(),
-                        Ok(Some(d)) => {
+                        Ok(Some(PlayerPageData::Competitive(d))) => {
                             let win_rate = if d.totals.finished_games == 0 {
                                 "-".to_string()
                             } else {
@@ -252,64 +333,8 @@ pub fn PlayersPage() -> impl IntoView {
                             let profile_game_types = game_types_for_profile(d.game_types.clone());
                             view! {
                                 <div class="profile content-page">
-                                    <header class="profile-header">
-                                        <h1>{d.user.name.clone()}</h1>
-                                        <ColorRibbon colors=d.user.pref_colors.clone()/>
-                                        <p class="profile-member-since">
-                                            "Member since " {d.user.created_at.date().to_string()}
-                                        </p>
-                                        {
-                                            let profile_user_id = d.user.user_id;
-                                            d.viewer_user_id
-                                                .filter(|vid| *vid != profile_user_id && d.can_add_friend)
-                                                .map(|_| {
-                                                    let add_friend = ServerAction::<crate::friends::SendFriendRequest>::new();
-                                                    view! {
-                                                        <div class="profile-add-friend">
-                                                            {move || match add_friend.value().get() {
-                                                                Some(Ok(())) => view! { <span>"Friend request sent"</span> }.into_any(),
-                                                                Some(Err(e)) => view! { <span class="error">{e.to_string()}</span> }.into_any(),
-                                                                None => view! {
-                                                                    <a href="#" on:click=move |ev| {
-                                                                        ev.prevent_default();
-                                                                        add_friend.dispatch(crate::friends::SendFriendRequest {
-                                                                            user_id: Some(profile_user_id),
-                                                                            name: None,
-                                                                        });
-                                                                    }>"Add friend"</a>
-                                                                }.into_any(),
-                                                            }}
-                                                        </div>
-                                                    }
-                                                })
-                                        }
-                                    </header>
-                                    <div class="profile-bots-toggle">
-                                        {
-                                            let toggle_name = d.user.name.clone();
-                                            move || {
-                                                if query.get().get("bots").as_deref() == Some("1") {
-                                                    let href = format!(
-                                                        "/players/{}",
-                                                        encode_path_segment(&toggle_name),
-                                                    );
-                                                    view! {
-                                                        <A href=href>
-                                                            "Showing bot-only games - exclude them"
-                                                        </A>
-                                                    }.into_any()
-                                                } else {
-                                                    let href = format!(
-                                                        "/players/{}?bots=1",
-                                                        encode_path_segment(&toggle_name),
-                                                    );
-                                                    view! {
-                                                        <A href=href>"Include bot-only games"</A>
-                                                    }.into_any()
-                                                }
-                                            }
-                                        }
-                                    </div>
+                                    {profile_header(&d.user, d.viewer_user_id, d.can_add_friend)}
+                                    {profile_view_selector(&d.user.name, ProfileView::Competitive)}
                                     <section class="profile-overall-stats">
                                         <h2>"Overall"</h2>
                                         <p>"Finished games: " {d.totals.finished_games}</p>
@@ -323,7 +348,6 @@ pub fn PlayersPage() -> impl IntoView {
                                                 <p class="profile-no-games">"No finished games yet."</p>
                                             }.into_any()
                                         } else {
-                                            let bots = query.get().get("bots").as_deref() == Some("1");
                                             let player_name = d.user.name.clone();
                                             let game_types = profile_game_types.clone();
                                             let recent_form = d.recent_form.clone();
@@ -350,14 +374,11 @@ pub fn PlayersPage() -> impl IntoView {
                                                     .peak_rating
                                                     .map(|r| r.to_string())
                                                     .unwrap_or_else(|| "-".to_string());
-                                                let mut href = format!(
+                                                let href = format!(
                                                     "/players/{}/{}",
                                                     encode_path_segment(&player_name),
                                                     encode_path_segment(&s.game_type_name),
                                                 );
-                                                if bots {
-                                                    href.push_str("?bots=1");
-                                                }
                                                 view! {
                                                     <tr>
                                                         <td><A href=href>{s.game_type_name.clone()}</A></td>
@@ -496,6 +517,71 @@ pub fn PlayersPage() -> impl IntoView {
                                                     </table>
                                                 </div>
                                             }.into_any()
+                                        }}
+                                    </section>
+                                </div>
+                            }.into_any()
+                        }
+                        Ok(Some(PlayerPageData::Results(d))) => {
+                            view! {
+                                <div class="profile content-page">
+                                    {profile_header(&d.user, d.viewer_user_id, d.can_add_friend)}
+                                    {profile_view_selector(&d.user.name, ProfileView::Results)}
+                                    <section class="profile-game-results">
+                                        <h2>"Game results"</h2>
+                                        {if d.game_results.is_empty() {
+                                            view! {
+                                                <p class="profile-no-games">"No finished games yet."</p>
+                                            }.into_any()
+                                        } else {
+                                            let game_results = d.game_results.clone();
+                                            let rows = game_results.into_iter().map(|game| {
+                                                let game_href = format!("/games/{}", game.game_id);
+                                                let finished = game
+                                                    .finished_at
+                                                    .map(|t| t.date().to_string())
+                                                    .unwrap_or_else(|| "-".to_string());
+                                                let seats = game.seats.iter().map(|seat| {
+                                                    let identity = match (&seat.user_name, &seat.bot_name) {
+                                                        (Some(user_name), Some(bot_name)) => {
+                                                            format!("{} (bot: {})", user_name, bot_name)
+                                                        }
+                                                        (Some(user_name), None) => user_name.clone(),
+                                                        (None, Some(bot_name)) => bot_name.clone(),
+                                                        (None, None) => "-".to_string(),
+                                                    };
+                                                    view! {
+                                                        <tr>
+                                                            <td>{identity}</td>
+                                                            {seat.place.map(|place| {
+                                                                view! {
+                                                                    <>
+                                                                        <td>"Game placing"</td>
+                                                                        <td>{place.to_string()}</td>
+                                                                    </>
+                                                                }.into_any()
+                                                            })}
+                                                        </tr>
+                                                    }
+                                                }).collect_view();
+                                                view! {
+                                                    <div class="profile-game-result">
+                                                        <h3><A href=game_href>{game.game_type_name.clone()}</A></h3>
+                                                        <p class="profile-game-result-finished">{finished}</p>
+                                                        <div class="table-scroll">
+                                                            <table>
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>"Player"</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>{seats}</tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                }
+                                            }).collect_view();
+                                            view! { <div class="profile-game-results-list">{rows}</div> }.into_any()
                                         }}
                                     </section>
                                 </div>

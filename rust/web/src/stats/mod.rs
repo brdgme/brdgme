@@ -196,6 +196,17 @@ pub struct PlayerResultsData {
     pub viewer_user_id: Option<Uuid>,
     pub can_add_friend: bool,
 }
+
+/// The main-profile response envelope: the single blocking resource dispatches
+/// the selected view to either the competitive profile data (default) or the
+/// authoritative Game results data. Serialized to the client like every other
+/// resource value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PlayerPageData {
+    Competitive(PlayerProfileData),
+    Results(PlayerResultsData),
+}
+
 #[cfg(feature = "ssr")]
 mod queries;
 
