@@ -40,28 +40,36 @@ pub async fn find_game_type_name(pool: &PgPool, name: &str) -> Result<Option<Str
     Ok(row.map(|row| row.name))
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct OverallTotalsRow {
+    finished_games: i64,
+    wins: i64,
+}
+
 pub async fn overall_totals(
     pool: &PgPool,
     user_id: Uuid,
     include_single_human: bool,
 ) -> Result<super::OverallTotals> {
-    let row = sqlx::query!(
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    let row: OverallTotalsRow = sqlx::query_as(
         r#"
         SELECT
-            count(*) AS "finished_games!",
-            count(*) FILTER (WHERE gp.place = 1) AS "wins!"
+            count(*) AS finished_games,
+            count(*) FILTER (WHERE gp.ranked_placing = 1) AS wins
         FROM game_players gp
         JOIN games g ON g.id = gp.game_id
         WHERE gp.user_id = $1
           AND g.is_finished = true
+          AND gp.ranked_placing IS NOT NULL
           AND (
               SELECT count(*) FROM game_players gp2
-              WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL
+              WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL AND gp2.ranked_placing IS NOT NULL
           ) >= CASE WHEN $2 THEN 1 ELSE 2 END
         "#,
-        user_id,
-        include_single_human
     )
+    .bind(user_id)
+    .bind(include_single_human)
     .fetch_one(pool)
     .await?;
 
@@ -101,18 +109,20 @@ pub async fn game_type_stats(
             SELECT
                 gt.id AS game_type_id,
                 gt.name AS game_type_name,
-                gp.place,
-                (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS n
+                gp.ranked_placing AS place,
+                (SELECT count(*) FROM game_players gp2
+                 WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL AND gp2.ranked_placing IS NOT NULL) AS n
             FROM game_players gp
             JOIN games g ON g.id = gp.game_id
             JOIN game_versions gv ON gv.id = g.game_version_id
             JOIN game_types gt ON gt.id = gv.game_type_id
             WHERE gp.user_id = $1
               AND g.is_finished = true
+              AND gp.ranked_placing IS NOT NULL
               AND ($3::text IS NULL OR gt.name = $3)
               AND (
                   SELECT count(*) FROM game_players gp3
-                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL
+                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL AND gp3.ranked_placing IS NOT NULL
               ) >= CASE WHEN $2 THEN 1 ELSE 2 END
         ),
         agg AS (
@@ -525,6 +535,16 @@ pub async fn game_history_count(
     Ok(count)
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct HeadToHeadRow {
+    user_id: Uuid,
+    name: String,
+    games: i64,
+    wins: i64,
+    losses: i64,
+    ties: i64,
+}
+
 pub async fn head_to_head(
     pool: &PgPool,
     user_id: Uuid,
@@ -532,10 +552,11 @@ pub async fn head_to_head(
     include_single_human: bool,
     viewer: Option<Uuid>,
 ) -> Result<Vec<super::HeadToHead>> {
-    let rows = sqlx::query!(
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    let rows: Vec<HeadToHeadRow> = sqlx::query_as(
         r#"
         WITH qualifying AS (
-            SELECT g.id AS game_id, gp.place
+            SELECT g.id AS game_id, gp.ranked_placing AS place
             FROM game_players gp
             JOIN games g ON g.id = gp.game_id
             JOIN game_versions gv ON gv.id = g.game_version_id
@@ -543,9 +564,10 @@ pub async fn head_to_head(
             WHERE gp.user_id = $1
               AND g.is_finished = true
               AND gt.name = $2
+              AND gp.ranked_placing IS NOT NULL
               AND (
                   SELECT count(*) FROM game_players gp2
-                  WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL
+                  WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL AND gp2.ranked_placing IS NOT NULL
               ) >= CASE WHEN $3 THEN 1 ELSE 2 END
         ),
         opponent_rows AS (
@@ -553,33 +575,34 @@ pub async fn head_to_head(
                 q.place AS my_place,
                 gp.user_id AS opp_id,
                 u.name AS opp_name,
-                gp.place AS opp_place
+                gp.ranked_placing AS opp_place
             FROM qualifying q
             JOIN game_players gp
                 ON gp.game_id = q.game_id AND gp.user_id IS NOT NULL AND gp.user_id <> $1
+                AND gp.ranked_placing IS NOT NULL
             JOIN users u ON u.id = gp.user_id
         )
         SELECT
-            opp_id AS "user_id!",
-            opp_name AS "name!",
-            count(*) AS "games!",
+            opp_id AS user_id,
+            opp_name AS name,
+            count(*) AS games,
             count(*) FILTER (
-                WHERE my_place IS NOT NULL AND opp_place IS NOT NULL AND my_place < opp_place
-            ) AS "wins!",
+                WHERE my_place < opp_place
+            ) AS wins,
             count(*) FILTER (
-                WHERE my_place IS NOT NULL AND opp_place IS NOT NULL AND my_place > opp_place
-            ) AS "losses!",
+                WHERE my_place > opp_place
+            ) AS losses,
             count(*) FILTER (
-                WHERE my_place IS NOT NULL AND opp_place IS NOT NULL AND my_place = opp_place
-            ) AS "ties!"
+                WHERE my_place = opp_place
+            ) AS ties
         FROM opponent_rows
         GROUP BY opp_id, opp_name
-        ORDER BY "games!" DESC, opp_name
+        ORDER BY games DESC, name
         "#,
-        user_id,
-        game_type_name,
-        include_single_human
     )
+    .bind(user_id)
+    .bind(game_type_name)
+    .bind(include_single_human)
     .fetch_all(pool)
     .await?;
 
@@ -610,22 +633,34 @@ pub async fn head_to_head(
         .collect())
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct RecentFormRow {
+    game_type_name: String,
+    game_id: Uuid,
+    finished_at: Option<PrimitiveDateTime>,
+    place: Option<i32>,
+    rating_change: Option<i32>,
+    player_count: i64,
+}
+
 pub async fn recent_form(
     pool: &PgPool,
     user_id: Uuid,
     per_type: i64,
     include_single_human: bool,
 ) -> Result<Vec<super::GameTypeForm>> {
-    let rows = sqlx::query!(
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    let rows: Vec<RecentFormRow> = sqlx::query_as(
         r#"
         WITH qualifying AS (
             SELECT
                 gt.name AS game_type_name,
                 g.id AS game_id,
                 g.finished_at,
-                COALESCE(gp.ranked_placing, gp.place) AS place,
+                gp.ranked_placing AS place,
                 gp.rating_change,
-                (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
+                (SELECT count(*) FROM game_players gp2
+                 WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL AND gp2.ranked_placing IS NOT NULL) AS player_count,
                 row_number() OVER (
                     PARTITION BY gt.id ORDER BY g.finished_at DESC NULLS LAST, g.id
                 ) AS rn
@@ -635,26 +670,27 @@ pub async fn recent_form(
             JOIN game_types gt ON gt.id = gv.game_type_id
             WHERE gp.user_id = $1
               AND g.is_finished = true
+              AND gp.ranked_placing IS NOT NULL
               AND (
                   SELECT count(*) FROM game_players gp3
-                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL
+                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL AND gp3.ranked_placing IS NOT NULL
               ) >= CASE WHEN $3 THEN 1 ELSE 2 END
         )
         SELECT
-            game_type_name AS "game_type_name!",
-            game_id AS "game_id!",
+            game_type_name AS game_type_name,
+            game_id AS game_id,
             finished_at,
             place,
             rating_change,
-            player_count AS "player_count!"
+            player_count AS player_count
         FROM qualifying
         WHERE rn <= $2
-        ORDER BY "game_type_name!", finished_at ASC, "game_id!"
+        ORDER BY game_type_name, finished_at ASC, game_id
         "#,
-        user_id,
-        per_type,
-        include_single_human
     )
+    .bind(user_id)
+    .bind(per_type)
+    .bind(include_single_human)
     .fetch_all(pool)
     .await?;
 
@@ -709,9 +745,10 @@ pub async fn recent_form_for_game_type(
                 gp.user_id AS user_id,
                 g.id AS game_id,
                 g.finished_at,
-                COALESCE(gp.ranked_placing, gp.place) AS place,
+                gp.ranked_placing AS place,
                 gp.rating_change,
-                (SELECT count(*) FROM game_players gp2 WHERE gp2.game_id = g.id) AS player_count,
+                (SELECT count(*) FROM game_players gp2
+                 WHERE gp2.game_id = g.id AND gp2.user_id IS NOT NULL AND gp2.ranked_placing IS NOT NULL) AS player_count,
                 row_number() OVER (
                     PARTITION BY gp.user_id ORDER BY g.finished_at DESC NULLS LAST, g.id
                 ) AS rn
@@ -722,9 +759,10 @@ pub async fn recent_form_for_game_type(
             WHERE gp.user_id = ANY($1)
               AND gt.id = $2
               AND g.is_finished = true
+              AND gp.ranked_placing IS NOT NULL
               AND (
                   SELECT count(*) FROM game_players gp3
-                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL
+                  WHERE gp3.game_id = g.id AND gp3.user_id IS NOT NULL AND gp3.ranked_placing IS NOT NULL
               ) >= 2
         )
         SELECT
@@ -866,20 +904,25 @@ pub(crate) mod fixtures {
             } else {
                 None
             };
+            // Competitive fixtures default a human seat's ranked_placing to its
+            // authoritative place; tests that need a historical null-ranked or a
+            // diverging competitive placing override this directly.
+            let ranked_placing = if user_id.is_some() { *place } else { None };
 
-            sqlx::query!(
+            sqlx::query(
                 r#"INSERT INTO game_players
                     (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
-                     is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, rating_change)
-                   VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, true, false, now(), now(), false, true, $6, $7)"#,
-                game_id,
-                *user_id,
-                game_bot_id,
-                i as i32,
-                COLORS[i % COLORS.len()],
-                *place,
-                *rating_change
+                     is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, ranked_placing, rating_change)
+                   VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, true, false, now(), now(), false, true, $6, $7, $8)"#,
             )
+            .bind(game_id)
+            .bind(*user_id)
+            .bind(game_bot_id)
+            .bind(i as i32)
+            .bind(COLORS[i % COLORS.len()])
+            .bind(*place)
+            .bind(ranked_placing)
+            .bind(*rating_change)
             .execute(pool)
             .await
             .expect("insert game_player");
@@ -1008,6 +1051,72 @@ mod tests {
         assert_eq!(bob_totals.win_percent, 100.0);
     }
 
+    /// Historical null-ranked rows (finished authoritative `place` but no
+    /// competitive `ranked_placing`) never contribute to competitive counts:
+    /// they are excluded from both the player's own rows and the eligibility
+    /// denominator, and are never repaired.
+    #[sqlx::test]
+    async fn competitive_queries_exclude_historical_null_ranked_games(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        let legacy = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(2), None), (Some(opponent), Some(1), None)],
+        )
+        .await;
+        sqlx::query("UPDATE game_players SET ranked_placing = NULL WHERE game_id = $1")
+            .bind(legacy)
+            .execute(&pool)
+            .await
+            .expect("null ranked placing");
+
+        let totals = overall_totals(&pool, user, false).await.expect("query ok");
+        assert_eq!(totals.finished_games, 1);
+        assert_eq!(totals.wins, 1);
+
+        let stats = game_type_stats(&pool, user, false, None)
+            .await
+            .expect("query ok");
+        let camel = stats
+            .iter()
+            .find(|s| s.game_type_name == "Camel Up")
+            .expect("camel up present");
+        assert_eq!(camel.games, 1);
+        assert_eq!(camel.wins, 1);
+
+        let forms = recent_form(&pool, user, 10, false).await.expect("query ok");
+        let camel_form = forms
+            .iter()
+            .find(|f| f.game_type_name == "Camel Up")
+            .expect("camel up form present");
+        assert_eq!(camel_form.results.len(), 1);
+        assert_eq!(camel_form.results[0].place, Some(1));
+
+        // The null-ranked game also fails to meet the two-ranked-human gate,
+        // so it is absent even when its own row carries a competitive place.
+        let gt_only = game_type_stats(&pool, user, false, Some("Camel Up"))
+            .await
+            .expect("query ok");
+        assert_eq!(gt_only[0].games, 1);
+        assert_eq!(
+            gt_only[0].avg_place_percentile,
+            Some(1.0),
+            "only the ranked game remains; percentile (2 - 1) / (2 - 1)"
+        );
+    }
+
     #[sqlx::test]
     async fn game_type_stats_includes_rating_only_types_and_orders_by_name(pool: PgPool) {
         let user = make_user(&pool, "alice").await;
@@ -1045,9 +1154,15 @@ mod tests {
         assert_eq!(stats[1].peak_rating, Some(1350));
     }
 
+    /// Competitive denominators: only eligible ranked human rows count. A
+    /// user-vs-bots game has n = 1 so no percentile is produced (n >= 2
+    /// required), and an all-human game's percentile divides by the ranked
+    /// human count, not the seat count.
     #[sqlx::test]
     async fn game_type_stats_computes_avg_place_percentile(pool: PgPool) {
         let user = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let carol = make_user(&pool, "carol").await;
         let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
 
         insert_finished_game(
@@ -1063,41 +1178,52 @@ mod tests {
         )
         .await;
 
+        // Pure bots contribute no ranked-human denominator: n = 1.
+        let stats = game_type_stats(&pool, user, true, None)
+            .await
+            .expect("query ok");
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].games, 1);
+        assert_eq!(stats[0].wins, 1);
+        assert_eq!(
+            stats[0].avg_place_percentile, None,
+            "single ranked participant yields no percentile"
+        );
+
+        // Three ranked humans: percentile uses the ranked-human denominator n = 3.
         insert_finished_game(
             &pool,
             gv,
             datetime!(2026-01-02 00:00:00),
             &[
                 (Some(user), Some(3), None),
-                (None, Some(1), None),
-                (None, Some(2), None),
+                (Some(bob), Some(2), None),
+                (Some(carol), Some(1), None),
             ],
         )
         .await;
 
-        let stats = game_type_stats(&pool, user, true, None)
-            .await
-            .expect("query ok");
-        assert_eq!(stats.len(), 1);
-        assert_eq!(stats[0].avg_place_percentile, Some(0.5));
-
-        let (_gt2, gv2) = make_game_type(&pool, "Duel").await;
+        // Tied competitive places: both ranked first count as wins.
         insert_finished_game(
             &pool,
-            gv2,
+            gv,
             datetime!(2026-01-03 00:00:00),
-            &[(Some(user), Some(2), None), (None, Some(1), None)],
+            &[
+                (Some(user), Some(1), None),
+                (Some(bob), Some(2), None),
+                (Some(carol), Some(1), None),
+            ],
         )
         .await;
 
-        let stats2 = game_type_stats(&pool, user, true, None)
+        let stats = game_type_stats(&pool, user, false, None)
             .await
             .expect("query ok");
-        let duel = stats2
-            .iter()
-            .find(|s| s.game_type_name == "Duel")
-            .expect("duel present");
-        assert_eq!(duel.avg_place_percentile, Some(0.0));
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].games, 2);
+        assert_eq!(stats[0].wins, 1, "tied ranked-first game counts as a win");
+        // Both ranked games: (3 - 3) / 2 = 0.0 and (3 - 1) / 2 = 1.0.
+        assert_eq!(stats[0].avg_place_percentile, Some(0.5));
     }
 
     #[sqlx::test]
@@ -1515,6 +1641,100 @@ mod tests {
         assert!(h2h.is_empty());
     }
 
+    /// Head-to-head requires a non-null competitive placement for both human
+    /// participants: a game where the opponent's `ranked_placing` is null must
+    /// not count toward the pair, even though the pair passed the ranked-human
+    /// eligibility gate.
+    #[sqlx::test]
+    async fn head_to_head_requires_competitive_placement_for_both(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+
+        let legacy = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(1), None), (Some(opponent), Some(2), None)],
+        )
+        .await;
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = NULL WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(legacy)
+        .bind(opponent)
+        .execute(&pool)
+        .await
+        .expect("null opponent ranked placing");
+
+        let h2h = head_to_head(&pool, user, "Camel Up", true, None)
+            .await
+            .expect("query ok");
+        assert_eq!(h2h.len(), 1);
+        assert_eq!(h2h[0].user_id, Some(opponent));
+        assert_eq!(h2h[0].games, 1);
+        assert_eq!(h2h[0].wins, 1);
+        assert_eq!(h2h[0].losses, 0);
+        assert_eq!(h2h[0].ties, 0);
+    }
+
+    /// A replaced human retains its human identity (user_id) alongside a
+    /// replacement bot seat and remains an eligible competitive participant:
+    /// it counts toward the eligibility denominator and head-to-head.
+    #[sqlx::test]
+    async fn competitive_queries_include_replaced_humans_as_participants(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let replaced = make_user(&pool, "dave").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(replaced), Some(2), None)],
+        )
+        .await;
+        let bot_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO game_bots (id, game_id, name, bot_name)
+               VALUES (uuid_generate_v4(), $1, 'replacement-bot', 'medium')
+               RETURNING id"#,
+        )
+        .bind(game)
+        .fetch_one(&pool)
+        .await
+        .expect("insert replacement bot");
+        sqlx::query(
+            "UPDATE game_players SET game_bot_id = $1 WHERE game_id = $2 AND user_id = $3",
+        )
+        .bind(bot_id)
+        .bind(game)
+        .bind(replaced)
+        .execute(&pool)
+        .await
+        .expect("attach replacement bot seat");
+
+        let totals = overall_totals(&pool, user, false).await.expect("query ok");
+        assert_eq!(totals.finished_games, 1);
+        assert_eq!(totals.wins, 1);
+
+        let h2h = head_to_head(&pool, user, "Camel Up", false, None)
+            .await
+            .expect("query ok");
+        assert_eq!(h2h.len(), 1);
+        assert_eq!(h2h[0].user_id, Some(replaced));
+        assert_eq!(h2h[0].name, "dave");
+        assert_eq!(h2h[0].games, 1);
+        assert_eq!(h2h[0].wins, 1);
+    }
+
     #[sqlx::test]
     async fn recent_form_returns_last_n_chronological(pool: PgPool) {
         let user = make_user(&pool, "alice").await;
@@ -1582,6 +1802,104 @@ mod tests {
             .expect("duel present");
         assert_eq!(duel.results.len(), 1);
         assert_eq!(duel.results[0].game_id, g5);
+    }
+
+    /// A historical null-ranked game must be filtered inside the qualifying
+    /// CTE before `row_number()`, so it can neither enter the window nor
+    /// displace a genuinely recent ranked game.
+    #[sqlx::test]
+    async fn recent_form_null_ranked_does_not_displace_recent(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let g1 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(user), Some(1), None), (Some(make_user(&pool, "bob").await), Some(2), None)],
+        )
+        .await;
+        let g2 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(user), Some(2), None), (Some(make_user(&pool, "carol").await), Some(1), None)],
+        )
+        .await;
+        let g3 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-03 00:00:00),
+            &[(Some(user), Some(1), None), (Some(make_user(&pool, "dave").await), Some(2), None)],
+        )
+        .await;
+
+        // Newest by finished_at but missing the user's competitive placing.
+        let legacy = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-04 00:00:00),
+            &[
+                (Some(user), Some(3), None),
+                (Some(make_user(&pool, "erin").await), Some(1), None),
+                (Some(make_user(&pool, "frank").await), Some(2), None),
+            ],
+        )
+        .await;
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = NULL WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(legacy)
+        .bind(user)
+        .execute(&pool)
+        .await
+        .expect("null user ranked placing");
+
+        let forms = recent_form(&pool, user, 3, false).await.expect("query ok");
+        let camel = forms
+            .iter()
+            .find(|f| f.game_type_name == "Camel Up")
+            .expect("camel up present");
+        let ids: Vec<Uuid> = camel.results.iter().map(|r| r.game_id).collect();
+        assert!(
+            !ids.contains(&legacy),
+            "null-ranked game displaced a recent game: {ids:?}"
+        );
+        assert_eq!(ids, vec![g1, g2, g3], "window holds the ranked games, oldest first");
+    }
+
+    /// Form `player_count` is a competitive participant count: pure bots and
+    /// historical null-ranked rows do not contribute.
+    #[sqlx::test]
+    async fn recent_form_player_count_counts_ranked_humans_only(pool: PgPool) {
+        let user = make_user(&pool, "alice").await;
+        let opponent = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(user), Some(1), None),
+                (Some(opponent), Some(2), None),
+                (None, Some(3), None),
+                (None, Some(4), None),
+            ],
+        )
+        .await;
+
+        let forms = recent_form(&pool, user, 1, true).await.expect("query ok");
+        let camel = forms
+            .iter()
+            .find(|f| f.game_type_name == "Camel Up")
+            .expect("camel up present");
+        assert_eq!(camel.results.len(), 1);
+        assert_eq!(camel.results[0].place, Some(1));
+        assert_eq!(
+            camel.results[0].player_count, 2,
+            "two ranked humans, not four seats"
+        );
     }
 
     // Reconstructed-final == rating drift is already covered at the fixture
@@ -1974,6 +2292,71 @@ mod tests {
             "NULL-finished_at legacy game displaced a recent game: {ids:?}"
         );
         assert_eq!(ids, vec![g1, g2, g3], "window holds the dated games, oldest first");
+    }
+
+    /// A historical null-ranked row must be filtered from the qualifying CTE
+    /// before `row_number()`, so it cannot displace a valid recent game from a
+    /// per-user form window even when it is the newest by `finished_at`.
+    #[sqlx::test]
+    async fn recent_form_for_game_type_null_ranked_does_not_displace_recent(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let g1 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+        let g2 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-02 00:00:00),
+            &[(Some(alice), Some(2), None), (Some(bob), Some(1), None)],
+        )
+        .await;
+        let g3 = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-03 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+
+        // Newest by finished_at but the target user lacks a competitive placing.
+        let legacy = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-04 00:00:00),
+            &[
+                (Some(alice), Some(2), None),
+                (Some(bob), Some(1), None),
+                (Some(make_user(&pool, "carol").await), Some(3), None),
+            ],
+        )
+        .await;
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = NULL WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(legacy)
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .expect("null alice ranked placing");
+
+        let form = recent_form_for_game_type(&pool, &[alice], gt, 3)
+            .await
+            .expect("query ok");
+        let results = form.get(&alice).expect("alice present");
+
+        let ids: Vec<Uuid> = results.iter().map(|r| r.game_id).collect();
+        assert!(
+            !ids.contains(&legacy),
+            "NULL-ranked legacy game displaced a recent game: {ids:?}"
+        );
+        assert_eq!(ids, vec![g1, g2, g3], "window holds the ranked games, oldest first");
     }
 
     #[sqlx::test]
