@@ -1881,6 +1881,387 @@ mod tests {
         assert!(is_finished);
     }
 
+    // DRM-03b2c email action parity: the exact user-facing messages the shared
+    // `conflict_or_internal` mapping produces for the typed finished, stale,
+    // and not-enough-active-humans conflicts (asserted web-side in
+    // `conflict_or_internal_maps_typed_finished_and_stale_errors`) surface
+    // through `classify_server_fn_error` as the same bare strings to the email
+    // user, so web and email present one consistent outcome.
+    #[test]
+    fn classify_server_fn_error_surfaces_shared_conflict_messages_as_bare_user_text() {
+        for msg in [
+            "Game is already finished",
+            "The game changed while this was being processed; nothing was changed. Please try again.",
+            "Concede is not available: at least two active humans are required",
+        ] {
+            match classify_server_fn_error("end", leptos::prelude::ServerFnError::new(msg)) {
+                CommandError::User(actual) => assert_eq!(actual, msg),
+                CommandError::Internal(e) => panic!("expected User, got Internal({e})"),
+            }
+        }
+    }
+
+    /// An unfinished two-human game. Returns `(game_id, creator_id,
+    /// opponent_id)`.
+    async fn make_unfinished_two_human_game(
+        pool: &sqlx::PgPool,
+        creator_name: &str,
+        opponent_name: &str,
+    ) -> (uuid::Uuid, uuid::Uuid, uuid::Uuid) {
+        let creator = seed_user(pool, creator_name).await;
+        let opponent = seed_user(pool, opponent_name).await;
+        let game_version_id = make_game_version(pool).await;
+        let game = crate::db::create_game_with_users(
+            pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: creator,
+                opponent_ids: &[opponent],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        (game.id, creator, opponent)
+    }
+
+    async fn game_player_id_for(
+        pool: &sqlx::PgPool,
+        game_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> uuid::Uuid {
+        sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+            .bind(game_id)
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    fn make_email_ctx<'a>(
+        pool: &'a sqlx::PgPool,
+        http_client: &'a reqwest::Client,
+        broadcaster: &'a crate::websocket::GameBroadcaster,
+        jetstream: &'a async_nats::jetstream::Context,
+        game_id: uuid::Uuid,
+        game_player_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> EmailCommandCtx<'a> {
+        EmailCommandCtx {
+            pool,
+            http_client,
+            broadcaster,
+            jetstream,
+            resend: None,
+            game_id,
+            game_player_id,
+            user_id,
+            position: 0,
+        }
+    }
+
+    // DRM-03b2c email action parity: a departed actor gets the same End
+    // rejection the web action surfaces, leaving the game unfinished.
+    #[sqlx::test]
+    async fn run_end_rejects_departed_actor(pool: sqlx::PgPool) {
+        let (game_id, _creator, opponent) =
+            make_unfinished_two_human_game(&pool, "end-dep-actor", "end-dep-opp").await;
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_id)
+        .bind(opponent)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = make_email_ctx(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            game_id,
+            game_player_id_for(&pool, game_id, opponent).await,
+            opponent,
+        );
+
+        match run_end(&ctx).await {
+            Err(CommandError::User(m)) => {
+                assert_eq!(m, "End game is only available to the last human");
+            }
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!is_finished, "a rejected End must leave the game unfinished");
+    }
+
+    // DRM-03b2c email action parity: with zero active humans, an actor from an
+    // earlier departure event is rejected.
+    #[sqlx::test]
+    async fn run_end_rejects_earlier_departure_event_actor(pool: sqlx::PgPool) {
+        let (game_id, creator, opponent) =
+            make_unfinished_two_human_game(&pool, "end-earlier-a", "end-earlier-b").await;
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-01 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 1 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_id)
+        .bind(opponent)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-02 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 2 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_id)
+        .bind(creator)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = make_email_ctx(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            game_id,
+            game_player_id_for(&pool, game_id, opponent).await,
+            opponent,
+        );
+
+        match run_end(&ctx).await {
+            Err(CommandError::User(m)) => {
+                assert_eq!(m, "End game is only available to the last human");
+            }
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!is_finished, "a rejected End must leave the game unfinished");
+    }
+
+    // DRM-03b2c email action parity: with two or more active humans, the email
+    // End command surfaces the same rejection as the web action.
+    #[sqlx::test]
+    async fn run_end_rejects_two_active_humans(pool: sqlx::PgPool) {
+        let (game_id, creator, _opponent) =
+            make_unfinished_two_human_game(&pool, "end-two-a", "end-two-b").await;
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = make_email_ctx(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            game_id,
+            game_player_id_for(&pool, game_id, creator).await,
+            creator,
+        );
+
+        match run_end(&ctx).await {
+            Err(CommandError::User(m)) => {
+                assert_eq!(m, "End game is only available to the last human");
+            }
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!is_finished, "a rejected End must leave the game unfinished");
+    }
+
+    // DRM-03b2c email action parity: with zero active humans, a human tied in
+    // the latest departure event stops the game by email. One tied success
+    // covers the tie at the action level; the writer-level matrix (c2) already
+    // exercises every tied participant on separate games.
+    #[sqlx::test]
+    async fn run_end_ends_game_for_latest_departed_human_when_zero_active(pool: sqlx::PgPool) {
+        let (game_id, creator, _opponent) =
+            make_unfinished_two_human_game(&pool, "end-zero-a", "end-zero-b").await;
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id IS NOT NULL",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = make_email_ctx(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            game_id,
+            game_player_id_for(&pool, game_id, creator).await,
+            creator,
+        );
+
+        let reply = run_end(&ctx)
+            .await
+            .expect("a latest departure event human may stop by email");
+        assert_eq!(status_msg(reply), "Game ended.");
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(is_finished);
+    }
+
+    // DRM-03b2c email action parity: ending a finished game surfaces the shared
+    // "Game is already finished" outcome to the email user.
+    #[sqlx::test]
+    async fn run_end_rejects_finished_game(pool: sqlx::PgPool) {
+        let creator = seed_user(&pool, "end-finished").await;
+        let opponent = seed_user(&pool, "end-finished-opp").await;
+        let game_version_id = make_game_version(&pool).await;
+        let game = crate::db::create_game_with_users(
+            &pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[],
+                eliminated: &[],
+                placings: &[1, 2],
+                points: &[1.0, 0.0],
+                creator_id: creator,
+                opponent_ids: &[opponent],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "final_state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = make_email_ctx(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            game.id,
+            game_player_id_for(&pool, game.id, creator).await,
+            creator,
+        );
+
+        match run_end(&ctx).await {
+            Err(CommandError::User(m)) => assert_eq!(m, "Game is already finished"),
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+    }
+
+    // DRM-03b2c email action parity: with exactly one active human, Concede is
+    // rejected (even though a replacement bot exists) and End applies to the
+    // same game, terminating it without bot replacement.
+    #[sqlx::test]
+    async fn run_concede_rejects_sole_active_human_then_end_applies(pool: sqlx::PgPool) {
+        sqlx::query("INSERT INTO bots (name, can_replace_humans) VALUES ('Hard', true)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (game_id, creator, opponent) =
+            make_unfinished_two_human_game(&pool, "end-solo-a", "end-solo-opp").await;
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_id)
+        .bind(opponent)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
+        let http_client = reqwest::Client::new();
+        let ctx = make_email_ctx(
+            &pool,
+            &http_client,
+            &broadcaster,
+            &jetstream,
+            game_id,
+            game_player_id_for(&pool, game_id, creator).await,
+            creator,
+        );
+
+        match run_concede(&ctx).await {
+            Err(CommandError::User(m)) => {
+                assert!(
+                    m.contains("at least two active humans"),
+                    "unexpected concede rejection: {m}"
+                );
+            }
+            Err(CommandError::Internal(e)) => panic!("expected User error, got Internal: {e}"),
+            Ok(_) => panic!("expected User error, got Ok"),
+        }
+
+        let (is_finished, game_bot_id): (bool, Option<uuid::Uuid>) = sqlx::query_as(
+            "SELECT g.is_finished, gp.game_bot_id FROM games g \
+             JOIN game_players gp ON gp.game_id = g.id \
+             WHERE g.id = $1 AND gp.user_id = $2",
+        )
+        .bind(game_id)
+        .bind(creator)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!is_finished);
+        assert!(
+            game_bot_id.is_none(),
+            "the sole active human must not be replaced"
+        );
+
+        let reply = run_end(&ctx)
+            .await
+            .expect("End replaces Concede for the sole active human");
+        assert_eq!(status_msg(reply), "Game ended.");
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(is_finished, "End must terminate the game");
+    }
+
     async fn make_game_version(pool: &sqlx::PgPool) -> uuid::Uuid {
         let game_type_id: uuid::Uuid = sqlx::query_scalar(
             "INSERT INTO game_types (name, player_counts) VALUES ($1, $2) RETURNING id",

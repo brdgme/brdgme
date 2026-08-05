@@ -2996,6 +2996,17 @@ mod tests {
             }
             _ => panic!("expected ServerError, got {other:?}"),
         }
+
+        let not_enough_humans =
+            conflict_or_internal("test", anyhow::anyhow!(crate::db::NotEnoughActiveHumans));
+        match not_enough_humans {
+            leptos::prelude::ServerFnError::ServerError(m) => {
+                assert_eq!(
+                    m, "Concede is not available: at least two active humans are required"
+                );
+            }
+            _ => panic!("expected ServerError, got {not_enough_humans:?}"),
+        }
     }
 
     fn dt() -> time::PrimitiveDateTime {
@@ -3458,5 +3469,143 @@ mod tests {
             game_bot_id.is_none(),
             "the sole active human must not be replaced"
         );
+    }
+
+    /// An unfinished two-human game. Returns `(game_id, creator_id,
+    /// opponent_id)`.
+    async fn make_unfinished_two_player_game(pool: &PgPool) -> (Uuid, Uuid, Uuid) {
+        let creator = make_user(pool, "creator").await;
+        let opponent = make_user(pool, "opponent").await;
+        let game_version_id = make_game_version(pool).await;
+        let game = crate::db::create_game_with_users(
+            pool,
+            crate::db::CreateGameOpts {
+                game_version_id,
+                whose_turn: &[0],
+                eliminated: &[],
+                placings: &[],
+                points: &[],
+                creator_id: creator,
+                opponent_ids: &[opponent],
+                opponent_emails: &[],
+                bot_slots: &[],
+                chat_id: None,
+                game_state: "state",
+                all_accepted: false,
+            },
+        )
+        .await
+        .unwrap();
+        (game.id, creator, opponent)
+    }
+
+    // DRM-03b2c web action parity: the departed human is rejected by the shared
+    // End action even while the sole active human stays authorized.
+    #[sqlx::test]
+    async fn end_core_rejects_departed_actor(pool: PgPool) {
+        let (game_id, _creator, opponent) = make_unfinished_two_player_game(&pool).await;
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_id)
+        .bind(opponent)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        match end_core(&pool, game_id, ActingPlayer::User(opponent)).await {
+            Err(ServerFnError::ServerError(m)) => {
+                assert_eq!(m, "End game is only available to the last human");
+            }
+            other => panic!("expected ServerError, got {other:?}"),
+        }
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!is_finished, "a rejected End must leave the game unfinished");
+    }
+
+    // DRM-03b2c web action parity: with zero active humans, an actor from an
+    // earlier departure event is rejected.
+    #[sqlx::test]
+    async fn end_core_rejects_earlier_departure_event_actor(pool: PgPool) {
+        let (game_id, creator, opponent) = make_unfinished_two_player_game(&pool).await;
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-01 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 1 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_id)
+        .bind(opponent)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-02 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 2 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game_id)
+        .bind(creator)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        match end_core(&pool, game_id, ActingPlayer::User(opponent)).await {
+            Err(ServerFnError::ServerError(m)) => {
+                assert_eq!(m, "End game is only available to the last human");
+            }
+            other => panic!("expected ServerError, got {other:?}"),
+        }
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!is_finished, "a rejected End must leave the game unfinished");
+    }
+
+    // DRM-03b2c web action parity: with zero active humans, a human tied in the
+    // latest departure event ends through the shared action. One tied success
+    // covers the tie at the action level; the writer-level matrix (c2) already
+    // exercises every tied participant on separate games.
+    #[sqlx::test]
+    async fn end_core_ends_zero_active_latest_departure_tie(pool: PgPool) {
+        let (game_id, creator, _opponent) = make_unfinished_two_player_game(&pool).await;
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id IS NOT NULL",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let before = end_core(&pool, game_id, ActingPlayer::User(creator))
+            .await
+            .expect("a tied latest-departure human may stop");
+        assert!(
+            !before.game.is_finished,
+            "the returned snapshot must be the pre-write state"
+        );
+
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(is_finished, "end_core must delegate to the locked writer");
+        let end_reason: Option<String> =
+            sqlx::query_scalar("SELECT end_reason FROM games WHERE id = $1")
+                .bind(game_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(end_reason.as_deref(), Some("last_human_stop"));
     }
 }
