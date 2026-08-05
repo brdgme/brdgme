@@ -24,8 +24,8 @@ fn elo_rating_change(a_rating: i32, b_rating: i32, a_score: f32) -> i32 {
 }
 
 /// Computes and persists `ranked_placing` for every human player in a game
-/// that just finished. Survivors keep their game placing order; leavers
-/// (conceded/eliminated, ordered by `left_at`) take the remaining placings.
+/// that just finished. Active humans keep their game placing order; departed
+/// humans (ordered by `departure_sequence`) take the remaining placings.
 /// Pure bots are omitted. Must run in the same transaction as the placings
 /// write and before `apply_rating_changes`.
 #[cfg(feature = "ssr")]
@@ -33,17 +33,17 @@ pub(crate) async fn write_ranked_placings(
     tx: &mut sqlx::PgConnection,
     game_id: Uuid,
 ) -> Result<()> {
+    #[derive(sqlx::FromRow)]
     struct Row {
         id: Uuid,
         user_id: Option<Uuid>,
-        left_at: Option<time::PrimitiveDateTime>,
+        departure_sequence: Option<i32>,
         place: Option<i32>,
     }
-    let rows = sqlx::query_as!(
-        Row,
-        "SELECT id, user_id, left_at, place FROM game_players WHERE game_id = $1",
-        game_id
+    let rows = sqlx::query_as::<_, Row>(
+        "SELECT id, user_id, departure_sequence, place FROM game_players WHERE game_id = $1",
     )
+    .bind(game_id)
     .fetch_all(&mut *tx)
     .await?;
 
@@ -52,7 +52,7 @@ pub(crate) async fn write_ranked_placings(
         .map(|r| crate::game::placing::PlacingInput {
             game_player_id: r.id,
             is_pure_bot: r.user_id.is_none(),
-            left_at: r.left_at,
+            departure_sequence: r.departure_sequence,
             game_placing: r.place,
         })
         .collect();
