@@ -158,6 +158,16 @@ restored per owner instruction.)
 | 4.8 vendoring "known defects" spec section | done | `rrm-4.8-vendoring-defects`: docs/CODING.md |
 | 4.9 named-pattern sign-off sweeps | partial | `rrm-4.9-pattern-sweeps`; D1 manifest accepted after independent source audit. Two `host-unknown` attempts were empty and reconciled with no changes. `rrm-4.9a-sibling-sweep` accepted: authoritative claim/function scope plus reproducible pattern, scope, hit-count, and heuristic-limit records; 10-fixture harness covers positive, missing, stale-count, omitted-scope, malformed, duplicate, rogue, decoy, and over-limit cases. `rrm-4.9b-exhaustive-match` accepted: authoritative non-empty source scopes plus reproducible zero-wildcard and match-presence counts; its 11-fixture harness rejects missing, stale, omitted/empty, malformed, duplicate, rogue, nearby/vacuous decoy, and covered wildcard-arm cases. `rrm-4.9c-dead-code-sweep` accepted: D1's closure-register landed/staged universe is authoritative; reproducible records require 0 direct allowances, 0 covered suppression variants, and a current non-vacuous `dead_code` hit count. Its 12-fixture harness rejects missing, stale, omitted/empty/decoy, malformed, duplicate, rogue, remaining allowance, and covered `allow(unused|warnings)` / `expect(dead_code|unused|warnings)` variants. `rrm-4.9d-log-layer-proof` accepted: authoritative non-empty claim scopes plus reproducible comment/string-stripped `file:line` sets for direct `Log::public` invocations and the approved pattern. Its 14-fixture harness rejects missing, stale, omitted/empty, malformed, duplicate, rogue, nearby/lower-layer/comment/string/coexisting, and equal-count-wrong-lines decoys; its Bash limits are explicit and it makes no parser-grade proof claim. `rrm-4.9e-every-item-checklist` accepted: linked authoritative non-empty distinct-line item universe, per-record current-count reproduction, and exactly one exact-text checklist record per universe item; its 14-fixture harness rejects missing, stale (including later-row), omitted, duplicate, rogue, empty, malformed, nearby/absent-universe, and unlinked-claim records. Its textual input contract proves enumerated coverage only, not semantic completeness beyond the declared universe. One final integration/adversarial review remains required. |
 
+### 4.9 corrective slices (2026-08-06)
+
+| Semantic unit | Status | Scope |
+|---------------|--------|-------|
+| `rrm-4.9r1-sibling-lexical` | approved | Ignore comment and string-only decoys for claimed functions and sibling patterns; exact adversarial fixtures. |
+| `rrm-4.9r2-dead-code-spacing` | approved | Detect bounded whitespace variants, align coverage wording, and add a fixture. |
+| `rrm-4.9r3-ci-path-filter` | approved | Trigger the guard's CI job for checker, harness, all sign-off fixtures, and canonical manifest changes. |
+
+Parent `rrm-4.9-pattern-sweeps` remains partial pending accepted corrective slices and replacement independent review.
+
 ## Owner decisions
 
 | Decision | Ruling | Date |

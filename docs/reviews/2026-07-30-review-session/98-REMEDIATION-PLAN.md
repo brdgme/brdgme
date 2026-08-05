@@ -2371,6 +2371,22 @@ Run the five slices serially. Only after all five are accepted, run one final
 integration/adversarial review before the parent can be accepted. The parent is
 partial until then.
 
+#### 4.9 corrective slices (2026-08-06)
+
+The final independent integration/adversarial review found three reproducible
+guard-delivery defects. The approved same-scope corrective slices are serial;
+the semantic parent remains partial until they and a replacement independent
+review are accepted.
+
+| Semantic unit | Scope and acceptance evidence | Status |
+|---------------|-------------------------------|--------|
+| `rrm-4.9r1-sibling-lexical` | Strip or ignore comments and string-only decoys consistently for both claimed functions and sibling patterns. Add the exact adversarial fixtures from the review. | approved |
+| `rrm-4.9r2-dead-code-spacing` | Detect bounded whitespace variants such as `allow (dead_code)` consistently, align the contract wording with actual coverage, and add a fixture. | approved |
+| `rrm-4.9r3-ci-path-filter` | Ensure checker, harness, all sign-off fixtures, and the canonical sign-off manifest trigger the CI job that runs the guard. | approved |
+
+After accepted corrective slices, rerun one independent parent review. No
+historical repairs or semantic scope expansion are authorized.
+
 ### 4.10 Execution status (2026-08-06)
 
 | Semantic unit | Item | Status | Evidence |
