@@ -69,34 +69,45 @@ pub(crate) async fn write_ranked_placings(
 }
 
 /// Applies ELO rating changes for a game that just transitioned to finished
-/// with placings. Must be called within the same transaction as the
-/// placings write. No-op if the idempotency guard trips (any player already
-/// has a rating_change). Bot players are excluded from the calculation;
-/// only human players are rated against each other.
+/// with a competitive result. Must be called within the same transaction as
+/// the placings write. No-op when no human rating-change stamp exists but the
+/// game is ineligible: fewer than two human participants, or any human
+/// missing a `ranked_placing`. No-op if the idempotency guard trips (any
+/// human already has a rating_change). Pure bots are excluded from the human
+/// count, the ELO pairs, and the rating stamps; replaced humans (still
+/// carrying a `user_id`) participate. `ranked_placing` is the only ranking
+/// source - `place`, points, position, and departure fields are never used.
 #[cfg(feature = "ssr")]
 pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: Uuid) -> Result<()> {
+    #[derive(sqlx::FromRow)]
     struct PlayerRow {
         id: Uuid,
         position: i32,
         user_id: Option<Uuid>,
-        place: Option<i32>,
         ranked_placing: Option<i32>,
         rating_change: Option<i32>,
     }
 
-    let players = sqlx::query_as!(
-        PlayerRow,
-        "SELECT id, position, user_id, place, ranked_placing, rating_change FROM game_players WHERE game_id = $1",
-        game_id
+    // Plain (non-macro) query like `write_ranked_placings`, so the committed
+    // offline `.sqlx` cache needs no regeneration for this changed SELECT.
+    let players = sqlx::query_as::<_, PlayerRow>(
+        "SELECT id, position, user_id, ranked_placing, rating_change FROM game_players WHERE game_id = $1",
     )
+    .bind(game_id)
     .fetch_all(&mut *tx)
     .await?;
 
-    if players.iter().any(|p| p.rating_change.is_some()) {
+    let humans: Vec<&PlayerRow> = players.iter().filter(|p| p.user_id.is_some()).collect();
+
+    if humans.iter().any(|p| p.rating_change.is_some()) {
         // Idempotency guard: this game has already been rated.
         return Ok(());
     }
-    if players.iter().all(|p| p.place.is_none()) {
+    // Eligibility: only a competitive result with at least two human
+    // participants, all carrying a ranked placing, is rated. Checked before
+    // any `game_type_users` read or write so ineligible games have no rating
+    // side effects.
+    if humans.len() < 2 || humans.iter().any(|p| p.ranked_placing.is_none()) {
         return Ok(());
     }
 
@@ -113,18 +124,16 @@ pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: U
     .await?;
 
     struct RatedPlayer {
+        id: Uuid,
         position: i32,
         user_id: Uuid,
         rating: i32,
     }
 
-    let mut rated_players = Vec::with_capacity(players.len());
-    for p in &players {
-        if p.user_id.is_none() {
-            continue;
-        }
+    let mut rated_players = Vec::with_capacity(humans.len());
+    for p in &humans {
         let user_id = p.user_id.ok_or_else(|| {
-            anyhow::anyhow!("game_player {}: user_id missing for human player", p.id)
+            anyhow::anyhow!("player {}: user_id missing for human participant", p.id)
         })?;
 
         sqlx::query!(
@@ -144,6 +153,7 @@ pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: U
         .await?;
 
         rated_players.push(RatedPlayer {
+            id: p.id,
             position: p.position,
             user_id,
             rating,
@@ -155,14 +165,15 @@ pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: U
         .map(|p| (p.position, p.rating))
         .collect();
 
-    if rated_players.len() < 2 {
-        return Ok(());
+    // Competitive placings only; the eligibility check above guarantees a
+    // value for every human.
+    let mut places: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
+    for p in &humans {
+        let ranked_placing = p.ranked_placing.ok_or_else(|| {
+            anyhow::anyhow!("player {}: ranked_placing missing for eligible human", p.id)
+        })?;
+        places.insert(p.position, ranked_placing);
     }
-
-    let places: std::collections::HashMap<i32, i32> = players
-        .iter()
-        .map(|p| (p.position, p.ranked_placing.or(p.place).unwrap_or(i32::MAX)))
-        .collect();
 
     let mut rating_changes: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
     // Each unordered pair exactly once: index `i` against the tail slice.
@@ -170,8 +181,12 @@ pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: U
     // redundant because the last index yields an empty tail - ws F50.)
     for (i, a) in rated_players.iter().enumerate() {
         for b in &rated_players[i + 1..] {
-            let a_place = places.get(&a.position).copied().unwrap_or(i32::MAX);
-            let b_place = places.get(&b.position).copied().unwrap_or(i32::MAX);
+            let a_place = places.get(&a.position).copied().ok_or_else(|| {
+                anyhow::anyhow!("rated player position {}: missing ranked placing", a.position)
+            })?;
+            let b_place = places.get(&b.position).copied().ok_or_else(|| {
+                anyhow::anyhow!("rated player position {}: missing ranked placing", b.position)
+            })?;
             let a_score: f32 = match a_place.cmp(&b_place) {
                 std::cmp::Ordering::Less => 1.0,
                 std::cmp::Ordering::Equal => 0.5,
@@ -202,10 +217,11 @@ pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: U
         .await?;
     }
 
-    for p in &players {
-        let Some(&change) = rating_changes.get(&p.position) else {
-            continue;
-        };
+    // Stamp every human - including legitimate zero deltas - so the
+    // idempotency guard arms and a retry cannot re-rate. Pure bots keep their
+    // null rating fields.
+    for p in &rated_players {
+        let change = rating_changes.get(&p.position).copied().unwrap_or(0);
         let rating_before = rating_befores.get(&p.position).copied();
         sqlx::query("UPDATE game_players SET rating_change = $1, rating_before = $2 WHERE id = $3")
             .bind(change)
@@ -922,5 +938,302 @@ mod tests {
 
         let (creator_rating_after, _) = game_type_rating(&pool, game_type_id, creator.id).await;
         assert_eq!(creator_rating_after, 1200);
+    }
+
+    async fn game_type_users_count(pool: &PgPool, game_type_id: Uuid, user_id: Uuid) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM game_type_users WHERE game_type_id = $1 AND user_id = $2",
+        )
+        .bind(game_type_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[sqlx::test]
+    async fn game_places_without_ranked_placing_is_not_rated(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opp = make_user(&pool, "opp").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opp.id], 1, &[0]).await;
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let opp_pos = position_of(&ge, opp.id);
+        let bot_pos = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.user_id.is_none())
+            .unwrap()
+            .game_player
+            .position;
+
+        // Remove the rating rows the fixture created, so any game_type_users
+        // access by the (ineligible) rating path is observable.
+        sqlx::query!(
+            "DELETE FROM game_type_users WHERE game_type_id = $1",
+            game_type_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Authoritative game places exist but no ranked_placing does: the
+        // competitive result is incomplete, so nothing may be rated.
+        sqlx::query("UPDATE game_players SET place = $1 WHERE game_id = $2 AND position = $3")
+            .bind(1i32)
+            .bind(game.id)
+            .bind(creator_pos)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE game_players SET place = $1 WHERE game_id = $2 AND position = $3")
+            .bind(2i32)
+            .bind(game.id)
+            .bind(opp_pos)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE game_players SET place = $1 WHERE game_id = $2 AND position = $3")
+            .bind(3i32)
+            .bind(game.id)
+            .bind(bot_pos)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        // No rating-change or rating-before stamps, humans or bot.
+        for pos in [creator_pos, opp_pos, bot_pos] {
+            assert_eq!(find_rating_change(&pool, game.id, pos).await, None, "position {pos}");
+            let rb: Option<i32> = sqlx::query_scalar(
+                "SELECT rating_before FROM game_players WHERE game_id = $1 AND position = $2",
+            )
+            .bind(game.id)
+            .bind(pos)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(rb, None, "position {pos}");
+        }
+        // Eligibility is checked before game_type_users access, so no rating
+        // rows are created despite the authoritative places being present.
+        assert_eq!(
+            game_type_users_count(&pool, game_type_id, creator.id).await,
+            0
+        );
+        assert_eq!(game_type_users_count(&pool, game_type_id, opp.id).await, 0);
+    }
+
+    #[sqlx::test]
+    async fn ranked_placing_alone_rates_without_game_place(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+
+        sqlx::query!(
+            "DELETE FROM game_type_users WHERE game_type_id = $1",
+            game_type_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let opponent_pos = position_of(&ge, opponent.id);
+
+        // Competitive placings present, authoritative game places left NULL:
+        // ranked_placing is the sole ranking source.
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND position = $3",
+        )
+        .bind(1i32)
+        .bind(game.id)
+        .bind(creator_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND position = $3",
+        )
+        .bind(2i32)
+        .bind(game.id)
+        .bind(opponent_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let winner_change = find_rating_change(&pool, game.id, creator_pos).await;
+        let loser_change = find_rating_change(&pool, game.id, opponent_pos).await;
+        assert_eq!(winner_change, Some(16));
+        assert_eq!(loser_change, Some(-16));
+
+        let creator_rb: Option<i32> = sqlx::query_scalar(
+            "SELECT rating_before FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(creator_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(creator_rb, Some(1200));
+
+        let (winner_rating, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        let (loser_rating, _) = game_type_rating(&pool, game_type_id, opponent.id).await;
+        assert_eq!(winner_rating, 1216);
+        assert_eq!(loser_rating, 1184);
+    }
+
+    #[sqlx::test]
+    async fn single_human_with_ranked_placing_is_not_rated(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, game_version_id, creator.id, &[], 1, &[0]).await;
+
+        sqlx::query!(
+            "DELETE FROM game_type_users WHERE game_type_id = $1",
+            game_type_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let bot_pos = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.user_id.is_none())
+            .unwrap()
+            .game_player
+            .position;
+
+        // The sole human has a competitive placing, but fewer than two humans
+        // means no pairwise rating exists.
+        sqlx::query(
+            "UPDATE game_players SET place = $1, ranked_placing = $1 WHERE game_id = $2 AND position = $3",
+        )
+        .bind(1i32)
+        .bind(game.id)
+        .bind(creator_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE game_players SET place = 2 WHERE game_id = $1 AND position = $2")
+            .bind(game.id)
+            .bind(bot_pos)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(find_rating_change(&pool, game.id, creator_pos).await, None);
+        assert_eq!(find_rating_change(&pool, game.id, bot_pos).await, None);
+        assert_eq!(
+            game_type_users_count(&pool, game_type_id, creator.id).await,
+            0
+        );
+    }
+
+    #[sqlx::test]
+    async fn rated_game_is_not_rerated_on_second_invocation(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opponent = make_user(&pool, "opponent").await;
+        let (game_type_id, game_version_id) = make_game_type_and_version(&pool).await;
+        let game =
+            make_game_with_players(&pool, game_version_id, creator.id, &[opponent.id], 0, &[0])
+                .await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let opponent_pos = position_of(&ge, opponent.id);
+
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND position = $3",
+        )
+        .bind(1i32)
+        .bind(game.id)
+        .bind(creator_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND position = $3",
+        )
+        .bind(2i32)
+        .bind(game.id)
+        .bind(opponent_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(find_rating_change(&pool, game.id, creator_pos).await, Some(16));
+        assert_eq!(find_rating_change(&pool, game.id, opponent_pos).await, Some(-16));
+        let (rating_after_first, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        assert_eq!(rating_after_first, 1216);
+
+        // Even if the ranked placings are rewritten differently, the stamps
+        // already on the humans prevent a second rating pass.
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND position = $3",
+        )
+        .bind(2i32)
+        .bind(game.id)
+        .bind(creator_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND position = $3",
+        )
+        .bind(1i32)
+        .bind(game.id)
+        .bind(opponent_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        apply_rating_changes(&mut tx, game.id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(find_rating_change(&pool, game.id, creator_pos).await, Some(16));
+        assert_eq!(find_rating_change(&pool, game.id, opponent_pos).await, Some(-16));
+        let (rating_after_second, _) = game_type_rating(&pool, game_type_id, creator.id).await;
+        assert_eq!(rating_after_second, 1216);
     }
 }
