@@ -277,7 +277,7 @@
 #                                     guard =>`, `_ @ bind =>`); the guard must
 #                                     fail it as a remaining wildcard arm.
 #
-# And twelve more committed fixtures for the dead-code sweep gate (4.9c), which
+# And thirteen more committed fixtures for the dead-code sweep gate (4.9c), which
 # requires every in-scope dead-code sweep claim to name the authoritative
 # universe (the closure-register commit range it sweeps) and prove no
 # `#[allow(dead_code)]` or suppression variant remains there, reproducibly: the
@@ -287,9 +287,11 @@
 # recorded match count must reproduce, and the universe must actually contain at
 # least one `dead_code` mention - so a vacuous or nearby scan is never proof, and
 # an unreported variant (e.g. `#[allow(unused)]`, whose lint group covers
-# dead_code) cannot bypass the sweep. The dead-code scope is the authoritative
-# enumeration and is never inferred from the records, so omitting a record cannot
-# hide a claim:
+# dead_code) cannot bypass the sweep. The allowance and variant scans accept
+# bounded same-line whitespace between the lint name and its opening parenthesis,
+# so a spaced spelling such as `#[allow (dead_code)]` cannot bypass the sweep
+# either. The dead-code scope is the authoritative enumeration and is never
+# inferred from the records, so omitting a record cannot hide a claim:
 #   deadcode-positive             - one claim (F-1200, universe
 #                                   src/game_write.rs) whose universe carries a
 #                                   `#[deny(dead_code)]` mention and no
@@ -330,6 +332,13 @@
 #   deadcode-allowance-remains    - a universe whose code still carries
 #                                   `#[allow(dead_code)]`; the guard must fail
 #                                   it as a remaining allowance.
+#   deadcode-allowance-spaced     - a spaced-allowance bypass: the universe
+#                                   carries `#[allow (dead_code)]` (bounded
+#                                   same-line whitespace between the lint name
+#                                   and `(`) while the record reports 0
+#                                   allowances, so the tight-spelling-only
+#                                   allowance scan would miss it; the guard must
+#                                   fail it as a remaining allowance.
 #   deadcode-variant-remains      - unreported variant coverage: a universe that
 #                                   carries `#[allow(unused)]`, `#[allow(warnings)]`,
 #                                   `#[expect(dead_code)]`, `#[expect(unused)]`
@@ -774,6 +783,9 @@ fail_fixture deadcode-decoy-vacuous F-1200 DCSWEEP-DECOY \
   'DCSWEEP-DECOY: F-1200: universe src/game_write.rs contains no dead_code mention, so the no-allowance claim is vacuous' \
   signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
 fail_fixture deadcode-allowance-remains F-1200 DCSWEEP-ALLOWANCE-REMAINS \
+  'DCSWEEP-ALLOWANCE-REMAINS: F-1200: an #[allow(dead_code)] remains in src/game_write.rs (current count 1 > 0)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-allowance-spaced F-1200 DCSWEEP-ALLOWANCE-REMAINS \
   'DCSWEEP-ALLOWANCE-REMAINS: F-1200: an #[allow(dead_code)] remains in src/game_write.rs (current count 1 > 0)' \
   signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
 fail_fixture deadcode-variant-remains F-1200 DCSWEEP-VARIANT-REMAINS \

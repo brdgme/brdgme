@@ -319,14 +319,21 @@
 #                          authoritative universe named in the scope link
 #                          exactly, so a record scanning a different path is a
 #                          nearby scan, not evidence for this claim
-#     allowances           the recorded count of `allow(dead_code)` occurrences
+#     allowances           the recorded count of dead-code allowance occurrences
+#                          (an `allow` of the `dead_code` lint, with optional
+#                          bounded same-line whitespace between the lint name
+#                          and the opening parenthesis, e.g.
+#                          `#[allow(dead_code)]` or `#[allow (dead_code)]`)
 #                          returned by the guard's dead-code allowance heuristic
 #     variants             the recorded count of relevant dead-code suppression
 #                          variants (an `allow` of the `unused` or `warnings`
 #                          lint group, both of which cover dead_code, or an
 #                          `expect(dead_code)`, `expect(unused)` or
-#                          `expect(warnings)` lint expectation) returned by the
-#                          guard's suppression-variant heuristic
+#                          `expect(warnings)` lint expectation; each lint name
+#                          may carry the same bounded same-line whitespace
+#                          before its opening parenthesis, e.g.
+#                          `#[allow (unused)]`) returned by the guard's
+#                          suppression-variant heuristic
 #     matches              the recorded count of `dead_code` occurrences
 #                          returned by the guard's dead-code presence heuristic
 #                          (>= 1)
@@ -368,22 +375,28 @@
 #                           count <count> does not match the current re-run, or
 #                           the recorded match count <count> does not match the
 #                           current re-run
-#   DCSWEEP-ALLOWANCE-REMAINS: <id>: an `#[allow(dead_code)]` remains in
-#                           <universe> (current count <count> > 0)
+#   DCSWEEP-ALLOWANCE-REMAINS: <id>: an `#[allow(dead_code)]` (or bounded
+#                           same-line whitespace spelling such as
+#                           `#[allow (dead_code)]`) remains in <universe>
+#                           (current count <count> > 0)
 #   DCSWEEP-VARIANT-REMAINS: <id>: a dead-code suppression variant remains in
 #                           <universe> (current count <count> > 0)
 #
 # Dead-code sweep heuristic limits: the dead-code presence heuristic counts
 # word-boundary `dead_code` occurrences line-by-line, so every `allow(dead_code)`
 # and `deny(dead_code)` line also counts. The allowance heuristic counts a line
-# whose text contains `allow(` ... `dead_code` inside one `)`-closed group, so it
-# catches `#[allow(dead_code)]`, the inner `#![allow(dead_code)]`,
+# whose text contains `allow`, optional whitespace, and `(` ... `dead_code`
+# inside one `)`-closed group, so it catches `#[allow(dead_code)]`,
+# `#[allow (dead_code)]`, the inner `#![allow(dead_code)]`,
 # `#[allow(dead_code, ...)]`, and a single-line `cfg_attr(..., allow(dead_code))`.
-# The suppression-variant heuristic counts a line whose text contains
-# `allow(` ... `unused` or `allow(` ... `warnings` inside one group (both the
-# `unused` and `warnings` lint groups cover dead_code) or `expect(` ...
-# `dead_code`, `unused` or `warnings` inside one group (a lint expectation
-# naming a lint or group that covers dead_code).
+# The suppression-variant heuristic counts a line whose text contains `allow`,
+# optional whitespace, and `(` ... `unused` or `warnings` inside one group (both
+# the `unused` and `warnings` lint groups cover dead_code) or `expect`, optional
+# whitespace, and `(` ... `dead_code`, `unused` or `warnings` inside one group (a
+# lint expectation naming a lint or group that covers dead_code). The whitespace
+# between the lint name and the opening `(` is bounded to the line: the scan is
+# line-by-line, so a line break between the lint name and `(` is not seen, and
+# an attribute split across lines is not seen.
 # A line matching both the allowance and the variant heuristic (e.g.
 # `#[allow(dead_code, unused)]`) is counted in both counts. Neither scan is a
 # Rust parse: an attribute split across lines, a suppression spelled differently,
@@ -1497,8 +1510,8 @@ if [ -n "${14:-}" ]; then
   DCSWEEP_SCOPE="${14}"
   DCSWEEP_RECORDS="${15:-deadcode.tsv}"
   DCSWEEP_MATCH_PATTERN='\bdead_code\b'
-  DCSWEEP_ALLOWANCE_PATTERN='allow\([^)]*dead_code[^)]*\)'
-  DCSWEEP_VARIANT_PATTERN='allow\([^)]*\b(unused|warnings)\b[^)]*\)|expect\([^)]*\b(dead_code|unused|warnings)\b[^)]*\)'
+  DCSWEEP_ALLOWANCE_PATTERN='allow[[:space:]]*\([^)]*dead_code[^)]*\)'
+  DCSWEEP_VARIANT_PATTERN='allow[[:space:]]*\([^)]*\b(unused|warnings)\b[^)]*\)|expect[[:space:]]*\([^)]*\b(dead_code|unused|warnings)\b[^)]*\)'
   if [ ! -f "$DCSWEEP_SCOPE" ]; then
     echo "DCSWEEP-MISSING-SCOPE: no dead-code sweep scope file: $DCSWEEP_SCOPE" >&2
     fail=1
@@ -1624,6 +1637,9 @@ if [ -n "${14:-}" ]; then
         fi
         # Re-run the dead-code allowance heuristic: the proof of "no
         # #[allow(dead_code)] remains" is exactly this count reproducing at 0.
+        # The allowance pattern also matches bounded same-line whitespace
+        # spellings such as `#[allow (dead_code)]`, so the spaced form cannot
+        # bypass the sweep.
         actual_a="$(grep -rE "$DCSWEEP_ALLOWANCE_PATTERN" "$dc_universe" 2>/dev/null | wc -l | tr -d ' ')"
         if [ "$actual_a" -gt 0 ]; then
           echo "DCSWEEP-ALLOWANCE-REMAINS: $dc_id: an #[allow(dead_code)] remains in $dc_universe (current count $actual_a > 0)" >&2
@@ -2078,7 +2094,7 @@ msg="every record satisfies all four teeth"
 [ -n "${8:-}" ] && msg="$msg and every declared mandatory trigger has an exact owner-response"
 [ -n "${10:-}" ] && msg="$msg and every in-scope one-function-fix claim names a reproducible sibling-search pattern with a current hit count within its approved heuristic limit"
 [ -n "${12:-}" ] && msg="$msg and every in-scope exhaustive-match claim proves no wildcard match arm remains in its scope"
-[ -n "${14:-}" ] && msg="$msg and every in-scope dead-code sweep claim proves no #[allow(dead_code)] or suppression variant remains in its universe"
+[ -n "${14:-}" ] && msg="$msg and every in-scope dead-code sweep claim proves no #[allow(dead_code)] (or spaced spelling such as #[allow (dead_code)]) or suppression variant remains in its universe"
 [ -n "${16:-}" ] && msg="$msg and every in-scope logging-related claim proves direct Log::public content coverage at its authoritative log-layer scope"
 [ -n "${18:-}" ] && msg="$msg and every in-scope every-item claim enumerates exactly one per-item checklist record per authoritative universe item"
 echo "check-four-tooth: OK ($msg)"
