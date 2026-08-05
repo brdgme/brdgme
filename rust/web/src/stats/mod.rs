@@ -163,6 +163,39 @@ pub struct PlayerGameTypeData {
     pub head_to_head: Vec<HeadToHead>,
 }
 
+/// A completed game's authoritative result: every seat with the authoritative
+/// bot-inclusive placing (`game_players.place`) and the game-level end reason
+/// (`games.end_reason`). Distinct from `FinishedGameRow` (competitive) and the
+/// history query (mixed status); never carries `ranked_placing` or points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameResult {
+    pub game_id: Uuid,
+    pub game_type_name: String,
+    pub finished_at: Option<PrimitiveDateTime>,
+    pub end_reason: Option<String>,
+    pub seats: Vec<GameResultSeat>,
+}
+
+/// One seat of an authoritative Game result. Identity distinguishes pure bots
+/// (`user_id` None, `bot_id` Some) from replacement-human seats (`user_id` and
+/// `bot_id` both present) and untouched human seats (`bot_id` None).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameResultSeat {
+    pub position: i32,
+    pub user_id: Option<Uuid>,
+    pub user_name: Option<String>,
+    pub bot_id: Option<Uuid>,
+    pub bot_name: Option<String>,
+    pub place: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlayerResultsData {
+    pub user: ProfileUser,
+    pub game_results: Vec<GameResult>,
+    pub viewer_user_id: Option<Uuid>,
+    pub can_add_friend: bool,
+}
 #[cfg(feature = "ssr")]
 mod queries;
 
@@ -391,6 +424,45 @@ pub async fn get_player_history(
     }))
 }
 
+#[server(GetPlayerResults, "/api")]
+pub async fn get_player_results(
+    name: String,
+) -> Result<Option<PlayerResultsData>, ServerFnError> {
+    use crate::auth::server::get_current_user;
+    use sqlx::PgPool;
+    let pool = expect_context::<PgPool>();
+
+    let viewer_user_id = get_current_user().await?.map(|u| u.id);
+
+    let user = match get_profile_user(&pool, &name)
+        .await
+        .map_err(internal("get_player_results: find user"))?
+    {
+        Some(user) => user,
+        None => return Ok(None),
+    };
+
+    let game_results = game_results(&pool, user.user_id)
+        .await
+        .map_err(internal("get_player_results: game_results"))?;
+
+    let can_add_friend = match viewer_user_id {
+        Some(vid) if vid != user.user_id => {
+            !crate::db::should_hide_add_friend(&pool, vid, user.user_id)
+                .await
+                .map_err(internal("get_player_results: friend status"))?
+        }
+        _ => false,
+    };
+
+    Ok(Some(PlayerResultsData {
+        user,
+        game_results,
+        viewer_user_id,
+        can_add_friend,
+    }))
+}
+
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     use super::queries::fixtures;
@@ -532,5 +604,20 @@ mod tests {
         assert_eq!(data.stats.peak_rating, Some(1450));
         assert_eq!(data.stats.games, 1);
         assert_eq!(data.stats.wins, 1);
+    }
+
+    /// An unknown player name resolves to nothing at the server entry point:
+    /// `get_player_results` must return `Ok(None)`, matching the sibling
+    /// `get_player_profile`/`get_player_history` `Ok(None)` convention.
+    #[sqlx::test]
+    async fn get_player_results_unknown_player_returns_none(pool: PgPool) {
+        let result = crate::test_support::anonymous(&pool, || async {
+            get_player_results("nobody".to_string()).await
+        })
+        .await;
+        assert!(
+            result.expect("query ok").is_none(),
+            "unknown player must return Ok(None), matching sibling server fns"
+        );
     }
 }

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use time::PrimitiveDateTime;
@@ -421,32 +420,6 @@ pub async fn active_games(
         .collect())
 }
 
-/// A completed game's authoritative result: every seat with the authoritative
-/// bot-inclusive placing (`game_players.place`) and the game-level end reason
-/// (`games.end_reason`). Distinct from `FinishedGameRow` (competitive) and the
-/// history query (mixed status); never carries `ranked_placing` or points.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GameResult {
-    pub game_id: Uuid,
-    pub game_type_name: String,
-    pub finished_at: Option<PrimitiveDateTime>,
-    pub end_reason: Option<String>,
-    pub seats: Vec<GameResultSeat>,
-}
-
-/// One seat of an authoritative Game result. Identity distinguishes pure bots
-/// (`user_id` None, `bot_id` Some) from replacement-human seats (`user_id` and
-/// `bot_id` both present) and untouched human seats (`bot_id` None).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GameResultSeat {
-    pub position: i32,
-    pub user_id: Option<Uuid>,
-    pub user_name: Option<String>,
-    pub bot_id: Option<Uuid>,
-    pub bot_name: Option<String>,
-    pub place: Option<i32>,
-}
-
 #[derive(Debug, sqlx::FromRow)]
 struct GameResultSeatRow {
     game_id: Uuid,
@@ -464,7 +437,7 @@ struct GameResultSeatRow {
 /// Completed games in which `user_id` participated, newest finished first
 /// (tied by game id), each with every seat in seat-position order. Authoritative
 /// result fields are `games.end_reason` and nullable `game_players.place` only.
-pub async fn game_results(pool: &PgPool, user_id: Uuid) -> Result<Vec<GameResult>> {
+pub async fn game_results(pool: &PgPool, user_id: Uuid) -> Result<Vec<super::GameResult>> {
     // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
     let rows: Vec<GameResultSeatRow> = sqlx::query_as(
         r#"
@@ -497,9 +470,9 @@ pub async fn game_results(pool: &PgPool, user_id: Uuid) -> Result<Vec<GameResult
     .fetch_all(pool)
     .await?;
 
-    let mut games: Vec<GameResult> = Vec::new();
+    let mut games: Vec<super::GameResult> = Vec::new();
     for row in rows {
-        let seat = GameResultSeat {
+        let seat = super::GameResultSeat {
             position: row.position,
             user_id: row.user_id,
             user_name: row.user_name,
@@ -509,7 +482,7 @@ pub async fn game_results(pool: &PgPool, user_id: Uuid) -> Result<Vec<GameResult
         };
         match games.last_mut() {
             Some(game) if game.game_id == row.game_id => game.seats.push(seat),
-            _ => games.push(GameResult {
+            _ => games.push(super::GameResult {
                 game_id: row.game_id,
                 game_type_name: row.game_type_name,
                 finished_at: row.finished_at,
