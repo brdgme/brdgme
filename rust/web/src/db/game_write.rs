@@ -768,7 +768,11 @@ pub async fn undo_game(
                                   THEN NOW()
                                   WHEN is_eliminated = true AND $2 = false
                                   THEN NULL
-                                  ELSE left_at END
+                                  ELSE left_at END,
+                   departure_reason = CASE WHEN is_eliminated = true AND $2 = false
+                                           THEN NULL ELSE departure_reason END,
+                   departure_sequence = CASE WHEN is_eliminated = true AND $2 = false
+                                             THEN NULL ELSE departure_sequence END
                WHERE id = $5"#,
         )
         .bind(is_turn)
@@ -3759,6 +3763,29 @@ mod tests {
                 .unwrap();
         assert!(left_at.is_some(), "elimination must set left_at");
 
+        let departure_reason: Option<String> =
+            sqlx::query_scalar("SELECT departure_reason FROM game_players WHERE id = $1")
+                .bind(p1_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            departure_reason.as_deref(),
+            Some("eliminated"),
+            "elimination must set departure_reason"
+        );
+
+        let departure_sequence: Option<i32> =
+            sqlx::query_scalar("SELECT departure_sequence FROM game_players WHERE id = $1")
+                .bind(p1_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            departure_sequence.is_some_and(|s| s > 0),
+            "elimination must set a positive departure_sequence"
+        );
+
         let updated_at: time::PrimitiveDateTime =
             sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
                 .bind(game.id)
@@ -3790,6 +3817,28 @@ mod tests {
                 .await
                 .unwrap();
         assert!(left_at.is_none(), "un-elimination must clear left_at");
+
+        let departure_reason: Option<String> =
+            sqlx::query_scalar("SELECT departure_reason FROM game_players WHERE id = $1")
+                .bind(p1_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            departure_reason.is_none(),
+            "un-elimination must clear departure_reason"
+        );
+
+        let departure_sequence: Option<i32> =
+            sqlx::query_scalar("SELECT departure_sequence FROM game_players WHERE id = $1")
+                .bind(p1_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            departure_sequence.is_none(),
+            "un-elimination must clear departure_sequence"
+        );
 
         let is_eliminated: bool =
             sqlx::query_scalar("SELECT is_eliminated FROM game_players WHERE id = $1")
