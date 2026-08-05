@@ -71,12 +71,16 @@ pub struct GameViewData {
     /// link to `/invites/{id}` instead of offering a fresh restart.
     pub restart_proposal_id: Option<Uuid>,
     pub is_2player: bool,
-    /// Whether the viewer may concede: an active human in an unfinished game
-    /// with >=2 active humans, where a replacement bot exists or exactly 2
-    /// active humans remain (#47).
+    /// Whether the viewer may concede: the viewer is an active human in an
+    /// unfinished game with >=2 active humans, and either an eligible
+    /// replacement bot exists or the game has exactly 2 total seats for the
+    /// platform forfeit. Exactly one active human cannot Concede (#47, dual
+    /// result model).
     pub can_concede: bool,
-    /// Whether the viewer may end the game: a human in an unfinished game with
-    /// <=1 active humans remaining (#47).
+    /// Whether the viewer may end the game: an unfinished game with exactly
+    /// one active human (only that active actor) or zero active humans (only
+    /// human participants tied in the latest departure event) (#47, dual result
+    /// model).
     pub can_end_game: bool,
     pub players: Vec<PlayerViewData>,
     pub command_spec: Option<brdgme_game::command::Spec>,
@@ -325,29 +329,14 @@ pub async fn get_game_details(game_id: Uuid) -> Result<GameViewData, ServerFnErr
         .await
         .map_err(internal("get_game_details: restart proposal"))?;
 
-    let active_humans = ge
-        .game_players
-        .iter()
-        .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
-        .count();
-    let viewer_is_active_human = ge.game_players.iter().any(|p| {
-        p.user.as_ref().is_some_and(|u| u.id == user.id) && p.game_player.left_at.is_none()
-    });
     let replacement_available = crate::db::replacement_bot_available(&pool)
         .await
         .map_err(internal("get_game_details: replacement available"))?;
 
-    let can_concede = !ge.game.is_finished
-        && viewer_is_active_human
-        && active_humans >= 2
-        && (replacement_available || active_humans == 2);
+    let can_concede =
+        !ge.game.is_finished && concede_eligible(&ge, Some(user.id), replacement_available);
 
-    let can_end_game = !ge.game.is_finished
-        && active_humans <= 1
-        && ge
-            .game_players
-            .iter()
-            .any(|p| p.user.as_ref().is_some_and(|u| u.id == user.id));
+    let can_end_game = !ge.game.is_finished && end_eligible(&ge, Some(user.id));
 
     Ok(GameViewData {
         id: ge.game.id,
@@ -823,6 +812,79 @@ fn count_active_humans(ge: &crate::db::GameExtended) -> usize {
         .count()
 }
 
+/// Whether `actor_user_id` is an active human in the snapshot: present and not
+/// left. Pure-bot seats and departed/replaced humans are never active.
+#[cfg(feature = "ssr")]
+fn is_active_human(ge: &crate::db::GameExtended, actor_user_id: Uuid) -> bool {
+    ge.game_players.iter().any(|p| {
+        p.game_player.user_id.is_some_and(|uid| uid == actor_user_id)
+            && p.game_player.left_at.is_none()
+    })
+}
+
+/// Approved Concede actor/threshold rule: the actor is an active human and at
+/// least two active humans remain. Exactly one active human cannot Concede.
+#[cfg(feature = "ssr")]
+fn concede_actor_eligible(ge: &crate::db::GameExtended, actor_user_id: Option<Uuid>) -> bool {
+    actor_user_id.is_some_and(|uid| is_active_human(ge, uid)) && count_active_humans(ge) >= 2
+}
+
+/// Approved Concede snapshot eligibility: the actor is an active human, at
+/// least two active humans remain, and either an eligible replacement bot
+/// exists or the game has exactly two total seats for the platform forfeit.
+#[cfg(feature = "ssr")]
+fn concede_eligible(
+    ge: &crate::db::GameExtended,
+    actor_user_id: Option<Uuid>,
+    replacement_available: bool,
+) -> bool {
+    concede_actor_eligible(ge, actor_user_id)
+        && (replacement_available || ge.game_players.len() == 2)
+}
+
+/// Latest human departure-event sequence in the snapshot. Computed from human
+/// participant rows only - pure bots are never latest-event authority.
+#[cfg(feature = "ssr")]
+fn latest_human_departure_sequence(ge: &crate::db::GameExtended) -> Option<i32> {
+    ge.game_players
+        .iter()
+        .filter(|p| p.game_player.user_id.is_some())
+        .filter_map(|p| p.game_player.departure_sequence)
+        .max()
+}
+
+/// Whether `actor_user_id` is a human participant tied in the departure event
+/// at `sequence`.
+#[cfg(feature = "ssr")]
+fn is_human_in_departure_event(
+    ge: &crate::db::GameExtended,
+    actor_user_id: Uuid,
+    sequence: i32,
+) -> bool {
+    ge.game_players.iter().any(|p| {
+        p.game_player.user_id.is_some_and(|uid| uid == actor_user_id)
+            && p.game_player.departure_sequence == Some(sequence)
+    })
+}
+
+/// Approved End snapshot eligibility. Exactly one active human authorizes only
+/// that active actor; zero active humans authorizes only human participants
+/// tied in the latest human departure event; two or more active humans are
+/// rejected. Pure bots are never humans or latest-event authority. None of the
+/// authorization inputs consult `place`, `points`, or timestamps.
+#[cfg(feature = "ssr")]
+fn end_eligible(ge: &crate::db::GameExtended, actor_user_id: Option<Uuid>) -> bool {
+    let Some(actor_user_id) = actor_user_id else {
+        return false;
+    };
+    match count_active_humans(ge) {
+        n if n >= 2 => false,
+        1 => is_active_human(ge, actor_user_id),
+        _ => latest_human_departure_sequence(ge)
+            .is_some_and(|seq| is_human_in_departure_event(ge, actor_user_id, seq)),
+    }
+}
+
 #[cfg(feature = "ssr")]
 pub(crate) enum ActingPlayer {
     User(Uuid),
@@ -952,10 +1014,16 @@ pub(crate) async fn concede_core(
         return Err(ServerFnError::new("You have already left this game"));
     }
 
-    // DRM-03b2a: exactly one active human cannot Concede (End replaces it);
-    // guard before any replacement/forfeit dispatch so web and email cannot
-    // replace the last human.
-    if count_active_humans(&ge) < 2 {
+    // DRM-03b2b: courtesy prechecks derive from the shared snapshot predicates;
+    // the locked writers remain authoritative for concurrent changes. First the
+    // approved Concede actor/threshold rule - exactly one active human cannot
+    // Concede (End replaces it) - guarded before any replacement/forfeit
+    // dispatch so web and email cannot replace the last human.
+    let actor_user_id = match &actor {
+        ActingPlayer::User(user_id) => Some(*user_id),
+        ActingPlayer::GamePlayer(_) => player.game_player.user_id,
+    };
+    if !concede_actor_eligible(&ge, actor_user_id) {
         return Err(ServerFnError::new(
             "Concede is not available: at least two active humans are required",
         ));
@@ -964,6 +1032,12 @@ pub(crate) async fn concede_core(
     let replacement_available = crate::db::replacement_bot_available(pool)
         .await
         .map_err(internal("concede_core: replacement available"))?;
+
+    if !concede_eligible(&ge, actor_user_id, replacement_available) {
+        return Err(ServerFnError::new(
+            "Concede is not available: no replacement bot configured",
+        ));
+    }
 
     if replacement_available {
         crate::db::concede_game_replace(
@@ -975,7 +1049,7 @@ pub(crate) async fn concede_core(
         )
         .await
         .map_err(|e| conflict_or_internal("concede_core: replace", e))?;
-    } else if ge.game_players.len() == 2 {
+    } else {
         crate::db::concede_game(
             pool,
             game_id,
@@ -985,10 +1059,6 @@ pub(crate) async fn concede_core(
         )
         .await
         .map_err(|e| conflict_or_internal("concede_core: concede", e))?;
-    } else {
-        return Err(ServerFnError::new(
-            "Concede is not available: no replacement bot configured",
-        ));
     }
 
     Ok(ge)
@@ -1022,8 +1092,14 @@ pub(crate) async fn end_core(
             .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?,
     };
 
-    let active_humans = count_active_humans(&ge);
-    if active_humans > 1 {
+    // DRM-03b2b: courtesy precheck derives from the shared End snapshot
+    // predicate (sole active actor, or zero-active latest-departure-tie human);
+    // the locked writer remains authoritative for races.
+    let actor_user_id = match &actor {
+        ActingPlayer::User(user_id) => Some(*user_id),
+        ActingPlayer::GamePlayer(_) => player.game_player.user_id,
+    };
+    if !end_eligible(&ge, actor_user_id) {
         return Err(ServerFnError::new(
             "End game is only available to the last human",
         ));
@@ -2920,6 +2996,311 @@ mod tests {
             }
             _ => panic!("expected ServerError, got {other:?}"),
         }
+    }
+
+    fn dt() -> time::PrimitiveDateTime {
+        time::macros::datetime!(2026-01-01 0:00)
+    }
+
+    /// A single snapshot seat. `user_id` Some is a human (None a pure bot),
+    /// `left` marks an already-left (departed/replaced) human, and
+    /// `departure_sequence` ties a human to a departure event. Fixed
+    /// `place`/`points`/timestamps keep the pure predicates' inputs focused.
+    fn seat(
+        user_id: Option<Uuid>,
+        left: bool,
+        departure_sequence: Option<i32>,
+    ) -> crate::db::GamePlayerExtended {
+        let game_id = Uuid::new_v4();
+        crate::db::GamePlayerExtended {
+            game_player: crate::models::game::GamePlayer {
+                id: Uuid::new_v4(),
+                created_at: dt(),
+                updated_at: dt(),
+                game_id,
+                user_id,
+                position: 0,
+                color: "red".to_string(),
+                has_accepted: true,
+                is_turn: false,
+                is_turn_at: dt(),
+                place: None,
+                last_turn_at: dt(),
+                is_eliminated: false,
+                is_read: true,
+                points: Some(1.0),
+                undo_game_state: None,
+                rating_change: None,
+                ranked_placing: None,
+                left_at: left.then(dt),
+                departure_reason: departure_sequence.map(|_| "conceded".to_string()),
+                departure_sequence,
+            },
+            user: user_id.map(|id| crate::models::user::User {
+                id,
+                created_at: dt(),
+                updated_at: dt(),
+                name: "Human".to_string(),
+                pref_colors: Vec::new(),
+                theme: None,
+                is_admin: false,
+            }),
+            game_bot: user_id.is_none().then(|| crate::models::game::GameBot {
+                id: Uuid::new_v4(),
+                game_id,
+                name: "Bot".to_string(),
+                bot_name: "easy".to_string(),
+            }),
+            game_type_user: crate::models::game::GameTypeUser {
+                id: Uuid::new_v4(),
+                created_at: dt(),
+                updated_at: dt(),
+                game_type_id: Uuid::new_v4(),
+                user_id: user_id.unwrap_or_default(),
+                last_game_finished_at: None,
+                rating: 1000,
+                peak_rating: 1000,
+            },
+        }
+    }
+
+    fn snapshot(seats: Vec<crate::db::GamePlayerExtended>) -> crate::db::GameExtended {
+        crate::db::GameExtended {
+            game: crate::models::game::Game {
+                id: Uuid::new_v4(),
+                created_at: dt(),
+                updated_at: dt(),
+                game_version_id: Uuid::new_v4(),
+                is_finished: false,
+                finished_at: None,
+                game_state: "state".to_string(),
+                chat_id: None,
+                restarted_game_id: None,
+                end_reason: None,
+            },
+            game_type: crate::models::game::GameType {
+                id: Uuid::new_v4(),
+                created_at: dt(),
+                updated_at: dt(),
+                name: "Game".to_string(),
+                player_counts: vec![seats.len() as i32],
+                weight: 1.0,
+                blurb: String::new(),
+            },
+            game_version: crate::models::game::GameVersion {
+                id: Uuid::new_v4(),
+                created_at: dt(),
+                updated_at: dt(),
+                game_type_id: Uuid::new_v4(),
+                name: "v1".to_string(),
+                uri: "http://127.0.0.1:8100".to_string(),
+                is_public: true,
+                is_deprecated: false,
+            },
+            game_players: seats,
+        }
+    }
+
+    /// Concede capability matrix: replacement/no-replacement seat cases and the
+    /// active-human actor rule.
+    #[test]
+    fn concede_eligible_covers_replacement_and_forfeit_seat_cases() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let c = Uuid::new_v4();
+
+        let two_humans = snapshot(vec![seat(Some(a), false, None), seat(Some(b), false, None)]);
+        assert!(
+            concede_eligible(&two_humans, Some(a), false),
+            "two total seats forfeit with no replacement bot"
+        );
+        assert!(concede_eligible(&two_humans, Some(a), true), "replacement path");
+        assert!(
+            !concede_eligible(&two_humans, Some(c), false),
+            "a spectator is not an active human"
+        );
+
+        let three_humans = snapshot(vec![
+            seat(Some(a), false, None),
+            seat(Some(b), false, None),
+            seat(Some(c), false, None),
+        ]);
+        assert!(
+            !concede_eligible(&three_humans, Some(a), false),
+            "no replacement bot and not exactly two seats"
+        );
+        assert!(concede_eligible(&three_humans, Some(a), true));
+
+        let with_departed = snapshot(vec![
+            seat(Some(a), true, Some(1)),
+            seat(Some(b), false, None),
+            seat(Some(c), false, None),
+        ]);
+        assert!(
+            !concede_eligible(&with_departed, Some(a), true),
+            "a departed human is not an active actor"
+        );
+        assert!(
+            !concede_eligible(&with_departed, Some(b), false),
+            "three total seats still need a replacement bot"
+        );
+        assert!(concede_eligible(&with_departed, Some(b), true));
+
+        assert!(
+            !concede_eligible(&three_humans, None, true),
+            "a pure-bot seat cannot Concede"
+        );
+    }
+
+    /// One-active End-versus-Concede precedence: exactly one active human may
+    /// End but never Concede, and the sole active human is the only End actor.
+    #[test]
+    fn one_active_human_prefers_end_over_concede() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let ge = snapshot(vec![
+            seat(Some(a), false, None),
+            seat(Some(b), true, Some(1)),
+            seat(None, false, None),
+        ]);
+
+        assert!(
+            !concede_eligible(&ge, Some(a), true),
+            "exactly one active human cannot Concede even with a replacement bot"
+        );
+        assert!(end_eligible(&ge, Some(a)), "the sole active human may End");
+        assert!(
+            !end_eligible(&ge, Some(b)),
+            "a departed human is not the active End actor"
+        );
+    }
+
+    /// Zero-active End: every human tied in the latest departure event is
+    /// authorized, while earlier-event and pure-bot actors are not.
+    #[test]
+    fn zero_active_humans_end_authorizes_latest_departure_tie_only() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let c = Uuid::new_v4();
+        let ge = snapshot(vec![
+            seat(Some(a), true, Some(1)),
+            seat(Some(b), true, Some(2)),
+            seat(Some(c), true, Some(2)),
+            seat(None, false, None),
+        ]);
+
+        assert!(end_eligible(&ge, Some(b)), "tied in the latest event");
+        assert!(end_eligible(&ge, Some(c)), "tied in the latest event");
+        assert!(
+            !end_eligible(&ge, Some(a)),
+            "an earlier departure event is not authorized"
+        );
+        assert!(
+            !end_eligible(&ge, None),
+            "a pure bot is never latest-event authority"
+        );
+        assert!(
+            !concede_eligible(&ge, Some(b), true),
+            "no active humans remain to Concede"
+        );
+    }
+
+    /// Earlier departed rejection: with one active human, a previously departed
+    /// human cannot End.
+    #[test]
+    fn earlier_departed_human_cannot_end() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let ge = snapshot(vec![seat(Some(a), false, None), seat(Some(b), true, Some(1))]);
+
+        assert!(end_eligible(&ge, Some(a)), "the sole active human may End");
+        assert!(
+            !end_eligible(&ge, Some(b)),
+            "the earlier departed human cannot End"
+        );
+    }
+
+    /// Pure-bot exclusion: bot seats are never End/Concede actors and never
+    /// supply latest-event authority.
+    #[test]
+    fn pure_bots_are_never_humans_or_latest_event_authority() {
+        let a = Uuid::new_v4();
+        let all_bots = snapshot(vec![seat(None, false, None), seat(None, false, None)]);
+        assert!(!end_eligible(&all_bots, None), "a pure-bot game cannot End");
+        assert!(!end_eligible(&all_bots, Some(a)), "there are no humans at all");
+
+        let human_with_bots = snapshot(vec![
+            seat(Some(a), false, None),
+            seat(None, false, None),
+            seat(None, false, None),
+        ]);
+        assert!(end_eligible(&human_with_bots, Some(a)), "sole active human");
+        assert!(
+            !end_eligible(&human_with_bots, None),
+            "a bot seat cannot End"
+        );
+        assert!(
+            !concede_eligible(&human_with_bots, None, true),
+            "a bot seat cannot Concede"
+        );
+        assert!(
+            !concede_eligible(&human_with_bots, Some(a), true),
+            "one active human cannot Concede"
+        );
+    }
+
+    /// Multi-active End rejection: two or more active humans never authorize
+    /// End, even for one of the active actors.
+    #[test]
+    fn two_or_more_active_humans_reject_end() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let c = Uuid::new_v4();
+
+        let two = snapshot(vec![seat(Some(a), false, None), seat(Some(b), false, None)]);
+        assert!(!end_eligible(&two, Some(a)), "two active humans");
+        assert!(!end_eligible(&two, Some(b)), "two active humans");
+        assert!(concede_eligible(&two, Some(a), false), "two-seat forfeit");
+
+        let three = snapshot(vec![
+            seat(Some(a), false, None),
+            seat(Some(b), false, None),
+            seat(Some(c), false, None),
+        ]);
+        assert!(!end_eligible(&three, Some(a)), "three active humans");
+    }
+
+    /// Authorization inputs never consult `place`, `points`, or timestamps:
+    /// varying every result/timestamp field leaves identical eligibility.
+    #[test]
+    fn eligibility_never_consults_place_points_or_timestamps() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let mut ge = snapshot(vec![seat(Some(a), false, None), seat(Some(b), false, None)]);
+
+        let before = (
+            concede_eligible(&ge, Some(a), true),
+            end_eligible(&ge, Some(a)),
+        );
+
+        for p in &mut ge.game_players {
+            p.game_player.place = Some(3);
+            p.game_player.ranked_placing = Some(1);
+            p.game_player.points = Some(999.0);
+            p.game_player.left_at = p
+                .game_player
+                .left_at
+                .map(|_| time::macros::datetime!(2026-06-01 0:00));
+            p.game_player.updated_at = time::macros::datetime!(2026-06-01 0:00);
+        }
+
+        assert_eq!(
+            (
+                concede_eligible(&ge, Some(a), true),
+                end_eligible(&ge, Some(a))
+            ),
+            before
+        );
     }
 
     #[sqlx::test]
