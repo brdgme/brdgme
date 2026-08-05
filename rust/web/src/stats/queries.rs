@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use time::PrimitiveDateTime;
@@ -418,6 +419,106 @@ pub async fn active_games(
             updated_at: row.updated_at,
         })
         .collect())
+}
+
+/// A completed game's authoritative result: every seat with the authoritative
+/// bot-inclusive placing (`game_players.place`) and the game-level end reason
+/// (`games.end_reason`). Distinct from `FinishedGameRow` (competitive) and the
+/// history query (mixed status); never carries `ranked_placing` or points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameResult {
+    pub game_id: Uuid,
+    pub game_type_name: String,
+    pub finished_at: Option<PrimitiveDateTime>,
+    pub end_reason: Option<String>,
+    pub seats: Vec<GameResultSeat>,
+}
+
+/// One seat of an authoritative Game result. Identity distinguishes pure bots
+/// (`user_id` None, `bot_id` Some) from replacement-human seats (`user_id` and
+/// `bot_id` both present) and untouched human seats (`bot_id` None).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameResultSeat {
+    pub position: i32,
+    pub user_id: Option<Uuid>,
+    pub user_name: Option<String>,
+    pub bot_id: Option<Uuid>,
+    pub bot_name: Option<String>,
+    pub place: Option<i32>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct GameResultSeatRow {
+    game_id: Uuid,
+    game_type_name: String,
+    finished_at: Option<PrimitiveDateTime>,
+    end_reason: Option<String>,
+    position: i32,
+    user_id: Option<Uuid>,
+    user_name: Option<String>,
+    bot_id: Option<Uuid>,
+    bot_name: Option<String>,
+    place: Option<i32>,
+}
+
+/// Completed games in which `user_id` participated, newest finished first
+/// (tied by game id), each with every seat in seat-position order. Authoritative
+/// result fields are `games.end_reason` and nullable `game_players.place` only.
+pub async fn game_results(pool: &PgPool, user_id: Uuid) -> Result<Vec<GameResult>> {
+    // Runtime query_as: result shape maps naturally to a named FromRow struct; binds are static.
+    let rows: Vec<GameResultSeatRow> = sqlx::query_as(
+        r#"
+        SELECT
+            g.id AS game_id,
+            gt.name AS game_type_name,
+            g.finished_at,
+            g.end_reason,
+            gp."position" AS position,
+            u.id AS user_id,
+            u.name AS user_name,
+            gb.id AS bot_id,
+            gb.name AS bot_name,
+            gp.place AS place
+        FROM game_players gp
+        JOIN games g ON g.id = gp.game_id
+        JOIN game_versions gv ON gv.id = g.game_version_id
+        JOIN game_types gt ON gt.id = gv.game_type_id
+        LEFT JOIN users u ON u.id = gp.user_id
+        LEFT JOIN game_bots gb ON gb.id = gp.game_bot_id
+        WHERE g.is_finished = true
+          AND EXISTS (
+              SELECT 1 FROM game_players gp2
+              WHERE gp2.game_id = g.id AND gp2.user_id = $1
+          )
+        ORDER BY g.finished_at DESC NULLS LAST, g.id, gp."position"
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut games: Vec<GameResult> = Vec::new();
+    for row in rows {
+        let seat = GameResultSeat {
+            position: row.position,
+            user_id: row.user_id,
+            user_name: row.user_name,
+            bot_id: row.bot_id,
+            bot_name: row.bot_name,
+            place: row.place,
+        };
+        match games.last_mut() {
+            Some(game) if game.game_id == row.game_id => game.seats.push(seat),
+            _ => games.push(GameResult {
+                game_id: row.game_id,
+                game_type_name: row.game_type_name,
+                finished_at: row.finished_at,
+                end_reason: row.end_reason,
+                seats: vec![seat],
+            }),
+        }
+    }
+    Ok(games)
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -870,7 +971,35 @@ pub(crate) mod fixtures {
         finished_at: PrimitiveDateTime,
         players: &[(Option<Uuid>, Option<i32>, Option<i32>)],
     ) -> Uuid {
-        insert_game(pool, game_version_id, true, Some(finished_at), players).await
+        insert_game(
+            pool,
+            Uuid::new_v4(),
+            game_version_id,
+            true,
+            Some(finished_at),
+            players,
+        )
+        .await
+    }
+
+    /// Insert a finished game with an explicit id so ordering tie-breaks
+    /// (`finished_at` equal, then game id) can be asserted deterministically.
+    pub(crate) async fn insert_finished_game_with_id(
+        pool: &PgPool,
+        game_id: Uuid,
+        game_version_id: Uuid,
+        finished_at: PrimitiveDateTime,
+        players: &[(Option<Uuid>, Option<i32>, Option<i32>)],
+    ) -> Uuid {
+        insert_game(
+            pool,
+            game_id,
+            game_version_id,
+            true,
+            Some(finished_at),
+            players,
+        )
+        .await
     }
 
     pub(crate) async fn insert_unfinished_game(
@@ -878,24 +1007,37 @@ pub(crate) mod fixtures {
         game_version_id: Uuid,
         players: &[(Option<Uuid>, Option<i32>, Option<i32>)],
     ) -> Uuid {
-        insert_game(pool, game_version_id, false, None, players).await
+        insert_game(pool, Uuid::new_v4(), game_version_id, false, None, players).await
+    }
+
+    pub(crate) async fn set_game_end_reason(pool: &PgPool, game_id: Uuid, end_reason: &str) {
+        sqlx::query("UPDATE games SET end_reason = $1 WHERE id = $2")
+            .bind(end_reason)
+            .bind(game_id)
+            .execute(pool)
+            .await
+            .expect("set game end reason");
     }
 
     async fn insert_game(
         pool: &PgPool,
+        game_id: Uuid,
         game_version_id: Uuid,
         is_finished: bool,
         finished_at: Option<PrimitiveDateTime>,
         players: &[(Option<Uuid>, Option<i32>, Option<i32>)],
     ) -> Uuid {
-        let game_id = sqlx::query_scalar!(
+        // Plain runtime query_scalar: the explicit game_id changes the SQL shape
+        // versus the cached macro query, and no `.sqlx` regeneration is allowed.
+        sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO games (id, game_version_id, is_finished, finished_at, game_state)
-               VALUES (uuid_generate_v4(), $1, $2, $3, '')
+               VALUES ($1, $2, $3, $4, '')
                RETURNING id"#,
-            game_version_id,
-            is_finished,
-            finished_at
         )
+        .bind(game_id)
+        .bind(game_version_id)
+        .bind(is_finished)
+        .bind(finished_at)
         .fetch_one(pool)
         .await
         .expect("insert game");
@@ -1656,6 +1798,274 @@ mod tests {
         assert_eq!(for_opponent.len(), 1);
         assert_eq!(for_opponent[0].ranked_placing, Some(1));
         assert_eq!(for_opponent[0].player_count, 2);
+    }
+
+    /// A normal finish returns every seat - profile human, opponent, and pure
+    /// bot - with authoritative `place`s and `end_reason = game_service`. The
+    /// profile human's divergent competitive `ranked_placing` never leaks into
+    /// the authoritative seat place.
+    #[sqlx::test]
+    async fn game_results_normal_finish_returns_every_seat_with_places(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(alice), Some(1), None),
+                (Some(bob), Some(2), None),
+                (None, Some(3), None),
+            ],
+        )
+        .await;
+        set_game_end_reason(&pool, game, "game_service").await;
+        sqlx::query(
+            "UPDATE game_players SET ranked_placing = $1 WHERE game_id = $2 AND user_id = $3",
+        )
+        .bind(4)
+        .bind(game)
+        .bind(alice)
+        .execute(&pool)
+        .await
+        .expect("override ranked placing");
+
+        let results = game_results(&pool, alice).await.expect("query ok");
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert_eq!(result.game_id, game);
+        assert_eq!(result.game_type_name, "Camel Up");
+        assert_eq!(result.end_reason.as_deref(), Some("game_service"));
+        assert_eq!(result.seats.len(), 3);
+        assert_eq!(result.seats[0].position, 0);
+        assert_eq!(result.seats[1].position, 1);
+        assert_eq!(result.seats[2].position, 2);
+        assert_eq!(result.seats[0].user_id, Some(alice));
+        assert_eq!(result.seats[1].user_id, Some(bob));
+        assert_eq!(result.seats[2].user_id, None);
+        assert_eq!(
+            result.seats[0].place,
+            Some(1),
+            "authoritative place, never the overridden ranked_placing"
+        );
+        assert_eq!(result.seats[1].place, Some(2));
+        assert_eq!(result.seats[2].place, Some(3));
+    }
+
+    /// A two-human platform concession forfeit is authoritative 1/2 with
+    /// `end_reason = concession_forfeit`.
+    #[sqlx::test]
+    async fn game_results_two_human_concession_carries_forfeit_places(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+        set_game_end_reason(&pool, game, "concession_forfeit").await;
+
+        let results = game_results(&pool, alice).await.expect("query ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].end_reason.as_deref(), Some("concession_forfeit"));
+        assert_eq!(results[0].seats[0].place, Some(1));
+        assert_eq!(results[0].seats[1].place, Some(2));
+    }
+
+    /// Identity representation: a replacement-human seat carries both the human
+    /// identity (user) and its replacement-bot identity, and stays distinct from
+    /// a pure bot seat (bot identity only, no user) and an untouched human seat
+    /// (user only, no bot).
+    #[sqlx::test]
+    async fn game_results_distinguishes_pure_bots_from_replacement_humans(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let replaced = make_user(&pool, "dave").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[
+                (Some(alice), Some(1), None),
+                (Some(replaced), Some(2), None),
+                (None, Some(3), None),
+            ],
+        )
+        .await;
+        let bot_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO game_bots (id, game_id, name, bot_name)
+               VALUES (uuid_generate_v4(), $1, 'replacement-bot', 'medium')
+               RETURNING id"#,
+        )
+        .bind(game)
+        .fetch_one(&pool)
+        .await
+        .expect("insert replacement bot");
+        sqlx::query("UPDATE game_players SET game_bot_id = $1 WHERE game_id = $2 AND user_id = $3")
+            .bind(bot_id)
+            .bind(game)
+            .bind(replaced)
+            .execute(&pool)
+            .await
+            .expect("attach replacement bot seat");
+        set_game_end_reason(&pool, game, "game_service").await;
+
+        let results = game_results(&pool, alice).await.expect("query ok");
+        assert_eq!(results.len(), 1);
+        let seats = &results[0].seats;
+        assert_eq!(seats.len(), 3);
+
+        let untouched = &seats[0];
+        assert_eq!(untouched.user_id, Some(alice));
+        assert!(
+            untouched.bot_id.is_none(),
+            "untouched human seat has no bot"
+        );
+        assert!(untouched.user_name.is_some());
+
+        let replacement = &seats[1];
+        assert_eq!(replacement.user_id, Some(replaced));
+        assert_eq!(replacement.user_name.as_deref(), Some("dave"));
+        assert_eq!(replacement.bot_id, Some(bot_id));
+        assert_eq!(replacement.bot_name.as_deref(), Some("replacement-bot"));
+        assert_eq!(replacement.place, Some(2));
+
+        let pure_bot = &seats[2];
+        assert_eq!(pure_bot.user_id, None, "pure bot has no human identity");
+        assert_eq!(pure_bot.user_name, None);
+        assert!(pure_bot.bot_id.is_some());
+        assert_eq!(pure_bot.bot_name.as_deref(), Some("bot-2"));
+        assert_eq!(pure_bot.place, Some(3));
+    }
+
+    /// Only completed games are selected; an unfinished game the profile human
+    /// is in is excluded.
+    #[sqlx::test]
+    async fn game_results_includes_only_completed_games(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+        insert_unfinished_game(
+            &pool,
+            gv,
+            &[(Some(alice), None, None), (Some(bob), None, None)],
+        )
+        .await;
+
+        let results = game_results(&pool, alice).await.expect("query ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].seats.len(), 2);
+    }
+
+    /// Deterministic ordering matches project conventions: games newest
+    /// `finished_at` first with equal timestamps tied by ascending game id, and
+    /// seats ordered by position within each game.
+    #[sqlx::test]
+    async fn game_results_orders_games_newest_first_then_seat_position(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let game_a = insert_finished_game_with_id(
+            &pool,
+            Uuid::parse_str("00000000-0000-0000-0000-00000000000a").expect("uuid"),
+            gv,
+            datetime!(2026-02-01 00:00:00),
+            &[
+                (Some(alice), Some(1), None),
+                (Some(bob), Some(2), None),
+                (None, Some(3), None),
+            ],
+        )
+        .await;
+        let game_b = insert_finished_game_with_id(
+            &pool,
+            Uuid::parse_str("00000000-0000-0000-0000-00000000000b").expect("uuid"),
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(2), None), (Some(bob), Some(1), None)],
+        )
+        .await;
+        let game_c = insert_finished_game_with_id(
+            &pool,
+            Uuid::parse_str("00000000-0000-0000-0000-00000000000c").expect("uuid"),
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), Some(1), None), (Some(bob), Some(2), None)],
+        )
+        .await;
+
+        let results = game_results(&pool, alice).await.expect("query ok");
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].game_id, game_a, "newest finished_at first");
+        assert_eq!(
+            results[1].game_id, game_b,
+            "tie broken by ascending game id"
+        );
+        assert_eq!(
+            results[2].game_id, game_c,
+            "tie broken by ascending game id"
+        );
+        assert_eq!(
+            results[0]
+                .seats
+                .iter()
+                .map(|s| s.position)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2],
+            "seats ordered by position within a game"
+        );
+        assert_eq!(
+            results[1]
+                .seats
+                .iter()
+                .map(|s| s.position)
+                .collect::<Vec<_>>(),
+            vec![0, 1],
+        );
+    }
+
+    /// A voluntary last-human stop stays a completed game but produces no game
+    /// result: every seat has a null authoritative `place` and the game-level
+    /// `end_reason` is `last_human_stop`.
+    #[sqlx::test]
+    async fn game_results_last_human_stop_returns_null_places(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let (_gt, gv) = make_game_type(&pool, "Camel Up").await;
+
+        let game = insert_finished_game(
+            &pool,
+            gv,
+            datetime!(2026-01-01 00:00:00),
+            &[(Some(alice), None, None), (Some(bob), None, None)],
+        )
+        .await;
+        set_game_end_reason(&pool, game, "last_human_stop").await;
+
+        let results = game_results(&pool, alice).await.expect("query ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].end_reason.as_deref(), Some("last_human_stop"));
+        assert_eq!(results[0].seats.len(), 2);
+        assert!(
+            results[0].seats.iter().all(|s| s.place.is_none()),
+            "early stop yields no authoritative places"
+        );
     }
 
     /// wd F51: the per-game rating aggregate (the `LEFT JOIN LATERAL` that
