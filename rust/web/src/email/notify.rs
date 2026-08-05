@@ -184,13 +184,20 @@ async fn build_content(
         NotifyKind::Reminder => reminder_header_text(recipient_player.name()),
         NotifyKind::Eliminated => eliminated_header_text(recipient_player.name()),
         NotifyKind::Finished => {
-            let mut placed: Vec<&crate::db::GamePlayerExtended> = ge.game_players.iter().collect();
-            placed.sort_by_key(|p| p.game_player.place.unwrap_or(i32::MAX));
-            let winners: Vec<(String, Option<i32>)> = placed
-                .iter()
-                .map(|p| (p.name().to_string(), p.game_player.rating_change))
-                .collect();
-            finished_header_text(&winners)
+            // A last-human-stop game has no result: never derive a winner or
+            // rating-delta line from place/points/placing/rating (DRM-03c2a).
+            if ge.game.end_reason.as_deref() == Some("last_human_stop") {
+                "Game ended early. No game result.".to_string()
+            } else {
+                let mut placed: Vec<&crate::db::GamePlayerExtended> =
+                    ge.game_players.iter().collect();
+                placed.sort_by_key(|p| p.game_player.place.unwrap_or(i32::MAX));
+                let winners: Vec<(String, Option<i32>)> = placed
+                    .iter()
+                    .map(|p| (p.name().to_string(), p.game_player.rating_change))
+                    .collect();
+                finished_header_text(&winners)
+            }
         }
     });
 
@@ -710,6 +717,90 @@ mod tests {
         assert_eq!(finished_header_text(&[]), "Game over.");
     }
 
+    // DRM-03c2a: a last-human-stop game has no result. The finished mail's
+    // header must be the exact no-result line and must not derive any
+    // winner/result language from the players' place, points, ranked placing,
+    // or rating change.
+    #[sqlx::test]
+    async fn finished_last_human_stop_header_has_no_game_result(pool: sqlx::PgPool) {
+        use axum::{Json, Router, routing::post};
+        use brdgme_cmd::api::{PlayerRender as PlayerRenderApi, Request, Response};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/",
+            post(move |Json(_): Json<Request>| async {
+                Json(Response::PlayerRender {
+                    render: PlayerRenderApi {
+                        player_state: "state".to_string(),
+                        render: "mock board".to_string(),
+                        command_spec: None,
+                    },
+                })
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mock_uri = format!("http://{addr}");
+
+        let (game_id, _players) = seed_game_with_emailable_players(&pool, 2).await;
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        sqlx::query(
+            "UPDATE games SET is_finished = true, end_reason = 'last_human_stop' \
+             WHERE id = $1",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE game_versions SET uri = $1, name = $2 WHERE id = $3")
+            .bind(&mock_uri)
+            .bind(format!("notify-mock-{}", uuid::Uuid::new_v4().simple()))
+            .bind(ge.game.game_version_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Distinct result data on every player: the winner/placing header
+        // would have surfaced one of these.
+        sqlx::query(
+            "UPDATE game_players SET \
+               place = position, \
+               points = (position + 1)::real, \
+               ranked_placing = position + 1, \
+               rating_change = CASE WHEN position = 0 THEN 16 ELSE -16 END \
+             WHERE game_id = $1",
+        )
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = crate::db::find_game_extended(&pool, game_id)
+            .await
+            .unwrap()
+            .expect("game exists");
+        let content = build_content(
+            &pool,
+            &reqwest::Client::new(),
+            &ge,
+            &ge.game_players[0],
+            NotifyKind::Finished,
+            "subject".to_string(),
+        )
+        .await;
+        let header = content.header.as_deref().expect("finished mail has a header");
+        assert_eq!(header, "Game ended early. No game result.");
+        assert!(!header.contains("Winners"));
+        for p in &ge.game_players {
+            assert!(!header.contains(p.name()), "header must not name {}", p.name());
+        }
+    }
     #[test]
     fn reminder_header_contains_name() {
         let h = reminder_header_text("Alice");
