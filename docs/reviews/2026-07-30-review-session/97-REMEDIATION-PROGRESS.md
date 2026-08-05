@@ -164,9 +164,9 @@ restored per owner instruction.)
 |---------------|--------|-------|
 | `rrm-4.9r1-sibling-lexical` | accepted | Comment/string-only function and pattern decoys now reject; full guard harness and Bash syntax checks pass. |
 | `rrm-4.9r2-dead-code-spacing` | accepted | Same-line spaced allowance and variant forms are covered; spaced-allowance fixture, full harness, and Bash syntax checks pass. |
-| `rrm-4.9r3-ci-path-filter` | approved | Trigger the guard's CI job for checker, harness, all sign-off fixtures, and canonical manifest changes. |
+| `rrm-4.9r3-ci-path-filter` | accepted | `test-rust` selects checker, harness, `scripts/fixtures/**`, and the canonical manifest, then runs `bash scripts/check-four-tooth.test.sh`; guard harness and Bash syntax checks pass. |
 
-Parent `rrm-4.9-pattern-sweeps` remains partial pending accepted corrective slices and replacement independent review.
+Parent `rrm-4.9-pattern-sweeps` remains partial pending replacement independent review.
 
 ## Owner decisions
 

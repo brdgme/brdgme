@@ -2382,7 +2382,7 @@ review are accepted.
 |---------------|-------------------------------|--------|
 | `rrm-4.9r1-sibling-lexical` | Strip or ignore comments and string-only decoys consistently for both claimed functions and sibling patterns. Add the exact adversarial fixtures from the review. | accepted: full guard harness and Bash syntax checks pass; four adversarial lexical-decoy fixtures reject |
 | `rrm-4.9r2-dead-code-spacing` | Detect bounded whitespace variants such as `allow (dead_code)` consistently, align the contract wording with actual coverage, and add a fixture. | accepted: full guard harness and Bash syntax checks pass; spaced-allowance fixture rejects |
-| `rrm-4.9r3-ci-path-filter` | Ensure checker, harness, all sign-off fixtures, and the canonical sign-off manifest trigger the CI job that runs the guard. | approved |
+| `rrm-4.9r3-ci-path-filter` | Ensure checker, harness, all sign-off fixtures, and the canonical sign-off manifest trigger the CI job that runs the guard. | accepted: `test-rust` path filter selects all four path classes and runs `bash scripts/check-four-tooth.test.sh`; guard harness and Bash syntax checks pass |
 
 After accepted corrective slices, rerun one independent parent review. No
 historical repairs or semantic scope expansion are authorized.
@@ -2399,7 +2399,7 @@ historical repairs or semantic scope expansion are authorized.
 | `rrm-4.5-spec-code-review` | 4.5 | done | `docs/CODING.md` now requires the second reviewer, the written code-versus-spec answer, and grep/hit-count evidence; independent review and `git diff --check` passed. |
 | `rrm-4.6-stop-escalation` | 4.6 | done | `docs/CODING.md` requires an exact owner-signed amendment or recorded abandonment for every declared triggered mandatory STOP/HALT condition; silence, inferred approval, and ordinary completion do not clear it. `check-four-tooth.sh` adds deterministic escalation scope/response linkage (trigger, required owner, permitted response kind, evidence), with isolated positive and missing-response, wrong-owner, unauthorized/rogue, closure-masquerade, duplicate, empty-scope, and malformed bypass fixtures. Independent trigger/linkage review found no correctness finding. F-206's dependency-policy concern and WP-69 §5's parked negative checks remain recorded/unresolved; this unit makes no dependency-policy change or completion claim for them. |
 | `rrm-4.8-vendoring-defects` | 4.8 | done | `docs/CODING.md` now carries the 6.1 prohibition and mandatory inherited-defects/spec-owner-sign-off rule; `git diff --check` passed. |
-| `rrm-4.9-pattern-sweeps` | 4.9 | partial | D1 manifest accepted after independent source audit. Two empty `host-unknown` attempts were reconciled with no changes; `rrm-4.9a-sibling-sweep`, `rrm-4.9b-exhaustive-match`, `rrm-4.9c-dead-code-sweep`, `rrm-4.9d-log-layer-proof`, and `rrm-4.9e-every-item-checklist` are accepted. One final integration/adversarial review still gates parent acceptance. |
+| `rrm-4.9-pattern-sweeps` | 4.9 | partial | D1 manifest accepted after independent source audit. Two empty `host-unknown` attempts were reconciled with no changes; `rrm-4.9a-sibling-sweep`, `rrm-4.9b-exhaustive-match`, `rrm-4.9c-dead-code-sweep`, `rrm-4.9d-log-layer-proof`, `rrm-4.9e-every-item-checklist`, `rrm-4.9r1-sibling-lexical`, `rrm-4.9r2-dead-code-spacing`, and `rrm-4.9r3-ci-path-filter` are accepted. One replacement independent integration/adversarial review still gates parent acceptance. |
 
 ## 5. Coverage work
 
