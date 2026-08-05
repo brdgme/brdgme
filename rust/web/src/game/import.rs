@@ -88,16 +88,17 @@ pub async fn import_bundle(
 
     let mut tx = pool.begin().await?;
 
-    let game_id: Uuid = sqlx::query_scalar!(
-        "INSERT INTO games (game_version_id, is_finished, finished_at, game_state, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-        local_version.id,
-        bundle.game.is_finished,
-        bundle.game.finished_at,
-        bundle.game.game_state,
-        bundle.game.created_at,
-        bundle.game.updated_at
+    let game_id: Uuid = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO games (game_version_id, is_finished, finished_at, game_state, created_at, updated_at, end_reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
     )
+    .bind(local_version.id)
+    .bind(bundle.game.is_finished)
+    .bind(bundle.game.finished_at)
+    .bind(&bundle.game.game_state)
+    .bind(bundle.game.created_at)
+    .bind(bundle.game.updated_at)
+    .bind(&bundle.game.end_reason)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -117,12 +118,21 @@ pub async fn import_bundle(
         bot_ids.insert(bot.name.clone(), id);
     }
 
-    // Players: placeholder local users for humans (spec D5 - named players,
-    // no emails exist in the bundle), bots linked by name.
+    // Players: identity is `is_human` together with `bot_name`, never `bot_name`
+    // alone. Humans get a placeholder local user (spec D5 - named players, no
+    // emails exist in the bundle); bots link by name. A replacement human keeps
+    // its user (identity/name) and also its game bot. A non-human seat without a
+    // bot name is invalid and aborts the import (the transaction rolls back).
     let mut player_ids_by_position: HashMap<i32, Uuid> = HashMap::new();
     for player in &bundle.players {
-        let (user_id, game_bot_id) = match &player.bot_name {
-            Some(bot_name) => (
+        let (user_id, game_bot_id) = match (player.is_human, player.bot_name.as_deref()) {
+            (false, None) => {
+                return Err(anyhow!(
+                    "bundle player {:?} has is_human=false and no bot_name - a seat must be a human, a bot, or a replacement human with both",
+                    player.name
+                ));
+            }
+            (false, Some(bot_name)) => (
                 None,
                 Some(*bot_ids.get(bot_name).ok_or_else(|| {
                     anyhow!(
@@ -132,30 +142,47 @@ pub async fn import_bundle(
                     )
                 })?),
             ),
-            None => (Some(placeholder_user(&mut tx, &player.name).await?), None),
+            (true, None) => (Some(placeholder_user(&mut tx, &player.name).await?), None),
+            (true, Some(bot_name)) => (
+                Some(placeholder_user(&mut tx, &player.name).await?),
+                Some(*bot_ids.get(bot_name).ok_or_else(|| {
+                    anyhow!(
+                        "bundle player {:?} references unknown bot {:?}",
+                        player.name,
+                        bot_name
+                    )
+                })?),
+            ),
         };
-        let gp_id: Uuid = sqlx::query_scalar!(
+        let gp_id: Uuid = sqlx::query_scalar::<_, Uuid>(
             "INSERT INTO game_players
                (game_id, user_id, game_bot_id, position, color, has_accepted,
                 is_turn, is_turn_at, last_turn_at, place, is_eliminated, is_read,
-                points, undo_game_state, rating_change)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12, $13, $14)
+                points, undo_game_state, rating_change, ranked_placing,
+                departure_reason, departure_sequence, left_at, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12, $13, $14, $15, $16, $17, $18, $19, $20)
              RETURNING id",
-            game_id,
-            user_id,
-            game_bot_id,
-            player.position,
-            player.color,
-            player.has_accepted,
-            player.is_turn,
-            bundle.game.updated_at,
-            bundle.game.updated_at,
-            player.place,
-            player.is_eliminated,
-            player.points,
-            player.undo_game_state,
-            player.rating_change
         )
+        .bind(game_id)
+        .bind(user_id)
+        .bind(game_bot_id)
+        .bind(player.position)
+        .bind(&player.color)
+        .bind(player.has_accepted)
+        .bind(player.is_turn)
+        .bind(player.is_turn_at)
+        .bind(player.last_turn_at)
+        .bind(player.place)
+        .bind(player.is_eliminated)
+        .bind(player.points)
+        .bind(&player.undo_game_state)
+        .bind(player.rating_change)
+        .bind(player.ranked_placing)
+        .bind(&player.departure_reason)
+        .bind(player.departure_sequence)
+        .bind(player.left_at)
+        .bind(player.created_at)
+        .bind(player.updated_at)
         .fetch_one(&mut *tx)
         .await?;
         player_ids_by_position.insert(player.position, gp_id);
@@ -621,4 +648,196 @@ mod tests {
             assert_eq!(row.last_turn_at, bundle.game.updated_at);
         }
     }
+
+    #[sqlx::test]
+    async fn import_bundle_round_trips_result_and_departure_metadata(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        let past = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2020, time::Month::January, 1).unwrap(),
+            time::Time::MIDNIGHT,
+        );
+        bundle.game.is_finished = true;
+        bundle.game.finished_at = Some(past);
+        bundle.game.end_reason = Some("concession_forfeit".to_string());
+
+        let human_idx = bundle
+            .players
+            .iter()
+            .position(|p| p.bot_name.is_none())
+            .expect("human seat");
+        let bot_idx = bundle
+            .players
+            .iter()
+            .position(|p| p.bot_name.is_some())
+            .expect("bot seat");
+        bundle.players[human_idx].place = Some(1);
+        bundle.players[human_idx].ranked_placing = Some(1);
+        // The departed bot seat carries the departure metadata; its bot link
+        // satisfies the 028 left_at guard.
+        bundle.players[bot_idx].place = Some(2);
+        bundle.players[bot_idx].ranked_placing = Some(2);
+        bundle.players[bot_idx].left_at = Some(past);
+        bundle.players[bot_idx].departure_reason = Some("conceded".to_string());
+        bundle.players[bot_idx].departure_sequence = Some(1);
+
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let ge = crate::db::find_game_extended(&pool, outcome.game_id)
+            .await
+            .unwrap()
+            .expect("imported game exists");
+
+        assert_eq!(ge.game.end_reason.as_deref(), Some("concession_forfeit"));
+        assert_eq!(ge.game.finished_at, Some(past));
+        assert_eq!(ge.game_players.len(), 2);
+        for bp in &bundle.players {
+            let ip = ge
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == bp.position)
+                .expect("imported player");
+            assert_eq!(ip.game_player.place, bp.place);
+            assert_eq!(ip.game_player.ranked_placing, bp.ranked_placing);
+            assert_eq!(ip.game_player.left_at, bp.left_at);
+            assert_eq!(ip.game_player.departure_reason, bp.departure_reason);
+            assert_eq!(ip.game_player.departure_sequence, bp.departure_sequence);
+        }
+    }
+
+    #[sqlx::test]
+    async fn import_bundle_round_trips_player_timestamps_exactly(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        let dt = |month: time::Month| {
+            time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2020, month, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            )
+        };
+        let created_at = dt(time::Month::January);
+        let updated_at = dt(time::Month::February);
+        let is_turn_at = dt(time::Month::March);
+        let last_turn_at = dt(time::Month::April);
+        let left_at = dt(time::Month::May);
+
+        // Distinct values per field so a defaulted or swapped timestamp cannot
+        // pass.
+        for player in &mut bundle.players {
+            player.created_at = created_at;
+            player.updated_at = updated_at;
+            player.is_turn_at = is_turn_at;
+            player.last_turn_at = last_turn_at;
+        }
+        // left_at stays null on the active seat and is preserved on the bot
+        // seat (which satisfies the 028 left_at guard).
+        let bot_idx = bundle
+            .players
+            .iter()
+            .position(|p| p.bot_name.is_some())
+            .expect("bot seat");
+        bundle.players[bot_idx].left_at = Some(left_at);
+
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+
+        let ge = crate::db::find_game_extended(&pool, outcome.game_id)
+            .await
+            .unwrap()
+            .expect("imported game exists");
+        assert_eq!(ge.game_players.len(), 2);
+        for bp in &bundle.players {
+            let ip = ge
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == bp.position)
+                .expect("imported player");
+            assert_eq!(ip.game_player.created_at, bp.created_at);
+            assert_eq!(ip.game_player.updated_at, bp.updated_at);
+            assert_eq!(ip.game_player.is_turn_at, bp.is_turn_at);
+            assert_eq!(ip.game_player.last_turn_at, bp.last_turn_at);
+            assert_eq!(ip.game_player.left_at, bp.left_at);
+        }
+    }
+
+    #[sqlx::test]
+    async fn import_bundle_preserves_human_only_identity(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        for player in &mut bundle.players {
+            player.is_human = true;
+            player.bot_name = None;
+        }
+
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let ge = crate::db::find_game_extended(&pool, outcome.game_id)
+            .await
+            .unwrap()
+            .expect("imported game exists");
+        assert_eq!(ge.game_players.len(), 2);
+        for p in &ge.game_players {
+            assert!(
+                p.user.is_some(),
+                "a human-only seat must import a user, got user={:?} bot={:?}",
+                p.user.is_some(),
+                p.game_bot.is_some()
+            );
+            assert!(p.game_bot.is_none(), "a human-only seat must not link a bot");
+            assert_ne!(p.user.as_ref().unwrap().id, bundle_original_user_id(&pool).await);
+        }
+    }
+
+    #[sqlx::test]
+    async fn import_bundle_preserves_pure_bot_identity(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        for player in &mut bundle.players {
+            if player.bot_name.is_some() {
+                player.is_human = false;
+            }
+        }
+
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let ge = crate::db::find_game_extended(&pool, outcome.game_id)
+            .await
+            .unwrap()
+            .expect("imported game exists");
+        let bot = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_bot.is_some())
+            .expect("bot seat imported");
+        assert!(bot.user.is_none(), "a pure bot must not import a user");
+        assert_eq!(bot.game_bot.as_ref().unwrap().name, "Botty");
+    }
+
+    #[sqlx::test]
+    async fn import_bundle_preserves_replacement_human_and_bot_identity(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        // The bot seat becomes a replacement human: it must keep BOTH its
+        // human identity and its bot seat (per-game bot name).
+        for player in &mut bundle.players {
+            if player.bot_name.is_some() {
+                player.is_human = true;
+            }
+        }
+
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let ge = crate::db::find_game_extended(&pool, outcome.game_id)
+            .await
+            .unwrap()
+            .expect("imported game exists");
+        let human = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_bot.is_none())
+            .expect("human-only seat imported");
+        assert!(human.user.is_some(), "the human-only seat must import a user");
+        assert!(human.game_bot.is_none(), "the human-only seat must not link a bot");
+        let replacement = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_bot.is_some())
+            .expect("replacement seat imported");
+        assert!(
+            replacement.user.is_some(),
+            "a replacement human must retain its user identity"
+        );
+        assert_eq!(replacement.game_bot.as_ref().unwrap().name, "Botty");
+    }
+
 }
