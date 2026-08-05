@@ -175,7 +175,8 @@
 #                        by `grep -E`
 #     scope              the search scope: a file or directory path relative
 #                        to CWD; the hit count is the number of matching lines
-#                        returned by `grep -rE <pattern> <scope>`
+#                        returned by `grep -E <pattern>` over the
+#                        comment/string-stripped content of the scope
 #     count              the recorded current hit count (non-negative integer)
 #     limit              the approved heuristic limit (non-negative integer)
 #                        on structurally identical siblings for this claim
@@ -183,9 +184,22 @@
 #   cannot authorize a fabricated sweep - and the search must be applicable:
 #   the scope must exist, contain the fixed function named in the scope link,
 #   and the pattern must match at least the fixed code, so a pattern that
-#   matches nothing is a decoy, not evidence of "no siblings". The re-run must
-#   reproduce the recorded count and must not exceed the approved heuristic
-#   limit.
+#   matches nothing is a decoy, not evidence of "no siblings". Both the
+#   fixed-function presence check and the pattern re-run operate on the
+#   comment/string-stripped scope content (the same awk stripper the four teeth
+#   and the log-layer gate use), so a comment-only or string-only mention of a
+#   claimed function or of a pattern is never evidence of a real sibling search.
+#   The re-run must reproduce the recorded count and must not exceed the
+#   approved heuristic limit.
+# Sibling-sweep heuristic limits: the presence and pattern scans strip comments
+# (`//`, `/* */`, including multi-line) and string literals first and scan every
+# regular file under the declared scope. The stripper is not a Rust parse: it
+# cannot see a function or pattern reference split across lines or one living in
+# a file the scope does not enumerate, and a multi-line block comment can join
+# neighbouring lines. A pattern whose only matches live in a comment or string
+# literal re-runs to zero on the stripped content and is rejected as a decoy
+# before the recorded count is compared, so a count that reproduces only over
+# comment/string matches can never authorize a fabricated sweep.
 # Sibling diagnostics (the claim ID is interpolated):
 #   SIBLING-MALFORMED:      <id>: sibling scope link must have two
 #                           tab-separated non-empty fields (id function) |
@@ -746,6 +760,23 @@ loglayer_stripped_lines() {
   done < <(find "$scope" -type f -name '*.rs' 2>/dev/null)
 }
 
+# stripped_scope <scope> -> the comment/string-stripped content of every regular
+# file under <scope>, one stripped source line per output line (the same awk
+# stripper the four teeth and the log-layer gate use). A mention of a claimed
+# fixed function or a sibling-search pattern that lives only in a comment or
+# string literal is therefore never evidence: the sibling gate re-runs its
+# presence and pattern scans over this stripped content.
+stripped_scope() {
+  local scope="$1" f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    awk "$awk_fns"'
+      BEGIN { in_block = 0; in_str = 0 }
+      { print strip_line($0) }
+    ' "$f" 2>/dev/null
+  done < <(find "$scope" -type f 2>/dev/null)
+}
+
 while IFS=$'\t' read -r id symbol file test pdisp premise amendment; do
   [ -n "$id" ] || continue
   cite_missing=0
@@ -1149,9 +1180,13 @@ fi
 # record whose pattern re-runs to the recorded count within the approved
 # heuristic limit, and the search must be applicable: the declared scope must
 # exist, contain the fixed function named in the scope link, and match at
-# least one line. The scope file is the authoritative enumeration and is never
-# inferred from the records, so omitting a record cannot hide a claim, and no
-# record can authorize a fabricated sweep.
+# least one line. Comments and string literals are stripped before both the
+# presence check and the pattern re-run, so a comment-only or string-only
+# mention of a claimed function or pattern is never evidence of a real sibling
+# search, and a pattern that re-runs to zero is rejected as a decoy before any
+# recorded count is compared. The scope file is the authoritative enumeration
+# and is never inferred from the records, so omitting a record cannot hide a
+# claim, and no record can authorize a fabricated sweep.
 if [ -n "${10:-}" ]; then
   SIB_SCOPE="${10}"
   SIB_RECORDS="${11:-sibling.tsv}"
@@ -1237,29 +1272,35 @@ if [ -n "${10:-}" ]; then
         continue
       fi
       # The search must be applicable: the declared scope must exist and must
-      # contain the fixed function the scope link names.
+      # contain the fixed function the scope link names. Comments and string
+      # literals are stripped first, so a comment-only or string-only mention of
+      # the function is never proof that the fix landed in real code.
       if [ ! -e "$sb_scope" ]; then
         echo "SIBLING-DECOY: $sb_id: declared search scope not found: $sb_scope" >&2
         fail=1
         continue
       fi
-      if ! grep -rEq "fn ${sib_fn[$sb_id]}" "$sb_scope" 2>/dev/null; then
+      if ! grep -qE "fn ${sib_fn[$sb_id]}" <(stripped_scope "$sb_scope") 2>/dev/null; then
         echo "SIBLING-DECOY: $sb_id: fixed function ${sib_fn[$sb_id]} is absent from the declared search scope $sb_scope" >&2
         fail=1
         continue
       fi
       # Re-run the sibling search exactly as recorded and compare the count.
-      actual="$(grep -rE "$sb_pattern" "$sb_scope" 2>/dev/null | wc -l | tr -d ' ')"
-      if [ "$actual" -ne "$sb_count" ]; then
-        echo "SIBLING-STALE-COUNT: $sb_id: recorded hit count $sb_count does not match current hit count $actual for pattern \"$sb_pattern\" in $sb_scope" >&2
+      # Comments and string literals are stripped first, so a pattern whose only
+      # matches live in a comment or string is not a real sibling search.
+      actual="$(grep -E -- "$sb_pattern" <(stripped_scope "$sb_scope") 2>/dev/null | wc -l | tr -d ' ')"
+      # A pattern that matches nothing is a decoy, not evidence of "no
+      # siblings": a real sibling search over the fixed code matches at least
+      # the fixed function itself. Checked before the count comparison, so a
+      # recorded count that reproduces only over comment/string matches is a
+      # decoy, never accepted as stale-but-consistent evidence.
+      if [ "$actual" -eq 0 ]; then
+        echo "SIBLING-DECOY: $sb_id: pattern \"$sb_pattern\" matches nothing in $sb_scope" >&2
         fail=1
         continue
       fi
-      # A pattern that matches nothing is a decoy, not evidence of "no
-      # siblings": a real sibling search over the fixed code matches at least
-      # the fixed function itself.
-      if [ "$actual" -eq 0 ]; then
-        echo "SIBLING-DECOY: $sb_id: pattern \"$sb_pattern\" matches nothing in $sb_scope" >&2
+      if [ "$actual" -ne "$sb_count" ]; then
+        echo "SIBLING-STALE-COUNT: $sb_id: recorded hit count $sb_count does not match current hit count $actual for pattern \"$sb_pattern\" in $sb_scope" >&2
         fail=1
         continue
       fi

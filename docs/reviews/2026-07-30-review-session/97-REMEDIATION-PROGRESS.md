@@ -162,7 +162,7 @@ restored per owner instruction.)
 
 | Semantic unit | Status | Scope |
 |---------------|--------|-------|
-| `rrm-4.9r1-sibling-lexical` | approved | Ignore comment and string-only decoys for claimed functions and sibling patterns; exact adversarial fixtures. |
+| `rrm-4.9r1-sibling-lexical` | accepted | Comment/string-only function and pattern decoys now reject; full guard harness and Bash syntax checks pass. |
 | `rrm-4.9r2-dead-code-spacing` | approved | Detect bounded whitespace variants, align coverage wording, and add a fixture. |
 | `rrm-4.9r3-ci-path-filter` | approved | Trigger the guard's CI job for checker, harness, all sign-off fixtures, and canonical manifest changes. |
 

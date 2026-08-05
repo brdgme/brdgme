@@ -186,6 +186,35 @@
 #                                   src/other.rs contains matching lines but not
 #                                   the fixed function the scope link names;
 #                                   the guard must fail it as a decoy.
+#   sibling-decoy-comment-fn      - a comment-only fixed-function decoy: the
+#                                   claimed function exists only as a comment
+#                                   `// fn update_game_command_success()`, never
+#                                   in real code, while the recorded pattern
+#                                   count reproduces over the comment lines; the
+#                                   guard must fail it as a decoy, never accept
+#                                   the comment mention as proof the fix landed.
+#   sibling-decoy-string-fn       - a string-only fixed-function decoy: the
+#                                   claimed function appears only inside a
+#                                   string literal `"fn update_game_command_
+#                                   success() ..."`, never as real code, while
+#                                   the recorded pattern count reproduces over
+#                                   real code; the guard must fail it as a
+#                                   decoy, never accept the string mention as
+#                                   proof the fix landed.
+#   sibling-decoy-comment-pattern - a comment-only sibling-pattern decoy: the
+#                                   fixed function exists, but the pattern
+#                                   `left_at_guard` matches only comment lines,
+#                                   so the recorded count reproduces only over
+#                                   comments; the guard must fail it as a decoy,
+#                                   never accept comment matches as evidence of
+#                                   a real sibling search.
+#   sibling-decoy-string-pattern  - a string-only sibling-pattern decoy: the
+#                                   fixed function exists, but the pattern
+#                                   `left_at_guard` matches only string
+#                                   literals, so the recorded count reproduces
+#                                   only over strings; the guard must fail it as
+#                                   a decoy, never accept string matches as
+#                                   evidence of a real sibling search.
 #   sibling-over-limit            - a correct re-run whose hit count 2 exceeds
 #                                   the approved heuristic limit 1; the guard
 #                                   must fail it.
@@ -665,6 +694,18 @@ fail_fixture sibling-decoy-pattern F-1000 SIBLING-DECOY \
   signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
 fail_fixture sibling-decoy-scope F-1000 SIBLING-DECOY \
   'SIBLING-DECOY: F-1000: fixed function update_game_command_success is absent from the declared search scope src/other.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-decoy-comment-fn F-1000 SIBLING-DECOY \
+  'SIBLING-DECOY: F-1000: fixed function update_game_command_success is absent from the declared search scope src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-decoy-string-fn F-1000 SIBLING-DECOY \
+  'SIBLING-DECOY: F-1000: fixed function update_game_command_success is absent from the declared search scope src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-decoy-comment-pattern F-1000 SIBLING-DECOY \
+  'SIBLING-DECOY: F-1000: pattern "left_at_guard" matches nothing in src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-decoy-string-pattern F-1000 SIBLING-DECOY \
+  'SIBLING-DECOY: F-1000: pattern "left_at_guard" matches nothing in src/game_write.rs' \
   signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
 fail_fixture sibling-over-limit F-1000 SIBLING-OVER-LIMIT \
   'SIBLING-OVER-LIMIT: F-1000: hit count 2 exceeds the approved heuristic limit 1' \

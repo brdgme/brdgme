@@ -2380,7 +2380,7 @@ review are accepted.
 
 | Semantic unit | Scope and acceptance evidence | Status |
 |---------------|-------------------------------|--------|
-| `rrm-4.9r1-sibling-lexical` | Strip or ignore comments and string-only decoys consistently for both claimed functions and sibling patterns. Add the exact adversarial fixtures from the review. | approved |
+| `rrm-4.9r1-sibling-lexical` | Strip or ignore comments and string-only decoys consistently for both claimed functions and sibling patterns. Add the exact adversarial fixtures from the review. | accepted: full guard harness and Bash syntax checks pass; four adversarial lexical-decoy fixtures reject |
 | `rrm-4.9r2-dead-code-spacing` | Detect bounded whitespace variants such as `allow (dead_code)` consistently, align the contract wording with actual coverage, and add a fixture. | approved |
 | `rrm-4.9r3-ci-path-filter` | Ensure checker, harness, all sign-off fixtures, and the canonical sign-off manifest trigger the CI job that runs the guard. | approved |
 
