@@ -1845,6 +1845,505 @@ mod tests {
         );
     }
 
+    /// DRM-03b1c2: with exactly one active human, that active human is the
+    /// authorized stopper.
+    #[sqlx::test]
+    async fn end_game_authorizes_sole_active_human(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id], 0, &[0]).await;
+
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(!ge.game.is_finished, "fixture must start unfinished");
+        assert_eq!(
+            ge.game_players
+                .iter()
+                .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
+                .count(),
+            1,
+            "fixture must leave exactly one active human"
+        );
+        let actor: Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(creator.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        end_game(&pool, game.id, ge.game.updated_at, actor)
+            .await
+            .unwrap();
+
+        let after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(after.game.is_finished, "sole active human must be able to stop");
+        assert_eq!(after.game.end_reason.as_deref(), Some("last_human_stop"));
+    }
+
+    /// DRM-03b1c2: with exactly one active human, a departed human is rejected
+    /// and the rejected call mutates nothing.
+    #[sqlx::test]
+    async fn end_game_rejects_departed_human_with_one_active_human(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+
+        // Seed authoritative places and ratings so the no-mutation assertions
+        // prove the rejected call writes nothing.
+        for p in &ge.game_players {
+            sqlx::query("UPDATE game_players SET place = $1 WHERE id = $2")
+                .bind(p.game_player.position + 5)
+                .bind(p.game_player.id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "UPDATE game_type_users SET rating = 1300, peak_rating = 1400 \
+             WHERE user_id IN (SELECT user_id FROM game_players \
+             WHERE game_id = $1 AND user_id IS NOT NULL)",
+        )
+        .bind(game.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let actor: Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let result = end_game(&pool, game.id, ge.game.updated_at, actor).await;
+        assert!(result.is_err(), "departed human must be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("not the last active human"),
+            "unexpected error: {err}"
+        );
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(!ge_after.game.is_finished, "game must stay unfinished");
+        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
+        assert_eq!(ge_after.game.game_state, "initial_state");
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.place,
+                Some(p.game_player.position + 5),
+                "authoritative place must stay exactly as seeded"
+            );
+            assert_eq!(p.game_player.ranked_placing, None, "no ranked placing");
+            assert_eq!(p.game_player.rating_change, None, "no rating stamp");
+        }
+        let ratings: Vec<(i32, i32)> = sqlx::query_as(
+            "SELECT gtu.rating, gtu.peak_rating FROM game_type_users gtu \
+             JOIN game_players gp ON gp.user_id = gtu.user_id \
+             WHERE gp.game_id = $1",
+        )
+        .bind(game.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!ratings.is_empty(), "seeded ratings must exist");
+        assert!(
+            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            "game_type_user rating must stay exactly as seeded: {ratings:?}"
+        );
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        assert!(
+            !logs.iter().any(|l| l.body == "Game ended."),
+            "a rejected call must not write the end log"
+        );
+    }
+
+    /// DRM-03b1c2: with zero active humans, a human in the latest departure
+    /// event is the authorized stopper.
+    #[sqlx::test]
+    async fn end_game_authorizes_latest_departed_human_when_zero_active(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id], 0, &[0]).await;
+
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-01 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 1 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-02 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 2 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(creator.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(!ge.game.is_finished, "fixture must start unfinished");
+        assert_eq!(
+            ge.game_players
+                .iter()
+                .filter(|p| p.game_player.user_id.is_some() && p.game_player.left_at.is_none())
+                .count(),
+            0,
+            "fixture must leave zero active humans"
+        );
+        let actor: Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(creator.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        end_game(&pool, game.id, ge.game.updated_at, actor)
+            .await
+            .unwrap();
+
+        let after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(after.game.is_finished, "latest departure event human must be able to stop");
+        assert_eq!(after.game.end_reason.as_deref(), Some("last_human_stop"));
+    }
+
+    /// DRM-03b1c2: with zero active humans and a tie in the latest departure
+    /// event, every tied participant is authorizable. Each success runs on its
+    /// own unfinished game.
+    #[sqlx::test]
+    async fn end_game_authorizes_each_tied_latest_departed_human(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+
+        let pool_ref = &pool;
+        let depart_all_together = |game_id: Uuid| async move {
+            sqlx::query(
+                "UPDATE game_players SET left_at = '2026-01-01 00:00:00', \
+                 departure_reason = 'conceded', departure_sequence = 1 \
+                 WHERE game_id = $1 AND user_id IS NOT NULL",
+            )
+            .bind(game_id)
+            .execute(pool_ref)
+            .await
+            .unwrap();
+        };
+        let player_id = |game_id: Uuid, user_id: Uuid| async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+            )
+            .bind(game_id)
+            .bind(user_id)
+            .fetch_one(pool_ref)
+            .await
+            .unwrap()
+        };
+
+        for actor in [creator.id, a.id] {
+            let game = make_game_with_players(&pool, gv, creator.id, &[a.id], 0, &[0]).await;
+            depart_all_together(game.id).await;
+            let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+            assert!(!ge.game.is_finished, "each success must start unfinished");
+            end_game(&pool, game.id, ge.game.updated_at, player_id(game.id, actor).await)
+                .await
+                .unwrap();
+            let after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+            assert!(after.game.is_finished, "tied participant {actor} must be authorizable");
+            assert_eq!(after.game.end_reason.as_deref(), Some("last_human_stop"));
+        }
+    }
+
+    /// DRM-03b1c2: with zero active humans, a human from an earlier departure
+    /// event is rejected and the rejected call mutates nothing.
+    #[sqlx::test]
+    async fn end_game_rejects_earlier_departure_event_human(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+
+        for p in &ge.game_players {
+            sqlx::query("UPDATE game_players SET place = $1 WHERE id = $2")
+                .bind(p.game_player.position + 5)
+                .bind(p.game_player.id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "UPDATE game_type_users SET rating = 1300, peak_rating = 1400 \
+             WHERE user_id IN (SELECT user_id FROM game_players \
+             WHERE game_id = $1 AND user_id IS NOT NULL)",
+        )
+        .bind(game.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-01 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 1 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-02 00:00:00', \
+             departure_reason = 'conceded', departure_sequence = 2 \
+             WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(creator.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let actor: Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let result = end_game(&pool, game.id, ge.game.updated_at, actor).await;
+        assert!(result.is_err(), "earlier departure event human must be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("latest departure event"),
+            "unexpected error: {err}"
+        );
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(!ge_after.game.is_finished, "game must stay unfinished");
+        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
+        assert_eq!(ge_after.game.game_state, "initial_state");
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.place,
+                Some(p.game_player.position + 5),
+                "authoritative place must stay exactly as seeded"
+            );
+            assert_eq!(p.game_player.ranked_placing, None, "no ranked placing");
+            assert_eq!(p.game_player.rating_change, None, "no rating stamp");
+        }
+        let ratings: Vec<(i32, i32)> = sqlx::query_as(
+            "SELECT gtu.rating, gtu.peak_rating FROM game_type_users gtu \
+             JOIN game_players gp ON gp.user_id = gtu.user_id \
+             WHERE gp.game_id = $1",
+        )
+        .bind(game.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!ratings.is_empty(), "seeded ratings must exist");
+        assert!(
+            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            "game_type_user rating must stay exactly as seeded: {ratings:?}"
+        );
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        assert!(
+            !logs.iter().any(|l| l.body == "Game ended."),
+            "a rejected call must not write the end log"
+        );
+    }
+
+    /// DRM-03b1c2: a pure-bot/non-human actor is rejected and the rejected
+    /// call mutates nothing.
+    #[sqlx::test]
+    async fn end_game_rejects_pure_bot_actor(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[], 1, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let bot_actor = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.user_id.is_none())
+            .unwrap()
+            .game_player
+            .id;
+
+        for p in &ge.game_players {
+            sqlx::query("UPDATE game_players SET place = $1 WHERE id = $2")
+                .bind(p.game_player.position + 5)
+                .bind(p.game_player.id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "UPDATE game_type_users SET rating = 1300, peak_rating = 1400 \
+             WHERE user_id IN (SELECT user_id FROM game_players \
+             WHERE game_id = $1 AND user_id IS NOT NULL)",
+        )
+        .bind(game.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = end_game(&pool, game.id, ge.game.updated_at, bot_actor).await;
+        assert!(result.is_err(), "pure bot must be rejected");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("a bot"), "unexpected error: {err}");
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(!ge_after.game.is_finished, "game must stay unfinished");
+        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
+        assert_eq!(ge_after.game.game_state, "initial_state");
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.place,
+                Some(p.game_player.position + 5),
+                "authoritative place must stay exactly as seeded"
+            );
+            assert_eq!(p.game_player.ranked_placing, None, "no ranked placing");
+            assert_eq!(p.game_player.rating_change, None, "no rating stamp");
+        }
+        let ratings: Vec<(i32, i32)> = sqlx::query_as(
+            "SELECT gtu.rating, gtu.peak_rating FROM game_type_users gtu \
+             JOIN game_players gp ON gp.user_id = gtu.user_id \
+             WHERE gp.game_id = $1",
+        )
+        .bind(game.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!ratings.is_empty(), "seeded ratings must exist");
+        assert!(
+            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            "game_type_user rating must stay exactly as seeded: {ratings:?}"
+        );
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        assert!(
+            !logs.iter().any(|l| l.body == "Game ended."),
+            "a rejected call must not write the end log"
+        );
+    }
+
+    /// DRM-03b1c2: an attempt with two or more active humans is rejected and
+    /// the rejected call mutates nothing.
+    #[sqlx::test]
+    async fn end_game_rejects_two_or_more_active_humans(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let b = make_user(&pool, "b").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id, b.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+
+        for p in &ge.game_players {
+            sqlx::query("UPDATE game_players SET place = $1 WHERE id = $2")
+                .bind(p.game_player.position + 5)
+                .bind(p.game_player.id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "UPDATE game_type_users SET rating = 1300, peak_rating = 1400 \
+             WHERE user_id IN (SELECT user_id FROM game_players \
+             WHERE game_id = $1 AND user_id IS NOT NULL)",
+        )
+        .bind(game.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let actor: Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(creator.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let result = end_game(&pool, game.id, ge.game.updated_at, actor).await;
+        assert!(result.is_err(), "two or more active humans must be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("at most one active human"),
+            "unexpected error: {err}"
+        );
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert!(!ge_after.game.is_finished, "game must stay unfinished");
+        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
+        assert_eq!(ge_after.game.game_state, "initial_state");
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.place,
+                Some(p.game_player.position + 5),
+                "authoritative place must stay exactly as seeded"
+            );
+            assert_eq!(p.game_player.ranked_placing, None, "no ranked placing");
+            assert_eq!(p.game_player.rating_change, None, "no rating stamp");
+        }
+        let ratings: Vec<(i32, i32)> = sqlx::query_as(
+            "SELECT gtu.rating, gtu.peak_rating FROM game_type_users gtu \
+             JOIN game_players gp ON gp.user_id = gtu.user_id \
+             WHERE gp.game_id = $1",
+        )
+        .bind(game.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!ratings.is_empty(), "seeded ratings must exist");
+        assert!(
+            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            "game_type_user rating must stay exactly as seeded: {ratings:?}"
+        );
+        let logs = get_all_game_logs(&pool, game.id).await.unwrap();
+        assert!(
+            !logs.iter().any(|l| l.body == "Game ended."),
+            "a rejected call must not write the end log"
+        );
+    }
+
     #[sqlx::test]
     async fn undo_game_restores_state_and_clears_undo(pool: PgPool) {
         let creator = make_user(&pool, "creator").await;
