@@ -207,6 +207,83 @@
 #   SIBLING-OVER-LIMIT:     <id>: hit count exceeds the approved heuristic
 #                           limit
 #
+# Exhaustive-match gate (4.9b): a fix that makes a `match` exhaustive without a
+# wildcard arm (pattern 5 - the `_ => <default>` substitution) must name its
+# scope and prove no wildcard match arm remains there, reproducibly. The proof
+# is a textual Bash heuristic over the declared scope, documented below; it is
+# an auditable approximation, never a parser-grade guarantee. Two optional
+# inputs, enabled when an exhaustive scope file is given:
+#   exhaustive-scope.tsv  one in-scope exhaustive-match claim per line,
+#                         tab-separated fields (id scope). `scope` is the
+#                         source file or directory, relative to CWD, that the
+#                         claim sweeps. The authoritative enumeration, derived
+#                         in production from the commit range / fix records and
+#                         never from the evidence records - so omitting a
+#                         claim's evidence record cannot hide it.
+#                         (default: none, gate skipped)
+#   exhaustive-match.tsv  tab-separated evidence records, one per in-scope
+#                         claim, fields:
+#     id                   claim ID, matching a scope link exactly
+#     scope                the search scope, relative to CWD; must equal the
+#                          authoritative scope named in the scope link exactly,
+#                          so a record scanning a different scope is a nearby
+#                          scan, not evidence for this claim
+#     wildcards            the recorded count of wildcard match arms returned
+#                          by the guard's wildcard-arm heuristic
+#     matches              the recorded count of `match` occurrences returned
+#                          by the guard's match-presence heuristic (>= 1)
+#   The guard re-runs both heuristics against the declared scope. The wildcard
+#   count must reproduce at 0 - any remaining wildcard arm is rejected in any
+#   variant the heuristic covers. The match count must reproduce the recorded
+#   value, and the scope must actually contain at least one `match`: a scope
+#   with no match makes a "no wildcard arm remains" claim vacuous, so it is
+#   rejected rather than counted as proof. The authoritative scope must be
+#   non-empty: an empty scope file is rejected outright, because an
+#   exhaustive-match sign-off with no enumerated claims proves nothing. Every
+#   record must correspond exactly to an in-scope claim - a rogue record cannot
+#   authorize a fabricated sweep.
+# Exhaustive-match diagnostics (the claim ID is interpolated):
+#   EXMATCH-MALFORMED:      <id>: exhaustive-match scope link must have two
+#                           tab-separated non-empty fields (id scope) |
+#                           exhaustive-match record must have four
+#                           tab-separated non-empty fields (id scope wildcards
+#                           matches) | wildcards and matches must be
+#                           non-negative integers
+#   EXMATCH-DUPLICATE:      <id>: duplicate exhaustive-match scope link /
+#                           duplicate exhaustive-match record
+#   EXMATCH-MISSING:        <id>: in-scope exhaustive-match claim has no
+#                           evidence record
+#   EXMATCH-ROGUE:          <id>: exhaustive-match record matches no in-scope
+#                           claim
+#   EXMATCH-OMITTED-SCOPE:  <id>: exhaustive-match record omits the search
+#                           scope field (id scope wildcards matches)
+#   EXMATCH-EMPTY-SCOPE:    <scope-file>: the authoritative scope file names no
+#                           in-scope exhaustive-match claims (empty scope)
+#   EXMATCH-DECOY:          <id>: the scan is not applicable - the record's
+#                           scope differs from the authoritative scope, the
+#                           declared scope does not exist, or the scope
+#                           contains no `match` expression, so the no-wildcard
+#                           claim is vacuous
+#   EXMATCH-STALE:          <id>: recorded match count <count> does not match
+#                           the current re-run, or the recorded wildcard count
+#                           <count> does not match the current re-run
+#   EXMATCH-WILDCARD-REMAINS: <id>: a wildcard match arm remains in <scope>
+#                           (current count <count> > 0)
+#
+# Exhaustive-match heuristic limits: the wildcard-arm heuristic matches a line
+# whose first non-space text is `_` optionally followed by whitespace plus an
+# `@` bind or an `if` guard, then optional whitespace and `=>`. It catches the
+# plain `_ =>`, space-less `_=>`, `_ @ bind =>`, and `_ if guard =>` variants.
+# It is not a Rust parse: it cannot see a `_` nested inside another arm pattern
+# (e.g. `(_, x) =>` or `Some((_, y)) =>`), an arm inside a single-line
+# `match { ... }`, or a wildcard split across lines, and any line that spells a
+# wildcard shape (even in a comment or string) is counted. The match-presence
+# heuristic counts word-boundary `match` occurrences line-by-line, so a comment
+# or string containing the word `match` also counts. Both scans include every
+# file under the declared scope (no *.rs filter), and the guard cannot detect a
+# wildcard arm living outside the declared scope - the authoritative scope
+# enumeration must be complete for the proof to mean anything.
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -232,15 +309,17 @@
 # script from their own directory (same convention as check-delivery-lists.sh).
 # Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE [ROUTING-SCOPE
 # [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES [ESCALATION-SCOPE
-# [ESCALATION-RESPONSES [SIBLING-SCOPE [SIBLING-RECORDS]]]]]]]]]]] - RECORDS
-# defaults to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped),
-# PROVENANCE defaults to wp-provenance.tsv, ROUTING-SCOPE defaults to none
-# (4.4 gate skipped), ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
+# [ESCALATION-RESPONSES [SIBLING-SCOPE [SIBLING-RECORDS [EXMATCH-SCOPE
+# [EXMATCH-RECORDS]]]]]]]]]]]]] - RECORDS defaults to signoffs.tsv, SCOPE
+# defaults to none (4.3 gate skipped), PROVENANCE defaults to
+# wp-provenance.tsv, ROUTING-SCOPE defaults to none (4.4 gate skipped),
+# ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
 # routing-declarations.tsv, ROUTING-CLOSURES to routing-closures.tsv,
 # ESCALATION-SCOPE defaults to none (4.6 gate skipped), ESCALATION-RESPONSES to
-# escalation-responses.tsv, SIBLING-SCOPE defaults to none (4.9a gate skipped)
-# and SIBLING-RECORDS to sibling.tsv. Uses only standard Bash/GNU utilities
-# (grep, sed, awk).
+# escalation-responses.tsv, SIBLING-SCOPE defaults to none (4.9a gate skipped),
+# SIBLING-RECORDS to sibling.tsv, EXMATCH-SCOPE defaults to none (4.9b gate
+# skipped) and EXMATCH-RECORDS to exhaustive-match.tsv. Uses only standard
+# Bash/GNU utilities (grep, sed, awk).
 
 set -uo pipefail
 
@@ -861,6 +940,168 @@ if [ -n "${10:-}" ]; then
   fi
 fi
 
+# Exhaustive-match gate (4.9b): a fix that makes a `match` exhaustive without a
+# wildcard arm (pattern 5 - the `_ => <default>` substitution) must name its
+# scope and prove no wildcard match arm remains there, reproducibly. When an
+# exhaustive scope file is given, every in-scope claim must carry an evidence
+# record whose re-run reproduces both recorded counts, and the proof is
+# non-vacuous only when the scope actually contains at least one `match`
+# expression. The wildcard scan is a documented textual heuristic, not a Rust
+# parse (see the "Exhaustive-match heuristic limits" paragraph in the header).
+if [ -n "${12:-}" ]; then
+  EXM_SCOPE="${12}"
+  EXM_RECORDS="${13:-exhaustive-match.tsv}"
+  EXM_MATCH_PATTERN='\bmatch\b'
+  EXM_WILDCARD_PATTERN='^[[:space:]]*_([[:space:]]+@[[:space:]]*[A-Za-z_][A-Za-z0-9_]*|[[:space:]]+if[[:space:]].*)?[[:space:]]*=>'
+  if [ ! -f "$EXM_SCOPE" ]; then
+    echo "EXMATCH-MISSING-SCOPE: no exhaustive-match scope file: $EXM_SCOPE" >&2
+    fail=1
+  elif [ ! -f "$EXM_RECORDS" ]; then
+    echo "EXMATCH-MISSING-RECORDS: no exhaustive-match records file: $EXM_RECORDS" >&2
+    fail=1
+  else
+    # Authoritative scope: every in-scope exhaustive-match claim (id scope).
+    # A malformed scope link is still recorded so its claim is not cascaded
+    # into MISSING; the malformed diagnostic already fails the run.
+    declare -A exm_scope=() exm_scope_seen=() exm_scope_bad=() exm_rec_seen=()
+    exm_lines=0
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      exm_lines=$((exm_lines + 1))
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r ex_id ex_scope <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$ex_id" ] || [ -z "$ex_scope" ]; then
+        echo "EXMATCH-MALFORMED: ${ex_id:-<no-id>}: exhaustive-match scope link must have two tab-separated non-empty fields (id scope)" >&2
+        [ -n "$ex_id" ] && exm_scope_bad["$ex_id"]=1
+        fail=1
+        continue
+      fi
+      if [ -n "${exm_scope_seen[$ex_id]:-}" ]; then
+        echo "EXMATCH-DUPLICATE: $ex_id: duplicate exhaustive-match scope link" >&2
+        fail=1
+        continue
+      fi
+      exm_scope_seen["$ex_id"]=1
+      exm_scope["$ex_id"]="$ex_scope"
+    done < "$EXM_SCOPE"
+
+    # The authoritative source scope must be non-empty: an exhaustive-match
+    # sign-off must enumerate a non-empty source scope, so an empty scope file
+    # is rejected outright rather than silently accepted as proof.
+    if [ "$exm_lines" -eq 0 ]; then
+      echo "EXMATCH-EMPTY-SCOPE: $EXM_SCOPE: exhaustive-match scope is empty - no in-scope exhaustive-match claims are enumerated" >&2
+      fail=1
+    else
+      # Claim evidence: one record per in-scope claim (id scope wildcards
+      # matches). Every record must correspond exactly to a scope link - a rogue
+      # record cannot authorize a fabricated sweep - and must scan exactly the
+      # authoritative scope the link names, so a record pointing at a different
+      # scope is a nearby scan, not evidence. The record structure is validated
+      # with awk, whose -F'\t' split preserves empty fields (unlike `read`, which
+      # collapses consecutive tabs), so an empty search-scope field is diagnosed
+      # distinctly from a truncated row.
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        nf="$(printf '%s\n' "$line" | awk -F'\t' '{print NF}')"
+        empty_field="$(printf '%s\n' "$line" | awk -F'\t' '{ if ($2 == "") print "scope"; else if ($1 == "" || $3 == "" || $4 == "") print "other" }')"
+        if [ "$nf" -ne 4 ]; then
+          ex_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "EXMATCH-MALFORMED: ${ex_id:-<no-id>}: exhaustive-match record must have four tab-separated non-empty fields (id scope wildcards matches)" >&2
+          [ -n "$ex_id" ] && exm_rec_seen["$ex_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "scope" ]; then
+          ex_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "EXMATCH-OMITTED-SCOPE: ${ex_id:-<no-id>}: exhaustive-match record omits the search scope field (id scope wildcards matches)" >&2
+          [ -n "$ex_id" ] && exm_rec_seen["$ex_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "other" ]; then
+          ex_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "EXMATCH-MALFORMED: ${ex_id:-<no-id>}: exhaustive-match record must have four tab-separated non-empty fields (id scope wildcards matches)" >&2
+          [ -n "$ex_id" ] && exm_rec_seen["$ex_id"]=1
+          fail=1
+          continue
+        fi
+        IFS=$'\t' read -r ex_id ex_scope ex_wild ex_matches <<< "$line"
+        if [ -n "${exm_rec_seen[$ex_id]:-}" ]; then
+          echo "EXMATCH-DUPLICATE: $ex_id: duplicate exhaustive-match record" >&2
+          fail=1
+          continue
+        fi
+        exm_rec_seen["$ex_id"]=1
+        if ! [[ "$ex_wild" =~ ^[0-9]+$ ]] || ! [[ "$ex_matches" =~ ^[0-9]+$ ]]; then
+          echo "EXMATCH-MALFORMED: $ex_id: wildcards and matches must be non-negative integers" >&2
+          fail=1
+          continue
+        fi
+        # A claim whose scope link was malformed is not cascade-checked here:
+        # EXMATCH-MALFORMED already failed the run for that line.
+        [ -n "${exm_scope_bad[$ex_id]:-}" ] && continue
+        # A rogue record that matches no in-scope claim cannot authorize a
+        # fabricated sweep.
+        if [ -z "${exm_scope_seen[$ex_id]:-}" ]; then
+          echo "EXMATCH-ROGUE: $ex_id: exhaustive-match record matches no in-scope claim" >&2
+          fail=1
+          continue
+        fi
+        # The record must scan exactly the authoritative scope: a record that
+        # points at a different scope is a nearby scan, not evidence.
+        if [ "$ex_scope" != "${exm_scope[$ex_id]}" ]; then
+          echo "EXMATCH-DECOY: $ex_id: record scope $ex_scope does not match the authoritative scope ${exm_scope[$ex_id]}" >&2
+          fail=1
+          continue
+        fi
+        # The scan must be applicable: the declared scope must exist, and must
+        # actually contain at least one `match` expression - otherwise "no
+        # wildcard arm remains" is vacuous, not proof.
+        if [ ! -e "$ex_scope" ]; then
+          echo "EXMATCH-DECOY: $ex_id: declared scope not found: $ex_scope" >&2
+          fail=1
+          continue
+        fi
+        if [ "$ex_matches" -eq 0 ]; then
+          echo "EXMATCH-DECOY: $ex_id: scope $ex_scope contains no match expression, so the no-wildcard claim is vacuous" >&2
+          fail=1
+          continue
+        fi
+        # Re-run the match-presence heuristic exactly as the guard defines it
+        # and compare the count: stale evidence (the code has changed) is
+        # rejected.
+        actual_m="$(grep -rE "$EXM_MATCH_PATTERN" "$ex_scope" 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$actual_m" -ne "$ex_matches" ]; then
+          echo "EXMATCH-STALE: $ex_id: recorded match count $ex_matches does not match current count $actual_m in $ex_scope" >&2
+          fail=1
+          continue
+        fi
+        # Re-run the wildcard-arm heuristic: the proof of "no wildcard arm
+        # remains" is exactly this count reproducing at 0.
+        actual_w="$(grep -rE "$EXM_WILDCARD_PATTERN" "$ex_scope" 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$actual_w" -gt 0 ]; then
+          echo "EXMATCH-WILDCARD-REMAINS: $ex_id: a wildcard match arm remains in $ex_scope (current count $actual_w > 0)" >&2
+          fail=1
+          continue
+        fi
+        if [ "$actual_w" -ne "$ex_wild" ]; then
+          echo "EXMATCH-STALE: $ex_id: recorded wildcard count $ex_wild does not match current count $actual_w in $ex_scope" >&2
+          fail=1
+        fi
+      done < "$EXM_RECORDS"
+
+      # The scope is authoritative: omitting a claim's evidence record cannot
+      # hide it.
+      for ex_id in "${!exm_scope_seen[@]}"; do
+        if [ -z "${exm_rec_seen[$ex_id]:-}" ]; then
+          echo "EXMATCH-MISSING: $ex_id: in-scope exhaustive-match claim has no evidence record" >&2
+          fail=1
+        fi
+      done
+    fi
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
@@ -870,4 +1111,5 @@ msg="every record satisfies all four teeth"
 [ -n "${4:-}" ] && msg="$msg and every expected routing link is routed, declared, and never closed by its sender"
 [ -n "${8:-}" ] && msg="$msg and every declared mandatory trigger has an exact owner-response"
 [ -n "${10:-}" ] && msg="$msg and every in-scope one-function-fix claim names a reproducible sibling-search pattern with a current hit count within its approved heuristic limit"
+[ -n "${12:-}" ] && msg="$msg and every in-scope exhaustive-match claim proves no wildcard match arm remains in its scope"
 echo "check-four-tooth: OK ($msg)"

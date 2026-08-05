@@ -195,6 +195,58 @@
 # diagnostic - so every tooth and the WP, routing, escalation and sibling gates
 # are enforced independently and no fixture can pass for the wrong reason. Uses
 # only bash and the committed fixtures; never touches the real tree.
+#
+# And ten more committed fixtures for the exhaustive-match gate (4.9b), which
+# requires every in-scope exhaustive-match claim to name its scope and prove no
+# wildcard match arm remains there, reproducibly: the guard re-runs its two
+# documented textual heuristics (a wildcard-arm scan and a match-presence scan)
+# against the declared scope, the recorded wildcard count must reproduce at 0,
+# the recorded match count must reproduce, and the scope must actually contain
+# at least one `match` expression - so a vacuous or nearby scan is never proof.
+# The exhaustive scope is the authoritative enumeration and is never inferred
+# from the records, so omitting a record cannot hide a claim:
+#   exhaustive-positive             - one claim (F-1100, scope
+#                                     src/game_write.rs) with two exhaustive
+#                                     `match`es and zero wildcard arms, counts
+#                                     recorded as 0 wildcards / 2 matches; the
+#                                     guard must accept it.
+#   exhaustive-missing              - the scope enumerates the claim but the
+#                                     records file omits its evidence row; the
+#                                     guard must fail it as a missing record.
+#   exhaustive-stale                - the recorded match count 1 does not match
+#                                     the current count 2; the guard must fail
+#                                     it as stale, never trusting the recorded
+#                                     count.
+#   exhaustive-omitted-scope        - a record with an empty search-scope field;
+#                                     the guard must fail it with the
+#                                     scope-omitted diagnostic.
+#   exhaustive-empty-scope          - an empty authoritative scope file (and no
+#                                     records): the guard must fail it as an
+#                                     empty scope, never silently accept a
+#                                     sign-off that enumerates no claims.
+#   exhaustive-malformed            - a truncated record (missing the matches
+#                                     field); the guard must fail it as
+#                                     malformed.
+#   exhaustive-duplicate            - the same claim recorded twice; the guard
+#                                     must fail it as a duplicate rather than
+#                                     silently accept the last row.
+#   exhaustive-rogue                - an extra record for F-9999 matching no
+#                                     in-scope claim, paired with a complete
+#                                     valid record; the guard must fail the
+#                                     rogue record and no other claim.
+#   exhaustive-decoy-nearby         - a "nearby scan" decoy: the record's scope
+#                                     src/other.rs differs from the
+#                                     authoritative scope src/game_write.rs; the
+#                                     guard must fail it as a decoy.
+#   exhaustive-decoy-vacuous        - an "empty scope" decoy: the declared scope
+#                                     contains no `match` expression, so the
+#                                     recorded 0 wildcards proves nothing; the
+#                                     guard must fail it as a decoy.
+#   exhaustive-wildcard-remains     - a scope whose `match`es still carry
+#                                     wildcard arms in every variant the
+#                                     heuristic covers (`_ =>`, `_=>`, `_ if
+#                                     guard =>`, `_ @ bind =>`); the guard must
+#                                     fail it as a remaining wildcard arm.
 
 set -uo pipefail
 
@@ -252,7 +304,10 @@ fail_fixture() {
       ESCALATION-INVALID-RESPONSE \
       SIBLING-MISSING SIBLING-STALE-COUNT SIBLING-OMITTED-SCOPE \
       SIBLING-MALFORMED SIBLING-DUPLICATE SIBLING-ROGUE SIBLING-DECOY \
-      SIBLING-OVER-LIMIT; do
+      SIBLING-OVER-LIMIT \
+      EXMATCH-MALFORMED EXMATCH-DUPLICATE EXMATCH-MISSING EXMATCH-ROGUE \
+      EXMATCH-OMITTED-SCOPE EXMATCH-EMPTY-SCOPE EXMATCH-DECOY EXMATCH-STALE \
+      EXMATCH-WILDCARD-REMAINS; do
     [ "$other" = "$marker" ] && continue
     if grep -qF -- "$other" <<<"$out"; then
       echo "FAIL: $name emitted $other in addition to $marker" >&2
@@ -381,7 +436,40 @@ fail_fixture sibling-decoy-scope F-1000 SIBLING-DECOY \
   signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
 fail_fixture sibling-over-limit F-1000 SIBLING-OVER-LIMIT \
   'SIBLING-OVER-LIMIT: F-1000: hit count 2 exceeds the approved heuristic limit 1' \
-  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv "" ""
+
+pass_fixture exhaustive-positive \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-missing F-1100 EXMATCH-MISSING \
+  'EXMATCH-MISSING: F-1100: in-scope exhaustive-match claim has no evidence record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-stale F-1100 EXMATCH-STALE \
+  'EXMATCH-STALE: F-1100: recorded match count 1 does not match current count 2 in src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-omitted-scope F-1100 EXMATCH-OMITTED-SCOPE \
+  'EXMATCH-OMITTED-SCOPE: F-1100: exhaustive-match record omits the search scope field (id scope wildcards matches)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-empty-scope F-1100 EXMATCH-EMPTY-SCOPE \
+  'EXMATCH-EMPTY-SCOPE: exhaustive-scope.tsv: exhaustive-match scope is empty - no in-scope exhaustive-match claims are enumerated' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-malformed F-1100 EXMATCH-MALFORMED \
+  'EXMATCH-MALFORMED: F-1100: exhaustive-match record must have four tab-separated non-empty fields (id scope wildcards matches)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-duplicate F-1100 EXMATCH-DUPLICATE \
+  'EXMATCH-DUPLICATE: F-1100: duplicate exhaustive-match record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-rogue F-9999 EXMATCH-ROGUE \
+  'EXMATCH-ROGUE: F-9999: exhaustive-match record matches no in-scope claim' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-decoy-nearby F-1100 EXMATCH-DECOY \
+  'EXMATCH-DECOY: F-1100: record scope src/other.rs does not match the authoritative scope src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-decoy-vacuous F-1100 EXMATCH-DECOY \
+  'EXMATCH-DECOY: F-1100: scope src/game_write.rs contains no match expression, so the no-wildcard claim is vacuous' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+fail_fixture exhaustive-wildcard-remains F-1100 EXMATCH-WILDCARD-REMAINS \
+  'EXMATCH-WILDCARD-REMAINS: F-1100: a wildcard match arm remains in src/game_write.rs (current count 5 > 0)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
 
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2

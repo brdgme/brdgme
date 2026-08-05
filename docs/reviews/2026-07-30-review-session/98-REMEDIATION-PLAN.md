@@ -2362,7 +2362,7 @@ semantics:
 | Semantic unit | Scope and acceptance evidence | Status |
 |---------------|-------------------------------|--------|
 | `rrm-4.9a-sibling-sweep` | One-function-fix claims name a reproducible sibling-search pattern and current hit count. Reject missing, stale-count, omitted-scope, malformed, duplicate, rogue, and applicable decoy records. Positive and negative fixtures required. | accepted: guard and 10-fixture harness pass |
-| `rrm-4.9b-exhaustive-match` | Exhaustive-match claims name scope and prove no wildcard arm remains. Reject nearby/decoy scans, omitted scope, malformed, duplicate, rogue records, and wildcard variants within approved heuristic limits. Positive and negative fixtures required. | queued |
+| `rrm-4.9b-exhaustive-match` | Exhaustive-match claims name scope and prove no wildcard arm remains. Reject nearby/decoy scans, omitted scope, malformed, duplicate, rogue records, and wildcard variants within approved heuristic limits. Positive and negative fixtures required. | accepted: authoritative non-empty source scope, reproducible zero-wildcard and match-presence counts, and 11-fixture harness pass; textual Bash heuristic limits are explicit, not parser-grade proof |
 | `rrm-4.9c-dead-code-sweep` | Sign-off `allow(dead_code)` sweep across the approved universe. | queued |
 | `rrm-4.9d-log-layer-proof` | Prove `Log::public` content coverage at the approved log-layer scope. | queued |
 | `rrm-4.9e-every-item-checklist` | Require enumerated per-item evidence for approved "every X" claims. | queued |
@@ -2383,7 +2383,7 @@ partial until then.
 | `rrm-4.5-spec-code-review` | 4.5 | done | `docs/CODING.md` now requires the second reviewer, the written code-versus-spec answer, and grep/hit-count evidence; independent review and `git diff --check` passed. |
 | `rrm-4.6-stop-escalation` | 4.6 | done | `docs/CODING.md` requires an exact owner-signed amendment or recorded abandonment for every declared triggered mandatory STOP/HALT condition; silence, inferred approval, and ordinary completion do not clear it. `check-four-tooth.sh` adds deterministic escalation scope/response linkage (trigger, required owner, permitted response kind, evidence), with isolated positive and missing-response, wrong-owner, unauthorized/rogue, closure-masquerade, duplicate, empty-scope, and malformed bypass fixtures. Independent trigger/linkage review found no correctness finding. F-206's dependency-policy concern and WP-69 §5's parked negative checks remain recorded/unresolved; this unit makes no dependency-policy change or completion claim for them. |
 | `rrm-4.8-vendoring-defects` | 4.8 | done | `docs/CODING.md` now carries the 6.1 prohibition and mandatory inherited-defects/spec-owner-sign-off rule; `git diff --check` passed. |
-| `rrm-4.9-pattern-sweeps` | 4.9 | partial | D1 manifest accepted after independent source audit. Two empty `host-unknown` attempts were reconciled with no changes; execution is narrowed into five serial slices, followed by one integration/adversarial review. |
+| `rrm-4.9-pattern-sweeps` | 4.9 | partial | D1 manifest accepted after independent source audit. Two empty `host-unknown` attempts were reconciled with no changes; `rrm-4.9a-sibling-sweep` and `rrm-4.9b-exhaustive-match` are accepted. The remaining serial slices and one final integration/adversarial review still gate parent acceptance. |
 
 ## 5. Coverage work
 
