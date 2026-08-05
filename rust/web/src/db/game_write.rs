@@ -432,6 +432,11 @@ pub async fn concede_game_replace(
     let mut tx = pool.begin().await?;
     claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
 
+    // DRM-03b1a3: under the claim's game-row lock and while the game is still
+    // unfinished, normalise legacy old-pod departures so the sequence
+    // allocation below continues past them.
+    normalize_legacy_departures_tx(&mut tx, game_id).await?;
+
     let already_left: bool = sqlx::query_scalar(
         "SELECT left_at IS NOT NULL FROM game_players WHERE id = $1 AND game_id = $2",
     )
@@ -447,13 +452,25 @@ pub async fn concede_game_replace(
         .await?
         .ok_or_else(|| anyhow::anyhow!("no replacement bot configured"))?;
 
+    // DRM-03b1a3: one shared positive sequence for the concession departure.
+    // Computed after normalisation and bot selection and under the game-row
+    // lock, so concurrent events cannot collide.
+    let next_departure_sequence: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(departure_sequence), 0) + 1 FROM game_players WHERE game_id = $1",
+    )
+    .bind(game_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
     sqlx::query(
         r#"UPDATE game_players
            SET game_bot_id = $1, left_at = NOW(),
+               departure_reason = 'conceded', departure_sequence = $2,
                undo_game_state = NULL, turn_reminder_sent_at = NULL
-           WHERE id = $2"#,
+           WHERE id = $3"#,
     )
     .bind(bot.id)
+    .bind(next_departure_sequence)
     .bind(conceding_player_id)
     .execute(&mut *tx)
     .await?;
@@ -1569,15 +1586,35 @@ mod tests {
             .await
             .unwrap();
 
-        let row: (Option<Uuid>, Option<Uuid>, Option<time::PrimitiveDateTime>) =
-            sqlx::query_as("SELECT user_id, game_bot_id, left_at FROM game_players WHERE id = $1")
-                .bind(conceder)
+        let row: (
+            Option<Uuid>,
+            Option<Uuid>,
+            Option<time::PrimitiveDateTime>,
+            Option<String>,
+            Option<i32>,
+        ) = sqlx::query_as(
+            "SELECT user_id, game_bot_id, left_at, departure_reason, departure_sequence \
+             FROM game_players WHERE id = $1",
+        )
+        .bind(conceder)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let replacement_bot_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_bots WHERE game_id = $1")
+                .bind(game.id)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert_eq!(row.0, Some(a.id), "user_id preserved");
-        assert!(row.1.is_some(), "game_bot_id set");
+        assert_eq!(
+            row.1,
+            Some(replacement_bot_id),
+            "game_bot_id is selected replacement bot"
+        );
         assert!(row.2.is_some(), "left_at set");
+        assert_eq!(row.3.as_deref(), Some("conceded"), "departure_reason");
+        assert_eq!(row.4, Some(1), "departure_sequence");
 
         let finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
             .bind(game.id)
@@ -1585,6 +1622,22 @@ mod tests {
             .await
             .unwrap();
         assert!(!finished, "game must not be finished");
+
+        let unaffected: Vec<(bool, bool, bool)> = sqlx::query_as(
+            "SELECT left_at IS NOT NULL, departure_reason IS NOT NULL, departure_sequence IS NOT NULL \
+             FROM game_players WHERE game_id = $1 AND id <> $2",
+        )
+        .bind(game.id)
+        .bind(conceder)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!unaffected.is_empty(), "other players must exist");
+        for (left, reason, seq) in unaffected {
+            assert!(!left, "unaffected player has no left_at");
+            assert!(!reason, "unaffected player has no departure_reason");
+            assert!(!seq, "unaffected player has no departure_sequence");
+        }
     }
 
     #[sqlx::test]
