@@ -51,6 +51,70 @@
 #   WP-NO-PROVENANCE: <wp>: completed work package has neither specification
 #                     nor checklist evidence
 #
+# Deferral-routing gate (4.4): a deferral is a state (`routed-to: WP-NN`), never
+# `closed`. A finding deferred from one work package to another is routed, not
+# closed; the receiving WP's spec must name every inherited finding. Four
+# optional inputs, enabled when a routing scope file is given:
+#   routing-scope.tsv       one expected routing link per line, tab-separated
+#                           fields (finding sender receiver). The authoritative
+#                           enumeration, derived in production from the corpus
+#                           routing records and never from the routing records
+#                           or declarations below - so omitting a sender's
+#                           routing record or a receiver's declaration cannot
+#                           hide an expected link. An empty scope is valid only
+#                           with no routing records, declarations, or closures;
+#                           any routing content under an empty scope is rejected.
+#   routing.tsv             tab-separated routing records, one per routed
+#                           finding, fields (finding sender receiver state).
+#                           state must be exactly `routed-to: <receiver>`; the
+#                           4.4 failure mode recorded state as `closed`. Every
+#                           record must correspond exactly to an expected scope
+#                           link - a rogue record cannot authorize a fabricated
+#                           declaration.
+#   routing-declarations.tsv  tab-separated receiver declarations, one per
+#                           inherited finding, fields (finding receiver): the
+#                           receiving WP's spec naming the routed finding.
+#   routing-closures.tsv    tab-separated closure attributions, fields (finding
+#                           wp): the WP that closed the routed finding. Closure
+#                           attribution is explicit here and never inferred from
+#                           the generic sign-off records: a closure by the
+#                           sender fails; a closure by the receiving WP is
+#                           allowed only when the receiver's explicit
+#                           declaration exactly matches the routed finding; a
+#                           closure by any other WP fails.
+# Routing diagnostics (the finding ID is interpolated):
+#   ROUTING-MALFORMED:      <finding>: routing scope link must have three
+#                           tab-separated non-empty fields (finding sender
+#                           receiver) | routing record must have four
+#                           tab-separated non-empty fields (finding sender
+#                           receiver state) | routing declaration must have two
+#                           tab-separated non-empty fields (finding receiver) |
+#                           routing closure must have two tab-separated
+#                           non-empty fields (finding wp)
+#   ROUTING-DUPLICATE:      <finding>: duplicate routing scope link <sender> ->
+#                           <receiver> / duplicate routing record / duplicate
+#                           routing declaration for receiver <receiver> /
+#                           duplicate routing closure attributed to <wp>
+#   ROUTING-UNACCOUNTED:    <finding>: expected routing link <sender> ->
+#                           <receiver> has no routing record
+#   ROUTING-UNEXPECTED-RECORD: <finding>: routing record <sender> -> <receiver>
+#                           matches no expected routing link
+#   ROUTING-INVALID-STATE:  <finding>: deferral state "<state>" is not valid
+#                           (must be "routed-to: <receiver>")
+#   ROUTING-CLOSED-BY-SENDER: <finding>: routed finding closed by sender <wp>
+#                           (a deferral is a state, never closed)
+#   ROUTING-CLOSED-BY-OTHER: <finding>: routed finding closed by <wp>, which is
+#                           neither the sender nor the receiving WP
+#   ROUTING-CLOSED-WITHOUT-DECLARATION: <finding>: receiver <receiver> closed the
+#                           routed finding without declaring it exactly (finding
+#                           receiver)
+#   ROUTING-UNEXPECTED-CLOSURE: <finding>: closure attributed to <wp> but the
+#                           finding has no routed link
+#   ROUTING-UNDECLARED:     <finding>: receiver <receiver> has no declaration
+#                           of the inherited finding
+#   ROUTING-DECLARATION-MISMATCH: <finding>: declaration for <receiver> matches
+#                           no routing record
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -74,10 +138,13 @@
 # finding ID (or WP ID) and the exact failing tooth or gate, and the run exits
 # non-zero. All paths are resolved relative to CWD, so the fixtures invoke the
 # script from their own directory (same convention as check-delivery-lists.sh).
-# Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE]]] - RECORDS defaults
-# to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped) and PROVENANCE
-# defaults to wp-provenance.tsv. Uses only standard Bash/GNU utilities (grep,
-# sed, awk).
+# Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE [ROUTING-SCOPE
+# [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES]]]]]]] - RECORDS
+# defaults to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped),
+# PROVENANCE defaults to wp-provenance.tsv, ROUTING-SCOPE defaults to none (4.4
+# gate skipped), ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
+# routing-declarations.tsv and ROUTING-CLOSURES to routing-closures.tsv. Uses
+# only standard Bash/GNU utilities (grep, sed, awk).
 
 set -uo pipefail
 
@@ -273,12 +340,201 @@ if [ -n "${2:-}" ]; then
   fi
 fi
 
+# Deferral-routing gate (4.4): a deferral is a state (`routed-to: WP-NN`), never
+# `closed`. The routing scope file is the authoritative enumeration of expected
+# routing links (finding -> sender -> receiver); the routing records are the
+# sender's evidence, the declarations are the receiver's evidence and the
+# closures are the routing-specific closure attributions, so omitting any of
+# them cannot hide an expected link and no record can authorize a fabricated
+# declaration.
+if [ -n "${4:-}" ]; then
+  RT_SCOPE="$4"
+  RT_RECORDS="${5:-routing.tsv}"
+  RT_DECLS="${6:-routing-declarations.tsv}"
+  RT_CLOSURES="${7:-routing-closures.tsv}"
+  if [ ! -f "$RT_SCOPE" ]; then
+    echo "ROUTING-MISSING-SCOPE: no routing scope file: $RT_SCOPE" >&2
+    fail=1
+  elif [ ! -f "$RT_RECORDS" ]; then
+    echo "ROUTING-MISSING-RECORDS: no routing records file: $RT_RECORDS" >&2
+    fail=1
+  elif [ ! -f "$RT_DECLS" ]; then
+    echo "ROUTING-MISSING-DECLARATIONS: no routing declarations file: $RT_DECLS" >&2
+    fail=1
+  elif [ ! -f "$RT_CLOSURES" ]; then
+    echo "ROUTING-MISSING-CLOSURES: no routing closures file: $RT_CLOSURES" >&2
+    fail=1
+  else
+    # Authoritative scope: every expected link (finding sender receiver).
+    declare -A rt_scope=()
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r rt_f rt_sender rt_receiver <<< "$line"
+      if [ "${#tabs}" -ne 2 ] || [ -z "$rt_f" ] || [ -z "$rt_sender" ] || [ -z "$rt_receiver" ]; then
+        echo "ROUTING-MALFORMED: ${rt_f:-<no-finding>}: routing scope link must have three tab-separated non-empty fields (finding sender receiver)" >&2
+        fail=1
+        continue
+      fi
+      key="$rt_f|$rt_sender|$rt_receiver"
+      if [ -n "${rt_scope[$key]:-}" ]; then
+        echo "ROUTING-DUPLICATE: $rt_f: duplicate routing scope link $rt_sender -> $rt_receiver" >&2
+        fail=1
+        continue
+      fi
+      rt_scope["$key"]=1
+    done < "$RT_SCOPE"
+
+    # Sender evidence: routing records (finding sender receiver state).
+    declare -A rt_rec=() rt_fr=() rt_rec_f=()
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r rt_f rt_sender rt_receiver rt_state <<< "$line"
+      if [ "${#tabs}" -ne 3 ] || [ -z "$rt_f" ] || [ -z "$rt_sender" ] || [ -z "$rt_receiver" ] || [ -z "$rt_state" ]; then
+        echo "ROUTING-MALFORMED: ${rt_f:-<no-finding>}: routing record must have four tab-separated non-empty fields (finding sender receiver state)" >&2
+        fail=1
+        continue
+      fi
+      key="$rt_f|$rt_sender|$rt_receiver"
+      if [ -n "${rt_rec[$key]:-}" ]; then
+        echo "ROUTING-DUPLICATE: $rt_f: duplicate routing record $rt_sender -> $rt_receiver" >&2
+        fail=1
+        continue
+      fi
+      rt_rec["$key"]="$rt_state"
+      rt_fr["$rt_f|$rt_receiver"]=1
+      rt_rec_f["$rt_f"]=1
+    done < "$RT_RECORDS"
+
+    # Every routing record must correspond exactly to an authoritative scope
+    # link: a rogue record that matches no expected link fails here and cannot
+    # authorize a fabricated declaration.
+    for key in "${!rt_rec[@]}"; do
+      if [ -z "${rt_scope[$key]:-}" ]; then
+        IFS='|' read -r rt_f rt_sender rt_receiver <<< "$key"
+        echo "ROUTING-UNEXPECTED-RECORD: $rt_f: routing record $rt_sender -> $rt_receiver matches no expected routing link" >&2
+        fail=1
+      fi
+    done
+
+    # The deferral state must be exactly `routed-to: <receiver>`.
+    for key in "${!rt_rec[@]}"; do
+      IFS='|' read -r rt_f rt_sender rt_receiver <<< "$key"
+      expected="routed-to: $rt_receiver"
+      if [ "${rt_rec[$key]}" != "$expected" ]; then
+        echo "ROUTING-INVALID-STATE: $rt_f: deferral state \"${rt_rec[$key]}\" is not valid (must be \"$expected\")" >&2
+        fail=1
+      fi
+    done
+
+    # The scope is authoritative: omitting a sender's routing record cannot
+    # hide an expected link.
+    for key in "${!rt_scope[@]}"; do
+      if [ -z "${rt_rec[$key]:-}" ]; then
+        IFS='|' read -r rt_f rt_sender rt_receiver <<< "$key"
+        echo "ROUTING-UNACCOUNTED: $rt_f: expected routing link $rt_sender -> $rt_receiver has no routing record" >&2
+        fail=1
+      fi
+    done
+
+    # Receiver evidence: each receiving WP's spec names its inherited findings.
+    declare -A rt_decl=()
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r rt_f rt_receiver <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$rt_f" ] || [ -z "$rt_receiver" ]; then
+        echo "ROUTING-MALFORMED: ${rt_f:-<no-finding>}: routing declaration must have two tab-separated non-empty fields (finding receiver)" >&2
+        fail=1
+        continue
+      fi
+      frkey="$rt_f|$rt_receiver"
+      if [ -n "${rt_decl[$frkey]:-}" ]; then
+        echo "ROUTING-DUPLICATE: $rt_f: duplicate routing declaration for receiver $rt_receiver" >&2
+        fail=1
+        continue
+      fi
+      rt_decl["$frkey"]=1
+    done < "$RT_DECLS"
+
+    # Closure attribution is explicit in the routing-specific closure file
+    # (finding wp), never inferred from the generic sign-off records. A closure
+    # by the sender fails; a closure by the receiving WP is allowed only when
+    # the receiver's explicit declaration exactly matches the routed finding; a
+    # closure by any other WP fails.
+    declare -A rt_closed=() rt_recv_closed=()
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r rt_f rt_wp <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$rt_f" ] || [ -z "$rt_wp" ]; then
+        echo "ROUTING-MALFORMED: ${rt_f:-<no-finding>}: routing closure must have two tab-separated non-empty fields (finding wp)" >&2
+        fail=1
+        continue
+      fi
+      ckey="$rt_f|$rt_wp"
+      if [ -n "${rt_closed[$ckey]:-}" ]; then
+        echo "ROUTING-DUPLICATE: $rt_f: duplicate routing closure attributed to $rt_wp" >&2
+        fail=1
+        continue
+      fi
+      rt_closed["$ckey"]=1
+      if [ -z "${rt_rec_f[$rt_f]:-}" ]; then
+        echo "ROUTING-UNEXPECTED-CLOSURE: $rt_f: closure attributed to $rt_wp but the finding has no routed link" >&2
+        fail=1
+        continue
+      fi
+      is_sender=0
+      is_receiver=0
+      for key in "${!rt_rec[@]}"; do
+        IFS='|' read -r rf rs rr <<< "$key"
+        [ "$rf" = "$rt_f" ] || continue
+        [ "$rt_wp" = "$rs" ] && is_sender=1
+        [ "$rt_wp" = "$rr" ] && is_receiver=1
+      done
+      if [ "$is_sender" -eq 1 ]; then
+        echo "ROUTING-CLOSED-BY-SENDER: $rt_f: routed finding closed by sender $rt_wp (a deferral is a state, never closed)" >&2
+        fail=1
+      elif [ "$is_receiver" -eq 1 ]; then
+        rt_recv_closed["$rt_f|$rt_wp"]=1
+        if [ -z "${rt_decl[$ckey]:-}" ]; then
+          echo "ROUTING-CLOSED-WITHOUT-DECLARATION: $rt_f: receiver $rt_wp closed the routed finding without declaring it exactly (finding receiver)" >&2
+          fail=1
+        fi
+      else
+        echo "ROUTING-CLOSED-BY-OTHER: $rt_f: routed finding closed by $rt_wp, which is neither the sender nor the receiving WP" >&2
+        fail=1
+      fi
+    done < "$RT_CLOSURES"
+
+    # Every sender-routed link must be declared by its receiver (omitting a
+    # receiver's declaration cannot hide the link), and every declaration must
+    # match a routing record.
+    for key in "${!rt_scope[@]}"; do
+      [ -n "${rt_rec[$key]:-}" ] || continue
+      IFS='|' read -r rt_f rt_sender rt_receiver <<< "$key"
+      frkey="$rt_f|$rt_receiver"
+      if [ -z "${rt_decl[$frkey]:-}" ] && [ -z "${rt_recv_closed[$frkey]:-}" ]; then
+        echo "ROUTING-UNDECLARED: $rt_f: receiver $rt_receiver has no declaration of the inherited finding" >&2
+        fail=1
+      fi
+    done
+    for key in "${!rt_decl[@]}"; do
+      if [ -z "${rt_fr[$key]:-}" ]; then
+        IFS='|' read -r rt_f rt_receiver <<< "$key"
+        echo "ROUTING-DECLARATION-MISMATCH: $rt_f: declaration for $rt_receiver matches no routing record" >&2
+        fail=1
+      fi
+    done
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
 fi
-if [ -n "${2:-}" ]; then
-  echo "check-four-tooth: OK (every record satisfies all four teeth and every in-scope work package has provenance)"
-else
-  echo "check-four-tooth: OK (every record satisfies all four teeth)"
-fi
+msg="every record satisfies all four teeth"
+[ -n "${2:-}" ] && msg="$msg and every in-scope work package has provenance"
+[ -n "${4:-}" ] && msg="$msg and every expected routing link is routed, declared, and never closed by its sender"
+echo "check-four-tooth: OK ($msg)"
