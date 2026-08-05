@@ -1034,11 +1034,62 @@ async fn players_page_recent_games_render_with_opponent_links(pool: PgPool) {
     );
 }
 
+// A missing or unknown `view` query selects the Competitive profile default.
+// Both fetches prove the competitive branch (recent-games section and the
+// selector's Game results link) renders while the authoritative
+// `profile-game-results` branch does not.
 #[sqlx::test]
-async fn players_page_bots_toggle_changes_inclusion(pool: PgPool) {
+async fn players_page_missing_and_unknown_view_render_competitive(pool: PgPool) {
     let (_game_type_id, game_version_id) =
-        make_game_type_with_fixed_name(&pool, "Bots Toggle Test Game").await;
-    let user = make_user(&pool, "bots-toggle-player").await;
+        make_game_type_with_fixed_name(&pool, "Competitive View Test Game").await;
+    let user_a = make_user(&pool, "view-player-a").await;
+    let user_b = make_user(&pool, "view-player-b").await;
+    insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 16), (user_b.id, 2, -16)],
+    )
+    .await;
+
+    let app = build_router(make_state(pool).await).await;
+
+    let (status, content_type, body) =
+        get(app.clone(), &format!("/players/{}", user_a.name), None).await;
+    assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
+    assert!(
+        body.contains(&format!(
+            "href=\"/players/{}?view=results\"",
+            user_a.name
+        )),
+        "expected the Game results selector link in body: {body}"
+    );
+    assert!(
+        !body.contains("profile-game-results"),
+        "missing view must not render the Game results branch: {body}"
+    );
+
+    let (status, content_type, body) = get(
+        app,
+        &format!("/players/{}?view=nonsense", user_a.name),
+        None,
+    )
+    .await;
+    assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
+    assert!(
+        !body.contains("profile-game-results"),
+        "unknown view must select the Competitive default: {body}"
+    );
+}
+
+// The legacy `?bots=1` query is ignored on the main profile: a finished
+// single-human vs pure-bot game stays excluded from the competitive data both
+// with and without the parameter, and the main profile carries no bots control
+// or propagation link at all.
+#[sqlx::test]
+async fn players_page_bots_query_ignored_on_main_profile(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Bots Ignored Test Game").await;
+    let user = make_user(&pool, "bots-ignored-player").await;
 
     let game_id = sqlx::query_scalar!(
         "INSERT INTO games (id, game_version_id, is_finished, finished_at, game_state)
@@ -1072,6 +1123,15 @@ async fn players_page_bots_toggle_changes_inclusion(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
+    // The human seat carries the competitive ranked_placing; the bot seat below
+    // stays unranked (NULL ranked_placing), so the placing marker and the
+    // ranked participant count exclude pure bots.
+    sqlx::query("UPDATE game_players SET ranked_placing = 1 WHERE game_id = $1 AND user_id = $2")
+        .bind(game_id)
+        .bind(user.id)
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query!(
         r#"INSERT INTO game_players
             (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
@@ -1088,19 +1148,206 @@ async fn players_page_bots_toggle_changes_inclusion(pool: PgPool) {
 
     let (status, content_type, body) =
         get(app.clone(), &format!("/players/{}", user.name), None).await;
-    assert_clean_html_body(status, &content_type, &body, "profile-bots-toggle");
+    assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
     assert!(
         body.contains("No finished games yet."),
         "expected empty state by default (single-human game excluded): {body}"
     );
     assert!(
-        body.contains("?bots=1"),
-        "expected bots toggle link in body: {body}"
+        !body.contains("Bots Ignored Test Game"),
+        "the pure-bot game must not reappear on the main profile: {body}"
+    );
+    assert!(
+        !body.contains("1st of 1"),
+        "no competitive placing may count the pure bot: {body}"
+    );
+    assert!(
+        !body.contains("?bots=1") && !body.contains("profile-bots-toggle"),
+        "the main profile must have no bots control or propagation: {body}"
     );
 
     let (status, content_type, body) =
         get(app, &format!("/players/{}?bots=1", user.name), None).await;
-    assert_clean_html_body(status, &content_type, &body, "Bots Toggle Test Game");
+    assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
+    assert!(
+        body.contains("No finished games yet."),
+        "ignored ?bots=1 must keep the single-human game excluded: {body}"
+    );
+    assert!(
+        !body.contains("Bots Ignored Test Game")
+            && !body.contains("1st of 1")
+            && !body.contains("?bots=1")
+            && !body.contains("profile-bots-toggle"),
+        "?bots=1 must not reintroduce pure-bot competitive data or a bots control: {body}"
+    );
+}
+
+// `?view=results` renders every authoritative seat in seat order: the profile
+// human, a replacement-human seat carrying both human and replacement-bot
+// identity, and a pure bot seat. The `Game placing` column shows authoritative
+// `place` values (1/2/3) - the profile human's divergent competitive
+// `ranked_placing` of 2 must never leak in.
+#[sqlx::test]
+async fn players_page_results_view_renders_all_authoritative_seats(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Game Results Test Game").await;
+    let user_a = make_user(&pool, "results-player-a").await;
+    let replaced = make_user(&pool, "replaced-player").await;
+
+    let game_id = sqlx::query_scalar!(
+        "INSERT INTO games (id, game_version_id, is_finished, finished_at, game_state)
+         VALUES (uuid_generate_v4(), $1, true, now(), '')
+         RETURNING id",
+        game_version_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let replacement_bot_id = sqlx::query_scalar!(
+        "INSERT INTO game_bots (id, game_id, name, bot_name)
+         VALUES (uuid_generate_v4(), $1, $2, 'medium')
+         RETURNING id",
+        game_id,
+        "replacement-bot",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let pure_bot_id = sqlx::query_scalar!(
+        "INSERT INTO game_bots (id, game_id, name, bot_name)
+         VALUES (uuid_generate_v4(), $1, $2, 'medium')
+         RETURNING id",
+        game_id,
+        "pure-bot-3",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Runtime query: the seats carry ranked_placing, which the cached `.sqlx`
+    // shapes do not cover (same convention as insert_finished_two_player_game).
+    const COLORS: [&str; 3] = ["Green", "Red", "Blue"];
+    for (i, (seat_user, seat_bot, place, ranked_placing)) in [
+        (Some(user_a.id), None, Some(1), Some(2)),
+        (Some(replaced.id), Some(replacement_bot_id), Some(2), Some(2)),
+        (None, Some(pure_bot_id), Some(3), None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sqlx::query(
+            r#"INSERT INTO game_players
+                (id, game_id, user_id, game_bot_id, "position", color, has_accepted,
+                 is_turn, is_turn_at, last_turn_at, is_eliminated, is_read, place, ranked_placing, rating_change)
+               VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, true, false, now(), now(), false, true, $6, $7, NULL)"#,
+        )
+        .bind(game_id)
+        .bind(seat_user)
+        .bind(seat_bot)
+        .bind(i as i32)
+        .bind(COLORS[i % COLORS.len()])
+        .bind(place)
+        .bind(ranked_placing)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(
+        app,
+        &format!("/players/{}?view=results", user_a.name),
+        None,
+    )
+    .await;
+    assert_clean_html_body(status, &content_type, &body, "profile-game-results");
+    assert!(
+        body.contains("Game Results Test Game"),
+        "expected the completed game in body: {body}"
+    );
+    assert!(
+        body.contains("Game placing"),
+        "expected the Game placing column label in body: {body}"
+    );
+    assert!(
+        body.contains(&user_a.name),
+        "expected the profile human seat in body: {body}"
+    );
+    assert!(
+        body.contains(&format!("{} (bot: replacement-bot)", replaced.name)),
+        "expected the replacement-human seat to carry its replacement-bot identity: {body}"
+    );
+    assert!(
+        body.contains("pure-bot-3"),
+        "expected the pure bot seat in body: {body}"
+    );
+    assert!(
+        body.contains("<td>1</td>") && body.contains("<td>2</td>") && body.contains("<td>3</td>"),
+        "expected authoritative Game placing values 1/2/3 in body: {body}"
+    );
+    assert!(
+        !body.contains("1st of 2") && !body.contains("2nd of 2"),
+        "competitive placing must not leak into the Game results view: {body}"
+    );
+}
+
+// A last-human-stop game stays completed and present in the results view, but
+// every seat's authoritative place is null, so no seat placement value or
+// placing label renders for it.
+#[sqlx::test]
+async fn players_page_results_early_stop_renders_no_place_values(pool: PgPool) {
+    let (_game_type_id, game_version_id) =
+        make_game_type_with_fixed_name(&pool, "Early Stop Test Game").await;
+    let user_a = make_user(&pool, "early-stop-player-a").await;
+    let user_b = make_user(&pool, "early-stop-player-b").await;
+
+    let game_id = insert_finished_two_player_game(
+        &pool,
+        game_version_id,
+        &[(user_a.id, 1, 0), (user_b.id, 2, 0)],
+    )
+    .await;
+    sqlx::query("UPDATE games SET end_reason = $1 WHERE id = $2")
+        .bind("last_human_stop")
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE game_players SET place = NULL, ranked_placing = NULL WHERE game_id = $1")
+        .bind(game_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let app = build_router(make_state(pool).await).await;
+    let (status, content_type, body) = get(
+        app,
+        &format!("/players/{}?view=results", user_a.name),
+        None,
+    )
+    .await;
+    assert_clean_html_body(status, &content_type, &body, "profile-game-results");
+    assert!(
+        body.contains("Early Stop Test Game"),
+        "expected the completed early-stop game in body: {body}"
+    );
+    assert!(
+        body.contains("profile-game-result"),
+        "expected the game result block in body: {body}"
+    );
+    assert!(
+        body.contains(&user_a.name) && body.contains(&user_b.name),
+        "expected both seat identities in body: {body}"
+    );
+    assert!(
+        !body.contains("<td>1</td>") && !body.contains("<td>2</td>"),
+        "no seat placement value may render when every authoritative place is null: {body}"
+    );
+    assert!(
+        !body.contains("1st of 2") && !body.contains("2nd of 2"),
+        "no placing label may render for the early stop: {body}"
+    );
 }
 
 #[sqlx::test]
