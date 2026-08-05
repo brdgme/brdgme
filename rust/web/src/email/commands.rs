@@ -807,7 +807,7 @@ async fn run_end(ctx: &EmailCommandCtx<'_>) -> Result<CommandReply, CommandError
     }
 
     let before = ge.clone();
-    crate::db::end_game(ctx.pool, ctx.game_id, ge.game.updated_at)
+    crate::db::end_game(ctx.pool, ctx.game_id, ge.game.updated_at, ctx.game_player_id)
         .await
         .map_err(CommandError::Internal)?;
 

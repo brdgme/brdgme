@@ -1050,7 +1050,16 @@ pub async fn end_game(game_id: Uuid) -> Result<(), ServerFnError> {
         ));
     }
 
-    crate::db::end_game(&pool, game_id, ge.game.updated_at)
+    // DRM-03b1c4: forward the actor's `game_players.id` (never `users.id`) to
+    // the locked writer so it authorizes the stop under the game-row lock.
+    let actor_game_player_id = ge
+        .game_players
+        .iter()
+        .find(|p| p.user.as_ref().is_some_and(|u| u.id == user.id))
+        .ok_or_else(|| ServerFnError::new("You are not a player in this game"))?
+        .game_player
+        .id;
+    crate::db::end_game(&pool, game_id, ge.game.updated_at, actor_game_player_id)
         .await
         .map_err(internal("end_game: end"))?;
 

@@ -502,6 +502,7 @@ pub async fn end_game(
     pool: &PgPool,
     game_id: Uuid,
     expected_updated_at: time::PrimitiveDateTime,
+    acting_game_player_id: Uuid,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
     claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
@@ -510,6 +511,67 @@ pub async fn end_game(
     // unfinished, normalise legacy old-pod departures so the finishing report
     // ranks them as departed rather than active.
     normalize_legacy_departures_tx(&mut tx, game_id).await?;
+
+    // DRM-03b1c4: authorize the stop under the same game-row lock and after
+    // legacy normalization, using current human participant rows, before any
+    // terminal write. Identity is `game_players.id`, never `users.id`. With
+    // exactly one active human only that active human is authorized; with zero
+    // active humans every human in the latest departure event is. Plain
+    // (non-macro) query, not `query!`, because migration-032's
+    // `departure_sequence` is not in the committed offline `.sqlx` cache.
+    let actor: Option<(
+        Option<Uuid>,
+        Option<time::PrimitiveDateTime>,
+        Option<i32>,
+        i64,
+        Option<i32>,
+    )> = sqlx::query_as(
+        r#"SELECT gp.user_id, gp.left_at, gp.departure_sequence,
+                  (SELECT COUNT(*) FROM game_players
+                   WHERE game_id = $1 AND user_id IS NOT NULL AND left_at IS NULL),
+                  (SELECT MAX(departure_sequence) FROM game_players
+                   WHERE game_id = $1 AND user_id IS NOT NULL)
+           FROM game_players gp
+           WHERE gp.id = $2 AND gp.game_id = $1"#,
+    )
+    .bind(game_id)
+    .bind(acting_game_player_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((
+        actor_user_id,
+        actor_left_at,
+        actor_departure_sequence,
+        active_humans,
+        max_departure_sequence,
+    )) = actor
+    else {
+        return Err(anyhow::anyhow!("acting game player is not in this game"));
+    };
+    if actor_user_id.is_none() {
+        return Err(anyhow::anyhow!("acting game player is a bot"));
+    }
+    if active_humans >= 2 {
+        return Err(anyhow::anyhow!(
+            "end game requires at most one active human"
+        ));
+    }
+    if active_humans == 1 {
+        if actor_left_at.is_some() {
+            return Err(anyhow::anyhow!(
+                "acting game player is not the last active human"
+            ));
+        }
+    } else {
+        let Some(latest_departure_sequence) = max_departure_sequence else {
+            return Err(anyhow::anyhow!("no usable departure metadata for this game"));
+        };
+        if actor_departure_sequence != Some(latest_departure_sequence) {
+            return Err(anyhow::anyhow!(
+                "acting game player is not in the latest departure event"
+            ));
+        }
+    }
 
     // Plain (non-macro) query, not `query!`, because migration-032's
     // `end_reason` is not in the committed offline `.sqlx` cache (same
@@ -1700,7 +1762,17 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        end_game(&pool, game.id, updated_at).await.unwrap();
+        let creator_game_player: Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(creator.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        end_game(&pool, game.id, updated_at, creator_game_player)
+            .await
+            .unwrap();
 
         let finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
             .bind(game.id)
@@ -2017,14 +2089,35 @@ mod tests {
             "update_game_players_updated_at must bump updated_at without a manual set, got {gp_updated}"
         );
 
-        // end_game UPDATEs games and no longer sets updated_at.
+        // end_game UPDATEs games and no longer sets updated_at. Locked
+        // authorization makes end_game a one-active-human stop, so depart bob
+        // while keeping alice as the sole active human actor.
+        sqlx::query(
+            "UPDATE game_players SET left_at = NOW(), departure_reason = 'conceded', \
+             departure_sequence = 1 WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(b.id)
+        .execute(&pool)
+        .await
+        .unwrap();
         let updated_at: time::PrimitiveDateTime =
             sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
                 .bind(game.id)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        end_game(&pool, game.id, updated_at).await.unwrap();
+        let actor_game_player: Uuid = sqlx::query_scalar(
+            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
+        )
+        .bind(game.id)
+        .bind(a.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        end_game(&pool, game.id, updated_at, actor_game_player)
+            .await
+            .unwrap();
         let g_updated: time::PrimitiveDateTime =
             sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
                 .bind(game.id)
