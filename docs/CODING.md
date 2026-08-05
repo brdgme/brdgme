@@ -882,3 +882,31 @@ consistent but all wrong (pattern 4b, 2026-07-30 review - four confirmed
 instances plus two named variants). Any new `docs/CODING.md` rule that
 prescribes a grep procedure must state the grep, and the reviewer must run it
 and record the hit count.
+
+---
+
+## Spec-Mandated Stops
+
+**A triggered mandatory stop requires an exact owner response; silence,
+inferred approval, or ordinary completion cannot clear it.** When a spec's
+STOP-AND-REPORT (or HALT) condition fires, work on the affected step stops and
+escalates to the work's owner, and the only valid resolutions are an
+owner-signed explicit amendment or a recorded abandonment of the step. A code
+comment asserting the trigger does not apply is never a resolution - that is
+exactly the F-206 failure (2026-07-30 review): WP-69's §3b stop fired at 29
+skip entries and the commit answered it with a pre-emptive `deny.toml` comment
+instead of stopping. Completing the work anyway, staying silent, or inferring
+approval from an ordinary closure likewise clears nothing.
+
+**The sign-off guard enforces this on declared triggers.** `check-four-tooth.sh`
+(4.6 gate) takes an escalation scope (`escalation-scope.tsv`: one declared
+mandatory trigger per line, `trigger owner`) and an owner-response file
+(`escalation-responses.tsv`: one record per declared trigger, `trigger owner
+response-kind evidence`). Every declared trigger must carry an exact response:
+bound to the same trigger, answered by the exact required owner, classified
+exactly as `amendment` or `abandonment`, with recorded evidence of where the
+amendment or abandonment lives. A response is never inferred from a closure or
+completion record, and a record that answers a trigger with ordinary closure
+(`response-kind` other than `amendment`/`abandonment`) fails the gate. Declare
+every spec STOP/HALT trigger in the scope file when it fires - omitting it
+leaves the escalation unguarded.

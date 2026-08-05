@@ -96,11 +96,59 @@
 #                                   neither its sender nor its receiver; the
 #                                   guard must fail it.
 #
+# And ten more committed fixtures for the stop-escalation gate (4.6), which
+# requires every declared mandatory STOP/HALT trigger to carry an exact
+# owner-response record - bound to the same trigger, answered by the exact
+# required owner, and explicitly classified as `amendment` or `abandonment`.
+# The escalation scope is the authoritative enumeration and is never inferred
+# from the response records, so omitting a response cannot hide an unresponded
+# trigger:
+#   stop-escalation-positive             - two declared triggers each with an
+#                                          exact owner-response (one amendment,
+#                                          one abandonment); the guard must
+#                                          accept it.
+#   stop-escalation-missing-response     - a declared trigger with no response
+#                                          record (the F-206 shape: the trigger
+#                                          fired and nothing answered it). The
+#                                          guard must fail it as unresponded.
+#   stop-escalation-wrong-owner          - a response for a declared trigger
+#                                          answered by someone other than the
+#                                          required owner; the guard must fail
+#                                          it as a wrong-owner linkage.
+#   stop-escalation-unexpected-response  - a rogue response matching no declared
+#                                          trigger (an unauthorized response
+#                                          that would clear nothing). The guard
+#                                          must fail it and no other tooth.
+#   stop-escalation-closure-masquerade   - a response whose kind is `closed`
+#                                          instead of `amendment`/`abandonment`:
+#                                          an ordinary closure masquerading as
+#                                          a response. The guard must fail it.
+#   stop-escalation-duplicate-response   - the same trigger answered twice; the
+#                                          guard must fail it as a duplicate
+#                                          rather than silently accept one.
+#   stop-escalation-duplicate-scope      - the same declared trigger listed
+#                                          twice in the scope; the guard must
+#                                          fail it as a duplicate.
+#   stop-escalation-empty-scope          - an empty authoritative scope with a
+#                                          response record: the guard must
+#                                          reject the response as matching no
+#                                          declared trigger.
+#   stop-escalation-malformed-response   - a truncated response record; the
+#                                          guard must fail it with a
+#                                          trigger-scoped malformed diagnostic,
+#                                          never silently count the trigger as
+#                                          answered.
+#   stop-escalation-malformed-scope      - a truncated scope link; the guard
+#                                          must fail it with the scope malformed
+#                                          diagnostic and not cascade the
+#                                          trigger's response into an unrelated
+#                                          diagnostic.
+#
 # Each negative fixture must exit non-zero, emit the exact diagnostic of its
 # named tooth (or gate) with the finding (or WP) ID, and emit no other
-# diagnostic - so every tooth and the WP and routing gates are enforced
-# independently and no fixture can pass for the wrong reason. Uses only bash and
-# the committed fixtures; never touches the real tree.
+# diagnostic - so every tooth and the WP, routing and escalation gates are
+# enforced independently and no fixture can pass for the wrong reason. Uses
+# only bash and the committed fixtures; never touches the real tree.
 
 set -uo pipefail
 
@@ -152,7 +200,10 @@ fail_fixture() {
       ROUTING-MALFORMED ROUTING-UNACCOUNTED ROUTING-UNEXPECTED-RECORD \
       ROUTING-DUPLICATE ROUTING-INVALID-STATE ROUTING-CLOSED-BY-SENDER \
       ROUTING-CLOSED-BY-OTHER ROUTING-CLOSED-WITHOUT-DECLARATION \
-      ROUTING-UNEXPECTED-CLOSURE ROUTING-UNDECLARED ROUTING-DECLARATION-MISMATCH; do
+      ROUTING-UNEXPECTED-CLOSURE ROUTING-UNDECLARED ROUTING-DECLARATION-MISMATCH \
+      ESCALATION-MALFORMED ESCALATION-DUPLICATE ESCALATION-UNRESPONDED \
+      ESCALATION-UNEXPECTED-RESPONSE ESCALATION-WRONG-OWNER \
+      ESCALATION-INVALID-RESPONSE; do
     [ "$other" = "$marker" ] && continue
     if grep -qF -- "$other" <<<"$out"; then
       echo "FAIL: $name emitted $other in addition to $marker" >&2
@@ -222,6 +273,36 @@ fail_fixture routing-receiver-close-mismatched-declaration F-1003 ROUTING-CLOSED
 fail_fixture routing-closed-by-other F-1003 ROUTING-CLOSED-BY-OTHER \
   'ROUTING-CLOSED-BY-OTHER: F-1003: routed finding closed by WP-09, which is neither the sender nor the receiving WP' \
   signoffs.tsv "" "" routing-scope.tsv routing.tsv routing-declarations.tsv routing-closures.tsv
+
+pass_fixture stop-escalation-positive \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-missing-response T-02 ESCALATION-UNRESPONDED \
+  'ESCALATION-UNRESPONDED: T-02: declared mandatory trigger has no owner-response record' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-wrong-owner T-01 ESCALATION-WRONG-OWNER \
+  'ESCALATION-WRONG-OWNER: T-01: escalation response answered by owner-bob, required owner is owner-alex' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-unexpected-response T-99 ESCALATION-UNEXPECTED-RESPONSE \
+  'ESCALATION-UNEXPECTED-RESPONSE: T-99: escalation response matches no declared mandatory trigger' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-closure-masquerade T-01 ESCALATION-INVALID-RESPONSE \
+  'ESCALATION-INVALID-RESPONSE: T-01: escalation response kind "closed" is not valid (must be "amendment" or "abandonment")' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-duplicate-response T-01 ESCALATION-DUPLICATE \
+  'ESCALATION-DUPLICATE: T-01: duplicate escalation response' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-duplicate-scope T-01 ESCALATION-DUPLICATE \
+  'ESCALATION-DUPLICATE: T-01: duplicate escalation scope link' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-empty-scope T-01 ESCALATION-UNEXPECTED-RESPONSE \
+  'ESCALATION-UNEXPECTED-RESPONSE: T-01: escalation response matches no declared mandatory trigger' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-malformed-response T-01 ESCALATION-MALFORMED \
+  'ESCALATION-MALFORMED: T-01: escalation response must have four tab-separated non-empty fields (trigger owner response-kind evidence)' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+fail_fixture stop-escalation-malformed-scope T-01 ESCALATION-MALFORMED \
+  'ESCALATION-MALFORMED: T-01: escalation scope link must have two tab-separated non-empty fields (trigger owner)' \
+  signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
 
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2

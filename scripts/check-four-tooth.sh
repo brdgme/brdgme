@@ -115,6 +115,46 @@
 #   ROUTING-DECLARATION-MISMATCH: <finding>: declaration for <receiver> matches
 #                           no routing record
 #
+# Stop-escalation gate (4.6): a spec's STOP-AND-REPORT trigger firing is an
+# escalation to the owner, and the only valid resolutions are an owner-signed
+# spec amendment or recorded abandonment of the step - silence, inferred
+# approval, and ordinary completion never clear a fired trigger. Two optional
+# inputs, enabled when an escalation scope file is given:
+#   escalation-scope.tsv     one declared mandatory trigger per line,
+#                            tab-separated fields (trigger owner). The
+#                            authoritative enumeration, derived in production
+#                            from the specs that declare STOP/HALT conditions
+#                            and never from the response records - so omitting
+#                            a response record cannot hide an unresponded
+#                            trigger. (default: none, gate skipped)
+#   escalation-responses.tsv tab-separated owner-response records, one per
+#                            declared trigger, fields:
+#     trigger                the declared mandatory trigger, matching a scope
+#                            link exactly
+#     owner                  who answered, matching the declared owner exactly
+#     response-kind          exactly `amendment` or `abandonment`
+#     evidence               where the amendment or abandonment is recorded
+#   Every response must correspond exactly to a declared scope link - a rogue
+#   response cannot clear a trigger, and an ordinary closure/completion record
+#   is never a response. (default: escalation-responses.tsv)
+# Escalation diagnostics (the trigger ID is interpolated):
+#   ESCALATION-MALFORMED:      <trigger>: escalation scope link must have two
+#                              tab-separated non-empty fields (trigger owner) |
+#                              escalation response must have four
+#                              tab-separated non-empty fields (trigger owner
+#                              response-kind evidence)
+#   ESCALATION-DUPLICATE:      <trigger>: duplicate escalation scope link /
+#                              duplicate escalation response
+#   ESCALATION-UNRESPONDED:    <trigger>: declared mandatory trigger has no
+#                              owner-response record
+#   ESCALATION-UNEXPECTED-RESPONSE: <trigger>: escalation response matches no
+#                              declared mandatory trigger
+#   ESCALATION-WRONG-OWNER:    <trigger>: escalation response answered by
+#                              <owner>, required owner is <required-owner>
+#   ESCALATION-INVALID-RESPONSE: <trigger>: escalation response kind "<kind>"
+#                              is not valid (must be "amendment" or
+#                              "abandonment")
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -139,12 +179,14 @@
 # non-zero. All paths are resolved relative to CWD, so the fixtures invoke the
 # script from their own directory (same convention as check-delivery-lists.sh).
 # Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE [ROUTING-SCOPE
-# [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES]]]]]]] - RECORDS
-# defaults to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped),
-# PROVENANCE defaults to wp-provenance.tsv, ROUTING-SCOPE defaults to none (4.4
-# gate skipped), ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
-# routing-declarations.tsv and ROUTING-CLOSURES to routing-closures.tsv. Uses
-# only standard Bash/GNU utilities (grep, sed, awk).
+# [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES [ESCALATION-SCOPE
+# [ESCALATION-RESPONSES]]]]]]]]] - RECORDS defaults to signoffs.tsv, SCOPE
+# defaults to none (4.3 gate skipped), PROVENANCE defaults to wp-provenance.tsv,
+# ROUTING-SCOPE defaults to none (4.4 gate skipped), ROUTING-RECORDS to
+# routing.tsv, ROUTING-DECLARATIONS to routing-declarations.tsv, ROUTING-CLOSURES
+# to routing-closures.tsv, ESCALATION-SCOPE defaults to none (4.6 gate skipped)
+# and ESCALATION-RESPONSES to escalation-responses.tsv. Uses only standard
+# Bash/GNU utilities (grep, sed, awk).
 
 set -uo pipefail
 
@@ -530,6 +572,102 @@ if [ -n "${4:-}" ]; then
   fi
 fi
 
+# Stop-escalation gate (4.6): a spec's STOP-AND-REPORT trigger firing is an
+# escalation to the owner; the only valid resolutions are an owner-signed spec
+# amendment or recorded abandonment of the step. When an escalation scope file
+# is given, every declared mandatory trigger must carry an exact owner-response
+# record: bound to the same trigger, answered by the exact required owner, and
+# explicitly classified as `amendment` or `abandonment`. Silence, inferred
+# approval, and ordinary closure/completion never clear a trigger.
+if [ -n "${8:-}" ]; then
+  ES_SCOPE="$8"
+  ES_RESPONSES="${9:-escalation-responses.tsv}"
+  if [ ! -f "$ES_SCOPE" ]; then
+    echo "ESCALATION-MISSING-SCOPE: no escalation scope file: $ES_SCOPE" >&2
+    fail=1
+  elif [ ! -f "$ES_RESPONSES" ]; then
+    echo "ESCALATION-MISSING-RESPONSES: no escalation responses file: $ES_RESPONSES" >&2
+    fail=1
+  else
+    # Authoritative scope: every declared mandatory trigger (trigger owner). A
+    # malformed scope link is still recorded so its responses are not cascaded
+    # into UNEXPECTED-RESPONSE; the malformed diagnostic already fails the run.
+    declare -A es_scope=() es_scope_bad=()
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r es_trig es_owner <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$es_trig" ] || [ -z "$es_owner" ]; then
+        echo "ESCALATION-MALFORMED: ${es_trig:-<no-trigger>}: escalation scope link must have two tab-separated non-empty fields (trigger owner)" >&2
+        [ -n "$es_trig" ] && es_scope_bad["$es_trig"]=1
+        fail=1
+        continue
+      fi
+      key="$es_trig"
+      if [ -n "${es_scope[$key]:-}" ]; then
+        echo "ESCALATION-DUPLICATE: $es_trig: duplicate escalation scope link" >&2
+        fail=1
+        continue
+      fi
+      es_scope["$key"]="$es_owner"
+    done < "$ES_SCOPE"
+
+    # Owner evidence: one exact response record per declared trigger
+    # (trigger owner response-kind evidence).
+    declare -A es_resp=()
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r es_trig es_owner es_kind es_evidence <<< "$line"
+      if [ "${#tabs}" -ne 3 ] || [ -z "$es_trig" ] || [ -z "$es_owner" ] || [ -z "$es_kind" ] || [ -z "$es_evidence" ]; then
+        echo "ESCALATION-MALFORMED: ${es_trig:-<no-trigger>}: escalation response must have four tab-separated non-empty fields (trigger owner response-kind evidence)" >&2
+        [ -n "$es_trig" ] && es_resp["$es_trig"]=1
+        fail=1
+        continue
+      fi
+      key="$es_trig"
+      if [ -n "${es_resp[$key]:-}" ]; then
+        echo "ESCALATION-DUPLICATE: $es_trig: duplicate escalation response" >&2
+        fail=1
+        continue
+      fi
+      es_resp["$key"]=1
+      # A trigger whose scope link was malformed is not cascade-checked here:
+      # ESCALATION-MALFORMED already failed the run for that line.
+      [ -n "${es_scope_bad[$es_trig]:-}" ] && continue
+      # Every response must correspond exactly to a declared scope trigger:
+      # a rogue response cannot authorize a fabricated resolution.
+      required="${es_scope[$key]:-}"
+      if [ -z "$required" ]; then
+        echo "ESCALATION-UNEXPECTED-RESPONSE: $es_trig: escalation response matches no declared mandatory trigger" >&2
+        fail=1
+        continue
+      fi
+      # The response must be answered by the exact required owner.
+      if [ "$es_owner" != "$required" ]; then
+        echo "ESCALATION-WRONG-OWNER: $es_trig: escalation response answered by $es_owner, required owner is $required" >&2
+        fail=1
+        continue
+      fi
+      # An ordinary closure/completion is never a response: the kind must be
+      # exactly `amendment` or `abandonment`.
+      if [ "$es_kind" != "amendment" ] && [ "$es_kind" != "abandonment" ]; then
+        echo "ESCALATION-INVALID-RESPONSE: $es_trig: escalation response kind \"$es_kind\" is not valid (must be \"amendment\" or \"abandonment\")" >&2
+        fail=1
+      fi
+    done < "$ES_RESPONSES"
+
+    # The scope is authoritative: omitting a response cannot hide an
+    # unresponded trigger.
+    for es_trig in "${!es_scope[@]}"; do
+      if [ -z "${es_resp[$es_trig]:-}" ]; then
+        echo "ESCALATION-UNRESPONDED: $es_trig: declared mandatory trigger has no owner-response record" >&2
+        fail=1
+      fi
+    done
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
@@ -537,4 +675,5 @@ fi
 msg="every record satisfies all four teeth"
 [ -n "${2:-}" ] && msg="$msg and every in-scope work package has provenance"
 [ -n "${4:-}" ] && msg="$msg and every expected routing link is routed, declared, and never closed by its sender"
+[ -n "${8:-}" ] && msg="$msg and every declared mandatory trigger has an exact owner-response"
 echo "check-four-tooth: OK ($msg)"
