@@ -156,7 +156,7 @@ restored per owner instruction.)
 | 4.6 STOP-AND-REPORT escalation rule | done | `rrm-4.6-stop-escalation`; `docs/CODING.md` now requires an exact owner-signed amendment or recorded abandonment for every declared triggered mandatory STOP/HALT condition, never silence, inference, or ordinary completion. `check-four-tooth.sh` validates exact trigger/owner/kind/evidence linkage, with positive and missing-response, wrong-owner, rogue-response, closure-masquerade, duplicate, empty-scope, and malformed fixtures. Independent trigger/linkage review found no correctness finding. F-206's dependency-policy concern and WP-69 §5 parked negative checks remain recorded/unresolved. |
 | 4.7 delivery-list CI guard | done(85fff2e) | same as R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | 4.8 vendoring "known defects" spec section | done | `rrm-4.8-vendoring-defects`: docs/CODING.md |
-| 4.9 named-pattern sign-off sweeps | ready | `rrm-4.9-pattern-sweeps`; D1 manifest accepted after independent source audit; execute serially |
+| 4.9 named-pattern sign-off sweeps | partial | `rrm-4.9-pattern-sweeps`; D1 manifest accepted after independent source audit. Two `host-unknown` attempts were empty and reconciled with no changes. `rrm-4.9a-sibling-sweep` accepted: authoritative claim/function scope plus reproducible pattern, scope, hit-count, and heuristic-limit records; 10-fixture harness covers positive, missing, stale-count, omitted-scope, malformed, duplicate, rogue, decoy, and over-limit cases. Remaining serial slices: `rrm-4.9b-exhaustive-match`, `rrm-4.9c-dead-code-sweep`, `rrm-4.9d-log-layer-proof`, `rrm-4.9e-every-item-checklist`; final integration/adversarial review remains required. |
 
 ## Owner decisions
 

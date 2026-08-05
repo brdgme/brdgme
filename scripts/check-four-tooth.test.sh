@@ -144,10 +144,56 @@
 #                                          trigger's response into an unrelated
 #                                          diagnostic.
 #
+# And ten more committed fixtures for the sibling-sweep gate (4.9a), which
+# requires every in-scope one-function-fix claim to name a reproducible
+# sibling-search pattern and a recorded current hit count, and requires that
+# re-running the pattern against the declared scope reproduces the count within
+# the approved heuristic limit. The sibling scope is the authoritative
+# enumeration and is never inferred from the records, so omitting a record
+# cannot hide a claim:
+#   sibling-positive              - one claim (F-1000, fixed function
+#                                   update_game_command_success) whose pattern
+#                                   `left_at_guard` re-runs to the recorded
+#                                   count 2 in src/game_write.rs within limit 2,
+#                                   with the fixed function present; the guard
+#                                   must accept it.
+#   sibling-missing               - the scope enumerates the claim but the
+#                                   records file omits its evidence row; the
+#                                   guard must fail it as a missing record.
+#   sibling-stale-count           - the recorded hit count 1 does not match the
+#                                   current hit count 2; the guard must fail it
+#                                   as stale, never trusting the recorded count.
+#   sibling-omitted-scope         - a record with an empty search-scope field;
+#                                   the guard must fail it with the
+#                                   scope-omitted diagnostic, never silently
+#                                   reusing a neighbouring field as the scope.
+#   sibling-malformed             - a truncated record (missing the limit
+#                                   field); the guard must fail it as
+#                                   malformed.
+#   sibling-duplicate             - the same claim recorded twice; the guard
+#                                   must fail it as a duplicate rather than
+#                                   silently accept the last row.
+#   sibling-rogue                 - an extra record for F-9999 matching no
+#                                   in-scope claim, paired with a complete
+#                                   valid record; the guard must fail the rogue
+#                                   record and no other claim.
+#   sibling-decoy-pattern         - a decoy pattern that matches nothing with a
+#                                   recorded count of 0: a naive count-only
+#                                   guard passes it, but the pattern is not a
+#                                   real sibling search; the guard must fail it
+#                                   as a decoy.
+#   sibling-decoy-scope           - a "nearby scan" decoy: the declared scope
+#                                   src/other.rs contains matching lines but not
+#                                   the fixed function the scope link names;
+#                                   the guard must fail it as a decoy.
+#   sibling-over-limit            - a correct re-run whose hit count 2 exceeds
+#                                   the approved heuristic limit 1; the guard
+#                                   must fail it.
+#
 # Each negative fixture must exit non-zero, emit the exact diagnostic of its
 # named tooth (or gate) with the finding (or WP) ID, and emit no other
-# diagnostic - so every tooth and the WP, routing and escalation gates are
-# enforced independently and no fixture can pass for the wrong reason. Uses
+# diagnostic - so every tooth and the WP, routing, escalation and sibling gates
+# are enforced independently and no fixture can pass for the wrong reason. Uses
 # only bash and the committed fixtures; never touches the real tree.
 
 set -uo pipefail
@@ -203,7 +249,10 @@ fail_fixture() {
       ROUTING-UNEXPECTED-CLOSURE ROUTING-UNDECLARED ROUTING-DECLARATION-MISMATCH \
       ESCALATION-MALFORMED ESCALATION-DUPLICATE ESCALATION-UNRESPONDED \
       ESCALATION-UNEXPECTED-RESPONSE ESCALATION-WRONG-OWNER \
-      ESCALATION-INVALID-RESPONSE; do
+      ESCALATION-INVALID-RESPONSE \
+      SIBLING-MISSING SIBLING-STALE-COUNT SIBLING-OMITTED-SCOPE \
+      SIBLING-MALFORMED SIBLING-DUPLICATE SIBLING-ROGUE SIBLING-DECOY \
+      SIBLING-OVER-LIMIT; do
     [ "$other" = "$marker" ] && continue
     if grep -qF -- "$other" <<<"$out"; then
       echo "FAIL: $name emitted $other in addition to $marker" >&2
@@ -303,6 +352,36 @@ fail_fixture stop-escalation-malformed-response T-01 ESCALATION-MALFORMED \
 fail_fixture stop-escalation-malformed-scope T-01 ESCALATION-MALFORMED \
   'ESCALATION-MALFORMED: T-01: escalation scope link must have two tab-separated non-empty fields (trigger owner)' \
   signoffs.tsv "" "" "" "" "" "" escalation-scope.tsv escalation-responses.tsv
+
+pass_fixture sibling-positive \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-missing F-1000 SIBLING-MISSING \
+  'SIBLING-MISSING: F-1000: in-scope one-function-fix claim has no sibling record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-stale-count F-1000 SIBLING-STALE-COUNT \
+  'SIBLING-STALE-COUNT: F-1000: recorded hit count 1 does not match current hit count 2 for pattern "left_at_guard" in src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-omitted-scope F-1000 SIBLING-OMITTED-SCOPE \
+  'SIBLING-OMITTED-SCOPE: F-1000: sibling record omits the search scope field (id pattern scope count limit)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-malformed F-1000 SIBLING-MALFORMED \
+  'SIBLING-MALFORMED: F-1000: sibling record must have five tab-separated non-empty fields (id pattern scope count limit)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-duplicate F-1000 SIBLING-DUPLICATE \
+  'SIBLING-DUPLICATE: F-1000: duplicate sibling record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-rogue F-9999 SIBLING-ROGUE \
+  'SIBLING-ROGUE: F-9999: sibling record matches no in-scope claim' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-decoy-pattern F-1000 SIBLING-DECOY \
+  'SIBLING-DECOY: F-1000: pattern "right_at_guard" matches nothing in src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-decoy-scope F-1000 SIBLING-DECOY \
+  'SIBLING-DECOY: F-1000: fixed function update_game_command_success is absent from the declared search scope src/other.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
+fail_fixture sibling-over-limit F-1000 SIBLING-OVER-LIMIT \
+  'SIBLING-OVER-LIMIT: F-1000: hit count 2 exceeds the approved heuristic limit 1' \
+  signoffs.tsv "" "" "" "" "" "" "" "" sibling-scope.tsv sibling.tsv
 
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2

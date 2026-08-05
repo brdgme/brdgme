@@ -155,6 +155,58 @@
 #                              is not valid (must be "amendment" or
 #                              "abandonment")
 #
+# Sibling-sweep gate (4.9a): a one-function fix claims it swept the fixed
+# function's file for structurally identical siblings (pattern 2). The claim
+# must name a reproducible sibling-search pattern and a recorded current hit
+# count, so a later reader can re-run the search and confirm the count still
+# holds. Two optional inputs, enabled when a sibling scope file is given:
+#   sibling-scope.tsv   one in-scope one-function-fix claim per line,
+#                       tab-separated fields (id function). The authoritative
+#                       enumeration, derived in production from the commit
+#                       range / fix records and never from the sibling records -
+#                       so omitting a claim's evidence record cannot hide it.
+#                       `function` is the function the one-function fix landed
+#                       in; the declared search scope must contain it.
+#                       (default: none, gate skipped)
+#   sibling.tsv         tab-separated evidence records, one per in-scope claim,
+#                       fields:
+#     id                 claim ID, matching a scope link exactly
+#     pattern            the reproducible sibling-search pattern, as accepted
+#                        by `grep -E`
+#     scope              the search scope: a file or directory path relative
+#                        to CWD; the hit count is the number of matching lines
+#                        returned by `grep -rE <pattern> <scope>`
+#     count              the recorded current hit count (non-negative integer)
+#     limit              the approved heuristic limit (non-negative integer)
+#                        on structurally identical siblings for this claim
+#   Every record must correspond exactly to an in-scope claim - a rogue record
+#   cannot authorize a fabricated sweep - and the search must be applicable:
+#   the scope must exist, contain the fixed function named in the scope link,
+#   and the pattern must match at least the fixed code, so a pattern that
+#   matches nothing is a decoy, not evidence of "no siblings". The re-run must
+#   reproduce the recorded count and must not exceed the approved heuristic
+#   limit.
+# Sibling diagnostics (the claim ID is interpolated):
+#   SIBLING-MALFORMED:      <id>: sibling scope link must have two
+#                           tab-separated non-empty fields (id function) |
+#                           sibling record must have five tab-separated
+#                           non-empty fields (id pattern scope count limit) |
+#                           count and limit must be non-negative integers
+#   SIBLING-DUPLICATE:      <id>: duplicate sibling scope link / duplicate
+#                           sibling record
+#   SIBLING-MISSING:        <id>: in-scope one-function-fix claim has no
+#                           sibling record
+#   SIBLING-ROGUE:          <id>: sibling record matches no in-scope claim
+#   SIBLING-OMITTED-SCOPE:  <id>: sibling record omits the search scope field
+#                           (id pattern scope count limit)
+#   SIBLING-STALE-COUNT:    <id>: recorded hit count <count> does not match
+#                           the current hit count re-run against the scope
+#   SIBLING-DECOY:          <id>: the search is not applicable - the declared
+#                           search scope does not exist, the fixed function is
+#                           absent from it, or the pattern matches nothing
+#   SIBLING-OVER-LIMIT:     <id>: hit count exceeds the approved heuristic
+#                           limit
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -180,13 +232,15 @@
 # script from their own directory (same convention as check-delivery-lists.sh).
 # Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE [ROUTING-SCOPE
 # [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES [ESCALATION-SCOPE
-# [ESCALATION-RESPONSES]]]]]]]]] - RECORDS defaults to signoffs.tsv, SCOPE
-# defaults to none (4.3 gate skipped), PROVENANCE defaults to wp-provenance.tsv,
-# ROUTING-SCOPE defaults to none (4.4 gate skipped), ROUTING-RECORDS to
-# routing.tsv, ROUTING-DECLARATIONS to routing-declarations.tsv, ROUTING-CLOSURES
-# to routing-closures.tsv, ESCALATION-SCOPE defaults to none (4.6 gate skipped)
-# and ESCALATION-RESPONSES to escalation-responses.tsv. Uses only standard
-# Bash/GNU utilities (grep, sed, awk).
+# [ESCALATION-RESPONSES [SIBLING-SCOPE [SIBLING-RECORDS]]]]]]]]]]] - RECORDS
+# defaults to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped),
+# PROVENANCE defaults to wp-provenance.tsv, ROUTING-SCOPE defaults to none
+# (4.4 gate skipped), ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
+# routing-declarations.tsv, ROUTING-CLOSURES to routing-closures.tsv,
+# ESCALATION-SCOPE defaults to none (4.6 gate skipped), ESCALATION-RESPONSES to
+# escalation-responses.tsv, SIBLING-SCOPE defaults to none (4.9a gate skipped)
+# and SIBLING-RECORDS to sibling.tsv. Uses only standard Bash/GNU utilities
+# (grep, sed, awk).
 
 set -uo pipefail
 
@@ -668,6 +722,145 @@ if [ -n "${8:-}" ]; then
   fi
 fi
 
+# Sibling-sweep gate (4.9a): a one-function fix claims it swept the fixed
+# function's file for structurally identical siblings (pattern 2) and must name
+# a reproducible sibling-search pattern and a recorded current hit count. When
+# a sibling scope file is given, every in-scope claim must carry an evidence
+# record whose pattern re-runs to the recorded count within the approved
+# heuristic limit, and the search must be applicable: the declared scope must
+# exist, contain the fixed function named in the scope link, and match at
+# least one line. The scope file is the authoritative enumeration and is never
+# inferred from the records, so omitting a record cannot hide a claim, and no
+# record can authorize a fabricated sweep.
+if [ -n "${10:-}" ]; then
+  SIB_SCOPE="${10}"
+  SIB_RECORDS="${11:-sibling.tsv}"
+  if [ ! -f "$SIB_SCOPE" ]; then
+    echo "SIBLING-MISSING-SCOPE: no sibling scope file: $SIB_SCOPE" >&2
+    fail=1
+  elif [ ! -f "$SIB_RECORDS" ]; then
+    echo "SIBLING-MISSING-RECORDS: no sibling records file: $SIB_RECORDS" >&2
+    fail=1
+  else
+    # Authoritative scope: every in-scope one-function-fix claim (id function).
+    # A malformed scope link is still recorded so its claim is not cascaded
+    # into MISSING; the malformed diagnostic already fails the run.
+    declare -A sib_fn=() sib_scope_seen=() sib_rec_seen=()
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r sb_id sb_fn <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$sb_id" ] || [ -z "$sb_fn" ]; then
+        echo "SIBLING-MALFORMED: ${sb_id:-<no-id>}: sibling scope link must have two tab-separated non-empty fields (id function)" >&2
+        [ -n "$sb_id" ] && sib_scope_seen["$sb_id"]=1
+        fail=1
+        continue
+      fi
+      if [ -n "${sib_scope_seen[$sb_id]:-}" ]; then
+        echo "SIBLING-DUPLICATE: $sb_id: duplicate sibling scope link" >&2
+        fail=1
+        continue
+      fi
+      sib_scope_seen["$sb_id"]=1
+      sib_fn["$sb_id"]="$sb_fn"
+    done < "$SIB_SCOPE"
+
+    # Claim evidence: one record per in-scope claim (id pattern scope count
+    # limit). Every record must correspond exactly to a scope link - a rogue
+    # record cannot authorize a fabricated sweep - and the recorded count must
+    # be reproducible and within the approved heuristic limit. The record
+    # structure is validated with awk, whose -F'\t' split preserves empty
+    # fields (unlike `read`, which collapses consecutive tabs), so an empty
+    # search-scope field is diagnosed distinctly from a truncated row.
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      nf="$(printf '%s\n' "$line" | awk -F'\t' '{print NF}')"
+      empty_field="$(printf '%s\n' "$line" | awk -F'\t' '{ if ($3 == "") print "scope"; else if ($1 == "" || $2 == "" || $4 == "" || $5 == "") print "other" }')"
+      if [ "$nf" -ne 5 ]; then
+        sb_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+        echo "SIBLING-MALFORMED: ${sb_id:-<no-id>}: sibling record must have five tab-separated non-empty fields (id pattern scope count limit)" >&2
+        [ -n "$sb_id" ] && sib_rec_seen["$sb_id"]=1
+        fail=1
+        continue
+      fi
+      if [ "$empty_field" = "scope" ]; then
+        sb_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+        echo "SIBLING-OMITTED-SCOPE: ${sb_id:-<no-id>}: sibling record omits the search scope field (id pattern scope count limit)" >&2
+        [ -n "$sb_id" ] && sib_rec_seen["$sb_id"]=1
+        fail=1
+        continue
+      fi
+      if [ "$empty_field" = "other" ]; then
+        sb_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+        echo "SIBLING-MALFORMED: ${sb_id:-<no-id>}: sibling record must have five tab-separated non-empty fields (id pattern scope count limit)" >&2
+        [ -n "$sb_id" ] && sib_rec_seen["$sb_id"]=1
+        fail=1
+        continue
+      fi
+      IFS=$'\t' read -r sb_id sb_pattern sb_scope sb_count sb_limit <<< "$line"
+      if [ -n "${sib_rec_seen[$sb_id]:-}" ]; then
+        echo "SIBLING-DUPLICATE: $sb_id: duplicate sibling record" >&2
+        fail=1
+        continue
+      fi
+      sib_rec_seen["$sb_id"]=1
+      if ! [[ "$sb_count" =~ ^[0-9]+$ ]] || ! [[ "$sb_limit" =~ ^[0-9]+$ ]]; then
+        echo "SIBLING-MALFORMED: $sb_id: count and limit must be non-negative integers" >&2
+        fail=1
+        continue
+      fi
+      # A rogue record that matches no in-scope claim cannot authorize a
+      # fabricated sweep.
+      if [ -z "${sib_scope_seen[$sb_id]:-}" ]; then
+        echo "SIBLING-ROGUE: $sb_id: sibling record matches no in-scope claim" >&2
+        fail=1
+        continue
+      fi
+      # The search must be applicable: the declared scope must exist and must
+      # contain the fixed function the scope link names.
+      if [ ! -e "$sb_scope" ]; then
+        echo "SIBLING-DECOY: $sb_id: declared search scope not found: $sb_scope" >&2
+        fail=1
+        continue
+      fi
+      if ! grep -rEq "fn ${sib_fn[$sb_id]}" "$sb_scope" 2>/dev/null; then
+        echo "SIBLING-DECOY: $sb_id: fixed function ${sib_fn[$sb_id]} is absent from the declared search scope $sb_scope" >&2
+        fail=1
+        continue
+      fi
+      # Re-run the sibling search exactly as recorded and compare the count.
+      actual="$(grep -rE "$sb_pattern" "$sb_scope" 2>/dev/null | wc -l | tr -d ' ')"
+      if [ "$actual" -ne "$sb_count" ]; then
+        echo "SIBLING-STALE-COUNT: $sb_id: recorded hit count $sb_count does not match current hit count $actual for pattern \"$sb_pattern\" in $sb_scope" >&2
+        fail=1
+        continue
+      fi
+      # A pattern that matches nothing is a decoy, not evidence of "no
+      # siblings": a real sibling search over the fixed code matches at least
+      # the fixed function itself.
+      if [ "$actual" -eq 0 ]; then
+        echo "SIBLING-DECOY: $sb_id: pattern \"$sb_pattern\" matches nothing in $sb_scope" >&2
+        fail=1
+        continue
+      fi
+      # The hit count must stay within the approved heuristic limit.
+      if [ "$actual" -gt "$sb_limit" ]; then
+        echo "SIBLING-OVER-LIMIT: $sb_id: hit count $actual exceeds the approved heuristic limit $sb_limit" >&2
+        fail=1
+      fi
+    done < "$SIB_RECORDS"
+
+    # The scope is authoritative: omitting a claim's evidence record cannot
+    # hide it.
+    for sb_id in "${!sib_scope_seen[@]}"; do
+      if [ -z "${sib_rec_seen[$sb_id]:-}" ]; then
+        echo "SIBLING-MISSING: $sb_id: in-scope one-function-fix claim has no sibling record" >&2
+        fail=1
+      fi
+    done
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
@@ -676,4 +869,5 @@ msg="every record satisfies all four teeth"
 [ -n "${2:-}" ] && msg="$msg and every in-scope work package has provenance"
 [ -n "${4:-}" ] && msg="$msg and every expected routing link is routed, declared, and never closed by its sender"
 [ -n "${8:-}" ] && msg="$msg and every declared mandatory trigger has an exact owner-response"
+[ -n "${10:-}" ] && msg="$msg and every in-scope one-function-fix claim names a reproducible sibling-search pattern with a current hit count within its approved heuristic limit"
 echo "check-four-tooth: OK ($msg)"
