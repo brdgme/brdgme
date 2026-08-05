@@ -140,7 +140,7 @@ restored per owner instruction.)
 | F-96 Turnstile secret key (prod) | pending | GitOps repo |
 | TURNSTILE_SITE_KEY startup check | pending | lands with F-96 |
 | config::public_base_url() prod HTTPS | pending | |
-| F-207 sqlx migrator reconcile | ready(verification) | `rrm-f207-sqlx-migrator`; 0.9.0 selected, disposable-ledger compatibility and rollout gate required |
+| F-207 sqlx migrator reconcile | done | `rrm-f207-sqlx-migrator`; Docker migrate-builder and both CI installation sites pin exact 0.9.0. Disposable Postgres: 0.8.6 applied all 32 migrations, 0.9.0 accepted the unchanged ledger with no pending migrations, and fresh 0.8.6/0.9.0 schema, records, and checksums matched. Exact 0.9.0 also passed the CI migration command and single-job `cargo sqlx prepare --check`. No production ledger was accessed or verified: before rollout, back up or copy the production `_sqlx_migrations` ledger and validate that copy with exact 0.9.0. |
 | F-211 hanamikoji-1 delivery gap | done(85fff2e) | code half in R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | Pre-rollout checklist file in brdgme-config | pending | |
 

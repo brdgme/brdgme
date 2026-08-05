@@ -117,7 +117,7 @@ jobs:
           workspaces: rust
       - uses: taiki-e/install-action@v2
         with:
-          tool: sqlx-cli
+          tool: sqlx-cli@0.9.0
       - name: Run checks (fmt, clippy, sqlx, tests)
         run: bash ../scripts/rust-ci-commands.sh
 
@@ -213,7 +213,7 @@ jobs:
           workspaces: rust
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-leptos,wasm-bindgen-cli@0.2.121,sqlx-cli
+          tool: cargo-leptos,wasm-bindgen-cli@0.2.121,sqlx-cli@0.9.0
       - name: Install wasm-opt
         run: sudo apt-get update && sudo apt-get install -y binaryen
       # cargo-leptos's own dart-sass auto-download has been seen to fetch an

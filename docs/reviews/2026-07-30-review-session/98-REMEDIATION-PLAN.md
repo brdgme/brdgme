@@ -2155,11 +2155,16 @@ in `F-96-turnstile-key.md`; do not re-derive them.
 | **F-96** (downgraded - deployment blocker, not a code defect) | Real `TURNSTILE_SECRET_KEY` in prod, or `ALLOW_INSECURE_DEFAULT_KEY` deliberately set | `rust/web/src/main.rs:40-45` panics at startup. Dev and CI already set the opt-in flag (`k8s/dev/web-patch.yaml:18-19`, `scripts/rust-test.sh:64`); **no manifest sets the var in prod**. The panic is correct - it is the only thing preventing the `secret.is_empty() -> true` fail-open at `auth/server.rs:256-277`. |
 | **`TURNSTILE_SITE_KEY` startup check** (new, from the F-96 out-of-band report) | The site key, set **in the same change** as the secret key | No startup check exists; it silently defaults to empty, renders no widget, and rejects every login. **Setting only the secret key is a total login outage.** Both halves must land together, and a startup check for the site key should be added alongside. |
 | **`config::public_base_url()`** (from Unit 09b) | An HTTPS production base URL | Defaults to `http://localhost:3000`, which makes WP-58's `List-Unsubscribe` header non-HTTPS and **RFC 8058-invalid** in production. Mail providers may reject or ignore the header. |
-| **F-207** (Low) | Reconcile the three sqlx migrators: `sqlx-cli` **0.8.6** pinned in `rust/Dockerfile:132`, **unpinned latest** in `.github/workflows/ci.yml:90-92`, and the **0.9** library used by `#[sqlx::test]` | Divergent `_sqlx_migrations` checksum/format writes. **No commit in the entire 127-commit range touches `rust/Dockerfile`** and no spec mentions the pin. Mitigating: `rg 'migrate!' rust` is empty, so nothing validates checksums at runtime - this is why it is Low, not why it is safe. |
+| **F-207** (Low) | Reconcile the three sqlx migrators: the former `sqlx-cli` **0.8.6** Docker migrate-builder pin, two formerly **unpinned latest** CI installation sites, and the **0.9** library used by `#[sqlx::test]` | Divergent `_sqlx_migrations` checksum/format writes. **No commit in the entire 127-commit range touches `rust/Dockerfile`** and no spec mentions the pin. Mitigating: `rg 'migrate!' rust` is empty, so nothing validates checksums at runtime - this is why it is Low, not why it is safe. |
 | **F-211** | See section 11 for the exact wording; it is grouped here as a delivery/manifest item alongside F-208's hand-maintained lists (see `R-DEL` in section 2). | The `hanamikoji-1` delivery gap: the crate has **no `rust/Dockerfile` stage** (26 game stages at `:174-303` against 28 workspace members; the other absentee is `lords-of-vegas-1`, WIP and excluded). It **is** built by `cargo build --release --workspace --exclude web` and then never copied into an image. |
 
 **Also suggested, not urgent** (from the F-96 report): split
 `ALLOW_INSECURE_DEFAULT_KEY`. One flag currently disables two unrelated guards.
+
+**F-207 pre-rollout gate:** before rolling out the production migration image,
+take a backup or copy of the actual production `_sqlx_migrations` ledger and
+validate that copy with exact `sqlx-cli 0.9.0`. This remediation performed no
+production database access and does not claim production-ledger verification.
 
 **Acceptance for this whole section:** a single pre-rollout checklist file lives
 in `brdgme-config` and is referenced from `docs/DEV.md`; a reviewer can point at
@@ -2347,11 +2352,11 @@ list. Absence of known defects must be stated explicitly, not left blank.
   have no redaction test. **Mechanism:** a scope claim of "every X" requires an
   enumerated list in the spec and a per-item checkbox, never a prose claim.
 
-### 4.10 Execution status (2026-08-05)
+### 4.10 Execution status (2026-08-06)
 
 | Semantic unit | Item | Status | Evidence |
 |---------------|------|--------|----------|
-| `rrm-f207-sqlx-migrator` | F-207 | ready(verification) | 0.9.0 selected; disposable-ledger compatibility evidence and rollout gate required. |
+| `rrm-f207-sqlx-migrator` | F-207 | done | Exact 0.9.0 pins in the Docker migrate-builder and both CI installation sites; disposable 0.8.6/0.9.0 ledger compatibility, CI migration path, and single-job `cargo sqlx prepare --check` passed. Production-ledger validation remains a pre-rollout gate. |
 | `rrm-4.1-four-tooth-core` | 4.1 | ready | D1 manifest accepted after independent source audit; execute serially. |
 | `rrm-4.2-test-row-sweep` | 4.2 | ready | D1 manifest accepted after independent source audit; execute serially. |
 | `rrm-4.3-wp-provenance` | 4.3 | ready | D1 manifest accepted after independent source audit; execute serially. |

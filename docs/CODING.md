@@ -568,7 +568,7 @@ are held at `0.3.98` by the `wasm-bindgen =0.2.121` pin above (latest is
 `tower-sessions-sqlx-store` is no longer a dependency, which is what freed
 `web` to move off the `sqlx ^0.8` the published store imposed. `web`'s
 `tower-sessions` remains on `0.14.0` (the `0.15` bump was out of scope for the
-vendoring work). The `sqlx-cli` pin in `rust/Dockerfile` remains `0.8.6`. Run
+vendoring work). The `sqlx-cli` pin in `rust/Dockerfile` is `0.9.0`. Run
 `cargo update --verbose` periodically to check for patch-level updates; ignore
 "Unchanged" lines where a newer major version exists but the Cargo.toml
 constraint intentionally excludes it.

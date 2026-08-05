@@ -160,7 +160,7 @@ COPY --from=web-builder /tmp/wasm-dwarf/web.debug /web.debug
 FROM chef AS migrate-builder
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-gnu.tgz | tar -xvz \
     && mv cargo-binstall /usr/local/cargo/bin/cargo-binstall
-RUN cargo binstall sqlx-cli --version 0.8.6 --no-confirm
+RUN cargo binstall sqlx-cli --version 0.9.0 --no-confirm
 
 # --- Final Stage for migrate ---
 FROM debian:bookworm-slim AS migrate
