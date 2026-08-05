@@ -23,6 +23,29 @@
 #             identical to the original premise). (F-205: dp F12 was never
 #             true and the finding text was never amended.)
 #
+# WP provenance gate (4.3): a work package may not be marked done without
+# either an approved specification or at least one checklist row. When a scope
+# file is given the guard deterministically enumerates every in-scope work
+# package from it and fails any completed WP with neither. Two optional inputs:
+#   wp-scope.tsv        one in-scope WP ID per line (e.g. WP-01). The
+#                       authoritative enumeration, derived in production from
+#                       the commit range / registry headings and never from the
+#                       provenance rows - so omitting a completed WP's evidence
+#                       row cannot hide it. (default: none, gate skipped)
+#   wp-provenance.tsv   tab-separated rows, one per in-scope WP, fields:
+#     wp                 WP ID
+#     spec               "y" when an approved specification exists (active or
+#                        archive), anything else means none
+#     checklist          "y" when at least one checklist row exists, anything
+#                        else means none
+#     completed          "y" when the WP is closed/landed, anything else means
+#                        open (parked, deferred, blocked)
+# WP diagnostics (the WP ID is interpolated):
+#   WP-UNACCOUNTED: <wp>: in-scope work package has no provenance record
+#   WP-DUPLICATE:   <wp>: duplicate provenance record
+#   WP-NO-PROVENANCE: <wp>: completed work package has neither specification
+#                     nor checklist evidence
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -43,10 +66,13 @@
 # treated as a caller or as test exercise.
 #
 # Field values must not contain tabs. Every violation is diagnosed with the
-# finding ID and the exact failing tooth, and the run exits non-zero. All
-# paths are resolved relative to CWD, so the fixtures invoke the script from
-# their own directory (same convention as check-delivery-lists.sh). Uses only
-# standard Bash/GNU utilities (grep, sed, awk).
+# finding ID (or WP ID) and the exact failing tooth or gate, and the run exits
+# non-zero. All paths are resolved relative to CWD, so the fixtures invoke the
+# script from their own directory (same convention as check-delivery-lists.sh).
+# Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE]]] - RECORDS defaults
+# to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped) and PROVENANCE
+# defaults to wp-provenance.tsv. Uses only standard Bash/GNU utilities (grep,
+# sed, awk).
 
 set -uo pipefail
 
@@ -190,8 +216,55 @@ while IFS=$'\t' read -r id symbol file test pdisp premise amendment; do
   fi
 done < "$RECORDS"
 
+# WP provenance gate (4.3): when a scope file is given, enumerate every in-scope
+# work package deterministically and fail any completed WP with neither an
+# approved specification nor at least one checklist row.
+if [ -n "${2:-}" ]; then
+  SCOPE="$2"
+  PROVENANCE="${3:-wp-provenance.tsv}"
+  if [ ! -f "$SCOPE" ]; then
+    echo "MISSING-SCOPE: no WP scope file: $SCOPE" >&2
+    fail=1
+  elif [ ! -f "$PROVENANCE" ]; then
+    echo "MISSING-PROVENANCE: no WP provenance file: $PROVENANCE" >&2
+    fail=1
+  else
+    declare -A seen prov_spec prov_chk prov_done
+    while IFS=$'\t' read -r wp p_spec p_chk p_done; do
+      [ -n "$wp" ] || continue
+      if [ -n "${seen[$wp]:-}" ]; then
+        echo "WP-DUPLICATE: $wp: duplicate provenance record" >&2
+        fail=1
+        continue
+      fi
+      seen[$wp]=1
+      prov_spec[$wp]="$p_spec"
+      prov_chk[$wp]="$p_chk"
+      prov_done[$wp]="$p_done"
+    done < "$PROVENANCE"
+    while IFS= read -r wp; do
+      [ -n "$wp" ] || continue
+      if [ -z "${seen[$wp]:-}" ]; then
+        echo "WP-UNACCOUNTED: $wp: in-scope work package has no provenance record" >&2
+        fail=1
+        continue
+      fi
+      if [ "${prov_done[$wp]:-n}" = "y" ] \
+        && [ "${prov_spec[$wp]:-n}" != "y" ] \
+        && [ "${prov_chk[$wp]:-n}" != "y" ]; then
+        echo "WP-NO-PROVENANCE: $wp: completed work package has neither specification nor checklist evidence" >&2
+        fail=1
+      fi
+    done < "$SCOPE"
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
 fi
-echo "check-four-tooth: OK (every record satisfies all four teeth)"
+if [ -n "${2:-}" ]; then
+  echo "check-four-tooth: OK (every record satisfies all four teeth and every in-scope work package has provenance)"
+else
+  echo "check-four-tooth: OK (every record satisfies all four teeth)"
+fi

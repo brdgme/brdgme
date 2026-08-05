@@ -80,10 +80,11 @@ jobs:
       - name: Check delivery-list consistency
         working-directory: .
         run: bash scripts/check-delivery-lists.sh
-      # Four-tooth sign-off rule contract harness (4.1): the guard is
-      # exercised against committed fixtures proving all four teeth and the
-      # exact diagnostic of each negative tooth. Pure-text, no toolchain.
-      - name: Check four-tooth sign-off rule contract
+      # Sign-off guard contract harness (4.1 + 4.3): the four-tooth guard and
+      # the WP provenance gate are exercised against committed fixtures proving
+      # every tooth, the exact diagnostic of each negative, and the
+      # omitted-row bypass prevention. Pure-text, no toolchain.
+      - name: Check sign-off guard contract
         working-directory: .
         run: bash scripts/check-four-tooth.test.sh
       # Direct Compose validation: render the root compose.yaml with the same
