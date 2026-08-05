@@ -690,6 +690,51 @@ async fn claim_unfinished_game_tx(
     Ok(())
 }
 
+/// DRM-03a: old pods write `left_at` without departure metadata during the
+/// rollout. Under the authoritative `games` row lock and while the game is
+/// still unfinished, stamp such human rows `unknown_legacy` with a per-game
+/// dense sequence over `left_at` (equal timestamps tie), offset past any
+/// already-assigned sequences so no existing departure is overwritten or
+/// collided with. Completed games are never touched. Deterministic and
+/// idempotent. Callers must hold the game-row lock before invoking so a
+/// finishing report normalises departed old-pod humans as departed before
+/// ranking. Shared so the DRM-03b concession/end writers can normalise the
+/// same rows under the same lock before they allocate.
+#[cfg(feature = "ssr")]
+pub(crate) async fn normalize_legacy_departures_tx(
+    tx: &mut sqlx::PgConnection,
+    game_id: Uuid,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE game_players gp
+        SET departure_reason = 'unknown_legacy',
+            departure_sequence = nd.departure_sequence
+        FROM (
+            SELECT
+                id,
+                dense_rank() OVER (ORDER BY left_at) + (
+                    SELECT COALESCE(MAX(departure_sequence), 0)
+                    FROM game_players
+                    WHERE game_id = $1
+                ) AS departure_sequence
+            FROM game_players
+            WHERE game_id = $1
+              AND user_id IS NOT NULL
+              AND left_at IS NOT NULL
+              AND departure_sequence IS NULL
+        ) nd
+        JOIN games g ON g.id = gp.game_id
+        WHERE gp.id = nd.id
+          AND NOT g.is_finished
+        "#,
+    )
+    .bind(game_id)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
 #[cfg(feature = "ssr")]
 // Splitting these into a params struct would be a larger refactor than warranted here.
 #[allow(clippy::too_many_arguments)]
@@ -715,6 +760,28 @@ pub async fn update_game_command_success(
 
     let mut tx = pool.begin().await?;
 
+    // DRM-03a: acquire the authoritative `games` row lock and validate the
+    // optimistic `expected_updated_at` guard BEFORE any normalisation,
+    // sequence allocation, or player/game lifecycle write. A row not found
+    // here means a stale (or absent) game, matching the legacy 0-row UPDATE
+    // behaviour: `StaleStateConflict`, never an unrelated error.
+    let locked: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM games WHERE id = $1 AND updated_at = $2 FOR UPDATE",
+    )
+    .bind(game_id)
+    .bind(expected_updated_at)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if locked.is_none() {
+        return Err(StaleStateConflict.into());
+    }
+
+    // DRM-03a: under the lock above and while the game is still marked
+    // unfinished, normalise old-pod departures, so a finishing report ranks
+    // them as departed rather than active, and the sequence allocation below
+    // continues past them.
+    normalize_legacy_departures_tx(&mut tx, game_id).await?;
+
     // `is_finished` is sticky: a finished game stays finished, matching
     // `COALESCE($3, finished_at)` on the timestamp column. Un-finishing is
     // `undo_game`'s job (it writes is_finished AND finished_at = NULL
@@ -722,20 +789,36 @@ pub async fn update_game_command_success(
     // produced `is_finished = false` with a non-NULL `finished_at` (ws F37).
     // `updated_at` is maintained by the update_games_updated_at trigger, so
     // the optimistic-concurrency guard below still sees a changed value.
-    let update_result = sqlx::query!(
-        "UPDATE games SET game_state = $1, is_finished = ($2 OR is_finished), finished_at = COALESCE($3, finished_at) WHERE id = $4 AND updated_at = $5",
-        new_game_state,
-        status.is_finished,
-        finished_at,
-        game_id,
-        expected_updated_at
+    // Plain (non-macro) query, not `query!`, because migration-032's
+    // `end_reason` is not in the committed offline `.sqlx` cache. A normal
+    // service finish records `end_reason = 'game_service'` (DRM-03a); an
+    // existing reason is preserved so a retry cannot clobber it.
+    let update_result = sqlx::query(
+        "UPDATE games SET game_state = $1, is_finished = ($2 OR is_finished), finished_at = COALESCE($3, finished_at), \
+         end_reason = CASE WHEN $2 THEN COALESCE(end_reason, 'game_service') ELSE end_reason END \
+         WHERE id = $4 AND updated_at = $5",
     )
+    .bind(new_game_state)
+    .bind(status.is_finished)
+    .bind(finished_at)
+    .bind(game_id)
+    .bind(expected_updated_at)
     .execute(&mut *tx)
     .await?;
 
     if update_result.rows_affected() == 0 {
         return Err(StaleStateConflict.into());
     }
+
+    // DRM-03a: one shared positive sequence for every human eliminated in
+    // this report. Computed after normalisation and under the game-row lock
+    // acquired above, so concurrent events cannot collide.
+    let next_departure_sequence: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(departure_sequence), 0) + 1 FROM game_players WHERE game_id = $1",
+    )
+    .bind(game_id)
+    .fetch_one(&mut *tx)
+    .await?;
 
     // Plain (non-macro) query, not `query!`; see the `get_user_theme` doc
     // comment above for the same convention.
@@ -773,6 +856,12 @@ pub async fn update_game_command_success(
             None
         };
 
+        // DRM-03a: only a human seat with no prior departure (`left_at`
+        // still NULL) that this active report newly eliminates gets departure
+        // metadata; the shared `next_departure_sequence` is bound for every
+        // row, but the CASE only fires on that transition, so repeated
+        // reports retain existing metadata and pure bots / already-departed
+        // seats (e.g. conceded-replaced humans) stay bare.
         sqlx::query(
             r#"UPDATE game_players
                SET is_turn = $1, place = $2,
@@ -781,7 +870,15 @@ pub async fn update_game_command_success(
                    undo_game_state = $5, last_turn_at = $6, is_turn_at = $7,
                    turn_reminder_sent_at = NULL,
                    left_at = CASE WHEN is_eliminated = false AND $3 = true AND NOT $9
-                                  THEN NOW() ELSE left_at END
+                                  THEN NOW() ELSE left_at END,
+                   departure_reason = CASE WHEN user_id IS NOT NULL AND left_at IS NULL
+                                               AND is_eliminated = false AND $3 = true AND NOT $9
+                                               AND departure_reason IS NULL
+                                           THEN 'eliminated' ELSE departure_reason END,
+                   departure_sequence = CASE WHEN user_id IS NOT NULL AND left_at IS NULL
+                                                 AND is_eliminated = false AND $3 = true AND NOT $9
+                                                 AND departure_sequence IS NULL
+                                             THEN $10 ELSE departure_sequence END
                WHERE id = $8"#,
         )
         .bind(is_turn)
@@ -793,6 +890,7 @@ pub async fn update_game_command_success(
         .bind(is_turn_at)
         .bind(p_id)
         .bind(status.is_finished)
+        .bind(next_departure_sequence)
         .execute(&mut *tx)
         .await?;
     }
@@ -2789,5 +2887,606 @@ mod tests {
             left_at.is_none(),
             "is_finished=true must not set left_at even when status reports elimination"
         );
+    }
+
+    /// DRM-03a: old pods write `left_at` without departure metadata during the
+    /// rollout. The lifecycle writer stamps such unfinished human rows
+    /// `unknown_legacy` with a per-game dense `left_at` sequence (equal
+    /// timestamps tie).
+    #[sqlx::test]
+    async fn update_game_command_success_normalizes_old_pod_departures(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let b = make_user(&pool, "b").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id, b.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let a_pos = position_of(&ge, a.id);
+        let b_pos = position_of(&ge, b.id);
+
+        // Old-pod state: left_at set, no departure metadata. creator and a tie.
+        for pos in [creator_pos, a_pos] {
+            sqlx::query(
+                "UPDATE game_players SET left_at = '2026-01-01 00:00:00' \
+                 WHERE game_id = $1 AND position = $2",
+            )
+            .bind(game.id)
+            .bind(pos)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-02 00:00:00' \
+             WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(b_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let played_id = ge.game_players[0].game_player.id;
+        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
+            "SELECT updated_at FROM games WHERE id = $1",
+        )
+        .bind(game.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s0",
+            "s1",
+            false,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![creator_pos as usize],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[],
+            updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let dep = |pos: i32| -> (Option<String>, Option<i32>) {
+            let p = ge_after
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == pos)
+                .unwrap();
+            (
+                p.game_player.departure_reason.clone(),
+                p.game_player.departure_sequence,
+            )
+        };
+        assert_eq!(
+            dep(creator_pos),
+            (Some("unknown_legacy".to_string()), Some(1)),
+            "earliest tie shares sequence 1"
+        );
+        assert_eq!(dep(a_pos), (Some("unknown_legacy".to_string()), Some(1)));
+        assert_eq!(dep(b_pos), (Some("unknown_legacy".to_string()), Some(2)));
+    }
+
+    /// DRM-03a: the normalisation helper never touches completed games, and
+    /// new old-pod rows continue the per-game dense numbering past any
+    /// already-assigned departure sequences rather than colliding with them.
+    #[sqlx::test]
+    async fn normalize_legacy_departures_tx_skips_completed_and_continues(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let b = make_user(&pool, "b").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id, b.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+
+        // A completed game's departed rows are never written.
+        sqlx::query("UPDATE games SET is_finished = true WHERE id = $1")
+            .bind(game.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-01 00:00:00' \
+             WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(creator_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        {
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query("SELECT 1 FROM games WHERE id = $1 FOR UPDATE")
+                .bind(game.id)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            normalize_legacy_departures_tx(&mut tx, game.id).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+        let dep: Option<String> = sqlx::query_scalar(
+            "SELECT departure_reason FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(creator_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(dep.is_none(), "completed game rows must stay untouched");
+
+        // A fresh unfinished game: one departure already carries sequence 1
+        // (assigned by the new writer); later old-pod departures must slot in
+        // as dense events after it, never reusing its sequence.
+        let (_, gv2) = make_game_type_and_version(&pool).await;
+        let game2 = make_game_with_players(&pool, gv2, creator.id, &[a.id, b.id], 0, &[0]).await;
+        let ge2 = find_game_extended(&pool, game2.id).await.unwrap().unwrap();
+        let creator2_pos = position_of(&ge2, creator.id);
+        let a2_pos = position_of(&ge2, a.id);
+        let b2_pos = position_of(&ge2, b.id);
+        sqlx::query(
+            "UPDATE game_players SET departure_reason = 'eliminated', departure_sequence = 1, \
+             left_at = '2026-01-01 00:00:00' \
+             WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game2.id)
+        .bind(a2_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-02 00:00:00' \
+             WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game2.id)
+        .bind(creator2_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-03 00:00:00' \
+             WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game2.id)
+        .bind(b2_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+        {
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query("SELECT 1 FROM games WHERE id = $1 FOR UPDATE")
+                .bind(game2.id)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            normalize_legacy_departures_tx(&mut tx, game2.id).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+        let game2_id = game2.id;
+        let pool_ref = &pool;
+        let seq = move |pos: i32| async move {
+            sqlx::query_scalar::<_, i32>(
+                "SELECT departure_sequence FROM game_players WHERE game_id = $1 AND position = $2",
+            )
+            .bind(game2_id)
+            .bind(pos)
+            .fetch_one(pool_ref)
+            .await
+            .unwrap()
+        };
+        assert_eq!(seq(a2_pos).await, 1, "existing sequence must be preserved");
+        assert_eq!(seq(creator2_pos).await, 2, "dense among old-pod rows, offset past event 1");
+        assert_eq!(seq(b2_pos).await, 3);
+    }
+
+    /// DRM-03a: an active service update assigns `departure_reason=eliminated`,
+    /// `left_at`, and one shared positive sequence only to newly eliminated
+    /// human seats; repeated reports retain existing metadata and pure bots
+    /// stay bare.
+    #[sqlx::test]
+    async fn update_game_command_success_assigns_elimination_departure_metadata(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let a = make_user(&pool, "a").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        // Two humans plus one pure bot.
+        let game = make_game_with_players(&pool, gv, creator.id, &[a.id], 1, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let a_pos = position_of(&ge, a.id);
+        let bot_pos = ge
+            .game_players
+            .iter()
+            .find(|p| p.game_player.user_id.is_none())
+            .unwrap()
+            .game_player
+            .position;
+        let played_id = ge.game_players[0].game_player.id;
+
+        // Report 1: creator and a eliminated together -> one shared sequence.
+        let status = StatusUpdate {
+            is_finished: false,
+            whose_turn: vec![],
+            eliminated: vec![creator_pos as usize, a_pos as usize],
+            placings: vec![],
+        };
+        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
+            "SELECT updated_at FROM games WHERE id = $1",
+        )
+        .bind(game.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        update_game_command_success(&pool, game.id, played_id, "s0", "s1", false, &status, &[], updated_at, vec![])
+            .await
+            .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let dep = |pos: i32| -> (Option<String>, Option<i32>) {
+            let p = ge_after
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == pos)
+                .unwrap();
+            (
+                p.game_player.departure_reason.clone(),
+                p.game_player.departure_sequence,
+            )
+        };
+        assert_eq!(dep(creator_pos), (Some("eliminated".to_string()), Some(1)));
+        assert_eq!(dep(a_pos), (Some("eliminated".to_string()), Some(1)));
+        assert_eq!(dep(bot_pos), (None, None), "pure bots get no departure metadata");
+
+        // Report 2: identical report retains the existing metadata.
+        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
+            "SELECT updated_at FROM games WHERE id = $1",
+        )
+        .bind(game.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        update_game_command_success(&pool, game.id, played_id, "s1", "s2", false, &status, &[], updated_at, vec![])
+            .await
+            .unwrap();
+        let creator_dep_seq: Option<i32> = sqlx::query_scalar(
+            "SELECT departure_sequence FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(creator_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            creator_dep_seq, Some(1),
+            "repeated reports must retain existing metadata"
+        );
+
+        // Report 3: only the bot is newly eliminated -> still no bot
+        // metadata, and no new human sequence is allocated.
+        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
+            "SELECT updated_at FROM games WHERE id = $1",
+        )
+        .bind(game.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s2",
+            "s3",
+            false,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![],
+                eliminated: vec![bot_pos as usize],
+                placings: vec![],
+            },
+            &[],
+            updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+        let bot_dep: Option<String> = sqlx::query_scalar(
+            "SELECT departure_reason FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(bot_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(bot_dep.is_none(), "a bot-only report must not stamp departure metadata");
+    }
+
+    /// DRM-03a: a seat that already left (left_at set, e.g. a conceded-replaced
+    /// human during the rollout window) is never "newly eliminated" - a later
+    /// report eliminating that position must not stamp it `eliminated`.
+    #[sqlx::test]
+    async fn update_game_command_success_elimination_skips_already_left_humans(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[opp.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let opp_pos = position_of(&ge, opp.id);
+        let played_id = ge.game_players[0].game_player.id;
+
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-01 00:00:00' \
+             WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(opp_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
+            "SELECT updated_at FROM games WHERE id = $1",
+        )
+        .bind(game.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s0",
+            "s1",
+            false,
+            &StatusUpdate {
+                is_finished: false,
+                whose_turn: vec![],
+                eliminated: vec![opp_pos as usize],
+                placings: vec![],
+            },
+            &[],
+            updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let opp_dep: Option<String> = sqlx::query_scalar(
+            "SELECT departure_reason FROM game_players WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(opp_pos)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            opp_dep.is_none(),
+            "an already-left seat must not be stamped eliminated"
+        );
+    }
+
+    /// DRM-03a: a normal service finish writes `end_reason = 'game_service'`,
+    /// persists the exact service placings by position, then computes
+    /// competitive ranks and applies ELO in the same transaction.
+    #[sqlx::test]
+    async fn update_game_command_success_service_finish_writes_end_reason_places_and_rating(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[opp.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let opp_pos = position_of(&ge, opp.id);
+        let played_id = ge.game_players[0].game_player.id;
+
+        let mut placings = vec![0usize; 2];
+        placings[creator_pos as usize] = 1;
+        placings[opp_pos as usize] = 2;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s0",
+            "final",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
+            &[10.0, 5.0],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge_after.game.end_reason.as_deref(), Some("game_service"));
+        let by_pos = |pos: i32| {
+            ge_after
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == pos)
+                .unwrap()
+                .game_player
+                .clone()
+        };
+        assert_eq!(by_pos(creator_pos).place, Some(1));
+        assert_eq!(by_pos(opp_pos).place, Some(2));
+        assert_eq!(by_pos(creator_pos).ranked_placing, Some(1));
+        assert_eq!(by_pos(opp_pos).ranked_placing, Some(2));
+        assert_eq!(by_pos(creator_pos).rating_change, Some(16));
+        assert_eq!(by_pos(opp_pos).rating_change, Some(-16));
+    }
+
+    /// DRM-03a: a service finish with no placings records the finish but
+    /// remains unranked and unrated - no places are invented from points or
+    /// any other source.
+    #[sqlx::test]
+    async fn update_game_command_success_service_finish_without_placings_stays_unrated(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[opp.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let played_id = ge.game_players[0].game_player.id;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s0",
+            "final",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings: vec![],
+            },
+            &[10.0, 5.0],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge_after.game.end_reason.as_deref(), Some("game_service"));
+        for p in &ge_after.game_players {
+            assert_eq!(p.game_player.place, None);
+            assert_eq!(p.game_player.ranked_placing, None);
+            assert_eq!(p.game_player.rating_change, None);
+        }
+    }
+
+    /// DRM-03a: an old-pod departed human is normalised to `unknown_legacy`
+    /// before a finishing report ranks, so it places after the active humans
+    /// instead of being treated as an active participant.
+    #[sqlx::test]
+    async fn update_game_command_success_finish_ranks_old_pod_departed_human_after_active(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[opp.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let creator_pos = position_of(&ge, creator.id);
+        let opp_pos = position_of(&ge, opp.id);
+        let played_id = ge.game_players[0].game_player.id;
+
+        // Old-pod departure: opp left earlier, metadata never written.
+        sqlx::query(
+            "UPDATE game_players SET left_at = '2026-01-01 00:00:00', is_eliminated = true \
+             WHERE game_id = $1 AND position = $2",
+        )
+        .bind(game.id)
+        .bind(opp_pos)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut placings = vec![0usize; 2];
+        placings[creator_pos as usize] = 1;
+        placings[opp_pos as usize] = 2;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s0",
+            "final",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![],
+                placings,
+            },
+            &[10.0, 5.0],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let opp_p = ge_after
+            .game_players
+            .iter()
+            .find(|p| p.game_player.position == opp_pos)
+            .unwrap();
+        assert_eq!(
+            opp_p.game_player.departure_reason.as_deref(),
+            Some("unknown_legacy")
+        );
+        assert_eq!(opp_p.game_player.departure_sequence, Some(1));
+        assert_eq!(
+            ge_after
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == creator_pos)
+                .unwrap()
+                .game_player
+                .ranked_placing,
+            Some(1),
+            "active human ranks ahead of the departed one"
+        );
+        assert_eq!(opp_p.game_player.ranked_placing, Some(2));
+    }
+
+    /// DRM-03a: a terminal service status never infers elimination departures
+    /// - the `eliminated` list on a finish report writes no departure metadata.
+    #[sqlx::test]
+    async fn update_game_command_success_finish_does_not_infer_departures(pool: PgPool) {
+        let creator = make_user(&pool, "creator").await;
+        let opp = make_user(&pool, "opp").await;
+        let (_, gv) = make_game_type_and_version(&pool).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[opp.id], 0, &[0]).await;
+        let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        let opp_pos = position_of(&ge, opp.id);
+        let played_id = ge.game_players[0].game_player.id;
+
+        let mut placings = vec![0usize; 2];
+        placings[position_of(&ge, creator.id) as usize] = 1;
+        placings[opp_pos as usize] = 2;
+
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s0",
+            "final",
+            false,
+            &StatusUpdate {
+                is_finished: true,
+                whose_turn: vec![],
+                eliminated: vec![opp_pos as usize],
+                placings,
+            },
+            &[10.0, 5.0],
+            ge.game.updated_at,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.departure_reason, None,
+                "a finish report must not infer departure metadata from its eliminated list"
+            );
+            assert_eq!(p.game_player.departure_sequence, None);
+        }
     }
 }
