@@ -14,6 +14,27 @@ fn usage() -> ! {
 
 const MAX_BUNDLE_BYTES: u64 = 100 * 1024 * 1024;
 
+/// Minimal version envelope decoded before the full `ExportBundle`, so a v1 or
+/// other unsupported schema is rejected with a targeted error instead of a
+/// confusing full-bundle deserialization failure (DRM-04c).
+#[derive(serde::Deserialize)]
+struct VersionEnvelope {
+    schema_version: u32,
+}
+
+fn parse_bundle(raw: &str, path: &str) -> anyhow::Result<web::game::export::ExportBundle> {
+    let envelope: VersionEnvelope = serde_json::from_str(raw)
+        .map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
+    if envelope.schema_version != web::game::export::BUNDLE_SCHEMA_VERSION {
+        anyhow::bail!(
+            "{path}: unsupported bundle schema_version {} (this build supports {})",
+            envelope.schema_version,
+            web::game::export::BUNDLE_SCHEMA_VERSION
+        );
+    }
+    serde_json::from_str(raw).map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))
+}
+
 fn read_bundle_limited<R: std::io::Read>(
     mut reader: R,
     path: &str,
@@ -39,8 +60,7 @@ async fn main() -> anyhow::Result<()> {
 
     let file = std::fs::File::open(&path).map_err(|e| anyhow::anyhow!("opening {path}: {e}"))?;
     let raw = read_bundle_limited(file, &path, MAX_BUNDLE_BYTES)?;
-    let bundle: web::game::export::ExportBundle =
-        serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
+    let bundle = parse_bundle(&raw, &path)?;
 
     let pool = web::db::create_pool().await?;
     let http_client = reqwest::Client::new();
@@ -78,5 +98,60 @@ mod tests {
         let raw = read_bundle_limited(std::io::Cursor::new(under_limit), "test-bundle", 8)
             .expect("under-limit input must be accepted");
         assert_eq!(raw, "{{{{");
+    }
+
+    #[test]
+    fn parse_bundle_rejects_v1_envelope_before_full_decode() {
+        // A v1 bundle carries only the version envelope here - full v2
+        // deserialization would fail on missing fields, so the targeted
+        // unsupported-version error proves the envelope check runs first.
+        let err = parse_bundle(r#"{"schema_version":1}"#, "bundle.json").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unsupported bundle schema_version 1 (this build supports 2)"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_bundle_rejects_future_version_before_full_decode() {
+        let err = parse_bundle(r#"{"schema_version":999}"#, "bundle.json").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unsupported bundle schema_version 999 (this build supports 2)"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_bundle_accepts_current_version() {
+        let bundle = web::game::export::ExportBundle {
+            schema_version: web::game::export::BUNDLE_SCHEMA_VERSION,
+            exported_at: time::OffsetDateTime::now_utc(),
+            game_type_name: "Lost Cities".to_string(),
+            game_version_name: "v1".to_string(),
+            game_version_uri: "http://localhost:0/mock".to_string(),
+            game: web::game::export::BundleGame {
+                id: uuid::Uuid::new_v4(),
+                is_finished: false,
+                finished_at: None,
+                end_reason: None,
+                game_state: "state".to_string(),
+                created_at: time::PrimitiveDateTime::new(
+                    time::Date::from_calendar_date(2020, time::Month::January, 1).unwrap(),
+                    time::Time::MIDNIGHT,
+                ),
+                updated_at: time::PrimitiveDateTime::new(
+                    time::Date::from_calendar_date(2020, time::Month::January, 1).unwrap(),
+                    time::Time::MIDNIGHT,
+                ),
+            },
+            players: vec![],
+            bots: vec![],
+            logs: vec![],
+        };
+        let raw = serde_json::to_string(&bundle).unwrap();
+        let parsed = parse_bundle(&raw, "bundle.json").expect("v2 bundle must parse");
+        assert_eq!(parsed.schema_version, 2);
     }
 }

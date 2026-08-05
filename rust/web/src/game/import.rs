@@ -534,8 +534,31 @@ mod tests {
         let mut bundle = make_exported_game(&pool).await;
         bundle.schema_version = 999;
 
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
         let result = import_bundle(&pool, &reqwest::Client::new(), &bundle).await;
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "a future schema version must be rejected"
+        );
+        let err = result.err().expect("error present");
+        assert!(
+            err.to_string()
+                .contains("unsupported bundle schema_version 999 (this build supports 2)"),
+            "unexpected error: {err}"
+        );
+
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            after, before,
+            "a future-version envelope must not persist any game"
+        );
     }
 
     /// F-122: bundle-supplied `undo_game_state` was written verbatim with no
@@ -840,4 +863,29 @@ mod tests {
         assert_eq!(replacement.game_bot.as_ref().unwrap().name, "Botty");
     }
 
+    #[sqlx::test]
+    async fn import_bundle_rejects_v1_envelope_without_writes(pool: PgPool) {
+        let mut bundle = make_exported_game(&pool).await;
+        bundle.schema_version = 1;
+
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = import_bundle(&pool, &reqwest::Client::new(), &bundle).await;
+        assert!(result.is_err(), "a v1 envelope must be rejected");
+        let err = result.err().expect("error present");
+        assert!(
+            err.to_string()
+                .contains("unsupported bundle schema_version 1 (this build supports 2)"),
+            "unexpected error: {err}"
+        );
+
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(after, before, "a v1 envelope must not persist any game");
+    }
 }

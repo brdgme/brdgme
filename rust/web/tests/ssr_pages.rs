@@ -1385,7 +1385,7 @@ async fn admin_export_route_returns_bundle_without_emails(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
     assert!(content_type.starts_with("application/json"));
     let bundle: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(bundle["schema_version"], 1);
+    assert_eq!(bundle["schema_version"], 2);
     assert_eq!(bundle["game"]["game_state"], "opaque_state_blob");
     assert_eq!(bundle["players"].as_array().unwrap().len(), 2);
     assert_eq!(bundle["bots"][0]["name"], "Botty");

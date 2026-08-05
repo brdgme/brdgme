@@ -17,7 +17,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tower_sessions::Session;
 use uuid::Uuid;
 
-pub const BUNDLE_SCHEMA_VERSION: u32 = 1;
+pub const BUNDLE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportBundle {
