@@ -148,7 +148,7 @@ restored per owner instruction.)
 
 | Item | Status | Notes |
 |------|--------|-------|
-| 4.1 four-tooth sign-off script | ready | `rrm-4.1-four-tooth-core`; D1 manifest accepted after independent source audit; execute serially |
+| 4.1 four-tooth sign-off script | done | `rrm-4.1-four-tooth-core`; versioned D1 input contract, independent four-tooth fixture harness, and CI invocation accepted after independent review. |
 | 4.2 "Test? y with no test" sweep | ready | `rrm-4.2-test-row-sweep`; D1 manifest accepted after independent source audit; execute serially |
 | 4.3 WP spec/checklist sign-off gate | ready | `rrm-4.3-wp-provenance`; D1 manifest accepted after independent source audit; execute serially |
 | 4.4 deferral-state mechanism | ready | `rrm-4.4-deferral-routing`; D1 manifest accepted after independent source audit; execute serially |
@@ -205,6 +205,16 @@ restored per owner instruction.)
 
 ## Process-fix evidence
 
+- `rrm-4.1-four-tooth-core`: `scripts/check-four-tooth.sh` enforces citation
+  presence, non-test reachability, named-test invocation, and explicit
+  disproved-premise amendment against the versioned contract in
+  `HISTORICAL-SIGNOFF-MANIFEST.md`. The committed harness has one passing
+  fixture and six isolated negative fixtures (the four required teeth plus
+  comment-only caller/test decoys); it runs in CI. `bash
+  scripts/check-four-tooth.test.sh`, direct positive-fixture execution,
+  `bash -n`, and `git diff --check` passed. Independent final review exercised
+  comment/string decoys and test-module exclusion; historical manifest gaps
+  remain intentionally unmodified.
 - `rrm-4.5-spec-code-review`: `docs/CODING.md` requires a second reviewer when
   a fix changes a test assertion, `RULES.md`, or a `docs/CODING.md` rule; that
   review must answer whether code moved to the spec or vice versa. New

@@ -2357,7 +2357,7 @@ list. Absence of known defects must be stated explicitly, not left blank.
 | Semantic unit | Item | Status | Evidence |
 |---------------|------|--------|----------|
 | `rrm-f207-sqlx-migrator` | F-207 | done | Exact 0.9.0 pins in the Docker migrate-builder and both CI installation sites; disposable 0.8.6/0.9.0 ledger compatibility, CI migration path, and single-job `cargo sqlx prepare --check` passed. Production-ledger validation remains a pre-rollout gate. |
-| `rrm-4.1-four-tooth-core` | 4.1 | ready | D1 manifest accepted after independent source audit; execute serially. |
+| `rrm-4.1-four-tooth-core` | 4.1 | done | Versioned D1 input contract, Bash checker, positive plus isolated negative fixtures for all four teeth (including comment decoys), CI harness invocation, direct verification, and independent final review accepted; historical gaps intentionally remain unresolved. |
 | `rrm-4.2-test-row-sweep` | 4.2 | ready | D1 manifest accepted after independent source audit; execute serially. |
 | `rrm-4.3-wp-provenance` | 4.3 | ready | D1 manifest accepted after independent source audit; execute serially. |
 | `rrm-4.4-deferral-routing` | 4.4 | ready | D1 manifest accepted after independent source audit; execute serially. |

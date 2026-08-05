@@ -1,0 +1,1 @@
+F-205	game_history	src/history.rs	rating_before_aggregates_exclude_nulls	y	game_history is excluded from ratings aggregates	-

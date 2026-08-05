@@ -80,6 +80,12 @@ jobs:
       - name: Check delivery-list consistency
         working-directory: .
         run: bash scripts/check-delivery-lists.sh
+      # Four-tooth sign-off rule contract harness (4.1): the guard is
+      # exercised against committed fixtures proving all four teeth and the
+      # exact diagnostic of each negative tooth. Pure-text, no toolchain.
+      - name: Check four-tooth sign-off rule contract
+        working-directory: .
+        run: bash scripts/check-four-tooth.test.sh
       # Direct Compose validation: render the root compose.yaml with the same
       # parser `docker compose up` uses (validates all 27 game services, their
       # build targets, ports, and the YAML watch aliases).
