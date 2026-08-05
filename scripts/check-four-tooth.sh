@@ -284,6 +284,101 @@
 # wildcard arm living outside the declared scope - the authoritative scope
 # enumeration must be complete for the proof to mean anything.
 #
+# Dead-code sweep gate (4.9c): a fix that removes or documents dead code must
+# sweep the approved universe for remaining `#[allow(dead_code)]` suppressions
+# and prove none remains, reproducibly. The proof is a textual Bash heuristic
+# over the declared universe, documented below; it is an auditable
+# approximation, never a parser-grade guarantee. Two optional inputs, enabled
+# when a dead-code scope file is given:
+#   deadcode-scope.tsv one in-scope dead-code sweep claim per line,
+#                      tab-separated fields (id universe). `universe` is the
+#                      source file or directory, relative to CWD, covering the
+#                      closure-register commit range the claim sweeps. The
+#                      authoritative enumeration, derived in production from the
+#                      commit range / closure register and never from the
+#                      evidence records - so omitting a claim's evidence record
+#                      cannot hide it. (default: none, gate skipped)
+#   deadcode.tsv       tab-separated evidence records, one per in-scope claim,
+#                      fields:
+#     id                   claim ID, matching a scope link exactly
+#     universe             the sweep universe, relative to CWD; must equal the
+#                          authoritative universe named in the scope link
+#                          exactly, so a record scanning a different path is a
+#                          nearby scan, not evidence for this claim
+#     allowances           the recorded count of `allow(dead_code)` occurrences
+#                          returned by the guard's dead-code allowance heuristic
+#     variants             the recorded count of relevant dead-code suppression
+#                          variants (an `allow` of the `unused` or `warnings`
+#                          lint group, both of which cover dead_code, or an
+#                          `expect(dead_code)`, `expect(unused)` or
+#                          `expect(warnings)` lint expectation) returned by the
+#                          guard's suppression-variant heuristic
+#     matches              the recorded count of `dead_code` occurrences
+#                          returned by the guard's dead-code presence heuristic
+#                          (>= 1)
+#   The guard re-runs all three heuristics against the declared universe. The
+#   allowance count must reproduce at 0 - any remaining `#[allow(dead_code)]` is
+#   rejected - and the variant count must reproduce at 0 - any unreported
+#   suppression variant is rejected, so an alternate spelling cannot bypass the
+#   sweep. The match count must reproduce the recorded value, and the universe
+#   must actually contain at least one `dead_code` mention: a universe with no
+#   dead-code content makes a "no allowance remains" claim vacuous, so it is
+#   rejected rather than counted as proof. The authoritative universe must be
+#   non-empty: an empty scope file is rejected outright, because a dead-code
+#   sweep sign-off with no enumerated claims proves nothing. Every record must
+#   correspond exactly to an in-scope claim - a rogue record cannot authorize a
+#   fabricated sweep.
+# Dead-code sweep diagnostics (the claim ID is interpolated):
+#   DCSWEEP-MALFORMED:      <id>: dead-code scope link must have two
+#                           tab-separated non-empty fields (id universe) |
+#                           dead-code record must have five tab-separated
+#                           non-empty fields (id universe allowances variants
+#                           matches) | allowances, variants and matches must be
+#                           non-negative integers
+#   DCSWEEP-DUPLICATE:      <id>: duplicate dead-code scope link / duplicate
+#                           dead-code record
+#   DCSWEEP-MISSING:        <id>: in-scope dead-code sweep claim has no evidence
+#                           record
+#   DCSWEEP-ROGUE:          <id>: dead-code record matches no in-scope claim
+#   DCSWEEP-OMITTED-SCOPE:  <id>: dead-code record omits the sweep universe field
+#                           (id universe allowances variants matches)
+#   DCSWEEP-EMPTY-SCOPE:    <scope-file>: the authoritative scope file names no
+#                           in-scope dead-code sweep claims (empty scope)
+#   DCSWEEP-DECOY:          <id>: the sweep is not applicable - the record's
+#                           universe differs from the authoritative universe,
+#                           the declared universe does not exist, or the
+#                           universe contains no `dead_code` mention, so the
+#                           no-allowance claim is vacuous
+#   DCSWEEP-STALE:          <id>: recorded allowance count <count> does not
+#                           match the current re-run, or the recorded variant
+#                           count <count> does not match the current re-run, or
+#                           the recorded match count <count> does not match the
+#                           current re-run
+#   DCSWEEP-ALLOWANCE-REMAINS: <id>: an `#[allow(dead_code)]` remains in
+#                           <universe> (current count <count> > 0)
+#   DCSWEEP-VARIANT-REMAINS: <id>: a dead-code suppression variant remains in
+#                           <universe> (current count <count> > 0)
+#
+# Dead-code sweep heuristic limits: the dead-code presence heuristic counts
+# word-boundary `dead_code` occurrences line-by-line, so every `allow(dead_code)`
+# and `deny(dead_code)` line also counts. The allowance heuristic counts a line
+# whose text contains `allow(` ... `dead_code` inside one `)`-closed group, so it
+# catches `#[allow(dead_code)]`, the inner `#![allow(dead_code)]`,
+# `#[allow(dead_code, ...)]`, and a single-line `cfg_attr(..., allow(dead_code))`.
+# The suppression-variant heuristic counts a line whose text contains
+# `allow(` ... `unused` or `allow(` ... `warnings` inside one group (both the
+# `unused` and `warnings` lint groups cover dead_code) or `expect(` ...
+# `dead_code`, `unused` or `warnings` inside one group (a lint expectation
+# naming a lint or group that covers dead_code).
+# A line matching both the allowance and the variant heuristic (e.g.
+# `#[allow(dead_code, unused)]`) is counted in both counts. Neither scan is a
+# Rust parse: an attribute split across lines, a suppression spelled differently,
+# or any suppression living outside the declared universe is not seen, and any
+# line that spells the shape (even in a comment or string) is counted. Both scans
+# include every file under the declared universe (no *.rs filter), and the guard
+# cannot detect a suppression outside the declared universe - the authoritative
+# universe enumeration must be complete for the proof to mean anything.
+#
 # Records are tab-separated, one per line, fields in order:
 #   id                finding ID (e.g. F-109)
 #   symbol            cited symbol (teeth 1-3)
@@ -310,16 +405,17 @@
 # Usage: check-four-tooth.sh [RECORDS [SCOPE [PROVENANCE [ROUTING-SCOPE
 # [ROUTING-RECORDS [ROUTING-DECLARATIONS [ROUTING-CLOSURES [ESCALATION-SCOPE
 # [ESCALATION-RESPONSES [SIBLING-SCOPE [SIBLING-RECORDS [EXMATCH-SCOPE
-# [EXMATCH-RECORDS]]]]]]]]]]]]] - RECORDS defaults to signoffs.tsv, SCOPE
-# defaults to none (4.3 gate skipped), PROVENANCE defaults to
-# wp-provenance.tsv, ROUTING-SCOPE defaults to none (4.4 gate skipped),
-# ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
+# [EXMATCH-RECORDS [DCSWEEP-SCOPE [DCSWEEP-RECORDS]]]]]]]]]]]]]]] - RECORDS
+# defaults to signoffs.tsv, SCOPE defaults to none (4.3 gate skipped),
+# PROVENANCE defaults to wp-provenance.tsv, ROUTING-SCOPE defaults to none
+# (4.4 gate skipped), ROUTING-RECORDS to routing.tsv, ROUTING-DECLARATIONS to
 # routing-declarations.tsv, ROUTING-CLOSURES to routing-closures.tsv,
 # ESCALATION-SCOPE defaults to none (4.6 gate skipped), ESCALATION-RESPONSES to
 # escalation-responses.tsv, SIBLING-SCOPE defaults to none (4.9a gate skipped),
 # SIBLING-RECORDS to sibling.tsv, EXMATCH-SCOPE defaults to none (4.9b gate
-# skipped) and EXMATCH-RECORDS to exhaustive-match.tsv. Uses only standard
-# Bash/GNU utilities (grep, sed, awk).
+# skipped), EXMATCH-RECORDS to exhaustive-match.tsv, DCSWEEP-SCOPE defaults to
+# none (4.9c gate skipped) and DCSWEEP-RECORDS to deadcode.tsv. Uses only
+# standard Bash/GNU utilities (grep, sed, awk).
 
 set -uo pipefail
 
@@ -1102,6 +1198,183 @@ if [ -n "${12:-}" ]; then
   fi
 fi
 
+# Dead-code sweep gate (4.9c): a fix that removes or documents dead code must
+# sweep the approved universe for remaining `#[allow(dead_code)]` suppressions
+# and prove none remains, reproducibly. When a dead-code scope file is given,
+# every in-scope claim must carry an evidence record whose re-run reproduces all
+# three recorded counts, the allowance and suppression-variant counts must be 0,
+# and the universe must actually contain at least one `dead_code` mention - so a
+# vacuous or nearby scan is never proof. The sweep is a documented textual
+# heuristic, not a Rust parse (see the "Dead-code sweep heuristic limits"
+# paragraph in the header).
+if [ -n "${14:-}" ]; then
+  DCSWEEP_SCOPE="${14}"
+  DCSWEEP_RECORDS="${15:-deadcode.tsv}"
+  DCSWEEP_MATCH_PATTERN='\bdead_code\b'
+  DCSWEEP_ALLOWANCE_PATTERN='allow\([^)]*dead_code[^)]*\)'
+  DCSWEEP_VARIANT_PATTERN='allow\([^)]*\b(unused|warnings)\b[^)]*\)|expect\([^)]*\b(dead_code|unused|warnings)\b[^)]*\)'
+  if [ ! -f "$DCSWEEP_SCOPE" ]; then
+    echo "DCSWEEP-MISSING-SCOPE: no dead-code sweep scope file: $DCSWEEP_SCOPE" >&2
+    fail=1
+  elif [ ! -f "$DCSWEEP_RECORDS" ]; then
+    echo "DCSWEEP-MISSING-RECORDS: no dead-code sweep records file: $DCSWEEP_RECORDS" >&2
+    fail=1
+  else
+    # Authoritative scope: every in-scope dead-code sweep claim (id universe).
+    # A malformed scope link is still recorded so its claim is not cascaded into
+    # MISSING; the malformed diagnostic already fails the run.
+    declare -A dc_scope=() dc_scope_seen=() dc_scope_bad=() dc_rec_seen=()
+    dc_lines=0
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      dc_lines=$((dc_lines + 1))
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r dc_id dc_universe <<< "$line"
+      if [ "${#tabs}" -ne 1 ] || [ -z "$dc_id" ] || [ -z "$dc_universe" ]; then
+        echo "DCSWEEP-MALFORMED: ${dc_id:-<no-id>}: dead-code scope link must have two tab-separated non-empty fields (id universe)" >&2
+        [ -n "$dc_id" ] && dc_scope_bad["$dc_id"]=1
+        fail=1
+        continue
+      fi
+      if [ -n "${dc_scope_seen[$dc_id]:-}" ]; then
+        echo "DCSWEEP-DUPLICATE: $dc_id: duplicate dead-code scope link" >&2
+        fail=1
+        continue
+      fi
+      dc_scope_seen["$dc_id"]=1
+      dc_scope["$dc_id"]="$dc_universe"
+    done < "$DCSWEEP_SCOPE"
+
+    # The authoritative universe must be non-empty: a dead-code sweep sign-off
+    # must enumerate a non-empty source scope, so an empty scope file is
+    # rejected outright rather than silently accepted as proof.
+    if [ "$dc_lines" -eq 0 ]; then
+      echo "DCSWEEP-EMPTY-SCOPE: $DCSWEEP_SCOPE: dead-code sweep scope is empty - no in-scope dead-code sweep claims are enumerated" >&2
+      fail=1
+    else
+      # Claim evidence: one record per in-scope claim (id universe allowances
+      # variants matches). Every record must correspond exactly to a scope link -
+      # a rogue record cannot authorize a fabricated sweep - and must scan
+      # exactly the authoritative universe the link names, so a record pointing
+      # at a different path is a nearby scan, not evidence. The record structure
+      # is validated with awk, whose -F'\t' split preserves empty fields (unlike
+      # `read`, which collapses consecutive tabs), so an empty universe field is
+      # diagnosed distinctly from a truncated row.
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        nf="$(printf '%s\n' "$line" | awk -F'\t' '{print NF}')"
+        empty_field="$(printf '%s\n' "$line" | awk -F'\t' '{ if ($2 == "") print "universe"; else if ($1 == "" || $3 == "" || $4 == "" || $5 == "") print "other" }')"
+        if [ "$nf" -ne 5 ]; then
+          dc_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "DCSWEEP-MALFORMED: ${dc_id:-<no-id>}: dead-code record must have five tab-separated non-empty fields (id universe allowances variants matches)" >&2
+          [ -n "$dc_id" ] && dc_rec_seen["$dc_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "universe" ]; then
+          dc_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "DCSWEEP-OMITTED-SCOPE: ${dc_id:-<no-id>}: dead-code record omits the sweep universe field (id universe allowances variants matches)" >&2
+          [ -n "$dc_id" ] && dc_rec_seen["$dc_id"]=1
+          fail=1
+          continue
+        fi
+        if [ "$empty_field" = "other" ]; then
+          dc_id="$(printf '%s\n' "$line" | awk -F'\t' '{print $1}')"
+          echo "DCSWEEP-MALFORMED: ${dc_id:-<no-id>}: dead-code record must have five tab-separated non-empty fields (id universe allowances variants matches)" >&2
+          [ -n "$dc_id" ] && dc_rec_seen["$dc_id"]=1
+          fail=1
+          continue
+        fi
+        IFS=$'\t' read -r dc_id dc_universe dc_allow dc_variant dc_matches <<< "$line"
+        if [ -n "${dc_rec_seen[$dc_id]:-}" ]; then
+          echo "DCSWEEP-DUPLICATE: $dc_id: duplicate dead-code record" >&2
+          fail=1
+          continue
+        fi
+        dc_rec_seen["$dc_id"]=1
+        if ! [[ "$dc_allow" =~ ^[0-9]+$ ]] || ! [[ "$dc_variant" =~ ^[0-9]+$ ]] || ! [[ "$dc_matches" =~ ^[0-9]+$ ]]; then
+          echo "DCSWEEP-MALFORMED: $dc_id: allowances, variants and matches must be non-negative integers" >&2
+          fail=1
+          continue
+        fi
+        # A claim whose scope link was malformed is not cascade-checked here:
+        # DCSWEEP-MALFORMED already failed the run for that line.
+        [ -n "${dc_scope_bad[$dc_id]:-}" ] && continue
+        # A rogue record that matches no in-scope claim cannot authorize a
+        # fabricated sweep.
+        if [ -z "${dc_scope_seen[$dc_id]:-}" ]; then
+          echo "DCSWEEP-ROGUE: $dc_id: dead-code record matches no in-scope claim" >&2
+          fail=1
+          continue
+        fi
+        # The record must scan exactly the authoritative universe: a record that
+        # points at a different path is a nearby scan, not evidence.
+        if [ "$dc_universe" != "${dc_scope[$dc_id]}" ]; then
+          echo "DCSWEEP-DECOY: $dc_id: record universe $dc_universe does not match the authoritative universe ${dc_scope[$dc_id]}" >&2
+          fail=1
+          continue
+        fi
+        # The sweep must be applicable: the declared universe must exist, and
+        # must actually contain at least one `dead_code` mention - otherwise "no
+        # allowance remains" is vacuous, not proof.
+        if [ ! -e "$dc_universe" ]; then
+          echo "DCSWEEP-DECOY: $dc_id: declared universe not found: $dc_universe" >&2
+          fail=1
+          continue
+        fi
+        if [ "$dc_matches" -eq 0 ]; then
+          echo "DCSWEEP-DECOY: $dc_id: universe $dc_universe contains no dead_code mention, so the no-allowance claim is vacuous" >&2
+          fail=1
+          continue
+        fi
+        # Re-run the dead-code presence heuristic exactly as the guard defines
+        # it and compare the count: stale evidence (the code has changed) is
+        # rejected.
+        actual_m="$(grep -rE "$DCSWEEP_MATCH_PATTERN" "$dc_universe" 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$actual_m" -ne "$dc_matches" ]; then
+          echo "DCSWEEP-STALE: $dc_id: recorded match count $dc_matches does not match current count $actual_m in $dc_universe" >&2
+          fail=1
+          continue
+        fi
+        # Re-run the dead-code allowance heuristic: the proof of "no
+        # #[allow(dead_code)] remains" is exactly this count reproducing at 0.
+        actual_a="$(grep -rE "$DCSWEEP_ALLOWANCE_PATTERN" "$dc_universe" 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$actual_a" -gt 0 ]; then
+          echo "DCSWEEP-ALLOWANCE-REMAINS: $dc_id: an #[allow(dead_code)] remains in $dc_universe (current count $actual_a > 0)" >&2
+          fail=1
+          continue
+        fi
+        if [ "$actual_a" -ne "$dc_allow" ]; then
+          echo "DCSWEEP-STALE: $dc_id: recorded allowance count $dc_allow does not match current count $actual_a in $dc_universe" >&2
+          fail=1
+          continue
+        fi
+        # Re-run the suppression-variant heuristic: any variant the record fails
+        # to report is an unreported suppression, and none may remain.
+        actual_v="$(grep -rE "$DCSWEEP_VARIANT_PATTERN" "$dc_universe" 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$actual_v" -gt 0 ]; then
+          echo "DCSWEEP-VARIANT-REMAINS: $dc_id: a dead-code suppression variant remains in $dc_universe (current count $actual_v > 0)" >&2
+          fail=1
+          continue
+        fi
+        if [ "$actual_v" -ne "$dc_variant" ]; then
+          echo "DCSWEEP-STALE: $dc_id: recorded variant count $dc_variant does not match current count $actual_v in $dc_universe" >&2
+          fail=1
+        fi
+      done < "$DCSWEEP_RECORDS"
+
+      # The scope is authoritative: omitting a claim's evidence record cannot
+      # hide it.
+      for dc_id in "${!dc_scope_seen[@]}"; do
+        if [ -z "${dc_rec_seen[$dc_id]:-}" ]; then
+          echo "DCSWEEP-MISSING: $dc_id: in-scope dead-code sweep claim has no evidence record" >&2
+          fail=1
+        fi
+      done
+    fi
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
   exit 1
@@ -1112,4 +1385,5 @@ msg="every record satisfies all four teeth"
 [ -n "${8:-}" ] && msg="$msg and every declared mandatory trigger has an exact owner-response"
 [ -n "${10:-}" ] && msg="$msg and every in-scope one-function-fix claim names a reproducible sibling-search pattern with a current hit count within its approved heuristic limit"
 [ -n "${12:-}" ] && msg="$msg and every in-scope exhaustive-match claim proves no wildcard match arm remains in its scope"
+[ -n "${14:-}" ] && msg="$msg and every in-scope dead-code sweep claim proves no #[allow(dead_code)] or suppression variant remains in its universe"
 echo "check-four-tooth: OK ($msg)"

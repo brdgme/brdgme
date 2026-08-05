@@ -247,6 +247,68 @@
 #                                     heuristic covers (`_ =>`, `_=>`, `_ if
 #                                     guard =>`, `_ @ bind =>`); the guard must
 #                                     fail it as a remaining wildcard arm.
+#
+# And twelve more committed fixtures for the dead-code sweep gate (4.9c), which
+# requires every in-scope dead-code sweep claim to name the authoritative
+# universe (the closure-register commit range it sweeps) and prove no
+# `#[allow(dead_code)]` or suppression variant remains there, reproducibly: the
+# guard re-runs its three documented textual heuristics (a dead-code presence
+# scan, an `allow(dead_code)` scan, and a suppression-variant scan) against the
+# declared universe, the allowance and variant counts must reproduce at 0, the
+# recorded match count must reproduce, and the universe must actually contain at
+# least one `dead_code` mention - so a vacuous or nearby scan is never proof, and
+# an unreported variant (e.g. `#[allow(unused)]`, whose lint group covers
+# dead_code) cannot bypass the sweep. The dead-code scope is the authoritative
+# enumeration and is never inferred from the records, so omitting a record cannot
+# hide a claim:
+#   deadcode-positive             - one claim (F-1200, universe
+#                                   src/game_write.rs) whose universe carries a
+#                                   `#[deny(dead_code)]` mention and no
+#                                   allowance or suppression variant, counts
+#                                   recorded as 0 allowances / 0 variants / 1
+#                                   match; the guard must accept it.
+#   deadcode-missing              - the scope enumerates the claim but the
+#                                   records file omits its evidence row; the
+#                                   guard must fail it as a missing record.
+#   deadcode-stale                - the recorded match count 1 does not match
+#                                   the current count 2; the guard must fail it
+#                                   as stale, never trusting the recorded count.
+#   deadcode-omitted-scope        - a record with an empty universe field; the
+#                                   guard must fail it with the scope-omitted
+#                                   diagnostic.
+#   deadcode-empty-scope          - an empty authoritative scope file (and no
+#                                   records): the guard must fail it as an empty
+#                                   scope, never silently accept a sign-off that
+#                                   enumerates no claims.
+#   deadcode-malformed            - a truncated record (missing the matches
+#                                   field); the guard must fail it as
+#                                   malformed.
+#   deadcode-duplicate            - the same claim recorded twice; the guard
+#                                   must fail it as a duplicate rather than
+#                                   silently accept the last row.
+#   deadcode-rogue                - an extra record for F-9999 matching no
+#                                   in-scope claim, paired with a complete
+#                                   valid record; the guard must fail the rogue
+#                                   record and no other claim.
+#   deadcode-decoy-nearby         - a "nearby scan" decoy: the record's universe
+#                                   src/other.rs differs from the authoritative
+#                                   universe src/game_write.rs; the guard must
+#                                   fail it as a decoy.
+#   deadcode-decoy-vacuous        - an "empty universe" decoy: the declared
+#                                   universe contains no `dead_code` mention, so
+#                                   the recorded 0 allowances proves nothing;
+#                                   the guard must fail it as a decoy.
+#   deadcode-allowance-remains    - a universe whose code still carries
+#                                   `#[allow(dead_code)]`; the guard must fail
+#                                   it as a remaining allowance.
+#   deadcode-variant-remains      - unreported variant coverage: a universe that
+#                                   carries `#[allow(unused)]`, `#[allow(warnings)]`,
+#                                   `#[expect(dead_code)]`, `#[expect(unused)]`
+#                                   and `#[expect(warnings)]` - lint groups and
+#                                   expectations that all cover dead_code -
+#                                   while the record reports 0 variants; the
+#                                   guard must fail it as a remaining
+#                                   suppression variant.
 
 set -uo pipefail
 
@@ -307,7 +369,10 @@ fail_fixture() {
       SIBLING-OVER-LIMIT \
       EXMATCH-MALFORMED EXMATCH-DUPLICATE EXMATCH-MISSING EXMATCH-ROGUE \
       EXMATCH-OMITTED-SCOPE EXMATCH-EMPTY-SCOPE EXMATCH-DECOY EXMATCH-STALE \
-      EXMATCH-WILDCARD-REMAINS; do
+      EXMATCH-WILDCARD-REMAINS \
+      DCSWEEP-MALFORMED DCSWEEP-DUPLICATE DCSWEEP-MISSING DCSWEEP-ROGUE \
+      DCSWEEP-OMITTED-SCOPE DCSWEEP-EMPTY-SCOPE DCSWEEP-DECOY DCSWEEP-STALE \
+      DCSWEEP-ALLOWANCE-REMAINS DCSWEEP-VARIANT-REMAINS; do
     [ "$other" = "$marker" ] && continue
     if grep -qF -- "$other" <<<"$out"; then
       echo "FAIL: $name emitted $other in addition to $marker" >&2
@@ -470,6 +535,42 @@ fail_fixture exhaustive-decoy-vacuous F-1100 EXMATCH-DECOY \
 fail_fixture exhaustive-wildcard-remains F-1100 EXMATCH-WILDCARD-REMAINS \
   'EXMATCH-WILDCARD-REMAINS: F-1100: a wildcard match arm remains in src/game_write.rs (current count 5 > 0)' \
   signoffs.tsv "" "" "" "" "" "" "" "" "" "" exhaustive-scope.tsv exhaustive-match.tsv
+
+pass_fixture deadcode-positive \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-missing F-1200 DCSWEEP-MISSING \
+  'DCSWEEP-MISSING: F-1200: in-scope dead-code sweep claim has no evidence record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-stale F-1200 DCSWEEP-STALE \
+  'DCSWEEP-STALE: F-1200: recorded match count 1 does not match current count 2 in src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-omitted-scope F-1200 DCSWEEP-OMITTED-SCOPE \
+  'DCSWEEP-OMITTED-SCOPE: F-1200: dead-code record omits the sweep universe field (id universe allowances variants matches)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-empty-scope F-1200 DCSWEEP-EMPTY-SCOPE \
+  'DCSWEEP-EMPTY-SCOPE: deadcode-scope.tsv: dead-code sweep scope is empty - no in-scope dead-code sweep claims are enumerated' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-malformed F-1200 DCSWEEP-MALFORMED \
+  'DCSWEEP-MALFORMED: F-1200: dead-code record must have five tab-separated non-empty fields (id universe allowances variants matches)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-duplicate F-1200 DCSWEEP-DUPLICATE \
+  'DCSWEEP-DUPLICATE: F-1200: duplicate dead-code record' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-rogue F-9999 DCSWEEP-ROGUE \
+  'DCSWEEP-ROGUE: F-9999: dead-code record matches no in-scope claim' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-decoy-nearby F-1200 DCSWEEP-DECOY \
+  'DCSWEEP-DECOY: F-1200: record universe src/other.rs does not match the authoritative universe src/game_write.rs' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-decoy-vacuous F-1200 DCSWEEP-DECOY \
+  'DCSWEEP-DECOY: F-1200: universe src/game_write.rs contains no dead_code mention, so the no-allowance claim is vacuous' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-allowance-remains F-1200 DCSWEEP-ALLOWANCE-REMAINS \
+  'DCSWEEP-ALLOWANCE-REMAINS: F-1200: an #[allow(dead_code)] remains in src/game_write.rs (current count 1 > 0)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
+fail_fixture deadcode-variant-remains F-1200 DCSWEEP-VARIANT-REMAINS \
+  'DCSWEEP-VARIANT-REMAINS: F-1200: a dead-code suppression variant remains in src/game_write.rs (current count 5 > 0)' \
+  signoffs.tsv "" "" "" "" "" "" "" "" "" "" "" "" deadcode-scope.tsv deadcode.tsv
 
 if [ "$fail" -ne 0 ]; then
   echo "check-four-tooth: FAIL" >&2
