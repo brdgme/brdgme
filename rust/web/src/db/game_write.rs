@@ -326,6 +326,11 @@ pub async fn concede_game(
     let mut tx = pool.begin().await?;
     claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
 
+    // DRM-03b1b2: under the game-row lock acquired above and while the game is
+    // still unfinished, normalise old-pod departures so the sequence
+    // allocation below continues past them.
+    normalize_legacy_departures_tx(&mut tx, game_id).await?;
+
     let already_left: bool = sqlx::query_scalar(
         "SELECT left_at IS NOT NULL FROM game_players WHERE id = $1 AND game_id = $2",
     )
@@ -365,16 +370,36 @@ pub async fn concede_game(
             players.len()
         ));
     }
+
+    // DRM-03b1b2: one shared positive sequence for the concession departure.
+    // Computed after normalisation and under the game-row lock acquired above,
+    // so concurrent events cannot collide.
+    let next_departure_sequence: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(departure_sequence), 0) + 1 FROM game_players WHERE game_id = $1",
+    )
+    .bind(game_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
     for p in &players {
-        let place: i32 = if p.id == conceding_player_id { 2 } else { 1 };
+        let is_conceder = p.id == conceding_player_id;
+        let place: i32 = if is_conceder { 2 } else { 1 };
+        // DRM-03b1b2: only the conceder's seat receives departure metadata;
+        // the winner keeps `left_at`, `departure_reason`, and
+        // `departure_sequence` NULL.
         sqlx::query(
             r#"UPDATE game_players
                SET is_turn = false, place = $1, undo_game_state = NULL,
-                   turn_reminder_sent_at = NULL
+                   turn_reminder_sent_at = NULL,
+                   left_at = CASE WHEN $3 THEN NOW() ELSE left_at END,
+                   departure_reason = CASE WHEN $3 THEN 'conceded' ELSE departure_reason END,
+                   departure_sequence = CASE WHEN $3 THEN $4 ELSE departure_sequence END
                WHERE id = $2"#,
         )
         .bind(place)
         .bind(p.id)
+        .bind(is_conceder)
+        .bind(next_departure_sequence)
         .execute(&mut *tx)
         .await?;
     }

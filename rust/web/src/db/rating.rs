@@ -761,6 +761,15 @@ mod tests {
         assert_eq!(non_conceder.game_player.place, Some(1));
         assert_eq!(conceder.game_player.rating_change, Some(-16));
         assert_eq!(non_conceder.game_player.rating_change, Some(16));
+        assert!(conceder.game_player.left_at.is_some());
+        assert_eq!(
+            conceder.game_player.departure_reason.as_deref(),
+            Some("conceded")
+        );
+        assert_eq!(conceder.game_player.departure_sequence, Some(1));
+        assert!(non_conceder.game_player.left_at.is_none());
+        assert!(non_conceder.game_player.departure_reason.is_none());
+        assert!(non_conceder.game_player.departure_sequence.is_none());
 
         let (non_conceder_rating, _) =
             game_type_rating(&pool, game_type_id, non_conceder.user.as_ref().unwrap().id).await;
