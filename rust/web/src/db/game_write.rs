@@ -506,32 +506,39 @@ pub async fn end_game(
     let mut tx = pool.begin().await?;
     claim_unfinished_game_tx(&mut tx, game_id, expected_updated_at).await?;
 
-    sqlx::query!(
-        "UPDATE games SET is_finished = true, finished_at = NOW() WHERE id = $1",
-        game_id
+    // DRM-03b1c3: under the claim's game-row lock and while the game is still
+    // unfinished, normalise legacy old-pod departures so the finishing report
+    // ranks them as departed rather than active.
+    normalize_legacy_departures_tx(&mut tx, game_id).await?;
+
+    // Plain (non-macro) query, not `query!`, because migration-032's
+    // `end_reason` is not in the committed offline `.sqlx` cache (same
+    // convention as `update_game_command_success`).
+    let update_result = sqlx::query(
+        "UPDATE games SET is_finished = true, finished_at = NOW(), \
+         end_reason = 'last_human_stop' \
+         WHERE id = $1 AND updated_at = $2 AND is_finished = false",
     )
+    .bind(game_id)
+    .bind(expected_updated_at)
     .execute(&mut *tx)
     .await?;
-
-    let ordered = sqlx::query!(
-        "SELECT id FROM game_players WHERE game_id = $1 ORDER BY points DESC NULLS LAST, position ASC",
-        game_id
-    )
-    .fetch_all(&mut *tx)
-    .await?;
-    for (i, row) in ordered.iter().enumerate() {
-        let place = (i + 1) as i32;
-        sqlx::query(
-            r#"UPDATE game_players
-               SET place = $1, is_turn = false, undo_game_state = NULL,
-                   turn_reminder_sent_at = NULL
-               WHERE id = $2"#,
-        )
-        .bind(place)
-        .bind(row.id)
-        .execute(&mut *tx)
-        .await?;
+    if update_result.rows_affected() == 0 {
+        return Err(StaleStateConflict.into());
     }
+
+    // DRM-03b1c3: a last-human stop has no authoritative game places; clear
+    // every seat's place, turn, undo, and reminder state so no stale
+    // point-sorted place survives. Competitive ranks come solely from
+    // `write_ranked_placings` below.
+    sqlx::query(
+        "UPDATE game_players SET place = NULL, is_turn = false, \
+         undo_game_state = NULL, turn_reminder_sent_at = NULL \
+         WHERE game_id = $1",
+    )
+    .bind(game_id)
+    .execute(&mut *tx)
+    .await?;
 
     sqlx::query!(
         "INSERT INTO game_logs (game_id, body, is_public, logged_at) VALUES ($1, $2, true, NOW())",
@@ -1711,6 +1718,59 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(survivor_ranked, Some(1));
+
+        // DRM-03b1c3: a last-human stop records the stop reason, leaves every
+        // seat without an authoritative place or turn/undo/reminder state, and
+        // still ranks the retained and replaced humans competitively while the
+        // pure bot gets no placement.
+        let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
+        assert_eq!(ge_after.game.end_reason.as_deref(), Some("last_human_stop"));
+        assert!(
+            ge_after.game.finished_at.is_some(),
+            "a last-human stop must record finished_at"
+        );
+
+        for p in &ge_after.game_players {
+            assert_eq!(
+                p.game_player.place, None,
+                "no authoritative place on a last-human stop"
+            );
+            assert!(!p.game_player.is_turn, "no seat keeps its turn");
+            assert_eq!(p.game_player.undo_game_state, None, "undo state cleared");
+        }
+        let reminded: Vec<i32> = sqlx::query_scalar(
+            "SELECT position FROM game_players WHERE game_id = $1 AND turn_reminder_sent_at IS NOT NULL",
+        )
+        .bind(game.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(reminded.is_empty(), "no turn reminder survives the stop");
+
+        let by_pos = |pos: i32| {
+            ge_after
+                .game_players
+                .iter()
+                .find(|p| p.game_player.position == pos)
+                .unwrap()
+                .game_player
+                .clone()
+        };
+        assert_eq!(
+            by_pos(creator_pos).ranked_placing,
+            Some(1),
+            "retained human takes the top competitive placement"
+        );
+        assert_eq!(
+            by_pos(a_pos).ranked_placing,
+            Some(2),
+            "replaced human follows in reverse departure order"
+        );
+        assert_eq!(
+            by_pos(bot_pos).ranked_placing,
+            None,
+            "pure bot has no competitive placement"
+        );
     }
 
     #[sqlx::test]
