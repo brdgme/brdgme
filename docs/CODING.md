@@ -856,3 +856,13 @@ Convention for new parser/render code: every `parse`-like function over user
 input gets an `..._handles_multibyte_input`-style test alongside its ASCII
 tests, asserting error-not-panic for malformed multi-byte input and correct
 `consumed`/`remaining` splits for valid input containing multi-byte chars.
+
+**A change that edits a test assertion, a `RULES.md`, or a `docs/CODING.md`
+rule in the same change as the fix it validates requires a second reviewer.**
+The review must answer in writing: "did the code move to the spec, or the spec
+to the code?" Adjusting the assertion or doc to agree with the code erases the
+discrepancy the finding cited and leaves code, tests and docs mutually
+consistent but all wrong (pattern 4b, 2026-07-30 review - four confirmed
+instances plus two named variants). Any new `docs/CODING.md` rule that
+prescribes a grep procedure must state the grep, and the reviewer must run it
+and record the hit count.

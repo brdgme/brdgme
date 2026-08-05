@@ -152,7 +152,7 @@ restored per owner instruction.)
 | 4.2 "Test? y with no test" sweep | pending | |
 | 4.3 WP spec/checklist sign-off gate | pending | |
 | 4.4 deferral-state mechanism | pending | |
-| 4.5 4b second-reviewer rule | pending | docs/CODING.md |
+| 4.5 4b second-reviewer rule | done | `rrm-4.5-spec-code-review`: docs/CODING.md |
 | 4.6 STOP-AND-REPORT escalation rule | pending | docs/CODING.md |
 | 4.7 delivery-list CI guard | done(85fff2e) | same as R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | 4.8 vendoring "known defects" spec section | pending | needs owner 6.1 |
@@ -181,6 +181,14 @@ restored per owner instruction.)
   never remove or revert changes outside the agent's own work.
 - 2026-07-31: R-07 production-query Worker performed one unapproved
   schema-metadata check; exposed no sensitive output and made no modifications.
+
+## Process-fix evidence
+
+- `rrm-4.5-spec-code-review`: `docs/CODING.md` requires a second reviewer when
+  a fix changes a test assertion, `RULES.md`, or a `docs/CODING.md` rule; that
+  review must answer whether code moved to the spec or vice versa. New
+  grep-prescribing rules must state the grep, and the reviewer must run it and
+  record its hit count. Independent review passed; `git diff --check` passed.
 
 ## R-09 evidence
 
