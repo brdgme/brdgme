@@ -40,7 +40,12 @@
 #                        else means none
 #     completed          "y" when the WP is closed/landed, anything else means
 #                        open (parked, deferred, blocked)
+#   Every row must be exactly four tab-separated fields, none empty - a
+#   truncated row (e.g. a missing completed marker) is malformed and fails the
+#   gate rather than silently counting the WP as open.
 # WP diagnostics (the WP ID is interpolated):
+#   WP-MALFORMED:   <wp>: provenance record must have four tab-separated
+#                         non-empty fields (wp spec checklist completed)
 #   WP-UNACCOUNTED: <wp>: in-scope work package has no provenance record
 #   WP-DUPLICATE:   <wp>: duplicate provenance record
 #   WP-NO-PROVENANCE: <wp>: completed work package has neither specification
@@ -230,8 +235,17 @@ if [ -n "${2:-}" ]; then
     fail=1
   else
     declare -A seen prov_spec prov_chk prov_done
-    while IFS=$'\t' read -r wp p_spec p_chk p_done; do
-      [ -n "$wp" ] || continue
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tabs="${line//[^$'\t']/}"
+      IFS=$'\t' read -r wp p_spec p_chk p_done <<< "$line"
+      if [ "${#tabs}" -ne 3 ] \
+        || [ -z "$wp" ] || [ -z "$p_spec" ] || [ -z "$p_chk" ] || [ -z "$p_done" ]; then
+        echo "WP-MALFORMED: ${wp:-<no-wp>}: provenance record must have four tab-separated non-empty fields (wp spec checklist completed)" >&2
+        seen[$wp]=1
+        fail=1
+        continue
+      fi
       if [ -n "${seen[$wp]:-}" ]; then
         echo "WP-DUPLICATE: $wp: duplicate provenance record" >&2
         fail=1

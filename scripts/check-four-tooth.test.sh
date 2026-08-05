@@ -35,6 +35,11 @@
 #                                   is authoritative and never inferred from
 #                                   the provenance rows, so omitting a row
 #                                   cannot bypass the gate.
+#   wp-provenance-malformed       - a truncated provenance row (empty checklist
+#                                   and completed fields). The guard must fail
+#                                   it with a WP-scoped malformed-record
+#                                   diagnostic, never silently count the WP as
+#                                   open.
 #
 # Each negative fixture must exit non-zero, emit the exact diagnostic of its
 # named tooth (or gate) with the finding (or WP) ID, and emit no other
@@ -88,7 +93,7 @@ fail_fixture() {
     fail=1
   fi
   for other in CITATION-MISSING CITATION-UNREACHABLE DECOY-TEST UNAMENDED-PREMISE \
-      WP-UNACCOUNTED WP-DUPLICATE WP-NO-PROVENANCE; do
+      WP-MALFORMED WP-UNACCOUNTED WP-DUPLICATE WP-NO-PROVENANCE; do
     [ "$other" = "$marker" ] && continue
     if grep -qF -- "$other" <<<"$out"; then
       echo "FAIL: $name emitted $other in addition to $marker" >&2
@@ -118,6 +123,9 @@ fail_fixture wp-provenance-nospec WP-02 WP-NO-PROVENANCE \
   signoffs.tsv wp-scope.tsv wp-provenance.tsv
 fail_fixture wp-provenance-omitted WP-03 WP-UNACCOUNTED \
   'WP-UNACCOUNTED: WP-03: in-scope work package has no provenance record' \
+  signoffs.tsv wp-scope.tsv wp-provenance.tsv
+fail_fixture wp-provenance-malformed WP-02 WP-MALFORMED \
+  'WP-MALFORMED: WP-02: provenance record must have four tab-separated non-empty fields (wp spec checklist completed)' \
   signoffs.tsv wp-scope.tsv wp-provenance.tsv
 
 if [ "$fail" -ne 0 ]; then
