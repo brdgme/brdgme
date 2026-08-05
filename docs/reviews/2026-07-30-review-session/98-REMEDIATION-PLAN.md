@@ -22,6 +22,19 @@ decides what is next.
   explicit monolith or legacy-Go score consumer; the current bot has no score
   consumer. See 97 for acceptance evidence.
 
+## Pending decisions (2026-08-05 Orchestrator ruling)
+
+- **D1 - sign-off input:** choose the canonical reproducible source for the
+  four-tooth guard and its dependent historical sweeps. The `T3-B*` source files
+  are absent from the current worktree after `d89fa345`; do not choose a
+  historical revision, retained manifest, or future-only scope autonomously.
+  This parks `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
+  `rrm-4.3-wp-provenance`, `rrm-4.4-deferral-routing`,
+  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps`.
+- **D2 - sqlx-cli version:** choose the exact explicit release and required
+  compatibility evidence for the deployed migration ledger. Do not choose it
+  autonomously. This parks `rrm-f207-sqlx-migrator`.
+
 ## 1. How to use this document
 
 - Every work package (`R-NN`) closes a named set of findings, cited by **F-number
@@ -2326,6 +2339,20 @@ list. Absence of known defects must be stated explicitly, not left blank.
   every game crate and applied to three; no later WP swept the rest, and 13 crates
   have no redaction test. **Mechanism:** a scope claim of "every X" requires an
   enumerated list in the spec and a per-item checkbox, never a prose claim.
+
+### 4.10 Execution status (2026-08-05)
+
+| Semantic unit | Item | Status | Evidence |
+|---------------|------|--------|----------|
+| `rrm-f207-sqlx-migrator` | F-207 | parked(D2) | Exact CLI release and migration-ledger compatibility evidence await a user decision. |
+| `rrm-4.1-four-tooth-core` | 4.1 | parked(D1) | Canonical reproducible historical input awaits a user decision. |
+| `rrm-4.2-test-row-sweep` | 4.2 | parked(D1) | Depends on D1. |
+| `rrm-4.3-wp-provenance` | 4.3 | parked(D1) | Depends on D1. |
+| `rrm-4.4-deferral-routing` | 4.4 | parked(D1) | Depends on D1. |
+| `rrm-4.5-spec-code-review` | 4.5 | done | `docs/CODING.md` now requires the second reviewer, the written code-versus-spec answer, and grep/hit-count evidence; independent review and `git diff --check` passed. |
+| `rrm-4.6-stop-escalation` | 4.6 | parked(D1) | Depends on D1. |
+| `rrm-4.8-vendoring-defects` | 4.8 | done | `docs/CODING.md` now carries the 6.1 prohibition and mandatory inherited-defects/spec-owner-sign-off rule; `git diff --check` passed. |
+| `rrm-4.9-pattern-sweeps` | 4.9 | parked(D1) | Depends on D1. |
 
 ## 5. Coverage work
 

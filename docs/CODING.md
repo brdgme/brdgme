@@ -573,6 +573,22 @@ vendoring work). The `sqlx-cli` pin in `rust/Dockerfile` remains `0.8.6`. Run
 "Unchanged" lines where a newer major version exists but the Cargo.toml
 constraint intentionally excludes it.
 
+**Vendoring a dependency is forbidden except where there is no alternative and
+work is completely blocked.** A vendored copy inherits every upstream defect and
+any fix has to be re-derived by hand on top of a frozen snapshot, so exhaust
+in-repo alternatives before vendoring; it is only justified when nothing else
+unblocks the work. When vendoring is the only option, the work must also
+satisfy the mandatory "known upstream defects inherited" spec section below.
+(Decision 6.1, 2026-07-31.)
+
+**Every future vendoring spec must carry a mandatory "known upstream defects
+inherited" section.** The vendor reads the upstream issue tracker and open PRs,
+lists the defects being inherited, and the owner signs that list; a faithful
+minimal port - not a rewrite - can preserve upstream defects unless they are
+separately remediated (the vendored `brdgme_session_store`'s `migrate()`
+duplicate-key path is the documented instance). When no known defects are inherited, the section must
+state so explicitly; it cannot be left blank. (Criterion 4.8, 2026-07-31.)
+
 **`rust/web/end2end`'s `@types/node`** tracks the Node.js major provided by
 the devenv shell (currently 24), not npm latest.
 
