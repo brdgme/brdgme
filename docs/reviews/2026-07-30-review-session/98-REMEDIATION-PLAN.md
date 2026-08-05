@@ -33,13 +33,14 @@ decides what is next.
   input without restoring the whole historical corpus to the worktree.
   `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
   `rrm-4.3-wp-provenance`, `rrm-4.4-deferral-routing`,
-  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps` are no longer
-  decision-parked; they await that committed, independently audited manifest.
-  The next approved state is manifest extraction and audit only; do not
-  implement a dependent unit before it is accepted.
-- **D2 - sqlx-cli version:** choose the exact explicit release and required
-  compatibility evidence for the deployed migration ledger. Do not choose it
-  autonomously. This parks `rrm-f207-sqlx-migrator`.
+  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps` are unblocked: the
+  manifest was accepted on 2026-08-06 after an independent source audit and
+  same-scope corrections. Execute them serially.
+- **D2 - sqlx-cli version (user decision):** standardize Docker and both CI
+  install sites on `sqlx-cli` 0.9.0, contingent on compatibility verification.
+  Use a disposable ledger applied with 0.8.6, verify 0.9.0 accepts its checksums,
+  compare a fresh 0.9.0 ledger, and run applicable CI checks. Production-ledger
+  verification is unavailable; retain a rollout gate and do not claim it passed.
 
 ## 1. How to use this document
 
@@ -2350,15 +2351,15 @@ list. Absence of known defects must be stated explicitly, not left blank.
 
 | Semantic unit | Item | Status | Evidence |
 |---------------|------|--------|----------|
-| `rrm-f207-sqlx-migrator` | F-207 | parked(D2) | Exact CLI release and migration-ledger compatibility evidence await a user decision. |
-| `rrm-4.1-four-tooth-core` | 4.1 | blocked(manifest) | D1 resolved; awaits committed source-pinned manifest and independent extraction audit. |
-| `rrm-4.2-test-row-sweep` | 4.2 | blocked(manifest) | Awaits the D1 manifest and audit. |
-| `rrm-4.3-wp-provenance` | 4.3 | blocked(manifest) | Awaits the D1 manifest and audit. |
-| `rrm-4.4-deferral-routing` | 4.4 | blocked(manifest) | Awaits the D1 manifest and audit. |
+| `rrm-f207-sqlx-migrator` | F-207 | ready(verification) | 0.9.0 selected; disposable-ledger compatibility evidence and rollout gate required. |
+| `rrm-4.1-four-tooth-core` | 4.1 | ready | D1 manifest accepted after independent source audit; execute serially. |
+| `rrm-4.2-test-row-sweep` | 4.2 | ready | D1 manifest accepted after independent source audit; execute serially. |
+| `rrm-4.3-wp-provenance` | 4.3 | ready | D1 manifest accepted after independent source audit; execute serially. |
+| `rrm-4.4-deferral-routing` | 4.4 | ready | D1 manifest accepted after independent source audit; execute serially. |
 | `rrm-4.5-spec-code-review` | 4.5 | done | `docs/CODING.md` now requires the second reviewer, the written code-versus-spec answer, and grep/hit-count evidence; independent review and `git diff --check` passed. |
-| `rrm-4.6-stop-escalation` | 4.6 | blocked(manifest) | Awaits the D1 manifest and audit. |
+| `rrm-4.6-stop-escalation` | 4.6 | ready | D1 manifest accepted after independent source audit; execute serially. |
 | `rrm-4.8-vendoring-defects` | 4.8 | done | `docs/CODING.md` now carries the 6.1 prohibition and mandatory inherited-defects/spec-owner-sign-off rule; `git diff --check` passed. |
-| `rrm-4.9-pattern-sweeps` | 4.9 | blocked(manifest) | Awaits the D1 manifest and audit. |
+| `rrm-4.9-pattern-sweeps` | 4.9 | ready | D1 manifest accepted after independent source audit; execute serially. |
 
 ## 5. Coverage work
 

@@ -140,7 +140,7 @@ restored per owner instruction.)
 | F-96 Turnstile secret key (prod) | pending | GitOps repo |
 | TURNSTILE_SITE_KEY startup check | pending | lands with F-96 |
 | config::public_base_url() prod HTTPS | pending | |
-| F-207 sqlx migrator reconcile | parked(D2) | `rrm-f207-sqlx-migrator`; pending user decision |
+| F-207 sqlx migrator reconcile | ready(verification) | `rrm-f207-sqlx-migrator`; 0.9.0 selected, disposable-ledger compatibility and rollout gate required |
 | F-211 hanamikoji-1 delivery gap | done(85fff2e) | code half in R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | Pre-rollout checklist file in brdgme-config | pending | |
 
@@ -148,15 +148,15 @@ restored per owner instruction.)
 
 | Item | Status | Notes |
 |------|--------|-------|
-| 4.1 four-tooth sign-off script | blocked(manifest) | `rrm-4.1-four-tooth-core`; D1 resolved, awaits committed source-pinned manifest and independent extraction audit |
-| 4.2 "Test? y with no test" sweep | blocked(manifest) | `rrm-4.2-test-row-sweep`; awaits D1 manifest and audit |
-| 4.3 WP spec/checklist sign-off gate | blocked(manifest) | `rrm-4.3-wp-provenance`; awaits D1 manifest and audit |
-| 4.4 deferral-state mechanism | blocked(manifest) | `rrm-4.4-deferral-routing`; awaits D1 manifest and audit |
+| 4.1 four-tooth sign-off script | ready | `rrm-4.1-four-tooth-core`; D1 manifest accepted after independent source audit; execute serially |
+| 4.2 "Test? y with no test" sweep | ready | `rrm-4.2-test-row-sweep`; D1 manifest accepted after independent source audit; execute serially |
+| 4.3 WP spec/checklist sign-off gate | ready | `rrm-4.3-wp-provenance`; D1 manifest accepted after independent source audit; execute serially |
+| 4.4 deferral-state mechanism | ready | `rrm-4.4-deferral-routing`; D1 manifest accepted after independent source audit; execute serially |
 | 4.5 4b second-reviewer rule | done | `rrm-4.5-spec-code-review`: docs/CODING.md |
-| 4.6 STOP-AND-REPORT escalation rule | blocked(manifest) | `rrm-4.6-stop-escalation`; awaits D1 manifest and audit |
+| 4.6 STOP-AND-REPORT escalation rule | ready | `rrm-4.6-stop-escalation`; D1 manifest accepted after independent source audit; execute serially |
 | 4.7 delivery-list CI guard | done(85fff2e) | same as R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | 4.8 vendoring "known defects" spec section | done | `rrm-4.8-vendoring-defects`: docs/CODING.md |
-| 4.9 named-pattern sign-off sweeps | blocked(manifest) | `rrm-4.9-pattern-sweeps`; awaits D1 manifest and audit |
+| 4.9 named-pattern sign-off sweeps | ready | `rrm-4.9-pattern-sweeps`; D1 manifest accepted after independent source audit; execute serially |
 
 ## Owner decisions
 
@@ -167,7 +167,8 @@ restored per owner instruction.)
 | 6.3a F-203/F-204: rider 1 vs 3b | 3b stands (bare-major stays; rider 1 struck). F-203: add [workspace.lints.rust]. R-46 EXPANDED: eliminate all 22 lint overrides via workspace clippy.toml threshold + case fixes + no-new-allows CODING.md rule | 2026-07-31 |
 | 6.3b ws F55 second half (R-11) | Implement it (shutdown signal for bot consumer + email sweep, with tests) | 2026-07-31 |
 | 6.3c ALLOW_INSECURE_DEFAULT_KEY split | Leave as-is; note in pre-rollout checklist only | 2026-07-31 |
-| D1 sign-off input | Compact committed historical manifest is canonical. Derive it from `23f8ab78e015c127f4e809d4901467e494e21bb3`, record that source, and independently audit the initial extraction against it before acceptance. | 2026-08-05 |
+| D1 sign-off input | Compact committed historical manifest is canonical. Derived from `23f8ab78e015c127f4e809d4901467e494e21bb3`, records that source, and accepted on 2026-08-06 after independent source audit and same-scope corrections. | 2026-08-05 |
+| D2 sqlx-cli version | Standardize Docker and both CI install sites on `sqlx-cli` 0.9.0 only after disposable-ledger compatibility verification; production-ledger verification is unavailable, so retain a rollout gate. | 2026-08-06 |
 | F-59 status | excluded (default) | |
 | Web crate commands | cargo check/clippy -p web ALLOWED; build/test/run against web banned | 2026-07-31 |
 | Commit policy | commit after each item; never push | 2026-07-31 |
@@ -183,12 +184,14 @@ restored per owner instruction.)
   before acceptance. This resolves D1 without restoring the full corpus.
   `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
   `rrm-4.3-wp-provenance`, `rrm-4.4-deferral-routing`,
-  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps` now await the
-  manifest and audit, rather than a user decision. The next approved state is
-  extraction and audit only; no dependent unit is approved for implementation.
-- **D2 sqlx-cli version:** choose the exact explicit `sqlx-cli` release and the
-  required compatibility evidence for the deployed migration ledger. Parks
-  `rrm-f207-sqlx-migrator`.
+  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps` are unblocked: the
+  manifest was accepted on 2026-08-06 after an independent source audit and
+  same-scope corrections. Execute them serially.
+- **D2 sqlx-cli version (user decision):** standardize Docker and both CI
+  install sites on `sqlx-cli` 0.9.0, contingent on compatibility verification.
+  Use a disposable ledger applied with 0.8.6, verify 0.9.0 accepts its checksums,
+  compare a fresh 0.9.0 ledger, and run applicable CI checks. Production-ledger
+  verification is unavailable; retain a rollout gate and do not claim it passed.
 
 ## Incident log
 
