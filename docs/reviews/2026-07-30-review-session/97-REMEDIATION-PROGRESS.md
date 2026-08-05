@@ -149,7 +149,7 @@ restored per owner instruction.)
 | Item | Status | Notes |
 |------|--------|-------|
 | 4.1 four-tooth sign-off script | done | `rrm-4.1-four-tooth-core`; versioned D1 input contract, independent four-tooth fixture harness, and CI invocation accepted after independent review. |
-| 4.2 "Test? y with no test" sweep | ready | `rrm-4.2-test-row-sweep`; D1 manifest accepted after independent source audit; execute serially |
+| 4.2 "Test? y with no test" sweep | done | `rrm-4.2-test-row-sweep`; `RRM-4.2-TEST-ROW-SWEEP.tsv` audits all 52 manifest rows: 47 pass, 3 unpackaged residuals (`T3-B1:28 f F8` `shoot`, `T3-B1:51 f F27` `render`, `T3-B4:52 e F5` `command_parser`), 2 ambiguous deliberate reversals (`T3-B1:46 f F24`, `T3-B2:64 f F57`); independent review confirmed all five non-pass classifications. |
 | 4.3 WP spec/checklist sign-off gate | ready | `rrm-4.3-wp-provenance`; D1 manifest accepted after independent source audit; execute serially |
 | 4.4 deferral-state mechanism | ready | `rrm-4.4-deferral-routing`; D1 manifest accepted after independent source audit; execute serially |
 | 4.5 4b second-reviewer rule | done | `rrm-4.5-spec-code-review`: docs/CODING.md |
