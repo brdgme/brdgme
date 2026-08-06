@@ -271,7 +271,12 @@ pub(crate) async fn publish_bot_turns(
         let message = async_nats::jetstream::message::PublishMessage::build()
             .payload(payload.into())
             .headers(headers)
-            .message_id(bot_turn_message_id(game_id, turn.position, &updated_at, attempt));
+            .message_id(bot_turn_message_id(
+                game_id,
+                turn.position,
+                &updated_at,
+                attempt,
+            ));
         match jetstream
             .send_publish(crate::nats::SUBJECT_TURN, message)
             .await

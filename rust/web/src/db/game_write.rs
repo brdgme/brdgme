@@ -596,7 +596,9 @@ pub async fn end_game(
         }
     } else {
         let Some(latest_departure_sequence) = max_departure_sequence else {
-            return Err(anyhow::anyhow!("no usable departure metadata for this game"));
+            return Err(anyhow::anyhow!(
+                "no usable departure metadata for this game"
+            ));
         };
         if actor_departure_sequence != Some(latest_departure_sequence) {
             return Err(anyhow::anyhow!(
@@ -919,13 +921,12 @@ pub async fn update_game_command_success(
     // sequence allocation, or player/game lifecycle write. A row not found
     // here means a stale (or absent) game, matching the legacy 0-row UPDATE
     // behaviour: `StaleStateConflict`, never an unrelated error.
-    let locked: Option<i32> = sqlx::query_scalar(
-        "SELECT 1 FROM games WHERE id = $1 AND updated_at = $2 FOR UPDATE",
-    )
-    .bind(game_id)
-    .bind(expected_updated_at)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let locked: Option<i32> =
+        sqlx::query_scalar("SELECT 1 FROM games WHERE id = $1 AND updated_at = $2 FOR UPDATE")
+            .bind(game_id)
+            .bind(expected_updated_at)
+            .fetch_optional(&mut *tx)
+            .await?;
     if locked.is_none() {
         return Err(StaleStateConflict.into());
     }
@@ -1803,14 +1804,13 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        let creator_game_player: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(creator.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let creator_game_player: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(creator.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         end_game(&pool, game.id, updated_at, creator_game_player)
             .await
             .unwrap();
@@ -1915,21 +1915,23 @@ mod tests {
             1,
             "fixture must leave exactly one active human"
         );
-        let actor: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(creator.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let actor: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(creator.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         end_game(&pool, game.id, ge.game.updated_at, actor)
             .await
             .unwrap();
 
         let after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
-        assert!(after.game.is_finished, "sole active human must be able to stop");
+        assert!(
+            after.game.is_finished,
+            "sole active human must be able to stop"
+        );
         assert_eq!(after.game.end_reason.as_deref(), Some("last_human_stop"));
     }
 
@@ -1973,14 +1975,13 @@ mod tests {
         .await
         .unwrap();
 
-        let actor: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(a.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let actor: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(a.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         let result = end_game(&pool, game.id, ge.game.updated_at, actor).await;
         assert!(result.is_err(), "departed human must be rejected");
@@ -1992,7 +1993,10 @@ mod tests {
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         assert!(!ge_after.game.is_finished, "game must stay unfinished");
-        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert!(
+            ge_after.game.finished_at.is_none(),
+            "finished_at must stay unset"
+        );
         assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
         assert_eq!(ge_after.game.game_state, "initial_state");
         for p in &ge_after.game_players {
@@ -2015,7 +2019,9 @@ mod tests {
         .unwrap();
         assert!(!ratings.is_empty(), "seeded ratings must exist");
         assert!(
-            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            ratings
+                .iter()
+                .all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
             "game_type_user rating must stay exactly as seeded: {ratings:?}"
         );
         let logs = get_all_game_logs(&pool, game.id).await.unwrap();
@@ -2065,21 +2071,23 @@ mod tests {
             0,
             "fixture must leave zero active humans"
         );
-        let actor: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(creator.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let actor: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(creator.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         end_game(&pool, game.id, ge.game.updated_at, actor)
             .await
             .unwrap();
 
         let after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
-        assert!(after.game.is_finished, "latest departure event human must be able to stop");
+        assert!(
+            after.game.is_finished,
+            "latest departure event human must be able to stop"
+        );
         assert_eq!(after.game.end_reason.as_deref(), Some("last_human_stop"));
     }
 
@@ -2120,11 +2128,19 @@ mod tests {
             depart_all_together(game.id).await;
             let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
             assert!(!ge.game.is_finished, "each success must start unfinished");
-            end_game(&pool, game.id, ge.game.updated_at, player_id(game.id, actor).await)
-                .await
-                .unwrap();
+            end_game(
+                &pool,
+                game.id,
+                ge.game.updated_at,
+                player_id(game.id, actor).await,
+            )
+            .await
+            .unwrap();
             let after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
-            assert!(after.game.is_finished, "tied participant {actor} must be authorizable");
+            assert!(
+                after.game.is_finished,
+                "tied participant {actor} must be authorizable"
+            );
             assert_eq!(after.game.end_reason.as_deref(), Some("last_human_stop"));
         }
     }
@@ -2178,17 +2194,19 @@ mod tests {
         .await
         .unwrap();
 
-        let actor: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(a.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let actor: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(a.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         let result = end_game(&pool, game.id, ge.game.updated_at, actor).await;
-        assert!(result.is_err(), "earlier departure event human must be rejected");
+        assert!(
+            result.is_err(),
+            "earlier departure event human must be rejected"
+        );
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("latest departure event"),
@@ -2197,7 +2215,10 @@ mod tests {
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         assert!(!ge_after.game.is_finished, "game must stay unfinished");
-        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert!(
+            ge_after.game.finished_at.is_none(),
+            "finished_at must stay unset"
+        );
         assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
         assert_eq!(ge_after.game.game_state, "initial_state");
         for p in &ge_after.game_players {
@@ -2220,7 +2241,9 @@ mod tests {
         .unwrap();
         assert!(!ratings.is_empty(), "seeded ratings must exist");
         assert!(
-            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            ratings
+                .iter()
+                .all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
             "game_type_user rating must stay exactly as seeded: {ratings:?}"
         );
         let logs = get_all_game_logs(&pool, game.id).await.unwrap();
@@ -2271,7 +2294,10 @@ mod tests {
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         assert!(!ge_after.game.is_finished, "game must stay unfinished");
-        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert!(
+            ge_after.game.finished_at.is_none(),
+            "finished_at must stay unset"
+        );
         assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
         assert_eq!(ge_after.game.game_state, "initial_state");
         for p in &ge_after.game_players {
@@ -2294,7 +2320,9 @@ mod tests {
         .unwrap();
         assert!(!ratings.is_empty(), "seeded ratings must exist");
         assert!(
-            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            ratings
+                .iter()
+                .all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
             "game_type_user rating must stay exactly as seeded: {ratings:?}"
         );
         let logs = get_all_game_logs(&pool, game.id).await.unwrap();
@@ -2333,17 +2361,19 @@ mod tests {
         .await
         .unwrap();
 
-        let actor: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(creator.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let actor: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(creator.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         let result = end_game(&pool, game.id, ge.game.updated_at, actor).await;
-        assert!(result.is_err(), "two or more active humans must be rejected");
+        assert!(
+            result.is_err(),
+            "two or more active humans must be rejected"
+        );
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("at most one active human"),
@@ -2352,7 +2382,10 @@ mod tests {
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         assert!(!ge_after.game.is_finished, "game must stay unfinished");
-        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert!(
+            ge_after.game.finished_at.is_none(),
+            "finished_at must stay unset"
+        );
         assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
         assert_eq!(ge_after.game.game_state, "initial_state");
         for p in &ge_after.game_players {
@@ -2375,7 +2408,9 @@ mod tests {
         .unwrap();
         assert!(!ratings.is_empty(), "seeded ratings must exist");
         assert!(
-            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            ratings
+                .iter()
+                .all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
             "game_type_user rating must stay exactly as seeded: {ratings:?}"
         );
         let logs = get_all_game_logs(&pool, game.id).await.unwrap();
@@ -2647,14 +2682,13 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        let actor_game_player: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(a.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let actor_game_player: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(a.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         end_game(&pool, game.id, updated_at, actor_game_player)
             .await
             .unwrap();
@@ -3239,8 +3273,7 @@ mod tests {
         let a = make_user(&pool, "a").await;
         let (_, game_version_id) = make_game_type_and_version(&pool).await;
         let game =
-            make_game_with_players(&pool, game_version_id, creator.id, &[a.id], 0, &[0])
-                .await;
+            make_game_with_players(&pool, game_version_id, creator.id, &[a.id], 0, &[0]).await;
         let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
 
         // Seed authoritative places and ratings so the no-mutation assertions
@@ -3274,14 +3307,13 @@ mod tests {
         .await
         .unwrap();
 
-        let conceder: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(creator.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let conceder: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(creator.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         // Capture the seeded departed human's departure metadata before the
         // rejected call so the assertions below can prove it stays exactly
@@ -3310,14 +3342,20 @@ mod tests {
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         assert!(!ge_after.game.is_finished, "game must stay unfinished");
-        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert!(
+            ge_after.game.finished_at.is_none(),
+            "finished_at must stay unset"
+        );
         assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
         let conceder_row = ge_after
             .game_players
             .iter()
             .find(|p| p.game_player.id == conceder)
             .unwrap();
-        assert!(conceder_row.game_player.left_at.is_none(), "conceder must not depart");
+        assert!(
+            conceder_row.game_player.left_at.is_none(),
+            "conceder must not depart"
+        );
         assert!(
             conceder_row.game_player.departure_reason.is_none(),
             "no departure reason"
@@ -3332,18 +3370,15 @@ mod tests {
             .find(|p| p.game_player.user_id == Some(a.id))
             .unwrap();
         assert_eq!(
-            departed_row.game_player.left_at,
-            departed_left_at,
+            departed_row.game_player.left_at, departed_left_at,
             "seeded departed human's left_at must stay exactly unchanged"
         );
         assert_eq!(
-            departed_row.game_player.departure_reason,
-            departed_reason,
+            departed_row.game_player.departure_reason, departed_reason,
             "seeded departed human's departure_reason must stay exactly unchanged"
         );
         assert_eq!(
-            departed_row.game_player.departure_sequence,
-            departed_sequence,
+            departed_row.game_player.departure_sequence, departed_sequence,
             "seeded departed human's departure_sequence must stay exactly unchanged"
         );
         for p in &ge_after.game_players {
@@ -3366,7 +3401,9 @@ mod tests {
         .unwrap();
         assert!(!ratings.is_empty(), "seeded ratings must exist");
         assert!(
-            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            ratings
+                .iter()
+                .all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
             "game_type_user rating must stay exactly as seeded: {ratings:?}"
         );
         let logs = get_all_game_logs(&pool, game.id).await.unwrap();
@@ -3483,8 +3520,7 @@ mod tests {
         let a = make_user(&pool, "a").await;
         let (_, game_version_id) = make_game_type_and_version(&pool).await;
         let game =
-            make_game_with_players(&pool, game_version_id, creator.id, &[a.id], 0, &[0])
-                .await;
+            make_game_with_players(&pool, game_version_id, creator.id, &[a.id], 0, &[0]).await;
 
         // A replacement bot is configured so that, without the locked
         // two-active-human guard, the sole active human would be replaced.
@@ -3526,14 +3562,13 @@ mod tests {
         .await
         .unwrap();
 
-        let conceder: Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(creator.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let conceder: Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(creator.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         // Capture the seeded departed human's departure metadata before the
         // rejected call so the assertions below can prove it stays exactly
@@ -3552,8 +3587,8 @@ mod tests {
         .await
         .unwrap();
 
-        let result = concede_game_replace(&pool, game.id, conceder, "creator", ge.game.updated_at)
-            .await;
+        let result =
+            concede_game_replace(&pool, game.id, conceder, "creator", ge.game.updated_at).await;
         assert!(result.is_err(), "sole active human must be rejected");
         let err = result.unwrap_err();
         assert!(
@@ -3567,7 +3602,10 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert!(game_bot_id.is_none(), "conceder must not be replaced by a bot");
+        assert!(
+            game_bot_id.is_none(),
+            "conceder must not be replaced by a bot"
+        );
         let bot_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM game_bots WHERE game_id = $1")
                 .bind(game.id)
@@ -3578,14 +3616,20 @@ mod tests {
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         assert!(!ge_after.game.is_finished, "game must stay unfinished");
-        assert!(ge_after.game.finished_at.is_none(), "finished_at must stay unset");
+        assert!(
+            ge_after.game.finished_at.is_none(),
+            "finished_at must stay unset"
+        );
         assert_eq!(ge_after.game.end_reason, None, "end_reason must stay unset");
         let conceder_row = ge_after
             .game_players
             .iter()
             .find(|p| p.game_player.id == conceder)
             .unwrap();
-        assert!(conceder_row.game_player.left_at.is_none(), "conceder must not depart");
+        assert!(
+            conceder_row.game_player.left_at.is_none(),
+            "conceder must not depart"
+        );
         assert!(
             conceder_row.game_player.departure_reason.is_none(),
             "no departure reason"
@@ -3600,18 +3644,15 @@ mod tests {
             .find(|p| p.game_player.user_id == Some(a.id))
             .unwrap();
         assert_eq!(
-            departed_row.game_player.left_at,
-            departed_left_at,
+            departed_row.game_player.left_at, departed_left_at,
             "seeded departed human's left_at must stay exactly unchanged"
         );
         assert_eq!(
-            departed_row.game_player.departure_reason,
-            departed_reason,
+            departed_row.game_player.departure_reason, departed_reason,
             "seeded departed human's departure_reason must stay exactly unchanged"
         );
         assert_eq!(
-            departed_row.game_player.departure_sequence,
-            departed_sequence,
+            departed_row.game_player.departure_sequence, departed_sequence,
             "seeded departed human's departure_sequence must stay exactly unchanged"
         );
         for p in &ge_after.game_players {
@@ -3634,7 +3675,9 @@ mod tests {
         .unwrap();
         assert!(!ratings.is_empty(), "seeded ratings must exist");
         assert!(
-            ratings.iter().all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
+            ratings
+                .iter()
+                .all(|&(rating, peak)| (rating, peak) == (1300, 1400)),
             "game_type_user rating must stay exactly as seeded: {ratings:?}"
         );
         let logs = get_all_game_logs(&pool, game.id).await.unwrap();
@@ -4062,13 +4105,12 @@ mod tests {
         .unwrap();
 
         let played_id = ge.game_players[0].game_player.id;
-        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM games WHERE id = $1",
-        )
-        .bind(game.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let updated_at: time::PrimitiveDateTime =
+            sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         update_game_command_success(
             &pool,
             game.id,
@@ -4145,7 +4187,9 @@ mod tests {
                 .execute(&mut *tx)
                 .await
                 .unwrap();
-            normalize_legacy_departures_tx(&mut tx, game.id).await.unwrap();
+            normalize_legacy_departures_tx(&mut tx, game.id)
+                .await
+                .unwrap();
             tx.commit().await.unwrap();
         }
         let dep: Option<String> = sqlx::query_scalar(
@@ -4202,7 +4246,9 @@ mod tests {
                 .execute(&mut *tx)
                 .await
                 .unwrap();
-            normalize_legacy_departures_tx(&mut tx, game2.id).await.unwrap();
+            normalize_legacy_departures_tx(&mut tx, game2.id)
+                .await
+                .unwrap();
             tx.commit().await.unwrap();
         }
         let game2_id = game2.id;
@@ -4218,7 +4264,11 @@ mod tests {
             .unwrap()
         };
         assert_eq!(seq(a2_pos).await, 1, "existing sequence must be preserved");
-        assert_eq!(seq(creator2_pos).await, 2, "dense among old-pod rows, offset past event 1");
+        assert_eq!(
+            seq(creator2_pos).await,
+            2,
+            "dense among old-pod rows, offset past event 1"
+        );
         assert_eq!(seq(b2_pos).await, 3);
     }
 
@@ -4252,16 +4302,26 @@ mod tests {
             eliminated: vec![creator_pos as usize, a_pos as usize],
             placings: vec![],
         };
-        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM games WHERE id = $1",
+        let updated_at: time::PrimitiveDateTime =
+            sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s0",
+            "s1",
+            false,
+            &status,
+            &[],
+            updated_at,
+            vec![],
         )
-        .bind(game.id)
-        .fetch_one(&pool)
         .await
         .unwrap();
-        update_game_command_success(&pool, game.id, played_id, "s0", "s1", false, &status, &[], updated_at, vec![])
-            .await
-            .unwrap();
 
         let ge_after = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         let dep = |pos: i32| -> (Option<String>, Option<i32>) {
@@ -4277,19 +4337,33 @@ mod tests {
         };
         assert_eq!(dep(creator_pos), (Some("eliminated".to_string()), Some(1)));
         assert_eq!(dep(a_pos), (Some("eliminated".to_string()), Some(1)));
-        assert_eq!(dep(bot_pos), (None, None), "pure bots get no departure metadata");
+        assert_eq!(
+            dep(bot_pos),
+            (None, None),
+            "pure bots get no departure metadata"
+        );
 
         // Report 2: identical report retains the existing metadata.
-        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM games WHERE id = $1",
+        let updated_at: time::PrimitiveDateTime =
+            sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        update_game_command_success(
+            &pool,
+            game.id,
+            played_id,
+            "s1",
+            "s2",
+            false,
+            &status,
+            &[],
+            updated_at,
+            vec![],
         )
-        .bind(game.id)
-        .fetch_one(&pool)
         .await
         .unwrap();
-        update_game_command_success(&pool, game.id, played_id, "s1", "s2", false, &status, &[], updated_at, vec![])
-            .await
-            .unwrap();
         let creator_dep_seq: Option<i32> = sqlx::query_scalar(
             "SELECT departure_sequence FROM game_players WHERE game_id = $1 AND position = $2",
         )
@@ -4299,19 +4373,19 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            creator_dep_seq, Some(1),
+            creator_dep_seq,
+            Some(1),
             "repeated reports must retain existing metadata"
         );
 
         // Report 3: only the bot is newly eliminated -> still no bot
         // metadata, and no new human sequence is allocated.
-        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM games WHERE id = $1",
-        )
-        .bind(game.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let updated_at: time::PrimitiveDateTime =
+            sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         update_game_command_success(
             &pool,
             game.id,
@@ -4339,7 +4413,10 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert!(bot_dep.is_none(), "a bot-only report must not stamp departure metadata");
+        assert!(
+            bot_dep.is_none(),
+            "a bot-only report must not stamp departure metadata"
+        );
     }
 
     /// DRM-03a: a seat that already left (left_at set, e.g. a conceded-replaced
@@ -4365,13 +4442,12 @@ mod tests {
         .await
         .unwrap();
 
-        let updated_at: time::PrimitiveDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM games WHERE id = $1",
-        )
-        .bind(game.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let updated_at: time::PrimitiveDateTime =
+            sqlx::query_scalar("SELECT updated_at FROM games WHERE id = $1")
+                .bind(game.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         update_game_command_success(
             &pool,
             game.id,
@@ -4410,7 +4486,9 @@ mod tests {
     /// persists the exact service placings by position, then computes
     /// competitive ranks and applies ELO in the same transaction.
     #[sqlx::test]
-    async fn update_game_command_success_service_finish_writes_end_reason_places_and_rating(pool: PgPool) {
+    async fn update_game_command_success_service_finish_writes_end_reason_places_and_rating(
+        pool: PgPool,
+    ) {
         let creator = make_user(&pool, "creator").await;
         let opp = make_user(&pool, "opp").await;
         let (_, gv) = make_game_type_and_version(&pool).await;
@@ -4467,7 +4545,9 @@ mod tests {
     /// remains unranked and unrated - no places are invented from points or
     /// any other source.
     #[sqlx::test]
-    async fn update_game_command_success_service_finish_without_placings_stays_unrated(pool: PgPool) {
+    async fn update_game_command_success_service_finish_without_placings_stays_unrated(
+        pool: PgPool,
+    ) {
         let creator = make_user(&pool, "creator").await;
         let opp = make_user(&pool, "opp").await;
         let (_, gv) = make_game_type_and_version(&pool).await;
@@ -4508,7 +4588,9 @@ mod tests {
     /// before a finishing report ranks, so it places after the active humans
     /// instead of being treated as an active participant.
     #[sqlx::test]
-    async fn update_game_command_success_finish_ranks_old_pod_departed_human_after_active(pool: PgPool) {
+    async fn update_game_command_success_finish_ranks_old_pod_departed_human_after_active(
+        pool: PgPool,
+    ) {
         let creator = make_user(&pool, "creator").await;
         let opp = make_user(&pool, "opp").await;
         let (_, gv) = make_game_type_and_version(&pool).await;

@@ -43,19 +43,18 @@ pub async fn get_game_info(name: String) -> Result<Option<GameInfoData>, ServerF
         None => return Ok(None),
     };
 
-    let (rules_version_id, total_games, active_today, distinct_players, ranking_rows) =
-        tokio::try_join!(
-            queries::game_info_rules_version_id(&pool, game_type_id)
-                .map_err(internal("get_game_info: rules_version_id")),
-            queries::game_info_total_games(&pool, game_type_id)
-                .map_err(internal("get_game_info: total_games")),
-            queries::game_info_active_today(&pool, game_type_id)
-                .map_err(internal("get_game_info: active_today")),
-            queries::game_info_distinct_players(&pool, game_type_id)
-                .map_err(internal("get_game_info: distinct_players")),
-            queries::game_info_top_ranking(&pool, game_type_id)
-                .map_err(internal("get_game_info: top_ranking")),
-        )?;
+    let (rules_version_id, total_games, active_today, distinct_players, ranking_rows) = tokio::try_join!(
+        queries::game_info_rules_version_id(&pool, game_type_id)
+            .map_err(internal("get_game_info: rules_version_id")),
+        queries::game_info_total_games(&pool, game_type_id)
+            .map_err(internal("get_game_info: total_games")),
+        queries::game_info_active_today(&pool, game_type_id)
+            .map_err(internal("get_game_info: active_today")),
+        queries::game_info_distinct_players(&pool, game_type_id)
+            .map_err(internal("get_game_info: distinct_players")),
+        queries::game_info_top_ranking(&pool, game_type_id)
+            .map_err(internal("get_game_info: top_ranking")),
+    )?;
 
     let user_ids: Vec<Uuid> = ranking_rows.iter().map(|(id, _, _, _)| *id).collect();
     let form = crate::stats::recent_form_for_game_type(&pool, &user_ids, game_type_id, 10)

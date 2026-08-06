@@ -23,8 +23,8 @@ struct VersionEnvelope {
 }
 
 fn parse_bundle(raw: &str, path: &str) -> anyhow::Result<web::game::export::ExportBundle> {
-    let envelope: VersionEnvelope = serde_json::from_str(raw)
-        .map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
+    let envelope: VersionEnvelope =
+        serde_json::from_str(raw).map_err(|e| anyhow::anyhow!("parsing {path}: {e}"))?;
     if envelope.schema_version != web::game::export::BUNDLE_SCHEMA_VERSION {
         anyhow::bail!(
             "{path}: unsupported bundle schema_version {} (this build supports {})",

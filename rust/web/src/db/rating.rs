@@ -182,10 +182,16 @@ pub(crate) async fn apply_rating_changes(tx: &mut sqlx::PgConnection, game_id: U
     for (i, a) in rated_players.iter().enumerate() {
         for b in &rated_players[i + 1..] {
             let a_place = places.get(&a.position).copied().ok_or_else(|| {
-                anyhow::anyhow!("rated player position {}: missing ranked placing", a.position)
+                anyhow::anyhow!(
+                    "rated player position {}: missing ranked placing",
+                    a.position
+                )
             })?;
             let b_place = places.get(&b.position).copied().ok_or_else(|| {
-                anyhow::anyhow!("rated player position {}: missing ranked placing", b.position)
+                anyhow::anyhow!(
+                    "rated player position {}: missing ranked placing",
+                    b.position
+                )
             })?;
             let a_score: f32 = match a_place.cmp(&b_place) {
                 std::cmp::Ordering::Less => 1.0,
@@ -756,7 +762,10 @@ mod tests {
             .iter()
             .find(|p| p.game_player.id != conceding_id)
             .unwrap();
-        assert_eq!(ge_after.game.end_reason.as_deref(), Some("concession_forfeit"));
+        assert_eq!(
+            ge_after.game.end_reason.as_deref(),
+            Some("concession_forfeit")
+        );
         assert_eq!(conceder.game_player.place, Some(2));
         assert_eq!(non_conceder.game_player.place, Some(1));
         assert_eq!(conceder.game_player.rating_change, Some(-16));
@@ -1025,7 +1034,11 @@ mod tests {
 
         // No rating-change or rating-before stamps, humans or bot.
         for pos in [creator_pos, opp_pos, bot_pos] {
-            assert_eq!(find_rating_change(&pool, game.id, pos).await, None, "position {pos}");
+            assert_eq!(
+                find_rating_change(&pool, game.id, pos).await,
+                None,
+                "position {pos}"
+            );
             let rb: Option<i32> = sqlx::query_scalar(
                 "SELECT rating_before FROM game_players WHERE game_id = $1 AND position = $2",
             )
@@ -1211,8 +1224,14 @@ mod tests {
         apply_rating_changes(&mut tx, game.id).await.unwrap();
         tx.commit().await.unwrap();
 
-        assert_eq!(find_rating_change(&pool, game.id, creator_pos).await, Some(16));
-        assert_eq!(find_rating_change(&pool, game.id, opponent_pos).await, Some(-16));
+        assert_eq!(
+            find_rating_change(&pool, game.id, creator_pos).await,
+            Some(16)
+        );
+        assert_eq!(
+            find_rating_change(&pool, game.id, opponent_pos).await,
+            Some(-16)
+        );
         let (rating_after_first, _) = game_type_rating(&pool, game_type_id, creator.id).await;
         assert_eq!(rating_after_first, 1216);
 
@@ -1241,8 +1260,14 @@ mod tests {
         apply_rating_changes(&mut tx, game.id).await.unwrap();
         tx.commit().await.unwrap();
 
-        assert_eq!(find_rating_change(&pool, game.id, creator_pos).await, Some(16));
-        assert_eq!(find_rating_change(&pool, game.id, opponent_pos).await, Some(-16));
+        assert_eq!(
+            find_rating_change(&pool, game.id, creator_pos).await,
+            Some(16)
+        );
+        assert_eq!(
+            find_rating_change(&pool, game.id, opponent_pos).await,
+            Some(-16)
+        );
         let (rating_after_second, _) = game_type_rating(&pool, game_type_id, creator.id).await;
         assert_eq!(rating_after_second, 1216);
     }

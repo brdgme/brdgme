@@ -1175,18 +1175,18 @@ async fn handle_invite_reply(
                 return RouteOutcome::Done;
             }
         };
-        let proposal =
-            match crate::proposals::lock_proposal_for_update(&mut tx, proposal_id).await {
-                Ok(Some(p)) => p,
-                Ok(None) => {
-                    tracing::warn!("resend webhook: proposal {proposal_id} not found on re-start");
-                    return RouteOutcome::Done;
-                }
-                Err(e) => {
-                    tracing::error!("resend webhook: invite re-start lock failed: {e}");
-                    return RouteOutcome::Done;
-                }
-            };
+        let proposal = match crate::proposals::lock_proposal_for_update(&mut tx, proposal_id).await
+        {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                tracing::warn!("resend webhook: proposal {proposal_id} not found on re-start");
+                return RouteOutcome::Done;
+            }
+            Err(e) => {
+                tracing::error!("resend webhook: invite re-start lock failed: {e}");
+                return RouteOutcome::Done;
+            }
+        };
         if proposal.status != "open" {
             rollback_invite_tx(tx, "invite no longer open on re-start").await;
             send_invite_reply_response(
@@ -1208,7 +1208,10 @@ async fn handle_invite_reply(
                     return RouteOutcome::Done;
                 }
             };
-        let accepted_now = roster_now.iter().filter(|p| p.response == "accepted").count();
+        let accepted_now = roster_now
+            .iter()
+            .filter(|p| p.response == "accepted")
+            .count();
         if !invite_roster_unchanged(&roster_snapshot, &roster_now) || accepted_now != accepted_count
         {
             // A concurrent mutation changed the roster while the game service was
@@ -3068,9 +3071,7 @@ body\r\n";
     }
 
     #[sqlx::test]
-    async fn invite_reply_does_not_start_game_on_stale_roster_after_game_fetch(
-        pool: sqlx::PgPool,
-    ) {
+    async fn invite_reply_does_not_start_game_on_stale_roster_after_game_fetch(pool: sqlx::PgPool) {
         use axum::{Json, Router, routing::post};
         use brdgme_cmd::api::Request;
         use std::sync::Arc;
@@ -3178,8 +3179,7 @@ body\r\n";
         let state_task = state.clone();
         let handle = tokio::spawn(async move {
             let source = StaticInbound(emails);
-            handle_invite_reply(&state_task, &source, token, "r18-invitee@brdg.me", email_id)
-                .await
+            handle_invite_reply(&state_task, &source, token, "r18-invitee@brdg.me", email_id).await
         });
 
         called.notified().await;
@@ -3198,13 +3198,12 @@ body\r\n";
         proceed.notify_one();
         let outcome = handle.await.unwrap();
 
-        let (status, started_game_id): (String, Option<uuid::Uuid>) = sqlx::query_as(
-            "SELECT status, started_game_id FROM game_proposals WHERE id = $1",
-        )
-        .bind(proposal_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let (status, started_game_id): (String, Option<uuid::Uuid>) =
+            sqlx::query_as("SELECT status, started_game_id FROM game_proposals WHERE id = $1")
+                .bind(proposal_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         let game_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM games g \
@@ -3389,20 +3388,18 @@ body\r\n";
         let source = StaticInbound(emails);
         let state = make_inbound_test_state(pool.clone()).await;
 
-        let outcome =
-            handle_invite_reply(&state, &source, token, &invitee_email, email_id).await;
+        let outcome = handle_invite_reply(&state, &source, token, &invitee_email, email_id).await;
         assert!(
             matches!(outcome, RouteOutcome::Done),
             "invite accept auto-start must complete as Done"
         );
 
-        let started: Option<uuid::Uuid> = sqlx::query_scalar(
-            "SELECT started_game_id FROM game_proposals WHERE id = $1",
-        )
-        .bind(proposal_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let started: Option<uuid::Uuid> =
+            sqlx::query_scalar("SELECT started_game_id FROM game_proposals WHERE id = $1")
+                .bind(proposal_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         let _game_id = started.expect("proposal must have started a game");
 
         // The on-turn player is the owner (position 0); the accept reply mail

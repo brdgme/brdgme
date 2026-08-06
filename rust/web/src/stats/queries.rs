@@ -1618,7 +1618,8 @@ mod tests {
             .expect("query ok");
         assert_eq!(rows.len(), 1);
         assert_eq!(
-            rows[0].ranked_placing, Some(2),
+            rows[0].ranked_placing,
+            Some(2),
             "ranked_placing must come from ranked_placing, not authoritative place"
         );
         assert_eq!(rows[0].player_count, 2);
@@ -1721,15 +1722,13 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("insert replacement bot");
-        sqlx::query(
-            "UPDATE game_players SET game_bot_id = $1 WHERE game_id = $2 AND user_id = $3",
-        )
-        .bind(bot_id)
-        .bind(game)
-        .bind(replaced)
-        .execute(&pool)
-        .await
-        .expect("attach replacement bot seat");
+        sqlx::query("UPDATE game_players SET game_bot_id = $1 WHERE game_id = $2 AND user_id = $3")
+            .bind(bot_id)
+            .bind(game)
+            .bind(replaced)
+            .execute(&pool)
+            .await
+            .expect("attach replacement bot seat");
 
         let rows = finished_games(&pool, user, None, false, None, None)
             .await
@@ -2115,7 +2114,10 @@ mod tests {
         );
         assert_eq!(rows[0].game_id, camel);
         assert_eq!(rows[0].game_type_name, "Camel Up");
-        assert_eq!(rows[0].player_count, 2, "count(*) still counts the NULL seat");
+        assert_eq!(
+            rows[0].player_count, 2,
+            "count(*) still counts the NULL seat"
+        );
 
         let elo = rows[0]
             .match_elo
@@ -2294,15 +2296,13 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("insert replacement bot");
-        sqlx::query(
-            "UPDATE game_players SET game_bot_id = $1 WHERE game_id = $2 AND user_id = $3",
-        )
-        .bind(bot_id)
-        .bind(game)
-        .bind(replaced)
-        .execute(&pool)
-        .await
-        .expect("attach replacement bot seat");
+        sqlx::query("UPDATE game_players SET game_bot_id = $1 WHERE game_id = $2 AND user_id = $3")
+            .bind(bot_id)
+            .bind(game)
+            .bind(replaced)
+            .execute(&pool)
+            .await
+            .expect("attach replacement bot seat");
 
         let totals = overall_totals(&pool, user, false).await.expect("query ok");
         assert_eq!(totals.finished_games, 1);
@@ -2399,21 +2399,30 @@ mod tests {
             &pool,
             gv,
             datetime!(2026-01-01 00:00:00),
-            &[(Some(user), Some(1), None), (Some(make_user(&pool, "bob").await), Some(2), None)],
+            &[
+                (Some(user), Some(1), None),
+                (Some(make_user(&pool, "bob").await), Some(2), None),
+            ],
         )
         .await;
         let g2 = insert_finished_game(
             &pool,
             gv,
             datetime!(2026-01-02 00:00:00),
-            &[(Some(user), Some(2), None), (Some(make_user(&pool, "carol").await), Some(1), None)],
+            &[
+                (Some(user), Some(2), None),
+                (Some(make_user(&pool, "carol").await), Some(1), None),
+            ],
         )
         .await;
         let g3 = insert_finished_game(
             &pool,
             gv,
             datetime!(2026-01-03 00:00:00),
-            &[(Some(user), Some(1), None), (Some(make_user(&pool, "dave").await), Some(2), None)],
+            &[
+                (Some(user), Some(1), None),
+                (Some(make_user(&pool, "dave").await), Some(2), None),
+            ],
         )
         .await;
 
@@ -2448,7 +2457,11 @@ mod tests {
             !ids.contains(&legacy),
             "null-ranked game displaced a recent game: {ids:?}"
         );
-        assert_eq!(ids, vec![g1, g2, g3], "window holds the ranked games, oldest first");
+        assert_eq!(
+            ids,
+            vec![g1, g2, g3],
+            "window holds the ranked games, oldest first"
+        );
     }
 
     /// Form `player_count` is a competitive participant count: pure bots and
@@ -2874,7 +2887,11 @@ mod tests {
             !ids.contains(&legacy),
             "NULL-finished_at legacy game displaced a recent game: {ids:?}"
         );
-        assert_eq!(ids, vec![g1, g2, g3], "window holds the dated games, oldest first");
+        assert_eq!(
+            ids,
+            vec![g1, g2, g3],
+            "window holds the dated games, oldest first"
+        );
     }
 
     /// A historical null-ranked row must be filtered from the qualifying CTE
@@ -2939,7 +2956,11 @@ mod tests {
             !ids.contains(&legacy),
             "NULL-ranked legacy game displaced a recent game: {ids:?}"
         );
-        assert_eq!(ids, vec![g1, g2, g3], "window holds the ranked games, oldest first");
+        assert_eq!(
+            ids,
+            vec![g1, g2, g3],
+            "window holds the ranked games, oldest first"
+        );
     }
 
     #[sqlx::test]

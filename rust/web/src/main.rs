@@ -118,16 +118,12 @@ async fn main() {
     background_tasks.push(tokio::spawn({
         let shutdown = shutdown.clone();
         async move {
-            web::nats::supervise_consumer(
-                "max-deliveries-advisory",
-                shutdown.clone(),
-                move || {
-                    web::nats::run_max_deliveries_advisory_listener(
-                        advisory_client.clone(),
-                        shutdown.clone(),
-                    )
-                },
-            )
+            web::nats::supervise_consumer("max-deliveries-advisory", shutdown.clone(), move || {
+                web::nats::run_max_deliveries_advisory_listener(
+                    advisory_client.clone(),
+                    shutdown.clone(),
+                )
+            })
             .await;
         }
     }));
@@ -194,9 +190,7 @@ async fn main() {
     .await
     .is_err()
     {
-        tracing::warn!(
-            "background tasks did not drain within {drain_bound:?}; abandoning them"
-        );
+        tracing::warn!("background tasks did not drain within {drain_bound:?}; abandoning them");
     }
 }
 

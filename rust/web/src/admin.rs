@@ -2509,7 +2509,10 @@ mod tests {
     #[sqlx::test]
     async fn admin_list_bots_distinguishes_anonymous_non_admin_admin(pool: sqlx::PgPool) {
         // migration 013 seeds easy/medium/hard; clear so admin yields an empty list.
-        sqlx::query("DELETE FROM bots").execute(&pool).await.unwrap();
+        sqlx::query("DELETE FROM bots")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         let anonymous =
             crate::test_support::anonymous(&pool, || async { admin_list_bots().await }).await;
@@ -4182,9 +4185,9 @@ mod tests {
                 "simulated upstream failure",
             )),
         ]);
-        let resp = reqwest::Response::from(axum::http::Response::new(
-            reqwest::Body::wrap_stream(stream),
-        ));
+        let resp = reqwest::Response::from(axum::http::Response::new(reqwest::Body::wrap_stream(
+            stream,
+        )));
         let out = read_capped_body(resp).await;
         assert!(out.starts_with("partial"), "partial body lost: {out}");
         assert!(

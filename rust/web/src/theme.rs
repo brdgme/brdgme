@@ -13,10 +13,8 @@ use brdgme_color::{
 /// my-turn/hover tints; its remaining soften tokens come from
 /// `IN_USE_SOFTENS`) - kept separate so the game-text contrast gate in
 /// `brdgme_color` stays scoped to games; see THEMING.md.
-const CHROME_SOFTENS: &[(NamedColor, u8)] = &[
-    (NamedColor::Orange, 86),
-    (NamedColor::Foreground, 96),
-];
+const CHROME_SOFTENS: &[(NamedColor, u8)] =
+    &[(NamedColor::Orange, 86), (NamedColor::Foreground, 96)];
 
 /// Known theme slugs, paired with the display name from `brdgme_color::themes()`.
 /// Hardcoded (rather than derived) so the cookie/`data-theme` value is a

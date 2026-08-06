@@ -436,9 +436,7 @@ pub async fn get_player_history(
 }
 
 #[server(GetPlayerResults, "/api")]
-pub async fn get_player_results(
-    name: String,
-) -> Result<Option<PlayerResultsData>, ServerFnError> {
+pub async fn get_player_results(name: String) -> Result<Option<PlayerResultsData>, ServerFnError> {
     use crate::auth::server::get_current_user;
     use sqlx::PgPool;
     let pool = expect_context::<PgPool>();

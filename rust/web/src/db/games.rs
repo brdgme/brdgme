@@ -1218,8 +1218,7 @@ mod tests {
         let creator = make_user(&pool, "creator").await;
         let opponent = make_user(&pool, "opponent").await;
         let (_, gv) = make_game_type_and_version(&pool).await;
-        let game =
-            make_game_with_players(&pool, gv, creator.id, &[opponent.id], 0, &[0]).await;
+        let game = make_game_with_players(&pool, gv, creator.id, &[opponent.id], 0, &[0]).await;
 
         let ge = find_game_extended(&pool, game.id).await.unwrap().unwrap();
         let player_id = ge.game_players[0].game_player.id;
@@ -1300,7 +1299,10 @@ mod tests {
         .bind(player_id)
         .execute(&pool)
         .await;
-        assert!(bad_dep.is_err(), "invalid departure_reason must be rejected");
+        assert!(
+            bad_dep.is_err(),
+            "invalid departure_reason must be rejected"
+        );
 
         // Departure reason without its paired sequence.
         let reason_only = sqlx::query(
@@ -1350,6 +1352,9 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(checks, 4, "all four migration-032 CHECK constraints must exist");
+        assert_eq!(
+            checks, 4,
+            "all four migration-032 CHECK constraints must exist"
+        );
     }
 }

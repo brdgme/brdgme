@@ -1119,10 +1119,7 @@ async fn players_page_missing_and_unknown_view_render_competitive(pool: PgPool) 
         get(app.clone(), &format!("/players/{}", user_a.name), None).await;
     assert_clean_html_body(status, &content_type, &body, "profile-recent-games");
     assert!(
-        body.contains(&format!(
-            "href=\"/players/{}?view=results\"",
-            user_a.name
-        )),
+        body.contains(&format!("href=\"/players/{}?view=results\"", user_a.name)),
         "expected the Game results selector link in body: {body}"
     );
     assert!(
@@ -1292,7 +1289,12 @@ async fn players_page_results_view_renders_all_authoritative_seats(pool: PgPool)
     const COLORS: [&str; 3] = ["Green", "Red", "Blue"];
     for (i, (seat_user, seat_bot, place, ranked_placing)) in [
         (Some(user_a.id), None, Some(1), Some(2)),
-        (Some(replaced.id), Some(replacement_bot_id), Some(2), Some(2)),
+        (
+            Some(replaced.id),
+            Some(replacement_bot_id),
+            Some(2),
+            Some(2),
+        ),
         (None, Some(pure_bot_id), Some(3), None),
     ]
     .into_iter()
@@ -1317,12 +1319,8 @@ async fn players_page_results_view_renders_all_authoritative_seats(pool: PgPool)
     }
 
     let app = build_router(make_state(pool).await).await;
-    let (status, content_type, body) = get(
-        app,
-        &format!("/players/{}?view=results", user_a.name),
-        None,
-    )
-    .await;
+    let (status, content_type, body) =
+        get(app, &format!("/players/{}?view=results", user_a.name), None).await;
     assert_clean_html_body(status, &content_type, &body, "profile-game-results");
     assert!(
         body.contains("Game Results Test Game"),
@@ -1383,12 +1381,8 @@ async fn players_page_results_early_stop_renders_no_place_values(pool: PgPool) {
         .unwrap();
 
     let app = build_router(make_state(pool).await).await;
-    let (status, content_type, body) = get(
-        app,
-        &format!("/players/{}?view=results", user_a.name),
-        None,
-    )
-    .await;
+    let (status, content_type, body) =
+        get(app, &format!("/players/{}?view=results", user_a.name), None).await;
     assert_clean_html_body(status, &content_type, &body, "profile-game-results");
     assert!(
         body.contains("Early Stop Test Game"),

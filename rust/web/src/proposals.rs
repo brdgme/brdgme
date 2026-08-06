@@ -414,7 +414,11 @@ impl InviteMailer for RealInviteMailer {
         let resend = self.resend.clone();
         let http_client = self.http_client.clone();
         tokio::spawn(async move {
-            let mailer = RealInviteMailer { pool, resend, http_client };
+            let mailer = RealInviteMailer {
+                pool,
+                resend,
+                http_client,
+            };
             mailer
                 .send_invite_core(proposal_id, invitee_user_id, email_token)
                 .await;
@@ -498,7 +502,10 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Reinvite)),
+                Some(&invite_notify_thread_id(
+                    proposal_id,
+                    &InviteNotifyKind::Reinvite,
+                )),
                 false,
                 &format!("i-{token}@brdg.me"),
                 unsubscribe,
@@ -577,7 +584,10 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Decline)),
+                Some(&invite_notify_thread_id(
+                    proposal_id,
+                    &InviteNotifyKind::Decline,
+                )),
                 false,
                 &crate::email::notify::invite_reply_address("noreply"),
                 unsubscribe,
@@ -642,7 +652,10 @@ impl InviteMailer for RealInviteMailer {
                     &content,
                     palette,
                     &[],
-                    Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Cancelled)),
+                    Some(&invite_notify_thread_id(
+                        proposal_id,
+                        &InviteNotifyKind::Cancelled,
+                    )),
                     false,
                     &crate::email::notify::invite_reply_address("noreply"),
                     unsubscribe,
@@ -710,7 +723,10 @@ impl InviteMailer for RealInviteMailer {
                     &content,
                     palette,
                     &[],
-                    Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Started)),
+                    Some(&invite_notify_thread_id(
+                        proposal_id,
+                        &InviteNotifyKind::Started,
+                    )),
                     false,
                     &crate::email::notify::invite_reply_address("noreply"),
                     unsubscribe,
@@ -789,7 +805,10 @@ impl InviteMailer for RealInviteMailer {
                 &content,
                 palette,
                 &[],
-                Some(&invite_notify_thread_id(proposal_id, &InviteNotifyKind::Ready)),
+                Some(&invite_notify_thread_id(
+                    proposal_id,
+                    &InviteNotifyKind::Ready,
+                )),
                 false,
                 &crate::email::notify::invite_reply_address("noreply"),
                 unsubscribe,
@@ -820,7 +839,11 @@ pub(crate) fn mailer() -> RealInviteMailer {
 
 #[cfg(feature = "ssr")]
 pub(crate) fn mailer_from(pool: PgPool, resend: Option<resend_rs::Resend>) -> RealInviteMailer {
-    RealInviteMailer { pool, resend, http_client: reqwest::Client::new() }
+    RealInviteMailer {
+        pool,
+        resend,
+        http_client: reqwest::Client::new(),
+    }
 }
 
 #[cfg(feature = "ssr")]
@@ -4127,7 +4150,10 @@ mod tests {
         use tower_sessions::{MemoryStore, Session};
 
         let session = Session::new(None, Arc::new(MemoryStore::default()), None);
-        session.insert(SESSION_USER_KEY, session_user).await.unwrap();
+        session
+            .insert(SESSION_USER_KEY, session_user)
+            .await
+            .unwrap();
         let (mut parts, _) = axum::http::Request::new(()).into_parts();
         parts.extensions.insert(session);
 
@@ -4424,7 +4450,10 @@ mod tests {
         use tower_sessions::{MemoryStore, Session};
 
         let session = Session::new(None, Arc::new(MemoryStore::default()), None);
-        session.insert(SESSION_USER_KEY, session_user).await.unwrap();
+        session
+            .insert(SESSION_USER_KEY, session_user)
+            .await
+            .unwrap();
         let (mut parts, _) = axum::http::Request::new(()).into_parts();
         parts.extensions.insert(session);
 
@@ -4482,18 +4511,10 @@ mod tests {
         insert_proposal_player(&mut tx, pid, 0, Some(owner), None, None, "accepted", None)
             .await
             .unwrap();
-        let invitee_player = insert_proposal_player(
-            &mut tx,
-            pid,
-            1,
-            Some(invitee),
-            None,
-            None,
-            "accepted",
-            None,
-        )
-        .await
-        .unwrap();
+        let invitee_player =
+            insert_proposal_player(&mut tx, pid, 1, Some(invitee), None, None, "accepted", None)
+                .await
+                .unwrap();
         tx.commit().await.unwrap();
 
         let auth_token_id = Uuid::new_v4();
@@ -4595,10 +4616,16 @@ mod tests {
             true
         }
         fn notify_changed_reinvite(&self, _: Uuid, _: Uuid, _: Option<String>) {
-            self.calls.lock().unwrap().push("notify_changed_reinvite".into());
+            self.calls
+                .lock()
+                .unwrap()
+                .push("notify_changed_reinvite".into());
         }
         fn notify_owner_decline(&self, _: Uuid, _: Uuid) {
-            self.calls.lock().unwrap().push("notify_owner_decline".into());
+            self.calls
+                .lock()
+                .unwrap()
+                .push("notify_owner_decline".into());
         }
         fn notify_cancelled(&self, _: Uuid, _: Vec<Uuid>) {
             self.calls.lock().unwrap().push("notify_cancelled".into());
@@ -4610,13 +4637,18 @@ mod tests {
             self.calls.lock().unwrap().push("notify_owner_ready".into());
         }
         async fn notify_game_started(&self, _: Uuid) {
-            self.calls.lock().unwrap().push("notify_game_started".into());
+            self.calls
+                .lock()
+                .unwrap()
+                .push("notify_game_started".into());
         }
     }
 
     #[test]
     fn invite_mailer_seam_is_spyable() {
-        let spy = SpyMailer { calls: std::sync::Mutex::new(Vec::new()) };
+        let spy = SpyMailer {
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
         let pid = Uuid::new_v4();
         let uid = Uuid::new_v4();
         let gid = Uuid::new_v4();
@@ -4783,8 +4815,7 @@ mod tests {
             auth_token_id,
         };
 
-        let result =
-            with_start_proposal_context(&pool, session_user, || start_proposal(pid)).await;
+        let result = with_start_proposal_context(&pool, session_user, || start_proposal(pid)).await;
         let game_id = result.expect("start_proposal must succeed");
 
         assert!(
@@ -4873,8 +4904,7 @@ mod tests {
             auth_token_id,
         };
 
-        let result =
-            with_start_proposal_context(&pool, session_user, || start_proposal(pid)).await;
+        let result = with_start_proposal_context(&pool, session_user, || start_proposal(pid)).await;
         let game_id = result.expect("start_proposal must succeed");
 
         let owner_email: String = sqlx::query_scalar(
@@ -4944,5 +4974,4 @@ mod tests {
             }
         }
     }
-
 }

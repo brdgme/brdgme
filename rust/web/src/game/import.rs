@@ -393,7 +393,9 @@ mod tests {
     async fn import_bundle_round_trips_a_game(pool: PgPool) {
         let bundle = make_exported_game(&pool).await;
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
         assert_ne!(outcome.game_id, bundle.game.id);
         // Same local version name as the bundle - no fidelity warning.
         assert!(
@@ -490,7 +492,9 @@ mod tests {
             }
         }
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
         let human = crate::db::find_game_extended(&pool, outcome.game_id)
             .await
             .unwrap()
@@ -512,7 +516,9 @@ mod tests {
         let mut bundle = make_exported_game(&pool).await;
         bundle.game_version_name = "v0-ancient".to_string();
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
         assert!(
             outcome.warnings.iter().any(|w| w.contains("v0-ancient")),
             "expected version-mismatch warning, got {:?}",
@@ -540,10 +546,7 @@ mod tests {
             .unwrap();
 
         let result = import_bundle(&pool, &reqwest::Client::new(), &bundle).await;
-        assert!(
-            result.is_err(),
-            "a future schema version must be rejected"
-        );
+        assert!(result.is_err(), "a future schema version must be rejected");
         let err = result.err().expect("error present");
         assert!(
             err.to_string()
@@ -596,7 +599,10 @@ mod tests {
             .unwrap();
 
         let result = import_bundle(&pool, &reqwest::Client::new(), &bundle).await;
-        assert!(result.is_err(), "a state the service cannot load must fail the import");
+        assert!(
+            result.is_err(),
+            "a state the service cannot load must fail the import"
+        );
 
         let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM games")
             .fetch_one(&pool)
@@ -625,7 +631,9 @@ mod tests {
             log.created_at = past;
         }
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
 
         let game_row = sqlx::query!(
             "SELECT created_at, updated_at FROM games WHERE id = $1",
@@ -656,7 +664,9 @@ mod tests {
         );
         bundle.game.updated_at = past;
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
 
         let rows = sqlx::query!(
             "SELECT is_turn_at, last_turn_at FROM game_players WHERE game_id = $1 ORDER BY position",
@@ -703,7 +713,9 @@ mod tests {
         bundle.players[bot_idx].departure_reason = Some("conceded".to_string());
         bundle.players[bot_idx].departure_sequence = Some(1);
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
         let ge = crate::db::find_game_extended(&pool, outcome.game_id)
             .await
             .unwrap()
@@ -758,7 +770,9 @@ mod tests {
             .expect("bot seat");
         bundle.players[bot_idx].left_at = Some(left_at);
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
 
         let ge = crate::db::find_game_extended(&pool, outcome.game_id)
             .await
@@ -787,7 +801,9 @@ mod tests {
             player.bot_name = None;
         }
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
         let ge = crate::db::find_game_extended(&pool, outcome.game_id)
             .await
             .unwrap()
@@ -800,8 +816,14 @@ mod tests {
                 p.user.is_some(),
                 p.game_bot.is_some()
             );
-            assert!(p.game_bot.is_none(), "a human-only seat must not link a bot");
-            assert_ne!(p.user.as_ref().unwrap().id, bundle_original_user_id(&pool).await);
+            assert!(
+                p.game_bot.is_none(),
+                "a human-only seat must not link a bot"
+            );
+            assert_ne!(
+                p.user.as_ref().unwrap().id,
+                bundle_original_user_id(&pool).await
+            );
         }
     }
 
@@ -814,7 +836,9 @@ mod tests {
             }
         }
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
         let ge = crate::db::find_game_extended(&pool, outcome.game_id)
             .await
             .unwrap()
@@ -839,7 +863,9 @@ mod tests {
             }
         }
 
-        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle).await.unwrap();
+        let outcome = import_bundle(&pool, &reqwest::Client::new(), &bundle)
+            .await
+            .unwrap();
         let ge = crate::db::find_game_extended(&pool, outcome.game_id)
             .await
             .unwrap()
@@ -849,8 +875,14 @@ mod tests {
             .iter()
             .find(|p| p.game_bot.is_none())
             .expect("human-only seat imported");
-        assert!(human.user.is_some(), "the human-only seat must import a user");
-        assert!(human.game_bot.is_none(), "the human-only seat must not link a bot");
+        assert!(
+            human.user.is_some(),
+            "the human-only seat must import a user"
+        );
+        assert!(
+            human.game_bot.is_none(),
+            "the human-only seat must not link a bot"
+        );
         let replacement = ge
             .game_players
             .iter()

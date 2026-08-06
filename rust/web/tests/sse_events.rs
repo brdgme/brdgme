@@ -247,8 +247,7 @@ fn gauge_value(
 // NATS publishes its monitoring endpoint on the client port + 4000 (CI maps
 // 4222->8222, the local test script 14222->18222; both run `nats-server -m 8222`).
 fn nats_monitor_base() -> String {
-    let url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let stripped = url.strip_prefix("nats://").unwrap_or(&url);
     let (host, port) = match stripped.rsplit_once(':') {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(4222)),
@@ -265,8 +264,9 @@ async fn nats_game_subjects() -> Vec<String> {
         .text()
         .await
         .unwrap();
-    let json: serde_json::Value = serde_json::from_str(&body)
-        .unwrap_or_else(|e| panic!("could not parse NATS subsz JSON from {url}: {e}\nbody: {body}"));
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_else(|e| {
+        panic!("could not parse NATS subsz JSON from {url}: {e}\nbody: {body}")
+    });
     let mut subjects = Vec::new();
     if let Some(subs) = json.get("subscriptions").and_then(|s| s.as_array()) {
         for sub in subs {

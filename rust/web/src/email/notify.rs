@@ -794,11 +794,18 @@ mod tests {
             "subject".to_string(),
         )
         .await;
-        let header = content.header.as_deref().expect("finished mail has a header");
+        let header = content
+            .header
+            .as_deref()
+            .expect("finished mail has a header");
         assert_eq!(header, "Game ended early. No game result.");
         assert!(!header.contains("Winners"));
         for p in &ge.game_players {
-            assert!(!header.contains(p.name()), "header must not name {}", p.name());
+            assert!(
+                !header.contains(p.name()),
+                "header must not name {}",
+                p.name()
+            );
         }
     }
 
@@ -878,7 +885,10 @@ mod tests {
             "subject".to_string(),
         )
         .await;
-        let header = content.header.as_deref().expect("finished mail has a header");
+        let header = content
+            .header
+            .as_deref()
+            .expect("finished mail has a header");
         let p0 = &ge.game_players[0];
         let p1 = &ge.game_players[1];
         assert_eq!(
@@ -973,16 +983,15 @@ mod tests {
             "subject".to_string(),
         )
         .await;
-        let header = content.header.as_deref().expect("finished mail has a header");
+        let header = content
+            .header
+            .as_deref()
+            .expect("finished mail has a header");
         let p0 = &ge.game_players[0];
         let p1 = &ge.game_players[1];
         assert_eq!(
             header,
-            format!(
-                "Game over. Winners: {} (+8), {} (-8)",
-                p0.name(),
-                p1.name()
-            ),
+            format!("Game over. Winners: {} (+8), {} (-8)", p0.name(), p1.name()),
             "two-human concession must keep authoritative/competitive 1/2 order"
         );
     }

@@ -1478,10 +1478,9 @@ mod tests {
         assert_eq!(user_count(&pool).await, 0);
         let code = get_confirmation(&pool, email).await.unwrap().code;
 
-        let confirmed =
-            confirm_login_inner(&pool, &canonicalize_email(email), &code)
-                .await
-                .unwrap();
+        let confirmed = confirm_login_inner(&pool, &canonicalize_email(email), &code)
+            .await
+            .unwrap();
         assert!(
             crate::db::validate_username(&confirmed.user.name),
             "default username satisfies D2: {}",
@@ -2083,7 +2082,8 @@ mod tests {
         async fn load(
             &self,
             _id: &tower_sessions::session::Id,
-        ) -> tower_sessions::session_store::Result<Option<tower_sessions::session::Record>> {
+        ) -> tower_sessions::session_store::Result<Option<tower_sessions::session::Record>>
+        {
             use std::sync::atomic::Ordering;
             if self.failed.swap(true, Ordering::SeqCst) {
                 Ok(None)
@@ -2121,13 +2121,14 @@ mod tests {
     }
 
     async fn seed_user_with_two_tokens(pool: &PgPool) -> Uuid {
-        let user_id: Uuid =
-            sqlx::query_scalar("INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id")
-                .bind("victim")
-                .bind(Vec::<String>::new())
-                .fetch_one(pool)
-                .await
-                .unwrap();
+        let user_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO users (name, pref_colors) VALUES ($1, $2) RETURNING id",
+        )
+        .bind("victim")
+        .bind(Vec::<String>::new())
+        .fetch_one(pool)
+        .await
+        .unwrap();
         for _ in 0..2 {
             sqlx::query("INSERT INTO user_auth_tokens (id, user_id) VALUES ($1, $2)")
                 .bind(Uuid::new_v4())
@@ -2176,11 +2177,7 @@ mod tests {
     async fn logout_everywhere_revokes_all_tokens_on_healthy_session(pool: PgPool) {
         let user_id = seed_user_with_two_tokens(&pool).await;
 
-        let session = Session::new(
-            None,
-            Arc::new(tower_sessions::MemoryStore::default()),
-            None,
-        );
+        let session = Session::new(None, Arc::new(tower_sessions::MemoryStore::default()), None);
         session
             .insert(
                 SESSION_USER_KEY,

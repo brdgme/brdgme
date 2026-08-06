@@ -1008,7 +1008,10 @@ mod tests {
         let empty = should_hide_add_friend_many(&pool, viewer.id, &[])
             .await
             .unwrap();
-        assert!(empty.is_empty(), "empty targets must short-circuit to empty");
+        assert!(
+            empty.is_empty(),
+            "empty targets must short-circuit to empty"
+        );
     }
 
     /// ws F35: three untested friend/block helpers, batched.

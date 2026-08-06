@@ -1184,7 +1184,8 @@ async fn ensure_stream_and_consumers_reconciles_drifted_config(pool: PgPool) {
     let drifted_turn: async_nats::jetstream::consumer::PullConsumer =
         stream.get_consumer(nats::CONSUMER_TURN).await.unwrap();
     assert_eq!(
-        drifted_turn.cached_info().config.max_deliver, 1,
+        drifted_turn.cached_info().config.max_deliver,
+        1,
         "test setup failed to drift the bot-turn consumer max_deliver"
     );
 

@@ -817,7 +817,9 @@ fn count_active_humans(ge: &crate::db::GameExtended) -> usize {
 #[cfg(feature = "ssr")]
 fn is_active_human(ge: &crate::db::GameExtended, actor_user_id: Uuid) -> bool {
     ge.game_players.iter().any(|p| {
-        p.game_player.user_id.is_some_and(|uid| uid == actor_user_id)
+        p.game_player
+            .user_id
+            .is_some_and(|uid| uid == actor_user_id)
             && p.game_player.left_at.is_none()
     })
 }
@@ -862,7 +864,9 @@ fn is_human_in_departure_event(
     sequence: i32,
 ) -> bool {
     ge.game_players.iter().any(|p| {
-        p.game_player.user_id.is_some_and(|uid| uid == actor_user_id)
+        p.game_player
+            .user_id
+            .is_some_and(|uid| uid == actor_user_id)
             && p.game_player.departure_sequence == Some(sequence)
     })
 }
@@ -901,7 +905,9 @@ fn conflict_or_internal(context: &'static str, e: anyhow::Error) -> ServerFnErro
             "The game changed while this was being processed; nothing was changed. Please try again.",
         );
     }
-    if e.downcast_ref::<crate::db::NotEnoughActiveHumans>().is_some() {
+    if e.downcast_ref::<crate::db::NotEnoughActiveHumans>()
+        .is_some()
+    {
         return ServerFnError::new(
             "Concede is not available: at least two active humans are required",
         );
@@ -2970,7 +2976,8 @@ mod tests {
 
     #[test]
     fn conflict_or_internal_maps_typed_finished_and_stale_errors() {
-        let finished = conflict_or_internal("test", anyhow::anyhow!(crate::db::GameAlreadyFinished));
+        let finished =
+            conflict_or_internal("test", anyhow::anyhow!(crate::db::GameAlreadyFinished));
         match finished {
             leptos::prelude::ServerFnError::ServerError(m) => {
                 assert_eq!(m, "Game is already finished");
@@ -3002,7 +3009,8 @@ mod tests {
         match not_enough_humans {
             leptos::prelude::ServerFnError::ServerError(m) => {
                 assert_eq!(
-                    m, "Concede is not available: at least two active humans are required"
+                    m,
+                    "Concede is not available: at least two active humans are required"
                 );
             }
             _ => panic!("expected ServerError, got {not_enough_humans:?}"),
@@ -3125,7 +3133,10 @@ mod tests {
             concede_eligible(&two_humans, Some(a), false),
             "two total seats forfeit with no replacement bot"
         );
-        assert!(concede_eligible(&two_humans, Some(a), true), "replacement path");
+        assert!(
+            concede_eligible(&two_humans, Some(a), true),
+            "replacement path"
+        );
         assert!(
             !concede_eligible(&two_humans, Some(c), false),
             "a spectator is not an active human"
@@ -3222,7 +3233,10 @@ mod tests {
     fn earlier_departed_human_cannot_end() {
         let a = Uuid::new_v4();
         let b = Uuid::new_v4();
-        let ge = snapshot(vec![seat(Some(a), false, None), seat(Some(b), true, Some(1))]);
+        let ge = snapshot(vec![
+            seat(Some(a), false, None),
+            seat(Some(b), true, Some(1)),
+        ]);
 
         assert!(end_eligible(&ge, Some(a)), "the sole active human may End");
         assert!(
@@ -3238,7 +3252,10 @@ mod tests {
         let a = Uuid::new_v4();
         let all_bots = snapshot(vec![seat(None, false, None), seat(None, false, None)]);
         assert!(!end_eligible(&all_bots, None), "a pure-bot game cannot End");
-        assert!(!end_eligible(&all_bots, Some(a)), "there are no humans at all");
+        assert!(
+            !end_eligible(&all_bots, Some(a)),
+            "there are no humans at all"
+        );
 
         let human_with_bots = snapshot(vec![
             seat(Some(a), false, None),
@@ -3316,7 +3333,8 @@ mod tests {
 
     #[sqlx::test]
     async fn end_core_rejects_finished_game(pool: PgPool) {
-        let (game_id, creator) = make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
+        let (game_id, creator) =
+            make_finished_two_player_game(&pool, "http://127.0.0.1:8100").await;
         match end_core(&pool, game_id, ActingPlayer::User(creator)).await {
             Err(ServerFnError::ServerError(m)) => {
                 assert_eq!(m, "Game is already finished");
@@ -3356,12 +3374,11 @@ mod tests {
             }
             other => panic!("expected ServerError, got {other:?}"),
         }
-        let is_finished: bool =
-            sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
-                .bind(game.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert!(!is_finished);
     }
 
@@ -3400,12 +3417,11 @@ mod tests {
             "the returned snapshot must be the pre-write state"
         );
 
-        let is_finished: bool =
-            sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
-                .bind(game.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let is_finished: bool = sqlx::query_scalar("SELECT is_finished FROM games WHERE id = $1")
+            .bind(game.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert!(is_finished, "end_core must delegate to the locked writer");
     }
 
@@ -3526,7 +3542,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert!(!is_finished, "a rejected End must leave the game unfinished");
+        assert!(
+            !is_finished,
+            "a rejected End must leave the game unfinished"
+        );
     }
 
     // DRM-03b2c web action parity: with zero active humans, an actor from an
@@ -3567,7 +3586,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert!(!is_finished, "a rejected End must leave the game unfinished");
+        assert!(
+            !is_finished,
+            "a rejected End must leave the game unfinished"
+        );
     }
 
     // DRM-03b2c web action parity: with zero active humans, a human tied in the

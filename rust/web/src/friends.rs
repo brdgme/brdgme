@@ -99,14 +99,12 @@ pub async fn get_friends_overview() -> Result<FriendsOverview, ServerFnError> {
     let pool = expect_context::<PgPool>();
     let user = require_user().await?;
     let (friends, incoming, outgoing, blocked, invite_policy, game_visibility) = tokio::try_join!(
-        crate::db::list_friends(&pool, user.id)
-            .map_err(internal("get_friends_overview: friends")),
+        crate::db::list_friends(&pool, user.id).map_err(internal("get_friends_overview: friends")),
         crate::db::list_incoming_friend_requests(&pool, user.id)
             .map_err(internal("get_friends_overview: incoming")),
         crate::db::list_outgoing_friend_requests(&pool, user.id)
             .map_err(internal("get_friends_overview: outgoing")),
-        crate::db::list_blocked(&pool, user.id)
-            .map_err(internal("get_friends_overview: blocked")),
+        crate::db::list_blocked(&pool, user.id).map_err(internal("get_friends_overview: blocked")),
         crate::db::get_invite_policy(&pool, user.id)
             .map_err(internal("get_friends_overview: policy")),
         crate::db::get_game_visibility(&pool, user.id)
@@ -646,11 +644,10 @@ mod tests {
 
     #[sqlx::test]
     async fn block_user_rejects_unknown_target(pool: sqlx::PgPool) {
-        let err = crate::test_support::non_admin(&pool, || async {
-            block_user(Uuid::new_v4()).await
-        })
-        .await
-        .expect_err("blocking an unknown user must be rejected");
+        let err =
+            crate::test_support::non_admin(&pool, || async { block_user(Uuid::new_v4()).await })
+                .await
+                .expect_err("blocking an unknown user must be rejected");
         match err {
             ServerFnError::ServerError(msg) => assert_eq!(msg, "User not found"),
             other => panic!("expected ServerError(\"User not found\"), got {other:?}"),

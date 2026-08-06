@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use tower_sessions::{MemoryStore, Session};
 use uuid::Uuid;
 
-use crate::auth::session::{SessionUser, SESSION_USER_KEY};
+use crate::auth::session::{SESSION_USER_KEY, SessionUser};
 
 async fn run_with_session<F, Fut, T>(pool: &PgPool, session: Session, f: F) -> T
 where

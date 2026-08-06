@@ -419,7 +419,10 @@ mod tests {
             .await
             .expect("query ok")
             .expect("a version is picked");
-        assert_eq!(rules_version_id, latest.id, "both selectors must agree on the tie");
+        assert_eq!(
+            rules_version_id, latest.id,
+            "both selectors must agree on the tie"
+        );
         assert_eq!(rules_version_id, higher, "name DESC must pick '2.0.0'");
     }
 

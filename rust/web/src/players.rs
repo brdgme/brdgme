@@ -164,7 +164,9 @@ fn placing_histograms(games: &[FinishedGameRow]) -> Vec<PlacingHistogram> {
     let labels = ["2 players", "3 players", "4+ players"];
     let mut grouped: [Vec<i32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for g in games {
-        let Some(place) = g.ranked_placing else { continue };
+        let Some(place) = g.ranked_placing else {
+            continue;
+        };
         let idx = match g.player_count {
             2 => 0,
             3 => 1,

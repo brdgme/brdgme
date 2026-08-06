@@ -469,11 +469,16 @@ pub fn spawn_bot_turn_sweep(
     jetstream: async_nats::jetstream::Context,
     shutdown: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
-    spawn_sweep("bot_turn_sweep", bot_turn_sweep_interval(), shutdown, move || {
-        let pool = pool.clone();
-        let jetstream = jetstream.clone();
-        async move { sweep_bot_turns_once(&pool, &jetstream).await }
-    })
+    spawn_sweep(
+        "bot_turn_sweep",
+        bot_turn_sweep_interval(),
+        shutdown,
+        move || {
+            let pool = pool.clone();
+            let jetstream = jetstream.clone();
+            async move { sweep_bot_turns_once(&pool, &jetstream).await }
+        },
+    )
 }
 
 /// The 22d unverified-address expiry window: unverified `user_emails` older
@@ -505,14 +510,22 @@ async fn sweep_processed_webhook_events_once(pool: &PgPool) {
 
 /// Periodic job deleting unverified addresses that were never confirmed
 /// (the 22d expiry cleanup). Reuses the shared `sweep_interval()` cadence.
-pub fn spawn_unverified_email_sweep(pool: PgPool, shutdown: CancellationToken) -> tokio::task::JoinHandle<()> {
-    spawn_sweep("unverified_email_expiry", sweep_interval(), shutdown, move || {
-        let pool = pool.clone();
-        async move {
-            sweep_unverified_emails_once(&pool).await;
-            sweep_processed_webhook_events_once(&pool).await;
-        }
-    })
+pub fn spawn_unverified_email_sweep(
+    pool: PgPool,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    spawn_sweep(
+        "unverified_email_expiry",
+        sweep_interval(),
+        shutdown,
+        move || {
+            let pool = pool.clone();
+            async move {
+                sweep_unverified_emails_once(&pool).await;
+                sweep_processed_webhook_events_once(&pool).await;
+            }
+        },
+    )
 }
 
 pub const DEFAULT_INVITE_REMINDER_THRESHOLD: std::time::Duration =
@@ -641,12 +654,17 @@ pub fn spawn_invite_auto_decline_sweep(
     broadcaster: crate::websocket::GameBroadcaster,
     shutdown: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
-    spawn_sweep("invite_auto_decline", sweep_interval(), shutdown, move || {
-        let pool = pool.clone();
-        let resend = resend.clone();
-        let broadcaster = broadcaster.clone();
-        async move { sweep_invite_auto_decline_once(resend.as_ref(), &pool, &broadcaster).await }
-    })
+    spawn_sweep(
+        "invite_auto_decline",
+        sweep_interval(),
+        shutdown,
+        move || {
+            let pool = pool.clone();
+            let resend = resend.clone();
+            let broadcaster = broadcaster.clone();
+            async move { sweep_invite_auto_decline_once(resend.as_ref(), &pool, &broadcaster).await }
+        },
+    )
 }
 
 /// Spawns all periodic email/bot sweeps, each observing `shutdown` (R-11 /
@@ -661,11 +679,21 @@ pub fn spawn_periodic_sweeps(
     shutdown: CancellationToken,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     vec![
-        spawn_turn_reminder_sweep(pool.clone(), resend.clone(), http_client.clone(), shutdown.clone()),
+        spawn_turn_reminder_sweep(
+            pool.clone(),
+            resend.clone(),
+            http_client.clone(),
+            shutdown.clone(),
+        ),
         spawn_unverified_email_sweep(pool.clone(), shutdown.clone()),
         spawn_invite_nudge_sweep(pool.clone(), resend.clone(), shutdown.clone()),
         spawn_invite_expiry_sweep(pool.clone(), resend.clone(), shutdown.clone()),
-        spawn_invite_auto_decline_sweep(pool.clone(), resend.clone(), broadcaster, shutdown.clone()),
+        spawn_invite_auto_decline_sweep(
+            pool.clone(),
+            resend.clone(),
+            broadcaster,
+            shutdown.clone(),
+        ),
         spawn_bot_turn_sweep(pool.clone(), jetstream, shutdown.clone()),
     ]
 }
@@ -1710,8 +1738,7 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
-        let candidates =
-            crate::proposals::fetch_nudge_candidates(&pool, 86400).await;
+        let candidates = crate::proposals::fetch_nudge_candidates(&pool, 86400).await;
         assert!(
             candidates.iter().any(|c| c.proposal_id == pid),
             "the seeded proposal must be a nudge candidate before the fault is injected"
@@ -1918,25 +1945,23 @@ mod tests {
 
         // Per-invitee marker state: the sendable invitee is nudged exactly once
         // (its own marker set), the retrying invitee stays unmarked for retry.
-        let sendable_nudged: Option<time::PrimitiveDateTime> = sqlx::query_scalar(
-            "SELECT nudged_at FROM game_proposal_players WHERE id = $1",
-        )
-        .bind(sendable_pp)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let sendable_nudged: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT nudged_at FROM game_proposal_players WHERE id = $1")
+                .bind(sendable_pp)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(
             sendable_nudged.is_some(),
             "the sendable invitee must be recorded as nudged via its own per-invitee marker"
         );
 
-        let retrying_nudged: Option<time::PrimitiveDateTime> = sqlx::query_scalar(
-            "SELECT nudged_at FROM game_proposal_players WHERE id = $1",
-        )
-        .bind(retrying_pp)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let retrying_nudged: Option<time::PrimitiveDateTime> =
+            sqlx::query_scalar("SELECT nudged_at FROM game_proposal_players WHERE id = $1")
+                .bind(retrying_pp)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(
             retrying_nudged.is_none(),
             "the retrying (web-present) invitee must remain unmarked"
@@ -2146,7 +2171,9 @@ mod tests {
     /// is released during the send and the flip lands.
     async fn try_flip_turn(pool: &PgPool, gp_id: Uuid) -> Result<(), sqlx::Error> {
         let mut tx = pool.begin().await?;
-        sqlx::query("SET LOCAL lock_timeout = '250ms'").execute(&mut *tx).await?;
+        sqlx::query("SET LOCAL lock_timeout = '250ms'")
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("UPDATE game_players SET is_turn = false WHERE id = $1")
             .bind(gp_id)
             .execute(&mut *tx)

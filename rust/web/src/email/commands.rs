@@ -1845,14 +1845,13 @@ mod tests {
         )
         .await
         .unwrap();
-        let game_player_id: uuid::Uuid = sqlx::query_scalar(
-            "SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2",
-        )
-        .bind(game.id)
-        .bind(user_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let game_player_id: uuid::Uuid =
+            sqlx::query_scalar("SELECT id FROM game_players WHERE game_id = $1 AND user_id = $2")
+                .bind(game.id)
+                .bind(user_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
         let (broadcaster, jetstream) = make_standalone_ctx_deps().await;
         let http_client = reqwest::Client::new();
@@ -2009,7 +2008,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert!(!is_finished, "a rejected End must leave the game unfinished");
+        assert!(
+            !is_finished,
+            "a rejected End must leave the game unfinished"
+        );
     }
 
     // DRM-03b2c email action parity: with zero active humans, an actor from an
@@ -2064,7 +2066,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert!(!is_finished, "a rejected End must leave the game unfinished");
+        assert!(
+            !is_finished,
+            "a rejected End must leave the game unfinished"
+        );
     }
 
     // DRM-03b2c email action parity: with two or more active humans, the email
@@ -2099,7 +2104,10 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert!(!is_finished, "a rejected End must leave the game unfinished");
+        assert!(
+            !is_finished,
+            "a rejected End must leave the game unfinished"
+        );
     }
 
     // DRM-03b2c email action parity: with zero active humans, a human tied in
