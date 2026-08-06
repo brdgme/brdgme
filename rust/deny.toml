@@ -73,7 +73,8 @@ allow-workspace = false
 # most-depended-on version is kept canonical and the holdout copy is skipped.
 # Each entry names (a) the crate pulling the extra copy and (b) the upstream
 # change that would remove it. These are ecosystem semver splits no single
-# sibling was scoped to fix - not papered-over sibling work.
+# sibling was scoped to fix - not papered-over sibling work. The one exception
+# is the tower-http entry below: a first-party (web) pin, kept per stay-on-latest.
 skip = [
     # sqlx-postgres 0.9 pulls a parallel digest-0.11/sha2-0.11 crypto stack next
     # to the workspace digest-0.10 stack (ed25519/axum/sqlx-core). Clears when
@@ -125,10 +126,11 @@ skip = [
     # gloo-timers 0.3 is a lone holdout via backon (kube-runtime); 0.4.0 is
     # workspace-direct (web). Clears when backon adopts gloo-timers 0.4.
     { name = "gloo-timers", version = "0.3.0" }, # (a) via backon (kube-runtime <- kube <- brdgme-operator); (b) clears when backon adopts gloo-timers 0.4
-    # tower-http 0.6 vs 0.7: 0.6.11 is canonical (axum-prometheus/kube-client/
-    # leptos_axum/reqwest); web pins 0.7.0 directly. Clears when web and those
-    # crates converge on one tower-http minor.
-    { name = "tower-http", version = "0.7.0" }, # (a) via web (first-party, pins 0.7.0 directly); (b) clears when web aligns with the 0.6.11 crates or they bump to 0.7
+    # tower-http 0.6 vs 0.7: 0.6.11 via axum-prometheus/kube-client/leptos_axum/
+    # reqwest; web pins 0.7.0 directly (rust/web/Cargo.toml:44) per the stay-on-
+    # latest policy (docs/CODING.md:540). Knowingly accepted, not a web bug to
+    # fix. Clears only when those four crates adopt tower-http 0.7.
+    { name = "tower-http", version = "0.7.0" }, # (a) via web (first-party, pins 0.7.0 directly); (b) clears only when axum-prometheus/kube-client/leptos_axum/reqwest adopt tower-http 0.7
     # webpki-roots 0.26 is a lone holdout via tokio-websockets; 1.0.9 via
     # sqlx-core. Clears when tokio-websockets adopts webpki-roots 1.x.
     { name = "webpki-roots", version = "0.26.11" }, # (a) via tokio-websockets; (b) clears when tokio-websockets adopts webpki-roots 1.x
