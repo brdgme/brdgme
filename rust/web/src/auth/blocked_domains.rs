@@ -1,4 +1,9 @@
-// Vendored from https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/main/disposable_email_blocklist.conf
+// Vendored verbatim from disposable-email-domains/disposable-email-domains
+// (https://github.com/disposable-email-domains/disposable-email-domains),
+// file disposable_email_blocklist.conf at immutable commit
+// f9004b00673ca09626e9dd5eaf97fd657d009cb8 (2026-07-22). CC0 1.0 Universal
+// (see sibling BLOCKED_DOMAINS_LICENSE). The embedded list is a verbatim copy
+// of that revision; do not edit it in place.
 pub static BLOCKED_DOMAINS: std::sync::LazyLock<std::collections::HashSet<&'static str>> =
     std::sync::LazyLock::new(|| {
         std::collections::HashSet::from([

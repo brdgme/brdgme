@@ -95,10 +95,12 @@ jobs:
         run: docker buildx build --check --target register -f rust/Dockerfile .
       # Vendored-code guard (R-45 AC3): session_store is `publish = false` and
       # skipped by cargo-deny, so assert its MIT licence text and upstream
-      # attribution header directly.
-      - name: Check session_store licence and attribution
+      # attribution header directly. blocked_domains.rs is likewise vendored
+      # (verbatim CC0 list), so also assert the sibling licence text and the
+      # exact immutable upstream commit in its attribution header.
+      - name: Check vendored licence and attribution
         working-directory: .
-        run: grep -q "Permission is hereby granted" rust/lib/session_store/LICENSE && grep -q "Vendored from tower-sessions-sqlx-store 0.15.0" rust/lib/session_store/src/lib.rs
+        run: grep -q "Permission is hereby granted" rust/lib/session_store/LICENSE && grep -q "Vendored from tower-sessions-sqlx-store 0.15.0" rust/lib/session_store/src/lib.rs && grep -q "Public Domain Dedication" rust/web/src/auth/BLOCKED_DOMAINS_LICENSE && grep -q "f9004b00673ca09626e9dd5eaf97fd657d009cb8" rust/web/src/auth/blocked_domains.rs
       # GitHub Actions `services:` containers can't take extra CLI args (no
       # way to append `-js` to the image's default command), so NATS is
       # started as a plain step instead - JetStream needs that flag.
