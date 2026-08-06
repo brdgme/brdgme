@@ -15,7 +15,8 @@ keeps this one from filling up with closed work.
 
 **Priority order (updated 2026-08-03):**
 **Immediate next:** #31 Rust-only repository (delete legacy trio + brdgme-go,
-lift `rust/` to root; #23 game ports now complete so WP3-5 unblocked).
+lift `rust/` to root; #23 game ports now complete so WP3-5 unblocked); #60 web
+auth rate-limiting hardening (pre-go-live priority, R-37.1/R-37.2).
 **Then:** #52 managed Postgres migration (CNPG to DO Managed Database, frees
 ~600Mi cluster memory), #15 tails (CI deploy job, delete stale k8s/argocd/,
 admin-password rotation), #54 maximum-performance fuzzer (after #31, which
@@ -24,7 +25,10 @@ subsequent game port and remediation package cheaper to validate).
 **Unscheduled post-go-live:** #27 remainder (WebSocketTrigger deletion, flaky
 NATS tests), #36 Web Push, #37 game verification, #38 "new version" notification,
 #40 DB tests opt-in, #46 turn timer, #48 moderation, #49 sqlx macros (review first),
-#51 bot sqlx queries, #55 dependency/toolchain currency pass.
+#51 bot sqlx queries, #55 dependency/toolchain currency pass, #61 workspace lint
+policy, #62 cargo-deny bans CI check, #63 U8 e2e gate (blocked on hydration
+flake), #64 re-add NotifyKind::Reminder, #65 revert operator BoxFuture
+workaround.
 
 ## Objective
 
@@ -81,6 +85,12 @@ have been moved to [`docs/archive/BACKLOG.md`](archive/BACKLOG.md).
 | 57 | unsafe-libyaml still in Cargo.lock (dp-F14 backend half) | Open tech debt from the 2026-07-23 Rust review. The front half of dp-F14 landed (WP-70 migrated bot + game_client from the archived `serde_yaml` to `serde_yaml_ng`, output byte-identical), but the backend half is unresolved: `unsafe-libyaml` 0.2.11 (the C libyaml binding) remains in `Cargo.lock` via `serde_yaml_ng`. Removing it means severing the libyaml-backed parser (e.g. a pure-Rust YAML path). Surfaced during the 2026-07-23 Rust review. | - | - |
 | 58 | Non-default build targets are not CI-gated | Open tech debt surfaced during the 2026-07-23 Rust review remediation. Two pre-existing gaps: (a) `cargo test -p web` without the `ssr` feature has never compiled (~323 errors; the integration tests require `ssr`), so the non-ssr web target is untested and ungated; (b) wasm-target clippy with `-D warnings` fails on four pre-existing lints (`unused_unit`, `collapsible_if`) and is never CI-gated (wasm builds via cargo-leptos while clippy runs ssr-only). Either gate these targets in CI or fix-and-gate them. Surfaced during the 2026-07-23 Rust review. Update 2026-07-30: the four (b) wasm-hydrate clippy lints (`unused_unit`, `collapsible_if`) in `websocket_client.rs` were fixed, so `cargo clippy -p web --features hydrate --target wasm32-unknown-unknown -- -D warnings` now passes; gating that target in CI and part (a) remain open. | - | - |
 | 59 | Extend dual-result selectors to game-type and history pages | Pending - unscheduled follow-up from DRM-05a; extend the competitive/game-result selector and dual-result presentation beyond the main `/players/:name` profile to game-type and history pages. | - | - |
+| 60 | Web auth rate-limiting hardening (R-37.1 auth/session integrity, R-37.2 rate-limit/external-auth) | Pre-go-live priority. Carved 2026-08-06 from the 2026-07-30 review's R-37 web auth hardening package (closes F-86, F-87, F-88, F-89, F-91, F-92, F-93, F-94, F-95 - F-94 is the absence of any rate-limiting middleware in `rust/web`); R-37 itself is closed as a remediation item. Approved specs for R-37.1 (auth/session integrity) and R-37.2 (rate-limit and external-auth hardening) live in `docs/reviews/2026-07-30-review-session/98-REMEDIATION-PLAN.md` (R-37.1/R-37.2 sections) and `97-REMEDIATION-PROGRESS.md` (R-37.0 evidence) - implement per those approved specs, do not re-derive. Preserve R-37.1 before R-37.2. | - | - |
+| 61 | Workspace lint policy: baseline + eliminate 22 `allow` overrides | Captured 2026-08-06 from the 2026-07-30 review's R-46 workspace lint configuration package, which closed at R-46.0 (stale `.rls.toml` cleanup) as a remediation item. Owner decision 6.3a (`docs/reviews/2026-07-30-review-session/97-REMEDIATION-PROGRESS.md`) approved adding `[workspace.lints.rust]`/`[workspace.lints.clippy]`, a non-empty rust-lint threshold, refactoring the sole over-threshold helper, and eliminating all 22 existing lint `allow` overrides plus a no-new-allows CODING.md rule; threshold/policy specifics are unselected. | - | - |
+| 62 | Add `cargo deny check bans` to the weekly dependency CI job | Captured 2026-08-06 from the 2026-07-30 review's R-43 package (`deny.toml` bans enforcement, F-199/F-206), which is otherwise resolved: stays on tower-http 0.7.0 per the dependency-currency stay-on-latest policy (`docs/CODING.md:540`), with the `deny.toml` skip-entry justification corrected (`785cd855`). The weekly `.github/workflows/deps-currency.yml` job still checks advisories only; making it also run and fail (not warn) on `cargo deny check bans`/licenses is unscheduled. | - | - |
+| 63 | U8: e2e job as a required merge/deploy gate, blocked on the hydration-race flake | Captured 2026-08-06 from the 2026-07-30 review's R-54 package (closed as a remediation item after U9/U14). U8 - removing `continue-on-error: true` from the e2e CI job so it actually gates merges and deploys - is deliberately unscheduled until the hydration-race flake (see `docs/hydration.md`) is fixed first; turning the gate on before that would make the pre-existing flake the newly-surfaced blocker. | - | - |
+| 64 | Re-add reminder notification support (`NotifyKind::Reminder`) once a real send path exists | `NotifyKind::Reminder` was deleted as dead code (commit `7937d7d6`, 2026-08-06) per user ruling: never constructed since `dcd8844c`, and its only intended caller `send_turn_reminder` had already been deleted in an earlier remediation pass. Re-add when a real reminder-send caller through the notify pipeline is built. Context: finding F-147 in `docs/reviews/2026-07-30-review-session/07b-wp51-wp53-tail.md` has the history; the variant existed because of the deferred `wfe-F36` dedup decision (WP-51's shared `send_one` pipeline was consciously not built into the reminder sweep). | - | - |
+| 65 | Revert the `BoxFuture` boxing workaround in the operator/registration once rustc#134997 lands | `rust/operator/src/controller.rs` and `rust/lib/registration/src/registration.rs` box reconciler futures (commit `5597e842`, 2026-08-06) to work around a known rustc trait-solver Send leak-check limitation (rust-lang/rust#134997) that failed `cargo clippy --workspace --exclude web --all-targets -- -D warnings` on the reconcile -> finalizer closure -> apply/cleanup -> upsert/set_public chain. The boxing is a behaviourally-inert compiler workaround, not a design change. Revert to plain `async fn` once the upstream rustc issue is fixed on stable. | - | - |
 
 ---
 
@@ -513,3 +523,15 @@ turn-reminder emails, and 22d multi-email switching all implemented.
 #24 game invites complete (invite flow with accept/decline, policy
 enforcement). #25 rules rendering complete (web UI + email,
 single-source RULES.md with render-time specialization).
+
+2026-08-06: six items added (#60-65) from the 2026-07-30 review session's
+remediation trackers, recording already-decided user rulings that CLOSE
+R-37/R-43/R-46/R-54 as remediation items while moving their remaining scope
+here: #60 web auth rate-limiting hardening (R-37.1/R-37.2, pre-go-live
+priority), #61 workspace lint policy (R-46 baseline + 22-allow elimination),
+#62 `cargo deny check bans` in CI (R-43), #63 U8 e2e merge/deploy gate
+(blocked on the hydration-race flake), #64 re-add `NotifyKind::Reminder` when
+a real send path exists, #65 revert the operator/registration `BoxFuture`
+workaround once rustc#134997 lands. See
+`docs/reviews/2026-07-30-review-session/97-REMEDIATION-PROGRESS.md` and
+`98-REMEDIATION-PLAN.md` for full rulings and evidence.

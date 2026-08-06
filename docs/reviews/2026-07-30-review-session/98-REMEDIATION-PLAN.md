@@ -14,9 +14,22 @@ decides what is next.
   done (uncommitted): `blocked_domains.rs` provenance is pinned to immutable
   `f9004b00673ca09626e9dd5eaf97fd657d009cb8` with verbatim CC0 text in
   `rust/web/src/auth/BLOCKED_DOMAINS_LICENSE` and the focused CI guard extended;
-  see 97. R-37 and R-43 are parked by user process; R-38 is done (uncommitted; see
-  97). R-46 is `partial/parked` after R-46.0; R-51 is done (uncommitted; see
+  see 97. R-38 is done (uncommitted; see 97). R-51 is done (uncommitted; see
   97).
+- **R-37, R-43, R-46, R-54 are CLOSED (user ruling 2026-08-06), not parked.**
+  R-37.1/R-37.2 (auth/session integrity, rate-limit hardening; F-94) move to
+  `docs/BACKLOG.md` #60 as pre-go-live work. R-43 stays on tower-http 0.7.0
+  (`docs/CODING.md:540`; skip-entry justification corrected, `785cd855`);
+  adding `cargo deny check bans` to CI moves to `docs/BACKLOG.md` #62. R-46
+  closes at R-46.0; the lint baseline and 22-`allow` elimination move to
+  `docs/BACKLOG.md` #61. R-54 closes; U8 (e2e merge/deploy gate) moves to
+  `docs/BACKLOG.md` #63, blocked on the hydration-race flake fix. See 97 for
+  the per-package status rows.
+- **R-07 is DEFERRED (user ruling 2026-08-06),** not blocked-pending-retry: run
+  it after all other remediation is done, via a local migration test against a
+  copy of production data, then a production backup, then migration 027. F-207's
+  production-ledger validation is folded into this same deferred task, not a
+  separate pre-rollout gate. See 97.
 - **R-35 is done (uncommitted):** `game_client::fetch_game_data` remains
   scoreless and must never request `Status` to obtain points. No game-service
   JSON-contract change, `Response::PlayerRender` change, or points endpoint was
@@ -45,8 +58,6 @@ decides what is next.
   Use a disposable ledger applied with 0.8.6, verify 0.9.0 accepts its checksums,
   compare a fresh 0.9.0 ledger, and run applicable CI checks. Production-ledger
   verification is unavailable; retain a rollout gate and do not claim it passed.
-
-## 1. How to use this document
 - **D3 - sign-off checker retirement (user decision 2026-08-06):** the permanent
   CI sign-off checker is retired/rejected. `scripts/check-four-tooth.sh`,
   `scripts/check-four-tooth.test.sh`, all sign-off fixtures, and the CI job that
@@ -63,6 +74,15 @@ decides what is next.
   automated enforcement does not. Checker-specific durable process text in
   `docs/CODING.md` (formerly `docs/CODING.md:901-912`) is deleted per the user
   decision (2026-08-06; see 97).
+- **D4 - remediation completeness (user ruling 2026-08-06):** a full ancestry
+  audit found zero remediation items in a "claimed done, no evidence" state.
+  Remediation is complete except items that are external (operator/GitOps
+  action outside this worktree) or explicitly parked/backlogged: R-31
+  (8-player cap retained), R-37.1/R-37.2 and R-43's CI job and R-46.1-4 and
+  R-54's U8 (all moved to `docs/BACKLOG.md`), and R-07 (deferred until all
+  other remediation is done). See 97 for the itemized disposition.
+
+## 1. How to use this document
 
 - Every work package (`R-NN`) closes a named set of findings, cited by **F-number
   against `99-UNIFIED-REPORT.md` section 11**, which is the canonical findings
@@ -369,6 +389,12 @@ survive.
    of trim-duplicate rows found.
 5. F-127's doc comment is replaced by the type; the comment must be **deleted**,
    not kept alongside, so nobody re-derives the contract from prose.
+
+**Resolution (user ruling 2026-08-06):** deferred, not implemented now. Run
+after all other remediation is done: a local migration test against a copy
+of production data, then a production backup, then migration 027. F-207's
+production-ledger validation (section 3) is folded into this same task. See
+97 for status.
 
 ---
 
@@ -1111,6 +1137,13 @@ documentation to the code.
    equal length.
 3. A test starts a 9-player and a 10-player game and plays a round.
 
+**Resolution (user ruling, retain 2026-08-06):** parked. 8 players remains a
+hard platform limit for now - the platform supports only eight pre-approved
+player colours - so this package's `RULES.md`/`MAX_PLAYERS` acceptance
+criteria are not implemented. Expanding the player colour palette to support
+9-10 players is future work outside this remediation effort. See 97's R-31
+row for the full ruling.
+
 ---
 
 ### R-32 - Epilogue gate sweep
@@ -1401,6 +1434,12 @@ a **lower** bound where the spec prescribed an **upper** bound.
    `success: false` are all uncovered. Shared crypto's `load_key` tests now live
    in `rust/lib/crypto/src/lib.rs:120-162`; do not claim an unfixed bot copy.
 
+**Resolution (user ruling 2026-08-06):** R-37 CLOSES as a remediation item.
+R-37.1 and R-37.2 above MOVE to `docs/BACKLOG.md` #60 as pre-go-live work,
+carrying this section's approved behavior by reference - do not copy it
+wholesale into the backlog entry. Preserve R-37.1 before R-37.2 when
+implemented.
+
 ---
 
 ### R-38 - Admin surface and db module
@@ -1677,6 +1716,13 @@ They are a scope and enforcement failure, not a testing one.
    is never a valid answer to a spec's stop-work trigger; leaving it in place
    preserves the falsified claim in the tree.
 
+**Resolution (user ruling 2026-08-06):** stay on tower-http 0.7.0 per the
+dependency-currency stay-on-latest policy (`docs/CODING.md:540`); AC2 does
+not apply. AC5 (the rebuttal comment) is done - corrected by `785cd855`. AC1
+(the weekly job actually running/failing `cargo deny check bans`) is
+BACKLOGGED as `docs/BACKLOG.md` #62. AC3/AC4 remain unaddressed and
+unscheduled.
+
 ---
 
 ### R-44 - Fix the vendored session store
@@ -1761,6 +1807,11 @@ created.
 3. F-197: the two remaining `.rls.toml` files are removed; WP-65
    (`2c28ae8`) already removed the other three siblings. A reviewer greps for
    `.rls.toml` and records the remaining count.
+
+**Resolution (user ruling 2026-08-06):** R-46 CLOSES at R-46.0 (AC3, done -
+see 97). AC1/AC2 - the workspace lint baseline and eliminating all 22
+existing `allow` overrides per owner decision 6.3a - MOVE to
+`docs/BACKLOG.md` #61 as a standalone quality item, not implemented here.
 
 ---
 
@@ -2110,6 +2161,11 @@ finding number covers.
    one wasted token-lookup query per one-way mail. A test calls the router with
    that address and asserts no lookup occurs.
 
+**Resolution (user ruling 2026-08-06):** R-54 CLOSES. U9 and U14 are done
+(see 97). U8 (turning off `continue-on-error: true` so e2e gates merges and
+deploys) MOVES to `docs/BACKLOG.md` #63, BACKLOGGED behind fixing the
+hydration-race flake first.
+
 ---
 
 ### R-55 - Read the surfaces nobody read
@@ -2158,6 +2214,15 @@ verifiable acceptance criteria at all.
   WP-36 specification is operative and a ruling on the AAD disposition. It does
   not block the independent audits.
 
+**Follow-up (`rrm-r55-directness-tests`, value/cost review, no-action):** all
+six tooth-3 directness candidates recorded above (`r55-u15a`'s three,
+`r55-u16a`'s two, `r55-u15b`'s one) were reviewed against a strict value/cost
+filter and found to be no-action: each is either already closed by a separate
+existing direct-call test, or (one case) has no extractable production seam to
+call directly without a disproportionate, locally-unverifiable NATS-dependent
+harness. See `97-REMEDIATION-PROGRESS.md`'s `rrm-r55-directness-tests` row for
+the per-candidate evidence. No source or test file was changed.
+
 
 ## 3. Deployment checklist family
 
@@ -2186,11 +2251,24 @@ take a backup or copy of the actual production `_sqlx_migrations` ledger and
 validate that copy with exact `sqlx-cli 0.9.0`. This remediation performed no
 production database access and does not claim production-ledger verification.
 
-**Acceptance for this whole section:** a single pre-rollout checklist file lives
-in `brdgme-config` and is referenced from `docs/DEV.md`; a reviewer can point at
-the manifest line that sets each variable above; and the Turnstile pair is
-verified as a pair (site key set **and** secret key set) rather than
-individually.
+**Resolution (user ruling 2026-08-06):** F-96/TURNSTILE_SITE_KEY - Option A,
+a new `turnstile-config` Secret; the `secretRef` is wired into
+`k8s/base/web/deployment.yaml` (525f81a9) and both `TURNSTILE_SECRET_KEY` and
+`TURNSTILE_SITE_KEY` now fail closed at startup (525f81a9), mirroring each
+other. The Secret itself must still be sealed and committed in
+`brdgme-config` - that remains an outstanding external (operator) action, not
+done by this session. `config::public_base_url()` also now fails closed
+unless it resolves to `https://` (525f81a9); its premise was stale -
+`k8s/base/web/deployment.yaml:45` already sets `PUBLIC_BASE_URL=https://brdg.me`
+in prod - so the check is defence in depth, not a fix for a missing value.
+F-207's production-ledger validation is folded into R-07's deferred sequence
+(see 97), not a standalone pre-rollout gate.
+
+**Acceptance for this whole section - DROPPED (user ruling 2026-08-06):** the
+pre-rollout checklist file is designed out, not written. All three env vars
+now fail closed at startup instead of needing a manifest-line checklist; F-207
+is folded into R-07; F-211 was already closed via R-16 (see the deployment
+items table in 97). No further acceptance criterion applies to this section.
 
 ## 4. Process fixes
 
@@ -2198,6 +2276,14 @@ Source: unified report section 4 (systemic patterns) and section 10 (the
 four-tooth sign-off rule). These are changes to how work is specified, checked
 and signed off. They are not optional: every High finding in this review came
 from a commit whose checklist row, commit message and tests all read clean.
+
+**Retirement (user decision 2026-08-06, D3):** the automation this section
+prescribed - the sign-off checker (`scripts/check-four-tooth.sh`), its contract
+harness, all sign-off fixtures, and the CI job - is retired/rejected and
+deleted. Items below whose deliverable was that automation are marked
+superseded, not completed; the raw-string corrective slice (r4) is cancelled.
+The historical manifest (D1) and the one-off 4.2 audit are retained; the 4.5
+and 4.8 `docs/CODING.md` policy outcomes stand. See D3 in Decision state above.
 
 ### 4.1 The four-tooth sign-off rule (the centrepiece)
 
@@ -2210,14 +2296,6 @@ because a real closed finding in this programme defeated the weaker version.
    the checklist row and both commits still read as closed.
 2. **The citation is reachable.** (F-147) Present is not enough.
    `send_turn_reminder` exists, has **never had a caller**, and its doc comment
-**Retirement (user decision 2026-08-06, D3):** the automation this section
-prescribed - the sign-off checker (`scripts/check-four-tooth.sh`), its contract
-harness, all sign-off fixtures, and the CI job - is retired/rejected and
-deleted. Items below whose deliverable was that automation are marked
-superseded, not completed; the raw-string corrective slice (r4) is cancelled.
-The historical manifest (D1) and the one-off 4.2 audit are retained; the 4.5
-and 4.8 `docs/CODING.md` policy outcomes stand. See D3 in Decision state above.
-
    states the dedup as accomplished fact.
 3. **The regression test actually calls the function under test.** (F-151,
    F-161d) `rating_before_aggregates_exclude_nulls` name-matches its risk exactly
@@ -2439,7 +2517,7 @@ remain unauthorized.
 
 | Semantic unit | Item | Status | Evidence |
 |---------------|------|--------|----------|
-| `rrm-f207-sqlx-migrator` | F-207 | done | Exact 0.9.0 pins in the Docker migrate-builder and both CI installation sites; disposable 0.8.6/0.9.0 ledger compatibility, CI migration path, and single-job `cargo sqlx prepare --check` passed. Production-ledger validation remains a pre-rollout gate. |
+| `rrm-f207-sqlx-migrator` | F-207 | done | Exact 0.9.0 pins in the Docker migrate-builder and both CI installation sites; disposable 0.8.6/0.9.0 ledger compatibility, CI migration path, and single-job `cargo sqlx prepare --check` passed. Production-ledger validation is folded into R-07's deferred sequence (user ruling 2026-08-06; see 97), not a standalone pre-rollout gate. |
 | `rrm-4.1-four-tooth-core` | 4.1 | superseded (D3) | Versioned D1 input contract, Bash checker, positive plus isolated negative fixtures for all four teeth (including comment decoys), CI harness invocation, direct verification, and independent final review were accepted at the time; historical gaps intentionally remain unresolved. **Superseded by D3 (2026-08-06):** the checker, harness, and fixtures are deleted; the manifest data it consumed is retained, the automation is not. |
 | `rrm-4.2-test-row-sweep` | 4.2 | done (one-off audit, retained) | `RRM-4.2-TEST-ROW-SWEEP.tsv` records all 52 canonical rows: 47 pass, 3 unpackaged tooth-3 residuals, and 2 explicit deliberate-reversal ambiguities; independent review confirmed the five non-pass rows. One-off audit retained by D3. |
 | `rrm-4.3-wp-provenance` | 4.3 | superseded (D3) | `8132c591` added deterministic scope enumeration, provenance validation, committed positive/no-spec/omitted fixtures, harness coverage, and CI invocation; `8fa51603` closed malformed-row bypass handling. A whitespace-clean truncated malformed fixture preserved the exact `WP-MALFORMED` failure. Full harness, Bash syntax checks, direct malformed-fixture failure, and committed-range whitespace validation passed. The 85-heading/84-in-scope enumeration (excluding WP-09 alias) and 12 explicit historical residual gaps are unchanged. **Superseded by D3:** the guard, fixtures, and CI invocation are deleted; the enumeration and residual-gap facts are historical. |
