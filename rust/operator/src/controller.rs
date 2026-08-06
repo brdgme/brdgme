@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use brdgme_cmd::api::{Request, Response};
 use brdgme_registration::{Registration, set_public, upsert};
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt, future::BoxFuture};
 use kube::{
     Api, Client, ResourceExt,
     api::{Patch, PatchParams},
@@ -70,104 +70,119 @@ fn interceptor_uri(env: Option<String>) -> String {
     })
 }
 
-async fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
-    let name = obj.name_any();
-    let ns = obj.namespace().unwrap_or_else(|| "brdgme".to_string());
-    let api: Api<GameVersion> = Api::namespaced(ctx.client.clone(), &ns);
-    let generation = obj.metadata.generation;
+// Boxed rather than a plain `async fn`: with a plain `async fn` here, proving
+// the `Send` bound `Controller::run` requires on the returned future hits a
+// known rustc trait-solver limitation around opaque async-fn return types
+// that borrow from their own locals (rust-lang/rust#134997), reported as
+// "implementation of `Send`/`Acquire` is not general enough". Returning a
+// concrete `BoxFuture` sidesteps the buggy generic leak-check.
+fn reconcile(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> BoxFuture<'static, Result<Action, Error>> {
+    async move {
+        let name = obj.name_any();
+        let ns = obj.namespace().unwrap_or_else(|| "brdgme".to_string());
+        let api: Api<GameVersion> = Api::namespaced(ctx.client.clone(), &ns);
+        let generation = obj.metadata.generation;
 
-    match finalizer(&api, FINALIZER, obj, |event| async {
-        match event {
-            Event::Apply(obj) => apply(obj, ctx).await,
-            Event::Cleanup(obj) => cleanup(obj, ctx).await,
-        }
-    })
-    .await
-    {
-        Ok(action) => Ok(action),
-        Err(err) => {
-            let status = GameVersionStatus {
-                ready: false,
-                message: Some(err.to_string()),
-                observed_generation: generation,
-            };
-            if let Err(e) = api
-                .patch_status(
-                    &name,
-                    &PatchParams::default(),
-                    &Patch::Merge(json!({ "status": status })),
-                )
-                .await
-            {
-                error!(name, error = %e, "Failed to patch failure status");
+        match finalizer(&api, FINALIZER, obj, |event| {
+            async move {
+                match event {
+                    Event::Apply(obj) => apply(obj, ctx).await,
+                    Event::Cleanup(obj) => cleanup(obj, ctx).await,
+                }
             }
-            Err(Error::Finalizer(Box::new(err)))
+            .boxed()
+        })
+        .await
+        {
+            Ok(action) => Ok(action),
+            Err(err) => {
+                let status = GameVersionStatus {
+                    ready: false,
+                    message: Some(err.to_string()),
+                    observed_generation: generation,
+                };
+                if let Err(e) = api
+                    .patch_status(
+                        &name,
+                        &PatchParams::default(),
+                        &Patch::Merge(json!({ "status": status })),
+                    )
+                    .await
+                {
+                    error!(name, error = %e, "Failed to patch failure status");
+                }
+                Err(Error::Finalizer(Box::new(err)))
+            }
         }
     }
+    .boxed()
 }
 
-async fn apply(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
-    let name = obj.name_any();
-    let generation = obj.metadata.generation;
-    let observed_generation = obj.status.as_ref().and_then(|s| s.observed_generation);
-    // Rows persisted before the snapshot columns existed (and first
-    // reconciles) have incomplete snapshots, so keep reconciling until all
-    // three are persisted even when the generation is otherwise unchanged.
-    // Only then is `observedGeneration` written and the normal guard resumes.
-    let snapshots_complete = snapshots_complete(&ctx.pool, &name, &obj.spec.type_name).await?;
-    if should_skip_reconcile(generation, observed_generation, snapshots_complete) {
-        info!(name, "Spec unchanged since last reconcile, skipping");
-        return Ok(requeue_with_jitter());
-    }
+fn apply(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> BoxFuture<'static, Result<Action, Error>> {
+    async move {
+        let name = obj.name_any();
+        let generation = obj.metadata.generation;
+        let observed_generation = obj.status.as_ref().and_then(|s| s.observed_generation);
+        // Rows persisted before the snapshot columns existed (and first
+        // reconciles) have incomplete snapshots, so keep reconciling until all
+        // three are persisted even when the generation is otherwise unchanged.
+        // Only then is `observedGeneration` written and the normal guard resumes.
+        let snapshots_complete = snapshots_complete(&ctx.pool, &name, &obj.spec.type_name).await?;
+        if should_skip_reconcile(generation, observed_generation, snapshots_complete) {
+            info!(name, "Spec unchanged since last reconcile, skipping");
+            return Ok(requeue_with_jitter());
+        }
 
-    let uri = interceptor_uri(std::env::var("INTERCEPTOR_URI").ok());
-    info!(name, uri, "Upserting game version");
+        let uri = interceptor_uri(std::env::var("INTERCEPTOR_URI").ok());
+        info!(name, uri, "Upserting game version");
 
-    let player_counts =
-        match game_service_request(&ctx.http, &uri, &name, &Request::PlayerCounts).await? {
-            Response::PlayerCounts { player_counts } => player_counts
-                .into_iter()
-                .map(|c| c as i32)
-                .collect::<Vec<_>>(),
+        let player_counts =
+            match game_service_request(&ctx.http, &uri, &name, &Request::PlayerCounts).await? {
+                Response::PlayerCounts { player_counts } => player_counts
+                    .into_iter()
+                    .map(|c| c as i32)
+                    .collect::<Vec<_>>(),
+                other => {
+                    return Err(Error::GameService(format!(
+                        "unexpected response to PlayerCounts: {:?}",
+                        other
+                    )));
+                }
+            };
+
+        let rules = match game_service_request(&ctx.http, &uri, &name, &Request::Rules).await? {
+            Response::Rules { rules } => rules,
             other => {
                 return Err(Error::GameService(format!(
-                    "unexpected response to PlayerCounts: {:?}",
+                    "unexpected response to Rules: {:?}",
                     other
                 )));
             }
         };
 
-    let rules = match game_service_request(&ctx.http, &uri, &name, &Request::Rules).await? {
-        Response::Rules { rules } => rules,
-        other => {
-            return Err(Error::GameService(format!(
-                "unexpected response to Rules: {:?}",
-                other
-            )));
-        }
-    };
+        upsert(
+            &ctx.pool,
+            &registration_from_spec(&obj.spec, &name, &uri, player_counts, rules),
+        )
+        .await?;
 
-    upsert(
-        &ctx.pool,
-        &registration_from_spec(&obj.spec, &name, &uri, player_counts, rules),
-    )
-    .await?;
+        let ns = obj.namespace().unwrap_or_else(|| "brdgme".to_string());
+        let api: Api<GameVersion> = Api::namespaced(ctx.client.clone(), &ns);
+        let status = GameVersionStatus {
+            ready: true,
+            message: None,
+            observed_generation: generation,
+        };
+        api.patch_status(
+            &name,
+            &PatchParams::default(),
+            &Patch::Merge(json!({ "status": status })),
+        )
+        .await?;
 
-    let ns = obj.namespace().unwrap_or_else(|| "brdgme".to_string());
-    let api: Api<GameVersion> = Api::namespaced(ctx.client.clone(), &ns);
-    let status = GameVersionStatus {
-        ready: true,
-        message: None,
-        observed_generation: generation,
-    };
-    api.patch_status(
-        &name,
-        &PatchParams::default(),
-        &Patch::Merge(json!({ "status": status })),
-    )
-    .await?;
-
-    Ok(requeue_with_jitter())
+        Ok(requeue_with_jitter())
+    }
+    .boxed()
 }
 
 /// Whether the stored `game_versions` row for a version has all three snapshot
@@ -218,11 +233,14 @@ fn should_skip_reconcile(
     generation.is_some() && generation == observed_generation && snapshots_complete
 }
 
-async fn cleanup(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> Result<Action, Error> {
-    let name = obj.name_any();
-    info!(name, "Marking game version unavailable");
-    set_public(&ctx.pool, &name, &obj.spec.type_name, false).await?;
-    Ok(Action::await_change())
+fn cleanup(obj: Arc<GameVersion>, ctx: Arc<Ctx>) -> BoxFuture<'static, Result<Action, Error>> {
+    async move {
+        let name = obj.name_any();
+        info!(name, "Marking game version unavailable");
+        set_public(&ctx.pool, &name, &obj.spec.type_name, false).await?;
+        Ok(Action::await_change())
+    }
+    .boxed()
 }
 
 fn registration_from_spec(

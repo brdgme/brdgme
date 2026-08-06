@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::future::Future;
+use std::pin::Pin;
 
 use sqlx::{Acquire, PgConnection, PgPool, Row};
 use thiserror::Error;
@@ -145,15 +147,20 @@ where
 /// which version is authoritative calls this after the mutation so deprecating,
 /// demoting, or deleting the newest version re-points `game_types` instead of
 /// stranding it.
-pub async fn reconcile_game_type_descriptors<'c, A>(
+// Boxed for the same reason as `set_public` above: an `async fn` generic over
+// `Acquire` hits the rustc "not general enough" trait-solver bug when its
+// caller needs a `Send` future (rust-lang/rust#134997).
+pub fn reconcile_game_type_descriptors<'a, 'c, A>(
     acquire: A,
     game_type_id: Uuid,
-) -> Result<(), RegistrationError>
+) -> Pin<Box<dyn Future<Output = Result<(), RegistrationError>> + Send + 'a>>
 where
-    A: Acquire<'c, Database = sqlx::Postgres>,
+    A: Acquire<'c, Database = sqlx::Postgres> + Send + 'a,
 {
-    let mut conn = acquire.acquire().await?;
-    reconcile_game_type_descriptors_conn(&mut conn, game_type_id).await
+    Box::pin(async move {
+        let mut conn = acquire.acquire().await?;
+        reconcile_game_type_descriptors_conn(&mut conn, game_type_id).await
+    })
 }
 
 async fn reconcile_game_type_descriptors_conn(
@@ -246,28 +253,36 @@ pub async fn bulk_set(pool: &PgPool, regs: &[Registration]) -> Result<SetStats, 
 /// remaining fully snapshotted authoritative version. The visibility flip and
 /// the reconciliation run in one transaction, so a reconciliation failure
 /// rolls the flip back instead of stranding a demoted type.
-pub async fn set_public(
-    pool: &PgPool,
-    version_name: &str,
-    type_name: &str,
+// Boxed rather than a plain `async fn`: an `async fn` here hits a known rustc
+// trait-solver limitation proving `Send` for opaque async-fn return types
+// that nest another elided-lifetime async call on a local (the
+// `reconcile_game_type_descriptors` call below), reported as "implementation
+// of `Send`/`Acquire` is not general enough" (rust-lang/rust#134997). A
+// concrete boxed future sidesteps the buggy generic leak-check.
+pub fn set_public<'a>(
+    pool: &'a PgPool,
+    version_name: &'a str,
+    type_name: &'a str,
     is_public: bool,
-) -> Result<(), RegistrationError> {
-    let mut tx = pool.begin().await?;
-    let game_type_id: Option<Uuid> = sqlx::query_scalar(
-        "UPDATE game_versions SET is_public = $3, updated_at = NOW() \
-         WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2) \
-         RETURNING game_type_id",
-    )
-    .bind(version_name)
-    .bind(type_name)
-    .bind(is_public)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if let Some(game_type_id) = game_type_id {
-        reconcile_game_type_descriptors(&mut tx, game_type_id).await?;
-    }
-    tx.commit().await?;
-    Ok(())
+) -> Pin<Box<dyn Future<Output = Result<(), RegistrationError>> + Send + 'a>> {
+    Box::pin(async move {
+        let mut tx = pool.begin().await?;
+        let game_type_id: Option<Uuid> = sqlx::query_scalar(
+            "UPDATE game_versions SET is_public = $3, updated_at = NOW() \
+             WHERE name = $1 AND game_type_id = (SELECT id FROM game_types WHERE name = $2) \
+             RETURNING game_type_id",
+        )
+        .bind(version_name)
+        .bind(type_name)
+        .bind(is_public)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(game_type_id) = game_type_id {
+            reconcile_game_type_descriptors(&mut tx, game_type_id).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    })
 }
 
 /// Marks every stored game version except `keep_version_name` non-public.
