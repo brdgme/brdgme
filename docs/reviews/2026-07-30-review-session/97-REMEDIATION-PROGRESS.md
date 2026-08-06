@@ -148,25 +148,29 @@ restored per owner instruction.)
 
 | Item | Status | Notes |
 |------|--------|-------|
-| 4.1 four-tooth sign-off script | done | `rrm-4.1-four-tooth-core`; versioned D1 input contract, independent four-tooth fixture harness, and CI invocation accepted after independent review. |
-| 4.2 "Test? y with no test" sweep | done | `rrm-4.2-test-row-sweep`; `RRM-4.2-TEST-ROW-SWEEP.tsv` audits all 52 manifest rows: 47 pass, 3 unpackaged residuals (`T3-B1:28 f F8` `shoot`, `T3-B1:51 f F27` `render`, `T3-B4:52 e F5` `command_parser`), 2 ambiguous deliberate reversals (`T3-B1:46 f F24`, `T3-B2:64 f F57`); independent review confirmed all five non-pass classifications. |
-| 4.3 WP spec/checklist sign-off gate | done | `rrm-4.3-wp-provenance`; `8132c591` adds the guard, fixture harness, and CI invocation; `8fa51603` closes the malformed-row bypass. Recovery replaces the malformed fixture's trailing-tab encoding with a whitespace-clean truncated row while preserving the exact `WP-MALFORMED` diagnostic. Full harness, Bash syntax checks, direct malformed-fixture failure, and the committed-range whitespace check pass. The 85-heading/84-in-scope enumeration (excluding WP-09 alias) and 12 explicit historical residual gaps are unchanged. |
-| 4.4 deferral-state mechanism | done(e87b8938) | `rrm-4.4-deferral-routing`; deterministic routed-state, sender/receiver closure attribution, exact inherited-declaration, and bypass-fixture guard accepted after independent state-transition review. D1 retains six source routing records and the WP-09 split/itemization ambiguity as residuals. |
+| 4.1 four-tooth sign-off script | superseded (D3) | `rrm-4.1-four-tooth-core`; versioned D1 input contract, independent four-tooth fixture harness, and CI invocation were accepted at the time but their deliverable was the now-deleted checker (`scripts/check-four-tooth.sh` + harness + fixtures). Retired/rejected with the checker by D3 (2026-08-06); the manifest data it consumed remains valid historical input, the checker and fixtures do not. |
+| 4.2 "Test? y with no test" sweep | done(dc47ccf8) (one-off audit, retained) | `rrm-4.2-test-row-sweep`; `RRM-4.2-TEST-ROW-SWEEP.tsv` audits all 52 manifest rows: 47 pass, 3 unpackaged residuals (`T3-B1:28 f F8` `shoot`, `T3-B1:51 f F27` `render`, `T3-B4:52 e F5` `command_parser`), 2 ambiguous deliberate reversals (`T3-B1:46 f F24`, `T3-B2:64 f F57`); independent review confirmed all five non-pass classifications. This one-off audit is retained (D3). |
+| 4.3 WP spec/checklist sign-off gate | superseded (D3) | `rrm-4.3-wp-provenance`; `8132c591` adds the guard, fixture harness, and CI invocation; `8fa51603` closes the malformed-row bypass. Recovery replaces the malformed fixture's trailing-tab encoding with a whitespace-clean truncated row while preserving the exact `WP-MALFORMED` diagnostic. Full harness, Bash syntax checks, direct malformed-fixture failure, and the committed-range whitespace check pass. The 85-heading/84-in-scope enumeration (excluding WP-09 alias) and 12 explicit historical residual gaps are unchanged. **Automation superseded by D3** - guard, fixtures, and CI invocation deleted; the enumeration and residual-gap facts are historical. |
+| 4.4 deferral-state mechanism | superseded (D3) | `rrm-4.4-deferral-routing`; deterministic routed-state, sender/receiver closure attribution, exact inherited-declaration, and bypass-fixture guard accepted after independent state-transition review. D1 retains six source routing records and the WP-09 split/itemization ambiguity as residuals. **Automation superseded by D3** - the routing guard and fixtures are deleted; D1's six routing records remain as historical residuals. |
 | 4.5 4b second-reviewer rule | done | `rrm-4.5-spec-code-review`: docs/CODING.md |
-| 4.6 STOP-AND-REPORT escalation rule | done | `rrm-4.6-stop-escalation`; `docs/CODING.md` now requires an exact owner-signed amendment or recorded abandonment for every declared triggered mandatory STOP/HALT condition, never silence, inference, or ordinary completion. `check-four-tooth.sh` validates exact trigger/owner/kind/evidence linkage, with positive and missing-response, wrong-owner, rogue-response, closure-masquerade, duplicate, empty-scope, and malformed fixtures. Independent trigger/linkage review found no correctness finding. F-206's dependency-policy concern and WP-69 §5 parked negative checks remain recorded/unresolved. |
+| 4.6 STOP-AND-REPORT escalation rule | done(f136d873) (policy); guard half superseded (D3) | `rrm-4.6-stop-escalation`; `docs/CODING.md` now requires an exact owner-signed amendment or recorded abandonment for every declared triggered mandatory STOP/HALT condition, never silence, inference, or ordinary completion. The `docs/CODING.md` rule is durable and retained. The `check-four-tooth.sh` escalation linkage (trigger/owner/kind/evidence) with its positive and missing-response, wrong-owner, rogue-response, closure-masquerade, duplicate, empty-scope, and malformed fixtures was retired with the checker by D3; its acceptance no longer holds. F-206's dependency-policy concern and WP-69 §5 parked negative checks remain recorded/unresolved. |
 | 4.7 delivery-list CI guard | done(85fff2e) | same as R-16 (commit 85fff2e784e49f0191a417a1dab2325d80b5df45) |
 | 4.8 vendoring "known defects" spec section | done | `rrm-4.8-vendoring-defects`: docs/CODING.md |
-| 4.9 named-pattern sign-off sweeps | partial | `rrm-4.9-pattern-sweeps`; D1 manifest accepted after independent source audit. Two `host-unknown` attempts were empty and reconciled with no changes. `rrm-4.9a-sibling-sweep` accepted: authoritative claim/function scope plus reproducible pattern, scope, hit-count, and heuristic-limit records; 10-fixture harness covers positive, missing, stale-count, omitted-scope, malformed, duplicate, rogue, decoy, and over-limit cases. `rrm-4.9b-exhaustive-match` accepted: authoritative non-empty source scopes plus reproducible zero-wildcard and match-presence counts; its 11-fixture harness rejects missing, stale, omitted/empty, malformed, duplicate, rogue, nearby/vacuous decoy, and covered wildcard-arm cases. `rrm-4.9c-dead-code-sweep` accepted: D1's closure-register landed/staged universe is authoritative; reproducible records require 0 direct allowances, 0 covered suppression variants, and a current non-vacuous `dead_code` hit count. Its 12-fixture harness rejects missing, stale, omitted/empty/decoy, malformed, duplicate, rogue, remaining allowance, and covered `allow(unused|warnings)` / `expect(dead_code|unused|warnings)` variants. `rrm-4.9d-log-layer-proof` accepted: authoritative non-empty claim scopes plus reproducible comment/string-stripped `file:line` sets for direct `Log::public` invocations and the approved pattern. Its 14-fixture harness rejects missing, stale, omitted/empty, malformed, duplicate, rogue, nearby/lower-layer/comment/string/coexisting, and equal-count-wrong-lines decoys; its Bash limits are explicit and it makes no parser-grade proof claim. `rrm-4.9e-every-item-checklist` accepted: linked authoritative non-empty distinct-line item universe, per-record current-count reproduction, and exactly one exact-text checklist record per universe item; its 14-fixture harness rejects missing, stale (including later-row), omitted, duplicate, rogue, empty, malformed, nearby/absent-universe, and unlinked-claim records. Its textual input contract proves enumerated coverage only, not semantic completeness beyond the declared universe. One final integration/adversarial review remains required. |
+| 4.9 named-pattern sign-off sweeps | superseded (D3) | `rrm-4.9-pattern-sweeps`; D1 manifest accepted after independent source audit. Two `host-unknown` attempts were empty and reconciled with no changes. The sub-slices `rrm-4.9a-sibling-sweep` through `rrm-4.9e-every-item-checklist` plus corrective slices `rrm-4.9r1/r2/r3` each added fixture harnesses to the deleted checker (positive/negative fixtures with exact diagnostics); all are **superseded by D3** and their checker/fixture acceptance claims no longer hold. `rrm-4.9r4-raw-string-lexing` is **cancelled**. The named pattern anchors in D1 (section 4.9) remain valid historical observations. |
 
 ### 4.9 corrective slices (2026-08-06)
 
 | Semantic unit | Status | Scope |
 |---------------|--------|-------|
-| `rrm-4.9r1-sibling-lexical` | accepted | Comment/string-only function and pattern decoys now reject; full guard harness and Bash syntax checks pass. |
-| `rrm-4.9r2-dead-code-spacing` | accepted | Same-line spaced allowance and variant forms are covered; spaced-allowance fixture, full harness, and Bash syntax checks pass. |
-| `rrm-4.9r3-ci-path-filter` | accepted | `test-rust` selects checker, harness, `scripts/fixtures/**`, and the canonical manifest, then runs `bash scripts/check-four-tooth.test.sh`; guard harness and Bash syntax checks pass. |
+| `rrm-4.9r1-sibling-lexical` | superseded (D3) | Comment/string-only function and pattern decoys were made to reject; the guard harness and Bash syntax checks passed at the time. Superseded with the deleted checker by D3 (2026-08-06); its fixture claims no longer hold. |
+| `rrm-4.9r2-dead-code-spacing` | superseded (D3) | Same-line spaced allowance and variant forms were covered; the spaced-allowance fixture, full harness, and Bash syntax checks passed at the time. Superseded with the deleted checker by D3 (2026-08-06); its fixture claims no longer hold. |
+| `rrm-4.9r3-ci-path-filter` | superseded (D3) | `test-rust` selected checker, harness, `scripts/fixtures/**`, and the canonical manifest, then ran `bash scripts/check-four-tooth.test.sh`; guard harness and Bash syntax checks passed at the time. Superseded by D3 (2026-08-06) - the CI step and path filters were removed; the manifest is no longer a CI path trigger. |
+| `rrm-4.9r4-raw-string-lexing` | cancelled (D3) | The raw-string corrective slice is cancelled by D3 (2026-08-06); the shared textual stripper's raw-string handling is not delivered and no checker/fixture claims hold. |
 
-Parent `rrm-4.9-pattern-sweeps` remains partial pending replacement independent review.
+Parent `rrm-4.9-pattern-sweeps` is superseded (D3): every sub-slice deliverable
+was checker/fixture automation now deleted; the parent needs no replacement
+independent review because no live guard remains. The D1 manifest pattern
+anchors (section 4.9) remain valid historical observations.
 
 ## Owner decisions
 
@@ -190,13 +194,18 @@ Parent `rrm-4.9-pattern-sweeps` remains partial pending replacement independent 
   is the canonical sign-off input, derived from deleted-corpus source
   `23f8ab78e015c127f4e809d4901467e494e21bb3` (the parent of deletion commit
   `d89fa345019ec9d52d5e56e7c6c2affa98cd7b8d`) and recording that source. An
+| D3 sign-off checker retirement | Permanent CI sign-off checker retired/rejected: `scripts/check-four-tooth.sh`, its contract harness, all sign-off fixtures, and the CI job are deleted. Automation-focused process-fix items (4.1 checker, 4.3/4.4/4.6 guard halves, 4.9 sweeps incl. r1-r3, r4 raw-string corrective slice) are superseded/cancelled, not completed. The historical manifest (D1) and the one-off 4.2 audit are retained. CODING.md checker-specific process text (line ~901) is classified for a later user decision and left unchanged. | 2026-08-06 |
   independent audit must compare the initial extraction against that source
   before acceptance. This resolves D1 without restoring the full corpus.
-  `rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
+  The manifest itself was accepted on 2026-08-06 after an independent source
+  audit and same-scope corrections and remains the canonical historical
+  sign-off input. The execution direction in the original D1 text
+  (`rrm-4.1-four-tooth-core`, `rrm-4.2-test-row-sweep`,
   `rrm-4.3-wp-provenance`, `rrm-4.4-deferral-routing`,
-  `rrm-4.6-stop-escalation`, and `rrm-4.9-pattern-sweeps` are unblocked: the
-  manifest was accepted on 2026-08-06 after an independent source audit and
-  same-scope corrections. Execute them serially.
+  `rrm-4.6-stop-escalation`, `rrm-4.9-pattern-sweeps` "execute serially") is
+  **superseded by D3 (2026-08-06)**: every automation-backed unit is retired
+  with the checker, and only the one-off 4.2 audit and the manifest data are
+  retained.
 - **D2 sqlx-cli version (user decision):** standardize Docker and both CI
   install sites on `sqlx-cli` 0.9.0, contingent on compatibility verification.
   Use a disposable ledger applied with 0.8.6, verify 0.9.0 accepts its checksums,
@@ -213,18 +222,39 @@ Parent `rrm-4.9-pattern-sweeps` remains partial pending replacement independent 
 - 2026-07-31: R-07 production-query Worker performed one unapproved
   schema-metadata check; exposed no sensitive output and made no modifications.
 
+- **D3 sign-off checker retirement (user decision 2026-08-06):** the permanent
+  CI sign-off checker is retired/rejected. `scripts/check-four-tooth.sh`,
+  `scripts/check-four-tooth.test.sh`, all `scripts/fixtures/**` sign-off
+  fixtures, and the CI job that ran the harness are deleted from the worktree;
+  CI no longer runs a checker harness. Automation-focused items are
+  **superseded, not completed** - the process-fix rows below whose deliverable
+  was checker/guard/fixture automation (4.1, 4.3, 4.4, 4.6's guard half,
+  4.9 incl. r1-r3, and 4.10's checker-backed rows) are marked superseded and
+  their checker/fixture acceptance claims no longer hold. The raw-string
+  corrective slice `rrm-4.9r4-raw-string-lexing` is **cancelled**. The
+  historical manifest (D1, `HISTORICAL-SIGNOFF-MANIFEST.md`) and the one-off
+  4.2 audit (`RRM-4.2-TEST-ROW-SWEEP.tsv`, 52 rows: 47 pass / 3 fail / 2
+  ambiguous) are **retained** as canonical historical input. The 4.5 and 4.8
+  `docs/CODING.md` policy outcomes, F-207 evidence/gate, and all unrelated
+  parked/external items are unaffected. Checker-specific durable process text
+  in `docs/CODING.md` (the "sign-off guard enforces this on declared triggers"
+  paragraph, formerly `docs/CODING.md:901-912`) is deleted: the classification
+  below decided to remove it, and it no longer exists in `docs/CODING.md`.
 ## Process-fix evidence
 
-- `rrm-4.1-four-tooth-core`: `scripts/check-four-tooth.sh` enforces citation
-  presence, non-test reachability, named-test invocation, and explicit
-  disproved-premise amendment against the versioned contract in
-  `HISTORICAL-SIGNOFF-MANIFEST.md`. The committed harness has one passing
-  fixture and six isolated negative fixtures (the four required teeth plus
-  comment-only caller/test decoys); it runs in CI. `bash
-  scripts/check-four-tooth.test.sh`, direct positive-fixture execution,
-  `bash -n`, and `git diff --check` passed. Independent final review exercised
-  comment/string decoys and test-module exclusion; historical manifest gaps
-  remain intentionally unmodified.
+- `rrm-4.1-four-tooth-core` (historical, superseded by D3): the now-deleted
+  `scripts/check-four-tooth.sh` enforced citation presence, non-test
+  reachability, named-test invocation, and explicit disproved-premise amendment
+  against the versioned contract in `HISTORICAL-SIGNOFF-MANIFEST.md`. The
+  committed harness had one passing fixture and six isolated negative fixtures
+  (the four required teeth plus comment-only caller/test decoys) and ran in CI.
+  `bash scripts/check-four-tooth.test.sh`, direct positive-fixture execution,
+  `bash -n`, and `git diff --check` passed at the time. Independent final review
+  exercised comment/string decoys and test-module exclusion; historical manifest
+  gaps remain intentionally unmodified. This evidence records what was done at
+  the time; the checker, harness, and fixtures are deleted (D3) and their
+  acceptance no longer holds. The manifest data the checker consumed is
+  retained.
 - `rrm-4.5-spec-code-review`: `docs/CODING.md` requires a second reviewer when
   a fix changes a test assertion, `RULES.md`, or a `docs/CODING.md` rule; that
   review must answer whether code moved to the spec or vice versa. New
@@ -233,7 +263,16 @@ Parent `rrm-4.9-pattern-sweeps` remains partial pending replacement independent 
 - `rrm-4.8-vendoring-defects`: `docs/CODING.md` forbids vendoring absent no
   alternative and a complete block, and requires every future vendoring spec to
   state inherited upstream defects (or explicit absence) after upstream issue
-  and PR review, with owner sign-off. `git diff --check` passed.
+  and PR review, with owner sign-off. `git diff --check` passed. Retained.
+- `docs/CODING.md` checker-specific durable process text (user decision
+  2026-08-06: deleted): the "Spec-Mandated Stops" section's former closing
+  paragraph, "The sign-off guard enforces this on declared triggers." (formerly
+  `docs/CODING.md:901-912`), described the deleted `check-four-tooth.sh` 4.6
+  escalation gate (escalation-scope/escalation-responses `.tsv` linkage). It was
+  checker-specific automation prose naming a deleted script; the user decided to
+  delete it rather than re-scope it to a replacement mechanism, and it has been
+  removed from `docs/CODING.md`. The durable owner-signed-amendment rule that
+  preceded it stands alone. Deleted per D3.
 
 ## R-09 evidence
 
@@ -241,6 +280,7 @@ Code commit `61f9f4eee5af657b108a11e5722155f82d4260c8` (only tracked change:
 `rust/web/src/email/inbound.rs`, 277+/58-).
 
 - **Root cause:** F-162 (invite) and F-169 (settings) were the same defect
+  Retained.
   class - a transient (retryable) DB failure collapsed into `RouteOutcome::Done`,
   so svix saw 200 and never redelivered, violating D-2 at-least-once. Invite's
   six pre-`tx.commit()` errors and settings' two lookup errors now map to

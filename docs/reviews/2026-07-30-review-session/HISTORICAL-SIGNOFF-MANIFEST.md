@@ -192,71 +192,13 @@ Named audit targets from 98-REMEDIATION-PLAN 4.1, crosswalked to the corpus:
   finding text lives in `findings/dependencies.md` (finding text unchanged),
   not in the corpus closure notes.
 
-#### 4.1 checker input contract (rrm-4.1-four-tooth-core)
-
-The 4.1 checker (`scripts/check-four-tooth.sh`) is generic over an input
-contract, not over this manifest's narratives. Each input line is one closed
-finding record, tab-separated fields in order:
-
-`id  symbol  file  test  premise-disproved  premise  amendment`
-
-- `id` - finding ID (e.g. F-109).
-- `symbol` - cited symbol (teeth 1-3).
-- `file` - cited source file, resolved relative to the checker's CWD (tooth 1).
-- `test` - named regression test, `-` when the row is not `Test? y` (tooth 3).
-- `premise-disproved` - `y` when the closing commit disproved the original
-  premise, anything else means no (tooth 4).
-- `premise` - the original finding text / mechanism claim; `-` when none.
-- `amendment` - the amended finding text; `-` when none (tooth 4).
-
-Field values must not contain tabs. An invocation is `symbol` (not as a
-suffix of a longer identifier) followed by optional spaces and `(`, with
-comments (`//`, `/* */`, including multi-line) and string literals stripped
-first - a comment or string that merely mentions the symbol is never a caller
-and never test exercise. A test module is a `*.rs` file under a `tests/`
-directory, named `tests.rs` or `*_test.rs`, or containing `#[cfg(test)]`.
-
-The four teeth, each with its exact diagnostic (the finding ID is
-interpolated):
-
-1. The citation still exists: `CITATION-MISSING: <id>: ...` when `file` is
-   absent or the cited `symbol` is not present in it.
-2. The citation is reachable: `CITATION-UNREACHABLE: <id>: ...` when the
-   symbol has no actual invocation in a `*.rs` file other than `file`. Test
-   modules are always excluded from reachability, whether or not a named test
-   resolves (the named test's own file is excluded too when it does);
-   checked only when tooth 1 passes.
-3. The regression test exercises the target: `DECOY-TEST: <id>: ...` when the
-   named test is not found or its body never actually invokes `symbol`.
-4. A disproved premise is amended: `UNAMENDED-PREMISE: <id>: ...` when
-   `premise-disproved` is `y` and `amendment` is empty, `-`, or identical to
-   `premise`.
-
-CI runs only the committed contract harness
-(`scripts/check-four-tooth.test.sh`) against seven committed fixtures, never
-this manifest's historical targets: the recorded targets intentionally contain
-unresolved gaps, so the manifest is not a CI gate. Fixture mapping (one real
-positive, plus negatives each failing exactly one named tooth with its exact
-diagnostic, including the two comment decoys that a mention-based guard would
-falsely pass):
-
-- `scripts/fixtures/four-tooth-positive/` - all four teeth hold (real caller,
-  test that calls the target, explicit amendment).
-- `scripts/fixtures/four-tooth-missing-citation/` - tooth 1, cited file
-  absent (F-109 shape: deleted fix/test).
-- `scripts/fixtures/four-tooth-unreachable/` - tooth 2, symbol with no caller,
-  `test` field `-` so test-module exclusion is proven without a named test
-  (F-147 shape: `send_turn_reminder`).
-- `scripts/fixtures/four-tooth-decoy-test/` - tooth 3, name-matching test that
-  never touches the target (F-151 shape).
-- `scripts/fixtures/four-tooth-comment-caller/` - tooth 2, adversarial: the
-  symbol is mentioned only in a comment, never invoked, so a comment-only
-  caller decoy cannot pass.
-- `scripts/fixtures/four-tooth-comment-test/` - tooth 3, adversarial: the
-  named test body only comments about the target, so a comment-only test
-  decoy cannot pass.
-- `scripts/fixtures/four-tooth-unamended-premise/` - tooth 4, unamended
-  disproved premise (F-205 shape: dp F12).
+Retirement note (user decision 2026-08-06): the permanent CI sign-off checker
+(`scripts/check-four-tooth.sh`), its committed contract harness
+(`scripts/check-four-tooth.test.sh`), all sign-off fixtures, and the CI job
+that ran them were retired/rejected by user decision and deleted. No checker
+input contract or automated enforcement remains. The 4.1 material above is
+retained purely as historical reference data extracted from the deleted corpus;
+this manifest's role as canonical historical sign-off input is unchanged.
 
 ### 4.2 test-row-sweep
 
