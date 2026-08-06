@@ -857,6 +857,34 @@ mod tests {
     }
 
     #[test]
+    fn test_shoot_off_board_errors() {
+        let mut g = mock_game();
+        place_all(&mut g, MICK);
+        place_all(&mut g, STEVE);
+        for loc in [
+            Loc {
+                y: 0,
+                x: BOARD_SIZE,
+            },
+            Loc {
+                y: BOARD_SIZE,
+                x: 0,
+            },
+        ] {
+            assert!(
+                matches!(
+                    g.shoot(MICK, loc),
+                    Err(GameError::InvalidInput { message })
+                        if message.contains("off the board")
+                ),
+                "shoot({:?}) should be rejected as off the board",
+                loc
+            );
+        }
+        assert_eq!(MICK, g.current_player);
+    }
+
+    #[test]
     fn test_player_hits_remaining() {
         let mut g = mock_game();
         place_all(&mut g, MICK);

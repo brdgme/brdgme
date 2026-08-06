@@ -1149,6 +1149,19 @@ mod tests {
     }
 
     #[test]
+    fn finished_game_offers_no_commands() {
+        let mut g = Game::start(2, 1).unwrap().0;
+        g.player_points[MICK] = end_score_of(2);
+        assert!(g.check_finished());
+        assert!(g.command_parser(MICK).is_none());
+        let players = vec!["Mick".to_string(), "Steve".to_string()];
+        assert!(matches!(
+            g.command(MICK, "princess", &players),
+            Err(GameError::Finished)
+        ));
+    }
+
+    #[test]
     fn pub_state_does_not_leak_hidden_info() {
         let g = Game::start(3, 1).unwrap().0;
         let json = serde_json::to_value(g.pub_state()).unwrap();

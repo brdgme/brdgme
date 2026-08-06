@@ -134,3 +134,36 @@ impl Renderer for PlayerState {
         render(&self.public, Some(&self.hand))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finished_game_render_omits_points_until_end_footer() {
+        let finished = PubState {
+            players: 2,
+            player_cards_counts: vec![0, 0],
+            player_points: vec![66, 10],
+            finished: true,
+            placings: vec![2, 1],
+            ..PubState::default()
+        };
+        let rendered = brdgme_markup::to_string(&render(&finished, None));
+        assert!(
+            !rendered.contains("until the end of the game"),
+            "finished render must not show the points-until-end footer"
+        );
+
+        let running = PubState {
+            finished: false,
+            placings: vec![],
+            ..finished
+        };
+        let rendered = brdgme_markup::to_string(&render(&running, None));
+        assert!(
+            rendered.contains("until the end of the game"),
+            "running render must show the points-until-end footer"
+        );
+    }
+}
