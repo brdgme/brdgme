@@ -772,6 +772,25 @@ mod tests {
         upsert(&pool, &tic_tac_toe_registration("http://localhost:0/mock"))
             .await
             .unwrap();
+        // A second public, non-deprecated version of the same type must
+        // survive as a fallback: per R-51 constraint 5, reconciliation with
+        // no authoritative version is a documented no-op (it leaves
+        // `game_types` descriptors unchanged rather than writing to them), so
+        // demoting the type's only version would never touch `game_types`
+        // and the trigger below would never fire.
+        upsert(
+            &pool,
+            &registration(
+                "Tic-tac-toe",
+                "tic-tac-toe-1",
+                vec![2],
+                1.0,
+                "fallback blurb",
+                false,
+            ),
+        )
+        .await
+        .unwrap();
 
         // Force the post-demotion descriptor reconciliation to fail so the
         // visibility flip and reconciliation roll back together.
