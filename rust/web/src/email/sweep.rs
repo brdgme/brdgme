@@ -273,22 +273,20 @@ async fn sweep_once(
         if claimed.is_none() {
             continue;
         }
-        let token = match crate::email::outbound::ensure_email_token_tx(
-            &mut *claim_tx,
-            c.game_player_id,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::error!(
-                    "turn_reminder: failed to ensure email token for {}: {}",
-                    c.game_player_id,
-                    e
-                );
-                continue;
-            }
-        };
+        let token =
+            match crate::email::outbound::ensure_email_token_tx(&mut claim_tx, c.game_player_id)
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!(
+                        "turn_reminder: failed to ensure email token for {}: {}",
+                        c.game_player_id,
+                        e
+                    );
+                    continue;
+                }
+            };
         if let Err(e) = claim_tx.commit().await {
             tracing::error!(
                 "turn_reminder: failed to commit claim tx for {}: {}",

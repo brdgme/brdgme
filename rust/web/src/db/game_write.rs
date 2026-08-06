@@ -526,6 +526,14 @@ pub async fn concede_game_replace(
     Ok(())
 }
 
+type ActorRow = (
+    Option<Uuid>,
+    Option<time::PrimitiveDateTime>,
+    Option<i32>,
+    i64,
+    Option<i32>,
+);
+
 #[cfg(feature = "ssr")]
 #[tracing::instrument(skip(pool), fields(game_id = %game_id))]
 pub async fn end_game(
@@ -549,13 +557,7 @@ pub async fn end_game(
     // active humans every human in the latest departure event is. Plain
     // (non-macro) query, not `query!`, because migration-032's
     // `departure_sequence` is not in the committed offline `.sqlx` cache.
-    let actor: Option<(
-        Option<Uuid>,
-        Option<time::PrimitiveDateTime>,
-        Option<i32>,
-        i64,
-        Option<i32>,
-    )> = sqlx::query_as(
+    let actor: Option<ActorRow> = sqlx::query_as(
         r#"SELECT gp.user_id, gp.left_at, gp.departure_sequence,
                   (SELECT COUNT(*) FROM game_players
                    WHERE game_id = $1 AND user_id IS NOT NULL AND left_at IS NULL),
