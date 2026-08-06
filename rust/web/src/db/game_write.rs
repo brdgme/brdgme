@@ -1069,6 +1069,14 @@ mod tests {
     use sqlx::postgres::PgPool;
     use uuid::Uuid;
 
+    type ConcedeRow = (
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<time::PrimitiveDateTime>,
+        Option<String>,
+        Option<i32>,
+    );
+
     #[sqlx::test]
     async fn create_game_with_users_assigns_positions_and_colors(pool: PgPool) {
         let creator = make_user(&pool, "creator").await;
@@ -1697,13 +1705,7 @@ mod tests {
             .await
             .unwrap();
 
-        let row: (
-            Option<Uuid>,
-            Option<Uuid>,
-            Option<time::PrimitiveDateTime>,
-            Option<String>,
-            Option<i32>,
-        ) = sqlx::query_as(
+        let row: ConcedeRow = sqlx::query_as(
             "SELECT user_id, game_bot_id, left_at, departure_reason, departure_sequence \
              FROM game_players WHERE id = $1",
         )

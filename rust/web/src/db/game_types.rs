@@ -142,6 +142,8 @@ mod tests {
     use sqlx::postgres::PgPool;
     use uuid::Uuid;
 
+    type SnapshotRow = (Option<Vec<i32>>, Option<f32>, Option<String>);
+
     #[sqlx::test]
     async fn find_available_game_types_carries_weight_and_blurb(pool: PgPool) {
         // Unchecked queries: `weight`/`blurb` are exercised through the
@@ -211,7 +213,7 @@ mod tests {
         // R-51: the fixture inserts omit the snapshot columns, so every
         // eligible (public, non-deprecated) version here has an incomplete
         // snapshot. Such versions must still be listed as available.
-        let snapshots: Vec<(Option<Vec<i32>>, Option<f32>, Option<String>)> = sqlx::query_as(
+        let snapshots: Vec<SnapshotRow> = sqlx::query_as(
             "SELECT snapshot_player_counts, snapshot_weight, snapshot_blurb \
              FROM game_versions WHERE game_type_id = $1 AND is_public = true AND is_deprecated = false",
         )

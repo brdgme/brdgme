@@ -1227,7 +1227,7 @@ mod tests {
         let http = reqwest::Client::new();
 
         let mut tx = pool.begin().await.unwrap();
-        let token = crate::email::outbound::ensure_email_token_tx(&mut *tx, gp_id)
+        let token = crate::email::outbound::ensure_email_token_tx(&mut tx, gp_id)
             .await
             .unwrap();
         tx.commit().await.unwrap();

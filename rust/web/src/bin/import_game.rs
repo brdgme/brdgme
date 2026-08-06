@@ -36,7 +36,7 @@ fn parse_bundle(raw: &str, path: &str) -> anyhow::Result<web::game::export::Expo
 }
 
 fn read_bundle_limited<R: std::io::Read>(
-    mut reader: R,
+    reader: R,
     path: &str,
     max_bytes: u64,
 ) -> anyhow::Result<String> {

@@ -2160,7 +2160,7 @@ mod tests {
             None,
         );
 
-        let result = with_session_context(&pool, session, || logout_everywhere()).await;
+        let result = with_session_context(&pool, session, logout_everywhere).await;
 
         assert!(
             result.is_err(),
@@ -2191,7 +2191,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = with_session_context(&pool, session, || logout_everywhere()).await;
+        let result = with_session_context(&pool, session, logout_everywhere).await;
 
         assert!(
             matches!(result, Ok(true)),
