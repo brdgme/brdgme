@@ -101,6 +101,9 @@ jobs:
       - name: Check vendored licence and attribution
         working-directory: .
         run: grep -q "Permission is hereby granted" rust/lib/session_store/LICENSE && grep -q "Vendored from tower-sessions-sqlx-store 0.15.0" rust/lib/session_store/src/lib.rs && grep -q "Public Domain Dedication" rust/web/src/auth/BLOCKED_DOMAINS_LICENSE && grep -q "f9004b00673ca09626e9dd5eaf97fd657d009cb8" rust/web/src/auth/blocked_domains.rs
+      - name: Check Dockerfile Rust version matches toolchain file
+        working-directory: .
+        run: test "$(grep -oP '^channel = "\K[^"]+' rust/rust-toolchain.toml)" = "$(grep -oP 'lukemathwalker/cargo-chef:\S+-rust-\K[0-9][0-9.]*' rust/Dockerfile | head -1)"
       # GitHub Actions `services:` containers can't take extra CLI args (no
       # way to append `-js` to the image's default command), so NATS is
       # started as a plain step instead - JetStream needs that flag.

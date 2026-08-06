@@ -10,8 +10,7 @@
   languages.typescript.enable = true;
   languages.rust = {
     enable = true;
-    channel = "stable";
-    targets = [ "wasm32-unknown-unknown" ];
+    toolchainFile = ./rust/rust-toolchain.toml;
   };
   languages.python = {
     enable = true;

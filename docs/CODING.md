@@ -622,16 +622,13 @@ defaults flip to `aws-lc-rs` (kube and async-nats both already expose the
 feature), at which point the migration becomes one-line feature swaps plus a
 `ring` entry in the `deny.toml` `[bans]` deny list.
 
-**`rust/rust-toolchain.toml` and `devenv.nix`'s Rust channel must be kept in
-sync.** `rust-toolchain.toml` pins an explicit rustc channel; CI's
-`dtolnay/rust-toolchain@stable` step is overridden by this file the moment
-`cargo` runs inside `rust/`, so the toolchain file - not the CI action - is
-the real source of truth for `rustfmt`/`rustc` version. If it drifts from
-what `devenv.nix` (`languages.rust.channel = "stable"`) actually resolves to
-locally, `cargo fmt --all -- --check` can flip-flop between passing locally
-and failing in CI (different rustfmt versions format some constructs
-differently). When either file's version changes, update the other to match
-in the same change.
+**`rust/rust-toolchain.toml` is the single source of truth for the Rust
+toolchain version, components, and targets.** `devenv.nix` reads it via
+`languages.rust.toolchainFile`, so local and CI resolve to the same pin by
+mechanism, not hand-syncing. CI asserts `rust/Dockerfile`'s cargo-chef
+base-image Rust version matches it. To change the Rust version: bump `channel`
+in `rust-toolchain.toml` and the `cargo-chef` tag in `rust/Dockerfile`; no
+other file changes.
 
 **Docker builder and runtime stages must be on the same Debian release.**
 `rust/Dockerfile`'s builder stage pins an explicit `cargo-chef` tag
