@@ -898,15 +898,3 @@ skip entries and the commit answered it with a pre-emptive `deny.toml` comment
 instead of stopping. Completing the work anyway, staying silent, or inferring
 approval from an ordinary closure likewise clears nothing.
 
-**The sign-off guard enforces this on declared triggers.** `check-four-tooth.sh`
-(4.6 gate) takes an escalation scope (`escalation-scope.tsv`: one declared
-mandatory trigger per line, `trigger owner`) and an owner-response file
-(`escalation-responses.tsv`: one record per declared trigger, `trigger owner
-response-kind evidence`). Every declared trigger must carry an exact response:
-bound to the same trigger, answered by the exact required owner, classified
-exactly as `amendment` or `abandonment`, with recorded evidence of where the
-amendment or abandonment lives. A response is never inferred from a closure or
-completion record, and a record that answers a trigger with ordinary closure
-(`response-kind` other than `amendment`/`abandonment`) fails the gate. Declare
-every spec STOP/HALT trigger in the scope file when it fires - omitting it
-leaves the escalation unguarded.

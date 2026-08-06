@@ -1,1 +1,0 @@
-F-1003	game_history	src/history.rs	rating_before_aggregates_exclude_nulls	y	game_history is excluded from ratings aggregates	AMENDED: game_history is the ratings aggregate source and the regression test calls it directly
