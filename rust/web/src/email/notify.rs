@@ -130,10 +130,6 @@ pub async fn render_board_and_you_can(
 
 enum NotifyKind {
     Turn,
-    /// The turn-reminder sweep's nudge for a turn already notified. Shares
-    /// `Turn`'s de-threaded per-turn subject so it groups with the mail it
-    /// nudges (wfe F39).
-    Reminder,
     Eliminated,
     Finished,
 }
@@ -181,7 +177,6 @@ async fn build_content(
 ) -> crate::email::render::EmailContent {
     let header = Some(match &kind {
         NotifyKind::Turn => turn_header_text(recipient_player.name()),
-        NotifyKind::Reminder => reminder_header_text(recipient_player.name()),
         NotifyKind::Eliminated => eliminated_header_text(recipient_player.name()),
         NotifyKind::Finished => {
             // A last-human-stop game has no result: never derive a winner or
@@ -201,12 +196,7 @@ async fn build_content(
         }
     });
 
-    // A reminder carries no digest: the turn email it nudges already showed
-    // those lines and the recipient has not moved since (wfe F36).
-    let digest = match &kind {
-        NotifyKind::Reminder => None,
-        _ => digest_since_last_turn(pool, ge, recipient_player).await,
-    };
+    let digest = digest_since_last_turn(pool, ge, recipient_player).await;
 
     let (board, you_can) = render_board_and_you_can(
         http_client,
@@ -363,7 +353,6 @@ async fn send_one_loaded(
 
     let email_kind = match &kind {
         NotifyKind::Turn => crate::email::render::EmailKind::Turn,
-        NotifyKind::Reminder => crate::email::render::EmailKind::Reminder,
         NotifyKind::Eliminated | NotifyKind::Finished => crate::email::render::EmailKind::GameEvent,
     };
 
@@ -388,7 +377,7 @@ async fn send_one_loaded(
 
     let is_first_message = log_count == Some(0);
     let (subject, thread_id) = match &kind {
-        NotifyKind::Turn | NotifyKind::Reminder => (
+        NotifyKind::Turn => (
             turn_subject_or_fallback(&ge.game_type.name, game_id, log_count),
             None,
         ),

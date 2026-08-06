@@ -249,6 +249,12 @@ gated on `reminder_emails_enabled` and actually call it from the sweep), correct
 the `notify.rs:523-525` doc comment, and reopen wfe F36 against WP-46's sweep copy
 where it belongs - F-136 and F-147 are then one remediation item.
 
+> Update (2026-08-06): `notify::send_turn_reminder` was already deleted (see
+> `97-REMEDIATION-PROGRESS.md`), and `NotifyKind::Reminder` - the last piece of
+> this notify-side infrastructure, still never constructed - was deleted by
+> user ruling. Re-add it, or a `SendMode::Reminder` arm, only when a real
+> reminder caller through this pipeline exists.
+
 ### F-148 (Medium) - WP-53's most load-bearing fix is the one of three that shipped without its required test
 
 `rust/web/src/db/game_write.rs:739`, test gap in the same file's test module.
@@ -332,7 +338,9 @@ one; see Verified good.
   as an explicit `NotifyKind::Reminder => None` arm, and `Reminder` deliberately
   shares `Turn`'s subject so the nudge groups with the mail it nudges (wfe F39,
   documented at `:133-136`). This is the one place a shared subject is correct and
-  it says why - which is what makes F-146's silence notable.
+  it says why - which is what makes F-146's silence notable. (Update
+  2026-08-06: `NotifyKind::Reminder` was deleted by user ruling; see the F-147
+  note above.)
 - `sweep.rs:314-328` - `spawn_sweep` (wfe F38) is a faithful collapse of the six
   duplicated loops: `MissedTickBehavior::Skip` preserved, no behaviour change, and
   all six call sites go through it (including WP-38's `spawn_bot_turn_sweep`, which
