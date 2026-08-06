@@ -204,10 +204,12 @@ work breakdown. Still uncommitted.
   including ties and game-specific tie-breakers. Category 5, No Thanks, and
   Cathedral retain positive lower-is-better raw points; Cathedral's shared final
   score log displays positive remaining-piece sizes while `calc_placings` alone
-  negates that ranking metric. The web manual-end `points DESC` fallback remains
-  a separate unresolved owner decision and is not part of R-53. R-53 completed
-  with the 28/26/23/3/2 implementation inventory and focused lower-is-better
-  conformance tests.
+  negates that ranking metric. The web manual-end `points DESC` fallback was a
+  separate owner decision outside R-53; `44c057b4` removed it, so a last-human
+  stop now has no authoritative game placing - every seat's `place` is cleared,
+  `end_reason = 'last_human_stop'` is recorded, and competitive ranks come
+  solely from `write_ranked_placings`. R-53 completed with the 28/26/23/3/2
+  implementation inventory and focused lower-is-better conformance tests.
 - **`lords-of-vegas-1` is work in progress.** Its missing endgame (never assigns
   `finished = true`) is out of scope. Do not raise findings about missing or
   incomplete functionality there. F-50/F-57 and the no-`finished` observation are
@@ -243,7 +245,10 @@ All 28 `rust/game/*` crates have an owning sub-unit (table in
 - **01c's `V` marks are epilogue-shape only** and must not be read as crate-level
   coverage in the unified report.
 
-## F-96 - resolved out of band (report: `F-96-turnstile-key.md`)
+## F-96 - investigation closed, finding downgraded (report: `F-96-turnstile-key.md`)
+
+Prod `TURNSTILE_SECRET_KEY` remains open, tracked pending in the Deployment
+items table.
 
 Owner-requested investigation, done 2026-07-30. Conclusions, do not re-derive:
 

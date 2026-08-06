@@ -11,10 +11,12 @@ order is not execution order when blockers exist; the tracker's status column
 decides what is next.
 
 - **R-49 is done** (see 97 for commits), as are R-47 and R-48. R-45 is
-  `partial/parked` on the unpinned `blocked_domains.rs` provenance record; see
-  97. R-37 and R-43 are parked by user process; R-38 remains blocked on 5.3.
-  R-46 is `partial/parked` after R-46.0; R-51 is parked for the later
-  parked-item review pending two scope rulings; see 97.
+  done (uncommitted): `blocked_domains.rs` provenance is pinned to immutable
+  `f9004b00673ca09626e9dd5eaf97fd657d009cb8` with verbatim CC0 text in
+  `rust/web/src/auth/BLOCKED_DOMAINS_LICENSE` and the focused CI guard extended;
+  see 97. R-37 and R-43 are parked by user process; R-38 is done (uncommitted; see
+  97). R-46 is `partial/parked` after R-46.0; R-51 is done (uncommitted; see
+  97).
 - **R-35 is done (uncommitted):** `game_client::fetch_game_data` remains
   scoreless and must never request `Status` to obtain points. No game-service
   JSON-contract change, `Response::PlayerRender` change, or points endpoint was
@@ -2616,17 +2618,17 @@ never been swept.** Only `session_store` is known. That sweep is itself a work
 package - `R-VEND` in section 2 - and it should run regardless of which way the
 policy lands.
 
-### 6.2 Unit 07b scoping - OPEN, blocks nothing but leaves a coverage claim unproven
+### 6.2 Unit 07b scoping - RESOLVED (R-52 done(65fc01c))
 
-Unified report section 8.12 records one unresolved scoping question: **did Unit
+Unified report section 8.12 recorded one unresolved scoping question: **did Unit
 07b cover the whole WP-51 / WP-53 surface** after its quota-death re-dispatch?
 07b died before producing any finding and was re-dispatched from scratch; the
 re-dispatch produced F-144..F-149, but whether it re-walked the full surface of
 both commits was never confirmed.
 
-Resolving it means re-walking `dcd8844c` (WP-51) and `3610b957` (WP-53). This is
-proposed as a small verification work package (`R-VER` in section 2), not a
-blocker. The owner's decision is only whether it is worth the pass.
+R-52 settled it: the read-only re-walk of `dcd8844c` (WP-51) and `3610b957`
+(WP-53) confirmed coverage of all three named surfaces with no new finding -
+see `R-52-WP51-WP53-COVERAGE.md` and the R-52 tracker row in 97.
 
 ### 6.3 Second-order decisions the plan surfaces but does not make
 
