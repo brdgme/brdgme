@@ -37,6 +37,8 @@ spec:
                 name: email-config
             - secretRef:
                 name: database-encryption-key
+            - secretRef:
+                name: turnstile-config
           env:
             - name: NATS_URL
               value: nats://nats:4222

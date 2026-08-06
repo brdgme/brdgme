@@ -44,6 +44,22 @@ async fn main() {
         panic!("TURNSTILE_SECRET_KEY not set - refusing to start without CAPTCHA verification");
     }
 
+    let turnstile_site_key = std::env::var("TURNSTILE_SITE_KEY").unwrap_or_default();
+    if turnstile_site_key.is_empty()
+        && std::env::var("ALLOW_INSECURE_DEFAULT_KEY").as_deref() != Ok("true")
+    {
+        panic!("TURNSTILE_SITE_KEY not set - refusing to start without CAPTCHA verification");
+    }
+
+    let public_base_url = web::config::public_base_url();
+    if !public_base_url.starts_with("https://")
+        && std::env::var("ALLOW_INSECURE_DEFAULT_KEY").as_deref() != Ok("true")
+    {
+        panic!(
+            "PUBLIC_BASE_URL not set to an HTTPS URL - refusing to start without a valid production base URL"
+        );
+    }
+
     let pool = create_pool().await.expect("Failed to create database pool");
     let http_client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
