@@ -16,6 +16,7 @@
 - Do not touch unrelated or untracked files, especially `docs/reviews/2026-07-30-review-session/R-07-HANDOVER.md`.
 - Use bounded `kubectl` snapshots and bounded polling only. Do not stream logs or use an unbounded wait.
 - Never print, decode into the transcript, or commit secrets, credentials, tokens, connection strings, emails, names, session payloads, or other row-level PII. Report only counts, approved UUIDs, and pass/fail states.
+- **Deliberate deviation, recorded here so it is not rediscovered:** every `kubectl exec ... -- psql ... < file.sql` invocation (Tasks 2 and 4) needs `exec -i` for the shell's `< file` stdin redirection to actually reach psql - without `-i`, `kubectl exec` doesn't attach stdin, psql reads nothing, and the command exits 0 having executed no SQL at all. Any future stdin-redirected psql invocation (e.g. Task 5's postcheck, which reuses this pattern) must include `-i` too.
 - **Deliberate deviation, recorded here so it is not rediscovered:** every `psql` invocation in Tasks 2, 4, and 5 connects as `-U postgres`, not `-U brdgme_user` as this plan originally assumed. `kubectl exec -c postgres` runs as OS user `postgres`, and this cluster's `pg_hba.conf` only allows peer auth on that local socket, mapped solely to DB role `postgres` - there is no working auth path to `brdgme_user` without reading its password Secret over TCP. Owner ruling: use the existing peer-auth `postgres` path (already the access pattern used for this session's earlier production `pg_dump`) rather than read a Secret into a Worker's context. The repair SQL is hardcoded to 4 approved UUIDs with fail-closed assertions throughout and is personally inspected by the Lead before execution regardless of which role runs it, so the privilege difference between `postgres` and `brdgme_user` does not change the operation's actual safety.
 - CNPG Backup is the only rollback asset for the production repair; `pg_dump` output is never a substitute for it.
 - A read-only `pg_dump` for local migration-batch verification is permitted only under explicit user authorization (as performed for the `c0275c7c` verification).
@@ -264,7 +265,7 @@ ROLLBACK;
 Run:
 
 ```bash
-kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -v ON_ERROR_STOP=1 -U postgres -d brdgme < /tmp/opencode/r07-production-email-repair/preflight.sql
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -i --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -v ON_ERROR_STOP=1 -U postgres -d brdgme < /tmp/opencode/r07-production-email-repair/preflight.sql
 ```
 
 Expected safe output: `migration_026_rows=0`, `migration_029_rows=0`, `approved_users=4`, `approved_email_rows=4`, `email_owner_mapping_ok=4`, `one_email_per_approved_user=4`, `direct_user_fks=11`, `same_group_game_overlap=0`, `proposal_player_collision=0`, `owner_player_collision=0`, plus count-only game/proposal and SQL readiness values. Abort on a timeout, serialization error, nonzero psql exit, any different required count, or any additional email row for an approved user.
@@ -471,7 +472,7 @@ The script must be noninteractive and must not use `lower(btrim(email))` to assi
 - [ ] **Step 2: Execute once and preserve rollback behavior**
 
 ```bash
-kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -q -v ON_ERROR_STOP=1 -U postgres -d brdgme < /tmp/opencode/r07-production-email-repair/repair.sql
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec -i --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -q -v ON_ERROR_STOP=1 -U postgres -d brdgme < /tmp/opencode/r07-production-email-repair/repair.sql
 ```
 
 Expected safe output: psql command tags and a successful `COMMIT`, with no email, name, token, or session payload. A lock timeout, statement timeout, idle timeout, serialization failure, assertion failure, or nonzero psql exit aborts the run. Before `COMMIT`, PostgreSQL rolls back the entire transaction; do not retry. After `COMMIT`, do not make compensating writes: stop and use the verified CNPG recovery point only if the owner directs recovery.
