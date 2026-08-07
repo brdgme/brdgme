@@ -27,7 +27,7 @@ decides what is next.
   the per-package status rows.
 - **R-07 is DEFERRED (user ruling 2026-08-06),** not blocked-pending-retry: run
   it after all other remediation is done, via a local migration test against a
-  copy of production data, then a production backup, then migration 027. F-207's
+  copy of production data, then a production backup, then migrations 026 and 029. F-207's
   production-ledger validation is folded into this same deferred task, not a
   separate pre-rollout gate. See 97.
 - **R-35 is done (uncommitted):** `game_client::fetch_game_data` remains
@@ -392,7 +392,7 @@ survive.
 
 **Resolution (user ruling 2026-08-06):** deferred, not implemented now. Run
 after all other remediation is done: a local migration test against a copy
-of production data, then a production backup, then migration 027. F-207's
+of production data, then a production backup, then migrations 026 and 029. F-207's
 production-ledger validation (section 3) is folded into this same task. See
 97 for status.
 
@@ -940,7 +940,7 @@ Fixing one without the other leaves the crate wrong.
   (+14 sites); `for-sale-2/src/lib.rs:400-424` and
   `battleship-2/src/lib.rs:425-447`; `tic-tac-toe-2/src/lib.rs:190-204`
   (+1 site).
-- **Size: L** - basis: nine crates, and `jaipur-2` alone has **14 sites** where an
+- **Size: L** - basis: ten crates, and `jaipur-2` alone has **14 sites** where an
   unbounded `current_player` reaches fixed-array indexing.
 - **Depends on:** nothing. **Blocks:** R-21.
 - **Sizing caveat:** this is the least confident estimate in the plan. The site
@@ -1080,7 +1080,7 @@ first tests.
   `modern-art-2/src/lib.rs:442-450` (+3 sites), `:53-75`, `:304-309` (+1 site);
   `seven-wonders-1/src/lib.rs:722-725`;
   `splendor-2/src/lib.rs:237-239`, `:79-97`.
-- **Size: L** - basis: three crates plus a new test shape that **no game crate
+- **Size: L** - basis: four crates plus a new test shape that **no game crate
   currently has**.
 - **Depends on:** nothing. Fold the per-crate `Log::public` assertion into 5.5's
   checklist so the other 25 crates get it too.
@@ -2779,7 +2779,7 @@ escalates to account takeover.
 | R-22 | `texas-holdem-2` state validation | High | 3 | M |
 | R-23 | `lost-cities-1` / `-2` parity | High | 4 | M |
 | R-24 | `sushi-go-2`: F-06's row, the catch-all, the false-premise panic | High | 3 | M |
-| R-25 | The nine remaining crates with no `validate` override | Medium | 9 | L |
+| R-25 | The ten remaining crates with no `validate` override | Medium | 9 | L |
 | R-26 | `validate` exists but misses the invariant (pattern 2b) | Medium | 5 | M |
 | R-27 | `for-sale-2` deadlock and short-deck stall | High | 2 | S |
 | R-28 | `rand_bot` spec handling | High | 2 | M |
@@ -2825,11 +2825,11 @@ and R-52 on 6.2; R-45 should start immediately regardless of 6.1, because its
 output is what 6.1 needs to be decided on.
 
 **Unresolved, recorded rather than guessed.** Three sizings in this plan are not
-confident and say so at the package: R-25 (nine crates whose per-crate effort
+confident and say so at the package: R-25 (ten crates whose per-crate effort
 varies by an order of magnitude - re-size per crate), R-11's second half (the
 never-implemented half of ws F55, unsized pending owner decision 6.3), and R-45
-(the sweep is small; whatever it finds is not yet knowable). One open question
-survives the review itself: **F-59's status**, since the `lords-of-vegas-1` WIP
-ruling names only F-50 and F-57. Section 11 records it as "ambiguous coverage,
-unresolved". Treat it as excluded until the owner says otherwise, but do not
-record it as settled.
+(the sweep is small; whatever it finds is not yet knowable). **F-59's status**
+is resolved: the `lords-of-vegas-1` WIP ruling named only F-50 and F-57, and
+section 11 recorded coverage as ambiguous, but
+97-REMEDIATION-PROGRESS.md's decisions table records F-59 status as excluded
+(default), settling it.

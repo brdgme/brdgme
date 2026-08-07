@@ -16,7 +16,8 @@
 - Do not touch unrelated or untracked files, especially `docs/reviews/2026-07-30-review-session/R-07-HANDOVER.md`.
 - Use bounded `kubectl` snapshots and bounded polling only. Do not stream logs or use an unbounded wait.
 - Never print, decode into the transcript, or commit secrets, credentials, tokens, connection strings, emails, names, session payloads, or other row-level PII. Report only counts, approved UUIDs, and pass/fail states.
-- CNPG Backup is the only rollback asset. Do not create or use `pg_dump`.
+- CNPG Backup is the only rollback asset for the production repair; `pg_dump` output is never a substitute for it.
+- A read-only `pg_dump` for local migration-batch verification is permitted only under explicit user authorization (as performed for the `c0275c7c` verification).
 - Do not apply migration 026 or migration 029. Neither may have a row in `public._sqlx_migrations` before or after the repair.
 - Do not edit any migration under `rust/web/migrations/`.
 - Do not run `scripts/rust-test.sh`, workspace-wide Cargo, or workspace-wide `rustc`.
