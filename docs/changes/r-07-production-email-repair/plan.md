@@ -51,7 +51,7 @@
 
 **Interfaces:**
 - Consumes: production namespace `brdgme`, Cluster `postgres`, plugin `barman-cloud.cloudnative-pg.io`.
-- Produces: completed Backup `postgres-pre-repair-r07-20260801-01` and a recorded recovery timestamp that is later than that Backup's start time.
+- Produces: a completed Backup with a fresh UTC-timestamped name (generated at run time, never hardcoded - see Step 2) and a recorded recovery window covering it, confirmed via the `ObjectStore` resource (see Step 4 note on why not `Cluster.status`).
 
 - [ ] **Step 1: Confirm the production objects without reading Secrets**
 
@@ -63,13 +63,19 @@ kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get pods --namespace=brdgme 
 
 Expected: cluster `postgres`, ObjectStore `postgres-backup`, and exactly one running CNPG instance pod. Abort before creating the Backup if any object is absent, more than one instance pod is selected, or the instance pod is not `Running`.
 
-- [ ] **Step 2: Write and apply the one-off Backup CR**
+- [ ] **Step 2: Generate a fresh timestamped name, write and apply the one-off Backup CR**
 
-```yaml
+The Backup name is generated fresh every run, never hardcoded. A hardcoded name lets a retry silently no-op against a stale prior Backup (idempotent `kubectl apply` returns `configured`, not `created`) while the operator believes a fresh recovery point was taken - exactly the failure mode that makes the rollback guarantee worthless when it's actually needed. Persist the generated name to a file so later steps (and later Tasks, if resumed in a new shell) read the same value:
+
+```bash
+mkdir -p /tmp/opencode/r07-production-email-repair
+BACKUP_NAME="postgres-pre-repair-r07-$(date -u +%Y%m%dT%H%M%SZ)"
+printf '%s' "$BACKUP_NAME" > /tmp/opencode/r07-production-email-repair/backup-name.txt
+cat > /tmp/opencode/r07-production-email-repair/backup.yaml <<EOF
 apiVersion: postgresql.cnpg.io/v1
 kind: Backup
 metadata:
-  name: postgres-pre-repair-r07-20260801-01
+  name: ${BACKUP_NAME}
   namespace: brdgme
 spec:
   cluster:
@@ -77,22 +83,18 @@ spec:
   method: plugin
   pluginConfiguration:
     name: barman-cloud.cloudnative-pg.io
-```
-
-Run:
-
-```bash
-mkdir -p /tmp/opencode/r07-production-email-repair
+EOF
 kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml apply --namespace=brdgme -f /tmp/opencode/r07-production-email-repair/backup.yaml
 ```
 
-Expected: `backup.postgresql.cnpg.io/postgres-pre-repair-r07-20260801-01 created` or `configured`. Abort if an existing Backup of that name has a terminal phase other than `completed`; do not delete or replace it.
+Expected: `backup.postgresql.cnpg.io/<BACKUP_NAME> created`. Because the name is freshly timestamped, `created` is the only acceptable result - `configured` (or any other non-`created` result) means an unexpected name collision; abort rather than proceeding on a Backup object that might not be the one this run just requested.
 
 - [ ] **Step 3: Poll the Backup phase with a five-minute bound**
 
 ```bash
+BACKUP_NAME=$(cat /tmp/opencode/r07-production-email-repair/backup-name.txt)
 for attempt in $(seq 1 10); do
-  phase=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get backup postgres-pre-repair-r07-20260801-01 --namespace=brdgme -o jsonpath='{.status.phase}' 2>/dev/null)
+  phase=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get backup "$BACKUP_NAME" --namespace=brdgme -o jsonpath='{.status.phase}' 2>/dev/null)
   case "$phase" in
     completed) printf '%s\n' 'PASS: Backup completed'; break ;;
     failed) printf '%s\n' 'ABORT: Backup failed'; exit 1 ;;
@@ -111,10 +113,13 @@ Expected: only phase/status output and final `PASS: Backup completed`. Abort on 
 
 - [ ] **Step 4: Confirm the recovery point advanced with a five-minute bound**
 
+`Cluster.status.firstRecoverabilityPoint` (and the sibling `lastSuccessfulBackup`/`lastFailedBackup`/`*ByMethod` fields) are CNPG's legacy in-tree-backup fields. As of CNPG 1.30.0 they are documented `Deprecated: the field is not set for backup plugins` and are never populated when using plugin-based backup (`barman-cloud.cloudnative-pg.io`, as this cluster does) - confirmed empirically on this cluster across 32 days and 34 successful backups, and confirmed against the CNPG 1.30.0 CRD, release notes, and plugin-barman-cloud 0.13.0 docs. For plugin-based backup, the equivalent, continuously-maintained state lives on the `ObjectStore` resource instead, at `status.serverRecoveryWindow.<cluster-name>`. Do not check `Cluster.status` here - check `ObjectStore.status.serverRecoveryWindow.postgres` instead:
+
 ```bash
+BACKUP_NAME=$(cat /tmp/opencode/r07-production-email-repair/backup-name.txt)
 for attempt in $(seq 1 10); do
-  backup_time=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get backup postgres-pre-repair-r07-20260801-01 --namespace=brdgme -o jsonpath='{.status.startedAt}' 2>/dev/null)
-  recovery_time=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get cluster postgres --namespace=brdgme -o jsonpath='{.status.firstRecoverabilityPoint}' 2>/dev/null)
+  backup_time=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get backup "$BACKUP_NAME" --namespace=brdgme -o jsonpath='{.status.startedAt}' 2>/dev/null)
+  recovery_time=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get objectstore postgres-backup --namespace=brdgme -o jsonpath='{.status.serverRecoveryWindow.postgres.lastSuccessfulBackupTime}' 2>/dev/null)
   if [ -n "$backup_time" ] && [ -n "$recovery_time" ] && [ "$recovery_time" ">" "$backup_time" ]; then
     printf '%s\n' 'PASS: recoverability point is later than Backup start'
     break
@@ -544,10 +549,12 @@ Update only the R-07 work-package entry in `docs/reviews/2026-07-30-review-sessi
 ```text
 done
 implementation: 1e19d05f0506aa6e92cc16764d4f8c2f148eb022
-production repair: executed 2026-08-01; CNPG Backup postgres-pre-repair-r07-20260801-01 completed and recovery point advanced
+production repair: executed <actual UTC execution date>; CNPG Backup <actual generated BACKUP_NAME from Task 1 Step 2> completed and recovery point advanced (confirmed via ObjectStore.status.serverRecoveryWindow, not the deprecated Cluster.status field)
 data result: 2 loser users and their approved email rows deleted; the 2 retained survivor email rows Rust-canonicalized; game/proposal participation and ownership transferred
 verification: all postchecks passed; migrations 026 and 029 remain unapplied and ready
 ```
+
+Substitute the placeholders with the real execution date and the real generated Backup name from `/tmp/opencode/r07-production-email-repair/backup-name.txt` (Task 1 Step 2) - never the literal `postgres-pre-repair-r07-20260801-01` string, which was this plan's original authoring-date placeholder, not a fixed identifier.
 
 Step 1 must return `1e19d05f0506aa6e92cc16764d4f8c2f148eb022`; abort if it does not. Do not write secrets, PII, email values, tokens, connection strings, or a fabricated repair commit SHA.
 
@@ -567,5 +574,5 @@ Expected staged-file output contains only `docs/reviews/2026-07-30-review-sessio
 
 - [x] Coverage: Tasks 1-6 cover the named CNPG plugin Backup, bounded recovery verification, locked read-only/dry-run preflight, Rust-only canonical source, one serializable transaction, postchecks, migration-026/029 non-application, tracker evidence, exact-file staging, no push, and R-08 handoff.
 - [x] Placeholder scan: removed open-ended task text and omitted generic future-work markers. Dynamic production values are supplied only by the precisely defined private helper from locked preflight snapshots, never guessed or manually interpolated.
-- [x] Schema and command review: uses `public._sqlx_migrations`, `tower_sessions.session`, the exact 11 direct user FK locations, `barman-cloud.cloudnative-pg.io`, `postgres-pre-repair-r07-20260801-01`, bounded ten-attempt polling, and the approved UUID mappings.
+- [x] Schema and command review: uses `public._sqlx_migrations`, `tower_sessions.session`, the exact 11 direct user FK locations, `barman-cloud.cloudnative-pg.io`, a freshly-generated timestamped Backup name (never hardcoded - see Task 1 Step 2), bounded ten-attempt polling, and the approved UUID mappings.
 - [x] Identifier review: corrected every group-2 UUID occurrence to `d5197dc5-cfa3-48f3-a5d5-f2aef8ebace8`; retained/deleted email IDs and survivor/loser IDs match the approved mapping table.
