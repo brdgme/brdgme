@@ -4,7 +4,7 @@
 
 **Goal:** Repair the two owner-approved duplicate-email account groups in production while preserving every game and proposal, then record verified completion of R-07.
 
-**Architecture:** This is a one-off operational repair, not an application change. A verified CNPG plugin backup precedes a read-only, locked preflight and a disposable local helper produces a private, fully-bound SQL transaction from that preflight. The transaction transfers only game/proposal ownership and participation, removes the approved losing-account ancillary data, and canonicalizes retained and approved singleton email rows using Rust semantics.
+**Architecture:** This is a one-off operational repair, not an application change. A verified CNPG plugin backup precedes a read-only, locked preflight and a disposable local helper produces a private, fully-bound SQL transaction from that preflight. The transaction transfers only game/proposal ownership and participation, removes the approved losing-account ancillary data, and canonicalizes the two approved retained-survivor email rows using Rust semantics. Noncanonical rows outside the approved mapping (including singletons with no collision) are out of scope and are left for migration 026's own blanket canonicalization when it later runs.
 
 **Tech Stack:** Kubernetes, CloudNativePG Backup plugin, PostgreSQL/psql, a disposable standalone Rust crate, git.
 
@@ -17,7 +17,7 @@
 - Use bounded `kubectl` snapshots and bounded polling only. Do not stream logs or use an unbounded wait.
 - Never print, decode into the transcript, or commit secrets, credentials, tokens, connection strings, emails, names, session payloads, or other row-level PII. Report only counts, approved UUIDs, and pass/fail states.
 - CNPG Backup is the only rollback asset. Do not create or use `pg_dump`.
-- Do not apply migration 029. It must have no row in `public._sqlx_migrations` before and after the repair.
+- Do not apply migration 026 or migration 029. Neither may have a row in `public._sqlx_migrations` before or after the repair.
 - Do not edit any migration under `rust/web/migrations/`.
 - Do not run `scripts/rust-test.sh`, workspace-wide Cargo, or workspace-wide `rustc`.
 - For `web`, only `cargo check` variants are permitted. Do not use `cargo build`, `cargo test`, `cargo run`, `cargo clippy`, or `rustc` for `web`.
@@ -162,31 +162,31 @@ SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
 SET LOCAL idle_in_transaction_session_timeout = '60s';
 
+SELECT 'migration_026_rows=' || count(*)
+FROM public._sqlx_migrations
+WHERE version = 26;
+
 SELECT 'migration_029_rows=' || count(*)
 FROM public._sqlx_migrations
 WHERE version = 29;
 
-WITH locked AS (
-  SELECT id FROM public.users
-  WHERE id IN (
-    '1aa69b2f-a0f7-4b52-9abb-045426b47481',
-    'faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1',
-    '4e7f9c6b-a0fc-4d6c-847f-08e2c4e4baac',
-    'd5197dc5-cfa3-48f3-a5d5-f2aef8ebace8'
-  ) FOR SHARE
-)
-SELECT 'approved_users=' || count(*) FROM locked;
+SELECT 'approved_users=' || count(*)
+FROM public.users
+WHERE id IN (
+  '1aa69b2f-a0f7-4b52-9abb-045426b47481',
+  'faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1',
+  '4e7f9c6b-a0fc-4d6c-847f-08e2c4e4baac',
+  'd5197dc5-cfa3-48f3-a5d5-f2aef8ebace8'
+);
 
-WITH locked AS (
-  SELECT id FROM public.user_emails
-  WHERE id IN (
-    'cfa2cca4-54d0-4d2d-b93c-e3a036e41f74',
-    '580f6f06-f082-465c-b9c4-fa21aef4a6f7',
-    '76ae8efa-2cd1-4cc4-9fa4-444c1ca723da',
-    '7024274d-3567-4f05-98b8-dd503290fc0d'
-  ) FOR SHARE
-)
-SELECT 'approved_email_rows=' || count(*) FROM locked;
+SELECT 'approved_email_rows=' || count(*)
+FROM public.user_emails
+WHERE id IN (
+  'cfa2cca4-54d0-4d2d-b93c-e3a036e41f74',
+  '580f6f06-f082-465c-b9c4-fa21aef4a6f7',
+  '76ae8efa-2cd1-4cc4-9fa4-444c1ca723da',
+  '7024274d-3567-4f05-98b8-dd503290fc0d'
+);
 
 SELECT 'email_owner_mapping_ok=' || count(*)
 FROM public.user_emails
@@ -229,7 +229,7 @@ FROM (
   SELECT game_id FROM public.game_players
   WHERE user_id IN ('4e7f9c6b-a0fc-4d6c-847f-08e2c4e4baac', 'd5197dc5-cfa3-48f3-a5d5-f2aef8ebace8')
   GROUP BY game_id HAVING count(DISTINCT user_id) = 2
-) overlaps;
+) game_overlaps;
 
 SELECT 'proposal_player_collision=' || count(*)
 FROM public.game_proposal_players loser
@@ -260,7 +260,7 @@ Run:
 kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -qAt -v ON_ERROR_STOP=1 -U brdgme_user -d brdgme < /tmp/opencode/r07-production-email-repair/preflight.sql
 ```
 
-Expected safe output: `migration_029_rows=0`, `approved_users=4`, `approved_email_rows=4`, `email_owner_mapping_ok=4`, `one_email_per_approved_user=4`, `direct_user_fks=11`, `same_group_game_overlap=0`, `proposal_player_collision=0`, `owner_player_collision=0`, plus count-only game/proposal and SQL readiness values. Abort on a timeout, serialization error, nonzero psql exit, any different required count, or any additional email row for an approved user.
+Expected safe output: `migration_026_rows=0`, `migration_029_rows=0`, `approved_users=4`, `approved_email_rows=4`, `email_owner_mapping_ok=4`, `one_email_per_approved_user=4`, `direct_user_fks=11`, `same_group_game_overlap=0`, `proposal_player_collision=0`, `owner_player_collision=0`, plus count-only game/proposal and SQL readiness values. Abort on a timeout, serialization error, nonzero psql exit, any different required count, or any additional email row for an approved user.
 
 - [ ] **Step 3: Verify the exact direct-FK inventory rather than relying on its count**
 
@@ -355,10 +355,20 @@ Email algorithm:
   canonical(input) { input.trim().to_lowercase() }
   Parse every `emails.tsv` row as UUID, UUID, text. Build canonical collision
   groups. Permit exactly two groups of two: the approved retained/deleted row
-  pairs. Reject a collision containing any other row. For every row where stored
-  text differs from canonical text, permit it only when it is an approved loser,
-  retained survivor, or singleton. Include each retained survivor and every
-  singleton in the generated canonicalization list. Reject all other rows.
+  pairs. Reject a collision containing any other row (a real duplicate outside
+  the approved mapping is still an abort, not a skip). R-07 canonicalizes only
+  the two approved retained-survivor rows (`cfa2cca4-54d0-4d2d-b93c-e3a036e41f74`,
+  `76ae8efa-2cd1-4cc4-9fa4-444c1ca723da`) into the canonicalization list. Every
+  other noncanonical row - including a singleton with no collision - is left
+  untouched by this repair: it is not an error and not included in the
+  canonicalization list, only excluded. Migration 026's own blanket
+  `UPDATE ... WHERE email <> lower(btrim(email))` canonicalizes any such row
+  separately when 026 later runs; R-07 does not need to and must not touch it.
+  Specifically excluded by this rule: `user_emails.id = '0ad09a53-ea45-495e-ae46-820245f2bcbb'`
+  (owner `0b9208e6-6bd9-435b-b352-8d4dc3cff3e4`) - its stored value is not
+  case/whitespace noise but free text containing an embedded, unrelated
+  address; it is a singleton (no collision) and out of the approved mapping,
+  so R-07 leaves it exactly as stored.
 
 Session algorithm:
   Decode every hex `data` field with `rmp_serde::from_slice` into the same
@@ -419,7 +429,7 @@ Expected: the SQL begins a single transaction, contains no `CREATE`, `ALTER`, `D
 
 **Interfaces:**
 - Consumes: completed Backup, passing Task 2 preflight, and Task 3's private fully bound SQL.
-- Produces: two deleted loser users, transferred game/proposal references, canonical retained/singleton email rows, and no partial mutation on error.
+- Produces: two deleted loser users, transferred game/proposal references, the two canonical retained-survivor email rows, and no partial mutation on error.
 
 - [ ] **Step 1: Confirm the generated transaction has the required fixed sequence**
 
@@ -433,12 +443,14 @@ SET LOCAL statement_timeout = '60s';
 SET LOCAL idle_in_transaction_session_timeout = '60s';
 ```
 
+**Precondition (execution ordering, load-bearing):** this transaction runs against production at its current schema state, migration 022, before any further migration is applied. The full pending batch (023-032) runs afterward, uninterrupted, in one migration window. This is why Step 2 below does not touch `settings_email_token`/`settings_token_expires_at`/`settings_token_used_at`/`unsubscribe_token`: those columns do not exist yet at 022 (they originate in migrations 023, 027, and 025 respectively) and the repair must not assume any schema state beyond what production actually has when it runs.
+
 1. Lock approved users and email rows with `FOR UPDATE`; assert four users, four approved rows, exact row-owner pairs, exactly one email row per approved user, and every captured old email.
-2. Delete loser `public.user_auth_tokens`, matching `public.login_confirmations`, and decoded `tower_sessions.session` IDs; clear loser `users.settings_email_token`, `users.settings_token_expires_at`, `users.settings_token_used_at`, and `users.unsubscribe_token` before user deletion.
+2. Delete loser `public.user_auth_tokens`, matching `public.login_confirmations`, and decoded `tower_sessions.session` IDs. Do not attempt to clear settings/unsubscribe token columns first - they do not exist at migration 022 (they are added by migrations 023/025/027, none applied at repair time) and are moot regardless, since the loser `users` row that would hold them is deleted outright in Step 7.
 3. Update `public.game_players.user_id` from each loser to its survivor and set `email_token = NULL`; assert the exact captured player ID sets, game IDs, and counts.
 4. Update `public.game_proposal_players.user_id` and clear `email_token`; update `public.game_proposals.owner_user_id`; assert exact captured proposal-player IDs, proposal IDs, owner IDs, and counts.
 5. Delete only approved ancillary rows in FK-safe order: `public.chat_messages` through loser `public.chat_users`, loser `public.chat_users`, loser endpoints in `public.friends`, loser endpoints in `public.blocks`, and loser `public.game_type_users`.
-6. Delete exactly the two approved loser `public.user_emails` IDs. Update only the retained survivor rows and helper-approved singleton IDs with their bound Rust-canonical strings. Assert all exact old/new values and exact affected IDs.
+6. Delete exactly the two approved loser `public.user_emails` IDs. Update only the two retained survivor rows with their bound Rust-canonical strings. Assert all exact old/new values and exact affected IDs.
 7. Delete exactly the two loser `public.users` IDs. Assert zero references in each of the 11 direct-FK locations, zero decoded loser sessions, zero matching login confirmations, and the preserved game/proposal identities/counts.
 
 The final statements are exactly:
@@ -457,7 +469,7 @@ kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -q -v ON_ERROR_S
 
 Expected safe output: psql command tags and a successful `COMMIT`, with no email, name, token, or session payload. A lock timeout, statement timeout, idle timeout, serialization failure, assertion failure, or nonzero psql exit aborts the run. Before `COMMIT`, PostgreSQL rolls back the entire transaction; do not retry. After `COMMIT`, do not make compensating writes: stop and use the verified CNPG recovery point only if the owner directs recovery.
 
-### Task 5: Verify The Completed Repair Without Applying Migration 029
+### Task 5: Verify The Completed Repair Without Applying Migrations 026 Or 029
 
 **Files:**
 - Modify: none
@@ -465,7 +477,7 @@ Expected safe output: psql command tags and a successful `COMMIT`, with no email
 
 **Interfaces:**
 - Consumes: Task 4 committed transaction and Task 3 private helper/manifest.
-- Produces: production evidence that the repair is complete and 029 is ready but unapplied.
+- Produces: production evidence that the repair is complete and 026 and 029 are ready but unapplied.
 
 - [ ] **Step 1: Run the read-only zero-reference and preservation checks**
 
@@ -485,24 +497,25 @@ SELECT 'remaining_direct_fk_references=' || sum(reference_count) FROM (
   UNION ALL SELECT count(*) FROM public.game_players WHERE user_id IN ('faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1', 'd5197dc5-cfa3-48f3-a5d5-f2aef8ebace8')
   UNION ALL SELECT count(*) FROM public.game_proposals WHERE owner_user_id IN ('faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1', 'd5197dc5-cfa3-48f3-a5d5-f2aef8ebace8')
   UNION ALL SELECT count(*) FROM public.game_proposal_players WHERE user_id IN ('faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1', 'd5197dc5-cfa3-48f3-a5d5-f2aef8ebace8')
-) references;
+) ref_counts;
 
 SELECT 'games_total=' || count(*) FROM public.games;
 SELECT 'proposals_total=' || count(*) FROM public.game_proposals;
+SELECT 'migration_026_rows=' || count(*) FROM public._sqlx_migrations WHERE version = 26;
 SELECT 'migration_029_rows=' || count(*) FROM public._sqlx_migrations WHERE version = 29;
 SELECT 'sql_noncanonical=' || count(*) FROM public.user_emails WHERE email <> lower(btrim(email));
 SELECT 'sql_duplicate_groups=' || count(*) FROM (SELECT lower(btrim(email)) FROM public.user_emails GROUP BY 1 HAVING count(*) > 1) duplicate_groups;
 ```
 
-Expected: `loser_users=0`, `remaining_direct_fk_references=0`, `migration_029_rows=0`, `sql_noncanonical=0`, and `sql_duplicate_groups=0`. `games_total` and `proposals_total` must equal Task 2's recorded counts. Abort tracker completion on any mismatch. Do not apply migration 029.
+Expected: `loser_users=0`, `remaining_direct_fk_references=0`, `migration_026_rows=0`, `migration_029_rows=0`, and `sql_duplicate_groups=0`. `sql_noncanonical=1` is expected, not 0: R-07 deliberately excludes `user_emails.id = '0ad09a53-ea45-495e-ae46-820245f2bcbb'` (see Task 3's email algorithm) from canonicalization, and that row remains noncanonical until migration 026's own blanket update runs. `games_total` and `proposals_total` must equal Task 2's recorded counts. Abort tracker completion on any other mismatch. Do not apply migration 026 or 029.
 
 - [ ] **Step 2: Re-export private values and rerun Rust-level checks**
 
-Repeat Task 2's five exports into new `post-` files in the private directory, then rerun the helper with those paths and a distinct output SQL path. Expected safe output: `"status":"dry_run_passed"`, zero loser sessions, zero Rust-noncanonical rows, zero Rust-canonical duplicate groups, and preserved game/player/proposal identity/count sets. Abort if any count differs from the Task 2 manifest other than the explicitly deleted users/emails/ancillary rows and transferred owner/user IDs.
+Repeat Task 2's five exports into new `post-` files in the private directory, then rerun the helper with those paths and a distinct output SQL path. Expected safe output: `"status":"dry_run_passed"`, zero loser sessions, zero Rust-canonical duplicate groups, exactly one Rust-noncanonical row (the excluded singleton above, unchanged by design), and preserved game/player/proposal identity/count sets. Abort if any count differs from the Task 2 manifest other than the explicitly deleted users/emails/ancillary rows and transferred owner/user IDs.
 
-- [ ] **Step 3: Record the explicit migration-029 decision**
+- [ ] **Step 3: Record the explicit migration-026/029 decision**
 
-Record this count-only conclusion in the operator's production evidence: `migration_029_rows=0`, the Rust helper reports no noncanonical or duplicate rows, and the SQL diagnostics report `sql_noncanonical=0` and `sql_duplicate_groups=0`. The decision is: migration 029 is ready and remains unapplied. Do not invoke `sqlx`, the migration Job, ArgoCD sync, or any migration command.
+Record this count-only conclusion in the operator's production evidence: `migration_026_rows=0`, `migration_029_rows=0`, the Rust helper reports zero duplicate rows and exactly the one known excluded noncanonical row, and the SQL diagnostics report `sql_noncanonical=1` (the same excluded row) and `sql_duplicate_groups=0`. The decision is: migrations 026 and 029 are ready and remain unapplied. Do not invoke `sqlx`, the migration Job, ArgoCD sync, or any migration command.
 
 ### Task 6: Update The R-07 Tracker And Commit The Named File Only
 
@@ -531,8 +544,8 @@ Update only the R-07 work-package entry in `docs/reviews/2026-07-30-review-sessi
 done
 implementation: 1e19d05f0506aa6e92cc16764d4f8c2f148eb022
 production repair: executed 2026-08-01; CNPG Backup postgres-pre-repair-r07-20260801-01 completed and recovery point advanced
-data result: 2 loser users and their approved email rows deleted; retained survivor and approved singleton email rows Rust-canonicalized; game/proposal participation and ownership transferred
-verification: all postchecks passed; migration 029 remains unapplied and ready
+data result: 2 loser users and their approved email rows deleted; the 2 retained survivor email rows Rust-canonicalized; game/proposal participation and ownership transferred
+verification: all postchecks passed; migrations 026 and 029 remain unapplied and ready
 ```
 
 Step 1 must return `1e19d05f0506aa6e92cc16764d4f8c2f148eb022`; abort if it does not. Do not write secrets, PII, email values, tokens, connection strings, or a fabricated repair commit SHA.
@@ -551,7 +564,7 @@ Expected staged-file output contains only `docs/reviews/2026-07-30-review-sessio
 
 ## Inline Self-Review
 
-- [x] Coverage: Tasks 1-6 cover the named CNPG plugin Backup, bounded recovery verification, locked read-only/dry-run preflight, Rust-only canonical source, one serializable transaction, postchecks, migration-029 non-application, tracker evidence, exact-file staging, no push, and R-08 handoff.
+- [x] Coverage: Tasks 1-6 cover the named CNPG plugin Backup, bounded recovery verification, locked read-only/dry-run preflight, Rust-only canonical source, one serializable transaction, postchecks, migration-026/029 non-application, tracker evidence, exact-file staging, no push, and R-08 handoff.
 - [x] Placeholder scan: removed open-ended task text and omitted generic future-work markers. Dynamic production values are supplied only by the precisely defined private helper from locked preflight snapshots, never guessed or manually interpolated.
 - [x] Schema and command review: uses `public._sqlx_migrations`, `tower_sessions.session`, the exact 11 direct user FK locations, `barman-cloud.cloudnative-pg.io`, `postgres-pre-repair-r07-20260801-01`, bounded ten-attempt polling, and the approved UUID mappings.
 - [x] Identifier review: corrected every group-2 UUID occurrence to `d5197dc5-cfa3-48f3-a5d5-f2aef8ebace8`; retained/deleted email IDs and survivor/loser IDs match the approved mapping table.
