@@ -1,5 +1,17 @@
 # R-07 - `CanonicalEmail` newtype - Lead handover / design
 
+> **Correction note (added 2026-08-07):** This document's references to
+> "migration 027" below (the AC4 heading, the
+> `rust/web/migrations/027_canonical_email_check.sql` path, and the W3
+> worker-plan line) are incorrect. R-07's migration is actually
+> `rust/web/migrations/029_canonical_email_check.sql`; `026_canonical_emails.sql`
+> is the migration batch's actual first blocker (029 drops and replaces 026's
+> index); `027_settings_token_expiry.sql` belongs to R-02 and is unrelated. This
+> was established by local verification in commits `c0275c7c` and `0033c50c`.
+> The body below is preserved unedited as a historical record of what was
+> believed when this handover was written — do not treat its "migration 027"
+> references as current fact.
+
 Work package R-07 from `98-REMEDIATION-PLAN.md`. Closes F-124, F-125, F-126,
 F-127, F-128, F-173. Branch `master`, base HEAD `3cd727e`.
 
