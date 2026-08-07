@@ -252,3 +252,39 @@ only, no email content, per standing PII discipline.
    possibility of a shared root cause between this anomaly and the Group 2
    duplicate-account situation R-07 is repairing, rather than two
    independent incidents. Not investigated further here.
+
+## 2026-08-07 - Lead - unit-02 complete: local verification, doc fixes committed
+
+Result: `accepted`. Commit `c0275c7c62c96b8fd80a1c6814c6a55a25b5d0f7` on
+`master` ("docs(changes): fix R-07 preflight/repair defects, verify full
+migration batch locally"), 3 files
+(`plan.md`/`spec.md`/`log.md`), not pushed. Working tree clean after commit
+(`git status --short` empty). No Rust file changed, so `scripts/rust-test.sh`
+was not required and was not run.
+
+Independently re-verified (Lead, direct queries against `r07_repair_test`,
+not trusted from the Worker report alone): `max(version)=32`,
+`migrations_not_success=0` (all 1-32 `success=t`), `users_count=12` (14 at
+restore minus 2 deleted losers), both loser users/email rows absent, both
+survivor email rows present and canonical, `sql_noncanonical=0`,
+`sql_duplicate_groups=0`, `user_emails_email_canonical_chk` constraint and
+`user_emails_email_canonical_key` unique index (both from migration 029)
+present. All match the Worker's report exactly.
+
+Local end-to-end result: `repair.sql` (regenerated to canonicalize only the
+2 approved retained-survivor rows, per the exclusion ruling) committed
+cleanly against the restored scratch copy; the 2 duplicate-email groups
+merged per the approved mapping (verified by UUID and by
+`email = lower(btrim(email))` boolean, never by value); the full pending
+migration batch 023-032 - including 026 and 029, the two migrations known to
+be blocked in real production - applied successfully with zero failures.
+
+Scope note: this unit is local verification only. Production itself was
+never written to; the only production interaction across this whole unit
+remains unit-01's single read-only `pg_dump`. The disposable helper crate
+and `repair.sql` remain under `/tmp/opencode/r07-production-email-repair/`,
+never committed, per `spec.md`'s design (operator-private, ephemeral). A
+later unit is required to actually execute the real production repair
+(Backup, live preflight, live transaction, live postchecks, tracker update)
+- `plan.md` Tasks 1 and 6 were explicitly out of scope here and remain
+undone.
