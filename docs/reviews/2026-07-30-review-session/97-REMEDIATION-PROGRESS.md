@@ -34,7 +34,7 @@ restored per owner instruction.)
 | R-04 | done(c338d13) | c338d133027b57d5a7638a652bac6d3c0cbc811f | 5/5 game-creation entry points call validate_bot_slots |
 | R-05 | done(f3a87b7) | f3a87b7d282f432867ab9db2e366cbd7363a459b | AC5: sweep GATES on is_turn, so R-05 is the only F-119 control |
 | R-06 | done(3cd727e) | 3cd727eba4173f44276c3fae07c400e463c57ad3 | 4 lifecycle writers enumerated; CODING.md rule rewritten as property |
-| R-07 | deferred(after all other remediation; then local migration test, prod backup, migrations 026 and 029) | 1e19d05f0506aa6e92cc16764d4f8c2f148eb022 (impl HEAD pre-tracker) | Code-complete `CanonicalEmail` newtype implementation; earlier attempt blocked on a production Kubernetes API connectivity failure (TLS handshake EOF) before backup and mutation - Backup postgres-pre-repair-r07-20260801-01 not applied, no database action taken. User ruling 2026-08-06: defer until all other remediation is done, then run a local migration test against a copy of production data, then take a production backup, then apply migrations 026 and 029. F-207's production-ledger validation (Deployment items below) is folded into this same deferred task, not a separate pre-rollout gate. |
+| R-07 | done | 1e19d05f0506aa6e92cc16764d4f8c2f148eb022 | implementation: 1e19d05f0506aa6e92cc16764d4f8c2f148eb022. production repair: executed 2026-08-08; CNPG Backup postgres-pre-repair-r07-20260801-01 (backupId 20260807T220857) completed and recovery point advanced, confirmed via `ObjectStore.status.serverRecoveryWindow` (the legacy `Cluster.status.firstRecoverabilityPoint` field is unpopulated for plugin-based backup on this cluster - see plan.md Task 1 Step 4). data result: 2 loser users and their approved email rows deleted (14 users -> 12); the 2 retained survivor email rows Rust-canonicalized; 2 `game_players` rows transferred loser->survivor (1 per group), 0 proposal-players/proposals transferred, 0 loser sessions. verification: all postchecks passed by UUID; migrations 026 and 029 remain unapplied and ready for a future separate deployment; production confirmed still at migration 022. Local migration-batch test against a copy of production data was completed and verified in an earlier unit before this production run (see `docs/changes/r-07-production-email-repair/`). |
 | R-08 | done(899814f) | 899814f7528d719b2b46131e74129520b52f30ed | AC1 explicit exhaustive named matches (no wildcard); AC2 and AC3 persistence-mark tests; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with only two non-blocking Minor notes |
 | R-09 | done(61f9f4e) | 61f9f4eee5af657b108a11e5722155f82d4260c8 | AC1 single named contract `transient_failure` called by both routes; literal-Done grep 26 constructions commented (two non-constructions: match arm, doc prose); AC2 invite lock-timeout DB-error test asserts Retry; AC3 settings closed-pool DB-error test asserts Retry; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned); comprehensive review APPROVE with two non-blocking Minor notes |
 | R-10 | done(a9ea19d) | a9ea19d5e9f4640b8d6cafe64068fbcbbbe6cf3c | AC1 30s periodic session re-validation arm + revocation test; AC2 per-connection CancellationToken on SseStream::Drop + idle gauge-drop test; AC3 public handler per-id subscribe (no game.>) + VisibilityCache + subsz test; AC4 F-163 #[ignore] removed, #[serial] added; gate `SQLX_OFFLINE=true cargo check -p web --all-targets --features ssr` exit 0 (allowed); runtime web tests deferred to CI (web build/test/run banned; needs Postgres/NATS); comprehensive review ACCEPT, no Critical/Important findings |
@@ -263,6 +263,22 @@ anchors (section 4.9) remain valid historical observations.
   never remove or revert changes outside the agent's own work.
 - 2026-07-31: R-07 production-query Worker performed one unapproved
   schema-metadata check; exposed no sensitive output and made no modifications.
+- 2026-08-08: during R-07's production execution, two agents (a Worker, then
+  independently the Lead) each briefly displayed production email addresses
+  in their own tool-call transcript while ad-hoc grepping the private,
+  `chmod 600` generated `repair.sql` to verify its structure. Root cause was
+  structural, not individual: `repair.sql` embeds real email values across
+  multiple line types (`\set` variable assignments and
+  `IS NOT DISTINCT FROM` assertion comparisons alike), so any ad-hoc pattern
+  match against that file is unsafe by default - two independent agents hit
+  it the same way. Contained both times: never relayed to the user/owner
+  until disclosed, never committed, the file remained `chmod 600` throughout
+  (the mitigation that was supposed to hold, held). Lesson: this class of
+  generated artifact requires purpose-built safe extraction (e.g. extracting
+  only assertion labels or command verbs, never raw line content) rather
+  than ad-hoc `grep`/`cat`, and execution/postcheck output for this kind of
+  artifact should default to label/count-only with raw output redirected to
+  a private file, checked before each step rather than after.
 
 ## Process-fix evidence
 
