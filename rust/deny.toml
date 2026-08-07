@@ -79,64 +79,64 @@ skip = [
     # sqlx-postgres 0.9 pulls a parallel digest-0.11/sha2-0.11 crypto stack next
     # to the workspace digest-0.10 stack (ed25519/axum/sqlx-core). Clears when
     # sqlx-postgres converges on digest 0.10 (or the crypto crates align).
-    { name = "block-buffer", version = "0.12.1" }, # (a) via digest 0.11.3 from sqlx-postgres; (b) clears when sqlx-postgres uses digest 0.10
-    { name = "crypto-common", version = "0.2.2" }, # (a) via digest 0.11.3 from sqlx-postgres; (b) clears when sqlx-postgres uses digest 0.10
-    { name = "digest", version = "0.11.3" }, # (a) via hmac/md-5/sha2 0.11 from sqlx-postgres; (b) clears when sqlx-postgres uses digest 0.10
-    { name = "sha2", version = "0.11.0" }, # (a) via sqlx-postgres; (b) clears when sqlx-postgres uses sha2 0.10
-    { name = "cpufeatures", version = "0.3.0" }, # (a) via sha2 0.11/chacha20 from sqlx-postgres; (b) clears when sqlx-postgres uses sha2 0.10
+    { name = "block-buffer", version = "0.12.1", reason = "via digest 0.11.3 from sqlx-postgres; clears when sqlx-postgres uses digest 0.10" },
+    { name = "crypto-common", version = "0.2.2", reason = "via digest 0.11.3 from sqlx-postgres; clears when sqlx-postgres uses digest 0.10" },
+    { name = "digest", version = "0.11.3", reason = "via hmac/md-5/sha2 0.11 from sqlx-postgres; clears when sqlx-postgres uses digest 0.10" },
+    { name = "sha2", version = "0.11.0", reason = "via sqlx-postgres; clears when sqlx-postgres uses sha2 0.10" },
+    { name = "cpufeatures", version = "0.3.0", reason = "via sha2 0.11/chacha20 from sqlx-postgres; clears when sqlx-postgres uses sha2 0.10" },
     # getrandom 3-way split: 0.4.3 is canonical (leptos/uuid/web/rand 0.10);
     # 0.2.17 and 0.3.4 are holdouts; r-efi mirrors getrandom. Clears when
     # nkeys/ring adopt getrandom 0.4 and ahash/governor adopt getrandom 0.4.
-    { name = "getrandom", version = "0.2.17" }, # (a) via nkeys, rand_core 0.6, ring; (b) clears when nkeys/ring adopt getrandom 0.4
-    { name = "getrandom", version = "0.3.4" }, # (a) via ahash, governor, rand_core 0.9; (b) clears when ahash/governor adopt getrandom 0.4
-    { name = "r-efi", version = "5.3.0" }, # (a) via getrandom 0.3.4; (b) clears when getrandom 0.3 holdouts are gone
+    { name = "getrandom", version = "0.2.17", reason = "via nkeys, rand_core 0.6, ring; clears when nkeys/ring adopt getrandom 0.4" },
+    { name = "getrandom", version = "0.3.4", reason = "via ahash, governor, rand_core 0.9; clears when ahash/governor adopt getrandom 0.4" },
+    { name = "r-efi", version = "5.3.0", reason = "via getrandom 0.3.4; clears when getrandom 0.3 holdouts are gone" },
     # rand 3-way split: 0.10.2 is canonical (game crates, async-nats, sqlx-postgres,
     # svix); 0.8.7 and 0.9.5 are holdouts; rand_chacha/rand_core mirror rand.
     # Clears when the 0.8/0.9 dependents adopt rand 0.10.
-    { name = "rand", version = "0.8.7" }, # (a) via nkeys, nuid, tokio-websockets, tower-sessions-core; (b) clears when those adopt rand 0.10
-    { name = "rand", version = "0.9.5" }, # (a) via governor, leptos, sentry-core/types, tungstenite; (b) clears when those adopt rand 0.10
-    { name = "rand_chacha", version = "0.3.1" }, # (a) via rand 0.8.7; (b) clears when rand 0.8 holdouts are gone
-    { name = "rand_chacha", version = "0.9.0" }, # (a) via rand 0.9.5; (b) clears when rand 0.9 holdouts are gone
-    { name = "rand_core", version = "0.6.4" }, # (a) via crypto-common 0.1, rand 0.8.7, rand_chacha 0.3.1; (b) clears when rand 0.8 holdouts are gone
-    { name = "rand_core", version = "0.9.5" }, # (a) via rand 0.9.5, rand_chacha 0.9.0, rand_xoshiro; (b) clears when rand 0.9 holdouts are gone
+    { name = "rand", version = "0.8.7", reason = "via nkeys, nuid, tokio-websockets, tower-sessions-core; clears when those adopt rand 0.10" },
+    { name = "rand", version = "0.9.5", reason = "via governor, leptos, sentry-core/types, tungstenite; clears when those adopt rand 0.10" },
+    { name = "rand_chacha", version = "0.3.1", reason = "via rand 0.8.7; clears when rand 0.8 holdouts are gone" },
+    { name = "rand_chacha", version = "0.9.0", reason = "via rand 0.9.5; clears when rand 0.9 holdouts are gone" },
+    { name = "rand_core", version = "0.6.4", reason = "via crypto-common 0.1, rand 0.8.7, rand_chacha 0.3.1; clears when rand 0.8 holdouts are gone" },
+    { name = "rand_core", version = "0.9.5", reason = "via rand 0.9.5, rand_chacha 0.9.0, rand_xoshiro; clears when rand 0.9 holdouts are gone" },
     # syn 2 vs 3: 2.0.119 is canonical (~37 proc-macro crates); 3.0.3 is the
     # holdout. Clears as the ecosystem settles on one syn major.
-    { name = "syn", version = "3.0.3" }, # (a) via async-trait, serde_derive, thiserror-impl 2.0.19, schemars_derive, displaydoc, ref-cast-impl, serde_repr; (b) clears when syn 3 adopters converge with syn 2 users
+    { name = "syn", version = "3.0.3", reason = "via async-trait, serde_derive, thiserror-impl 2.0.19, schemars_derive, displaydoc, ref-cast-impl, serde_repr; clears when syn 3 adopters converge with syn 2 users" },
     # thiserror 1 vs 2: 2.0.19 is canonical (workspace-wide); 1.0.69 is a lone
     # holdout. Clears when gloo-net adopts thiserror 2.
-    { name = "thiserror", version = "1.0.69" }, # (a) via gloo-net; (b) clears when gloo-net adopts thiserror 2
-    { name = "thiserror-impl", version = "1.0.69" }, # (a) via thiserror 1.0.69; (b) clears when gloo-net adopts thiserror 2
+    { name = "thiserror", version = "1.0.69", reason = "via gloo-net; clears when gloo-net adopts thiserror 2" },
+    { name = "thiserror-impl", version = "1.0.69", reason = "via thiserror 1.0.69; clears when gloo-net adopts thiserror 2" },
     # hashbrown 3-way: 0.16.1 is canonical (governor/hashlink/kube-runtime/
     # metrics-util); 0.14.5 and 0.17.1 are holdouts. Clears when dashmap and
     # indexmap converge on hashbrown 0.16.
-    { name = "hashbrown", version = "0.14.5" }, # (a) via dashmap; (b) clears when dashmap adopts hashbrown 0.16
-    { name = "hashbrown", version = "0.17.1" }, # (a) via indexmap; (b) clears when indexmap adopts hashbrown 0.16
+    { name = "hashbrown", version = "0.14.5", reason = "via dashmap; clears when dashmap adopts hashbrown 0.16" },
+    { name = "hashbrown", version = "0.17.1", reason = "via indexmap; clears when indexmap adopts hashbrown 0.16" },
     # darling 0.20 vs 0.23 (plus core/macro): 0.23.0 via kube-derive is canonical;
     # 0.20.11 is a lone holdout. Clears when default-struct-builder adopts 0.23.
-    { name = "darling", version = "0.20.11" }, # (a) via default-struct-builder; (b) clears when default-struct-builder adopts darling 0.23
-    { name = "darling_core", version = "0.20.11" }, # (a) via darling 0.20.11; (b) clears when default-struct-builder adopts darling 0.23
-    { name = "darling_macro", version = "0.20.11" }, # (a) via darling 0.20.11; (b) clears when default-struct-builder adopts darling 0.23
+    { name = "darling", version = "0.20.11", reason = "via default-struct-builder; clears when default-struct-builder adopts darling 0.23" },
+    { name = "darling_core", version = "0.20.11", reason = "via darling 0.20.11; clears when default-struct-builder adopts darling 0.23" },
+    { name = "darling_macro", version = "0.20.11", reason = "via darling 0.20.11; clears when default-struct-builder adopts darling 0.23" },
     # svix 1.99 holds old http 0.2 and a lone itertools 0.15. Clears when svix
     # adopts http 1.x and the workspace itertools 0.14.
-    { name = "http", version = "0.2.12" }, # (a) via svix; (b) clears when svix adopts http 1.x
-    { name = "itertools", version = "0.15.0" }, # (a) via svix; (b) clears when svix adopts itertools 0.14
+    { name = "http", version = "0.2.12", reason = "via svix; clears when svix adopts http 1.x" },
+    { name = "itertools", version = "0.15.0", reason = "via svix; clears when svix adopts itertools 0.14" },
     # convert_case 0.6 is a lone holdout via config (0.11.0 is the leptos stack's
     # copy). Clears when config adopts convert_case 0.11.
-    { name = "convert_case", version = "0.6.0" }, # (a) via config; (b) clears when config adopts convert_case 0.11
+    { name = "convert_case", version = "0.6.0", reason = "via config; clears when config adopts convert_case 0.11" },
     # gloo-timers 0.3 is a lone holdout via backon (kube-runtime); 0.4.0 is
     # workspace-direct (web). Clears when backon adopts gloo-timers 0.4.
-    { name = "gloo-timers", version = "0.3.0" }, # (a) via backon (kube-runtime <- kube <- brdgme-operator); (b) clears when backon adopts gloo-timers 0.4
+    { name = "gloo-timers", version = "0.3.0", reason = "via backon (kube-runtime <- kube <- brdgme-operator); clears when backon adopts gloo-timers 0.4" },
     # tower-http 0.6 vs 0.7: 0.6.11 via axum-prometheus/kube-client/leptos_axum/
     # reqwest; web pins 0.7.0 directly (rust/web/Cargo.toml:44) per the stay-on-
     # latest policy (docs/CODING.md:540). Knowingly accepted, not a web bug to
     # fix. Clears only when those four crates adopt tower-http 0.7.
-    { name = "tower-http", version = "0.7.0" }, # (a) via web (first-party, pins 0.7.0 directly); (b) clears only when axum-prometheus/kube-client/leptos_axum/reqwest adopt tower-http 0.7
+    { name = "tower-http", version = "0.7.0", reason = "via web (first-party, pins 0.7.0 directly); clears only when axum-prometheus/kube-client/leptos_axum/reqwest adopt tower-http 0.7" },
     # webpki-roots 0.26 is a lone holdout via tokio-websockets; 1.0.9 via
     # sqlx-core. Clears when tokio-websockets adopts webpki-roots 1.x.
-    { name = "webpki-roots", version = "0.26.11" }, # (a) via tokio-websockets; (b) clears when tokio-websockets adopts webpki-roots 1.x
+    { name = "webpki-roots", version = "0.26.11", reason = "via tokio-websockets; clears when tokio-websockets adopts webpki-roots 1.x" },
     # windows-sys 0.52 is a lone holdout via ring; 0.61.2 is canonical. Clears
     # when ring adopts windows-sys 0.61.
-    { name = "windows-sys", version = "0.52.0" }, # (a) via ring; (b) clears when ring adopts windows-sys 0.61
+    { name = "windows-sys", version = "0.52.0", reason = "via ring; clears when ring adopts windows-sys 0.61" },
 ]
 skip-tree = []
 

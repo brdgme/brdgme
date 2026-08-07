@@ -140,7 +140,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - run: cargo deny check
+      - run: cargo deny check -D unmatched-skip -D unnecessary-skip
 
   kubeconform:
     needs: [changes]
