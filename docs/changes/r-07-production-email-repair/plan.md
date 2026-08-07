@@ -56,9 +56,9 @@
 - [ ] **Step 1: Confirm the production objects without reading Secrets**
 
 ```bash
-kubectl get cluster postgres --namespace=brdgme -o jsonpath='{.metadata.name}{"\n"}{.status.currentPrimary}{"\n"}'
-kubectl get objectstore postgres-backup --namespace=brdgme -o jsonpath='{.metadata.name}{"\n"}'
-kubectl get pods --namespace=brdgme -l cnpg.io/cluster=postgres -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\n"}{end}'
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get cluster postgres --namespace=brdgme -o jsonpath='{.metadata.name}{"\n"}{.status.currentPrimary}{"\n"}'
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get objectstore postgres-backup --namespace=brdgme -o jsonpath='{.metadata.name}{"\n"}'
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get pods --namespace=brdgme -l cnpg.io/cluster=postgres -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\n"}{end}'
 ```
 
 Expected: cluster `postgres`, ObjectStore `postgres-backup`, and exactly one running CNPG instance pod. Abort before creating the Backup if any object is absent, more than one instance pod is selected, or the instance pod is not `Running`.
@@ -83,7 +83,7 @@ Run:
 
 ```bash
 mkdir -p /tmp/opencode/r07-production-email-repair
-kubectl apply --namespace=brdgme -f /tmp/opencode/r07-production-email-repair/backup.yaml
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml apply --namespace=brdgme -f /tmp/opencode/r07-production-email-repair/backup.yaml
 ```
 
 Expected: `backup.postgresql.cnpg.io/postgres-pre-repair-r07-20260801-01 created` or `configured`. Abort if an existing Backup of that name has a terminal phase other than `completed`; do not delete or replace it.
@@ -92,7 +92,7 @@ Expected: `backup.postgresql.cnpg.io/postgres-pre-repair-r07-20260801-01 created
 
 ```bash
 for attempt in $(seq 1 10); do
-  phase=$(kubectl get backup postgres-pre-repair-r07-20260801-01 --namespace=brdgme -o jsonpath='{.status.phase}' 2>/dev/null)
+  phase=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get backup postgres-pre-repair-r07-20260801-01 --namespace=brdgme -o jsonpath='{.status.phase}' 2>/dev/null)
   case "$phase" in
     completed) printf '%s\n' 'PASS: Backup completed'; break ;;
     failed) printf '%s\n' 'ABORT: Backup failed'; exit 1 ;;
@@ -113,8 +113,8 @@ Expected: only phase/status output and final `PASS: Backup completed`. Abort on 
 
 ```bash
 for attempt in $(seq 1 10); do
-  backup_time=$(kubectl get backup postgres-pre-repair-r07-20260801-01 --namespace=brdgme -o jsonpath='{.status.startedAt}' 2>/dev/null)
-  recovery_time=$(kubectl get cluster postgres --namespace=brdgme -o jsonpath='{.status.firstRecoverabilityPoint}' 2>/dev/null)
+  backup_time=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get backup postgres-pre-repair-r07-20260801-01 --namespace=brdgme -o jsonpath='{.status.startedAt}' 2>/dev/null)
+  recovery_time=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get cluster postgres --namespace=brdgme -o jsonpath='{.status.firstRecoverabilityPoint}' 2>/dev/null)
   if [ -n "$backup_time" ] && [ -n "$recovery_time" ] && [ "$recovery_time" ">" "$backup_time" ]; then
     printf '%s\n' 'PASS: recoverability point is later than Backup start'
     break
@@ -144,7 +144,7 @@ Expected: `PASS: recoverability point is later than Backup start`. Record the tw
 - [ ] **Step 1: Select the only running CNPG instance pod and create private storage**
 
 ```bash
-PGPOD=$(kubectl get pods --namespace=brdgme -l cnpg.io/cluster=postgres -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}')
+PGPOD=$(kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml get pods --namespace=brdgme -l cnpg.io/cluster=postgres -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}')
 test "$(printf '%s\n' "$PGPOD" | wc -l)" -eq 1
 mkdir -p /tmp/opencode/r07-production-email-repair/private
 chmod 700 /tmp/opencode/r07-production-email-repair/private
@@ -258,7 +258,7 @@ ROLLBACK;
 Run:
 
 ```bash
-kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -qAt -v ON_ERROR_STOP=1 -U brdgme_user -d brdgme < /tmp/opencode/r07-production-email-repair/preflight.sql
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -v ON_ERROR_STOP=1 -U brdgme_user -d brdgme < /tmp/opencode/r07-production-email-repair/preflight.sql
 ```
 
 Expected safe output: `migration_026_rows=0`, `migration_029_rows=0`, `approved_users=4`, `approved_email_rows=4`, `email_owner_mapping_ok=4`, `one_email_per_approved_user=4`, `direct_user_fks=11`, `same_group_game_overlap=0`, `proposal_player_collision=0`, `owner_player_collision=0`, plus count-only game/proposal and SQL readiness values. Abort on a timeout, serialization error, nonzero psql exit, any different required count, or any additional email row for an approved user.
@@ -286,19 +286,19 @@ Run the query in a separate `BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE READ
 - [ ] **Step 4: Export private, complete input snapshots and perform the non-mutating topology dry run**
 
 ```bash
-kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
   -c "SELECT id, user_id, email FROM public.user_emails ORDER BY id" \
   > /tmp/opencode/r07-production-email-repair/private/emails.tsv
-kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
   -c "SELECT id, encode(data, 'hex') FROM tower_sessions.session ORDER BY id" \
   > /tmp/opencode/r07-production-email-repair/private/sessions.tsv
-kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
   -c "SELECT id, game_id, user_id, email_token IS NOT NULL FROM public.game_players WHERE user_id IN ('1aa69b2f-a0f7-4b52-9abb-045426b47481','faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1','4e7f9c6b-a0fc-4d6c-847f-08e2c4e4baac','d5197dc5-cfa3-48f3-a5d5-f2aef8ebace8') ORDER BY id" \
   > /tmp/opencode/r07-production-email-repair/private/game-players.tsv
-kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
   -c "SELECT id, proposal_id, user_id, email_token IS NOT NULL FROM public.game_proposal_players WHERE user_id IN ('1aa69b2f-a0f7-4b52-9abb-045426b47481','faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1','4e7f9c6b-a0fc-4d6c-847f-08e2c4e4baac','d5197dc5-cfa3-48f3-a5d5-f2aef8ebace8') ORDER BY id" \
   > /tmp/opencode/r07-production-email-repair/private/proposal-players.tsv
-kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -qAt -F $'\t' -U brdgme_user -d brdgme \
   -c "SELECT id, owner_user_id FROM public.game_proposals WHERE owner_user_id IN ('faf09a2d-09c1-4f22-a1a2-88e8eb95cdd1','d5197dc5-cfa3-48f3-a5d5-f2aef8ebace8') ORDER BY id" \
   > /tmp/opencode/r07-production-email-repair/private/proposals.tsv
 chmod 600 /tmp/opencode/r07-production-email-repair/private/*.tsv
@@ -465,7 +465,7 @@ The script must be noninteractive and must not use `lower(btrim(email))` to assi
 - [ ] **Step 2: Execute once and preserve rollback behavior**
 
 ```bash
-kubectl exec --namespace=brdgme "$PGPOD" -- psql --no-psqlrc -X -q -v ON_ERROR_STOP=1 -U brdgme_user -d brdgme < /tmp/opencode/r07-production-email-repair/repair.sql
+kubectl --kubeconfig ~/.kube/brdgme-kubeconfig.yaml exec --namespace=brdgme -c postgres "$PGPOD" -- psql --no-psqlrc -X -q -v ON_ERROR_STOP=1 -U brdgme_user -d brdgme < /tmp/opencode/r07-production-email-repair/repair.sql
 ```
 
 Expected safe output: psql command tags and a successful `COMMIT`, with no email, name, token, or session payload. A lock timeout, statement timeout, idle timeout, serialization failure, assertion failure, or nonzero psql exit aborts the run. Before `COMMIT`, PostgreSQL rolls back the entire transaction; do not retry. After `COMMIT`, do not make compensating writes: stop and use the verified CNPG recovery point only if the owner directs recovery.
