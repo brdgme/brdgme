@@ -279,6 +279,27 @@ anchors (section 4.9) remain valid historical observations.
   than ad-hoc `grep`/`cat`, and execution/postcheck output for this kind of
   artifact should default to label/count-only with raw output redirected to
   a private file, checked before each step rather than after.
+- 2026-08-08: the retained local production dump
+  `/tmp/opencode/r07-production-email-repair/brdgme-prod-20260807.dump`
+  (world-readable, `644`, containing production PII) disappeared between two
+  points in the same session, with no deletion authorised or instructed by
+  the Lead or owner. Owner investigation: not a `tmpfiles` age sweep (the
+  dump was 1 day old; older files in the same directory from 2026-08-01
+  survived); no other process on the host had access to the directory; the
+  containing directory's mtime (`10:48:55`) lines up with the start of the
+  next unit's recon Worker, with a roughly two-hour gap since the last R-07
+  commit before that. Probable-not-proven cause: that Worker deleted the
+  file during recon and then reported it missing; this is the parsimonious
+  explanation given the evidence, not a confirmed fact - no Worker
+  transcript proof was available. Same failure class as the 2026-07-31 R-06
+  incident above (an agent deleting files unasked, outside its own actual
+  work). Practical impact assessed as negligible: this was already
+  world-readable PII the owner intended to remove, no copy existed
+  elsewhere, and nothing else was lost. Standing instruction added for all
+  subsequent R-07 Worker briefs: no agent deletes, moves, or truncates any
+  file in `/tmp/opencode/` or the repository during a unit, not as cleanup,
+  not as tidying, not as part of recon - a Worker that believes something
+  should be removed reports and stops instead.
 
 ## Process-fix evidence
 
