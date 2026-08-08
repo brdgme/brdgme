@@ -288,3 +288,137 @@ later unit is required to actually execute the real production repair
 (Backup, live preflight, live transaction, live postchecks, tracker update)
 - `plan.md` Tasks 1 and 6 were explicitly out of scope here and remain
 undone.
+
+## 2026-08-08 - Lead - unit-07 (read-only operational description, for owner authorisation)
+
+Delegated to one Worker: read `spec.md`/`plan.md` in full and produce a
+precise plain-language description for the owner covering scope of
+destruction (exactly 2 `users` rows deleted), what transfers vs what is
+discarded, user-facing impact per account, reversibility (CNPG PITR is the
+only rollback asset, no in-script undo), blast-radius guards and what each
+does on violation, outstanding preconditions, and the pinned execution
+order. Lead independently spot-checked the cited `spec.md`/`plan.md` lines.
+No changes made, no production or database contact. Report delivered to the
+Orchestrator/owner and accepted.
+
+## 2026-08-08 - Lead - unit-08 (quantification of the 2 approved loser accounts' actual history)
+
+Delegated to one Worker, with Lead spot-checks directly against
+`r07_migration_test` (confirmed pre-repair before use), to get exact,
+UUID-keyed row counts for the 2 loser and 2 survivor accounts across games,
+chat, friends/blocks, per-game-type ratings, tokens, and pending proposals.
+Findings: each loser account had exactly 1 game played (vs 8-9 for its
+paired survivor), one loser's sole game was closed by an automated
+stale-game sweep (11 games closed simultaneously to the millisecond) rather
+than real activity; display names are the same base name with a
+platform-generated collision suffix, consistent with the same person
+re-registering after the email-confirmation bug; no friends/blocks exist
+between any of the 4 accounts including within a pair; survivor/loser
+assignment confirmed correct in both pairs (no reversal - the "survivor" is
+never the less-active account); no same-pair account ever appears together
+in the same game. Read-only, no changes. Accepted.
+
+## 2026-08-08 - Lead - unit-09 (production execution of the R-07 repair)
+
+Executed `plan.md` Tasks 1-6 against production under explicit owner
+authorisation. Found and fixed five further authoring defects live during
+execution (each its own commit, not pushed): missing explicit
+`--kubeconfig` on every `kubectl` call (`28ecbd39` - the plan's ambient-context
+reliance sent the first Task 1 attempt to an unrelated Linode cluster, which
+correctly aborted before any mutation); Task 1 Step 4 polling the deprecated
+`Cluster.status.firstRecoverabilityPoint`, which CNPG 1.30 never populates for
+plugin-based backup, plus the hardcoded (non-retry-safe) Backup CR name
+(`bfe6f4ba` - see unit-10 below for the evidence behind this fix); the assumed
+`brdgme_user` password/TCP auth path, which does not exist on this cluster's
+`pg_hba.conf` (peer-auth only) - fixed to use the existing peer-auth
+`-U postgres` path per owner ruling rather than read a Secret into a Worker's
+context (`97a0f967`); and `kubectl exec` missing `-i`, silently executing zero
+SQL against two of the stdin-redirected `psql` invocations (`17c01578`).
+
+Execution: Task 1 backup `postgres-pre-repair-r07-20260801-01`
+(`backupId 20260807T220857`, completed `2026-08-07T22:09:02Z`) - this
+predates the hardcoded-name fix and was accepted as final per owner ruling,
+not retaken. Task 2 live preflight - all ten fixed-value checks passed
+exactly, FK inventory exact 11-line match. Task 3 regenerated `repair.sql`
+from the live Task 2 data (not the earlier local-verification TSVs) -
+dry run passed, 2 approved collision groups, 2 game-players/0
+proposals/0 proposal-players/0 sessions to transfer. Task 4 - the single
+transaction committed successfully (exit 0, ended `COMMIT`, no retry). Task 5
+postchecks - all passed by UUID: 0 loser users, 0 remaining direct-FK
+references, `games_total`/`proposals_total` unchanged (2313/21),
+`sql_duplicate_groups=0`, `sql_noncanonical=1` (the deliberately excluded
+singleton, reconciling exactly against Task 2's pre-repair value of 3), both
+survivors and their email rows intact, `_sqlx_migrations` max version still
+22. Final state: `users` 14 -> 12, 2 loser `user_emails` rows deleted, 2
+survivor `user_emails` rows Rust-canonicalized, 2 `game_players` rows
+transferred (1 per approved group), 0 proposals/proposal-players/sessions
+affected. Migrations 026 and 029 deliberately left unapplied. Task 6 marked
+R-07 `done` in the tracker (`ba851eb4`), including a combined incident-log
+entry for two independent PII-exposure events this unit (a Worker, then the
+Lead, each briefly displayed the two accounts' email addresses in their own
+tool transcript via ad-hoc `grep` against the private, `chmod 600`
+`repair.sql`) - root-caused as structural (the file embeds email values
+across multiple line types, so any ad-hoc pattern match against it is unsafe
+by default), contained both times, never committed, never relayed to the
+owner before disclosure.
+
+## 2026-08-08 - Lead - unit-10 (read-only: confirming a real PITR target existed before Task 1 Step 4 could pass)
+
+Task 1 Step 4 as originally written polled `Cluster.status.firstRecoverabilityPoint`,
+which stayed empty after a real, healthy, completed Backup. Rather than
+override the gate on a theory, investigated with three independent,
+convergent lines of evidence (all read-only, no production writes): cluster
+history (`ObjectStore.status.serverRecoveryWindow.postgres` has been
+continuously populated since this cluster's first-ever backup, 32 days and
+34 successful backups, no failures, never a regression); CNPG 1.30.0 and
+plugin-barman-cloud 0.13.0 documentation (the CRD explicitly marks the
+`Cluster.status` fields `Deprecated: the field is not set for backup
+plugins`; a CNPG maintainer confirmed on a GitHub issue that the
+`ObjectStore` status is the correct plugin-mode replacement - this is
+intentional architecture, not a bug); and direct evidence of WAL archiving
+actually working (`ContinuousArchiving` condition `True` continuously for 32
+days, plugin sidecar logs showing real WAL segments shipped to DigitalOcean
+Spaces roughly every 5 minutes, the completed Backup's own consistent
+begin/end WAL and LSN metadata). Verdict: yes, a real, current PITR target
+existed. `plan.md` Task 1 Step 4 corrected to check the right field (folded
+into unit-09's `bfe6f4ba` commit above, with the reasoning recorded inline
+in `plan.md` so it is not rediscovered a third time).
+
+## 2026-08-08 - Lead - unit-11 (post-repair production dump, local restore, full migration batch 023-032 against real post-repair data)
+
+Owner requested empirical confirmation, against real post-repair production
+data rather than unit-02's local simulation, that the pending migration
+batch is genuinely unblocked. One read-only production `pg_dump`
+(`brdgme-prod-postrepair-20260808T025706Z.dump`, `chmod 600` immediately on
+creation, valid custom-format archive confirmed by TOC listing) was the only
+production contact; restored inside the local `postgres:18` container (never
+host tooling, which is 17.10) into a brand-new scratch database
+`r07_postrepair_test`, never reusing `r07_migration_test`/`r07_repair_test`.
+Restored copy confirmed (count-only) to match post-repair production
+exactly: 12 users, 12 `user_emails`, `_sqlx_migrations` max version 22, 0
+duplicate canonical groups, 1 noncanonical row (the same deliberately
+excluded singleton). `sqlx migrate run` (the repo's documented convention,
+`docs/DEV.md`) applied the full pending batch 023 through 032 against that
+copy with zero failures: migration 026's duplicate guard did not fire and
+its blanket canonicalization resolved the excluded singleton (noncanonical
+count 1 -> 0); migration 029 created its CHECK constraint and unique index.
+Post-batch noncanonical count: 0. **Verdict: production is confirmed safe to
+deploy the full pending migration batch (023-032) against**, now evidenced
+against real post-repair production data rather than a simulation.
+
+Separate incident during this unit's first attempt: the older retained local
+dump `brdgme-prod-20260807.dump` was found missing, with no deletion
+authorised or instructed by anyone in this session. Not a `tmpfiles` age
+sweep (it was 1 day old; older files in the same directory survived); no
+other explanation found. Probable-not-proven cause recorded as that
+attempt's recon Worker, based on directory-mtime timing; not confirmed by
+transcript evidence. Recorded in the tracker incident log (same failure
+class as the 2026-07-31 R-06 incident: an agent removing files unasked).
+Practical impact assessed negligible - the dump was already world-readable
+PII flagged for removal, and no copy existed elsewhere. A standing
+no-deletion instruction was added to every subsequent Worker brief this
+unit: no agent may delete, move, or truncate any pre-existing file in
+`/tmp/opencode/` or the repository, for any reason, including cleanup or
+recon; a Worker that believes something should be removed reports and stops
+instead. The retry under that instruction completed cleanly with no further
+incident.
